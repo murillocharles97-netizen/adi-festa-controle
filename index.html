@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#31d0ad">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Adi Festa">
+  <title>Adi Festa Controle</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./assets/icon.svg">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/finance.css">
+  <link rel="stylesheet" href="./css/mobile.css">
+  <script src="./assets/lucide.min.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-logo">AF</span><div><strong>Adi Festa</strong><small>Controle de vendas</small></div></div>
+    <nav id="nav">
+      <a href="#/inicio" data-route="inicio"><i data-lucide="house"></i>Início</a>
+      <a href="#/vender" data-route="vender"><i data-lucide="shopping-bag"></i>Vender</a>
+      <a href="#/clientes" data-route="clientes"><i data-lucide="users"></i>Clientes</a>
+      <a href="#/fiados" data-route="fiados"><i data-lucide="hand-coins"></i>Fiados</a>
+      <a href="#/produtos" data-route="produtos"><i data-lucide="candy"></i>Produtos</a>
+      <a href="#/historico" data-route="historico"><i data-lucide="history"></i>Histórico</a>
+      <a href="#/relatorios" data-route="relatorios"><i data-lucide="chart-no-axes-combined"></i>Relatórios</a>
+      <a href="#/configuracoes" data-route="configuracoes"><i data-lucide="settings"></i>Configurações</a>
+    </nav>
+    <footer><span></span>Dados salvos neste aparelho</footer>
+  </aside>
+  <div class="overlay" id="overlay"></div>
+  <div class="shell"><header class="topbar"><button class="icon-btn menu-btn" id="menu" aria-label="Abrir menu"><i data-lucide="menu"></i></button><div><h1 id="title">Início</h1><small id="date"></small></div><span class="local-badge"><i data-lucide="database"></i> Local</span><span class="avatar">A</span></header><main id="app"></main></div>
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Navegação rápida">
+    <a href="#/inicio" data-mobile-route="inicio"><i data-lucide="house"></i><span>Início</span></a>
+    <a href="#/vender" data-mobile-route="vender"><i data-lucide="shopping-bag"></i><span>Vender</span></a>
+    <a href="#/clientes" data-mobile-route="clientes"><i data-lucide="users"></i><span>Clientes</span></a>
+    <a href="#/fiados" data-mobile-route="fiados"><i data-lucide="hand-coins"></i><span>Fiados</span></a>
+  </nav>
+  <div id="modal"></div><div id="toasts"></div>
+  <script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/storage.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/clientes.js"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/produtos.js"></script><script src="./js/vendas.js"></script><script src="./js/fiados.js"></script><script src="./js/router.js"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js"></script><script src="./js/app.js"></script>
+</body>
+</html>
