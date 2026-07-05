@@ -1,0 +1,1 @@
+(()=>{DB.alterar(db=>{db.config||={nome:'Adi Festa'};if(db.config.saldoCorrecoes==='confirmadas-v1')return;const joao=db.clientes.find(c=>Utils.somenteNumeros(c.telefone)==='5517981616778'||String(c.nome).trim().toLowerCase()==='joão adidas');if(joao)joao.saldo=476.50;db.config.saldoCorrecoes='confirmadas-v1';db.config.saldoCorrecoesEm=new Date().toISOString()})})();

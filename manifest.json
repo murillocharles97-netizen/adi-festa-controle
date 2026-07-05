@@ -1,0 +1,15 @@
+{
+  "name": "Adi Festa Controle",
+  "short_name": "Adi Festa",
+  "description": "Controle de vendas, clientes e fiados da Adi Festa.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#31d0ad",
+  "orientation": "portrait",
+  "icons": [
+    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
