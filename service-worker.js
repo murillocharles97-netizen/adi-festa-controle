@@ -1,4 +1,4 @@
-const CACHE='adi-festa-v10';
+const CACHE='adi-festa-v11';
 const ARQUIVOS=['./','./index.html','./manifest.json','./css/style.css','./css/finance.css','./css/mobile.css','./css/import.css','./assets/icon.svg','./assets/icon-192.png','./assets/icon-512.png','./assets/lucide.min.js','./js/kyteData.js','./js/kyteBalances.js','./js/utils.js','./js/storage.js','./js/cleanupDemo.js','./js/clientes.js','./js/kyteBootstrap.js','./js/saldoCorrecoes.js','./js/financeMigration.js','./js/produtos.js','./js/vendas.js','./js/fiados.js','./js/router.js','./js/csvImport.js','./js/recibos.js','./js/app.js'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ARQUIVOS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
