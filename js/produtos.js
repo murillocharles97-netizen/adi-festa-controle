@@ -1,1 +1,31 @@
-window.Produtos=(()=>{const listar=()=>DB.carregar().produtos,obter=id=>listar().find(p=>p.id===id),salvar=d=>DB.alterar(db=>{const a=db.produtos.find(p=>p.id===d.id),v={nome:d.nome.trim(),preco:Number(d.preco),custo:d.custo===''?null:Number(d.custo),estoque:d.estoque===''?null:Number(d.estoque),ativo:d.ativo!==false};a?Object.assign(a,v):db.produtos.push({id:Utils.uuid(),...v,criadoEm:new Date().toISOString()})}),excluir=id=>DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id));return{listar,obter,salvar,excluir}})();
+window.Produtos=(()=>{
+  const listar=()=>DB.carregar().produtos;
+  const obter=id=>listar().find(p=>p.id===id);
+  const status=p=>Number(p.estoqueAtual)<=0?'esgotado':Number(p.estoqueAtual)<=Number(p.estoqueMinimo||0)?'baixo':'disponivel';
+  const salvar=d=>DB.alterar(db=>{
+    const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
+    const estoque=d.estoqueAtual??d.estoque;
+    const v={nome:String(d.nome||'').trim(),preco:Number(d.preco||0),custo:d.custo===''||d.custo===null?null:Number(d.custo||0),estoqueAtual:estoque===''||estoque===null||estoque===undefined?0:Number(estoque),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',ativo:d.ativo!==false,atualizadoEm:agora};
+    v.estoque=v.estoqueAtual;
+    atual?Object.assign(atual,v):db.produtos.push({id:Utils.uuid(),...v,criadoEm:agora});
+  });
+  const excluir=id=>DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id));
+  const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{let mov;DB.alterar(db=>{
+    const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
+    const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
+    const anterior=Number(p.estoqueAtual||0),novo=anterior+q,agora=new Date().toISOString();
+    p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
+    if(custoUnitario!==''&&custoUnitario!==null&&custoUnitario!==undefined)p.custo=Number(custoUnitario);
+    mov={id:Utils.uuid(),produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora};
+    db.movimentacoesEstoque.push(mov);
+  });return mov};
+  const ajustarEstoque=(produtoId,novoEstoque,motivo)=>{let mov;DB.alterar(db=>{
+    const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
+    const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
+    p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
+    mov={id:Utils.uuid(),produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora};
+    db.movimentacoesEstoque.push(mov);
+  });return mov};
+  const historico=produtoId=>DB.carregar().movimentacoesEstoque.filter(m=>m.produtoId===produtoId).sort((a,b)=>new Date(b.data)-new Date(a.data));
+  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status};
+})();
