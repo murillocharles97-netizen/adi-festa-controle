@@ -1,5 +1,5 @@
 window.DB=(()=>{
-  const CHAVE='adiFestaDB_v1',VERSAO=4,agora=()=>new Date().toISOString();
+  const CHAVE='adiFestaDB_v1',VERSAO=5,agora=()=>new Date().toISOString();
   const configBase=()=>({nome:'Adi Festa'});
   const produtoDemo=(id,nome,preco,custo,estoqueAtual,estoqueMinimo,categoria)=>({id,nome,preco,custo,estoque:estoqueAtual,estoqueAtual,estoqueMinimo,categoria,ativo:true,criadoEm:agora(),atualizadoEm:agora()});
   const exemplo=()=>({versao:VERSAO,config:configBase(),clientes:[{id:'c1',nome:'Mariana Silva',telefone:'(17) 99665-5784',telefone2:'',email:'',endereco:'Shopping Center',complemento:'Loja ao lado',documento:'',observacoes:'Cliente frequente',totalComprado:78,quantidadeVendas:3,saldo:-36,ultimaCompra:agora(),ativo:true,criadoEm:agora(),atualizadoEm:agora()},{id:'c2',nome:'Carlos Souza',telefone:'(17) 98888-4321',telefone2:'',email:'',endereco:'',complemento:'',documento:'',observacoes:'',totalComprado:20,quantidadeVendas:1,saldo:0,ultimaCompra:agora(),ativo:true,criadoEm:agora(),atualizadoEm:agora()}],produtos:[produtoDemo('p1','Brigadeiro gourmet',6,2.1,38,10,'Doces'),produtoDemo('p2','Brownie recheado',10,4,22,8,'Doces'),produtoDemo('p3','Bolo no pote',14,5.5,15,6,'Bolos')],vendas:[],pagamentos:[],movimentacoes:[],movimentacoesEstoque:[],cobrancas:[]});
@@ -22,8 +22,8 @@ window.DB=(()=>{
     d.cobrancas=d.cobrancas.map(c=>({id:c.id||Utils.uuid(),clienteId:c.clienteId||'',clienteNome:c.clienteNome||'',valorCobrado:numero(c.valorCobrado),mensagem:c.mensagem||'',status:c.status||'enviado',data:c.data||agora()}));
     return d;
   };
-  const salvar=dados=>{const normalizado=migrar(dados);localStorage.setItem(CHAVE,JSON.stringify(normalizado));return normalizado};
-  const carregar=()=>{try{return salvar(JSON.parse(localStorage.getItem(CHAVE))||exemplo())}catch{return salvar(exemplo())}};
+  const salvar=dados=>{const normalizado=migrar(dados);normalizado.config.appSchemaVersion=Math.max(2,Number(normalizado.config.appSchemaVersion||0));normalizado.config.recentClientIds=Array.isArray(normalizado.config.recentClientIds)?normalizado.config.recentClientIds:[];normalizado.produtos.forEach(p=>{p.favorito=Boolean(p.favorito);p.semControleEstoque=Boolean(p.semControleEstoque);p.codigo=p.codigo||'';p.palavrasChave=p.palavrasChave||'';p.imagem=p.imagem||''});localStorage.setItem(CHAVE,JSON.stringify(normalizado));return normalizado};
+  const carregar=()=>{try{const bruto=localStorage.getItem(CHAVE),dados=JSON.parse(bruto)||exemplo();if(bruto&&Number(dados.versao||0)<VERSAO&&!localStorage.getItem('adiFestaDB_auto_backup_schema_5'))localStorage.setItem('adiFestaDB_auto_backup_schema_5',bruto);return salvar(dados)}catch{return salvar(exemplo())}};
   const alterar=funcao=>{const dados=carregar();funcao(dados);return salvar(dados)};
   const validarBackup=d=>{if(!d||typeof d!=='object')throw Error('O arquivo nao contem um backup valido');const listas=['clientes','produtos','vendas','pagamentos','movimentacoes'];const ausentes=listas.filter(c=>!Array.isArray(d[c]));if(ausentes.length)throw Error(`Backup incompleto: faltam ${ausentes.join(', ')}`);if(!d.config||typeof d.config!=='object')throw Error('Backup incompleto: faltam as configuracoes');return true};
   const criarBackup=()=>{const d=structuredClone(carregar());d.backupInfo={app:'Adi Festa Controle',versao:VERSAO,exportadoEm:agora(),inclui:['clientes','produtos','vendas','pagamentos','movimentacoes','movimentacoesEstoque','cobrancas','config']};return d};
