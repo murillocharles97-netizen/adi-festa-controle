@@ -1,8 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function authorized() { return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
-    match /users/{uid} { allow read: if request.auth != null && request.auth.uid == uid; allow write: if false; }
+    function signedIn() { return request.auth != null; }
+    function firstOwner() { return signedIn() && request.auth.token.email == 'murillo.charles97@gmail.com' && !exists(/databases/$(database)/documents/businesses/adi-festa); }
+    function authorized() { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if request.auth.uid == uid && firstOwner() && request.resource.data.email == request.auth.token.email && request.resource.data.role == 'admin' && request.resource.data.active == true && request.resource.data.businessId == 'adi-festa';
+      allow update: if authorized() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+    match /businesses/{businessId} {
+      allow create: if businessId == 'adi-festa' && firstOwner() && request.resource.data.ownerId == request.auth.uid;
+      allow read, update: if authorized() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId;
+      allow delete: if false;
+    }
     match /businesses/{businessId}/{document=**} { allow read, write: if authorized() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId; }
   }
 }
