@@ -37,5 +37,7 @@
   const originalClientForm=base.clientForm.bind(base);
   base.clientForm=id=>{originalClientForm(id);if(!mq.matches)return;const nameField=document.querySelector('#modal input[name="nome"]')?.closest('.field'),client=id?Clientes.obter(id):{};nameField?.insertAdjacentHTML('afterend',`<div class="field full"><label>Apelido</label><input name="apelido" value="${esc(client?.apelido||'')}" placeholder="Como você conhece este cliente"></div>`)};
   document.querySelector('#mobile-client-fab')?.addEventListener('click',()=>{if(Router.atual()!=='produtos')base.clientForm()});
+  function search(query){state.query=query;state.limit=50;dataCache=null;observer?.disconnect();document.querySelector('#mobile-load-sentinel')?.remove();const list=filtered(),shown=list.slice(0,state.limit),root=document.querySelector('#mobile-client-list');if(!root)return;root.innerHTML=shown.map(card).join('')||`<div class="mobile-client-empty">${icon('search-x')}<h3>Nenhum cliente encontrado</h3><p>Tente mudar a busca ou os filtros.</p></div>`;const count=document.querySelector('.mobile-sort-row>small');if(count)count.textContent=`${list.length} cliente${list.length===1?'':'s'}`;document.querySelectorAll('.mobile-swipe-shell',root).forEach(bindSwipe);window.lucide?.createIcons()}
+  window.ClientesMobile={applyFilter(filter='todos',sort='maiorDebito'){state.filter=filter;state.sort=sort;state.query='';state.limit=50;state.sheet=false;dataCache=null},search,refresh:refreshMobile};
   mq.addEventListener('change',()=>{if(location.hash.includes('/clientes'))base.refresh()});
 })();

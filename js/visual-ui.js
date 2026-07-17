@@ -17,6 +17,7 @@ window.VisualUI=(()=>{
     list.addEventListener('click',e=>{const button=e.target.closest('[data-toggle-favorite]');if(!button)return;e.preventDefault();e.stopPropagation();const id=button.dataset.toggleFavorite;DB.alterar(db=>{const p=db.produtos.find(x=>x.id===id);p.favorito=!p.favorito});const p=Produtos.obter(id);button.classList.toggle('is-favorite',p.favorito);button.textContent=p.favorito?'★':'☆';button.setAttribute('aria-label',p.favorito?'Remover dos favoritos':'Adicionar aos favoritos');sort();});
   }
   function dashboardEnhancements(){
+    if(window.MobileHome?.isMobile())return;
     const app=document.querySelector('#app');if(!app||app.dataset.dashboardVisual||Router.atual()!=='inicio')return;
     app.dataset.dashboardVisual='1';app.classList.add('dashboard-v2');
     const db=DB.carregar(),today=db.vendas.filter(v=>Utils.hoje(v.data)),sold=new Map();today.forEach(v=>(v.itens||[]).forEach(i=>sold.set(i.produtoId,{nome:i.nome,q:(sold.get(i.produtoId)?.q||0)+Number(i.quantidade||0),total:(sold.get(i.produtoId)?.total||0)+Number(i.subtotalFinal||0)})));const top=[...sold.values()].sort((a,b)=>b.q-a.q).slice(0,3),debt=db.clientes.filter(c=>Number(c.saldo)<0),out=db.produtos.filter(p=>getProductStockStatus(p)==='esgotado'),low=db.produtos.filter(p=>getProductStockStatus(p)==='baixo');
