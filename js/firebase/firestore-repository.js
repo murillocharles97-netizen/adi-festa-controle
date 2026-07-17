@@ -1,5 +1,5 @@
 import { auth, db, BUSINESS_ID } from './firebase-config.js';
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import { normalizeFirestoreData, sanitizeForFirestore } from './firestore-utils.js';
 
 function requireUser(){
@@ -28,6 +28,7 @@ export function createFirestoreRepository(collectionName){
     async set(id,data){const exists=(await getDoc(documentRef(id))).exists();await setDoc(documentRef(id),payload(id,data,!exists),{merge:true});return id},
     async remove(id){await setDoc(documentRef(id),payload(id,{active:false,deletedAt:new Date().toISOString()}),{merge:true});return id},
     async listRecent(max=100){return (await getDocs(query(collectionRef(),orderBy('createdAt','desc'),limit(max)))).docs.map(snapshot=>convert(snapshot)).filter(item=>!item.deletedAt)},
+    async listPage(cursor=null,max=100){const constraints=[orderBy('createdAt','desc')];if(cursor)constraints.push(startAfter(cursor));constraints.push(limit(max));const snapshot=await getDocs(query(collectionRef(),...constraints));return{items:snapshot.docs.map(item=>convert(item)).filter(item=>!item.deletedAt),cursor:snapshot.docs.at(-1)||null,hasMore:snapshot.docs.length===max}},
     subscribe(callback,onError){return onSnapshot(collectionRef(),snapshot=>callback(snapshot.docs.map(item=>convert(item))),error=>{console.error('[Firestore listener failed]',{collection:collectionName,code:error.code,message:error.message});onError?.(error)})},
     subscribeRecent(callback,onError,max=100){return onSnapshot(query(collectionRef(),orderBy('createdAt','desc'),limit(max)),snapshot=>callback(snapshot.docs.map(item=>convert(item))),error=>{console.error('[Firestore recent listener failed]',{collection:collectionName,code:error.code,message:error.message});onError?.(error)})}
   };
