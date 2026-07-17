@@ -15,14 +15,14 @@ window.Vendas=(()=>{
   });return criada};
   const ultima=()=>{const vendas=listar();return vendas[vendas.length-1]||null};
   const podeDesfazer=()=>{const v=ultima();return Boolean(v&&Date.now()-new Date(v.data).getTime()<=5*60*1000)};
-  const desfazerUltima=()=>{let removida;DB.alterar(db=>{
+  const desfazerUltima=()=>{let removida;const operationId=Utils.uuid();DB.alterar(db=>{
     const venda=db.vendas[db.vendas.length-1];if(!venda)throw Error('Nenhuma venda para desfazer');if(Date.now()-new Date(venda.data).getTime()>5*60*1000)throw Error('O prazo de 5 minutos para desfazer terminou');
     removida={...venda};db.vendas.pop();const agora=new Date().toISOString();
-    venda.itens.forEach(i=>{const p=db.produtos.find(x=>x.id===i.produtoId);if(!p)return;const anterior=Number(p.estoqueAtual||0),novo=anterior+Number(i.quantidade);p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;db.movimentacoesEstoque.push({id:Utils.uuid(),produtoId:p.id,produtoNome:p.nome,tipo:'venda_desfeita',vendaId:venda.id,quantidade:Number(i.quantidade),estoqueAnterior:anterior,estoqueNovo:novo,observacao:'Estoque restaurado ao desfazer venda',data:agora})});
+    venda.itens.forEach(i=>{const p=db.produtos.find(x=>x.id===i.produtoId);if(!p)return;const anterior=Number(p.estoqueAtual||0),novo=anterior+Number(i.quantidade);p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;db.movimentacoesEstoque.push({id:Utils.uuid(),operationId,produtoId:p.id,produtoNome:p.nome,tipo:'venda_desfeita',vendaId:venda.id,quantidade:Number(i.quantidade),estoqueAnterior:anterior,estoqueNovo:novo,observacao:'Estoque restaurado ao desfazer venda',data:agora})});
     const cliente=db.clientes.find(c=>c.id===venda.clienteId);
     if(cliente){if(venda.status==='fiado')cliente.saldo=Number(venda.saldoAnterior||0);cliente.totalComprado=Math.max(0,Number(cliente.totalComprado||0)-Number(venda.valorFinal??venda.valorTotal));cliente.quantidadeVendas=Math.max(0,Number(cliente.quantidadeVendas||0)-1);const anteriores=db.vendas.filter(v=>v.clienteId===cliente.id);cliente.ultimaCompra=anteriores.length?anteriores[anteriores.length-1].data:null}
     db.movimentacoes=db.movimentacoes.filter(m=>m.vendaId!==venda.id);
-    db.movimentacoes.push({id:Utils.uuid(),clienteId:venda.clienteId,clienteNome:venda.clienteNome,tipo:'venda_desfeita',vendaId:venda.id,valor:Number(venda.valorFinal??venda.valorTotal),data:agora});
+    db.movimentacoes.push({id:operationId,operationId,clienteId:venda.clienteId,clienteNome:venda.clienteNome,tipo:'venda_desfeita',vendaId:venda.id,valor:Number(venda.valorFinal??venda.valorTotal),data:agora});
   });return removida};
   return{listar,registrar,ultima,podeDesfazer,desfazerUltima,estoqueInsuficiente};
 })();
