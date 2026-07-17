@@ -46,5 +46,5 @@ if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.s
   registration.addEventListener('updatefound',()=>{const worker=registration.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)offerUpdate(worker)})});
   let refreshing=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!refreshing){refreshing=true;location.reload()}});
 }).catch(error=>console.error('[Service worker registration]',error));
-Router.iniciar(render);
+let appRouterStarted=false;addEventListener('firebase-auth-ready',()=>{if(!appRouterStarted){appRouterStarted=true;Router.iniciar(render)}});
 })();
