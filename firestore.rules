@@ -4,7 +4,7 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function firstOwner() { return signedIn() && request.auth.token.email == 'murillo.charles97@gmail.com' && !exists(/databases/$(database)/documents/businesses/adi-festa); }
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function authorized() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && profile().active == true && profile().role == 'admin'; }
+    function authorized() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && profile().active == true; }
     function canAccess(businessId) { return authorized() && profile().businessId == businessId; }
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
@@ -21,7 +21,7 @@ service cloud.firestore {
     match /businesses/{businessId}/{subcollection}/{documentId} {
       allow read: if canAccess(businessId);
       allow create: if canAccess(businessId) && request.resource.data.businessId == businessId && request.resource.data.ownerId == request.auth.uid;
-      allow update: if canAccess(businessId) && request.resource.data.businessId == businessId && request.resource.data.ownerId == resource.data.ownerId;
+      allow update: if canAccess(businessId) && resource.data.businessId == businessId && request.resource.data.businessId == businessId && request.resource.data.ownerId == resource.data.ownerId;
       allow delete: if false;
     }
   }
