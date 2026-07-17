@@ -38,5 +38,13 @@ const sidebar=$('#sidebar'),overlay=$('#overlay'),fecharMenu=()=>{sidebar.classL
 document.addEventListener('input',e=>{if(e.target.id==='fiado-search'){const q=e.target.value.trim().toLowerCase();$$('.fiado-card').forEach(c=>c.hidden=!c.dataset.name.includes(q))}});
 document.addEventListener('focusin',e=>{if(e.target.matches('input[type="number"]'))e.target.inputMode='decimal';if(e.target.matches('input[name*="telefone"],input[type="tel"]'))e.target.inputMode='tel'});
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.copyCharge){const c=Clientes.obter(b.dataset.copyCharge);copiarTexto(mensagemCobranca(c))}if(b.dataset.chargeWhatsapp){const c=Clientes.obter(b.dataset.chargeWhatsapp);window.open(`https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(mensagemCobranca(c))}`,'_blank')}if(b.hasAttribute('data-copy-closing'))copiarTexto(resumoFechamento().texto);if(b.hasAttribute('data-share-closing'))window.open(`https://wa.me/?text=${encodeURIComponent(resumoFechamento().texto)}`,'_blank');if(b.hasAttribute('data-undo-sale'))abrirFormulario('Desfazer última venda','<p>Tem certeza que deseja desfazer a última venda? O saldo e o estoque serão restaurados.</p>',()=>{Vendas.desfazerUltima();toast('Venda desfeita com sucesso')},'Desfazer venda')});
-addEventListener('load',()=>window.lucide?.createIcons());if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js');Router.iniciar(render);
+addEventListener('load',()=>window.lucide?.createIcons());
+addEventListener('cloud-data-updated',()=>{if(!document.querySelector('#modal')?.children.length&&Router.atual()!=='vender')render(Router.atual())});
+if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js').then(registration=>{
+  const offerUpdate=worker=>{if(!worker)return;if(confirm('Nova versão disponível. Deseja atualizar agora?'))worker.postMessage('SKIP_WAITING')};
+  if(registration.waiting)offerUpdate(registration.waiting);
+  registration.addEventListener('updatefound',()=>{const worker=registration.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)offerUpdate(worker)})});
+  let refreshing=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!refreshing){refreshing=true;location.reload()}});
+}).catch(error=>console.error('[Service worker registration]',error));
+Router.iniciar(render);
 })();

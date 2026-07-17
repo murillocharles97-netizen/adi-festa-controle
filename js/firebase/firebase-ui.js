@@ -27,7 +27,7 @@ function panel(){
       <dl class="firebase-details" id="firebase-details" hidden></dl>
     </div>
     <div class="actions firebase-actions">
-      <button class="btn btn-light" id="firebase-test" type="button">Testar gravação na nuvem</button>
+      <button class="btn btn-light" id="firebase-test" type="button">Testar conexão com a nuvem</button>
       <button class="btn btn-primary" id="firebase-migrate" type="button" disabled>Enviar dados para a nuvem</button>
       <button class="btn btn-dark" id="firebase-sync" type="button">Sincronizar agora</button>
       <button class="btn btn-light" id="firebase-logout" type="button">Sair</button>
@@ -56,19 +56,19 @@ async function run(buttonId,label,task){
 
 function bind(){
   document.querySelector('#firebase-test').onclick=()=>run('firebase-test','Testando…',async()=>{
-    await window.SyncFirebase.testConnection();
-    notify('Teste concluído: a gravação e a leitura na nuvem funcionam.');
-  }).catch(()=>{});
+    await window.SyncFirebase.testFirestoreConnection();
+    notify('Conexão com Firestore funcionando.');
+  }).catch(error=>console.error('[Cloud connection button]',error));
   document.querySelector('#firebase-migrate').onclick=()=>run('firebase-migrate','Enviando…',async()=>{
     if(!confirm('Será criado um backup automático e todos os dados locais serão enviados com os mesmos identificadores. Continuar?'))return;
     backup();
     const result=await window.SyncFirebase.startCloudMigration();
     notify(result.check.ok?'Migração concluída e conferida.':'A conferência encontrou diferenças.',!result.check.ok);
-  }).catch(()=>{});
+  }).catch(error=>console.error('[Cloud migration button]',error));
   document.querySelector('#firebase-sync').onclick=()=>run('firebase-sync','Sincronizando…',async()=>{
-    await window.SyncFirebase.processSyncQueue();
+    await window.SyncFirebase.synchronizeNow();
     notify('Sincronização concluída.');
-  }).catch(()=>{});
+  }).catch(error=>console.error('[Cloud synchronization button]',error));
   document.querySelector('#firebase-logout').onclick=()=>window.FirebaseAuthActions?.signOut?.();
   document.querySelector('#firebase-details-toggle').onclick=event=>{
     const details=document.querySelector('#firebase-details');
@@ -91,10 +91,16 @@ function renderState(state){
   document.querySelector('#firebase-details').innerHTML=`
     <dt>Usuário</dt><dd>${escape(d.authenticated?`${d.email} (${d.uid})`:'não autenticado')}</dd>
     <dt>Perfil</dt><dd>${d.userDocument?'ativo':'não localizado'}</dd>
+    <dt>Banco</dt><dd>${escape(d.databaseId)}</dd>
+    <dt>Conexão</dt><dd>${escape(d.connection)}</dd>
+    <dt>Listeners ativos</dt><dd>${escape(d.activeListeners)}</dd>
     <dt>Negócio</dt><dd>${escape(d.businessId)} · ${d.businessDocument?'confirmado':'a confirmar'}</dd>
     <dt>Projeto</dt><dd>${escape(d.projectId)}</dd>
     <dt>Caminho atual</dt><dd>${escape(d.currentPath)}</dd>
-    <dt>Registros locais</dt><dd>${escape(d.pending)}</dd>
+    <dt>Clientes</dt><dd>local ${escape(d.localClients)} · nuvem ${escape(d.cloudClients)}</dd>
+    <dt>Produtos</dt><dd>local ${escape(d.localProducts)} · nuvem ${escape(d.cloudProducts)}</dd>
+    <dt>Operações pendentes</dt><dd>${escape(d.pending)}</dd>
+    <dt>Última sincronização</dt><dd>${escape(d.lastSync)}</dd>
     <dt>Último erro</dt><dd>${escape(d.lastError||'nenhum')}</dd>`;
   const busy=['testing','validating','syncing'].includes(state.status);
   const test=document.querySelector('#firebase-test'),sync=document.querySelector('#firebase-sync'),migrate=document.querySelector('#firebase-migrate');
