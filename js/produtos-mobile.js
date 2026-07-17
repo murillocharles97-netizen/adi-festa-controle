@@ -48,5 +48,7 @@
   $('#mobile-client-fab')?.addEventListener('click',()=>{if(Router.atual()==='produtos')productForm()});
   addEventListener('hashchange',updateFab);
   new MutationObserver(()=>{const page=$('#app .products-mobile-page');if(page&&!page.dataset.productsBound){page.dataset.productsBound='true';queueMicrotask(bind)}}).observe($('#app'),{childList:true});
-  window.ProdutosMobile={isMobile:()=>mq.matches,render,bind,refresh,productForm,stockEntry,stockAdjust,history,details,getProductStockStatus:status,stockPercent};
+  function applyFilter(filter='todos',sort='nomeAsc'){state.filter=filter;state.sort=sort;state.query='';state.limit=50;state.menuId=null;state.filtersOpen=false;dataCache=null;saveState()}
+  function search(query){state.query=query;state.limit=50;dataCache=null;observer?.disconnect();$('#mobile-product-sentinel')?.remove();const list=filtered(),shown=list.slice(0,state.limit),root=$('#mobile-products');if(!root)return;root.innerHTML=shown.map(card).join('')+empty(list);$$('[data-product-shell]',root).forEach(bindSwipe);window.lucide?.createIcons()}
+  window.ProdutosMobile={isMobile:()=>mq.matches,render,bind,refresh,applyFilter,search,productForm,stockEntry,stockAdjust,history,details,getProductStockStatus:status,stockPercent};
 })();
