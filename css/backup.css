@@ -1,0 +1,1 @@
+.backup-mode{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:12px 0;padding:14px;border:1px solid #dfe4ea;border-radius:14px;background:#fff}.backup-mode input{grid-row:1/3;align-self:center}.backup-mode small{color:#7d8796}.backup-mode:has(input:checked){border-color:#31d0ad;background:#effcf8}#replace-confirm{margin-top:14px}
