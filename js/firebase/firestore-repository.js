@@ -7,10 +7,13 @@ function requireUser(){
   if(!user)throw Object.assign(new Error('Usuário não autenticado.'),{code:'unauthenticated'});
   return user;
 }
+function requireBusinessId(){if(BUSINESS_ID!=='adi-festa')throw new Error('BusinessId inválido para o Adi Festa.');return BUSINESS_ID}
+export function getBusinessCollectionRef(collectionName){return collection(db,'businesses',requireBusinessId(),String(collectionName))}
+export function getBusinessDocumentRef(collectionName,id){return doc(db,'businesses',requireBusinessId(),String(collectionName),String(id))}
 
 export function createFirestoreRepository(collectionName){
-  const collectionRef=()=>collection(db,'businesses',BUSINESS_ID,collectionName);
-  const documentRef=id=>doc(db,'businesses',BUSINESS_ID,collectionName,String(id));
+  const collectionRef=()=>getBusinessCollectionRef(collectionName);
+  const documentRef=id=>getBusinessDocumentRef(collectionName,id);
   const convert=snapshot=>snapshot.exists()?normalizeFirestoreData({id:snapshot.id,...snapshot.data()}):null;
   const payload=(id,data,creating=false)=>{
     const user=requireUser(),clean=sanitizeForFirestore(data)||{};

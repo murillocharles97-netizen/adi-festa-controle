@@ -9,20 +9,25 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create: if request.auth.uid == uid && firstOwner() && request.resource.data.email == request.auth.token.email && request.resource.data.role == 'admin' && request.resource.data.active == true && request.resource.data.businessId == 'adi-festa';
-      allow update: if authorized() && request.auth.uid == uid && request.resource.data.businessId == resource.data.businessId && request.resource.data.role == resource.data.role;
+      allow update: if authorized()
+        && request.auth.uid == uid
+        && request.resource.data.uid == request.auth.uid
+        && (!('uid' in resource.data) || resource.data.uid == request.auth.uid)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.businessId == resource.data.businessId
+        && request.resource.data.role == resource.data.role;
       allow delete: if false;
     }
     match /businesses/{businessId} {
       allow create: if businessId == 'adi-festa' && firstOwner() && request.resource.data.ownerId == request.auth.uid;
       allow read: if canAccess(businessId);
-      allow update: if canAccess(businessId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow update: if canAccess(businessId) && ((resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == resource.data.ownerId) || (request.auth.token.email == 'murillo.charles97@gmail.com' && profile().role == 'admin' && request.resource.data.ownerId == request.auth.uid));
       allow delete: if false;
-    }
-    match /businesses/{businessId}/{subcollection}/{documentId} {
-      allow read: if canAccess(businessId);
-      allow create: if canAccess(businessId) && request.resource.data.businessId == businessId && request.resource.data.ownerId == request.auth.uid;
-      allow update: if canAccess(businessId) && resource.data.businessId == businessId && request.resource.data.businessId == businessId && request.resource.data.ownerId == resource.data.ownerId;
-      allow delete: if false;
+      match /{document=**} {
+        allow read, create, update: if canAccess(businessId);
+        allow delete: if false;
+      }
     }
   }
 }
