@@ -36,6 +36,6 @@
   base.render=render;base.bind=bind;
   const originalClientForm=base.clientForm.bind(base);
   base.clientForm=id=>{originalClientForm(id);if(!mq.matches)return;const nameField=document.querySelector('#modal input[name="nome"]')?.closest('.field'),client=id?Clientes.obter(id):{};nameField?.insertAdjacentHTML('afterend',`<div class="field full"><label>Apelido</label><input name="apelido" value="${esc(client?.apelido||'')}" placeholder="Como você conhece este cliente"></div>`)};
-  document.querySelector('#mobile-client-fab')?.addEventListener('click',()=>base.clientForm());
+  document.querySelector('#mobile-client-fab')?.addEventListener('click',()=>{if(Router.atual()!=='produtos')base.clientForm()});
   mq.addEventListener('change',()=>{if(location.hash.includes('/clientes'))base.refresh()});
 })();

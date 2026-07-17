@@ -1,11 +1,16 @@
+window.getProductStockStatus=product=>{
+  if(product?.semControleEstoque||product?.controlaEstoque===false)return'sem-controle';
+  const current=Number(product?.estoqueAtual??product?.estoque??0),minimum=Number(product?.estoqueMinimo||0);
+  return current<=0?'esgotado':current<=minimum?'baixo':'disponivel';
+};
 window.Produtos=(()=>{
   const listar=()=>DB.carregar().produtos;
   const obter=id=>listar().find(p=>p.id===id);
-  const status=p=>Number(p.estoqueAtual)<=0?'esgotado':Number(p.estoqueAtual)<=Number(p.estoqueMinimo||0)?'baixo':'disponivel';
+  const status=p=>getProductStockStatus(p);
   const salvar=d=>DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
     const estoque=d.estoqueAtual??d.estoque;
-    const v={nome:String(d.nome||'').trim(),preco:Number(d.preco||0),custo:d.custo===''||d.custo===null?null:Number(d.custo||0),estoqueAtual:estoque===''||estoque===null||estoque===undefined?0:Number(estoque),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',ativo:d.ativo!==false,atualizadoEm:agora};
+    const v={nome:String(d.nome||'').trim(),codigo:d.codigo??atual?.codigo??'',preco:Number(d.preco||0),custo:d.custo===''||d.custo===null?null:Number(d.custo||0),estoqueAtual:estoque===''||estoque===null||estoque===undefined?0:Number(estoque),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',observacao:d.observacao??atual?.observacao??'',semControleEstoque:d.semControleEstoque===undefined?Boolean(atual?.semControleEstoque):Boolean(d.semControleEstoque),favorito:Boolean(d.favorito??atual?.favorito),ativo:d.ativo!==false,atualizadoEm:agora};
     v.estoque=v.estoqueAtual;
     atual?Object.assign(atual,v):db.produtos.push({id:Utils.uuid(),...v,criadoEm:agora});
   });
@@ -27,5 +32,6 @@ window.Produtos=(()=>{
     db.movimentacoesEstoque.push(mov);
   });return mov};
   const historico=produtoId=>DB.carregar().movimentacoesEstoque.filter(m=>m.produtoId===produtoId).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status};
+  const favoritar=(id,value)=>DB.alterar(db=>{const product=db.produtos.find(p=>p.id===id);if(!product)throw Error('Produto não encontrado');product.favorito=value===undefined?!product.favorito:Boolean(value);product.atualizadoEm=new Date().toISOString()});
+  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status,favoritar};
 })();
