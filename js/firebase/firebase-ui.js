@@ -1,125 +1,28 @@
 import './sync.js';
 
-let unsubscribe=null;
-const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+let unsubscribe=null,lastState=null;
 const escape=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 const notify=(message,error=false)=>window.Utils?.toast?.(message,error);
+const formattedTime=value=>value?new Date(value).toLocaleString('pt-BR'):'Ainda não sincronizado';
 
-function backup(){
-  const data=window.DB?.criarBackup?.()||window.DB?.carregar?.();
-  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
-  const link=document.createElement('a');
-  link.href=url;
-  link.download=`adi-festa-backup-antes-da-nuvem-${new Date().toISOString().slice(0,10)}.json`;
-  link.click();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);
-}
-
-function panel(){
-  const settings=document.querySelector('.settings');
-  if(!settings||document.querySelector('#firebase-cloud-panel'))return;
+function settingsPanel(){
+  const settings=document.querySelector('.settings');if(!settings||document.querySelector('#firebase-cloud-panel'))return;
   const session=window.FirebaseSession,profile=session?.profile||{},uid=session?.user?.uid||'';
-  settings.insertAdjacentHTML('beforeend',`<section class="setting firebase-account" id="firebase-account-panel"><div><b>Conta</b><div class="firebase-account-grid"><span>Nome</span><strong>${escape(profile.name||'Administrador')}</strong><span>E-mail</span><strong>${escape(session?.user?.email||'')}</strong><span>UID</span><strong>${escape(uid?`${uid.slice(0,8)}…`:'')}</strong><span>Perfil</span><strong>${profile.role==='admin'?'Administrador':escape(profile.role||'')}</strong><span>Negócio</span><strong>Adi Festa</strong><span>Status</span><strong>${profile.active===true?'Ativo':'Inativo'}</strong></div></div><button class="btn btn-danger" id="firebase-logout" type="button">Sair da conta</button></section><section class="setting firebase-setting" id="firebase-cloud-panel">
-    <div class="firebase-copy"><b>Nuvem segura</b><small>Faça o teste e envie o backup local para sua conta Firebase.</small>
-      <div class="firebase-status" id="firebase-status" role="status">Aguardando teste de conexão</div>
-      <div class="firebase-progress" aria-hidden="true"><i id="firebase-progress-bar"></i></div>
-      <div class="firebase-counts" id="firebase-counts"></div>
-      <button class="firebase-details-toggle" id="firebase-details-toggle" type="button">Ver detalhes</button>
-      <dl class="firebase-details" id="firebase-details" hidden></dl>
-    </div>
-    <div class="actions firebase-actions">
-      <button class="btn btn-light" id="firebase-diagnostic" type="button">Executar diagnóstico</button>
-      <button class="btn btn-light" id="firebase-test" type="button">Testar conexão com a nuvem</button>
-      <button class="btn btn-primary" id="firebase-migrate" type="button" disabled>Enviar dados para a nuvem</button>
-      <button class="btn btn-dark" id="firebase-sync" type="button">Sincronizar agora</button>
-    </div>
-  </section>`);
-  bind();
-  unsubscribe?.();
-  unsubscribe=window.SyncFirebase.subscribe(renderState);
+  settings.insertAdjacentHTML('beforeend',`<section class="setting firebase-account"><div><b>Conta</b><div class="firebase-account-grid"><span>Nome</span><strong>${escape(profile.name||'Administrador')}</strong><span>E-mail</span><strong>${escape(session?.user?.email||'')}</strong><span>UID</span><strong>${escape(uid?`${uid.slice(0,8)}…`:'')}</strong><span>Perfil</span><strong>${profile.role==='admin'?'Administrador':escape(profile.role||'Usuário')}</strong><span>Negócio</span><strong>${escape(profile.businessId||'—')}</strong><span>Status</span><strong>${profile.active===true?'Ativo':'Inativo'}</strong></div></div><button class="btn btn-danger" id="firebase-logout" type="button">Sair da conta</button></section><section class="setting firebase-setting" id="firebase-cloud-panel"><div class="firebase-copy"><b>Nuvem</b><small>As alterações são salvas primeiro no aparelho e sincronizadas automaticamente.</small><div class="firebase-status" id="firebase-status" role="status">Preparando sincronização…</div><div class="firebase-sync-grid"><span>Última sincronização</span><strong id="firebase-last-sync">—</strong><span>Pendentes</span><strong id="firebase-pending">0</strong><span>Com erro</span><strong id="firebase-errors">0</strong><span>Migração inicial</span><strong>Concluída</strong><span>Modo atual</span><strong>Sincronização automática</strong></div><button class="firebase-details-toggle" id="firebase-details-toggle" type="button">Ver detalhes técnicos</button><dl class="firebase-details" id="firebase-details" hidden></dl></div><div class="actions firebase-actions"><button class="btn btn-dark" id="firebase-sync" type="button">Sincronizar agora</button></div></section>`);
+  document.querySelector('#firebase-sync').onclick=manualSync;
+  document.querySelector('#firebase-logout').onclick=()=>window.FirebaseAuthActions?.signOut?.();
+  document.querySelector('#firebase-details-toggle').onclick=event=>{const details=document.querySelector('#firebase-details');details.hidden=!details.hidden;event.currentTarget.textContent=details.hidden?'Ver detalhes técnicos':'Ocultar detalhes técnicos'};
+  if(lastState)renderState(lastState)
 }
 
-function setBusy(busy){
-  ['firebase-diagnostic','firebase-test','firebase-migrate','firebase-sync'].forEach(id=>{const button=document.querySelector(`#${id}`);if(button)button.disabled=busy||(id==='firebase-migrate'&&!window.SyncFirebaseState?.testPassed)});
-}
+async function manualSync(){const button=document.querySelector('#firebase-sync')||document.querySelector('#cloud-panel-sync'),original=button?.textContent;if(button){button.disabled=true;button.textContent='Sincronizando…'}try{const result=await window.SyncFirebase.synchronizeNow();if(result.offline)return notify('Sem conexão. As alterações continuam salvas no aparelho.');if(!result.sent&&!result.received&&!result.pending)notify('Tudo já está sincronizado.');else notify(`Sincronização concluída: ${result.sent} enviada(s), ${result.received} recebida(s), ${result.errors||0} erro(s).`,Boolean(result.errors))}catch(error){notify('Não foi possível sincronizar agora.',true);console.error('[Manual sync]',{code:error.code,message:error.message})}finally{if(button){button.disabled=false;button.textContent=original}}}
 
-async function run(buttonId,label,task){
-  const button=document.querySelector(`#${buttonId}`),original=button?.textContent;
-  document.querySelector('#firebase-cloud-panel')?.setAttribute('aria-busy','true');
-  setBusy(true);
-  if(button)button.textContent=label;
-  try{return await task()}catch(error){notify(error?.message||'Não foi possível concluir a operação.',true);throw error}finally{
-    document.querySelector('#firebase-cloud-panel')?.removeAttribute('aria-busy');
-    if(button)button.textContent=original;
-    setBusy(false);
-  }
-}
+function technicalDetails(d){return `<dt>Projeto</dt><dd>${escape(d.projectId)}</dd><dt>Banco</dt><dd>${escape(d.databaseId)}</dd><dt>Autenticado</dt><dd>${d.authenticated?'sim':'não'}</dd><dt>UID</dt><dd>${escape(d.uid||'—')}</dd><dt>Perfil</dt><dd>${escape(`${d.userRole||'—'} · ${d.userActive?'ativo':'inativo'}`)}</dd><dt>BusinessId</dt><dd>${escape(d.userBusinessId||'—')}</dd><dt>Negócio localizado</dt><dd>${d.businessDocumentExists?'sim':'não'}</dd><dt>OwnerId</dt><dd>${escape(d.businessOwnerId||'—')}</dd><dt>Listeners</dt><dd>${escape(d.activeListeners)}</dd><dt>Fila total</dt><dd>${escape(d.pendingOperations)}</dd><dt>Último erro</dt><dd>${escape(d.lastErrorCode?`${d.lastErrorCode}: ${d.lastErrorMessage}`:'nenhum')}</dd>`}
 
-function bind(){
-  document.querySelector('#firebase-diagnostic').onclick=()=>run('firebase-diagnostic','Verificando…',async()=>{await window.SyncFirebase.runFirebaseDiagnostic();document.querySelector('#firebase-details').hidden=false;document.querySelector('#firebase-details-toggle').textContent='Ocultar detalhes';notify('Diagnóstico concluído sem falhas.')}).catch(error=>console.error('[Firebase diagnostic button]',error));
-  document.querySelector('#firebase-test').onclick=()=>run('firebase-test','Testando…',async()=>{
-    await window.SyncFirebase.testFirestoreConnection();
-    notify('Conexão com Firestore funcionando.');
-  }).catch(error=>console.error('[Cloud connection button]',error));
-  document.querySelector('#firebase-migrate').onclick=()=>run('firebase-migrate','Enviando…',async()=>{
-    const summary=window.SyncFirebase.snapshot();
-    if(!confirm(`Será criado um backup automático e enviados:\n\n${summary.clientes} clientes\n${summary.produtos} produtos\n${summary.vendas} vendas\n${summary.pagamentos} pagamentos\nTotal em aberto: ${money(summary.fiado)}\n\nContinuar?`))return;
-    backup();
-    const result=await window.SyncFirebase.startCloudMigration();
-    notify(result.check.ok?'Migração concluída e conferida.':'A conferência encontrou diferenças.',!result.check.ok);
-  }).catch(error=>console.error('[Cloud migration button]',error));
-  document.querySelector('#firebase-sync').onclick=()=>run('firebase-sync','Sincronizando…',async()=>{
-    await window.SyncFirebase.synchronizeNow();
-    notify('Sincronização concluída.');
-  }).catch(error=>console.error('[Cloud synchronization button]',error));
-  document.querySelector('#firebase-logout').onclick=async()=>{if(!confirm('Deseja realmente sair desta conta?'))return;await window.FirebaseAuthActions?.signOut?.()};
-  document.querySelector('#firebase-details-toggle').onclick=event=>{
-    const details=document.querySelector('#firebase-details');
-    details.hidden=!details.hidden;
-    event.currentTarget.textContent=details.hidden?'Ver detalhes':'Ocultar detalhes';
-  };
-}
+function renderState(state){lastState=state;window.SyncFirebaseState=state;const status=document.querySelector('#firebase-status');if(status){status.className=`firebase-status is-${state.status}`;status.textContent=state.message;document.querySelector('#firebase-last-sync').textContent=formattedTime(state.lastSync);document.querySelector('#firebase-pending').textContent=state.pending;document.querySelector('#firebase-errors').textContent=state.errors;document.querySelector('#firebase-details').innerHTML=technicalDetails(state.details||{})}const modal=document.querySelector('#cloud-sync-panel');if(modal){modal.querySelector('[data-cloud-status]').textContent=state.message;modal.querySelector('[data-cloud-last]').textContent=formattedTime(state.lastSync);modal.querySelector('[data-cloud-pending]').textContent=state.queueTotal;modal.querySelector('[data-cloud-errors]').textContent=state.errors}}
 
-function renderState(state){
-  window.SyncFirebaseState=state;
-  const status=document.querySelector('#firebase-status');
-  if(!status)return;
-  status.className=`firebase-status is-${state.status}`;
-  status.textContent=state.message;
-  document.querySelector('#firebase-progress-bar').style.width=`${state.progress||0}%`;
-  const sent=Object.entries(state.sent||{}).map(([name,total])=>`${name}: ${total}`).join(' · ');
-  const comparison=state.comparison?`Conferência: local ${state.comparison.local.clientes} clientes / nuvem ${state.comparison.remote.clients||0}; fiado local ${money(state.comparison.local.fiado)} / nuvem ${money(state.comparison.remote.fiado||0)}.`:'';
-  document.querySelector('#firebase-counts').textContent=[sent,comparison].filter(Boolean).join(' — ')||'Nenhum dado enviado nesta sessão.';
-  const d=state.details||{};
-  document.querySelector('#firebase-details').innerHTML=`
-    <dt>Autenticação pronta</dt><dd>${d.authReady?'sim':'não'}</dd>
-    <dt>Usuário</dt><dd>${escape(d.authenticated?`${d.email} (${d.uid})`:'não autenticado')}</dd>
-    <dt>Documento do usuário</dt><dd>${d.userDocumentExists?'localizado':'não localizado'}</dd>
-    <dt>Perfil</dt><dd>${escape(`${d.userRole||'—'} · ${d.userActive?'ativo':'inativo'}`)}</dd>
-    <dt>BusinessId do usuário</dt><dd>${escape(d.userBusinessId||'—')}</dd>
-    <dt>Banco</dt><dd>${escape(d.databaseId)}</dd>
-    <dt>Conexão</dt><dd>${escape(d.connection)}</dd>
-    <dt>Listeners ativos</dt><dd>${escape(d.activeListeners)}</dd>
-    <dt>Negócio</dt><dd>${escape(d.targetBusinessId)} · ${d.businessDocumentExists?'localizado':'não localizado'}</dd>
-    <dt>Proprietário</dt><dd>${escape(d.businessOwnerId||'—')}</dd>
-    <dt>UID confere</dt><dd>${d.ownerMatches?'sim':'não'}</dd>
-    <dt>Projeto</dt><dd>${escape(d.projectId)}</dd>
-    <dt>Caminho atual</dt><dd>${escape(d.currentPath)}</dd>
-    <dt>Clientes</dt><dd>local ${escape(d.localClients)} · nuvem ${escape(d.cloudClients)}</dd>
-    <dt>Produtos</dt><dd>local ${escape(d.localProducts)} · nuvem ${escape(d.cloudProducts)}</dd>
-    <dt>Operações pendentes</dt><dd>${escape(d.pending)}</dd>
-    <dt>Última sincronização</dt><dd>${escape(d.lastSync)}</dd>
-    <dt>Último erro</dt><dd>${escape(d.lastErrorCode?`${d.lastErrorCode}: ${d.lastErrorMessage}`:'nenhum')}</dd>`;
-  const busy=['testing','validating','syncing'].includes(state.status);
-  const diagnostic=document.querySelector('#firebase-diagnostic'),test=document.querySelector('#firebase-test'),sync=document.querySelector('#firebase-sync'),migrate=document.querySelector('#firebase-migrate');
-  if(diagnostic)diagnostic.disabled=busy;
-  if(test)test.disabled=busy;
-  if(sync)sync.disabled=busy;
-  if(migrate)migrate.disabled=!state.testPassed||busy;
-}
+function openHeaderPanel(){const state=lastState;if(!state)return;document.querySelector('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box cloud-panel" id="cloud-sync-panel"><header class="modal-head"><h3>Sincronização</h3><button class="icon-btn close" type="button"><i data-lucide="x"></i></button></header><div class="modal-body"><div class="cloud-panel-icon is-${escape(state.status)}"><i data-lucide="cloud"></i></div><h3 data-cloud-status>${escape(state.message)}</h3><div class="firebase-sync-grid"><span>Conexão</span><strong>${navigator.onLine?'Online':'Offline'}</strong><span>Última sincronização</span><strong data-cloud-last>${escape(formattedTime(state.lastSync))}</strong><span>Pendências</span><strong data-cloud-pending>${state.queueTotal}</strong><span>Erros</span><strong data-cloud-errors>${state.errors}</strong></div></div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-primary" id="cloud-panel-sync" type="button">Sincronizar agora</button></footer></section></div>`;document.querySelectorAll('#cloud-sync-panel .close').forEach(button=>button.onclick=()=>document.querySelector('#modal').innerHTML='');document.querySelector('#cloud-panel-sync').onclick=manualSync;window.lucide?.createIcons()}
 
-function mount(){if(location.hash.includes('configuracoes'))queueMicrotask(panel)}
-addEventListener('hashchange',mount);
-addEventListener('firebase-auth-ready',mount);
-new MutationObserver(mount).observe(document.querySelector('main')||document.body,{childList:true,subtree:true});
-mount();
+function bindHeader(){const badge=document.querySelector('.local-badge');if(!badge||badge.dataset.cloudPanelBound)return;badge.dataset.cloudPanelBound='true';badge.onclick=openHeaderPanel;badge.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();openHeaderPanel()}}}
+function mount(){bindHeader();if(location.hash.includes('configuracoes'))queueMicrotask(settingsPanel)}
+addEventListener('hashchange',mount);addEventListener('firebase-auth-ready',()=>{unsubscribe?.();unsubscribe=window.SyncFirebase.subscribe(renderState);mount()});new MutationObserver(mount).observe(document.querySelector('main')||document.body,{childList:true,subtree:true});mount();
