@@ -44,7 +44,14 @@
     });
     const total=$('.total-row b',summary)?.textContent||money(0),finish=$('#finish-sale',summary);if(finish&&!$('strong',finish))finish.innerHTML=`${icon('check')} Concluir venda <strong>${total}</strong>`;else if(finish&&$('strong',finish)?.textContent!==total)$('strong',finish).textContent=total;
     const bag=$('#open-sale-summary'),items=$$('.editable-cart',summary).reduce((sum,row)=>sum+Number($('[data-item-qty]',row)?.value||0),0),client=$('#sale-client',summary),clientName=client?.value?client.options[client.selectedIndex]?.text:'Venda avulsa';
-    const meta=`${clientName} · ${payment==='fiado'?'Fiado':payment[0].toUpperCase()+payment.slice(1)}`;if(bag?.dataset.meta!==meta)bag.dataset.meta=meta;if(bag?.dataset.count!==String(items))bag.dataset.count=String(items);
+    const meta=`${clientName} · ${payment==='fiado'?'Fiado':payment[0].toUpperCase()+payment.slice(1)}`;
+    if(bag){
+      const previous=Number(bag.dataset.totalCount||0),initialized=bag.hasAttribute('data-total-count');
+      bag.dataset.meta=meta;bag.dataset.totalCount=String(items);bag.dataset.count=items>99?'99+':String(items);
+      bag.classList.toggle('has-items',items>0);bag.classList.toggle('is-empty',items===0);
+      bag.setAttribute('aria-label',items?`Abrir sacola com ${items} ${items===1?'item':'itens'}`:'Sacola vazia');
+      if(initialized&&previous!==items){bag.classList.remove('bag-bump');requestAnimationFrame(()=>bag.classList.add('bag-bump'));if(items>previous)navigator.vibrate?.(18)}
+    }
   }
   function bindCartSwipe(row){
     let x=0,y=0,dx=0;row.addEventListener('pointerdown',event=>{if(event.target.closest('button,input'))return;x=event.clientX;y=event.clientY;dx=0});row.addEventListener('pointermove',event=>{if(!x)return;const mx=event.clientX-x,my=event.clientY-y;if(Math.abs(my)>Math.abs(mx))return;dx=Math.max(-105,Math.min(105,mx));row.style.transform=`translateX(${dx}px)`});row.addEventListener('pointerup',()=>{if(dx<-75)$('[data-remove]',row)?.click();else if(dx>75){const input=$('[data-item-qty]',row);if(input){input.value=Math.max(1,Number(input.value||1)*2);input.dispatchEvent(new Event('change',{bubbles:true}))}}row.style.transform='';x=0;dx=0});row.addEventListener('pointercancel',()=>{row.style.transform='';x=0;dx=0})
