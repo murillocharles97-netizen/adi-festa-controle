@@ -1,5 +1,5 @@
 .mobile-client-fab{display:none}
-@media(max-width:780px){
+@media(max-width:767px){
   body:has(.clients-mobile-page){background:#f7f9fc;padding-bottom:92px}
   body:has(.clients-mobile-page) #app{padding:16px 14px 30px}
   body:has(.clients-mobile-page) .local-badge{display:flex;padding:7px 9px;font-size:10px}
