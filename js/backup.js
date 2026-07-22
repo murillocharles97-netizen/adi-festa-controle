@@ -1,6 +1,6 @@
 window.BackupManager=(()=>{
-  const LISTS=['clientes','produtos','vendas','pagamentos','movimentacoes','movimentacoesEstoque','cobrancas','campanhas','progressosCampanha','recompensas','messageHistory','messageTemplates','messageSequences'];
-  const FINANCIAL=new Set(['vendas','pagamentos','movimentacoes','movimentacoesEstoque','recompensas','messageHistory','messageSequences']);
+  const LISTS=['clientes','produtos','vendas','pagamentos','movimentacoes','movimentacoesEstoque','cobrancas','campanhas','progressosCampanha','recompensas','messageHistory','messageTemplates','messageSequences','visitas','catalogOrders'];
+  const FINANCIAL=new Set(['vendas','pagamentos','movimentacoes','movimentacoesEstoque','recompensas','messageHistory','messageSequences','catalogOrders']);
   const norm=value=>String(value??'').trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '),digits=value=>String(value??'').replace(/\D/g,'');
   const stable=value=>{if(Array.isArray(value))return`[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`;return JSON.stringify(value)};
   const hash=value=>{let h=2166136261;for(const char of String(value)){h^=char.charCodeAt(0);h=Math.imul(h,16777619)}return(h>>>0).toString(36)};

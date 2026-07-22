@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="./css/checkout-mobile.css">
   <link rel="stylesheet" href="./css/mobile-fixes.css">
   <link rel="stylesheet" href="./css/mensagens-mobile.css">
+  <link rel="stylesheet" href="./css/visitas.css">
   <script>document.documentElement.classList.add('auth-pending');</script>
   <script src="./assets/lucide.min.js" defer></script>
 </head>
@@ -37,6 +38,7 @@
       <a href="#/vender" data-route="vender"><i data-lucide="shopping-bag"></i>Vender</a>
       <a href="#/clientes" data-route="clientes"><i data-lucide="users"></i>Clientes</a>
       <a href="#/produtos" data-route="produtos"><i data-lucide="candy"></i>Produtos</a>
+      <a href="#/visitas" data-route="visitas"><i data-lucide="map-pinned"></i>Visitas</a>
       <a href="#/historico" data-route="historico"><i data-lucide="history"></i>Histórico</a>
       <a href="#/relatorios" data-route="relatorios"><i data-lucide="chart-no-axes-combined"></i>Desempenho</a>
       <a href="#/configuracoes" data-route="configuracoes"><i data-lucide="settings"></i>Configurações</a>
@@ -55,10 +57,12 @@
   <div id="modal"></div><div id="toasts"></div><div id="auth-gate" aria-live="polite"></div>
   <script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/storage.js"></script><script src="./js/backup.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/clientes.js"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/produtos.js"></script><script src="./js/vendas.js"></script><script src="./js/fiados.js"></script><script src="./js/cobrancas.js"></script><script src="./js/mensagens.js"></script><script src="./js/router.js"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js"></script><script src="./js/repositories.js"></script><script src="./js/checkout.js"></script><script src="./js/clientes-page.js"></script><script src="./js/mensagens-mobile.js"></script><script src="./js/clientes-mobile.js"></script><script src="./js/produtos-mobile.js"></script><script src="./js/app.js"></script>
   <script src="./js/home-mobile.js"></script>
+  <script src="./js/visitas.js"></script>
   <script src="./js/checkout-mobile.js"></script>
   <script src="./js/visual-ui.js"></script>
   <script>window.startPrivateUI=()=>{if(window.privateUIStarted)return;window.privateUIStarted=true;window.Checkout&&Checkout.mount();window.VisualUI&&VisualUI.start()};addEventListener('firebase-auth-ready',window.startPrivateUI);</script>
   <script type="module" src="./js/firebase/auth.js"></script>
   <script type="module" src="./js/firebase/firebase-ui.js"></script>
+  <script type="module" src="./js/firebase/catalog-bridge.js"></script>
 </body>
 </html>
