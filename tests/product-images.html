@@ -1,0 +1,6 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Teste de fotos de produtos</title><link rel="stylesheet" href="../css/style.css"><link rel="stylesheet" href="../css/product-images.css"></head><body><main style="padding:20px"><button id="open" class="btn btn-primary">Abrir formulário de teste</button><output id="result"></output></main><div id="modal"></div><div id="toasts"></div><script>
+window.Utils={uuid:()=>crypto.randomUUID(),toast:(message,error)=>{document.querySelector('#result').textContent=message;document.querySelector('#result').dataset.error=String(Boolean(error))}};
+window.Modais={fechar:()=>document.querySelector('#modal').replaceChildren()};
+window.Produtos={obter:()=>null,salvar:value=>value};
+window.DB={};
+</script><script src="../js/product-images.js"></script><script>document.querySelector('#open').onclick=()=>ProductImages.openForm()</script></body></html>

@@ -3,5 +3,8 @@
     "database": "(default)",
     "location": "southamerica-east1",
     "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }
