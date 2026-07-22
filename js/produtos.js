@@ -7,14 +7,15 @@ window.Produtos=(()=>{
   const listar=()=>DB.carregar().produtos;
   const obter=id=>listar().find(p=>p.id===id);
   const status=p=>getProductStockStatus(p);
-  const salvar=d=>DB.alterar(db=>{
+  const salvar=d=>{let salvo;DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
     const estoque=d.estoqueAtual??d.estoque;
-    const v={nome:String(d.nome||'').trim(),codigo:d.codigo??atual?.codigo??'',preco:Number(d.preco||0),custo:d.custo===''||d.custo===null?null:Number(d.custo||0),estoqueAtual:estoque===''||estoque===null||estoque===undefined?0:Number(estoque),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',observacao:d.observacao??atual?.observacao??'',semControleEstoque:d.semControleEstoque===undefined?Boolean(atual?.semControleEstoque):Boolean(d.semControleEstoque),favorito:Boolean(d.favorito??atual?.favorito),ativo:d.ativo!==false,atualizadoEm:agora};
+    const imageField=(name,fallback=null)=>d[name]!==undefined?d[name]:(atual?.[name]??fallback);
+    const v={nome:String(d.nome||'').trim(),codigo:d.codigo??atual?.codigo??'',preco:Number(d.preco||0),custo:d.custo===''||d.custo===null?null:Number(d.custo||0),estoqueAtual:estoque===''||estoque===null||estoque===undefined?0:Number(estoque),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',observacao:d.observacao??atual?.observacao??'',semControleEstoque:d.semControleEstoque===undefined?Boolean(atual?.semControleEstoque):Boolean(d.semControleEstoque),favorito:Boolean(d.favorito??atual?.favorito),ativo:d.ativo!==false,imagem:imageField('imagem',''),imageUrl:imageField('imageUrl'),imageStoragePath:imageField('imageStoragePath'),imageThumbUrl:imageField('imageThumbUrl'),imageThumbStoragePath:imageField('imageThumbStoragePath'),imageUpdatedAt:imageField('imageUpdatedAt'),imageUploadStatus:imageField('imageUploadStatus','none'),imageOperationId:imageField('imageOperationId'),atualizadoEm:agora};
     v.estoque=v.estoqueAtual;
-    atual?Object.assign(atual,v):db.produtos.push({id:Utils.uuid(),...v,criadoEm:agora});
-  });
-  const excluir=id=>DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id));
+    if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
+  });return salvo};
+  const excluir=id=>{const product=obter(id);if(product&&(product.imageStoragePath||product.imageThumbStoragePath)&&navigator.onLine)window.ProductImageStorage?.remove(product).catch(error=>console.warn('[Product image cleanup]',error));return DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id))};
   const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
