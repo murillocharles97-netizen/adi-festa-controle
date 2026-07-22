@@ -4,8 +4,8 @@ import { createFirestoreRepository } from './firestore-repository.js';
 import { normalizeFirestoreData, sanitizeForFirestore } from './firestore-utils.js';
 
 const QUEUE_KEY='adiFestaSyncQueue_v2',LEGACY_QUEUE_KEY='adiFestaFirestoreQueue_v1',AUTO_SYNC_MS=30000,MAX_WRITES=350;
-const SOURCES={clients:{key:'clientes'},products:{key:'produtos'},sales:{key:'vendas'},payments:{key:'pagamentos'},balanceAdjustments:{key:'movimentacoes',filter:item=>item.tipo==='ajuste_saldo'},stockMovements:{key:'movimentacoesEstoque'},campaigns:{key:'campanhas'},campaignProgress:{key:'progressosCampanha'},rewards:{key:'recompensas'},charges:{key:'cobrancas'},messageHistory:{key:'messageHistory'},messageTemplates:{key:'messageTemplates'},messageSequences:{key:'messageSequences'}};
-const REALTIME_NAMES=new Set(['clients','products','settings','campaigns','campaignProgress','rewards','messageTemplates','messageSequences']);
+const SOURCES={clients:{key:'clientes'},products:{key:'produtos'},sales:{key:'vendas'},payments:{key:'pagamentos'},balanceAdjustments:{key:'movimentacoes',filter:item=>item.tipo==='ajuste_saldo'},stockMovements:{key:'movimentacoesEstoque'},campaigns:{key:'campanhas'},campaignProgress:{key:'progressosCampanha'},rewards:{key:'recompensas'},charges:{key:'cobrancas'},messageHistory:{key:'messageHistory'},messageTemplates:{key:'messageTemplates'},messageSequences:{key:'messageSequences'},visits:{key:'visitas'},catalogOrders:{key:'catalogOrders'}};
+const REALTIME_NAMES=new Set(['clients','products','settings','campaigns','campaignProgress','rewards','messageTemplates','messageSequences','visits','catalogOrders']);
 const CLOUD_NAMES=[...Object.keys(SOURCES),'settings'];
 const repositories=Object.fromEntries(CLOUD_NAMES.map(name=>[name,createFirestoreRepository(name)]));
 let currentUser=null,originalAlter=null,applyingCloud=false,processingPromise=null,autoTimer=null,quickTimer=null,unsubscribers=[],subscribers=new Set(),lastError='',lastErrorCode='',currentPath='';

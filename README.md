@@ -1,6 +1,6 @@
 # Adi Festa Controle
 
-PWA responsivo para controle de vendas, clientes, produtos e fiados da Adi Festa. Funciona no celular e no computador, sem backend, com os dados armazenados localmente no navegador.
+PWA responsivo para controle de vendas, clientes, produtos, fiados e pedidos antecipados da Adi Festa. O painel trabalha offline-first e sincroniza os dados do negócio com o Firebase.
 
 ## Funcionalidades
 
@@ -15,6 +15,15 @@ PWA responsivo para controle de vendas, clientes, produtos e fiados da Adi Festa
 - Importação de clientes do Kyte
 - Backup e restauração em JSON
 - Instalação como PWA e funcionamento offline
+- Visitas com catálogo online compartilhável
+- Carrinho e pedidos antecipados pelo celular
+- Acompanhamento do pedido e conversão em venda paga ou fiado
+
+## Catálogo online
+
+No painel, abra **Visitas**, crie uma visita, selecione os produtos e use **Compartilhar**. O cliente abre `catalogo.html` pelo link recebido, escolhe os itens e envia o pedido sem precisar instalar o app ou criar senha.
+
+O carrinho é preservado no aparelho do cliente. A confirmação do pedido exige internet; o painel recebe os pedidos pelo Firestore e mantém a conversão em venda idempotente para não baixar estoque ou saldo duas vezes.
 
 ## Como rodar localmente
 
@@ -53,4 +62,4 @@ Todos os caminhos são relativos, portanto o PWA funciona mesmo quando publicado
 
 ## Dados e privacidade
 
-Os dados ficam no `localStorage` do navegador. Faça backups JSON regularmente, especialmente antes de limpar dados do navegador, trocar de aparelho ou importar outro backup.
+O painel mantém uma cópia local para continuar funcionando offline e sincroniza as coleções do negócio no Firebase. Faça backups JSON regularmente, especialmente antes de limpar dados, trocar de aparelho ou importar outro backup.

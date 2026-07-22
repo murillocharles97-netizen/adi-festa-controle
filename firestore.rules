@@ -19,6 +19,43 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role;
       allow delete: if false;
     }
+    match /publicCatalogs/{visitToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn()
+        && request.resource.data.businessId is string
+        && canAccess(request.resource.data.businessId);
+      allow delete: if false;
+      match /orders/{orderId} {
+        allow create: if get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.active == true
+          && request.resource.data.id == orderId
+          && request.resource.data.catalogToken == visitToken
+          && request.resource.data.source == 'online_catalog'
+          && request.resource.data.orderStatus == 'recebido'
+          && request.resource.data.customerName is string
+          && request.resource.data.customerName.size() > 1
+          && request.resource.data.customerName.size() <= 120
+          && request.resource.data.customerPhone is string
+          && request.resource.data.customerPhone.size() >= 10
+          && request.resource.data.customerPhone.size() <= 15
+          && request.resource.data.items is list
+          && request.resource.data.items.size() > 0
+          && request.resource.data.items.size() <= 40
+          && request.resource.data.total is number
+          && request.resource.data.total > 0
+          && request.resource.data.total <= 10000
+          && request.resource.data.subtotal == request.resource.data.total
+          && request.resource.data.discount == 0
+          && request.resource.data.fee == 0
+          && request.resource.data.paymentPreference in ['entrega', 'pix', 'dinheiro', 'cartao', 'fiado']
+          && request.resource.data.orderAccessToken is string
+          && request.resource.data.orderAccessToken.size() >= 24;
+        allow get: if true;
+        allow list: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+    }
     match /businesses/{businessId} {
       allow create: if businessId == 'adi-festa' && firstOwner() && request.resource.data.ownerId == request.auth.uid;
       allow read: if canAccess(businessId);
