@@ -1,7 +1,7 @@
-import { auth, db } from './firebase-config.js?v=41';
+import { auth, db } from './firebase-config.js?v=42';
 import { collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, Timestamp, where } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import { normalizeFirestoreData, sanitizeForFirestore } from './firestore-utils.js';
-import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js?v=41';
+import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js?v=42';
 
 const queryCache=new Map(),CACHE_TTL_MS=60000;
 const cacheKey=(businessId,collectionName,variant)=>`${businessId}:${collectionName}:${variant}`;

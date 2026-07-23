@@ -1,10 +1,14 @@
-import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js?v=41';
+import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js?v=42';
 import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
 import {doc,getDoc,serverTimestamp,setDoc,Timestamp,writeBatch} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService} from './business-context.js?v=41';
-import './sync.js?v=41';
+import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService} from './business-context.js?v=42';
+import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js?v=42';
+import './sync.js?v=42';
 
-const gate=document.querySelector('#auth-gate'),OWNER_EMAIL='murillo.charles97@gmail.com',PENDING_PREFIX='adiFesta:onboarding:';
+const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000;
+const BOOTSTRAP_STATES=new Set(['unauthenticated','migrating','ready','onboarding','subscription_blocked','temporary_unavailable','permission_error','fatal_error']);
+let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0;
+const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
 const esc=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
@@ -14,6 +18,20 @@ const businessIdFor=user=>`biz_${user.uid}`;
 const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
 function screen(html){gate.innerHTML=html;gate.hidden=false;document.documentElement.classList.add('auth-pending');window.lucide?.createIcons()}
 function setButtonLoading(button,loading,text){if(!button)return;button.disabled=loading;if(text)button.textContent=text}
+function setBootstrapState(state,details={}){
+  if(!BOOTSTRAP_STATES.has(state))throw Error(`Estado de bootstrap inválido: ${state}`);
+  bootstrapState=state;
+  window.FirebaseBootstrap={state,details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout(),completeLegacyMigration:()=>completeLegacyMigrationManually()};
+  dispatchEvent(new CustomEvent('firebase-bootstrap-state',{detail:{state,...details}}));
+}
+function normalizedCode(error){return String(error?.code||'').replace('firestore/','')}
+function timeoutError(){return Object.assign(new Error('O bootstrap excedeu 15 segundos.'),{code:'bootstrap/timeout'})}
+function withTimeout(promise,token){
+  let timer;
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{token.cancelled=true;reject(timeoutError())},BOOTSTRAP_TIMEOUT_MS)});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
+function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapSequence)throw Object.assign(new Error('Bootstrap substituído por uma nova tentativa.'),{code:'bootstrap/cancelled'})}
 
 function login(message=''){
   screen(`<section class="auth-card auth-entry-card"><div class="auth-logo">AF</div><h1>${APP_NAME}</h1><p>Controle seu negócio com segurança, de qualquer aparelho.</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha">👁</button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar</button><button class="btn btn-light" type="button" id="show-register">Criar minha conta</button><button class="auth-link" type="button" data-show-plans>Conhecer planos</button></form></section>`);
@@ -66,20 +84,14 @@ async function provisionBusinessAccount(user,data){
   return profile;
 }
 
-async function migrateLegacy(user,profile,business){
+async function migrateLegacy(user,profile,business,mode='automatic'){
   if(profile.businessId!==LEGACY_BUSINESS_ID)return{profile,business};
-  const profilePatch={},businessPatch={};
-  if(!profile.uid)profilePatch.uid=user.uid;
-  if(profile.role==='admin')profilePatch.role='owner';
-  if(!Array.isArray(profile.permissions))profilePatch.permissions=[];
-  if(!business.slug)businessPatch.slug='adi-festa';
-  if(business.onboardingCompleted!==true)businessPatch.onboardingCompleted=true;
-  if(!business.businessType)businessPatch.businessType='Doceria';
-  if(!business.subscription)businessPatch.subscription={planId:'internal',status:'active',trialStartedAt:null,trialEndsAt:null,currentPeriodStart:null,currentPeriodEnd:null,cancelAtPeriodEnd:false,suspendedAt:null,gracePeriodEndsAt:null};
-  if(!business.limits)businessPatch.limits={maxUsers:999,maxProducts:999999,maxClients:999999,maxMonthlySales:999999,users:999,products:999999,clients:999999,monthlySales:999999,catalogEnabled:true,campaignsEnabled:true};
-  if(Object.keys(profilePatch).length){profile={...profile,...profilePatch};await setDoc(doc(db,'users',user.uid),{...profilePatch,updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.warn('[Legacy profile migration pending]',error.code))}
-  if(Object.keys(businessPatch).length){business={...business,...businessPatch};await setDoc(doc(db,'businesses',LEGACY_BUSINESS_ID),{...businessPatch,updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.warn('[Legacy business migration pending]',error.code))}
-  return{profile,business};
+  const result=await runLegacyMigration({
+    user,profile,business,mode,timestamp:new Date().toISOString(),
+    writeProfile:patch=>setDoc(doc(db,'users',user.uid),{...patch,migratedAt:serverTimestamp(),updatedAt:serverTimestamp()},{merge:true}),
+    writeBusiness:patch=>setDoc(doc(db,'businesses',LEGACY_BUSINESS_ID),{...patch,migratedAt:serverTimestamp(),updatedAt:serverTimestamp()},{merge:true})
+  });
+  return{profile:result.profile,business:result.business};
 }
 
 function downloadBackup(){
@@ -90,7 +102,7 @@ function plansScreen(authenticated=true){
   const plans=SubscriptionService.plans();
   screen(`<section class="auth-card auth-plans-card"><div class="auth-logo">AF</div><h1>Escolha seu plano</h1><p>O pagamento será integrado em uma próxima etapa.</p><div class="auth-plan-list">${plans.filter(plan=>plan.id!=='trial').map(plan=>`<article class="${plan.recommended?'recommended':''}"><small>${plan.recommended?'RECOMENDADO':''}</small><h2>${plan.name}</h2><b>${plan.monthlyPrice.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}<em>/mês</em></b><ul><li>${plan.limits.clients} clientes</li><li>${plan.limits.products} produtos</li><li>${plan.features.onlineCatalog?'Catálogo online':'Controle de vendas'}</li></ul><button class="btn btn-primary" data-plan="${plan.id}">Selecionar</button></article>`).join('')}</div><button class="btn btn-light" data-plans-back>${authenticated?'Voltar':'Voltar para entrar'}</button></section>`);
   document.querySelectorAll('[data-plan]').forEach(button=>button.onclick=async()=>{const result=await SubscriptionService.createCheckoutSession(button.dataset.plan);Utils.toast(result.message)});
-  document.querySelector('[data-plans-back]').onclick=()=>authenticated?resolveAuthenticatedUser(auth.currentUser):login();
+  document.querySelector('[data-plans-back]').onclick=()=>authenticated?startBootstrap(auth.currentUser,{mode:'retry'}):login();
 }
 function blockedScreen(user,context){
   const trial=context.access?.reason==='trial_expired';
@@ -103,6 +115,36 @@ function unauthorized(user,message,canResume=false){
   screen(`<section class="auth-card"><div class="auth-logo">AF</div><h1>Acesso não configurado</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
   document.querySelector('#resume-onboarding')?.addEventListener('click',async()=>{const saved=JSON.parse(localStorage.getItem(pendingKey(user.uid))||'null');if(!saved)return login('Os dados do cadastro não estão mais neste aparelho.');try{await provisionBusinessAccount(user,saved);localStorage.removeItem(pendingKey(user.uid));location.reload()}catch(error){unauthorized(user,friendly(error.code),true)}});
   document.querySelector('#logout-unauthorized').onclick=()=>logout(true);
+}
+function bootstrapErrorScreen(user,state,message,{manual=false}={}){
+  setBootstrapState(state,{code:state});
+  screen(`<section class="auth-card auth-blocked-card"><div class="auth-logo">AF</div><h1>${state==='temporary_unavailable'?'Configuração temporariamente indisponível':state==='permission_error'?'Permissão necessária':'Não foi possível abrir o aplicativo'}</h1><p>${esc(message)}</p><button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
+  document.querySelector('#bootstrap-retry').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Tentando…';await retryBootstrap(user)};
+  document.querySelector('#bootstrap-manual-migration')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Executando…';await completeLegacyMigrationManually()});
+  document.querySelector('#bootstrap-logout').onclick=bootstrapLogout;
+}
+async function bootstrapLogout(){
+  const signingOutUid=auth.currentUser?.uid;
+  bootstrapSequence++;
+  if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;
+  bootstrapRun=null;readyUid='';
+  try{window.SyncFirebase?.stop?.()}catch{}
+  try{badgeSubscription?.()}catch{}badgeSubscription=null;
+  BusinessContext.clear();DB.releaseBusiness();window.FirebaseSession=null;window.FirebaseAuthActions={signOut:bootstrapLogout};
+  if(signingOutUid)automaticBootstrapAttempts.delete(signingOutUid);
+  setBootstrapState('unauthenticated');
+  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Saindo da conta…</p></section>');
+  try{await Promise.race([signOut(auth),new Promise((_,reject)=>setTimeout(()=>reject(Error('logout-timeout')),5000))])}catch(error){console.warn('[Firebase Bootstrap] logout',{code:normalizedCode(error)||'timeout'})}finally{login()}
+}
+async function retryBootstrap(user=auth.currentUser){
+  if(!user)return login();
+  return startBootstrap(user,{mode:'retry'});
+}
+async function completeLegacyMigrationManually(){
+  const user=auth.currentUser;
+  if(!user)return login('Entre na conta do proprietário para executar a migração.');
+  resetLegacyMigrationAttempt(user.uid);
+  return startBootstrap(user,{mode:'manual'});
 }
 
 let badgeSubscription=null;
@@ -123,7 +165,8 @@ function allowed(user,profile,business){
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
   window.FirebaseAuthActions={signOut:logout};
-  if(!context.access.canAccessApp)return blockedScreen(user,context);
+  if(!context.access.canAccessApp){setBootstrapState('subscription_blocked',{businessId:profile.businessId});return blockedScreen(user,context)}
+  setBootstrapState('ready',{businessId:profile.businessId});
   window.SyncFirebase.setUser(user,profile);
   gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
@@ -150,25 +193,86 @@ async function logout(force=false){
   await signOut(auth);return true;
 }
 
-async function resolveAuthenticatedUser(user){
-  if(!user)return login();
-  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Validando seu ambiente…</p></section>');
-  try{
-    const profileRef=doc(db,'users',user.uid),profileSnapshot=await getDoc(profileRef);
-    if(!profileSnapshot.exists())return unauthorized(user,'Seu cadastro foi iniciado, mas a empresa ainda não foi configurada.',Boolean(localStorage.getItem(pendingKey(user.uid))));
-    let profile=profileSnapshot.data();
-    if(profile.uid!==user.uid)return unauthorized(user,'O perfil cadastrado não corresponde a esta conta.');
-    if(profile.active!==true)return unauthorized(user,'Sua conta está desativada.');
-    if(!profile.businessId)return unauthorized(user,'Esta conta não possui uma empresa vinculada.');
-    const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
-    if(!businessSnapshot.exists())return unauthorized(user,'A empresa vinculada ao seu perfil não existe.');
-    let business={id:businessSnapshot.id,...businessSnapshot.data()};
-    if(business.active===false)return unauthorized(user,'Esta empresa está suspensa.');
-    ({profile,business}=await migrateLegacy(user,profile,business));
-    await setDoc(profileRef,{lastLoginAt:serverTimestamp(),updatedAt:serverTimestamp()},{merge:true}).catch(()=>{});
-    allowed(user,profile,business);
-  }catch(error){console.error('[Firebase auth context]',{code:error.code,message:error.message});BusinessContext.fail(error);unauthorized(user,friendly(error.code))}
+async function bootstrapCore(user,token,mode){
+  setBootstrapState('migrating',{mode});
+  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Validando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');
+  document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
+  const profileRef=doc(db,'users',user.uid),profileSnapshot=await getDoc(profileRef);
+  assertCurrentRun(token);
+  if(!profileSnapshot.exists()){
+    setBootstrapState('onboarding');
+    return unauthorized(user,'Seu cadastro foi iniciado, mas a empresa ainda não foi configurada.',Boolean(localStorage.getItem(pendingKey(user.uid))));
+  }
+  let profile=profileSnapshot.data();
+  if(profile.uid!==user.uid)throw Object.assign(new Error('O perfil cadastrado não corresponde a esta conta.'),{code:'permission-denied'});
+  if(profile.active!==true)throw Object.assign(new Error('Sua conta está desativada.'),{code:'permission-denied'});
+  if(!profile.businessId){
+    setBootstrapState('onboarding');
+    return unauthorized(user,'Esta conta ainda não possui uma empresa vinculada.',Boolean(localStorage.getItem(pendingKey(user.uid))));
+  }
+  const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
+  assertCurrentRun(token);
+  if(!businessSnapshot.exists())throw Object.assign(new Error('A empresa vinculada ao seu perfil não existe.'),{code:'permission-denied'});
+  let business={id:businessSnapshot.id,...businessSnapshot.data()};
+  if(business.active===false)throw Object.assign(new Error('Esta empresa está suspensa.'),{code:'permission-denied'});
+  if(profile.businessId===LEGACY_BUSINESS_ID){
+    screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Concluindo a configuração segura da Adi Festa…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');
+    document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
+    ({profile,business}=await migrateLegacy(user,profile,business,mode));
+    assertCurrentRun(token);
+  }
+  setDoc(profileRef,{lastLoginAt:serverTimestamp(),updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.warn('[Firebase Bootstrap] last login pending',{code:normalizedCode(error)}));
+  allowed(user,profile,business);
+  if(['ready','subscription_blocked'].includes(bootstrapState))readyUid=user.uid;
+}
+function handleBootstrapError(user,error){
+  const code=normalizedCode(error);
+  if(code==='bootstrap/cancelled')return;
+  BusinessContext.fail(error);
+  console.error('[Firebase Bootstrap]',{code:code||'unknown',state:bootstrapState});
+  if(code==='resource-exhausted'){
+    return bootstrapErrorScreen(user,'temporary_unavailable','Não foi possível concluir a configuração da sua empresa porque o Firebase atingiu temporariamente o limite de uso. Aguarde a renovação da cota e tente novamente. Nenhum dado foi perdido.',{manual:true});
+  }
+  if(['bootstrap/timeout','unavailable','deadline-exceeded','network-request-failed'].includes(code)){
+    return bootstrapErrorScreen(user,'temporary_unavailable',code==='bootstrap/timeout'?'A validação ultrapassou o limite de 15 segundos. Verifique sua conexão e tente novamente. Nenhum dado foi perdido.':'Não foi possível conectar ao Firebase agora. Tente novamente em alguns instantes. Nenhum dado foi perdido.',{manual:user?.uid&&Boolean(localStorage.getItem(`adiFestaDB_v1:${LEGACY_BUSINESS_ID}`))});
+  }
+  if(['permission-denied','unauthenticated'].includes(code)){
+    return bootstrapErrorScreen(user,'permission_error',error.message||'Sua conta não possui permissão para concluir esta configuração.',{manual:true});
+  }
+  return bootstrapErrorScreen(user,'fatal_error','Ocorreu um erro inesperado durante a configuração. Nenhum dado foi apagado.',{manual:true});
+}
+function startBootstrap(user,{mode='automatic'}={}){
+  if(!user){setBootstrapState('unauthenticated');login();return Promise.resolve()}
+  if(readyUid===user.uid&&['ready','subscription_blocked'].includes(bootstrapState))return Promise.resolve(window.FirebaseSession);
+  if(bootstrapRun?.uid===user.uid)return bootstrapRun.promise;
+  if(mode==='automatic'&&automaticBootstrapAttempts.has(user.uid))return Promise.resolve();
+  if(mode==='automatic')automaticBootstrapAttempts.add(user.uid);
+  const token={sequence:++bootstrapSequence,cancelled:false},run={uid:user.uid,token,promise:null};
+  run.promise=withTimeout(bootstrapCore(user,token,mode),token)
+    .catch(error=>handleBootstrapError(user,error))
+    .finally(()=>{
+      if(bootstrapRun===run)bootstrapRun=null;
+      if(token.sequence===bootstrapSequence&&bootstrapState==='migrating'){
+        bootstrapErrorScreen(user,'fatal_error','A validação foi interrompida antes de ser concluída. Tente novamente. Nenhum dado foi perdido.',{manual:true});
+      }
+      document.querySelector('.auth-loading')?.classList.remove('auth-loading');
+    });
+  bootstrapRun=run;
+  return run.promise;
 }
 
+window.LegacyMigrationAdmin={
+  migrationVersion:LEGACY_MIGRATION_VERSION,
+  complete:completeLegacyMigrationManually,
+  state:()=>({bootstrapState,inProgress:Boolean(bootstrapRun),readyUid:readyUid?`${readyUid.slice(0,6)}…`:''})
+};
 screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Verificando acesso…</p></section>');
-onAuthStateChanged(auth,user=>{window.SyncFirebase.setAuthReady(true);resolveAuthenticatedUser(user)});
+onAuthStateChanged(auth,user=>{
+  window.SyncFirebase.setAuthReady(true);
+  if(!user){
+    bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;readyUid='';
+    automaticBootstrapAttempts.clear();
+    setBootstrapState('unauthenticated');return login();
+  }
+  startBootstrap(user,{mode:'automatic'});
+});

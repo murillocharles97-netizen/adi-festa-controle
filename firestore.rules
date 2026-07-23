@@ -79,10 +79,26 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.ownerId == uid;
       allow update: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.uid == resource.data.uid
+        && (
+          request.resource.data.uid == resource.data.uid
+          || (
+            resource.data.businessId == 'adi-festa'
+            && !('uid' in resource.data)
+            && request.resource.data.uid == request.auth.uid
+          )
+        )
         && request.resource.data.email == resource.data.email
         && request.resource.data.active == resource.data.active
         && request.resource.data.businessId == resource.data.businessId
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'migrationVersion', 'migratedAt'
+          ])
+          || (
+            resource.data.businessId == 'adi-festa'
+            && get(/databases/$(database)/documents/businesses/adi-festa).data.ownerId == request.auth.uid
+          )
+        )
         && (
           request.resource.data.role == resource.data.role
           || (
@@ -94,7 +110,7 @@ service cloud.firestore {
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'uid', 'name', 'phone', 'role', 'permissions', 'onboardingCompleted',
-          'lastLoginAt', 'updatedAt'
+          'lastLoginAt', 'migrationVersion', 'migratedAt', 'updatedAt'
         ]);
       allow delete: if false;
     }
@@ -235,10 +251,23 @@ service cloud.firestore {
           signedIn()
           && businessId == 'adi-festa'
           && resource.data.ownerId == request.auth.uid
-          && !('subscription' in resource.data)
-          && request.resource.data.subscription.planId == 'internal'
-          && request.resource.data.subscription.status == 'active'
           && request.resource.data.ownerId == resource.data.ownerId
+          && (
+            (
+              !('subscription' in resource.data)
+              && request.resource.data.subscription.planId == 'internal'
+              && request.resource.data.subscription.status == 'active'
+            )
+            || request.resource.data.subscription == resource.data.subscription
+          )
+          && (
+            !('limits' in resource.data)
+            || request.resource.data.limits == resource.data.limits
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'slug', 'onboardingCompleted', 'businessType', 'subscription',
+            'limits', 'migrationVersion', 'migratedAt', 'updatedAt'
+          ])
         );
       allow delete: if false;
 

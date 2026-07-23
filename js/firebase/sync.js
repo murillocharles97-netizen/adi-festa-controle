@@ -1,8 +1,8 @@
-import { auth, db, PROJECT_ID } from './firebase-config.js?v=41';
+import { auth, db, PROJECT_ID } from './firebase-config.js?v=42';
 import { collection, doc, getDoc, getDocs, increment, runTransaction, serverTimestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import { createFirestoreRepository } from './firestore-repository.js?v=41';
+import { createFirestoreRepository } from './firestore-repository.js?v=42';
 import { normalizeFirestoreData, sanitizeForFirestore } from './firestore-utils.js';
-import {setUsageScreen,usageSnapshot} from './usage-monitor.js?v=41';
+import {setUsageScreen,usageSnapshot} from './usage-monitor.js?v=42';
 
 const LEGACY_QUEUE_KEY='adiFestaFirestoreQueue_v1',AUTO_SYNC_MS=30000,PULL_TTL_MS=300000,PROFILE_TTL_MS=300000,MAX_WRITES=350;
 const SOURCES={clients:{key:'clientes'},products:{key:'produtos'},sales:{key:'vendas'},payments:{key:'pagamentos'},balanceAdjustments:{key:'movimentacoes',filter:item=>item.tipo==='ajuste_saldo'},stockMovements:{key:'movimentacoesEstoque'},campaigns:{key:'campanhas'},campaignProgress:{key:'progressosCampanha'},rewards:{key:'recompensas'},charges:{key:'cobrancas'},messageHistory:{key:'messageHistory'},messageTemplates:{key:'messageTemplates'},messageSequences:{key:'messageSequences'},visits:{key:'visitas'},catalogOrders:{key:'catalogOrders'}};
