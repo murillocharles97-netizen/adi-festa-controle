@@ -1,4 +1,4 @@
-import { app } from './firebase-config.js?v=41';
+import { app } from './firebase-config.js?v=42';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js';
 
 const storage=getStorage(app);

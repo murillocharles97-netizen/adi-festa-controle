@@ -55,7 +55,9 @@ const auth=read('js/firebase/auth.js');
 assert.match(auth,/businessIdFor=user=>`biz_\$\{user\.uid\}`/);
 assert.match(auth,/planId:'trial',status:'trial'/);
 assert.match(auth,/profile\.businessId!==LEGACY_BUSINESS_ID/);
-assert.match(auth,/planId:'internal',status:'active'/);
+const legacyMigration=read('js/firebase/legacy-migration.js');
+assert.match(legacyMigration,/planId:'internal',status:'active'/);
+assert.match(legacyMigration,/LEGACY_MIGRATION_VERSION=1/);
 assert.match(auth,/DB\.useBusiness\(profile\.businessId/);
 
 const rules=read('firestore.rules');

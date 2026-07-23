@@ -17,6 +17,31 @@ Os documentos operacionais ficam em `businesses/{businessId}/{collection}/{docum
 
 Antes de qualquer operação manual em produção, exporte o JSON pela tela Configurações. A migração não apaga documentos.
 
+### Bootstrap e migração legada
+
+A versão atual da migração é `1`. A conclusão é registrada em `migrationVersion` tanto no perfil `users/{uid}` quanto em `businesses/adi-festa`. O bootstrap considera a migração concluída somente quando os dois documentos possuem essa versão.
+
+Campos preenchidos somente quando necessário:
+
+- perfil: `uid`, papel `owner`, `permissions`, `migrationVersion`, `migratedAt` e `updatedAt`;
+- empresa: `slug`, `onboardingCompleted`, `businessType`, assinatura interna ativa, limites internos, `migrationVersion`, `migratedAt` e `updatedAt`.
+
+A tentativa automática possui uma trava em memória por usuário e só pode começar uma vez por sessão. Chamadas simultâneas reutilizam a mesma Promise. O aplicativo só inicia os listeners gerais depois que a migração terminou e o `BusinessContext` está pronto.
+
+Em caso de falha, o proprietário pode usar o botão **Completar migração manualmente** na tela de erro. Para suporte técnico, com o proprietário autenticado, o mesmo comando está disponível no console:
+
+```javascript
+await window.LegacyMigrationAdmin.complete()
+```
+
+Para consultar o estado sem expor dados sensíveis:
+
+```javascript
+window.LegacyMigrationAdmin.state()
+```
+
+O bootstrap tem limite máximo de 15 segundos. Erros de cota, permissão, rede e falhas inesperadas levam a estados de erro explícitos; nenhum deles mantém o aplicativo indefinidamente em loading.
+
 ## Cadastro sem backend
 
 Enquanto não há Cloud Functions, a criação usa um batch protegido pelas regras:

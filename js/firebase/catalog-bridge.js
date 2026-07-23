@@ -1,7 +1,7 @@
-import {auth,db} from './firebase-config.js?v=41';
+import {auth,db} from './firebase-config.js?v=42';
 import {collection,doc,onSnapshot,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import {maskPhone,normalizeBrazilianPhone,phoneIndexId} from '../catalog-portal.js';
-import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js?v=41';
+import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js?v=42';
 
 const subscriptions=new Map(),now=()=>new Date().toISOString();
 const ACTIVE_VISIT_STATUSES=new Set(['recebendo','pedidos_encerrados','separacao','deslocamento']);
