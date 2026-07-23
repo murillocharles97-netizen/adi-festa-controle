@@ -4,6 +4,7 @@ import {maskPhone,normalizeBrazilianPhone,phoneIndexId} from '../catalog-portal.
 
 const subscriptions=new Map(),now=()=>new Date().toISOString();
 const businessId=()=>window.FirebaseSession?.profile?.businessId||'';
+const validPublicToken=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{20,128}$/.test(value);
 const versioned=(url,updatedAt)=>url&&updatedAt?`${url}${url.includes('?')?'&':'?'}v=${encodeURIComponent(new Date(updatedAt).getTime()||updatedAt)}`:url||'';
 const maskedName=name=>{const parts=String(name||'Cliente').trim().split(/\s+/);return parts.length>1?`${parts[0]} ${parts.at(-1).slice(0,1)}.`:parts[0]};
 
@@ -14,7 +15,7 @@ function publicCampaign(c){
 
 function publicPayload(visit){
   const local=DB.carregar(),settings=local.config.catalogSettings||{},products=new Map((local.produtos||[]).map(product=>[product.id,product])),campaigns=(local.campanhas||[]).map(c=>window.Campanhas?.normalize?.(c)||c).filter(c=>(window.Campanhas?.status?.(c)||c.status)==='ativa'&&c.ativo!==false&&c.publica!==false&&(c.audience?.type||'all')==='all').map(publicCampaign);
-  return{visitId:visit.id,businessId:businessId(),publicName:settings.publicName||local.config.nome||'Adi Festa',primaryColor:settings.primaryColor||'#31d0ad',welcomeText:settings.welcomeText||visit.descricao||'Veja os produtos disponíveis e faça seu pedido.',contactPhone:settings.contactPhone||settings.whatsapp||local.config.telefone||'',local:visit.local,nome:visit.nome,data:visit.data,horarioChegada:visit.horarioChegada,horarioLimite:visit.horarioLimite,status:visit.status,active:visit.status==='recebendo',paymentMethods:settings.paymentMethods||['entrega','pix','dinheiro','cartao'],allowCredit:Boolean(settings.allowCredit),items:(visit.catalogItems||[]).filter(i=>i.active!==false).map(i=>{const product=products.get(i.productId),imageUpdatedAt=product?.imageUpdatedAt||i.imageUpdatedAt||null;return{...i,productImage:versioned(product?.imageThumbUrl||product?.imageUrl||product?.imagem||i.productImage||'',imageUpdatedAt),productMainImage:versioned(product?.imageUrl||product?.imagem||i.productMainImage||'',imageUpdatedAt),imageUpdatedAt,reservedStock:0}}),campaigns,updatedAt:serverTimestamp()};
+  return{catalogToken:visit.publicToken,documentId:visit.publicToken,schemaVersion:2,visitId:visit.id,businessId:businessId(),publicName:settings.publicName||local.config.nome||'Adi Festa',primaryColor:settings.primaryColor||'#31d0ad',welcomeText:settings.welcomeText||visit.descricao||'Veja os produtos disponíveis e faça seu pedido.',contactPhone:settings.contactPhone||settings.whatsapp||local.config.telefone||'',local:visit.local,nome:visit.nome,data:visit.data,horarioChegada:visit.horarioChegada,horarioLimite:visit.horarioLimite,status:visit.status,active:visit.status==='recebendo',paymentMethods:settings.paymentMethods||['entrega','pix','dinheiro','cartao'],allowCredit:Boolean(settings.allowCredit),items:(visit.catalogItems||[]).filter(i=>i.active!==false).map(i=>{const product=products.get(i.productId),imageUpdatedAt=product?.imageUpdatedAt||i.imageUpdatedAt||null;return{...i,productImage:versioned(product?.imageThumbUrl||product?.imageUrl||product?.imagem||i.productImage||'',imageUpdatedAt),productMainImage:versioned(product?.imageUrl||product?.imagem||i.productMainImage||'',imageUpdatedAt),imageUpdatedAt,reservedStock:0}}),campaigns,updatedAt:serverTimestamp()};
 }
 
 function safeOrders(local,visit,client){
@@ -38,14 +39,23 @@ async function publishPortalData(visit){
 }
 
 async function publish(visit){
-  if(!auth.currentUser||!visit?.publicToken)return;
+  if(!auth.currentUser)return;
+  const visitToken=visit?.publicToken;
+  if(!validPublicToken(visitToken)){
+    console.error('[Public catalog publish]',{code:'invalid-token',visitId:visit?.id||null,visitToken,expectedPath:'publicCatalogs/{visitToken}'});
+    Utils.toast?.('Não foi possível publicar: token público inválido.',true);
+    return;
+  }
   try{
     const payload=publicPayload(visit),open=(DB.carregar().catalogOrders||[]).filter(o=>o.visitId===visit.id&&!['cancelado','entregue'].includes(o.orderStatus));
     payload.items=payload.items.map(item=>({...item,reservedStock:open.reduce((sum,o)=>sum+Number(o.items?.find(x=>x.catalogItemId===item.id)?.quantity||0),0)}));
-    await setDoc(doc(db,'publicCatalogs',visit.publicToken),payload,{merge:true});
+    const reference=doc(db,'publicCatalogs',visitToken);
+    if(reference.id!==visitToken)throw Object.assign(new Error('O ID público não corresponde ao token.'),{code:'token-mismatch'});
+    await setDoc(reference,payload);
+    console.info('[Public catalog publish]',{code:'published',documentPath:reference.path,documentId:reference.id,urlToken:visitToken,tokenMatchesDocumentId:reference.id===visitToken,itemCount:payload.items.length,active:payload.active});
     await publishPortalData(visit);
     subscribeVisit(visit);
-  }catch(error){console.error('[Catalog publish]',error);Utils.toast?.('Visita salva; publicação aguardando a nuvem.',true)}
+  }catch(error){console.error('[Public catalog publish]',{code:error.code||'unknown',message:error.message,documentPath:`publicCatalogs/${visitToken}`,visitId:visit.id});Utils.toast?.('Visita salva; publicação aguardando a nuvem.',true)}
 }
 
 function mergeOrders(visit,docs){
