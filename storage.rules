@@ -9,15 +9,19 @@ service firebase.storage {
         && profile().active == true
         && profile().businessId == businessId;
     }
+    function canManageProducts(businessId) {
+      return canAccess(businessId)
+        && profile().role in ['owner', 'admin', 'manager'];
+    }
     match /businesses/{businessId}/products/{productId}/{fileName} {
       allow read: if true;
-      allow create, update: if canAccess(businessId)
+      allow create, update: if canManageProducts(businessId)
         && fileName.matches('^(main|thumb)\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
         && request.resource.metadata.productId == productId;
-      allow delete: if canAccess(businessId);
+      allow delete: if canManageProducts(businessId);
     }
   }
 }

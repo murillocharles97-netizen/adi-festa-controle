@@ -2,6 +2,8 @@
 
 PWA responsivo para controle de vendas, clientes, produtos, fiados e pedidos antecipados da Adi Festa. O painel trabalha offline-first e sincroniza os dados do negócio com o Firebase.
 
+A base atual é multiempresa: cada conta resolve sua própria empresa, assinatura, permissões, armazenamento local e caminho no Firestore. A arquitetura e as limitações da fase sem backend estão em [SAAS_MULTIEMPRESA.md](./SAAS_MULTIEMPRESA.md).
+
 ## Funcionalidades
 
 - Dashboard com vendas, lucro, fiados e fechamento diário
@@ -59,6 +61,10 @@ Todos os caminhos são relativos, portanto o PWA funciona mesmo quando publicado
 1. Abra o link no Safari.
 2. Toque em **Compartilhar**.
 3. Escolha **Adicionar à Tela de Início**.
+
+## Preparação para produção
+
+A auditoria de consumo, sincronização, cache, segurança e escalabilidade está documentada em [PRODUCTION_HARDENING.md](./PRODUCTION_HARDENING.md).
 
 ## Dados e privacidade
 

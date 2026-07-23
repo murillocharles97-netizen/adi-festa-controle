@@ -1,35 +1,124 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function firstOwner() { return signedIn() && request.auth.token.email == 'murillo.charles97@gmail.com' && !exists(/databases/$(database)/documents/businesses/adi-festa); }
-    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function authorized() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && profile().active == true; }
-    function canAccess(businessId) { return authorized() && profile().businessId == businessId; }
+    function signedIn() {
+      return request.auth != null;
+    }
+    function profileExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function validRole(role) {
+      return role in ['owner', 'admin', 'manager', 'cashier', 'viewer', 'platform_admin'];
+    }
+    function activeUser() {
+      return profileExists() && userProfile().active == true && validRole(userProfile().role);
+    }
+    function currentBusinessId() {
+      return userProfile().businessId;
+    }
+    function businessExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    }
+    function activeBusiness(businessId) {
+      return businessExists(businessId)
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.active == true;
+    }
+    function belongsToBusiness(businessId) {
+      return activeUser()
+        && currentBusinessId() == businessId
+        && activeBusiness(businessId);
+    }
+    function isOwner(businessId) {
+      return belongsToBusiness(businessId)
+        && userProfile().role == 'owner'
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+    function isAdmin(businessId) {
+      return belongsToBusiness(businessId) && userProfile().role in ['owner', 'admin'];
+    }
+    function canWriteCollection(businessId, collectionName) {
+      return belongsToBusiness(businessId)
+        && (
+          userProfile().role in ['owner', 'admin', 'manager']
+          || (
+            userProfile().role == 'cashier'
+            && collectionName in [
+              'clients', 'sales', 'payments', 'balanceEvents',
+              'charges', 'messageHistory', 'catalogOrders'
+            ]
+          )
+        );
+    }
+    function selfOnboardingBusinessId() {
+      return 'biz_' + request.auth.uid;
+    }
+    function onboardingOwner(businessId) {
+      return signedIn()
+        && businessId == selfOnboardingBusinessId()
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+        && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+
+    match /plans/{planId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      allow create: if request.auth.uid == uid && firstOwner() && request.resource.data.email == request.auth.token.email && request.resource.data.role == 'admin' && request.resource.data.active == true && request.resource.data.businessId == 'adi-festa';
-      allow update: if authorized()
+      allow create: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.uid == request.auth.uid
-        && (!('uid' in resource.data) || resource.data.uid == request.auth.uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.active == true
+        && request.resource.data.role == 'owner'
+        && request.resource.data.businessId == selfOnboardingBusinessId()
+        && getAfter(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.ownerId == uid;
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
         && request.resource.data.email == resource.data.email
         && request.resource.data.active == resource.data.active
         && request.resource.data.businessId == resource.data.businessId
-        && request.resource.data.role == resource.data.role;
+        && (
+          request.resource.data.role == resource.data.role
+          || (
+            resource.data.businessId == 'adi-festa'
+            && resource.data.role == 'admin'
+            && request.resource.data.role == 'owner'
+            && get(/databases/$(database)/documents/businesses/adi-festa).data.ownerId == request.auth.uid
+          )
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'uid', 'name', 'phone', 'role', 'permissions', 'onboardingCompleted',
+          'lastLoginAt', 'updatedAt'
+        ]);
       allow delete: if false;
     }
+
     match /publicCatalogs/{visitToken} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if signedIn()
+      allow create: if signedIn()
         && request.resource.data.businessId is string
-        && canAccess(request.resource.data.businessId);
+        && belongsToBusiness(request.resource.data.businessId);
+      allow update: if signedIn()
+        && resource.data.businessId == request.resource.data.businessId
+        && belongsToBusiness(resource.data.businessId);
       allow delete: if false;
+
       match /orders/{orderId} {
-        allow create: if get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.active == true
+        function catalog() {
+          return get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data;
+        }
+        allow create: if catalog().active == true
           && request.resource.data.id == orderId
           && request.resource.data.catalogToken == visitToken
+          && request.resource.data.businessId == catalog().businessId
+          && request.resource.data.visitId == catalog().visitId
           && request.resource.data.source == 'online_catalog'
           && request.resource.data.orderStatus == 'recebido'
           && request.resource.data.customerName is string
@@ -38,6 +127,10 @@ service cloud.firestore {
           && request.resource.data.customerPhone is string
           && request.resource.data.customerPhone.size() >= 10
           && request.resource.data.customerPhone.size() <= 15
+          && request.resource.data.customerLocation is string
+          && request.resource.data.customerLocation.size() <= 160
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 1000
           && request.resource.data.items is list
           && request.resource.data.items.size() > 0
           && request.resource.data.items.size() <= 40
@@ -51,31 +144,31 @@ service cloud.firestore {
           && request.resource.data.orderAccessToken is string
           && request.resource.data.orderAccessToken.size() >= 24;
         allow get: if true;
-        allow list: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
-        allow update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow list, update: if signedIn() && belongsToBusiness(catalog().businessId);
         allow delete: if false;
       }
+
       match /campaignProgress/{phoneHash} {
         allow get: if true;
         allow list: if false;
-        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /phoneIndex/{phoneHash} {
         allow get: if true;
         allow list: if false;
-        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalProfiles/{clientRefToken} {
         allow get: if true;
         allow list: if false;
-        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalSessions/{sessionHash} {
         allow get: if true;
-        allow list: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow list: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow create: if get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.active == true
           && request.resource.data.active == true
           && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
@@ -84,12 +177,14 @@ service cloud.firestore {
           && request.resource.data.clientRefToken.size() >= 20
           && request.resource.data.expiresAt is string
           && exists(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalProfiles/$(request.resource.data.clientRefToken));
-        allow update: if canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
-          || (resource.data.active == true
+        allow update: if belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          || (
+            resource.data.active == true
             && request.resource.data.businessId == resource.data.businessId
             && request.resource.data.visitId == resource.data.visitId
             && request.resource.data.clientRefToken == resource.data.clientRefToken
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastAccessAt', 'updatedAt', 'active', 'revokedAt']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastAccessAt', 'updatedAt', 'active', 'revokedAt'])
+          );
         allow delete: if false;
       }
       match /redemptionRequests/{requestId} {
@@ -103,17 +198,82 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.active == true
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.clientRefToken == request.resource.data.clientRefToken;
         allow get: if true;
-        allow list, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow list, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
     }
+
     match /businesses/{businessId} {
-      allow create: if businessId == 'adi-festa' && firstOwner() && request.resource.data.ownerId == request.auth.uid;
-      allow read: if canAccess(businessId);
-      allow update: if canAccess(businessId) && ((resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == resource.data.ownerId) || (request.auth.token.email == 'murillo.charles97@gmail.com' && profile().role == 'admin' && request.resource.data.ownerId == request.auth.uid));
+      allow create: if signedIn()
+        && businessId == selfOnboardingBusinessId()
+        && request.resource.data.id == businessId
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.active == true
+        && request.resource.data.onboardingCompleted == true
+        && request.resource.data.subscription.planId == 'trial'
+        && request.resource.data.subscription.status == 'trial'
+        && request.resource.data.subscription.trialStartedAt <= request.time
+        && request.resource.data.subscription.trialEndsAt > request.time + duration.value(6, 'd')
+        && request.resource.data.subscription.trialEndsAt <= request.time + duration.value(8, 'd')
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+      allow read: if belongsToBusiness(businessId);
+      allow update: if (
+        isOwner(businessId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.slug == resource.data.slug
+          && request.resource.data.subscription == resource.data.subscription
+          && request.resource.data.limits == resource.data.limits
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'legalName', 'document', 'phone', 'email', 'businessType',
+            'city', 'state', 'address', 'receiptName', 'active',
+            'onboardingCompleted', 'updatedAt'
+          ])
+        )
+        || (
+          signedIn()
+          && businessId == 'adi-festa'
+          && resource.data.ownerId == request.auth.uid
+          && !('subscription' in resource.data)
+          && request.resource.data.subscription.planId == 'internal'
+          && request.resource.data.subscription.status == 'active'
+          && request.resource.data.ownerId == resource.data.ownerId
+        );
       allow delete: if false;
-      match /{document=**} {
-        allow read, create, update: if canAccess(businessId);
+
+      match /subscriptionIntents/{intentId} {
+        allow read: if isOwner(businessId);
+        allow create: if isOwner(businessId)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.requestedBy == request.auth.uid;
+        allow update, delete: if false;
+      }
+      match /invites/{inviteId} {
+        allow read: if isAdmin(businessId);
+        allow create: if isOwner(businessId)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == 'pending';
+        allow update: if isOwner(businessId);
+        allow delete: if false;
+      }
+      match /auditLogs/{logId} {
+        allow read: if isOwner(businessId);
+        allow create: if (belongsToBusiness(businessId) || onboardingOwner(businessId))
+          && request.resource.data.businessId == businessId;
+        allow update, delete: if false;
+      }
+      match /{collectionName}/{documentId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId))
+          && request.resource.data.businessId == businessId;
+        allow update: if canWriteCollection(businessId, collectionName)
+          && (
+            resource.data.businessId == businessId
+            || (businessId == 'adi-festa' && !('businessId' in resource.data))
+          )
+          && request.resource.data.businessId == businessId;
         allow delete: if false;
       }
     }

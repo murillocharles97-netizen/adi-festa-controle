@@ -2,7 +2,7 @@ window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
   const listar=()=>DB.carregar().clientes;
   const obter=id=>listar().find(c=>c.id===id);
-  const salvar=d=>{let salvo;DB.alterar(db=>{
+  const salvar=d=>{if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateClient(),'criar novos clientes');let salvo;DB.alterar(db=>{
     const atual=db.clientes.find(c=>c.id===d.id),agora=new Date().toISOString(),telefone=d.telefone||'',normalizedPhone=normalizePhone(telefone),duplicado=db.clientes.find(c=>c.id!==d.id&&normalizedPhone&&normalizePhone(c.normalizedPhone||c.telefone)===normalizedPhone);
     if(duplicado)throw Error(`Este WhatsApp já pertence a ${duplicado.nome}.`);
     const campos={nome:d.nome.trim(),apelido:d.apelido||'',telefone,normalizedPhone,telefone2:d.telefone2||'',email:d.email||'',endereco:d.endereco||'',complemento:d.complemento||'',documento:d.documento||'',observacoes:d.observacoes||'',origemCadastro:d.origemCadastro||atual?.origemCadastro||'app',portalRefToken:d.portalRefToken||atual?.portalRefToken||Utils.uuid(),ativo:d.ativo!==false,atualizadoEm:agora};

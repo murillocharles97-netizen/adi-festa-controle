@@ -7,7 +7,7 @@ window.Produtos=(()=>{
   const listar=()=>DB.carregar().produtos;
   const obter=id=>listar().find(p=>p.id===id);
   const status=p=>getProductStockStatus(p);
-  const salvar=d=>{let salvo;DB.alterar(db=>{
+  const salvar=d=>{if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateProduct(),'criar novos produtos');let salvo;DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
     const estoque=d.estoqueAtual??d.estoque;
     const imageField=(name,fallback=null)=>d[name]!==undefined?d[name]:(atual?.[name]??fallback);
