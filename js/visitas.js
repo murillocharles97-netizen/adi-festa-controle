@@ -10,8 +10,32 @@ window.Visitas=(()=>{
   function publicar(visit){dispatchEvent(new CustomEvent('catalog-publish-request',{detail:{visit}}))}
   function status(id,status){let visit;DB.alterar(db=>{visit=db.visitas.find(v=>v.id===id);if(!visit)throw Error('Visita não encontrada');visit.status=status;visit.updatedAt=now()});publicar(visit);return visit}
   function atualizarPedido(id,orderStatus){let order;DB.alterar(db=>{order=db.catalogOrders.find(o=>o.id===id);if(!order)throw Error('Pedido não encontrado');order.orderStatus=orderStatus;order.updatedAt=now();const field={confirmado:'confirmedAt',separando:'preparingAt',deslocamento:'dispatchedAt',entregue:'deliveredAt',cancelado:'cancelledAt'}[orderStatus];if(field)order[field]=now()});dispatchEvent(new CustomEvent('catalog-order-status-request',{detail:{order}}));return order}
-  function converter(id,saleStatus='pago'){const existing=DB.carregar().catalogOrders.find(o=>o.id===id);if(!existing)throw Error('Pedido não encontrado');if(existing.convertedSaleId)return DB.carregar().vendas.find(v=>v.id===existing.convertedSaleId);const cliente=DB.carregar().clientes.find(c=>c.id===existing.clientId)||DB.carregar().clientes.find(c=>String(c.telefone||'').replace(/\D/g,'')===String(existing.customerPhone||'').replace(/\D/g,''));const operationId=`catalog-order:${id}`,sale=Vendas.registrar({operationId,clienteId:cliente?.id||null,status:saleStatus,formaPagamento:existing.paymentPreference,observacao:`Pedido online #${existing.publicOrderNumber}${existing.note?` — ${existing.note}`:''}`,itens:existing.items.map(i=>({produtoId:i.productId,nome:i.name,quantidade:i.quantity,precoOriginal:i.unitPrice,precoFinalUnitario:i.unitPrice,custoUnitario:Number(DB.carregar().produtos.find(p=>p.id===i.productId)?.custo||0)}))});DB.alterar(db=>{const o=db.catalogOrders.find(x=>x.id===id);o.convertedSaleId=sale.id;o.orderStatus='entregue';o.deliveredAt=o.deliveredAt||now();o.updatedAt=now()});dispatchEvent(new CustomEvent('catalog-order-status-request',{detail:{order:DB.carregar().catalogOrders.find(o=>o.id===id)}}));return sale}
-  const link=visit=>{const url=new URL('./catalogo.html',location.href.split('#')[0]);url.searchParams.set('v',visit.publicToken);return url.href};
+  function converter(id,saleStatus='pago'){
+    const existing=DB.carregar().catalogOrders.find(order=>order.id===id);
+    if(!existing)throw Error('Pedido não encontrado');
+    if(existing.convertedSaleId)return DB.carregar().vendas.find(venda=>venda.id===existing.convertedSaleId);
+    const phone=window.Clientes?.normalizePhone?.(existing.customerPhone)||String(existing.customerPhone||'').replace(/\D/g,'');
+    let cliente=DB.carregar().clientes.find(item=>item.id===existing.clientId)
+      ||DB.carregar().clientes.find(item=>item.portalRefToken&&item.portalRefToken===existing.clientRefToken)
+      ||DB.carregar().clientes.find(item=>(window.Clientes?.normalizePhone?.(item.normalizedPhone||item.telefone)||String(item.telefone||'').replace(/\D/g,''))===phone);
+    if(!cliente&&existing.customerName&&phone){
+      cliente=window.Clientes?.salvar?.({
+        nome:existing.customerName,
+        telefone:phone,
+        endereco:existing.customerLocation||'',
+        observacoes:'Cadastro iniciado pelo Catálogo Online. Revise os dados quando possível.',
+        saldo:0,
+        portalRefToken:existing.clientRefToken||Utils.uuid(),
+        origemCadastro:'catalogo_online',
+        ativo:true
+      });
+    }
+    const operationId=`catalog-order:${id}`,sale=Vendas.registrar({operationId,clienteId:cliente?.id||null,status:saleStatus,formaPagamento:existing.paymentPreference,observacao:`Pedido online #${existing.publicOrderNumber}${existing.note?` — ${existing.note}`:''}`,itens:existing.items.map(item=>({produtoId:item.productId,nome:item.name,quantidade:item.quantity,precoOriginal:item.unitPrice,precoFinalUnitario:item.unitPrice,custoUnitario:Number(DB.carregar().produtos.find(produto=>produto.id===item.productId)?.custo||0)}))});
+    DB.alterar(db=>{const order=db.catalogOrders.find(item=>item.id===id);order.clientId=cliente?.id||null;order.convertedSaleId=sale.id;order.orderStatus='entregue';order.deliveredAt=order.deliveredAt||now();order.updatedAt=now()});
+    dispatchEvent(new CustomEvent('catalog-order-status-request',{detail:{order:DB.carregar().catalogOrders.find(order=>order.id===id)}}));
+    return sale;
+  }
+  const link=visit=>new URL(`./catalogo/${encodeURIComponent(visit.publicToken)}`,location.href.split('#')[0]).href;
   return{listar,obter,ativa,pedidos,salvar,status,atualizarPedido,converter,publicar,link};
 })();
 

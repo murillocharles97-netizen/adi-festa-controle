@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Adi Festa</title></head>
+<body>
+<script>
+  (function(){
+    const parts=location.pathname.split('/').filter(Boolean),catalogIndex=parts.indexOf('catalogo');
+    if(catalogIndex>=0&&parts[catalogIndex+1]){
+      const base=`/${parts.slice(0,catalogIndex).join('/')}${catalogIndex?'/':''}`;
+      location.replace(`${base}catalogo.html?v=${encodeURIComponent(parts[catalogIndex+1])}${location.search?`&${location.search.slice(1)}`:''}`);
+      return;
+    }
+    location.replace('./');
+  })();
+</script>
+</body>
+</html>

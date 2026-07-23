@@ -15,7 +15,7 @@ window.Produtos=(()=>{
     v.estoque=v.estoqueAtual;
     if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });return salvo};
-  const excluir=id=>{const product=obter(id);if(product&&(product.imageStoragePath||product.imageThumbStoragePath)&&navigator.onLine)window.ProductImageStorage?.remove(product).catch(error=>console.warn('[Product image cleanup]',error));return DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id))};
+  const excluir=id=>DB.alterar(db=>db.produtos=db.produtos.filter(p=>p.id!==id));
   const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
