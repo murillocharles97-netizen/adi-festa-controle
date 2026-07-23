@@ -38,7 +38,7 @@ async function publishPortalData(visit){
   await Promise.all(jobs);
 }
 
-async function publish(visit){
+async function publish(visit,{publishProfiles=true}={}){
   if(!auth.currentUser)return;
   const visitToken=visit?.publicToken;
   if(!validPublicToken(visitToken)){
@@ -53,15 +53,16 @@ async function publish(visit){
     if(reference.id!==visitToken)throw Object.assign(new Error('O ID público não corresponde ao token.'),{code:'token-mismatch'});
     await setDoc(reference,payload);
     console.info('[Public catalog publish]',{code:'published',documentPath:reference.path,documentId:reference.id,urlToken:visitToken,tokenMatchesDocumentId:reference.id===visitToken,itemCount:payload.items.length,active:payload.active});
-    await publishPortalData(visit);
+    if(publishProfiles)await publishPortalData(visit);
     subscribeVisit(visit);
   }catch(error){console.error('[Public catalog publish]',{code:error.code||'unknown',message:error.message,documentPath:`publicCatalogs/${visitToken}`,visitId:visit.id});Utils.toast?.('Visita salva; publicação aguardando a nuvem.',true)}
 }
 
 function mergeOrders(visit,docs){
-  const incoming=docs.map(s=>({id:s.id,...s.data(),visitId:visit.id,businessId:businessId(),updatedAt:s.data().updatedAt?.toDate?.()?.toISOString?.()||s.data().updatedAt||now(),createdAt:s.data().createdAt?.toDate?.()?.toISOString?.()||s.data().createdAt||now()}));let changed=false;
-  DB.alterar(data=>{for(const order of incoming){const client=data.clientes.find(item=>item.portalRefToken&&item.portalRefToken===order.clientRefToken)||data.clientes.find(item=>normalizeBrazilianPhone(item.normalizedPhone||item.telefone)===normalizeBrazilianPhone(order.customerPhone));if(client)order.clientId=client.id;const index=data.catalogOrders.findIndex(o=>o.id===order.id);if(index<0){data.catalogOrders.push(order);changed=true}else if(!data.catalogOrders[index].convertedSaleId&&new Date(order.updatedAt)>=new Date(data.catalogOrders[index].updatedAt||0)){data.catalogOrders[index]={...data.catalogOrders[index],...order};changed=true}}});
-  if(changed){dispatchEvent(new CustomEvent('catalog-orders-updated',{detail:{visitId:visit.id}}));Utils.toast?.('Novo pedido recebido pelo catálogo.')}
+  const incoming=docs.map(s=>({id:s.id,...s.data(),visitId:visit.id,businessId:businessId(),updatedAt:s.data().updatedAt?.toDate?.()?.toISOString?.()||s.data().updatedAt||now(),createdAt:s.data().createdAt?.toDate?.()?.toISOString?.()||s.data().createdAt||now()}));let changed=false,newOrders=0;
+  DB.alterar(data=>{for(const order of incoming){const index=data.catalogOrders.findIndex(o=>o.id===order.id);if(index<0){data.catalogOrders.push(order);changed=true;newOrders++}else if(!data.catalogOrders[index].convertedSaleId&&new Date(order.updatedAt)>=new Date(data.catalogOrders[index].updatedAt||0)){data.catalogOrders[index]={...data.catalogOrders[index],...order};changed=true}}});
+  if(changed)dispatchEvent(new CustomEvent('catalog-orders-updated',{detail:{visitId:visit.id}}));
+  if(newOrders)Utils.toast?.(`${newOrders===1?'Novo pedido recebido':`${newOrders} novos pedidos recebidos`} pelo catálogo.`);
 }
 
 function mergeRedemptionRequests(visit,docs){
@@ -76,10 +77,10 @@ function subscribeVisit(visit){
   subscriptions.set(visit.publicToken,()=>{orderUnsub();rewardUnsub()});
 }
 
-function bindAll(){if(!auth.currentUser)return;for(const visit of DB.carregar().visitas||[]){subscribeVisit(visit);if(visit.publicToken)publish(visit)}}
+function bindAll(publishCatalogs=false){if(!auth.currentUser)return;for(const visit of DB.carregar().visitas||[]){subscribeVisit(visit);if(publishCatalogs&&visit.publicToken)publish(visit)}}
 addEventListener('catalog-publish-request',event=>publish(event.detail.visit));
-addEventListener('catalog-orders-updated',event=>{const visit=DB.carregar().visitas.find(v=>v.id===event.detail.visitId);if(visit)publish(visit)});
-addEventListener('catalog-order-status-request',event=>{const order=event.detail.order,visit=DB.carregar().visitas.find(v=>v.id===order.visitId);if(!visit?.publicToken)return;setDoc(doc(db,'publicCatalogs',visit.publicToken,'orders',order.id),{orderStatus:order.orderStatus,confirmedAt:order.confirmedAt||null,preparingAt:order.preparingAt||null,dispatchedAt:order.dispatchedAt||null,deliveredAt:order.deliveredAt||null,cancelledAt:order.cancelledAt||null,convertedSaleId:order.convertedSaleId||null,updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.error('[Catalog order status]',error))});
+addEventListener('catalog-orders-updated',event=>{const visit=DB.carregar().visitas.find(v=>v.id===event.detail.visitId);if(visit)publish(visit,{publishProfiles:false})});
+addEventListener('catalog-order-status-request',event=>{const order=event.detail.order,visit=DB.carregar().visitas.find(v=>v.id===order.visitId);if(!visit?.publicToken)return;setDoc(doc(db,'publicCatalogs',visit.publicToken,'orders',order.id),{orderStatus:order.orderStatus,confirmedAt:order.confirmedAt||null,preparingAt:order.preparingAt||null,dispatchedAt:order.dispatchedAt||null,deliveredAt:order.deliveredAt||null,cancelledAt:order.cancelledAt||null,convertedSaleId:order.convertedSaleId||null,clientId:order.clientId||null,clientNameSnapshot:order.clientNameSnapshot||null,linkedAt:order.linkedAt||null,keptAsGuest:Boolean(order.keptAsGuest),updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.error('[Catalog order status]',error))});
 addEventListener('catalog-redemption-status-request',event=>{const detail=event.detail,visit=DB.carregar().visitas.find(item=>item.id===detail.visitId);if(!visit?.publicToken)return;setDoc(doc(db,'publicCatalogs',visit.publicToken,'redemptionRequests',detail.requestId),{status:detail.status,rewardId:detail.rewardId||null,processedAt:serverTimestamp(),updatedAt:serverTimestamp()},{merge:true}).catch(error=>console.error('[Catalog reward status]',error))});
-addEventListener('firebase-auth-ready',bindAll);
-addEventListener('cloud-data-updated',()=>setTimeout(bindAll,250));
+addEventListener('firebase-auth-ready',()=>bindAll(true));
+addEventListener('cloud-data-updated',()=>setTimeout(()=>bindAll(false),250));
