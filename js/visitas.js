@@ -35,7 +35,7 @@ window.Visitas=(()=>{
     dispatchEvent(new CustomEvent('catalog-order-status-request',{detail:{order:DB.carregar().catalogOrders.find(order=>order.id===id)}}));
     return sale;
   }
-  const link=visit=>new URL(`./catalogo/${encodeURIComponent(visit.publicToken)}`,location.href.split('#')[0]).href;
+  const link=visit=>{const url=new URL('./catalogo.html',location.href.split('#')[0]);url.searchParams.set('v',String(visit.publicToken||''));return url.href};
   return{listar,obter,ativa,pedidos,salvar,status,atualizarPedido,converter,publicar,link};
 })();
 

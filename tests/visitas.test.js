@@ -6,6 +6,7 @@ global.Vendas={registrar:sale=>{const found=data.vendas.find(v=>v.operationId===
 require('../js/visitas.js');
 const visit=Visitas.salvar({nome:'Shopping',local:'Iguatemi',data:'2026-07-21',horarioChegada:'14:00',horarioLimite:'13:30',status:'recebendo'},['p1']);
 assert.equal(data.visitas.length,1);assert.equal(visit.catalogItems.length,1);assert.equal(visit.catalogItems[0].salePrice,8);assert.equal(visit.publicToken.length,36);
+const publicUrl=new URL(Visitas.link(visit));assert.equal(publicUrl.pathname,'/app/catalogo.html');assert.equal(publicUrl.searchParams.get('v'),visit.publicToken);
 data.catalogOrders.push({id:'o1',visitId:visit.id,publicOrderNumber:'AF001',clientId:'c1',customerPhone:'17999999999',items:[{productId:'p1',name:'Cone',quantity:2,unitPrice:8,subtotal:16}],total:16,paymentPreference:'pix',orderStatus:'separando'});
 const first=Visitas.converter('o1','pago'),second=Visitas.converter('o1','pago');
 assert.equal(first.id,second.id);assert.equal(data.vendas.length,1);assert.equal(data.catalogOrders[0].orderStatus,'entregue');assert.equal(data.catalogOrders[0].convertedSaleId,first.id);
