@@ -55,6 +55,57 @@ service cloud.firestore {
         allow update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
+      match /campaignProgress/{phoneHash} {
+        allow get: if true;
+        allow list: if false;
+        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /phoneIndex/{phoneHash} {
+        allow get: if true;
+        allow list: if false;
+        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /portalProfiles/{clientRefToken} {
+        allow get: if true;
+        allow list: if false;
+        allow create, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /portalSessions/{sessionHash} {
+        allow get: if true;
+        allow list: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create: if get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.active == true
+          && request.resource.data.active == true
+          && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
+          && request.resource.data.visitId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.visitId
+          && request.resource.data.clientRefToken is string
+          && request.resource.data.clientRefToken.size() >= 20
+          && request.resource.data.expiresAt is string
+          && exists(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalProfiles/$(request.resource.data.clientRefToken));
+        allow update: if canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          || (resource.data.active == true
+            && request.resource.data.businessId == resource.data.businessId
+            && request.resource.data.visitId == resource.data.visitId
+            && request.resource.data.clientRefToken == resource.data.clientRefToken
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastAccessAt', 'updatedAt', 'active', 'revokedAt']));
+        allow delete: if false;
+      }
+      match /redemptionRequests/{requestId} {
+        allow create: if request.resource.data.id == requestId
+          && request.resource.data.status == 'solicitado'
+          && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
+          && request.resource.data.visitId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.visitId
+          && request.resource.data.clientRefToken is string
+          && request.resource.data.portalSessionHash is string
+          && exists(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash))
+          && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.active == true
+          && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.clientRefToken == request.resource.data.clientRefToken;
+        allow get: if true;
+        allow list, update: if signedIn() && canAccess(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
     }
     match /businesses/{businessId} {
       allow create: if businessId == 'adi-festa' && firstOwner() && request.resource.data.ownerId == request.auth.uid;
