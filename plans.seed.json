@@ -1,0 +1,83 @@
+{
+  "trial": {
+    "id": "trial",
+    "name": "Teste grátis",
+    "active": true,
+    "monthlyPrice": 0,
+    "yearlyPrice": 0,
+    "trialDays": 7,
+    "features": {
+      "clients": true,
+      "products": true,
+      "sales": true,
+      "creditAccounts": true,
+      "stock": true,
+      "campaigns": true,
+      "onlineCatalog": true,
+      "multipleUsers": false,
+      "advancedReports": true
+    },
+    "limits": { "users": 1, "products": 300, "clients": 500, "monthlySales": 3000 }
+  },
+  "essential": {
+    "id": "essential",
+    "name": "Essencial",
+    "active": true,
+    "monthlyPrice": 39.9,
+    "yearlyPrice": 399,
+    "trialDays": 7,
+    "features": {
+      "clients": true,
+      "products": true,
+      "sales": true,
+      "creditAccounts": true,
+      "stock": true,
+      "campaigns": false,
+      "onlineCatalog": false,
+      "multipleUsers": false,
+      "advancedReports": false
+    },
+    "limits": { "users": 1, "products": 300, "clients": 500, "monthlySales": 3000 }
+  },
+  "professional": {
+    "id": "professional",
+    "name": "Profissional",
+    "active": true,
+    "recommended": true,
+    "monthlyPrice": 69.9,
+    "yearlyPrice": 699,
+    "trialDays": 7,
+    "features": {
+      "clients": true,
+      "products": true,
+      "sales": true,
+      "creditAccounts": true,
+      "stock": true,
+      "campaigns": true,
+      "onlineCatalog": true,
+      "multipleUsers": true,
+      "advancedReports": true
+    },
+    "limits": { "users": 5, "products": 1500, "clients": 3000, "monthlySales": 15000 }
+  },
+  "premium": {
+    "id": "premium",
+    "name": "Premium",
+    "active": true,
+    "monthlyPrice": 119.9,
+    "yearlyPrice": 1199,
+    "trialDays": 7,
+    "features": {
+      "clients": true,
+      "products": true,
+      "sales": true,
+      "creditAccounts": true,
+      "stock": true,
+      "campaigns": true,
+      "onlineCatalog": true,
+      "multipleUsers": true,
+      "advancedReports": true
+    },
+    "limits": { "users": 20, "products": 10000, "clients": 25000, "monthlySales": 100000 }
+  }
+}

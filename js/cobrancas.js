@@ -1,6 +1,6 @@
 window.Cobrancas=(()=>{
   const hoje=data=>data&&new Date(data).toDateString()===new Date().toDateString();
-  const mensagem=c=>`Ola, ${c.nome}, tudo bem? Passando para avisar que sua conta atual na Adi Festa esta em ${Utils.dinheiro(Math.abs(Number(c.saldo||0)))}. Quando puder, me chama para acertarmos. Obrigado!`;
+  const mensagem=c=>`Ola, ${c.nome}, tudo bem? Passando para avisar que sua conta atual na ${DB.carregar().config.nome||'nossa loja'} esta em ${Utils.dinheiro(Math.abs(Number(c.saldo||0)))}. Quando puder, me chama para acertarmos. Obrigado!`;
   const historicoCliente=clienteId=>DB.carregar().cobrancas.filter(c=>c.clienteId===clienteId).sort((a,b)=>new Date(b.data)-new Date(a.data));
   const ultimaCliente=clienteId=>historicoCliente(clienteId)[0]||null;
   const statusCliente=c=>{const u=ultimaCliente(c.id);return u&&hoje(u.data)?(u.status==='ignorado'?'ignorado':'enviado hoje'):'pendente'};
