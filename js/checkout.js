@@ -39,6 +39,8 @@ window.Checkout=(()=>{
     drawCart();if(pendingClient){const select=document.querySelector('#sale-client');if(select&&clients().getById(pendingClient.clientId)){select.value=pendingClient.clientId;select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('#product-search')?.focus()}pendingClient=null}window.lucide?.createIcons();
   }
   function prepareClientSale(clientId,source='client_swipe'){const client=clients().getById(clientId);if(!client)return toast('Cliente não encontrado',true),false;if(cart.length&&!confirm('Existe uma sacola em andamento. Deseja usar este cliente na venda atual?'))return false;pendingClient={clientId,source};if(Router.atual()==='vender'&&document.querySelector('#sale-client')){const select=document.querySelector('#sale-client');select.value=clientId;select.dispatchEvent(new Event('change',{bubbles:true}));pendingClient=null;document.querySelector('#product-search')?.focus()}else Router.ir('vender');return true}
+  function resetSession(){cart=[];discountKind=null;manual=false;finishing=false;pendingClient=null}
   function mount(){const paint=()=>{if(Router.atual()!=='vender')return;finishing=false;discountKind=null;manual=false;document.querySelector('#app').innerHTML=view();document.querySelector('#title').textContent='Vender';standalone()};addEventListener('hashchange',()=>setTimeout(paint,0));setTimeout(paint,0)}
-  return {view,enhance,mount,prepareClientSale,cartCount:()=>cart.reduce((sum,item)=>sum+Number(item.quantidade||0),0)};
+  addEventListener('firebase-session-cleared',resetSession);
+  return {view,enhance,mount,prepareClientSale,resetSession,cartCount:()=>cart.reduce((sum,item)=>sum+Number(item.quantidade||0),0)};
 })();

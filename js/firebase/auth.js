@@ -1,5 +1,5 @@
 import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js?v=42';
-import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
+import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
 import {doc,getDoc,serverTimestamp,setDoc,Timestamp,writeBatch} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService} from './business-context.js?v=42';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js?v=42';
@@ -145,7 +145,13 @@ async function bootstrapLogout(){
   bootstrapRun=null;readyUid='';
   try{window.SyncFirebase?.stop?.()}catch{}
   try{badgeSubscription?.()}catch{}badgeSubscription=null;
-  BusinessContext.clear();DB.releaseBusiness();window.FirebaseSession=null;window.FirebaseAuthActions={signOut:bootstrapLogout};
+  BusinessContext.clear();DB.releaseBusiness();window.FirebaseSession=null;window.SyncFirebaseState=null;window.FirebaseAuthActions={signOut:bootstrapLogout};
+  try{sessionStorage.removeItem('adiFestaMessagePendingReturn_v1')}catch{}
+  delete window.CheckoutPaymentMethod;
+  document.querySelector('#app').innerHTML='';
+  document.querySelector('#modal').innerHTML='';
+  location.hash='#/inicio';
+  dispatchEvent(new CustomEvent('firebase-session-cleared',{detail:{uid:signingOutUid||''}}));
   if(signingOutUid)automaticBootstrapAttempts.delete(signingOutUid);
   setBootstrapState('unauthenticated');
   screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Saindo da conta…</p></section>');
@@ -179,7 +185,7 @@ function allowed(user,profile,business){
   DB.useBusiness(profile.businessId,{migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID});
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
-  window.FirebaseAuthActions={signOut:logout};
+  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,sendPasswordReset};
   if(!context.access.canAccessApp){setBootstrapState('subscription_blocked',{businessId:profile.businessId});return blockedScreen(user,context)}
   setBootstrapState('ready',{businessId:profile.businessId});
   window.SyncFirebase.setUser(user,profile);
@@ -195,17 +201,50 @@ function allowed(user,profile,business){
   setTimeout(()=>showFirstBusinessOnboarding(context),350);
   const loginAuditId=`login_${crypto.randomUUID()}`;setDoc(doc(db,'businesses',profile.businessId,'auditLogs',loginAuditId),{id:loginAuditId,businessId:profile.businessId,type:'login',actorId:user.uid,createdAt:serverTimestamp()}).catch(()=>{});
 }
-async function logout(force=false){
-  let pending=window.SyncFirebase.getFirebaseDiagnostic().pendingOperations;
-  if(!force&&!pending&&!confirm('Deseja realmente sair desta conta?'))return false;
-  if(pending&&navigator.onLine){try{await window.SyncFirebase.synchronizeNow()}catch(error){console.error('[Sync before logout]',error)}}
-  pending=window.SyncFirebase.getFirebaseDiagnostic().pendingOperations;
-  if(!force&&pending&&!confirm(`Existem ${pending} alterações ainda não sincronizadas.\nElas permanecem isoladas nesta empresa.\n\nDeseja sair mesmo assim?`))return false;
+async function updateBusinessDetails(values={}){
   const session=window.FirebaseSession;
-  if(session?.businessId&&session?.user?.uid){const id=`logout_${crypto.randomUUID()}`;await setDoc(doc(db,'businesses',session.businessId,'auditLogs',id),{id,businessId:session.businessId,type:'logout',actorId:session.user.uid,createdAt:serverTimestamp()}).catch(()=>{})}
-  window.SyncFirebase.stop();badgeSubscription?.();badgeSubscription=null;BusinessContext.clear();DB.releaseBusiness();window.FirebaseSession=null;document.querySelector('#app').innerHTML='';location.hash='#/inicio';
-  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Saindo da conta…</p></section>');
-  await signOut(auth);return true;
+  if(!session?.user?.uid||!session.businessId)throw Error('A sessão da empresa não está disponível.');
+  if(session.profile?.role!=='owner')throw Error('Somente o proprietário pode editar os dados da empresa.');
+  const patch={name:String(values.name||'').trim(),phone:String(values.phone||'').trim(),businessType:String(values.businessType||'').trim(),updatedAt:serverTimestamp()};
+  if(!patch.name)throw Error('Informe o nome do negócio.');
+  await setDoc(doc(db,'businesses',session.businessId),patch,{merge:true});
+  const business={...session.business,...patch,updatedAt:new Date().toISOString()};
+  BusinessContext.set({business,userProfile:session.profile});
+  DB.alterar(data=>{data.config.nome=patch.name;data.config.telefone=patch.phone});
+  return business;
+}
+async function updateProfileDetails(values={}){
+  const session=window.FirebaseSession;
+  if(!session?.user?.uid||!session.profile)throw Error('A sessão do usuário não está disponível.');
+  const patch={name:String(values.name||'').trim(),phone:String(values.phone||'').trim(),updatedAt:serverTimestamp()};
+  if(!patch.name)throw Error('Informe seu nome.');
+  await setDoc(doc(db,'users',session.user.uid),patch,{merge:true});
+  const profile={...session.profile,...patch,updatedAt:new Date().toISOString()};
+  BusinessContext.set({business:session.business,userProfile:profile});
+  document.querySelector('.avatar').textContent=(profile.name||session.user.email||'A')[0].toUpperCase();
+  return profile;
+}
+async function sendPasswordReset(){
+  const email=auth.currentUser?.email;
+  if(!email)throw Error('Não foi possível identificar o e-mail desta conta.');
+  await sendPasswordResetEmail(auth,email);
+  return true;
+}
+function logoutConfirmation(){
+  const root=document.querySelector('#modal'),pending=Number(window.SyncFirebase?.getFirebaseDiagnostic?.().pendingOperations||0);
+  if(!root){
+    if(confirm('Sair da conta? Você poderá entrar novamente quando desejar.'))return bootstrapLogout();
+    return Promise.resolve(false);
+  }
+  root.innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Sair da conta?</h3><button class="icon-btn" type="button" data-logout-cancel aria-label="Cancelar"><i data-lucide="x"></i></button></header><div class="modal-body confirm-copy"><div class="confirm-icon" style="background:#e8faf6;color:#078d73"><i data-lucide="log-out"></i></div><p>Você poderá entrar novamente quando desejar.</p>${pending?`<div class="backup-warning"><b>${pending} alteração(ões) continuarão salvas na fila desta empresa.</b><br>Nenhuma informação será descartada.</div>`:''}</div><footer class="modal-foot"><button class="btn btn-light" type="button" data-logout-cancel>Cancelar</button><button class="btn btn-primary" type="button" id="confirm-account-logout">Sair</button></footer></section></div>`;
+  root.querySelectorAll('[data-logout-cancel]').forEach(button=>button.onclick=()=>root.innerHTML='');
+  root.querySelector('#confirm-account-logout').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Saindo…';await bootstrapLogout()};
+  window.lucide?.createIcons();
+  return Promise.resolve(false);
+}
+async function logout(force=false){
+  if(!force)return logoutConfirmation();
+  return bootstrapLogout();
 }
 
 async function bootstrapCore(user,token,mode){
