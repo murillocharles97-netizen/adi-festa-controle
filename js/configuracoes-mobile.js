@@ -12,8 +12,8 @@
   const state=()=>window.SyncFirebaseState||window.SyncFirebase?.snapshot?.()||{};
 
   function render(){
-    const session=window.FirebaseSession||{},business=session.business||{},profile=session.profile||{},subscription=session.subscription||business.subscription||{},sync=window.SyncFirebaseState||{},config=window.DB?.carregar?.().config||{};
-    const name=business.name||config.nome||'Meu negócio',phone=business.phone||config.telefone||'Não informado',type=business.businessType||'Não informado',plan=planNames[subscription.planId]||subscription.planId||'Plano atual',accountActive=business.active!==false&&profile.active!==false;
+    const session=window.FirebaseSession||{},business=session.business||{},profile=session.profile||{},subscription=session.subscription||business.subscription||{},access=session.access||window.BusinessContext?.get?.().access||{},sync=window.SyncFirebaseState||{},data=window.DB?.carregar?.()||{},config=data.config||{},limits=access.limits||business.limits||{};
+    const name=business.name||config.nome||'Meu negócio',phone=business.phone||config.telefone||'Não informado',type=business.businessType||'Não informado',plan=planNames[subscription.planId]||subscription.planId||'Plano atual',accountActive=business.active!==false&&profile.active!==false,internal=subscription.planId==='internal'&&subscription.status==='active';
     return `<div class="mobile-settings-page">
       <section class="mobile-settings-card settings-hero">
         <div class="settings-company-row"><span class="settings-logo">${esc(initials(name))}</span><div><h2>${esc(name)}</h2><p><span class="settings-plan">${esc(plan)}</span><span class="settings-account-dot"></span>${accountActive?'Conta ativa':'Conta inativa'}</p></div></div>
@@ -21,6 +21,12 @@
           <span class="settings-summary-icon">${icon('cloud-check')}</span><div><b id="firebase-status">Preparando sincronização…</b><small><span id="firebase-pending">${Number(sync.pending||0)}</span> pendência(s)</small></div>
           <span class="settings-summary-icon">${icon('clock-3')}</span><div><b>Última sincronização</b><small id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</small></div>
         </div>
+      </section>
+
+      <section class="mobile-settings-card settings-subscription-card">
+        <header class="settings-section-head"><span>${icon('gem')}</span><div><h3>Plano e assinatura</h3><p>${internal?'Todos os recursos liberados':subscription.status==='trial'?`Teste grátis · ${access.daysRemaining??0} dia(s) restante(s)`:`${esc(plan)} · ${esc(subscription.status||'status não informado')}`}</p></div><button class="settings-chevron" data-open-plans aria-label="Ver planos">${icon('chevron-right')}</button></header>
+        <div class="settings-plan-usage"><span><small>Produtos</small><b>${Number(data.produtos?.length||0)} de ${limits.products??'—'}</b><i style="--usage:${Math.min(100,Number(data.produtos?.length||0)/Math.max(1,Number(limits.products||1))*100)}%"></i></span><span><small>Clientes</small><b>${Number(data.clientes?.length||0)} de ${limits.clients??'—'}</b><i style="--usage:${Math.min(100,Number(data.clientes?.length||0)/Math.max(1,Number(limits.clients||1))*100)}%"></i></span></div>
+        <button class="settings-mobile-secondary" data-open-plans>${icon('gem')} ${internal?'Plano interno':'Ver planos'}</button>
       </section>
 
       <section class="mobile-settings-card">
@@ -85,6 +91,7 @@
     $('[data-my-data]')?.addEventListener('click',editProfile);
     $('[data-reset-password]')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await window.FirebaseAuthActions.sendPasswordReset();Utils.toast('Enviamos as instruções para o seu e-mail.')}catch(error){Utils.toast(error.message||'Não foi possível enviar as instruções.',true)}finally{button.disabled=false}});
     $$('[data-settings-logout]').forEach(button=>button.onclick=()=>window.FirebaseAuthActions?.signOut?.());
+    $$('[data-open-plans]').forEach(button=>button.onclick=()=>window.Router?.ir?.('planos'));
     $('#firebase-sync')?.addEventListener('click',event=>syncNow(event.currentTarget));
     $('#firebase-details-toggle')?.addEventListener('click',event=>{const details=$('#firebase-details'),open=details.hidden;details.hidden=!open;event.currentTarget.setAttribute('aria-expanded',String(open));$('em',event.currentTarget).textContent=open?'Expandido':'Recolhido'});
     $('#risk-clear-device')?.addEventListener('click',()=>$('#clear-device')?.click());

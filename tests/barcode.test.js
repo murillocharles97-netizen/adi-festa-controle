@@ -5,7 +5,7 @@ const source=fs.readFileSync('js/barcode.js','utf8');
 const worker=fs.readFileSync('service-worker.js','utf8');
 assert.ok(!/getDocs|onSnapshot|firebase-firestore|collection\(/i.test(source),'scanner must not query Firebase or create listeners');
 assert.match(worker,/assets\/zxing-browser\.min\.js/);
-assert.match(worker,/adi-festa-v47-barcode-scanner/);
+assert.match(worker,/adi-festa-v48-subscription-plans/);
 
 const stores={empresa_a:{produtos:[],movimentacoesEstoque:[]},empresa_b:{produtos:[],movimentacoesEstoque:[]}};
 let active='empresa_a',trackStopped=0,loadCount=0;

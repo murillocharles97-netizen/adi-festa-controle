@@ -126,7 +126,7 @@ function migrationModule(){
   assert.doesNotMatch(auth,/onSnapshot\(/);
 
   const worker=read('service-worker.js');
-  assert.match(worker,/adi-festa-v47-barcode-scanner/);
+assert.match(worker,/adi-festa-v48-subscription-plans/);
   assert.match(worker,/legacy-migration\.js/);
   assert.match(worker,/profile-validation\.js/);
 
