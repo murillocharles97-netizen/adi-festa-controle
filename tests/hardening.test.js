@@ -31,7 +31,7 @@ assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
 assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
-assert.match(worker, /adi-festa-v45-mobile-settings/);
+assert.match(worker, /adi-festa-v46-settings-freeze-fix/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
 
