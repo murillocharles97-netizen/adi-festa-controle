@@ -106,7 +106,7 @@ function migrationModule(){
   assert.doesNotMatch(auth,/onSnapshot\(/);
 
   const worker=read('service-worker.js');
-  assert.match(worker,/adi-festa-v42-bootstrap/);
+  assert.match(worker,/adi-festa-v43-sale-sharing/);
   assert.match(worker,/legacy-migration\.js/);
 
   console.log('bootstrap-migration.test.js: OK');

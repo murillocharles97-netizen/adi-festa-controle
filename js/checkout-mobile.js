@@ -91,12 +91,12 @@
   function enhance(){
     if(enhancing||!mq.matches||Router.atual()!=='vender')return;const page=$('.pos-page');if(!page)return;const first=!page.dataset.mobileSaleInitialized;if(first){payment='pix';window.CheckoutPaymentMethod='pix'}enhancing=true;try{page.classList.add('mobile-sale-page');mobileHeader(page);decorateProducts(page);const summary=$('#pos-summary',page);if(summary){summaryTools(summary);enhanceCart(summary)}bindPage(page);applyPending(page);if(first){page.dataset.mobileSaleInitialized='1';window.lucide?.createIcons()}}finally{enhancing=false}
   }
-  function receipt(){const modal=$('#modal .modal-box');if(!mq.matches||!modal||!modal.querySelector('.receipt-preview')||modal.querySelector('.mobile-sale-success'))return;const last=Vendas.ultima();modal.querySelector('.receipt-actions')?.insertAdjacentHTML('beforebegin',`<div class="mobile-sale-success"><button data-sale-next="new">Nova venda</button><button data-sale-next="same">Mesmo cliente</button><button data-sale-next="repeat">Repetir itens</button></div>`);$$('[data-sale-next]',modal).forEach(button=>button.onclick=()=>{pending={clientId:button.dataset.saleNext==='same'?last?.clienteId:null,repeat:button.dataset.saleNext==='repeat',items:last?.itens||[]};Modais.fechar();Router.ir('inicio');setTimeout(()=>Router.ir('vender'),20)})}
+  function prepareNext(action,sale){pending={clientId:action==='same'?sale?.clienteId:null,repeat:action==='repeat',items:sale?.itens||[]};Router.ir('inicio');setTimeout(()=>Router.ir('vender'),20)}
   document.addEventListener('click',event=>{if(event.target.closest('#finish-sale'))window.CheckoutPaymentMethod=payment;setTimeout(enhance,0)},{capture:true});
   document.addEventListener('change',()=>setTimeout(enhance,0),true);
   let valueTimer=null;document.addEventListener('input',event=>{if(!mq.matches||!['discount-value','discount-percent','manual-total'].includes(event.target.id))return;clearTimeout(valueTimer);valueTimer=setTimeout(()=>event.target.dispatchEvent(new Event('change',{bubbles:true})),180)},true);
-  new MutationObserver(()=>{queueMicrotask(enhance);queueMicrotask(receipt)}).observe($('#app'),{childList:true});
-  new MutationObserver(()=>queueMicrotask(receipt)).observe($('#modal'),{childList:true,subtree:true});
+  new MutationObserver(()=>queueMicrotask(enhance)).observe($('#app'),{childList:true});
+  addEventListener('sale-next-action',event=>prepareNext(event.detail.action,event.detail.sale));
   addEventListener('hashchange',()=>setTimeout(enhance,0));
-  window.CheckoutMobile={enhance,openSummary,closeSummary};
+  window.CheckoutMobile={enhance,openSummary,closeSummary,prepareNext};
 })();
