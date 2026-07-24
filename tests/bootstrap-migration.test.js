@@ -42,6 +42,8 @@ function migrationModule(){
     assert.equal(result.business.migrationVersion,1);
     assert.equal(result.business.subscription.planId,'internal');
     assert.equal(result.business.limits.catalogEnabled,true);
+    assert.equal('email' in result.profile,false);
+    assert.equal('businessId' in writes.profile[0],false);
 
     const completed=await migration.runLegacyMigration({
       user:{uid:'owner-1'},profile:result.profile,business:result.business,
@@ -51,6 +53,20 @@ function migrationModule(){
     });
     assert.equal(completed.alreadyCompleted,true);
     assert.ok(migration.logs.some(log=>log.message==='[Legacy Migration] already completed'));
+  }
+
+  {
+    const migration=migrationModule();
+    const profile={businessId:'adi-festa',uid:'different-owner',role:'admin'};
+    await assert.rejects(
+      migration.runLegacyMigration({
+        user:{uid:'real-owner'},profile,business:{id:'adi-festa'},
+        timestamp:'2026-07-23T12:00:00.000Z',
+        writeProfile:async()=>{throw Error('não deve gravar')},
+        writeBusiness:async()=>{throw Error('não deve gravar')}
+      }),
+      error=>error.code==='profile/uid-mismatch'
+    );
   }
 
   {
@@ -102,12 +118,17 @@ function migrationModule(){
   assert.match(auth,/finally\(\(\)=>\{/);
   assert.match(auth,/window\.LegacyMigrationAdmin=/);
   assert.match(auth,/window\.SyncFirebase\.setUser\(user,profile\)/);
+  assert.match(auth,/\[Profile Validation\]/);
+  assert.match(auth,/validateAuthenticatedProfile/);
+  assert.match(auth,/validateAuthenticatedBusiness/);
+  assert.doesNotMatch(auth,/if\(profile\.uid!==user\.uid\)/);
   assert.ok(auth.indexOf('BusinessContext.set')<auth.indexOf('window.SyncFirebase.setUser'));
   assert.doesNotMatch(auth,/onSnapshot\(/);
 
   const worker=read('service-worker.js');
-  assert.match(worker,/adi-festa-v43-sale-sharing/);
+  assert.match(worker,/adi-festa-v44-legacy-profile/);
   assert.match(worker,/legacy-migration\.js/);
+  assert.match(worker,/profile-validation\.js/);
 
   console.log('bootstrap-migration.test.js: OK');
 })().catch(error=>{

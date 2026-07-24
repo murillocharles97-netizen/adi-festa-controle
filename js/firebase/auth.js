@@ -3,6 +3,7 @@ import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPass
 import {doc,getDoc,serverTimestamp,setDoc,Timestamp,writeBatch} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService} from './business-context.js?v=42';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js?v=42';
+import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js?v=44';
 import './sync.js?v=42';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000;
@@ -25,6 +26,9 @@ function setBootstrapState(state,details={}){
   dispatchEvent(new CustomEvent('firebase-bootstrap-state',{detail:{state,...details}}));
 }
 function normalizedCode(error){return String(error?.code||'').replace('firestore/','')}
+function isDevelopment(){
+  return ['localhost','127.0.0.1'].includes(location.hostname)||localStorage.getItem('adiFestaDevMetrics')==='1';
+}
 function timeoutError(){return Object.assign(new Error('O bootstrap excedeu 15 segundos.'),{code:'bootstrap/timeout'})}
 function withTimeout(promise,token){
   let timer;
@@ -111,14 +115,25 @@ function blockedScreen(user,context){
   document.querySelector('[data-export-data]').onclick=downloadBackup;
   document.querySelector('[data-blocked-logout]').onclick=()=>logout(true);
 }
-function unauthorized(user,message,canResume=false){
-  screen(`<section class="auth-card"><div class="auth-logo">AF</div><h1>Acesso não configurado</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
+function unauthorized(user,message,canResume=false,title='Acesso não configurado'){
+  screen(`<section class="auth-card"><div class="auth-logo">AF</div><h1>${esc(title)}</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
   document.querySelector('#resume-onboarding')?.addEventListener('click',async()=>{const saved=JSON.parse(localStorage.getItem(pendingKey(user.uid))||'null');if(!saved)return login('Os dados do cadastro não estão mais neste aparelho.');try{await provisionBusinessAccount(user,saved);localStorage.removeItem(pendingKey(user.uid));location.reload()}catch(error){unauthorized(user,friendly(error.code),true)}});
-  document.querySelector('#logout-unauthorized').onclick=()=>logout(true);
+  document.querySelector('#logout-unauthorized').onclick=bootstrapLogout;
 }
-function bootstrapErrorScreen(user,state,message,{manual=false}={}){
-  setBootstrapState(state,{code:state});
-  screen(`<section class="auth-card auth-blocked-card"><div class="auth-logo">AF</div><h1>${state==='temporary_unavailable'?'Configuração temporariamente indisponível':state==='permission_error'?'Permissão necessária':'Não foi possível abrir o aplicativo'}</h1><p>${esc(message)}</p><button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
+function bootstrapTechnicalDetails(details={}){
+  const rows=[
+    ['UID autenticado',details.authUid],
+    ['Documento do perfil',details.profileDocumentId],
+    ['UID salvo no perfil',details.profileUid],
+    ['Proprietário da empresa',details.ownerId]
+  ].filter(([,value])=>value);
+  if(!rows.length)return'';
+  return `<div class="auth-review">${rows.map(([label,value])=>`<span><small>${esc(label)}</small><b>${esc(abbreviateTechnicalId(value))}</b></span>`).join('')}</div><p><small>Por segurança, um UID divergente nunca é corrigido automaticamente. Confirme no Firebase Authentication e em users/{UID} qual conta é a proprietária, ou encaminhe estes identificadores abreviados ao administrador.</small></p>`;
+}
+function bootstrapErrorScreen(user,state,message,{manual=false,title='',details={}}={}){
+  setBootstrapState(state,{code:details.code||state});
+  const heading=title||(state==='temporary_unavailable'?'Configuração temporariamente indisponível':state==='permission_error'?'Permissão necessária':'Não foi possível abrir o aplicativo');
+  screen(`<section class="auth-card auth-blocked-card"><div class="auth-logo">AF</div><h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-retry').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Tentando…';await retryBootstrap(user)};
   document.querySelector('#bootstrap-manual-migration')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Executando…';await completeLegacyMigrationManually()});
   document.querySelector('#bootstrap-logout').onclick=bootstrapLogout;
@@ -201,21 +216,21 @@ async function bootstrapCore(user,token,mode){
   assertCurrentRun(token);
   if(!profileSnapshot.exists()){
     setBootstrapState('onboarding');
-    return unauthorized(user,'Seu cadastro foi iniciado, mas a empresa ainda não foi configurada.',Boolean(localStorage.getItem(pendingKey(user.uid))));
+    return unauthorized(user,'Não existe um perfil em users/{UID} para esta conta. Seu cadastro pode ter sido iniciado sem concluir a empresa.',Boolean(localStorage.getItem(pendingKey(user.uid))),'Perfil não encontrado');
   }
   let profile=profileSnapshot.data();
-  if(profile.uid!==user.uid)throw Object.assign(new Error('O perfil cadastrado não corresponde a esta conta.'),{code:'permission-denied'});
-  if(profile.active!==true)throw Object.assign(new Error('Sua conta está desativada.'),{code:'permission-denied'});
-  if(!profile.businessId){
-    setBootstrapState('onboarding');
-    return unauthorized(user,'Esta conta ainda não possui uma empresa vinculada.',Boolean(localStorage.getItem(pendingKey(user.uid))));
-  }
+  const validation=profileValidationInfo({authUser:user,profileSnapshotId:profileSnapshot.id,profile});
+  if(isDevelopment())console.info('[Profile Validation]',validation);
+  const profileAccess=validateAuthenticatedProfile({authUser:user,profileSnapshotId:profileSnapshot.id,profile});
   const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
   assertCurrentRun(token);
-  if(!businessSnapshot.exists())throw Object.assign(new Error('A empresa vinculada ao seu perfil não existe.'),{code:'permission-denied'});
+  if(!businessSnapshot.exists())throw Object.assign(new Error('A empresa vinculada ao perfil não foi encontrada.'),{code:'business/not-found',details:{authUid:user.uid,profileDocumentId:profileSnapshot.id,businessId:profile.businessId}});
   let business={id:businessSnapshot.id,...businessSnapshot.data()};
-  if(business.active===false)throw Object.assign(new Error('Esta empresa está suspensa.'),{code:'permission-denied'});
+  const businessAccess=validateAuthenticatedBusiness({authUser:user,profile,businessId:businessSnapshot.id,business});
   if(profile.businessId===LEGACY_BUSINESS_ID){
+    if(!profileAccess.isLegacyAdiFestaOwnerCandidate||!businessAccess.isLegacyAdiFestaOwner){
+      throw Object.assign(new Error('A conta não atende aos critérios seguros da migração legada.'),{code:'permission-denied'});
+    }
     screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Concluindo a configuração segura da Adi Festa…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');
     document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
     ({profile,business}=await migrateLegacy(user,profile,business,mode));
@@ -237,9 +252,24 @@ function handleBootstrapError(user,error){
     return bootstrapErrorScreen(user,'temporary_unavailable',code==='bootstrap/timeout'?'A validação ultrapassou o limite de 15 segundos. Verifique sua conexão e tente novamente. Nenhum dado foi perdido.':'Não foi possível conectar ao Firebase agora. Tente novamente em alguns instantes. Nenhum dado foi perdido.',{manual:user?.uid&&Boolean(localStorage.getItem(`adiFestaDB_v1:${LEGACY_BUSINESS_ID}`))});
   }
   if(['permission-denied','unauthenticated'].includes(code)){
-    return bootstrapErrorScreen(user,'permission_error',error.message||'Sua conta não possui permissão para concluir esta configuração.',{manual:true});
+    return bootstrapErrorScreen(user,'permission_error',error.message||'Sua conta não possui permissão para concluir esta configuração.',{title:'Permissão negada',manual:Boolean(error.allowManual),details:{...error.details,code}});
   }
-  return bootstrapErrorScreen(user,'fatal_error','Ocorreu um erro inesperado durante a configuração. Nenhum dado foi apagado.',{manual:true});
+  const specific={
+    'profile/document-mismatch':['UID divergente','O documento do perfil não corresponde à conta autenticada.'],
+    'profile/uid-mismatch':['UID divergente','O campo UID salvo no perfil pertence a outra conta. A correção automática foi bloqueada.'],
+    'profile/uid-missing':['UID ausente','Este perfil não é elegível para a compatibilidade legada.'],
+    'profile/email-mismatch':['E-mail divergente','O e-mail do perfil não corresponde ao e-mail autenticado.'],
+    'profile/business-mismatch':['Empresa divergente','O perfil não possui a empresa esperada.'],
+    'profile/role-mismatch':['Permissão divergente','A função cadastrada não permite administrar a empresa legada.'],
+    'profile/inactive':['Usuário inativo','Este usuário está inativo e não pode acessar a empresa.'],
+    'business/id-mismatch':['Empresa divergente','A empresa carregada não corresponde à empresa do perfil.'],
+    'business/not-found':['Empresa divergente','A empresa vinculada ao perfil não foi encontrada.'],
+    'business/inactive':['Empresa inativa','A empresa vinculada está inativa.'],
+    'business/owner-mismatch':['Proprietário divergente','O proprietário registrado na empresa não corresponde à conta autenticada.'],
+    'business/subscription-mismatch':['Configuração divergente','A assinatura interna existente possui dados incompatíveis e não será substituída automaticamente.']
+  }[code];
+  if(specific)return bootstrapErrorScreen(user,'permission_error',specific[1],{title:specific[0],manual:Boolean(error.allowManual),details:{...error.details,code}});
+  return bootstrapErrorScreen(user,'fatal_error','Ocorreu um erro inesperado durante a configuração. Nenhum dado foi apagado.',{manual:Boolean(error.allowManual),details:{...error.details,code}});
 }
 function startBootstrap(user,{mode='automatic'}={}){
   if(!user){setBootstrapState('unauthenticated');login();return Promise.resolve()}
