@@ -2,12 +2,17 @@ const DAY=86400000;
 export const APP_NAME='Adi Festa Controle';
 export const INTERNAL_BUSINESS_ID='adi-festa';
 
+const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true};
+const GROWTH_FEATURES={campaigns:true,onlineCatalog:true,onlineOrders:true,bulkMessages:true,loyalty:true,advancedStock:true,dataImport:true,advancedReports:true};
+const PREMIUM_FEATURES={multipleUsers:true,rolesPermissions:true,advancedExports:true,automations:true,prioritySupport:true,multipleStocks:false,multipleUnits:false};
+const allFeatures={...OPERATION_FEATURES,...GROWTH_FEATURES,...PREMIUM_FEATURES};
+
 export const PLANS={
-  trial:{id:'trial',name:'Teste grátis',monthlyPrice:0,yearlyPrice:0,trialDays:7,features:{clients:true,products:true,sales:true,creditAccounts:true,stock:true,campaigns:true,onlineCatalog:true,multipleUsers:false,advancedReports:true},limits:{users:1,products:300,clients:500,monthlySales:3000}},
-  essential:{id:'essential',name:'Essencial',monthlyPrice:39.90,yearlyPrice:399,trialDays:7,features:{clients:true,products:true,sales:true,creditAccounts:true,stock:true,campaigns:false,onlineCatalog:false,multipleUsers:false,advancedReports:false},limits:{users:1,products:300,clients:500,monthlySales:3000}},
-  professional:{id:'professional',name:'Profissional',monthlyPrice:69.90,yearlyPrice:699,trialDays:7,recommended:true,features:{clients:true,products:true,sales:true,creditAccounts:true,stock:true,campaigns:true,onlineCatalog:true,multipleUsers:true,advancedReports:true},limits:{users:5,products:1500,clients:3000,monthlySales:15000}},
-  premium:{id:'premium',name:'Premium',monthlyPrice:119.90,yearlyPrice:1199,trialDays:7,features:{clients:true,products:true,sales:true,creditAccounts:true,stock:true,campaigns:true,onlineCatalog:true,multipleUsers:true,advancedReports:true},limits:{users:20,products:10000,clients:25000,monthlySales:100000}},
-  internal:{id:'internal',name:'Interno',monthlyPrice:0,yearlyPrice:0,trialDays:0,features:{clients:true,products:true,sales:true,creditAccounts:true,stock:true,campaigns:true,onlineCatalog:true,multipleUsers:true,advancedReports:true},limits:{users:999,products:999999,clients:999999,monthlySales:999999}}
+  trial:{id:'trial',name:'Teste grátis',summary:'Todos os recursos do Profissional por 7 dias.',monthlyPrice:0,yearlyPrice:0,trialDays:7,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:300,clients:500,monthlySales:1500}},
+  essential:{id:'essential',name:'Essencial',summary:'Organize o básico do seu negócio.',monthlyPrice:29.90,yearlyPrice:299,trialDays:7,features:{...OPERATION_FEATURES,campaigns:false,onlineCatalog:false,onlineOrders:false,bulkMessages:false,loyalty:false,advancedStock:false,dataImport:false,advancedReports:false,multipleUsers:false,rolesPermissions:false,advancedExports:false,automations:false,prioritySupport:false,multipleStocks:false,multipleUnits:false},limits:{users:1,products:300,clients:500,monthlySales:1500}},
+  professional:{id:'professional',name:'Profissional',summary:'Mais recursos para vender e crescer.',monthlyPrice:49.90,yearlyPrice:499,trialDays:7,recommended:true,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:2000,clients:5000,monthlySales:10000}},
+  premium:{id:'premium',name:'Premium',summary:'Para negócios que querem o máximo.',monthlyPrice:79.90,yearlyPrice:799,trialDays:7,features:{...allFeatures},limits:{users:10,products:10000,clients:25000,monthlySales:50000}},
+  internal:{id:'internal',name:'Plano interno',summary:'Todos os recursos liberados.',monthlyPrice:0,yearlyPrice:0,trialDays:0,features:{...allFeatures,multipleStocks:true,multipleUnits:true},limits:{users:999,products:999999,clients:999999,monthlySales:999999}}
 };
 
 const ROLE_PERMISSIONS={
@@ -27,20 +32,40 @@ const toDate=value=>{
 };
 
 export function getSubscriptionAccess(subscription={},limits={},at=new Date()){
-  const status=String(subscription.status||'trial'),trialEnd=toDate(subscription.trialEndsAt),periodEnd=toDate(subscription.currentPeriodEnd),graceEnd=toDate(subscription.gracePeriodEndsAt);
+  return resolveSubscriptionAccess(subscription,limits,at);
+}
+
+export function resolveSubscriptionAccess(subscription={},limits={},at=new Date()){
+  const planId=PLANS[subscription.planId]?subscription.planId:'trial',basePlan=PLANS[planId],status=String(subscription.status||'trial'),trialEnd=toDate(subscription.trialEndsAt),periodEnd=toDate(subscription.currentPeriodEnd),graceEnd=toDate(subscription.gracePeriodEndsAt),featureTrial=subscription.featureTrial||{},featureTrialEnd=toDate(featureTrial.endsAt);
   const daysRemaining=trialEnd?Math.max(0,Math.ceil((trialEnd-at)/DAY)):periodEnd?Math.max(0,Math.ceil((periodEnd-at)/DAY)):null;
   const trialValid=status==='trial'&&trialEnd&&trialEnd>=at;
-  const active=status==='active'||trialValid||status==='grace_period'&&(!graceEnd||graceEnd>=at);
+  const internal=planId==='internal'&&['active','internal'].includes(status),active=internal||status==='active'||trialValid||status==='grace_period'&&(!graceEnd||graceEnd>=at);
   const expired=status==='expired'||status==='cancelled'||status==='suspended'||status==='trial'&&!trialValid||status==='past_due'&&graceEnd&&graceEnd<at;
+  const featureTrialActive=planId==='essential'&&featureTrial.status==='active'&&featureTrial.used===true&&featureTrialEnd&&featureTrialEnd>=at;
+  const effectivePlan=internal?PLANS.internal:trialValid||featureTrialActive?PLANS.professional:basePlan;
+  const effectiveLimits={...effectivePlan.limits,...limits};
+  const features={...effectivePlan.features};
+  if(limits.catalogEnabled!==undefined)features.onlineCatalog=limits.catalogEnabled;
+  if(limits.campaignsEnabled!==undefined)features.campaigns=limits.campaignsEnabled;
   return{
     canAccessApp:active&&!expired,
     canCreateData:active&&!expired,
-    canUseCatalog:active&&!expired&&limits.catalogEnabled!==false,
-    canUseCampaigns:active&&!expired&&limits.campaignsEnabled!==false,
+    canUseCatalog:active&&!expired&&features.onlineCatalog===true,
+    canUseCampaigns:active&&!expired&&features.campaigns===true,
+    canUseFeature:feature=>active&&!expired&&features[feature]===true,
     showBillingWarning:status==='trial'&&daysRemaining!==null&&daysRemaining<=3||['past_due','grace_period'].includes(status),
     daysRemaining,
     reason:expired?(status==='trial'?'trial_expired':status):null,
-    status
+    status,
+    planId,
+    effectivePlanId:effectivePlan.id,
+    effectivePlan,
+    features,
+    limits:effectiveLimits,
+    featureTrialActive,
+    featureTrialDaysRemaining:featureTrialActive?Math.max(0,Math.ceil((featureTrialEnd-at)/DAY)):null,
+    shouldShowUpgrade:!internal&&effectivePlan.id!=='premium',
+    internal
   };
 }
 
@@ -53,8 +78,8 @@ export const BusinessContext={
   set({business,userProfile}){
     if(!business?.id||!userProfile?.uid||business.id!==userProfile.businessId)throw Error('Contexto de empresa inválido.');
     const role=userProfile.role||'viewer',permissions=[...new Set([...(ROLE_PERMISSIONS[role]||[]),...(userProfile.permissions||[])])],plan=PLANS[business.subscription?.planId]||PLANS.trial;
-    const limits={...plan.limits,...business.limits,catalogEnabled:business.limits?.catalogEnabled??plan.features.onlineCatalog,campaignsEnabled:business.limits?.campaignsEnabled??plan.features.campaigns};
-    Object.assign(state,{businessId:business.id,business:{...business,limits},userProfile,role,permissions,subscription:business.subscription||{},access:getSubscriptionAccess(business.subscription,limits),loading:false,error:null});
+    const limits={...plan.limits,...business.limits,catalogEnabled:business.limits?.catalogEnabled??plan.features.onlineCatalog,campaignsEnabled:business.limits?.campaignsEnabled??plan.features.campaigns},access=resolveSubscriptionAccess(business.subscription,limits);
+    Object.assign(state,{businessId:business.id,business:{...business,limits:access.limits},userProfile,role,permissions,subscription:business.subscription||{},access,loading:false,error:null});
     window.FirebaseSession={...(window.FirebaseSession||{}),profile:userProfile,businessId:business.id,business:state.business,subscription:state.subscription,access:state.access};
     emit();
     return snapshot();
@@ -68,9 +93,17 @@ export const BusinessContext={
 };
 
 export const SubscriptionService={
-  plans:()=>Object.values(PLANS).filter(plan=>plan.id!=='internal'),
+  plans:()=>Object.values(PLANS).filter(plan=>!['internal','trial'].includes(plan.id)),
+  getPlans:()=>Object.values(PLANS).filter(plan=>!['internal','trial'].includes(plan.id)),
+  getCurrentSubscription:()=>structuredClone(state.subscription||{}),
   getAccess:()=>state.access||getSubscriptionAccess({status:'expired'}),
+  startFreeTrial:async()=>({status:'backend_required',message:'A ativação segura do teste será disponibilizada com o serviço de assinaturas.'}),
+  requestUpgrade:async planId=>({status:'not_available',planId,message:'Pagamento ainda não integrado. Nenhum plano foi alterado.'}),
+  createCheckout:async planId=>({status:'not_available',planId,message:'Pagamento ainda não integrado. Nenhuma cobrança foi criada.'}),
   createCheckoutSession:async planId=>({status:'not_available',planId,message:'Pagamento será disponibilizado em breve.'}),
+  openBillingPortal:async()=>({status:'not_available',message:'O portal de cobrança será disponibilizado após a integração de pagamentos.'}),
+  requestCancellation:async()=>({status:'not_available',message:'Cancelamento online ainda não disponível.'}),
+  requestDowngrade:async planId=>({status:'not_available',planId,message:'Alteração de plano ainda não disponível.'}),
   openCustomerPortal:async()=>({status:'not_available'}),
   processSubscriptionWebhook:()=>{throw Error('Webhooks só podem ser processados no backend.')},
   syncSubscriptionStatus:()=>{throw Error('Status de assinatura só pode ser atualizado pelo backend.')},
@@ -87,6 +120,7 @@ export const PlanLimitService={
   canInviteUser(){const limit=state.business?.limits?.users??1;return decision(BusinessContext.hasPermission('manageUsers')&&limit>1,'users',limit,null)},
   canUseCampaigns(){return decision(Boolean(state.access?.canUseCampaigns)&&BusinessContext.hasPermission('manageCampaigns'),'campaigns')},
   canUseOnlineCatalog(){return decision(Boolean(state.access?.canUseCatalog),'onlineCatalog')},
+  canUseFeature(feature){return decision(Boolean(state.access?.canUseFeature?.(feature)),feature)},
   assert(result,label='operação'){if(!result.ok)throw Object.assign(new Error(result.limit!==null&&result.current>=result.limit?`Você atingiu o limite de ${result.limit} para ${label} no plano atual.`:`Seu plano não permite ${label} agora.`),{code:'plan-limit',details:result});return true}
 };
 
@@ -94,3 +128,5 @@ window.BusinessContext=BusinessContext;
 window.SubscriptionService=SubscriptionService;
 window.PlanLimitService=PlanLimitService;
 window.hasPermission=permission=>BusinessContext.hasPermission(permission);
+window.resolveSubscriptionAccess=resolveSubscriptionAccess;
+window.canUseFeature=feature=>PlanLimitService.canUseFeature(feature).ok;
