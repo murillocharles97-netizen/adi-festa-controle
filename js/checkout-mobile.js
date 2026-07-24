@@ -98,5 +98,6 @@
   new MutationObserver(()=>queueMicrotask(enhance)).observe($('#app'),{childList:true});
   addEventListener('sale-next-action',event=>prepareNext(event.detail.action,event.detail.sale));
   addEventListener('hashchange',()=>setTimeout(enhance,0));
+  addEventListener('firebase-session-cleared',()=>{pending=null;payment='pix';enhancing=false;window.CheckoutPaymentMethod='pix'});
   window.CheckoutMobile={enhance,openSummary,closeSummary,prepareNext};
 })();
