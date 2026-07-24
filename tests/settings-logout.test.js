@@ -38,10 +38,19 @@ assert.match(mobile,/SyncFirebase\.synchronizeNow\(\)/);
 assert.match(css,/@media \(max-width:767px\)/);
 assert.match(css,/@media \(min-width:768px\)/);
 assert.match(ui,/if\(document\.querySelector\('\.mobile-settings-page'\)\)/);
-assert.match(worker,/adi-festa-v45-mobile-settings/);
+assert.match(worker,/adi-festa-v46-settings-freeze-fix/);
 assert.match(worker,/configuracoes-mobile\.js/);
 assert.match(worker,/configuracoes-mobile\.css/);
 assert.match(read('js/checkout.js'),/addEventListener\('firebase-session-cleared',resetSession\)/);
 assert.match(read('js/checkout-mobile.js'),/addEventListener\('firebase-session-cleared'/);
+assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound==='true'/);
+assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound='true'/);
+assert.match(ui,/if\(element&&element\.textContent!==text\)/);
+const mobilePanel=ui.slice(ui.indexOf('function settingsPanel()'),ui.indexOf('async function manualSync'));
+assert.ok(
+  mobilePanel.indexOf("mobileSettings.dataset.firebaseUiBound='true'")<
+  mobilePanel.indexOf('renderState(lastState)'),
+  'The settings page must be marked as bound before its first DOM update'
+);
 
 console.log('settings-logout.test.js: OK');
