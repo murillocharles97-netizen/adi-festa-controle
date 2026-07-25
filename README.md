@@ -66,6 +66,8 @@ Todos os caminhos são relativos, portanto o PWA funciona mesmo quando publicado
 
 A auditoria de consumo, sincronização, cache, segurança e escalabilidade está documentada em [PRODUCTION_HARDENING.md](./PRODUCTION_HARDENING.md).
 
+O backend de assinaturas recorrentes, a configuração segura dos segredos e o fluxo de webhook estão documentados em [BILLING_BACKEND.md](./BILLING_BACKEND.md). O aplicativo usa o Firestore como fonte principal da assinatura e consulta o Mercado Pago somente em uma reconciliação manual excepcional.
+
 ## Dados e privacidade
 
 O painel mantém uma cópia local para continuar funcionando offline e sincroniza as coleções do negócio no Firebase. Faça backups JSON regularmente, especialmente antes de limpar dados, trocar de aparelho ou importar outro backup.

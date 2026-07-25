@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "businesses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subscription.status", "order": "ASCENDING" },
+        { "fieldPath": "subscription.trialEndsAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "businesses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subscription.status", "order": "ASCENDING" },
+        { "fieldPath": "subscription.expiresAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
