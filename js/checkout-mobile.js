@@ -72,6 +72,7 @@
     grid.addEventListener('click',event=>{const favorite=event.target.closest('[data-fav]');if(favorite){event.preventDefault();event.stopImmediatePropagation();DB.alterar(db=>{const item=db.produtos.find(entry=>entry.id===favorite.dataset.fav);if(item)item.favorito=!item.favorito});const item=product(favorite.dataset.fav);favorite.classList.toggle('active',Boolean(item?.favorito));favorite.innerHTML=icon('star');favorite.setAttribute('aria-label',item?.favorito?'Remover dos favoritos':'Adicionar aos favoritos');window.lucide?.createIcons();return}const card=event.target.closest('.pos-product');if(card?.dataset.blockClick==='1'&&event.isTrusted){event.preventDefault();event.stopImmediatePropagation();delete card.dataset.blockClick}},true)
   }
   function bindPage(page){
+    window.BarcodePrimaryFab?.update?.();
     if(page.dataset.mobileSaleBound)return;page.dataset.mobileSaleBound='1';
     page.insertAdjacentHTML('beforeend','<div class="pos-summary-overlay"></div>');
     page.addEventListener('click',event=>{
@@ -93,6 +94,7 @@
   }
   function prepareNext(action,sale){pending={clientId:action==='same'?sale?.clienteId:null,repeat:action==='repeat',items:sale?.itens||[]};Router.ir('inicio');setTimeout(()=>Router.ir('vender'),20)}
   document.addEventListener('click',event=>{if(event.target.closest('#finish-sale'))window.CheckoutPaymentMethod=payment;setTimeout(enhance,0)},{capture:true});
+  document.querySelector('#mobile-client-fab')?.addEventListener('click',event=>{if(mq.matches&&Router.atual()==='vender'&&event.currentTarget.dataset.primaryAction==='scan-sale')window.BarcodeWorkflows?.sale?.()});
   document.addEventListener('change',()=>setTimeout(enhance,0),true);
   let valueTimer=null;document.addEventListener('input',event=>{if(!mq.matches||!['discount-value','discount-percent','manual-total'].includes(event.target.id))return;clearTimeout(valueTimer);valueTimer=setTimeout(()=>event.target.dispatchEvent(new Event('change',{bubbles:true})),180)},true);
   new MutationObserver(()=>queueMicrotask(enhance)).observe($('#app'),{childList:true});
