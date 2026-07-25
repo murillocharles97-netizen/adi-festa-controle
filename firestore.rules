@@ -72,7 +72,7 @@ service cloud.firestore {
             userProfile().role == 'cashier'
             && collectionName in [
               'clients', 'sales', 'payments', 'balanceEvents',
-              'charges', 'messageHistory', 'catalogOrders'
+              'charges', 'messageHistory', 'clientContacts', 'catalogOrders'
             ]
           )
         );
