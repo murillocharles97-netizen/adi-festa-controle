@@ -18,7 +18,7 @@
       <section class="mobile-settings-card settings-hero">
         <div class="settings-company-row"><span class="settings-logo">${esc(initials(name))}</span><div><h2>${esc(name)}</h2><p><span class="settings-plan">${esc(plan)}</span><span class="settings-account-dot"></span>${accountActive?'Conta ativa':'Conta inativa'}</p></div></div>
         <div class="settings-cloud-summary">
-          <span class="settings-summary-icon">${icon('cloud-check')}</span><div><b id="firebase-status">Preparando sincronização…</b><small><span id="firebase-pending">${Number(sync.pending||0)}</span> pendência(s)</small></div>
+          <span class="settings-summary-icon">${icon('cloud')}</span><div><b id="firebase-status">Preparando sincronização…</b><small><span id="firebase-pending">${Number(sync.pending||0)}</span> pendência(s)</small></div>
           <span class="settings-summary-icon">${icon('clock-3')}</span><div><b>Última sincronização</b><small id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</small></div>
         </div>
       </section>
