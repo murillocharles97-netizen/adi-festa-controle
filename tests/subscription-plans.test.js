@@ -3,12 +3,12 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const read=file=>fs.readFileSync(file,'utf8');
 
-const businessSource=read('js/firebase/business-context.js').replace(/^export /gm,'')+'\n;globalThis.__plans={PLANS,resolveSubscriptionAccess,getSubscriptionAccess,SubscriptionService};';
+const businessSource=read('js/firebase/business-context.js').replace(/^export /gm,'')+'\n;globalThis.__plans={PLANS,resolveSubscriptionAccess,getSubscriptionAccess,SubscriptionService,BusinessContext,PlanLimitService};';
 const sandbox={window:null,structuredClone,dispatchEvent(){},CustomEvent:function(){},console,setTimeout,clearTimeout};
 sandbox.window=sandbox;
 vm.createContext(sandbox);
 vm.runInContext(businessSource,sandbox,{filename:'business-context.js'});
-const {PLANS,resolveSubscriptionAccess,SubscriptionService}=sandbox.__plans;
+const {PLANS,resolveSubscriptionAccess,SubscriptionService,BusinessContext,PlanLimitService}=sandbox.__plans;
 const now=new Date('2026-07-24T12:00:00Z');
 
 assert.equal(PLANS.essential.monthlyPrice,29.90);
@@ -27,32 +27,62 @@ assert.equal(PLANS.premium.yearlyPrice,799);
 assert.equal(PLANS.premium.limits.users,10);
 assert.equal(PLANS.internal.features.campaigns,true);
 assert.equal(PLANS.internal.features.onlineCatalog,true);
+assert.equal(PLANS.internal.features.reports,true);
 
 const internal=resolveSubscriptionAccess({planId:'internal',status:'active'},{},now);
 assert.equal(internal.canAccessApp,true);
 assert.equal(internal.canCreateData,true);
 assert.equal(internal.internal,true);
 assert.equal(internal.shouldShowUpgrade,false);
-assert.equal(internal.canUseFeature('automations'),true);
+assert.equal(internal.features.automations,true);
 
 const essential=resolveSubscriptionAccess({planId:'essential',status:'active'},{},now);
-assert.equal(essential.canUseFeature('products'),true);
-assert.equal(essential.canUseFeature('campaigns'),false);
-assert.equal(essential.canUseFeature('onlineCatalog'),false);
+assert.equal(essential.features.products,true);
+assert.equal(essential.features.campaigns,false);
+assert.equal(essential.features.onlineCatalog,false);
 
 const professional=resolveSubscriptionAccess({planId:'professional',status:'active'},{},now);
-assert.equal(professional.canUseFeature('campaigns'),true);
-assert.equal(professional.canUseFeature('onlineOrders'),true);
-assert.equal(professional.canUseFeature('rolesPermissions'),false);
+assert.equal(professional.features.campaigns,true);
+assert.equal(professional.features.onlineOrders,true);
+assert.equal(professional.features.rolesPermissions,false);
 
 const featureTrial=resolveSubscriptionAccess({planId:'essential',status:'active',featureTrial:{planId:'professional',used:true,status:'active',endsAt:'2026-07-30T12:00:00Z'}},{},now);
 assert.equal(featureTrial.featureTrialActive,true);
 assert.equal(featureTrial.effectivePlanId,'professional');
-assert.equal(featureTrial.canUseFeature('campaigns'),true);
+assert.equal(featureTrial.features.campaigns,true);
 
 const expiredFeatureTrial=resolveSubscriptionAccess({planId:'essential',status:'active',featureTrial:{planId:'professional',used:true,status:'active',endsAt:'2026-07-23T12:00:00Z'}},{},now);
 assert.equal(expiredFeatureTrial.featureTrialActive,false);
-assert.equal(expiredFeatureTrial.canUseFeature('campaigns'),false);
+assert.equal(expiredFeatureTrial.features.campaigns,false);
+
+const internalFallback=resolveSubscriptionAccess({business:{id:'adi-festa'},subscription:{},now});
+assert.equal(internalFallback.canUseApp,true);
+assert.equal(internalFallback.effectivePlanId,'internal');
+assert.deepEqual(Array.from(internalFallback.warnings),['SUBSCRIPTION_FALLBACK']);
+
+const tenantFallback=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{},now});
+assert.equal(tenantFallback.canUseApp,true);
+assert.equal(tenantFallback.effectivePlanId,'essential');
+assert.deepEqual(Array.from(tenantFallback.warnings),['SUBSCRIPTION_FALLBACK']);
+
+const unknownPlan=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{planId:'not-a-plan',status:'active'},now});
+assert.equal(unknownPlan.canUseApp,true);
+assert.equal(unknownPlan.effectivePlanId,'essential');
+assert.deepEqual(Array.from(unknownPlan.warnings),['INVALID_PLAN_FALLBACK']);
+
+const invalidStatus=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{planId:'professional',status:'invalid-status'},now});
+assert.equal(invalidStatus.canUseApp,false);
+assert.equal(invalidStatus.accessMode,'blocked');
+
+const contextSnapshot=BusinessContext.set({
+  business:{id:'adi-festa',name:'Adi Festa',ownerId:'owner-1',active:true},
+  userProfile:{uid:'owner-1',businessId:'adi-festa',role:'owner',active:true}
+});
+assert.equal(contextSnapshot.access.canUseApp,true);
+assert.equal(contextSnapshot.subscription.planId,'internal');
+assert.equal(PlanLimitService.canUseFeature('campaigns').ok,true);
+assert.doesNotThrow(()=>structuredClone(contextSnapshot));
+assert.doesNotThrow(()=>BusinessContext.fail(new Error('falha opcional')));
 
 assert.equal(SubscriptionService.getPlans().length,3);
 assert.equal(typeof SubscriptionService.startFreeTrial().then,'function');
@@ -75,7 +105,7 @@ assert.match(index,/data-route="planos"/);
 assert.match(index,/data-plan-feature="campaigns"/);
 assert.match(index,/data-plan-feature="onlineCatalog"/);
 assert.match(index,/data-plan-feature="onlineOrders"/);
-assert.match(worker,/adi-festa-v48-subscription-plans/);
+assert.match(worker,/adi-festa-v49-stabilize-saas-core/);
 assert.match(worker,/css\/plans\.css/);
 assert.match(worker,/js\/plans\.js/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);

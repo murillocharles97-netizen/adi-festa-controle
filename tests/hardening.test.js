@@ -9,14 +9,22 @@ const sync = read('js/firebase/sync.js');
 const repository = read('js/firebase/firestore-repository.js');
 const bridge = read('js/firebase/catalog-bridge.js');
 const publicCatalog = read('js/catalogo-publico.js');
+const firebaseConfig = read('js/firebase/firebase-config.js');
+const auth = read('js/firebase/auth.js');
+const lifecycle = read('js/firebase/session-lifecycle.js');
 const worker = read('service-worker.js');
 const rules = read('firestore.rules');
 
-assert.match(sync, /REALTIME_NAMES=new Set\(\['clients','products','sales','payments','settings'\]\)/);
+assert.match(sync, /REALTIME_NAMES=new Set\(\)/);
 assert.match(sync, /PULL_TTL_MS=300000/);
 assert.match(sync, /listChangedSince\(since,500\)/);
 assert.match(sync, /listAllPaged\(200\)/);
+assert.doesNotMatch(sync, /setInterval\(automaticSync/);
+assert.match(sync, /cloudPaused/);
+assert.match(sync, /\['permission-denied','unauthenticated','resource-exhausted','failed-precondition'\]/);
 assert.doesNotMatch(sync, /connection-test/);
+assert.match(sync, /function setUser\(user,profile=null,business=null\)/);
+assert.match(sync, /testPassed:trustedBootstrap/);
 
 assert.match(repository, /CACHE_TTL_MS=60000/);
 assert.match(repository, /async listAllPaged\(max=200\)/);
@@ -31,9 +39,16 @@ assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
 assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
-assert.match(worker, /adi-festa-v48-subscription-plans/);
+assert.match(worker, /adi-festa-v49-stabilize-saas-core/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
+assert.match(worker, /then\(\(\)=>self\.skipWaiting\(\)\)/);
+
+assert.match(firebaseConfig,/persistentLocalCache/);
+assert.doesNotMatch(firebaseConfig,/enableIndexedDbPersistence/);
+assert.match(auth,/cleanupCurrentSession\(\)/);
+assert.match(lifecycle,/export function registerCleanup/);
+assert.match(lifecycle,/export function cleanupCurrentSession/);
 
 assert.match(rules, /match \/businesses\/\{businessId\}/);
 assert.match(rules, /currentBusinessId\(\) == businessId/);
