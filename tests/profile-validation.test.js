@@ -26,6 +26,16 @@ const legacyBusiness={id:'adi-festa',ownerId:authUser.uid,active:true};
 }
 
 {
+  const result=validation.validateAuthenticatedProfile({
+    authUser,
+    profileSnapshotId:authUser.uid,
+    profile:{...legacyProfile,businessId:'biz_other',role:'owner'}
+  });
+  assert.equal(result.uidMissing,true);
+  assert.equal(result.needsLegacyMigration,false);
+}
+
+{
   const result=validation.validateAuthenticatedBusiness({
     authUser,
     profile:legacyProfile,

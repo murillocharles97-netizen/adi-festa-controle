@@ -41,13 +41,10 @@ export function validateAuthenticatedProfile({authUser,profileSnapshotId,profile
     && profile.active===true
     && ['admin','owner'].includes(profile.role)
     && normalizeProfileEmail(profile.email)===normalizeProfileEmail(authUser?.email);
-  if(uidMissing&&!isLegacyAdiFestaOwnerCandidate){
-    throw validationError('profile/uid-missing','O campo UID está ausente em um perfil que não é elegível para a migração legada.',details);
-  }
   if(profile.businessId==='adi-festa'&&!['admin','owner'].includes(profile.role)){
     throw validationError('profile/role-mismatch','O papel deste usuário não permite administrar a empresa legada.',details);
   }
-  return{isLegacyAdiFestaOwnerCandidate,needsLegacyMigration:isLegacyAdiFestaOwnerCandidate&&(uidMissing||profile.role==='admin')};
+  return{isLegacyAdiFestaOwnerCandidate,uidMissing,needsLegacyMigration:isLegacyAdiFestaOwnerCandidate&&(uidMissing||profile.role==='admin')};
 }
 
 export function validateAuthenticatedBusiness({authUser,profile,businessId,business={}}){

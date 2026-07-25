@@ -2,7 +2,7 @@ const DAY=86400000;
 export const APP_NAME='Adi Festa Controle';
 export const INTERNAL_BUSINESS_ID='adi-festa';
 
-const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true};
+const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true,reports:true};
 const GROWTH_FEATURES={campaigns:true,onlineCatalog:true,onlineOrders:true,bulkMessages:true,loyalty:true,advancedStock:true,dataImport:true,advancedReports:true};
 const PREMIUM_FEATURES={multipleUsers:true,rolesPermissions:true,advancedExports:true,automations:true,prioritySupport:true,multipleStocks:false,multipleUnits:false};
 const allFeatures={...OPERATION_FEATURES,...GROWTH_FEATURES,...PREMIUM_FEATURES};
@@ -35,8 +35,17 @@ export function getSubscriptionAccess(subscription={},limits={},at=new Date()){
   return resolveSubscriptionAccess(subscription,limits,at);
 }
 
-export function resolveSubscriptionAccess(subscription={},limits={},at=new Date()){
-  const planId=PLANS[subscription.planId]?subscription.planId:'trial',basePlan=PLANS[planId],status=String(subscription.status||'trial'),trialEnd=toDate(subscription.trialEndsAt),periodEnd=toDate(subscription.currentPeriodEnd),graceEnd=toDate(subscription.gracePeriodEndsAt),featureTrial=subscription.featureTrial||{},featureTrialEnd=toDate(featureTrial.endsAt);
+export function resolveSubscriptionAccess(input={},legacyLimits={},legacyNow=new Date()){
+  const structuredInput=Boolean(input&&('business' in input||'subscription' in input||'now' in input));
+  const business=structuredInput?input.business||{}:{};
+  const subscription=structuredInput?input.subscription||business.subscription||{}:input||{};
+  const limits=structuredInput?input.limits||business.limits||{}:legacyLimits||{};
+  const at=structuredInput?input.now||new Date():legacyNow;
+  const internalFallback=business.id===INTERNAL_BUSINESS_ID&&!subscription.planId;
+  const subscriptionFallback=structuredInput&&Boolean(business.id)&&business.id!==INTERNAL_BUSINESS_ID&&!subscription.planId;
+  const safeSubscription=internalFallback?{planId:'internal',status:'active'}:subscriptionFallback?{planId:'essential',status:'active'}:subscription;
+  const unknownPlan=Boolean(safeSubscription.planId&&!PLANS[safeSubscription.planId]);
+  const planId=unknownPlan?'essential':PLANS[safeSubscription.planId]?safeSubscription.planId:'trial',basePlan=PLANS[planId],status=String(safeSubscription.status||'trial'),trialEnd=toDate(safeSubscription.trialEndsAt),periodEnd=toDate(safeSubscription.currentPeriodEnd),graceEnd=toDate(safeSubscription.gracePeriodEndsAt),featureTrial=structuredInput?input.featureTrial||safeSubscription.featureTrial||{}:safeSubscription.featureTrial||{},featureTrialEnd=toDate(featureTrial.endsAt);
   const daysRemaining=trialEnd?Math.max(0,Math.ceil((trialEnd-at)/DAY)):periodEnd?Math.max(0,Math.ceil((periodEnd-at)/DAY)):null;
   const trialValid=status==='trial'&&trialEnd&&trialEnd>=at;
   const internal=planId==='internal'&&['active','internal'].includes(status),active=internal||status==='active'||trialValid||status==='grace_period'&&(!graceEnd||graceEnd>=at);
@@ -49,10 +58,11 @@ export function resolveSubscriptionAccess(subscription={},limits={},at=new Date(
   if(limits.campaignsEnabled!==undefined)features.campaigns=limits.campaignsEnabled;
   return{
     canAccessApp:active&&!expired,
+    canUseApp:active&&!expired,
     canCreateData:active&&!expired,
     canUseCatalog:active&&!expired&&features.onlineCatalog===true,
     canUseCampaigns:active&&!expired&&features.campaigns===true,
-    canUseFeature:feature=>active&&!expired&&features[feature]===true,
+    accessMode:internal?'internal':active&&!expired?'full':'blocked',
     showBillingWarning:status==='trial'&&daysRemaining!==null&&daysRemaining<=3||['past_due','grace_period'].includes(status),
     daysRemaining,
     reason:expired?(status==='trial'?'trial_expired':status):null,
@@ -65,11 +75,12 @@ export function resolveSubscriptionAccess(subscription={},limits={},at=new Date(
     featureTrialActive,
     featureTrialDaysRemaining:featureTrialActive?Math.max(0,Math.ceil((featureTrialEnd-at)/DAY)):null,
     shouldShowUpgrade:!internal&&effectivePlan.id!=='premium',
-    internal
+    internal,
+    warnings:[...(internalFallback||subscriptionFallback?['SUBSCRIPTION_FALLBACK']:[]),...(unknownPlan?['INVALID_PLAN_FALLBACK']:[])]
   };
 }
 
-const state={businessId:'',business:null,userProfile:null,role:'',permissions:[],subscription:null,access:null,loading:true,error:null};
+const state={businessId:'',business:null,userProfile:null,role:'',permissions:[],subscription:null,effectivePlan:null,access:null,loading:true,error:null};
 const listeners=new Set();
 const snapshot=()=>structuredClone(state);
 const emit=()=>{const value=snapshot();listeners.forEach(listener=>listener(value));dispatchEvent(new CustomEvent('business-context-changed',{detail:value}))};
@@ -77,14 +88,18 @@ const emit=()=>{const value=snapshot();listeners.forEach(listener=>listener(valu
 export const BusinessContext={
   set({business,userProfile}){
     if(!business?.id||!userProfile?.uid||business.id!==userProfile.businessId)throw Error('Contexto de empresa inválido.');
-    const role=userProfile.role||'viewer',permissions=[...new Set([...(ROLE_PERMISSIONS[role]||[]),...(userProfile.permissions||[])])],plan=PLANS[business.subscription?.planId]||PLANS.trial;
-    const limits={...plan.limits,...business.limits,catalogEnabled:business.limits?.catalogEnabled??plan.features.onlineCatalog,campaignsEnabled:business.limits?.campaignsEnabled??plan.features.campaigns},access=resolveSubscriptionAccess(business.subscription,limits);
-    Object.assign(state,{businessId:business.id,business:{...business,limits:access.limits},userProfile,role,permissions,subscription:business.subscription||{},access,loading:false,error:null});
+    const storedSubscription=business.subscription||{};
+    const access=resolveSubscriptionAccess({business,subscription:storedSubscription,limits:business.limits||{}});
+    const subscription=storedSubscription.planId?storedSubscription:{planId:access.planId,status:access.status,fallback:true};
+    const role=userProfile.role||'viewer',permissions=[...new Set([...(ROLE_PERMISSIONS[role]||[]),...(userProfile.permissions||[])])],plan=PLANS[subscription.planId]||PLANS.essential;
+    const limits={...plan.limits,...business.limits,catalogEnabled:business.limits?.catalogEnabled??plan.features.onlineCatalog,campaignsEnabled:business.limits?.campaignsEnabled??plan.features.campaigns};
+    access.limits={...access.limits,...limits};
+    Object.assign(state,{businessId:business.id,business:{...business,subscription,limits:access.limits},userProfile,role,permissions,subscription,effectivePlan:access.effectivePlan,access,loading:false,error:null});
     window.FirebaseSession={...(window.FirebaseSession||{}),profile:userProfile,businessId:business.id,business:state.business,subscription:state.subscription,access:state.access};
     emit();
     return snapshot();
   },
-  clear(){Object.assign(state,{businessId:'',business:null,userProfile:null,role:'',permissions:[],subscription:null,access:null,loading:false,error:null});emit()},
+  clear(){Object.assign(state,{businessId:'',business:null,userProfile:null,role:'',permissions:[],subscription:null,effectivePlan:null,access:null,loading:false,error:null});emit()},
   fail(error){state.loading=false;state.error=String(error?.message||error);emit()},
   get: snapshot,
   subscribe(listener){listeners.add(listener);listener(snapshot());return()=>listeners.delete(listener)},
@@ -120,7 +135,7 @@ export const PlanLimitService={
   canInviteUser(){const limit=state.business?.limits?.users??1;return decision(BusinessContext.hasPermission('manageUsers')&&limit>1,'users',limit,null)},
   canUseCampaigns(){return decision(Boolean(state.access?.canUseCampaigns)&&BusinessContext.hasPermission('manageCampaigns'),'campaigns')},
   canUseOnlineCatalog(){return decision(Boolean(state.access?.canUseCatalog),'onlineCatalog')},
-  canUseFeature(feature){return decision(Boolean(state.access?.canUseFeature?.(feature)),feature)},
+  canUseFeature(feature){return decision(Boolean(state.access?.canUseApp)&&state.access?.features?.[feature]===true,feature)},
   assert(result,label='operação'){if(!result.ok)throw Object.assign(new Error(result.limit!==null&&result.current>=result.limit?`Você atingiu o limite de ${result.limit} para ${label} no plano atual.`:`Seu plano não permite ${label} agora.`),{code:'plan-limit',details:result});return true}
 };
 

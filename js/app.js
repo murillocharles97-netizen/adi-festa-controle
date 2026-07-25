@@ -52,7 +52,7 @@ addEventListener('cloud-data-updated',scheduleCloudRender);
 document.addEventListener('focusout',()=>{if(cloudRenderPending)setTimeout(scheduleCloudRender,80)});
 let stableSearchTimer=null;
 document.addEventListener('input',event=>{const client=event.target.id==='mobile-client-search',product=event.target.id==='mobile-product-search';if(!client&&!product)return;event.stopImmediatePropagation();clearTimeout(stableSearchTimer);const value=event.target.value;stableSearchTimer=setTimeout(()=>client?window.ClientesMobile?.search(value):window.ProdutosMobile?.search(value),100)},true);
-if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js').then(registration=>{
+if('serviceWorker'in navigator&&location.protocol.startsWith('http')&&!['localhost','127.0.0.1'].includes(location.hostname))navigator.serviceWorker.register('./service-worker.js').then(registration=>{
   const offerUpdate=worker=>{if(!worker)return;if(confirm('Nova versão disponível. Deseja atualizar agora?'))worker.postMessage('SKIP_WAITING')};
   if(registration.waiting)offerUpdate(registration.waiting);
   registration.addEventListener('updatefound',()=>{const worker=registration.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)offerUpdate(worker)})});

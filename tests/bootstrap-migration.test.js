@@ -113,11 +113,11 @@ function migrationModule(){
   assert.match(auth,/BOOTSTRAP_TIMEOUT_MS=15000/);
   assert.match(auth,/profileSnapshot=await getDoc\(profileRef\)/);
   assert.match(auth,/automaticBootstrapAttempts/);
-  assert.match(auth,/new Set\(\['unauthenticated','migrating','ready','onboarding','subscription_blocked','temporary_unavailable','permission_error','fatal_error'\]\)/);
-  assert.match(auth,/Firebase atingiu temporariamente o limite de uso/);
+  assert.match(auth,/new Set\(\['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error'\]\)/);
+  assert.match(auth,/O serviço de nuvem atingiu temporariamente o limite de uso/);
   assert.match(auth,/finally\(\(\)=>\{/);
   assert.match(auth,/window\.LegacyMigrationAdmin=/);
-  assert.match(auth,/window\.SyncFirebase\.setUser\(user,profile\)/);
+  assert.match(auth,/window\.SyncFirebase\.setUser\(user,profile,business\)/);
   assert.match(auth,/\[Profile Validation\]/);
   assert.match(auth,/validateAuthenticatedProfile/);
   assert.match(auth,/validateAuthenticatedBusiness/);
@@ -126,7 +126,7 @@ function migrationModule(){
   assert.doesNotMatch(auth,/onSnapshot\(/);
 
   const worker=read('service-worker.js');
-assert.match(worker,/adi-festa-v48-subscription-plans/);
+assert.match(worker,/adi-festa-v49-stabilize-saas-core/);
   assert.match(worker,/legacy-migration\.js/);
   assert.match(worker,/profile-validation\.js/);
 
