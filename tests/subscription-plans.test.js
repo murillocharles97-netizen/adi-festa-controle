@@ -105,7 +105,7 @@ assert.match(index,/data-route="planos"/);
 assert.match(index,/data-plan-feature="campaigns"/);
 assert.match(index,/data-plan-feature="onlineCatalog"/);
 assert.match(index,/data-plan-feature="onlineOrders"/);
-assert.match(worker,/adi-festa-v54-crm-client-profile/);
+assert.match(worker,/adi-festa-v55-universal-catalog/);
 assert.match(worker,/css\/plans\.css/);
 assert.match(worker,/js\/plans\.js/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);

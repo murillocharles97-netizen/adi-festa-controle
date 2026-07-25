@@ -18,7 +18,7 @@
     onlineOrders:{title:'Pedidos online fazem parte do Plano Profissional',text:'Receba, organize e acompanhe pedidos enviados pelo catálogo.',benefits:['Fila de pedidos','Status do pedido','Integração com clientes','Conversão em venda']},
     bulkMessages:{title:'Disparos e cobranças fazem parte do Plano Profissional',text:'Organize mensagens e cobranças pelo WhatsApp com segurança.',benefits:['Central de mensagens','Cobrança em sequência','Modelos personalizados','Histórico de contatos']}
   };
-  const routeFeatures={campanhas:'campaigns',visitas:'onlineCatalog',pedidos:'onlineOrders'};
+  const routeFeatures={campanhas:'campaigns',visitas:'onlineCatalog',catalogo:'onlineCatalog',pedidos:'onlineOrders'};
   let options={};
 
   function context(){
