@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>QA mobile layout polish</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/clientes-mobile.css">
+  <link rel="stylesheet" href="../css/produtos-mobile.css">
+  <link rel="stylesheet" href="../css/checkout-mobile.css">
+  <link rel="stylesheet" href="../css/mobile-fixes.css?v=53qa">
+  <link rel="stylesheet" href="../css/campanhas-mobile.css">
+  <link rel="stylesheet" href="../css/barcode.css">
+  <style>
+    body{margin:0;background:#f5f6f8}.qa-page{display:none}.qa-page.active{display:block}
+    .qa-nav{display:flex;gap:6px;padding:8px;overflow:auto}.qa-nav button{min-height:44px;white-space:nowrap}
+    .qa-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}
+    .qa-card{min-width:0;padding:14px;border-radius:16px;background:#fff;box-shadow:0 4px 16px #17233b10}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <button class="menu-btn" aria-label="Menu">☰</button>
+    <div><h1 id="qa-title">Início</h1><small>Controle rápido e simples</small></div>
+    <span class="subscription-badge">Plano interno</span>
+    <button class="local-badge" aria-label="Sincronizado">☁ Sincronizado</button>
+    <span class="avatar">M</span>
+  </header>
+  <nav class="qa-nav">
+    <button data-show="vender">Vender</button><button data-show="clientes">Clientes</button>
+    <button data-show="produtos">Produtos</button><button data-show="campanhas">Campanhas</button>
+  </nav>
+  <main>
+    <section class="qa-page active" data-page="vender">
+      <div class="pos-search-wrap"><input placeholder="Buscar produto ou código" aria-label="Buscar produto por nome, código ou categoria"><button data-scan-sale>⌗</button></div>
+      <div class="qa-cards"><article class="qa-card"><b>Cone recheado</b><p>R$ 12,00</p></article><article class="qa-card"><b>Brownie recheado</b><p>R$ 8,00</p></article></div>
+    </section>
+    <section class="qa-page clients-mobile-page" data-page="clientes">
+      <div class="mobile-client-search-row"><label>⌕<input placeholder="Buscar cliente"></label><button>☷</button><button>📣</button></div>
+      <div class="qa-cards"><article class="qa-card"><b>Cliente com nome muito comprido</b><p>(17) 99999-9999</p><strong class="kpi-money-value">R$ 123.456,78</strong></article><article class="qa-card"><b>Maria Doces</b><p>Sem telefone</p><strong>Sem saldo</strong></article></div>
+    </section>
+    <section class="qa-page products-mobile-page" data-page="produtos">
+      <div class="mobile-product-search"><label>⌕<input placeholder="Buscar produto"></label><button>☷</button></div>
+      <div class="mobile-product-compact-actions"><button>＋ Novo produto</button><button>▣ Entrada por código</button></div>
+      <div class="qa-cards"><article class="qa-card"><b>Produto extremamente comprido</b><p>R$ 12,00</p></article><article class="qa-card"><b>Brigadeiro</b><p>35 un.</p></article></div>
+    </section>
+    <section class="qa-page mobile-campaigns-page" data-page="campanhas">
+      <div class="mobile-campaign-metrics"><article><small>Campanhas ativas</small><strong>3</strong></article><article><small>Participantes</small><strong>128</strong></article><article><small>Resgates</small><strong>24</strong></article><article><small>Taxa de conversão</small><strong>42,5%</strong></article></div>
+      <div class="mobile-campaign-search"><label>⌕<input placeholder="Buscar campanha"></label><button>☷</button></div>
+      <div class="qa-cards"><article class="qa-card"><b>Compre 5 cones e ganhe 1 grátis</b><p>52,9% de conversão</p></article><article class="qa-card"><b>Acumule pontos</b><p>31,5% de conversão</p></article></div>
+    </section>
+  </main>
+  <nav class="bottom-nav"><a>Início</a><a>Vender</a><button class="mobile-client-fab" id="mobile-client-fab" data-primary-action="scan-sale">⌗<span>Escanear</span></button><a>Clientes</a><a>Produtos</a></nav>
+  <script>
+    document.querySelectorAll('[data-show]').forEach(button=>button.onclick=()=>{
+      document.querySelectorAll('[data-page]').forEach(page=>page.classList.toggle('active',page.dataset.page===button.dataset.show));
+      document.querySelector('#qa-title').textContent=button.textContent;
+    });
+  </script>
+</body>
+</html>

@@ -131,7 +131,14 @@
   function updatePrimaryFab(){
     const fab=document.querySelector('#mobile-client-fab');if(!fab)return;
     const route=window.Router?.atual?.()||location.hash.split('/')[1]||'inicio';
-    const config=route==='vender'?{icon:'scan-barcode',label:'Escanear',action:'scan-sale'}:route==='produtos'?{icon:'scan-barcode',label:'Ler código',action:'scan-product'}:{icon:'plus',label:'Novo cliente',action:'new-client'};
+    const actions={
+      inicio:{icon:'plus',label:'Ação rápida',action:'quick-action'},
+      vender:{icon:'scan-barcode',label:'Escanear',action:'scan-sale'},
+      clientes:{icon:'plus',label:'Novo cliente',action:'new-client'},
+      produtos:{icon:'scan-barcode',label:'Ler código',action:'scan-product'},
+      campanhas:{icon:'megaphone',label:'Nova campanha',action:'new-campaign'}
+    };
+    const config=actions[route]||actions.inicio;
     fab.dataset.primaryAction=config.action;fab.setAttribute('aria-label',config.label);fab.innerHTML=`${icon(config.icon)}<span>${config.label}</span>`;window.lucide?.createIcons();
   }
   window.BarcodePrimaryFab={update:updatePrimaryFab};

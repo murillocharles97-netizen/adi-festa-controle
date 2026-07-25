@@ -9,7 +9,7 @@
   .mobile-campaign-detail {
     width: 100%;
     min-width: 0;
-    padding: 0 14px 112px;
+    padding: 0 14px calc(var(--bottom-nav-height,76px) + env(safe-area-inset-bottom) + 36px);
     color: #14213d;
   }
 
@@ -29,11 +29,13 @@
   }
 
   .mobile-campaign-metrics article {
-    display: flex;
-    align-items: center;
+    display: grid;
+    align-content: space-between;
     gap: 10px;
-    min-width: 148px;
-    padding: 13px 12px;
+    flex: 0 0 164px;
+    min-width: 164px;
+    min-height: 132px;
+    padding: 14px;
     background: #fff;
     border: 1px solid #e5eaf1;
     border-radius: 16px;
@@ -71,8 +73,9 @@
   .mobile-campaign-metrics small {
     margin-top: 4px;
     color: #6b778c;
-    font-size: .7rem;
-    white-space: nowrap;
+    font-size: .72rem;
+    line-height: 1.25;
+    white-space: normal;
   }
 
   .mobile-campaign-search-row {
@@ -474,19 +477,7 @@
   }
 
   .mobile-campaign-fab {
-    display: grid;
-    place-items: center;
-    position: fixed;
-    right: 20px;
-    bottom: 91px;
-    z-index: 30;
-    width: 58px;
-    height: 58px;
-    border: 0;
-    border-radius: 50%;
-    color: #fff;
-    background: linear-gradient(145deg, #00a879, #31d0ad);
-    box-shadow: 0 12px 28px rgba(0, 168, 121, .38);
+    display: none;
   }
 
   .mobile-campaign-fab svg {
