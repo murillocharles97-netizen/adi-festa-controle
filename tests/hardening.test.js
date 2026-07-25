@@ -30,7 +30,7 @@ assert.match(repository, /CACHE_TTL_MS=60000/);
 assert.match(repository, /async listAllPaged\(max=200\)/);
 assert.match(repository, /listenerClosed\(collectionName\)/);
 
-assert.match(bridge, /\.slice\(0,3\)/);
+assert.match(bridge, /desired=universal\?\.publicToken\?\[universal\]:\[\]/);
 assert.match(bridge, /function stopAllSubscriptions\(\)/);
 assert.match(bridge, /firebase-sync-status/);
 
@@ -39,7 +39,7 @@ assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
 assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
-assert.match(worker, /adi-festa-v54-crm-client-profile/);
+assert.match(worker, /adi-festa-v55-universal-catalog/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
 assert.match(worker, /then\(\(\)=>self\.skipWaiting\(\)\)/);

@@ -65,7 +65,8 @@ assert.match(rules,/currentBusinessId\(\) == businessId/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);
 assert.match(rules,/request\.resource\.data\.limits == resource\.data\.limits/);
 assert.match(rules,/businessId == selfOnboardingBusinessId\(\)/);
-assert.match(rules,/request\.resource\.data\.businessId == catalog\(\)\.businessId/);
+assert.match(rules,/match \/orders\/\{orderId\}[\s\S]*allow create: if false/);
+assert.match(read('functions/src/index.js'),/context\.catalog\.businessId/);
 assert.match(rules,/allow list: if false/);
 
 const catalogBridge=read('js/firebase/catalog-bridge.js');

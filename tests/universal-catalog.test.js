@@ -1,0 +1,32 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const read=file=>fs.readFileSync(path.join(root,file),'utf8');
+
+const admin=read('js/catalogo-admin.js'),portal=read('js/catalogo-publico.js'),bridge=read('js/firebase/catalog-bridge.js'),rules=read('firestore.rules'),functions=read('functions/src/index.js'),index=read('index.html'),worker=read('service-worker.js');
+
+assert.match(index,/data-route="catalogo"[^>]*>[^<]*<i[^>]*><\/i>Catálogo online|data-route="catalogo"/);
+assert.doesNotMatch(index,/data-route="visitas"/);
+assert.match(admin,/publicToken/);
+assert.match(admin,/migrationVersion/);
+assert.match(admin,/closedBehavior/);
+assert.match(admin,/catalogVisible|visible/);
+assert.match(admin,/acceptingOrders/);
+assert.match(admin,/operationMode/);
+assert.match(admin,/scheduled_visit/);
+assert.match(admin,/qrcode/);
+assert.match(bridge,/schemaVersion:4/);
+assert.match(bridge,/legacyRedirect:true/);
+assert.match(portal,/legacy-token-redirected/);
+assert.match(portal,/httpsCallable\(functions,'identifyCatalogCustomer'\)/);
+assert.match(portal,/httpsCallable\(functions,'submitCatalogOrder'\)/);
+assert.doesNotMatch(portal,/getDocs\(collection/);
+assert.match(functions,/exports\.identifyCatalogCustomer=onCall/);
+assert.match(functions,/exports\.submitCatalogOrder=onCall/);
+assert.match(functions,/where\('normalizedPhone','==',phone\)\.limit\(2\)/);
+assert.match(functions,/publicRateLimits/);
+assert.match(rules,/match \/orders\/\{orderId\}[\s\S]*allow create: if false/);
+assert.match(rules,/match \/phoneIndex\/\{phoneHash\}[\s\S]*allow get: if false/);
+assert.match(worker,/adi-festa-v55-universal-catalog/);
+console.log('universal-catalog.test.js: OK');
