@@ -112,17 +112,30 @@ export const SubscriptionService={
   getPlans:()=>Object.values(PLANS).filter(plan=>!['internal','trial'].includes(plan.id)),
   getCurrentSubscription:()=>structuredClone(state.subscription||{}),
   getAccess:()=>state.access||getSubscriptionAccess({status:'expired'}),
-  startFreeTrial:async()=>({status:'backend_required',message:'A ativação segura do teste será disponibilizada com o serviço de assinaturas.'}),
-  requestUpgrade:async planId=>({status:'not_available',planId,message:'Pagamento ainda não integrado. Nenhum plano foi alterado.'}),
-  createCheckout:async planId=>({status:'not_available',planId,message:'Pagamento ainda não integrado. Nenhuma cobrança foi criada.'}),
-  createCheckoutSession:async planId=>({status:'not_available',planId,message:'Pagamento será disponibilizado em breve.'}),
-  openBillingPortal:async()=>({status:'not_available',message:'O portal de cobrança será disponibilizado após a integração de pagamentos.'}),
-  requestCancellation:async()=>({status:'not_available',message:'Cancelamento online ainda não disponível.'}),
+  startFreeTrial:async()=>({status:state.subscription?.status||'trial',message:'O teste gratuito é ativado automaticamente ao criar a empresa.'}),
+  requestUpgrade:async planId=>{
+    if(!state.businessId)throw Error('Nenhuma empresa ativa.');
+    const operationId=globalThis.crypto?.randomUUID?.()||`${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const response=await window.FirebaseCallable('createSubscription',{companyId:state.businessId,userId:state.userProfile?.uid,planId,operationId});
+    return{status:'checkout_created',planId,checkoutUrl:response.data?.checkoutUrl};
+  },
+  createCheckout:async planId=>SubscriptionService.requestUpgrade(planId),
+  createCheckoutSession:async planId=>SubscriptionService.requestUpgrade(planId),
+  openBillingPortal:async()=>({status:'available',message:'Use as opções de assinatura para cancelar ou reconciliar o pagamento.'}),
+  requestCancellation:async()=>{
+    if(!state.businessId)throw Error('Nenhuma empresa ativa.');
+    const response=await window.FirebaseCallable('cancelSubscription',{companyId:state.businessId});
+    return{status:response.data?.status||'cancelled',message:'Cancelamento solicitado com sucesso.'};
+  },
   requestDowngrade:async planId=>({status:'not_available',planId,message:'Alteração de plano ainda não disponível.'}),
   openCustomerPortal:async()=>({status:'not_available'}),
   processSubscriptionWebhook:()=>{throw Error('Webhooks só podem ser processados no backend.')},
-  syncSubscriptionStatus:()=>{throw Error('Status de assinatura só pode ser atualizado pelo backend.')},
-  cancelSubscription:async()=>({status:'requested'}),
+  syncSubscriptionStatus:async({reconcileProvider=false}={})=>{
+    if(!state.businessId)throw Error('Nenhuma empresa ativa.');
+    if(reconcileProvider){const response=await window.FirebaseCallable('syncSubscription',{companyId:state.businessId,reconcileProvider:true});return response.data}
+    const business=await window.FirebaseBusinessReader(state.businessId);if(!business)throw Error('Empresa não encontrada.');BusinessContext.set({business,userProfile:state.userProfile});return{subscription:BusinessContext.get().subscription,source:'firestore'};
+  },
+  cancelSubscription:async()=>SubscriptionService.requestCancellation(),
   reactivateSubscription:async()=>({status:'requested'})
 };
 

@@ -26,6 +26,29 @@ service cloud.firestore {
       return businessExists(businessId)
         && get(/databases/$(database)/documents/businesses/$(businessId)).data.active == true;
     }
+    function subscriptionAllowsWrites(businessId) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let subscription = business.subscription;
+      return business.active == true
+        && (
+          (subscription.planId == 'internal' && subscription.status == 'active')
+          || subscription.status == 'active'
+          || (subscription.status == 'trial' && subscription.trialEndsAt > request.time)
+          || (
+            subscription.status == 'grace_period'
+            && (!('gracePeriodEndsAt' in subscription) || subscription.gracePeriodEndsAt > request.time)
+          )
+        );
+    }
+    function planAllowsCollection(businessId, collectionName) {
+      let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
+      return !(collectionName in [
+          'campaigns', 'campaignProgress', 'rewards', 'charges',
+          'messageHistory', 'messageTemplates', 'messageSequences',
+          'visits', 'catalogOrders'
+        ])
+        || subscription.planId in ['internal', 'trial', 'professional', 'premium'];
+    }
     function belongsToBusiness(businessId) {
       return activeUser()
         && currentBusinessId() == businessId
@@ -41,6 +64,8 @@ service cloud.firestore {
     }
     function canWriteCollection(businessId, collectionName) {
       return belongsToBusiness(businessId)
+        && subscriptionAllowsWrites(businessId)
+        && planAllowsCollection(businessId, collectionName)
         && (
           userProfile().role in ['owner', 'admin', 'manager']
           || (
@@ -120,10 +145,14 @@ service cloud.firestore {
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.businessId is string
-        && belongsToBusiness(request.resource.data.businessId);
+        && belongsToBusiness(request.resource.data.businessId)
+        && subscriptionAllowsWrites(request.resource.data.businessId)
+        && get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
       allow update: if signedIn()
         && resource.data.businessId == request.resource.data.businessId
-        && belongsToBusiness(resource.data.businessId);
+        && belongsToBusiness(resource.data.businessId)
+        && subscriptionAllowsWrites(resource.data.businessId)
+        && get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
       allow delete: if false;
 
       match /orders/{orderId} {
@@ -273,10 +302,7 @@ service cloud.firestore {
 
       match /subscriptionIntents/{intentId} {
         allow read: if isOwner(businessId);
-        allow create: if isOwner(businessId)
-          && request.resource.data.businessId == businessId
-          && request.resource.data.requestedBy == request.auth.uid;
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
       match /invites/{inviteId} {
         allow read: if isAdmin(businessId);
@@ -305,6 +331,14 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId;
         allow delete: if false;
       }
+    }
+
+    match /subscriptionIndex/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    match /webhookEvents/{eventId} {
+      allow read, write: if false;
     }
   }
 }

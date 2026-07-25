@@ -82,7 +82,7 @@
       ].map(item=>`<article>${icon(item[0])}<b>${item[1]}</b><p>${item[2]}</p></article>`).join('')}</div><footer><span>${icon('shield-check')}<b>Sem fidelidade</b><small>Cancele ou mude de plano quando quiser.</small></span><span>${icon('headphones')}<b>Suporte humano</b><small>Estamos prontos para ajudar.</small></span></footer></section>
       <section class="plans-security">${icon('shield')}<span>Seus dados estão seguros. Você pode exportar suas informações a qualquer momento.</span></section>
       ${publicMode?'<div class="public-plan-actions"><button class="btn btn-primary" type="button" data-public-register>Começar teste grátis</button><button class="btn btn-light" type="button" data-public-login>Entrar na minha conta</button></div>':''}
-      <p class="payment-disclaimer">Pagamento recorrente ainda não integrado. Nenhuma cobrança ou ativação é feita pelo navegador.</p>
+      <p class="payment-disclaimer">Pagamento processado com segurança pelo Mercado Pago. O app recebe o status oficial pelo Firebase.</p>
     </section>`;
   }
   function fullComparison(){
@@ -106,6 +106,15 @@
     $('[data-pro-trial]',root).onclick=async()=>{const result=await window.SubscriptionService?.startFreeTrial?.();window.Utils?.toast?.(result?.message||'Teste ainda não disponível.',true)};
     window.lucide?.createIcons();
   }
+  function manageSubscription(){
+    const root=$('#modal');if(!root)return;
+    root.innerHTML=`<div class="modal-bg"><section class="modal-box pro-feature-modal"><header class="modal-head"><div class="pro-modal-icon">${icon('credit-card')}</div><h3>Gerenciar assinatura</h3><button class="icon-btn" data-close-billing aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p>O status exibido no aplicativo vem do Firestore e é atualizado pelo webhook do Mercado Pago.</p><div class="actions"><button class="btn btn-light" data-refresh-subscription>${icon('refresh-cw')} Atualizar do Firebase</button><button class="btn btn-light" data-reconcile-subscription>${icon('cloud-cog')} Conferir com Mercado Pago</button></div><small class="muted">A conferência direta é excepcional e pode ser executada a cada 15 minutos.</small></div><footer class="modal-foot"><button class="btn btn-danger" data-cancel-subscription>Cancelar assinatura</button><button class="btn btn-primary" data-close-billing>Concluir</button></footer></section></div>`;
+    $$('[data-close-billing]',root).forEach(button=>button.onclick=()=>root.innerHTML='');
+    $('[data-refresh-subscription]',root).onclick=async event=>{event.currentTarget.disabled=true;try{await window.SubscriptionService.syncSubscriptionStatus();window.Utils?.toast?.('Assinatura atualizada pelo Firebase.');root.innerHTML='';window.Router?.render?.()}catch(error){window.Utils?.toast?.(error.message||'Não foi possível atualizar.',true)}finally{event.currentTarget.disabled=false}};
+    $('[data-reconcile-subscription]',root).onclick=async event=>{event.currentTarget.disabled=true;try{await window.SubscriptionService.syncSubscriptionStatus({reconcileProvider:true});window.Utils?.toast?.('Conferência concluída.');root.innerHTML='';window.Router?.render?.()}catch(error){window.Utils?.toast?.(error.message||'Não foi possível conferir agora.',true)}finally{event.currentTarget.disabled=false}};
+    $('[data-cancel-subscription]',root).onclick=async event=>{if(!confirm('Cancelar a assinatura recorrente? O acesso seguirá o status devolvido pelo Mercado Pago.'))return;event.currentTarget.disabled=true;try{const result=await window.SubscriptionService.requestCancellation();window.Utils?.toast?.(result.message);root.innerHTML='';window.Router?.render?.()}catch(error){window.Utils?.toast?.(error.message||'Não foi possível cancelar.',true)}finally{event.currentTarget.disabled=false}};
+    window.lucide?.createIcons();
+  }
   function scrollToIndex(carousel,index){
     const cards=$$('[data-plan-card]',carousel),card=cards[index];if(!card)return;$$('[data-plan-indicator]',carousel.closest('[data-plans-root]')).forEach((dot,i)=>dot.classList.toggle('active',i===index));carousel.scrollTo({left:card.offsetLeft-(carousel.clientWidth-card.offsetWidth)/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
   }
@@ -126,8 +135,8 @@
     $('[data-plan-next]',scope)?.addEventListener('click',()=>selectPlan(selectedIndex+1));
     $$('[data-plan-indicator]',scope).forEach(button=>button.onclick=()=>selectPlan(Number(button.dataset.planIndicator)));
     $('[data-full-comparison]',scope)?.addEventListener('click',fullComparison);
-    $$('[data-plan-cta]',scope).forEach(button=>button.onclick=async()=>{if(options.publicMode)return options.onRegister?.();const result=await window.SubscriptionService?.requestUpgrade?.(button.dataset.planCta);window.Utils?.toast?.(result?.message||'Pagamento ainda não integrado.',true)});
-    $('[data-manage-plan]',scope)?.addEventListener('click',async()=>{const result=await window.SubscriptionService?.openBillingPortal?.();window.Utils?.toast?.(result?.message||'Gerenciamento ainda não disponível.',true)});
+    $$('[data-plan-cta]',scope).forEach(button=>button.onclick=async()=>{if(options.publicMode)return options.onRegister?.();button.disabled=true;try{const result=await window.SubscriptionService?.requestUpgrade?.(button.dataset.planCta);if(result?.checkoutUrl){location.assign(result.checkoutUrl);return}window.Utils?.toast?.(result?.message||'Não foi possível abrir o checkout.',true)}catch(error){window.Utils?.toast?.(error.message||'Não foi possível iniciar a assinatura.',true)}finally{button.disabled=false}});
+    $('[data-manage-plan]',scope)?.addEventListener('click',manageSubscription);
     $('[data-plan-preview]',scope)?.addEventListener('click',()=>window.Utils?.toast?.('A conta interna permanece inalterada.'));
     $('[data-start-feature-trial]',scope)?.addEventListener('click',async()=>{const result=await window.SubscriptionService?.startFreeTrial?.();window.Utils?.toast?.(result?.message||'Teste ainda não disponível.',true)});
     $('[data-plans-back]',scope)?.addEventListener('click',()=>options.onBack?.());
