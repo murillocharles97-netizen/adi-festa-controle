@@ -8,7 +8,7 @@ const checkoutMobile=fs.readFileSync('js/checkout-mobile.js','utf8');
 const clientsMobile=fs.readFileSync('js/clientes-mobile.js','utf8');
 assert.ok(!/getDocs|onSnapshot|firebase-firestore|collection\(/i.test(source),'scanner must not query Firebase or create listeners');
 assert.match(worker,/assets\/zxing-browser\.min\.js/);
-assert.match(worker,/adi-festa-v52-subscriptions-backend/);
+assert.match(worker,/adi-festa-v53-mobile-layout-polish/);
 assert.match(source,/mode:'sale'/);
 assert.match(source,/mode:'products'/);
 assert.match(source,/mode:'stock'/);
@@ -24,7 +24,7 @@ assert.match(source,/label:'Ler código',action:'scan-product'/);
 assert.match(productsMobile,/mobile-product-compact-actions/);
 assert.doesNotMatch(productsMobile,/mobile-product-actions/,'the oversized product shortcut row must be removed');
 assert.match(checkoutMobile,/primaryAction==='scan-sale'/);
-assert.match(clientsMobile,/!\['vender','produtos'\]\.includes/,'client creation must not intercept scanner FAB routes');
+assert.match(clientsMobile,/\['new-client','quick-action'\]\.includes/,'client creation must only handle its own FAB routes');
 
 const stores={empresa_a:{produtos:[],movimentacoesEstoque:[]},empresa_b:{produtos:[],movimentacoesEstoque:[]}};
 let active='empresa_a',trackStopped=0,loadCount=0;

@@ -15,6 +15,10 @@
     ? new Date(`${String(value).slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR')
     : 'Sem limite';
   const today = () => new Date().toISOString().slice(0, 10);
+  const percent = value => Number(value || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }) + '%';
 
   const state = {
     filter: 'all',
@@ -75,10 +79,10 @@
   function metrics() {
     const value = Campanhas.metricas();
     return `<section class="mobile-campaign-metrics" aria-label="Indicadores de campanhas">
-      <article><span>${icon('megaphone')}</span><div><b>${value.active}</b><small>Ativas</small></div></article>
+      <article><span>${icon('megaphone')}</span><div><b>${value.active}</b><small>Campanhas ativas</small></div></article>
       <article><span>${icon('users')}</span><div><b>${value.participants}</b><small>Participantes</small></div></article>
       <article><span>${icon('gift')}</span><div><b>${value.redemptions}</b><small>Resgates</small></div></article>
-      <article><span>${icon('chart-no-axes-combined')}</span><div><b>${value.conversion.toFixed(1)}%</b><small>Taxa de conv.</small></div></article>
+      <article><span>${icon('chart-no-axes-combined')}</span><div><b>${percent(value.conversion)}</b><small>Taxa de conversão</small></div></article>
     </section>`;
   }
 
@@ -115,7 +119,7 @@
       <div class="mobile-campaign-card-stats">
         <span>${icon('users')}<b>${participants}</b><small>Participantes</small></span>
         <span>${icon('gift')}<b>${redemptions}</b><small>Resgates</small></span>
-        <span>${icon('chart-no-axes-combined')}<b>${rate.toFixed(1)}%</b><small>Taxa de resgate</small></span>
+        <span>${icon('chart-no-axes-combined')}<b>${percent(rate)}</b><small>Taxa de resgate</small></span>
         ${icon('chevron-right')}
       </div>
       ${state.menuId === campaign.id ? menu(campaign) : ''}
@@ -126,11 +130,12 @@
     const campaigns = Campanhas.listar();
     const totals = counts(campaigns);
     const list = filteredCampaigns();
+    const hasFilter = Boolean(state.query) || state.filter !== 'all';
     return `<section class="mobile-campaigns-page">
       ${metrics()}
       <div class="mobile-campaign-search-row">
         <label class="mobile-campaign-search">${icon('search')}
-          <input data-mobile-campaign-search value="${esc(state.query)}" placeholder="Buscar campanha..." aria-label="Buscar campanha">
+          <input data-mobile-campaign-search value="${esc(state.query)}" placeholder="Buscar campanha" aria-label="Buscar campanha por nome, descrição ou tipo">
           ${state.query ? `<button type="button" data-clear-campaign-search aria-label="Limpar busca">${icon('x')}</button>` : ''}
         </label>
         <button class="mobile-campaign-filter-button" data-mobile-campaign-filters aria-label="Abrir filtros">${icon('list-filter')}<span>Filtros</span></button>
@@ -145,9 +150,8 @@
       <div class="mobile-campaign-list">
         ${list.length
           ? list.map(campaignCard).join('')
-          : `<div class="mobile-campaign-empty">${icon('party-popper')}<h3>Nenhuma campanha encontrada</h3><p>Tente outro filtro ou use o botão + para criar uma campanha.</p></div>`}
+          : `<div class="mobile-campaign-empty">${icon('party-popper')}<h3>Nenhuma campanha encontrada</h3><p>${hasFilter?'Tente alterar a busca ou os filtros.':'Crie sua primeira campanha para fidelizar seus clientes.'}</p></div>`}
       </div>
-      <button class="mobile-campaign-fab" data-mobile-new-campaign aria-label="Nova campanha">${icon('plus')}</button>
     </section>`;
   }
 
@@ -173,7 +177,7 @@
         <div><dt>Período</dt><dd>${formatDate(campaign.startDate)} até ${formatDate(campaign.endDate)}</dd></div>
         <div><dt>Participantes</dt><dd>${participants}</dd></div>
         <div><dt>Resgates</dt><dd>${redemptions}</dd></div>
-        <div><dt>Taxa de resgate</dt><dd>${participants ? (redemptions / participants * 100).toFixed(1) : '0,0'}%</dd></div>
+        <div><dt>Taxa de resgate</dt><dd>${percent(participants ? redemptions / participants * 100 : 0)}</dd></div>
       </dl>
       <div class="mobile-campaign-detail-actions">
         <button data-mobile-campaign-edit="${campaign.id}">${icon('pencil')} Editar campanha</button>
@@ -623,6 +627,12 @@
     });
     window.lucide?.createIcons();
   }
+
+  document.querySelector('#mobile-client-fab')?.addEventListener('click', event => {
+    if (isMobile() && Router.atual() === 'campanhas' && event.currentTarget.dataset.primaryAction === 'new-campaign') {
+      openMobileWizard();
+    }
+  });
 
   window.CampanhasUI = {
     ...desktop,

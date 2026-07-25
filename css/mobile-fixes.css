@@ -1,6 +1,22 @@
 @media(max-width:767px){
-  html,body{max-width:100%;overflow-x:clip}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{max-width:100%;overflow-x:hidden}
   :root{--bottom-nav-height:76px}
+  img,svg{max-width:100%}
+  .shell,.topbar,.topbar>*{min-width:0;max-width:100%}
+  .topbar{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 42px;gap:8px;width:100%;padding-inline:10px}
+  .topbar .menu-btn{width:44px;height:44px}
+  .topbar>div{min-width:0;overflow:hidden}
+  .topbar h1{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(20px,6vw,25px)}
+  .topbar small{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;font-size:clamp(10px,3vw,13px);line-height:1.25}
+  .topbar .subscription-badge{display:none!important}
+  .topbar .local-badge{display:grid!important;position:relative;place-items:center;width:44px;height:44px;min-width:44px;max-width:44px;margin:0;padding:0!important;border-radius:14px;font-size:0!important;overflow:visible}
+  .topbar .local-badge>svg{width:20px;height:20px}
+  .topbar .local-badge .cloud-count{position:absolute;right:-2px;top:-3px;min-width:19px;height:19px;margin:0;padding:0 4px;border:2px solid #fff;font-size:9px}
+  .topbar .avatar{width:42px;height:42px;min-width:42px}
+  .bottom-nav{min-height:var(--bottom-nav-height);padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+  .bottom-nav :is(a,button){min-width:0;min-height:44px}
+  .mobile-client-fab>span{max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #app,#app>*{min-width:0;max-width:100%}
   #app :is(article,section,header,footer,div,span,label){min-width:0}
   #app :is(.metrics,.entity-grid,.quick-actions,.home-main-metrics,.home-attention-grid,.product-detail-grid){grid-template-columns:minmax(0,1fr)}
@@ -47,6 +63,12 @@
   .mobile-sale-page .total-row b{max-width:58%;font-size:clamp(19px,6vw,25px);overflow-wrap:anywhere;text-align:right;font-variant-numeric:tabular-nums}
   .mobile-payment-chips{grid-template-columns:repeat(2,minmax(0,1fr))}
   .mobile-payment-chips button{min-width:0;white-space:normal}
+}
+
+@media(max-width:350px){
+  .topbar{grid-template-columns:42px minmax(0,1fr) 42px 38px;gap:5px;padding-inline:6px}
+  .topbar .local-badge{width:42px;min-width:42px}
+  .topbar .avatar{width:38px;height:38px;min-width:38px}
 }
 
 @media(max-width:350px){
