@@ -1,63 +1,1149 @@
-(()=>{'use strict';const $=(s,e=document)=>e.querySelector(s),$$=(s,e=document)=>[...e.querySelectorAll(s)],{dinheiro,dataHora,escapar,telefoneWhatsApp,toast}=Utils;let carrinho=[],historicoLimite=100;
-const icon=(n)=>`<i data-lucide="${n}"></i>`,cabecalho=(titulo,sub,acoes='')=>`<div class="page-head"><div><h2>${titulo}</h2><p>${sub}</p></div>${acoes?`<div class="head-actions">${acoes}</div>`:''}</div>`,vazio=(texto)=>`<div class="empty">${icon('inbox')}<div>${texto}</div></div>`,metric=(titulo,valor,sub,ico)=>`<article class="metric-card"><div class="metric-top"><span>${titulo}</span><span class="metric-icon">${icon(ico)}</span></div><strong>${valor}</strong><small>${sub}</small></article>`;
-function aplicarInputModes(root=document){$$('input[type="number"]',root).forEach(i=>i.setAttribute('inputmode','decimal'));$$('input[name*="telefone"],input[type="tel"]',root).forEach(i=>i.setAttribute('inputmode','tel'))}
-function abrirFormulario(titulo,conteudo,salvar,label='Salvar'){const root=$('#modal');root.innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${titulo}</h3><button class="icon-btn close">${icon('x')}</button></header><form><div class="modal-body">${conteudo}</div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;root.querySelectorAll('.close,.cancel').forEach(b=>b.onclick=Modais.fechar);root.querySelector('form').onsubmit=e=>{e.preventDefault();try{salvar(new FormData(e.target));Modais.fechar();render(Router.atual())}catch(err){toast(err.message,true)}};aplicarInputModes(root);window.lucide?.createIcons()}
-function resumoFechamento(){const d=DB.carregar(),vendas=d.vendas.filter(v=>Utils.hoje(v.data)),pagamentos=d.pagamentos.filter(p=>Utils.hoje(p.data)),vendido=vendas.reduce((s,v)=>s+Number(v.valorFinal??v.valorTotal),0),recebido=pagamentos.reduce((s,p)=>s+Number(p.valor),0),fiado=vendas.filter(v=>v.status==='fiado').reduce((s,v)=>s+Number(v.valorFinal??v.valorTotal),0),lucro=vendas.reduce((s,v)=>s+Number(v.lucro||0),0),clientes=new Set(vendas.map(v=>v.clienteId).filter(Boolean)).size;return{vendido,recebido,fiado,lucro,vendas:vendas.length,clientes,texto:`Fechamento do dia - ${new Date().toLocaleDateString('pt-BR')}\nTotal vendido: ${dinheiro(vendido)}\nTotal recebido: ${dinheiro(recebido)}\nTotal fiado: ${dinheiro(fiado)}\nLucro estimado: ${dinheiro(lucro)}\nVendas: ${vendas.length}\nClientes atendidos: ${clientes}`}}
-function resumoEstoque(){const d=DB.carregar(),produtos=d.produtos.filter(p=>p.ativo!==false),esgotados=produtos.filter(p=>getProductStockStatus(p)==='esgotado'),baixos=produtos.filter(p=>getProductStockStatus(p)==='baixo'),vendidos=new Map();d.vendas.filter(v=>Utils.hoje(v.data)).forEach(v=>v.itens.forEach(i=>vendidos.set(i.produtoId,{nome:i.nome,quantidade:(vendidos.get(i.produtoId)?.quantidade||0)+Number(i.quantidade||0)})));const maisVendidos=[...vendidos.values()].sort((a,b)=>b.quantidade-a.quantidade).slice(0,3),reposicao=[...esgotados,...baixos].slice(0,4);return{esgotados,baixos,maisVendidos,reposicao}}
-function blocoAlertasEstoque(){const e=resumoEstoque();return `<section class="panel stock-alerts"><div class="panel-head"><h3>Alertas de estoque</h3><button class="btn btn-light btn-sm" data-go="produtos">${icon('package')} Ver produtos</button></div><div class="stock-alert-grid"><div class="stock-alert danger"><b>${e.esgotados.length}</b><span>Produtos esgotados</span></div><div class="stock-alert warning"><b>${e.baixos.length}</b><span>Abaixo do mínimo</span></div><div><h4>Mais vendidos hoje</h4>${e.maisVendidos.length?e.maisVendidos.map(p=>`<p>${escapar(p.nome)} <b>${p.quantidade} un.</b></p>`).join(''):'<p class="muted">Nenhuma venda hoje</p>'}</div><div><h4>Sugestão de reposição</h4>${e.reposicao.length?e.reposicao.map(p=>`<p>${escapar(p.nome)} <b>${Number(p.estoqueAtual||0)} un.</b></p>`).join(''):'<p class="muted">Estoque tranquilo por enquanto</p>'}</div></div></section>`}
-function inicio(){const d=DB.carregar(),hoje=d.vendas.filter(v=>Utils.hoje(v.data)),valorHoje=hoje.reduce((s,v)=>s+Number(v.valorFinal??v.valorTotal),0),lucroHoje=hoje.reduce((s,v)=>s+Number(v.lucro||0),0),fiado=d.clientes.reduce((s,c)=>s+Math.abs(Math.min(0,c.saldo)),0),recebido=d.pagamentos.filter(p=>Utils.mesAtual(p.data)).reduce((s,p)=>s+p.valor,0),f=resumoFechamento(),ultima=Vendas.ultima();return cabecalho('Olá! Vamos vender?','Seu resumo rápido da Adi Festa.')+`<section class="metrics">${metric('Vendas hoje',hoje.length,'registros','shopping-cart')}${metric('Vendido hoje',dinheiro(valorHoje),'valor final','circle-dollar-sign')}${metric('Lucro hoje',dinheiro(lucroHoje),'somente para você','trending-up')}${metric('Fiado em aberto',dinheiro(fiado),'saldo de clientes','hand-coins')}${metric('Recebido no mês',dinheiro(recebido),'pagamentos','wallet-cards')}${metric('Clientes',d.clientes.length,'cadastrados','users')}${metric('Produtos',d.produtos.length,'cadastrados','candy')}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon('plus')}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button><button class="quick-card" data-go="fiados"><span>${icon('banknote-arrow-down')}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button></section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric('Vendido',dinheiro(f.vendido),'hoje','circle-dollar-sign')}${metric('Recebido',dinheiro(f.recebido),'pagamentos','wallet-cards')}${metric('Fiado',dinheiro(f.fiado),'novas contas','hand-coins')}${metric('Lucro estimado',dinheiro(f.lucro),'privado','trending-up')}${metric('Vendas',f.vendas,'realizadas','shopping-cart')}${metric('Clientes',f.clientes,'atendidos','users')}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon('copy')} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon('message-circle')} Compartilhar no WhatsApp</button>${ultima?`<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer()?'':'disabled'}>${icon('undo-2')} Desfazer última venda</button>`:''}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0,5),'Vendas recentes')}`}
-function clienteCard(c){const tel=Utils.somenteNumeros(c.telefone),saldo=Number(c.saldo||0),classe=saldo<0?'debit':saldo>0?'credit':'zero',rotulo=saldo<0?'Débito':saldo>0?'Crédito':'Sem saldo em aberto';return `<article class="entity-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone)||'Sem telefone'}</p></div><span class="badge balance-badge ${classe}">${rotulo}</span></div><div class="entity-stats"><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra?new Date(c.ultimaCompra).toLocaleDateString('pt-BR'):'—'}</strong></div><div class="entity-stat"><small>Total comprado</small><strong>${dinheiro(c.totalComprado)}</strong></div><div class="entity-stat"><small>Saldo</small><strong>${saldo===0?'Zerado':dinheiro(Math.abs(saldo))}</strong></div></div><div class="balance ${classe}"><span>${rotulo}</span><b class="${classe}">${saldo===0?'—':dinheiro(Math.abs(saldo))}</b></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-client-whatsapp="${c.id}" ${tel.length<10?'disabled':''}>${icon('message-circle')} WhatsApp</button><button class="btn btn-light btn-sm" data-client-charges="${c.id}">${icon('history')} Cobranças</button><button class="btn btn-dark btn-sm" data-adjust-client="${c.id}">${icon('scale')} Ajustar saldo</button><button class="btn btn-light btn-sm" data-edit-client="${c.id}">${icon('pencil')} Editar</button><button class="btn btn-danger btn-sm" data-delete-client="${c.id}">${icon('trash-2')} Excluir</button></div></article>`}
-function clientes(){if(window.ClientesPage)return ClientesPage.render();const lista=Clientes.listar(),debito=lista.reduce((s,c)=>s+Math.abs(Math.min(0,c.saldo)),0),credito=lista.reduce((s,c)=>s+Math.max(0,c.saldo),0);return cabecalho('Clientes','Contas, compras e contato em um só lugar.',`<button class="btn btn-dark" data-go="cobrancas">${icon('send')} Cobrança em lote</button><button class="btn btn-light" id="import-csv">${icon('file-up')} Importar CSV</button><button class="btn btn-primary" id="new-client">${icon('user-plus')} Novo cliente</button>`)+`<div class="toolbar"><input class="search" id="search" placeholder="Buscar por nome ou telefone..."></div><section class="entity-grid" id="entity-list">${lista.map(clienteCard).join('')||vazio('Nenhum cliente cadastrado')}</section><div class="fixed-totals"><span>Débitos: <b>${dinheiro(debito)}</b></span><span>Créditos: <b>${dinheiro(credito)}</b></span></div>`}
-function produtoCard(p){const st=Produtos.status(p),rotulo={disponivel:'Disponível',baixo:'Baixo estoque',esgotado:'Esgotado','sem-controle':'Sem controle'}[st],estoque=Number(p.estoqueAtual||0),minimo=Number(p.estoqueMinimo||0);return `<article class="entity-card product-card ${st}"><div class="entity-head"><div><h3>${escapar(p.nome)}</h3><p>${escapar(p.categoria)||'Sem categoria'}</p></div><span class="badge stock-badge ${st}">${rotulo}</span></div><div class="entity-stats"><div class="entity-stat"><small>Preço</small><strong>${dinheiro(p.preco)}</strong></div><div class="entity-stat"><small>Custo</small><strong>${p.custo===null?'—':dinheiro(p.custo)}</strong></div><div class="entity-stat"><small>Estoque atual</small><strong>${estoque}</strong></div><div class="entity-stat"><small>Estoque mínimo</small><strong>${minimo}</strong></div><div class="entity-stat"><small>Status</small><strong>${rotulo}</strong></div></div><div class="actions"><button class="btn btn-primary btn-sm" data-stock-entry="${p.id}">${icon('plus')} Adicionar entrada</button><button class="btn btn-dark btn-sm" data-stock-adjust="${p.id}">${icon('sliders-horizontal')} Ajustar estoque</button><button class="btn btn-light btn-sm" data-stock-history="${p.id}">${icon('history')} Histórico</button><button class="btn btn-light btn-sm" data-edit-product="${p.id}">${icon('pencil')} Editar</button><button class="btn btn-danger btn-sm" data-delete-product="${p.id}">${icon('trash-2')} Excluir</button></div></article>`}
-function produtos(){if(window.ProdutosMobile?.isMobile())return ProdutosMobile.render();const lista=Produtos.listar();return cabecalho('Produtos','Preços, custos e estoque dos seus doces.',`<button class="btn btn-primary" id="new-product">${icon('plus')} Novo produto</button>`)+`<div class="toolbar"><input class="search" id="search" placeholder="Buscar produto por nome ou código..."><button class="desktop-barcode-button" data-scan-product aria-label="Ler código"><i data-lucide="scan-barcode"></i></button><button class="btn btn-light" data-scan-stock><i data-lucide="package-plus"></i> Entrada por código</button></div><section class="entity-grid" id="entity-list">${lista.map(produtoCard).join('')||vazio('Nenhum produto cadastrado')}</section>`}
-const totaisCarrinho=()=>{const subtotalOriginal=carrinho.reduce((s,i)=>s+i.quantidade*i.precoOriginal,0),valorFinal=carrinho.reduce((s,i)=>s+i.quantidade*i.precoFinalUnitario,0),custoTotal=carrinho.reduce((s,i)=>s+i.quantidade*i.custoUnitario,0);return{subtotalOriginal,valorFinal,descontoTotal:subtotalOriginal-valorFinal,custoTotal,lucro:valorFinal-custoTotal}},carrinhoHTML=()=>carrinho.length?carrinho.map(i=>`<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${i.produtoId}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${i.produtoId}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${i.produtoId}">${icon('trash-2')}</button></div>`).join(''):vazio('Adicione produtos');
-function vender(){const ps=Produtos.listar().filter(p=>p.ativo),cs=Clientes.listar().filter(c=>c.ativo),t=totaisCarrinho();return cabecalho('Nova venda','Edite quantidades, preços e descontos antes de concluir.')+`<div class="sale-layout"><section><div class="toolbar"><input class="search" id="product-search" placeholder="Buscar produto ou código..."><button class="desktop-barcode-button" data-scan-sale aria-label="Ler código"><i data-lucide="scan-barcode"></i></button></div><div class="product-picker">${ps.map(p=>`<button class="pick-product" data-add="${p.id}"><b>${escapar(p.nome)}</b><small>${Number(p.estoqueAtual||0)} disponíveis</small><span>${dinheiro(p.preco)}</span></button>`).join('')||vazio('Cadastre um produto primeiro')}</div></section><aside class="panel sale-summary"><h3>Resumo da venda</h3><div id="cart">${carrinhoHTML()}</div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" min="0" step=".01" value="${t.valorFinal.toFixed(2)}"></div><div id="sale-totals"></div><div class="field"><label>Cliente</label><select id="sale-client"><option value="">Venda avulsa</option>${cs.map(c=>`<option value="${c.id}">${escapar(c.nome)}${c.saldo<0?` — deve ${dinheiro(Math.abs(c.saldo))}`:c.saldo>0?` — crédito ${dinheiro(c.saldo)}`:''}</option>`).join('')}</select></div><div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago</option><option value="fiado">Fiado</option></select></div><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale" style="width:100%;margin-top:15px">${icon('check')} Concluir venda</button></aside></div>`}
-function fiadoCard(c){const tel=Utils.somenteNumeros(c.telefone);return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone)||'Sem telefone'}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(Math.abs(c.saldo))}</b></div><div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon('banknote-arrow-down')} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length<10?'disabled':''}>${icon('message-circle')} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon('copy')} Copiar</button></div></article>`}
-function fiados(){const lista=Fiados.listar().sort((a,b)=>a.saldo-b.saldo),total=lista.reduce((s,c)=>s+Math.abs(c.saldo),0);return cabecalho('Fiados e pendências','Do maior débito para o menor.')+`<section class="metrics" style="margin-bottom:18px">${metric('Total em aberto',dinheiro(total),`${lista.length} cliente(s)`,'hand-coins')}</section><div class="toolbar"><input class="search" id="fiado-search" placeholder="Buscar cliente..."></div><section class="entity-grid" id="fiados-list">${lista.map(fiadoCard).join('')||vazio('Nenhuma pendência. Tudo em dia!')}</section>`}
-function historicoTabela(lista,titulo='Histórico'){return `<section class="panel"><div class="panel-head"><h3>${titulo}</h3></div>${lista.length?`<div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Status</th><th>Valor</th></tr></thead><tbody>${lista.map(v=>`<tr><td>${dataHora(v.data)}</td><td>${escapar(v.clienteNome||'Venda avulsa')}</td><td><span class="badge ${v.status==='pago'?'badge-paid':'badge-debt'}">${v.status}</span></td><td><b>${dinheiro(v.valorTotal)}</b></td></tr>`).join('')}</tbody></table></div>`:vazio('Nenhuma venda registrada')}</section>`}
-function historico(){const d=DB.carregar(),todos=[...d.movimentacoes].sort((a,b)=>new Date(b.data)-new Date(a.data)),eventos=todos.slice(0,historicoLimite);return cabecalho('Histórico','Vendas, pagamentos, descontos e ajustes.')+`<section class="panel"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Detalhe</th></tr></thead><tbody>${eventos.map(e=>`<tr><td>${dataHora(e.data)}</td><td>${escapar(e.clienteNome||'Venda avulsa')}</td><td><span class="badge badge-paid">${escapar(e.tipo.replaceAll('_',' '))}</span></td><td>${e.tipo==='ajuste_saldo'?`${dinheiro(e.saldoAnterior)} → ${dinheiro(e.saldoNovo)} · ${escapar(e.motivo)}`:e.valor!==undefined?dinheiro(e.valor):e.valorFinal!==undefined?dinheiro(e.valorFinal):'—'}</td></tr>`).join('')}</tbody></table></div>${todos.length>eventos.length?`<div class="modal-foot"><button class="btn btn-light" data-load-history>Carregar mais</button></div>`:''}</section>`}
-function relatorios(){if(matchMedia('(max-width:767px)').matches)return `<section class="mobile-desempenho-notice">${icon('monitor-up')}<h2>Desempenho no desktop</h2><p>A área de Desempenho está disponível na versão desktop.</p><button class="btn btn-primary" data-go="inicio">${icon('arrow-left')} Voltar ao início</button></section>`;const d=DB.carregar(),faturamento=d.vendas.reduce((s,v)=>s+Number(v.valorFinal??v.valorTotal),0),lucro=d.vendas.reduce((s,v)=>s+Number(v.lucro||0),0),custo=d.vendas.reduce((s,v)=>s+Number(v.custoTotal||0),0),fiado=d.clientes.reduce((s,c)=>s+Math.abs(Math.min(c.saldo,0)),0);return cabecalho('Desempenho','Análises detalhadas do seu negócio.')+`<section class="metrics">${metric('Faturamento',dinheiro(faturamento),`${d.vendas.length} vendas`,'circle-dollar-sign')}${metric('Custo total',dinheiro(custo),'produtos vendidos','package')}${metric('Lucro estimado',dinheiro(lucro),'não aparece no recibo','trending-up')}${metric('Fiado aberto',dinheiro(fiado),'a receber','hand-coins')}${metric('Ticket médio',dinheiro(d.vendas.length?faturamento/d.vendas.length:0),'por venda','chart-line')}</section>`}
-function cobrancaCard(c){const tel=Utils.somenteNumeros(c.telefone),ultima=Cobrancas.ultimaCliente(c.id),status=Cobrancas.statusCliente(c);return `<article class="entity-card charge-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone)||'Sem telefone'}</p></div><span class="badge ${status==='enviado hoje'?'badge-paid':'badge-debt'}">${status}</span></div><div class="entity-stats"><div class="entity-stat"><small>Valor em aberto</small><strong>${dinheiro(Math.abs(c.saldo))}</strong></div><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra?new Date(c.ultimaCompra).toLocaleDateString('pt-BR'):'—'}</strong></div><div class="entity-stat"><small>Última cobrança</small><strong>${ultima?dataHora(ultima.data):'Nunca'}</strong></div></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-batch-whatsapp="${c.id}" ${tel.length<10?'disabled':''}>${icon('message-circle')} Enviar cobrança</button><button class="btn btn-light btn-sm" data-copy-batch="${c.id}">${icon('copy')} Copiar mensagem</button><button class="btn btn-light btn-sm" data-ignore-charge="${c.id}">${icon('ban')} Ignorar hoje</button></div></article>`}
-function cobrancas(){const filtro=new URLSearchParams(location.hash.split('?')[1]||'').get('filtro')||'naoHoje',lista=Cobrancas.listar(filtro),total=lista.reduce((s,c)=>s+Math.abs(Number(c.saldo||0)),0);return cabecalho('Cobrança em lote','Fluxo manual e seguro para cobrar clientes pelo WhatsApp.',`<button class="btn btn-primary" id="send-next">${icon('send')} Enviar próximo</button><button class="btn btn-light" data-go="clientes">${icon('arrow-left')} Clientes</button>`)+`<section class="panel warning-panel"><div class="modal-body"><b>Use com cuidado.</b> O WhatsApp pode bloquear contas que enviam mensagens repetidas em excesso. Este app apenas abre uma conversa por vez; você confirma manualmente cada cobrança.</div></section><section class="metrics" style="margin:16px 0">${metric('Clientes na fila',lista.length,'com débito','users')}${metric('Total listado',dinheiro(total),'em aberto','hand-coins')}</section><div class="toolbar charge-filters"><button class="btn btn-light btn-sm" data-charge-filter="todos">Todos com débito</button><button class="btn btn-light btn-sm" data-charge-filter="nunca">Nunca cobrados</button><button class="btn btn-light btn-sm" data-charge-filter="naoHoje">Não cobrados hoje</button><button class="btn btn-light btn-sm" data-charge-filter="acima10">Acima de R$ 10</button><button class="btn btn-light btn-sm" data-charge-filter="acima50">Acima de R$ 50</button><button class="btn btn-light btn-sm" data-charge-filter="semTelefone">Sem telefone</button></div><section class="entity-grid" id="charge-list">${lista.map(cobrancaCard).join('')||vazio('Nenhum cliente neste filtro')}</section>`}
-function mostrarCobrancasCliente(id){const c=Clientes.obter(id),lista=Cobrancas.historicoCliente(id);$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Cobranças - ${escapar(c.nome)}</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><p>Saldo atual: <b>${dinheiro(Math.abs(Number(c.saldo||0)))}</b></p><div class="table-wrap"><table><thead><tr><th>Data</th><th>Status</th><th>Valor</th><th>Mensagem</th></tr></thead><tbody>${lista.map(x=>`<tr><td>${dataHora(x.data)}</td><td>${escapar(x.status)}</td><td>${dinheiro(x.valorCobrado)}</td><td>${escapar(x.mensagem)}</td></tr>`).join('')||'<tr><td colspan="4">Nenhuma cobrança registrada</td></tr>'}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-primary close">Fechar</button></footer></section></div>`;$$('#modal .close').forEach(b=>b.onclick=Modais.fechar);window.lucide?.createIcons()}
-function configuracoes(){if(window.ConfiguracoesMobile?.isMobile())return ConfiguracoesMobile.render();const session=window.FirebaseSession||{},business=session.business||{},subscription=session.subscription||{},access=session.access||{},plan=window.BusinessContext?.get?.().business?.subscription?.planId||subscription.planId||'trial',data=DB.carregar(),limits=access.limits||business.limits||{};return cabecalho('Configurações','Conta, backup e armazenamento deste aparelho.')+`<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name||data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId||DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role||'')}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status==='trial'&&access.daysRemaining!==null?` · ${access.daysRemaining} dia(s)`:''}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan==='internal'?'Todos os recursos liberados':subscription.status==='trial'?`Teste grátis · ${access.daysRemaining??0} dia(s) restante(s)`:`Status: ${subscription.status||'não informado'}`} · Produtos: ${data.produtos.length} de ${limits.products??'—'} · Clientes: ${data.clientes.length} de ${limits.clients??'—'}</small></div><button class="btn btn-primary" data-go="planos">${icon('gem')} ${plan==='internal'?'Plano interno':'Ver planos'}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name||data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon('download')} Exportar backup</button><label class="btn btn-light">${icon('upload')} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>`}
-function planos(){return window.PlansUI.render()}
-const inicioCompleto=()=>`${window.MobileHome?.isMobile()?MobileHome.render():inicio()}${window.CampanhasUI?.dashboard?.()||''}`;
-const views={inicio:inicioCompleto,vender,clientes,cobrancas,fiados,produtos,campanhas:()=>CampanhasUI.render(),catalogo:()=>CatalogoUI.render(),pedidos:()=>VisitasUI.renderOrdersPage(),historico,relatorios,configuracoes,planos},titles={inicio:'Início',vender:'Vender',clientes:'Clientes',cobrancas:'Cobranças',fiados:'Fiados',produtos:'Produtos',campanhas:'Campanhas',catalogo:'Catálogo online',pedidos:'Pedidos online',historico:'Histórico',relatorios:'Desempenho',configuracoes:'Configurações',planos:'Planos e assinatura'};
-function formularioCliente(id){const c=id?Clientes.obter(id):{};abrirFormulario(id?'Editar cliente':'Novo cliente',`<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${escapar(c.nome||'')}"></div><div class="field"><label>Telefone</label><input name="telefone" value="${escapar(c.telefone||'')}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" value="${escapar(c.telefone2||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${escapar(c.email||'')}"></div><div class="field"><label>Documento</label><input name="documento" value="${escapar(c.documento||'')}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${escapar(c.endereco||'')}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${escapar(c.complemento||'')}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${escapar(c.observacoes||'')}</textarea></div></div>`,f=>{Clientes.salvar({id,...Object.fromEntries(f),ativo:true});toast('Cliente salvo')})}
-function formularioProduto(id){ProductImages.openForm(id)}
-function formularioEntradaEstoque(id){const p=Produtos.obter(id);abrirFormulario('Adicionar entrada',`<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual||0)}</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div><div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" min="0" step=".01" value="${p.custo??''}"></div><div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,f=>{Produtos.entrada(id,f.get('quantidade'),f.get('custo'),f.get('observacao'));toast('Entrada registrada')},'Salvar entrada')}
-function formularioAjusteEstoque(id){const p=Produtos.obter(id);abrirFormulario('Ajustar estoque',`<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual||0)}</b></p><div class="field"><label>Novo estoque *</label><input name="estoque" type="number" step="1" value="${Number(p.estoqueAtual||0)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,f=>{Produtos.ajustarEstoque(id,f.get('estoque'),f.get('motivo'));toast('Estoque ajustado')},'Salvar ajuste')}
-function mostrarHistoricoEstoque(id){const p=Produtos.obter(id),lista=Produtos.historico(id);$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Histórico de estoque - ${escapar(p.nome)}</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Qtd.</th><th>Anterior</th><th>Novo</th><th>Observação</th></tr></thead><tbody>${lista.map(m=>`<tr><td>${dataHora(m.data)}</td><td>${escapar(m.tipo.replaceAll('_',' '))}</td><td><b>${Number(m.quantidade||0)}</b></td><td>${Number(m.estoqueAnterior||0)}</td><td>${Number(m.estoqueNovo||0)}</td><td>${escapar(m.observacao||'—')}</td></tr>`).join('')||'<tr><td colspan="6">Nenhuma movimentação registrada</td></tr>'}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-primary close">Fechar</button></footer></section></div>`;$$('#modal .close').forEach(b=>b.onclick=Modais.fechar);window.lucide?.createIcons()}
-function importarCSV(){const input=document.createElement('input');input.type='file';input.accept='.csv,text/csv';input.onchange=()=>{const arquivo=input.files[0];if(!arquivo)return;const reader=new FileReader();reader.onload=()=>{try{const resultado=CSVImport.ler(reader.result),registros=CSVImport.semDuplicados(resultado.clientes),duplicados=resultado.clientes.length-registros.length,resumo=CSVImport.resumir(registros),avisoSaldo=resultado.possuiSaldo?`<span class="badge badge-paid">Saldo reconhecido</span> O sinal será preservado: negativo é débito e positivo é crédito.`:`<span class="badge badge-debt">Sem coluna de saldo</span> Somente clientes novos deste arquivo serão criados com saldo zero.`;$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Prévia da migração do Kyte</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><div class="csv-summary"><b>${registros.length} clientes encontrados</b>${duplicados?` · ${duplicados} linha(s) duplicada(s) ignorada(s)`:''}<br><small>${avisoSaldo}</small></div><div class="import-stats"><div><small>Telefones</small><b>${resumo.telefones}</b></div><div><small>Devedores</small><b>${resumo.devedores}</b></div><div><small>Total em aberto</small><b>${dinheiro(resumo.totalEmAberto)}</b></div></div><div class="csv-preview"><table><thead><tr><th>Nome</th><th>Telefone / WhatsApp</th><th>Saldo atual</th><th>Observações</th></tr></thead><tbody>${registros.map(c=>`<tr><td>${escapar(c.nome)}</td><td>${escapar(c.telefone)||'—'}</td><td class="${c.saldo<0?'import-debt':c.saldo>0?'import-credit':''}">${dinheiro(c.saldo)}</td><td>${escapar(c.observacoes)||'—'}</td></tr>`).join('')}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary confirm" ${!registros.length?'disabled':''}>Importar ${registros.length} clientes</button></footer></section></div>`;$$('#modal .close,#modal .cancel').forEach(b=>b.onclick=Modais.fechar);$('#modal .confirm').onclick=()=>{Clientes.importar(registros,{possuiSaldo:resultado.possuiSaldo});const r=CSVImport.resumir(registros);$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Importação concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon('check')}</div><h2>${r.clientes} clientes importados</h2><p>${r.telefones} telefones importados</p><p>${r.devedores} clientes com saldo devedor</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(r.totalEmAberto)}</strong></div>${r.creditores?`<p>${r.creditores} clientes com crédito</p>`:''}</div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;$('#modal .done').onclick=()=>{Modais.fechar();render('clientes')};window.lucide?.createIcons()};window.lucide?.createIcons()}catch(e){toast(e.message||'CSV inválido',true)}};reader.readAsText(arquivo,'UTF-8')};input.click()}function abrirWhatsCobranca(c,confirmar=true){window.open(`https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(Cobrancas.mensagem(c))}`,'_blank');if(confirmar)setTimeout(()=>abrirFormulario('Marcar cobrança como enviada?',`<p>Você abriu o WhatsApp de <b>${escapar(c.nome)}</b>.</p><p>Deseja marcar esta cobrança como enviada hoje?</p>`,()=>{Cobrancas.registrar(c.id,'enviado');toast('Cobrança marcada como enviada')},'Marcar enviada'),500)}function bindCobrancas(){$$('[data-charge-filter]').forEach(b=>b.onclick=()=>Router.ir(`cobrancas?filtro=${b.dataset.chargeFilter}`));$('#send-next').onclick=()=>{const c=Cobrancas.proximo();if(!c)return toast('Nenhum próximo cliente com débito e telefone',true);abrirWhatsCobranca(c,true)};$('#charge-list').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.copyBatch){const c=Clientes.obter(b.dataset.copyBatch);copiarTexto(Cobrancas.mensagem(c))}if(b.dataset.batchWhatsapp){const c=Clientes.obter(b.dataset.batchWhatsapp);abrirWhatsCobranca(c,true)}if(b.dataset.ignoreCharge){Cobrancas.registrar(b.dataset.ignoreCharge,'ignorado');toast('Cobrança ignorada por hoje');render('cobrancas')}}}function bind(route){$$('[data-go]').forEach(b=>b.onclick=()=>Router.ir(b.dataset.go));if(route==='clientes'){$('#new-client').onclick=()=>formularioCliente();$('#import-csv').onclick=importarCSV;$('#search').oninput=e=>{$('#entity-list').innerHTML=Clientes.listar().filter(c=>(c.nome+c.telefone).toLowerCase().includes(e.target.value.toLowerCase())).map(clienteCard).join('')||vazio('Nenhum cliente encontrado');window.lucide?.createIcons()};$('#entity-list').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.editClient)formularioCliente(b.dataset.editClient);if(b.dataset.clientCharges)mostrarCobrancasCliente(b.dataset.clientCharges);if(b.dataset.adjustClient){const c=Clientes.obter(b.dataset.adjustClient);abrirFormulario('Ajustar saldo',`<p><b>${escapar(c.nome)}</b></p><p>Saldo atual: <b>${dinheiro(c.saldo)}</b></p><div class="balance-help">Use valor <b>negativo para débito</b>, positivo para crédito e zero para quitar.</div><div class="field"><label>Novo saldo *</label><input name="saldo" type="number" step=".01" value="${Number(c.saldo).toFixed(2)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: correção do saldo do Kyte"></textarea></div>`,f=>{Clientes.ajustarSaldo(c.id,Number(f.get('saldo')),f.get('motivo'));toast('Saldo ajustado e salvo no histórico')},'Salvar ajuste')}if(b.dataset.deleteClient)Modais.confirmar('cliente',()=>{Clientes.excluir(b.dataset.deleteClient);toast('Cliente excluído');render(route)});if(b.dataset.clientWhatsapp){const c=Clientes.obter(b.dataset.clientWhatsapp),texto=c.saldo<0?`sua conta atual na Adi Festa está em ${dinheiro(Math.abs(c.saldo))}`:c.saldo>0?`você possui um crédito de ${dinheiro(c.saldo)} na Adi Festa`:'sua conta na Adi Festa está zerada',msg=`Olá, tudo bem? Passando para avisar que ${texto}. Obrigado!`;window.open(`https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(msg)}`,'_blank')}}}if(route==='produtos'){$('#new-product').onclick=()=>formularioProduto();$('#search').oninput=e=>{$('#entity-list').innerHTML=Produtos.listar().filter(p=>`${p.nome} ${p.codigo||''} ${p.barcode||''} ${p.categoria||''}`.toLowerCase().includes(e.target.value.toLowerCase())).map(produtoCard).join('')||vazio('Nenhum produto encontrado');window.lucide?.createIcons()};$('#entity-list').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.editProduct)formularioProduto(b.dataset.editProduct);if(b.dataset.stockEntry)formularioEntradaEstoque(b.dataset.stockEntry);if(b.dataset.stockAdjust)formularioAjusteEstoque(b.dataset.stockAdjust);if(b.dataset.stockHistory)mostrarHistoricoEstoque(b.dataset.stockHistory);if(b.dataset.deleteProduct)Modais.confirmar('produto',()=>{Produtos.excluir(b.dataset.deleteProduct);toast('Produto excluído');render(route)})}}if(route==='cobrancas')bindCobrancas();if(route==='vender')bindVenda();if(route==='fiados')$$('[data-receive]').forEach(b=>b.onclick=()=>{const c=Clientes.obter(b.dataset.receive),divida=Math.abs(c.saldo);abrirFormulario(`Receber de ${escapar(c.nome)}`,`<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Pix, dinheiro..."></div>`,f=>{Fiados.receber(c.id,f.get('valor'),f.get('observacao'));toast('Pagamento registrado')},'Confirmar recebimento')});if(route==='configuracoes')bindConfig()}
-function confirmarEstoqueInsuficiente(faltas,acao){$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Estoque insuficiente</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><p>Alguns produtos não têm estoque suficiente.</p><ul>${faltas.map(f=>`<li><b>${escapar(f.produto.nome)}</b>: falta ${f.falta} un.</li>`).join('')}</ul><p>Deseja continuar mesmo assim?</p></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary yes">Continuar venda</button></footer></section></div>`;$$('#modal .close,#modal .cancel').forEach(b=>b.onclick=Modais.fechar);$('#modal .yes').onclick=()=>{Modais.fechar();acao()};window.lucide?.createIcons()}function bindVenda(){let ajusteManual=false,descontoTipo=null;const distribuir=valor=>{const t=totaisCarrinho(),alvo=Math.max(0,Number(valor)||0),fator=t.subtotalOriginal?alvo/t.subtotalOriginal:0;carrinho.forEach(i=>i.precoFinalUnitario=Number((i.precoOriginal*fator).toFixed(4)))};const redesenhar=()=>{const t=totaisCarrinho();$('#cart').innerHTML=carrinhoHTML();$('#sale-totals').innerHTML=`<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.subtotalOriginal)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.descontoTotal)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.valorFinal)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.custoTotal)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.lucro)}</b></div>`;$('#manual-total').value=t.valorFinal.toFixed(2);const c=Clientes.obter($('#sale-client').value),fiado=$('#sale-status').value==='fiado';$('#debt-preview').innerHTML=fiado&&c?`<div class="debt-preview"><div><span>Saldo anterior</span><b>${dinheiro(Math.abs(Math.min(0,c.saldo)))}</b></div><div><span>Valor desta venda</span><b>${dinheiro(t.valorFinal)}</b></div><div><span>Novo total em aberto</span><b>${dinheiro(Math.abs(Math.min(0,c.saldo-t.valorFinal)))}</b></div></div>`:'';$$('[data-item-qty]').forEach(x=>x.onchange=()=>{const i=carrinho.find(y=>y.produtoId===x.dataset.itemQty);i.quantidade=Math.max(1,Number(x.value)||1);redesenhar()});$$('[data-item-price]').forEach(x=>x.onchange=()=>{const i=carrinho.find(y=>y.produtoId===x.dataset.itemPrice);i.precoFinalUnitario=Math.max(0,Number(x.value)||0);ajusteManual=true;descontoTipo='item';redesenhar()});$$('[data-remove]').forEach(x=>x.onclick=()=>{carrinho=carrinho.filter(i=>i.produtoId!==x.dataset.remove);redesenhar()});window.lucide?.createIcons()};$$('[data-add]').forEach(b=>b.onclick=()=>{const p=Produtos.obter(b.dataset.add),i=carrinho.find(x=>x.produtoId===p.id);i?i.quantidade++:carrinho.push({produtoId:p.id,nome:p.nome,quantidade:1,precoOriginal:Number(p.preco),precoFinalUnitario:Number(p.preco),custoUnitario:Number(p.custo||0)});redesenhar()});$('#discount-value').onchange=e=>{const t=totaisCarrinho();distribuir(t.subtotalOriginal-Math.max(0,Number(e.target.value)||0));descontoTipo='valor';ajusteManual=false;$('#discount-percent').value='0';redesenhar()};$('#discount-percent').onchange=e=>{const t=totaisCarrinho(),pct=Math.min(100,Math.max(0,Number(e.target.value)||0));distribuir(t.subtotalOriginal*(1-pct/100));descontoTipo='percentual';ajusteManual=false;$('#discount-value').value='0';redesenhar()};$('#manual-total').onchange=e=>{distribuir(e.target.value);descontoTipo='valor_final_manual';ajusteManual=true;redesenhar()};$('#sale-client').onchange=$('#sale-status').onchange=redesenhar;$('#product-search').oninput=e=>$$('.pick-product').forEach(p=>p.hidden=!(`${p.textContent} ${Produtos.obter(p.dataset.add)?.barcode||''}`).toLowerCase().includes(e.target.value.toLowerCase()));$('#finish-sale').onclick=()=>{if(!carrinho.length)return toast('Adicione ao menos um produto',true);const clienteId=$('#sale-client').value||null,status=$('#sale-status').value;if(status==='fiado'&&!clienteId)return toast('Selecione um cliente para vender fiado',true);const cliente=clienteId?Clientes.obter(clienteId):null,seguir=()=>{const venda=Vendas.registrar({clienteId,status,observacao:$('#sale-note').value,itens:carrinho,ajusteManual,descontoTipo});carrinho=[];Recibos.mostrar(venda,cliente)},faltas=Vendas.estoqueInsuficiente(carrinho);if(faltas.length)return confirmarEstoqueInsuficiente(faltas,seguir);seguir()};redesenhar()}
-function baixarBackup(prefixo='backup'){const backup=DB.criarBackup(),slug=(backup.businessName||backup.businessId||'empresa').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));a.href=url;a.download=`${prefixo}-${slug}-${new Date().toISOString().slice(0,19).replaceAll(':','-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-function mostrarResultadoRestauracao(relatorio){$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Restauração concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon('check')}</div><p><b>${relatorio.counts.clientes}</b> clientes · <b>${relatorio.counts.produtos}</b> produtos · <b>${relatorio.counts.vendas}</b> vendas</p><p>${relatorio.updated} existentes atualizados · ${relatorio.added} novos adicionados</p><p>${relatorio.duplicates} duplicação(ões) detectada(s) após a conferência</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(relatorio.totals.fiado)}</strong></div>${relatorio.cloudTotals?`<p>Fiado local: <b>${dinheiro(relatorio.totals.fiado)}</b><br>Fiado na nuvem: <b>${dinheiro(relatorio.cloudTotals.fiado)}</b></p><p>${relatorio.matches?'Contagens e totais conferidos.':'A conferência ainda encontrou diferenças.'}</p>`:''}<p>${relatorio.pending?`${relatorio.pending} trabalho(s) aguardando sincronização.`:'Restauração idempotente finalizada.'}</p></div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;$('#modal .done').onclick=()=>{Modais.fechar();render('configuracoes')};window.lucide?.createIcons()}
-function mostrarPreviaBackup(prepared){const p=BackupManager.preview(prepared,DB.carregar());$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Prévia do backup</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><div class="import-stats"><div><small>Clientes</small><b>${p.clientes}</b></div><div><small>Produtos</small><b>${p.produtos}</b></div><div><small>Vendas</small><b>${p.vendas}</b></div><div><small>Pagamentos</small><b>${p.pagamentos}</b></div><div><small>Campanhas</small><b>${p.campanhas}</b></div><div><small>Mov. estoque</small><b>${p.movimentosEstoque}</b></div><div><small>Total do fiado</small><b>${dinheiro(p.totals.fiado)}</b></div></div><p>Data: <b>${prepared.exportedAt?dataHora(prepared.exportedAt):'Backup antigo'}</b> · Schema ${prepared.schemaVersion} · Negócio ${escapar(prepared.businessId)}</p><p>${p.validos} registro(s) válido(s) · ${p.duplicates} duplicado(s) no arquivo que serão mesclados · ${p.novos} novo(s) · ${p.atualizados} existente(s) serão atualizados.</p><label class="backup-mode"><input type="radio" name="backup-mode" value="merge" checked> <b>Mesclar com os dados atuais</b><small>Atualiza IDs existentes e adiciona apenas registros novos.</small></label><label class="backup-mode"><input type="radio" name="backup-mode" value="replace"> <b>Substituir os dados deste negócio</b><small>Substitui aparelho e nuvem. Um backup de segurança será criado.</small></label><div id="replace-confirm" hidden><div class="backup-warning"><b>Atenção:</b> digite SUBSTITUIR para confirmar a substituição completa.</div><input class="search" id="replace-word" autocomplete="off" placeholder="SUBSTITUIR"></div></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary confirm">Mesclar backup</button></footer></section></div>`;$$('#modal .close,#modal .cancel').forEach(button=>button.onclick=Modais.fechar);$$('input[name="backup-mode"]',$('#modal')).forEach(input=>input.onchange=()=>{const replace=input.value==='replace'&&input.checked;$('#replace-confirm').hidden=!replace;$('#modal .confirm').textContent=replace?'Substituir dados':'Mesclar backup'});$('#modal .confirm').onclick=async()=>{const mode=$('input[name="backup-mode"]:checked',$('#modal')).value;if(mode==='replace'&&$('#replace-word').value.trim()!=='SUBSTITUIR')return toast('Digite SUBSTITUIR para confirmar.',true);baixarBackup('adi-festa-backup-automatico');const button=$('#modal .confirm');button.disabled=true;button.textContent='Restaurando…';try{const report=await SyncFirebase.restoreBackupData(prepared,mode);mostrarResultadoRestauracao(report)}catch(error){button.disabled=false;button.textContent=mode==='replace'?'Substituir dados':'Mesclar backup';toast(error.message||'Não foi possível restaurar o backup.',true)}};window.lucide?.createIcons()}
-function limparDadosAparelho(){const pending=SyncFirebase.getFirebaseDiagnostic().pendingOperations;$('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Limpar os dados deste aparelho?</h3><button class="icon-btn close">${icon('x')}</button></header><div class="modal-body"><p>Os dados da nuvem permanecerão intactos. Ao entrar ou sincronizar novamente, eles serão baixados para este dispositivo.</p><p>Esta ação também remove operações locais que ainda não foram sincronizadas.</p>${pending?`<div class="backup-warning"><b>Existem ${pending} alterações ainda não sincronizadas.</b></div>`:''}</div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button>${pending?'<button class="btn btn-primary sync-first">Sincronizar antes de limpar</button><button class="btn btn-danger discard">Descartar alterações locais e limpar</button>':'<button class="btn btn-danger clear-now">Limpar este aparelho</button>'}</footer></section></div>`;$$('#modal .close,#modal .cancel').forEach(button=>button.onclick=Modais.fechar);const finish=async discard=>{try{await SyncFirebase.clearLocalDevice({discard});Modais.fechar();toast('Dados locais limpos. A nuvem permanece intacta.');render('configuracoes')}catch(error){toast(error.message||'Não foi possível limpar este aparelho.',true)}};if(pending){$('#modal .sync-first').onclick=async()=>{const button=$('#modal .sync-first');button.disabled=true;button.textContent='Sincronizando…';try{await SyncFirebase.synchronizeNow();if(SyncFirebase.getFirebaseDiagnostic().pendingOperations)return toast('Ainda existem alterações pendentes. Tente novamente.',true);await finish(false)}finally{button.disabled=false;button.textContent='Sincronizar antes de limpar'}};$('#modal .discard').onclick=()=>{if(confirm('Descartar definitivamente as alterações locais ainda não sincronizadas?'))finish(true)}}else $('#modal .clear-now').onclick=()=>finish(false);window.lucide?.createIcons()}
-function bindConfig(){const store=$('#store-name'),exportButton=$('#export'),importInput=$('#import'),clearButton=$('#clear-device');if(store)store.onchange=e=>DB.alterar(d=>d.config.nome=e.target.value.trim()||window.FirebaseSession?.business?.name||'Meu negócio');if(exportButton)exportButton.onclick=()=>baixarBackup();if(importInput)importInput.onchange=e=>{const arquivo=e.target.files[0];if(!arquivo)return;const reader=new FileReader();reader.onload=()=>{try{const raw=JSON.parse(reader.result),businessId=DB.getBusinessId(),prepared=BackupManager.normalizeBackup(raw,businessId);mostrarPreviaBackup(prepared)}catch(error){toast(error.message||'Backup inválido',true)}finally{e.target.value=''}};reader.readAsText(arquivo)};if(clearButton)clearButton.onclick=limparDadosAparelho;window.ConfiguracoesMobile?.bind?.()}
-async function copiarTexto(texto){try{await navigator.clipboard.writeText(texto);toast('Mensagem copiada')}catch{const t=document.createElement('textarea');t.value=texto;document.body.append(t);t.select();document.execCommand('copy');t.remove();toast('Mensagem copiada')}}
-const mensagemCobranca=c=>`Olá, ${c.nome}. Passando para avisar que sua conta atual na ${DB.carregar().config.nome||'nossa loja'} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
-function syncResponsiveNavigation(){const mobile=matchMedia('(max-width:767px)').matches,link=$('[data-route="relatorios"]');if(!link)return;link.hidden=mobile;link.setAttribute('aria-hidden',String(mobile));mobile?link.setAttribute('tabindex','-1'):link.removeAttribute('tabindex')}
-function render(route){if(window.PlansUI&&!window.PlansUI.guardRoute(route))route='inicio';window.SyncFirebase?.setScreen?.(route);syncResponsiveNavigation();$('#app').innerHTML=views[route]();$('#title').textContent=titles[route];$('#date').textContent=route==='clientes'?'Contas, compras e contato em um só lugar.':route==='produtos'&&matchMedia('(max-width:767px)').matches?'Preços, custos e estoque dos seus doces.':route==='campanhas'?'Fidelização, pontos e recompensas.':route==='catalogo'?'Link permanente, produtos e disponibilidade.':route==='pedidos'?'Gestão dos pedidos recebidos pelo catálogo.':route==='relatorios'?'Análises detalhadas do seu negócio.':route==='configuracoes'&&matchMedia('(max-width:767px)').matches?'Gerencie sua conta, empresa e dados.':route==='planos'?'Escolha o plano ideal para o seu negócio.':new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});$$('[data-route]').forEach(a=>a.classList.toggle('active',a.dataset.route===route));$$('[data-mobile-route]').forEach(a=>a.classList.toggle('active',a.dataset.mobileRoute===route));window.BarcodePrimaryFab?.update?.();fecharMenu();aplicarInputModes($('#app'));bind(route);if(route==='catalogo')CatalogoUI.bind();if(route==='pedidos')VisitasUI.bindOrdersPage();if(route==='campanhas')CampanhasUI.bind();if(route==='planos')window.PlansUI.bind($('#app'));window.PlansUI?.syncNavigation?.();window.lucide?.createIcons()}
-const sidebar=$('#sidebar'),overlay=$('#overlay'),fecharMenu=()=>{sidebar.classList.remove('open');overlay.classList.remove('show')};$('#menu').onclick=()=>{sidebar.classList.toggle('open');overlay.classList.toggle('show')};overlay.onclick=fecharMenu;$('#date').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
-syncResponsiveNavigation();matchMedia('(max-width:767px)').addEventListener('change',syncResponsiveNavigation);
-document.addEventListener('input',e=>{if(e.target.id==='fiado-search'){const q=e.target.value.trim().toLowerCase();$$('.fiado-card').forEach(c=>c.hidden=!c.dataset.name.includes(q))}});
-document.addEventListener('focusin',e=>{if(e.target.matches('input[type="number"]'))e.target.inputMode='decimal';if(e.target.matches('input[name*="telefone"],input[type="tel"]'))e.target.inputMode='tel'});
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.copyCharge){const c=Clientes.obter(b.dataset.copyCharge);copiarTexto(mensagemCobranca(c))}if(b.dataset.chargeWhatsapp){const c=Clientes.obter(b.dataset.chargeWhatsapp);window.open(`https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(mensagemCobranca(c))}`,'_blank')}if(b.hasAttribute('data-copy-closing'))copiarTexto(resumoFechamento().texto);if(b.hasAttribute('data-share-closing'))window.open(`https://wa.me/?text=${encodeURIComponent(resumoFechamento().texto)}`,'_blank');if(b.hasAttribute('data-load-history')){historicoLimite+=100;render('historico')}if(b.hasAttribute('data-undo-sale'))abrirFormulario('Desfazer última venda','<p>Tem certeza que deseja desfazer a última venda? O saldo e o estoque serão restaurados.</p>',()=>{Vendas.desfazerUltima();toast('Venda desfeita com sucesso')},'Desfazer venda')});
-addEventListener('load',()=>window.lucide?.createIcons());
-let cloudRenderTimer=null,cloudRenderPending=false;
-function scheduleCloudRender(){cloudRenderPending=true;clearTimeout(cloudRenderTimer);cloudRenderTimer=setTimeout(()=>{const active=document.activeElement,editing=active&&active.closest?.('#app')&&active.matches('input,textarea,select,[contenteditable="true"]');if(editing||document.querySelector('#modal')?.children.length||document.querySelector('.message-center-page')||Router.atual()==='vender')return;cloudRenderPending=false;render(Router.atual())},220)}
-addEventListener('cloud-data-updated',scheduleCloudRender);
-document.addEventListener('focusout',()=>{if(cloudRenderPending)setTimeout(scheduleCloudRender,80)});
-let stableSearchTimer=null;
-document.addEventListener('input',event=>{const client=event.target.id==='mobile-client-search',product=event.target.id==='mobile-product-search';if(!client&&!product)return;event.stopImmediatePropagation();clearTimeout(stableSearchTimer);const value=event.target.value;stableSearchTimer=setTimeout(()=>client?window.ClientesMobile?.search(value):window.ProdutosMobile?.search(value),100)},true);
-if('serviceWorker'in navigator&&location.protocol.startsWith('http')&&!['localhost','127.0.0.1'].includes(location.hostname))navigator.serviceWorker.register('./service-worker.js').then(registration=>{
-  const offerUpdate=worker=>{if(!worker)return;if(confirm('Nova versão disponível. Deseja atualizar agora?'))worker.postMessage('SKIP_WAITING')};
-  if(registration.waiting)offerUpdate(registration.waiting);
-  registration.addEventListener('updatefound',()=>{const worker=registration.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)offerUpdate(worker)})});
-  let refreshing=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!refreshing){refreshing=true;location.reload()}});
-}).catch(error=>console.error('[Service worker registration]',error));
-let appRouterStarted=false;addEventListener('firebase-auth-ready',()=>{if(!appRouterStarted){appRouterStarted=true;Router.iniciar(render)}else render(Router.atual())});addEventListener('firebase-session-cleared',()=>{carrinho=[];historicoLimite=100;$('#modal').innerHTML='';document.body.classList.remove('sale-sheet-open')});
-addEventListener('clientes-import-csv',importarCSV);
+(() => {
+  "use strict";
+  const $ = (s, e = document) => e.querySelector(s),
+    $$ = (s, e = document) => [...e.querySelectorAll(s)],
+    { dinheiro, dataHora, escapar, telefoneWhatsApp, toast } = Utils;
+  let carrinho = [],
+    historicoLimite = 100;
+  const icon = (n) => `<i data-lucide="${n}"></i>`,
+    cartKey = (item) =>
+      window.ProductVariations?.itemKey?.(item) || String(item?.produtoId || ""),
+    cabecalho = (titulo, sub, acoes = "") =>
+      `<div class="page-head"><div><h2>${titulo}</h2><p>${sub}</p></div>${acoes ? `<div class="head-actions">${acoes}</div>` : ""}</div>`,
+    vazio = (texto) =>
+      `<div class="empty">${icon("inbox")}<div>${texto}</div></div>`,
+    metric = (titulo, valor, sub, ico) =>
+      `<article class="metric-card"><div class="metric-top"><span>${titulo}</span><span class="metric-icon">${icon(ico)}</span></div><strong>${valor}</strong><small>${sub}</small></article>`;
+  function aplicarInputModes(root = document) {
+    $$('input[type="number"]', root).forEach((i) =>
+      i.setAttribute("inputmode", "decimal"),
+    );
+    $$('input[name*="telefone"],input[type="tel"]', root).forEach((i) =>
+      i.setAttribute("inputmode", "tel"),
+    );
+  }
+  function abrirFormulario(titulo, conteudo, salvar, label = "Salvar") {
+    const root = $("#modal");
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${titulo}</h3><button class="icon-btn close">${icon("x")}</button></header><form><div class="modal-body">${conteudo}</div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;
+    root
+      .querySelectorAll(".close,.cancel")
+      .forEach((b) => (b.onclick = Modais.fechar));
+    root.querySelector("form").onsubmit = (e) => {
+      e.preventDefault();
+      try {
+        salvar(new FormData(e.target));
+        Modais.fechar();
+        render(Router.atual());
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    aplicarInputModes(root);
+    window.lucide?.createIcons();
+  }
+  function resumoFechamento() {
+    const d = DB.carregar(),
+      vendas = d.vendas.filter((v) => Utils.hoje(v.data)),
+      pagamentos = d.pagamentos.filter((p) => Utils.hoje(p.data)),
+      vendido = vendas.reduce(
+        (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
+        0,
+      ),
+      recebido = pagamentos.reduce((s, p) => s + Number(p.valor), 0),
+      fiado = vendas
+        .filter((v) => v.status === "fiado")
+        .reduce((s, v) => s + Number(v.valorFinal ?? v.valorTotal), 0),
+      lucro = vendas.reduce((s, v) => s + Number(v.lucro || 0), 0),
+      clientes = new Set(vendas.map((v) => v.clienteId).filter(Boolean)).size;
+    return {
+      vendido,
+      recebido,
+      fiado,
+      lucro,
+      vendas: vendas.length,
+      clientes,
+      texto: `Fechamento do dia - ${new Date().toLocaleDateString("pt-BR")}\nTotal vendido: ${dinheiro(vendido)}\nTotal recebido: ${dinheiro(recebido)}\nTotal fiado: ${dinheiro(fiado)}\nLucro estimado: ${dinheiro(lucro)}\nVendas: ${vendas.length}\nClientes atendidos: ${clientes}`,
+    };
+  }
+  function resumoEstoque() {
+    const d = DB.carregar(),
+      produtos = d.produtos.filter((p) => p.ativo !== false),
+      esgotados = produtos.filter(
+        (p) => getProductStockStatus(p) === "esgotado",
+      ),
+      baixos = produtos.filter((p) => getProductStockStatus(p) === "baixo"),
+      vendidos = new Map();
+    d.vendas
+      .filter((v) => Utils.hoje(v.data))
+      .forEach((v) =>
+        v.itens.forEach((i) =>
+          vendidos.set(i.produtoId, {
+            nome: i.nome,
+            quantidade:
+              (vendidos.get(i.produtoId)?.quantidade || 0) +
+              Number(i.quantidade || 0),
+          }),
+        ),
+      );
+    const maisVendidos = [...vendidos.values()]
+        .sort((a, b) => b.quantidade - a.quantidade)
+        .slice(0, 3),
+      reposicao = [...esgotados, ...baixos].slice(0, 4);
+    return { esgotados, baixos, maisVendidos, reposicao };
+  }
+  function blocoAlertasEstoque() {
+    const e = resumoEstoque();
+    return `<section class="panel stock-alerts"><div class="panel-head"><h3>Alertas de estoque</h3><button class="btn btn-light btn-sm" data-go="produtos">${icon("package")} Ver produtos</button></div><div class="stock-alert-grid"><div class="stock-alert danger"><b>${e.esgotados.length}</b><span>Produtos esgotados</span></div><div class="stock-alert warning"><b>${e.baixos.length}</b><span>Abaixo do mínimo</span></div><div><h4>Mais vendidos hoje</h4>${e.maisVendidos.length ? e.maisVendidos.map((p) => `<p>${escapar(p.nome)} <b>${p.quantidade} un.</b></p>`).join("") : '<p class="muted">Nenhuma venda hoje</p>'}</div><div><h4>Sugestão de reposição</h4>${e.reposicao.length ? e.reposicao.map((p) => `<p>${escapar(p.nome)} <b>${Number(p.estoqueAtual || 0)} un.</b></p>`).join("") : '<p class="muted">Estoque tranquilo por enquanto</p>'}</div></div></section>`;
+  }
+  function inicio() {
+    const d = DB.carregar(),
+      hoje = d.vendas.filter((v) => Utils.hoje(v.data)),
+      valorHoje = hoje.reduce(
+        (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
+        0,
+      ),
+      lucroHoje = hoje.reduce((s, v) => s + Number(v.lucro || 0), 0),
+      fiado = d.clientes.reduce(
+        (s, c) => s + Math.abs(Math.min(0, c.saldo)),
+        0,
+      ),
+      recebido = d.pagamentos
+        .filter((p) => Utils.mesAtual(p.data))
+        .reduce((s, p) => s + p.valor, 0),
+      f = resumoFechamento(),
+      ultima = Vendas.ultima();
+    return (
+      cabecalho("Olá! Vamos vender?", "Seu resumo rápido da Adi Festa.") +
+      `<section class="metrics">${metric("Vendas hoje", hoje.length, "registros", "shopping-cart")}${metric("Vendido hoje", dinheiro(valorHoje), "valor final", "circle-dollar-sign")}${metric("Lucro hoje", dinheiro(lucroHoje), "somente para você", "trending-up")}${metric("Fiado em aberto", dinheiro(fiado), "saldo de clientes", "hand-coins")}${metric("Recebido no mês", dinheiro(recebido), "pagamentos", "wallet-cards")}${metric("Clientes", d.clientes.length, "cadastrados", "users")}${metric("Produtos", d.produtos.length, "cadastrados", "candy")}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon("plus")}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button><button class="quick-card" data-go="fiados"><span>${icon("banknote-arrow-down")}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button></section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric("Vendido", dinheiro(f.vendido), "hoje", "circle-dollar-sign")}${metric("Recebido", dinheiro(f.recebido), "pagamentos", "wallet-cards")}${metric("Fiado", dinheiro(f.fiado), "novas contas", "hand-coins")}${metric("Lucro estimado", dinheiro(f.lucro), "privado", "trending-up")}${metric("Vendas", f.vendas, "realizadas", "shopping-cart")}${metric("Clientes", f.clientes, "atendidos", "users")}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon("copy")} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon("message-circle")} Compartilhar no WhatsApp</button>${ultima ? `<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer() ? "" : "disabled"}>${icon("undo-2")} Desfazer última venda</button>` : ""}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0, 5), "Vendas recentes")}`
+    );
+  }
+  function clienteCard(c) {
+    const tel = Utils.somenteNumeros(c.telefone),
+      saldo = Number(c.saldo || 0),
+      classe = saldo < 0 ? "debit" : saldo > 0 ? "credit" : "zero",
+      rotulo =
+        saldo < 0 ? "Débito" : saldo > 0 ? "Crédito" : "Sem saldo em aberto";
+    return `<article class="entity-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge ${classe}">${rotulo}</span></div><div class="entity-stats"><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString("pt-BR") : "—"}</strong></div><div class="entity-stat"><small>Total comprado</small><strong>${dinheiro(c.totalComprado)}</strong></div><div class="entity-stat"><small>Saldo</small><strong>${saldo === 0 ? "Zerado" : dinheiro(Math.abs(saldo))}</strong></div></div><div class="balance ${classe}"><span>${rotulo}</span><b class="${classe}">${saldo === 0 ? "—" : dinheiro(Math.abs(saldo))}</b></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-client-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-client-charges="${c.id}">${icon("history")} Cobranças</button><button class="btn btn-dark btn-sm" data-adjust-client="${c.id}">${icon("scale")} Ajustar saldo</button><button class="btn btn-light btn-sm" data-edit-client="${c.id}">${icon("pencil")} Editar</button><button class="btn btn-danger btn-sm" data-delete-client="${c.id}">${icon("trash-2")} Excluir</button></div></article>`;
+  }
+  function clientes() {
+    if (window.ClientesPage) return ClientesPage.render();
+    const lista = Clientes.listar(),
+      debito = lista.reduce((s, c) => s + Math.abs(Math.min(0, c.saldo)), 0),
+      credito = lista.reduce((s, c) => s + Math.max(0, c.saldo), 0);
+    return (
+      cabecalho(
+        "Clientes",
+        "Contas, compras e contato em um só lugar.",
+        `<button class="btn btn-dark" data-go="cobrancas">${icon("send")} Cobrança em lote</button><button class="btn btn-light" id="import-csv">${icon("file-up")} Importar CSV</button><button class="btn btn-primary" id="new-client">${icon("user-plus")} Novo cliente</button>`,
+      ) +
+      `<div class="toolbar"><input class="search" id="search" placeholder="Buscar por nome ou telefone..."></div><section class="entity-grid" id="entity-list">${lista.map(clienteCard).join("") || vazio("Nenhum cliente cadastrado")}</section><div class="fixed-totals"><span>Débitos: <b>${dinheiro(debito)}</b></span><span>Créditos: <b>${dinheiro(credito)}</b></span></div>`
+    );
+  }
+  function produtoCard(p) {
+    const st = Produtos.status(p),
+      rotulo = {
+        disponivel: "Disponível",
+        baixo: "Baixo estoque",
+        esgotado: "Esgotado",
+        "sem-controle": "Sem controle",
+      }[st],
+      variable = p.productType === "variable",
+      estoque = Number(variable ? p.totalStock : p.estoqueAtual || 0),
+      minimo = Number(p.estoqueMinimo || 0),
+      preco =
+        variable && Number(p.minPrice) !== Number(p.maxPrice)
+          ? `${dinheiro(p.minPrice)} – ${dinheiro(p.maxPrice)}`
+          : dinheiro(variable ? p.minPrice : p.preco);
+    return `<article class="entity-card product-card ${st}"><div class="entity-head"><div><h3>${escapar(p.nome)}</h3><p>${escapar(p.categoria) || "Sem categoria"}${variable ? ` · <b>${Number(p.activeVariationCount || 0)} variações</b>` : ""}</p></div><span class="badge stock-badge ${st}">${rotulo}</span></div><div class="entity-stats"><div class="entity-stat"><small>Preço</small><strong>${preco}</strong></div>${variable ? `<div class="entity-stat"><small>Variações</small><strong>${Number(p.activeVariationCount || 0)}</strong></div>` : `<div class="entity-stat"><small>Custo</small><strong>${p.custo === null ? "—" : dinheiro(p.custo)}</strong></div>`}<div class="entity-stat"><small>Estoque total</small><strong>${estoque}</strong></div><div class="entity-stat"><small>Estoque mínimo</small><strong>${minimo}</strong></div><div class="entity-stat"><small>Status</small><strong>${rotulo}</strong></div></div><div class="actions"><button class="btn btn-primary btn-sm" data-stock-entry="${p.id}">${icon("plus")} Adicionar entrada</button>${variable ? "" : `<button class="btn btn-dark btn-sm" data-stock-adjust="${p.id}">${icon("sliders-horizontal")} Ajustar estoque</button>`}<button class="btn btn-light btn-sm" data-stock-history="${p.id}">${icon("history")} Histórico</button><button class="btn btn-light btn-sm" data-edit-product="${p.id}">${icon("pencil")} ${variable ? "Variações" : "Editar"}</button><button class="btn btn-danger btn-sm" data-delete-product="${p.id}">${icon("trash-2")} Excluir</button></div></article>`;
+  }
+  function produtos() {
+    if (window.ProdutosMobile?.isMobile()) return ProdutosMobile.render();
+    const lista = Produtos.listar();
+    return (
+      cabecalho(
+        "Produtos",
+        "Preços, custos e estoque dos seus doces.",
+        `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button>`,
+      ) +
+      `<div class="toolbar"><input class="search" id="search" placeholder="Buscar produto por nome ou código..."><button class="desktop-barcode-button" data-scan-product aria-label="Ler código"><i data-lucide="scan-barcode"></i></button><button class="btn btn-light" data-scan-stock><i data-lucide="package-plus"></i> Entrada por código</button></div><section class="entity-grid" id="entity-list">${lista.map(produtoCard).join("") || vazio("Nenhum produto cadastrado")}</section>`
+    );
+  }
+  const totaisCarrinho = () => {
+      const subtotalOriginal = carrinho.reduce(
+          (s, i) => s + i.quantidade * i.precoOriginal,
+          0,
+        ),
+        valorFinal = carrinho.reduce(
+          (s, i) => s + i.quantidade * i.precoFinalUnitario,
+          0,
+        ),
+        custoTotal = carrinho.reduce(
+          (s, i) => s + i.quantidade * i.custoUnitario,
+          0,
+        );
+      return {
+        subtotalOriginal,
+        valorFinal,
+        descontoTotal: subtotalOriginal - valorFinal,
+        custoTotal,
+        lucro: valorFinal - custoTotal,
+      };
+    },
+    carrinhoHTML = () =>
+      carrinho.length
+        ? carrinho
+            .map(
+              (i) =>
+                `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(cartKey(i))}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(cartKey(i))}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(cartKey(i))}">${icon("trash-2")}</button></div>`,
+            )
+            .join("")
+        : vazio("Adicione produtos");
+  function vender() {
+    const ps = Produtos.listar().filter((p) => p.ativo),
+      cs = Clientes.listar().filter((c) => c.ativo),
+      t = totaisCarrinho();
+    return (
+      cabecalho(
+        "Nova venda",
+        "Edite quantidades, preços e descontos antes de concluir.",
+      ) +
+      `<div class="sale-layout"><section><div class="toolbar"><input class="search" id="product-search" placeholder="Buscar produto ou código..."><button class="desktop-barcode-button" data-scan-sale aria-label="Ler código"><i data-lucide="scan-barcode"></i></button></div><div class="product-picker">${ps.map((p) => `<button class="pick-product" data-add="${p.id}"><b>${escapar(p.nome)}</b><small>${Number(p.estoqueAtual || 0)} disponíveis</small><span>${dinheiro(p.preco)}</span></button>`).join("") || vazio("Cadastre um produto primeiro")}</div></section><aside class="panel sale-summary"><h3>Resumo da venda</h3><div id="cart">${carrinhoHTML()}</div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" min="0" step=".01" value="${t.valorFinal.toFixed(2)}"></div><div id="sale-totals"></div><div class="field"><label>Cliente</label><select id="sale-client"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}${c.saldo < 0 ? ` — deve ${dinheiro(Math.abs(c.saldo))}` : c.saldo > 0 ? ` — crédito ${dinheiro(c.saldo)}` : ""}</option>`).join("")}</select></div><div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago</option><option value="fiado">Fiado</option></select></div><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale" style="width:100%;margin-top:15px">${icon("check")} Concluir venda</button></aside></div>`
+    );
+  }
+  function fiadoCard(c) {
+    const tel = Utils.somenteNumeros(c.telefone);
+    return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(Math.abs(c.saldo))}</b></div><div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon("banknote-arrow-down")} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon("copy")} Copiar</button></div></article>`;
+  }
+  function fiados() {
+    const lista = Fiados.listar().sort((a, b) => a.saldo - b.saldo),
+      total = lista.reduce((s, c) => s + Math.abs(c.saldo), 0);
+    return (
+      cabecalho("Fiados e pendências", "Do maior débito para o menor.") +
+      `<section class="metrics" style="margin-bottom:18px">${metric("Total em aberto", dinheiro(total), `${lista.length} cliente(s)`, "hand-coins")}</section><div class="toolbar"><input class="search" id="fiado-search" placeholder="Buscar cliente..."></div><section class="entity-grid" id="fiados-list">${lista.map(fiadoCard).join("") || vazio("Nenhuma pendência. Tudo em dia!")}</section>`
+    );
+  }
+  function historicoTabela(lista, titulo = "Histórico") {
+    return `<section class="panel"><div class="panel-head"><h3>${titulo}</h3></div>${lista.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Status</th><th>Valor</th></tr></thead><tbody>${lista.map((v) => `<tr><td>${dataHora(v.data)}</td><td>${escapar(v.clienteNome || "Venda avulsa")}</td><td><span class="badge ${v.status === "pago" ? "badge-paid" : "badge-debt"}">${v.status}</span></td><td><b>${dinheiro(v.valorTotal)}</b></td></tr>`).join("")}</tbody></table></div>` : vazio("Nenhuma venda registrada")}</section>`;
+  }
+  function historico() {
+    const d = DB.carregar(),
+      todos = [...d.movimentacoes].sort(
+        (a, b) => new Date(b.data) - new Date(a.data),
+      ),
+      eventos = todos.slice(0, historicoLimite);
+    return (
+      cabecalho("Histórico", "Vendas, pagamentos, descontos e ajustes.") +
+      `<section class="panel"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Detalhe</th></tr></thead><tbody>${eventos.map((e) => `<tr><td>${dataHora(e.data)}</td><td>${escapar(e.clienteNome || "Venda avulsa")}</td><td><span class="badge badge-paid">${escapar(e.tipo.replaceAll("_", " "))}</span></td><td>${e.tipo === "ajuste_saldo" ? `${dinheiro(e.saldoAnterior)} → ${dinheiro(e.saldoNovo)} · ${escapar(e.motivo)}` : e.valor !== undefined ? dinheiro(e.valor) : e.valorFinal !== undefined ? dinheiro(e.valorFinal) : "—"}</td></tr>`).join("")}</tbody></table></div>${todos.length > eventos.length ? `<div class="modal-foot"><button class="btn btn-light" data-load-history>Carregar mais</button></div>` : ""}</section>`
+    );
+  }
+  function relatorios() {
+    if (matchMedia("(max-width:767px)").matches)
+      return `<section class="mobile-desempenho-notice">${icon("monitor-up")}<h2>Desempenho no desktop</h2><p>A área de Desempenho está disponível na versão desktop.</p><button class="btn btn-primary" data-go="inicio">${icon("arrow-left")} Voltar ao início</button></section>`;
+    const d = DB.carregar(),
+      faturamento = d.vendas.reduce(
+        (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
+        0,
+      ),
+      lucro = d.vendas.reduce((s, v) => s + Number(v.lucro || 0), 0),
+      custo = d.vendas.reduce((s, v) => s + Number(v.custoTotal || 0), 0),
+      fiado = d.clientes.reduce(
+        (s, c) => s + Math.abs(Math.min(c.saldo, 0)),
+        0,
+      );
+    return (
+      cabecalho("Desempenho", "Análises detalhadas do seu negócio.") +
+      `<section class="metrics">${metric("Faturamento", dinheiro(faturamento), `${d.vendas.length} vendas`, "circle-dollar-sign")}${metric("Custo total", dinheiro(custo), "produtos vendidos", "package")}${metric("Lucro estimado", dinheiro(lucro), "não aparece no recibo", "trending-up")}${metric("Fiado aberto", dinheiro(fiado), "a receber", "hand-coins")}${metric("Ticket médio", dinheiro(d.vendas.length ? faturamento / d.vendas.length : 0), "por venda", "chart-line")}</section>`
+    );
+  }
+  function cobrancaCard(c) {
+    const tel = Utils.somenteNumeros(c.telefone),
+      ultima = Cobrancas.ultimaCliente(c.id),
+      status = Cobrancas.statusCliente(c);
+    return `<article class="entity-card charge-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge ${status === "enviado hoje" ? "badge-paid" : "badge-debt"}">${status}</span></div><div class="entity-stats"><div class="entity-stat"><small>Valor em aberto</small><strong>${dinheiro(Math.abs(c.saldo))}</strong></div><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString("pt-BR") : "—"}</strong></div><div class="entity-stat"><small>Última cobrança</small><strong>${ultima ? dataHora(ultima.data) : "Nunca"}</strong></div></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-batch-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} Enviar cobrança</button><button class="btn btn-light btn-sm" data-copy-batch="${c.id}">${icon("copy")} Copiar mensagem</button><button class="btn btn-light btn-sm" data-ignore-charge="${c.id}">${icon("ban")} Ignorar hoje</button></div></article>`;
+  }
+  function cobrancas() {
+    const filtro =
+        new URLSearchParams(location.hash.split("?")[1] || "").get("filtro") ||
+        "naoHoje",
+      lista = Cobrancas.listar(filtro),
+      total = lista.reduce((s, c) => s + Math.abs(Number(c.saldo || 0)), 0);
+    return (
+      cabecalho(
+        "Cobrança em lote",
+        "Fluxo manual e seguro para cobrar clientes pelo WhatsApp.",
+        `<button class="btn btn-primary" id="send-next">${icon("send")} Enviar próximo</button><button class="btn btn-light" data-go="clientes">${icon("arrow-left")} Clientes</button>`,
+      ) +
+      `<section class="panel warning-panel"><div class="modal-body"><b>Use com cuidado.</b> O WhatsApp pode bloquear contas que enviam mensagens repetidas em excesso. Este app apenas abre uma conversa por vez; você confirma manualmente cada cobrança.</div></section><section class="metrics" style="margin:16px 0">${metric("Clientes na fila", lista.length, "com débito", "users")}${metric("Total listado", dinheiro(total), "em aberto", "hand-coins")}</section><div class="toolbar charge-filters"><button class="btn btn-light btn-sm" data-charge-filter="todos">Todos com débito</button><button class="btn btn-light btn-sm" data-charge-filter="nunca">Nunca cobrados</button><button class="btn btn-light btn-sm" data-charge-filter="naoHoje">Não cobrados hoje</button><button class="btn btn-light btn-sm" data-charge-filter="acima10">Acima de R$ 10</button><button class="btn btn-light btn-sm" data-charge-filter="acima50">Acima de R$ 50</button><button class="btn btn-light btn-sm" data-charge-filter="semTelefone">Sem telefone</button></div><section class="entity-grid" id="charge-list">${lista.map(cobrancaCard).join("") || vazio("Nenhum cliente neste filtro")}</section>`
+    );
+  }
+  function mostrarCobrancasCliente(id) {
+    const c = Clientes.obter(id),
+      lista = Cobrancas.historicoCliente(id);
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Cobranças - ${escapar(c.nome)}</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Saldo atual: <b>${dinheiro(Math.abs(Number(c.saldo || 0)))}</b></p><div class="table-wrap"><table><thead><tr><th>Data</th><th>Status</th><th>Valor</th><th>Mensagem</th></tr></thead><tbody>${lista.map((x) => `<tr><td>${dataHora(x.data)}</td><td>${escapar(x.status)}</td><td>${dinheiro(x.valorCobrado)}</td><td>${escapar(x.mensagem)}</td></tr>`).join("") || '<tr><td colspan="4">Nenhuma cobrança registrada</td></tr>'}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-primary close">Fechar</button></footer></section></div>`;
+    $$("#modal .close").forEach((b) => (b.onclick = Modais.fechar));
+    window.lucide?.createIcons();
+  }
+  function configuracoes() {
+    if (window.ConfiguracoesMobile?.isMobile())
+      return ConfiguracoesMobile.render();
+    const session = window.FirebaseSession || {},
+      business = session.business || {},
+      subscription = session.subscription || {},
+      access = session.access || {},
+      plan =
+        window.BusinessContext?.get?.().business?.subscription?.planId ||
+        subscription.planId ||
+        "trial",
+      data = DB.carregar(),
+      limits = access.limits || business.limits || {};
+    return (
+      cabecalho(
+        "Configurações",
+        "Conta, backup e armazenamento deste aparelho.",
+      ) +
+      `<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name || data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId || DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role || "")}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status === "trial" && access.daysRemaining !== null ? ` · ${access.daysRemaining} dia(s)` : ""}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan === "internal" ? "Todos os recursos liberados" : subscription.status === "trial" ? `Teste grátis · ${access.daysRemaining ?? 0} dia(s) restante(s)` : `Status: ${subscription.status || "não informado"}`} · Produtos: ${data.produtos.length} de ${limits.products ?? "—"} · Clientes: ${data.clientes.length} de ${limits.clients ?? "—"}</small></div><button class="btn btn-primary" data-go="planos">${icon("gem")} ${plan === "internal" ? "Plano interno" : "Ver planos"}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name || data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon("download")} Exportar backup</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>`
+    );
+  }
+  function planos() {
+    return window.PlansUI.render();
+  }
+  const inicioCompleto = () =>
+    `${window.MobileHome?.isMobile() ? MobileHome.render() : inicio()}${window.CampanhasUI?.dashboard?.() || ""}`;
+  const views = {
+      inicio: inicioCompleto,
+      vender,
+      clientes,
+      cobrancas,
+      fiados,
+      produtos,
+      campanhas: () => CampanhasUI.render(),
+      catalogo: () => CatalogoUI.render(),
+      pedidos: () => VisitasUI.renderOrdersPage(),
+      historico,
+      relatorios,
+      configuracoes,
+      planos,
+    },
+    titles = {
+      inicio: "Início",
+      vender: "Vender",
+      clientes: "Clientes",
+      cobrancas: "Cobranças",
+      fiados: "Fiados",
+      produtos: "Produtos",
+      campanhas: "Campanhas",
+      catalogo: "Catálogo online",
+      pedidos: "Pedidos online",
+      historico: "Histórico",
+      relatorios: "Desempenho",
+      configuracoes: "Configurações",
+      planos: "Planos e assinatura",
+    };
+  function formularioCliente(id) {
+    const c = id ? Clientes.obter(id) : {};
+    abrirFormulario(
+      id ? "Editar cliente" : "Novo cliente",
+      `<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${escapar(c.nome || "")}"></div><div class="field"><label>Telefone</label><input name="telefone" value="${escapar(c.telefone || "")}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" value="${escapar(c.telefone2 || "")}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${escapar(c.email || "")}"></div><div class="field"><label>Documento</label><input name="documento" value="${escapar(c.documento || "")}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${escapar(c.endereco || "")}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${escapar(c.complemento || "")}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${escapar(c.observacoes || "")}</textarea></div></div>`,
+      (f) => {
+        Clientes.salvar({ id, ...Object.fromEntries(f), ativo: true });
+        toast("Cliente salvo");
+      },
+    );
+  }
+  function formularioProduto(id) {
+    window.ProdutosMobile?.productForm(id);
+  }
+  function formularioEntradaEstoque(id) {
+    const p = Produtos.obter(id);
+    if (p?.productType === "variable") return ProdutosMobile.stockEntry(id);
+    abrirFormulario(
+      "Adicionar entrada",
+      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div><div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" min="0" step=".01" value="${p.custo ?? ""}"></div><div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      (f) => {
+        Produtos.entrada(
+          id,
+          f.get("quantidade"),
+          f.get("custo"),
+          f.get("observacao"),
+        );
+        toast("Entrada registrada");
+      },
+      "Salvar entrada",
+    );
+  }
+  function formularioAjusteEstoque(id) {
+    const p = Produtos.obter(id);
+    abrirFormulario(
+      "Ajustar estoque",
+      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Novo estoque *</label><input name="estoque" type="number" step="1" value="${Number(p.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
+      (f) => {
+        Produtos.ajustarEstoque(id, f.get("estoque"), f.get("motivo"));
+        toast("Estoque ajustado");
+      },
+      "Salvar ajuste",
+    );
+  }
+  function mostrarHistoricoEstoque(id) {
+    const p = Produtos.obter(id),
+      lista = Produtos.historico(id);
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Histórico de estoque - ${escapar(p.nome)}</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Qtd.</th><th>Anterior</th><th>Novo</th><th>Observação</th></tr></thead><tbody>${lista.map((m) => `<tr><td>${dataHora(m.data)}</td><td>${escapar(m.tipo.replaceAll("_", " "))}</td><td><b>${Number(m.quantidade || 0)}</b></td><td>${Number(m.estoqueAnterior || 0)}</td><td>${Number(m.estoqueNovo || 0)}</td><td>${escapar(m.observacao || "—")}</td></tr>`).join("") || '<tr><td colspan="6">Nenhuma movimentação registrada</td></tr>'}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-primary close">Fechar</button></footer></section></div>`;
+    $$("#modal .close").forEach((b) => (b.onclick = Modais.fechar));
+    window.lucide?.createIcons();
+  }
+  function importarCSV() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,text/csv";
+    input.onchange = () => {
+      const arquivo = input.files[0];
+      if (!arquivo) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const resultado = CSVImport.ler(reader.result),
+            registros = CSVImport.semDuplicados(resultado.clientes),
+            duplicados = resultado.clientes.length - registros.length,
+            resumo = CSVImport.resumir(registros),
+            avisoSaldo = resultado.possuiSaldo
+              ? `<span class="badge badge-paid">Saldo reconhecido</span> O sinal será preservado: negativo é débito e positivo é crédito.`
+              : `<span class="badge badge-debt">Sem coluna de saldo</span> Somente clientes novos deste arquivo serão criados com saldo zero.`;
+          $("#modal").innerHTML =
+            `<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Prévia da migração do Kyte</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><div class="csv-summary"><b>${registros.length} clientes encontrados</b>${duplicados ? ` · ${duplicados} linha(s) duplicada(s) ignorada(s)` : ""}<br><small>${avisoSaldo}</small></div><div class="import-stats"><div><small>Telefones</small><b>${resumo.telefones}</b></div><div><small>Devedores</small><b>${resumo.devedores}</b></div><div><small>Total em aberto</small><b>${dinheiro(resumo.totalEmAberto)}</b></div></div><div class="csv-preview"><table><thead><tr><th>Nome</th><th>Telefone / WhatsApp</th><th>Saldo atual</th><th>Observações</th></tr></thead><tbody>${registros.map((c) => `<tr><td>${escapar(c.nome)}</td><td>${escapar(c.telefone) || "—"}</td><td class="${c.saldo < 0 ? "import-debt" : c.saldo > 0 ? "import-credit" : ""}">${dinheiro(c.saldo)}</td><td>${escapar(c.observacoes) || "—"}</td></tr>`).join("")}</tbody></table></div></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary confirm" ${!registros.length ? "disabled" : ""}>Importar ${registros.length} clientes</button></footer></section></div>`;
+          $$("#modal .close,#modal .cancel").forEach(
+            (b) => (b.onclick = Modais.fechar),
+          );
+          $("#modal .confirm").onclick = () => {
+            Clientes.importar(registros, {
+              possuiSaldo: resultado.possuiSaldo,
+            });
+            const r = CSVImport.resumir(registros);
+            $("#modal").innerHTML =
+              `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Importação concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon("check")}</div><h2>${r.clientes} clientes importados</h2><p>${r.telefones} telefones importados</p><p>${r.devedores} clientes com saldo devedor</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(r.totalEmAberto)}</strong></div>${r.creditores ? `<p>${r.creditores} clientes com crédito</p>` : ""}</div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;
+            $("#modal .done").onclick = () => {
+              Modais.fechar();
+              render("clientes");
+            };
+            window.lucide?.createIcons();
+          };
+          window.lucide?.createIcons();
+        } catch (e) {
+          toast(e.message || "CSV inválido", true);
+        }
+      };
+      reader.readAsText(arquivo, "UTF-8");
+    };
+    input.click();
+  }
+  function abrirWhatsCobranca(c, confirmar = true) {
+    window.open(
+      `https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(Cobrancas.mensagem(c))}`,
+      "_blank",
+    );
+    if (confirmar)
+      setTimeout(
+        () =>
+          abrirFormulario(
+            "Marcar cobrança como enviada?",
+            `<p>Você abriu o WhatsApp de <b>${escapar(c.nome)}</b>.</p><p>Deseja marcar esta cobrança como enviada hoje?</p>`,
+            () => {
+              Cobrancas.registrar(c.id, "enviado");
+              toast("Cobrança marcada como enviada");
+            },
+            "Marcar enviada",
+          ),
+        500,
+      );
+  }
+  function bindCobrancas() {
+    $$("[data-charge-filter]").forEach(
+      (b) =>
+        (b.onclick = () =>
+          Router.ir(`cobrancas?filtro=${b.dataset.chargeFilter}`)),
+    );
+    $("#send-next").onclick = () => {
+      const c = Cobrancas.proximo();
+      if (!c)
+        return toast("Nenhum próximo cliente com débito e telefone", true);
+      abrirWhatsCobranca(c, true);
+    };
+    $("#charge-list").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.copyBatch) {
+        const c = Clientes.obter(b.dataset.copyBatch);
+        copiarTexto(Cobrancas.mensagem(c));
+      }
+      if (b.dataset.batchWhatsapp) {
+        const c = Clientes.obter(b.dataset.batchWhatsapp);
+        abrirWhatsCobranca(c, true);
+      }
+      if (b.dataset.ignoreCharge) {
+        Cobrancas.registrar(b.dataset.ignoreCharge, "ignorado");
+        toast("Cobrança ignorada por hoje");
+        render("cobrancas");
+      }
+    };
+  }
+  function bind(route) {
+    $$("[data-go]").forEach((b) => (b.onclick = () => Router.ir(b.dataset.go)));
+    if (route === "clientes") {
+      $("#new-client").onclick = () => formularioCliente();
+      $("#import-csv").onclick = importarCSV;
+      $("#search").oninput = (e) => {
+        $("#entity-list").innerHTML =
+          Clientes.listar()
+            .filter((c) =>
+              (c.nome + c.telefone)
+                .toLowerCase()
+                .includes(e.target.value.toLowerCase()),
+            )
+            .map(clienteCard)
+            .join("") || vazio("Nenhum cliente encontrado");
+        window.lucide?.createIcons();
+      };
+      $("#entity-list").onclick = (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        if (b.dataset.editClient) formularioCliente(b.dataset.editClient);
+        if (b.dataset.clientCharges)
+          mostrarCobrancasCliente(b.dataset.clientCharges);
+        if (b.dataset.adjustClient) {
+          const c = Clientes.obter(b.dataset.adjustClient);
+          abrirFormulario(
+            "Ajustar saldo",
+            `<p><b>${escapar(c.nome)}</b></p><p>Saldo atual: <b>${dinheiro(c.saldo)}</b></p><div class="balance-help">Use valor <b>negativo para débito</b>, positivo para crédito e zero para quitar.</div><div class="field"><label>Novo saldo *</label><input name="saldo" type="number" step=".01" value="${Number(c.saldo).toFixed(2)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: correção do saldo do Kyte"></textarea></div>`,
+            (f) => {
+              Clientes.ajustarSaldo(
+                c.id,
+                Number(f.get("saldo")),
+                f.get("motivo"),
+              );
+              toast("Saldo ajustado e salvo no histórico");
+            },
+            "Salvar ajuste",
+          );
+        }
+        if (b.dataset.deleteClient)
+          Modais.confirmar("cliente", () => {
+            Clientes.excluir(b.dataset.deleteClient);
+            toast("Cliente excluído");
+            render(route);
+          });
+        if (b.dataset.clientWhatsapp) {
+          const c = Clientes.obter(b.dataset.clientWhatsapp),
+            texto =
+              c.saldo < 0
+                ? `sua conta atual na Adi Festa está em ${dinheiro(Math.abs(c.saldo))}`
+                : c.saldo > 0
+                  ? `você possui um crédito de ${dinheiro(c.saldo)} na Adi Festa`
+                  : "sua conta na Adi Festa está zerada",
+            msg = `Olá, tudo bem? Passando para avisar que ${texto}. Obrigado!`;
+          window.open(
+            `https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(msg)}`,
+            "_blank",
+          );
+        }
+      };
+    }
+    if (route === "produtos") {
+      $("#new-product").onclick = () => formularioProduto();
+      $("#search").oninput = (e) => {
+        const query = e.target.value.toLowerCase(),
+          variationMatches = new Map(
+            (window.ProductVariations?.search(e.target.value) || []).map(
+              (match) => [match.product.id, match.match],
+            ),
+          );
+        $("#entity-list").innerHTML =
+          Produtos.listar()
+            .filter(
+              (p) =>
+                `${p.nome} ${p.codigo || ""} ${p.barcode || ""} ${p.categoria || ""}`
+                  .toLowerCase()
+                  .includes(query) || variationMatches.has(p.id),
+            )
+            .map((p) => ({ ...p, _variationMatch: variationMatches.get(p.id) }))
+            .map(produtoCard)
+            .join("") || vazio("Nenhum produto encontrado");
+        window.lucide?.createIcons();
+      };
+      $("#entity-list").onclick = (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        if (b.dataset.editProduct) formularioProduto(b.dataset.editProduct);
+        if (b.dataset.stockEntry)
+          formularioEntradaEstoque(b.dataset.stockEntry);
+        if (b.dataset.stockAdjust)
+          formularioAjusteEstoque(b.dataset.stockAdjust);
+        if (b.dataset.stockHistory)
+          mostrarHistoricoEstoque(b.dataset.stockHistory);
+        if (b.dataset.deleteProduct)
+          Modais.confirmar("produto", () => {
+            Produtos.excluir(b.dataset.deleteProduct);
+            toast("Produto excluído");
+            render(route);
+          });
+      };
+    }
+    if (route === "cobrancas") bindCobrancas();
+    if (route === "vender") bindVenda();
+    if (route === "fiados")
+      $$("[data-receive]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const c = Clientes.obter(b.dataset.receive),
+              divida = Math.abs(c.saldo);
+            abrirFormulario(
+              `Receber de ${escapar(c.nome)}`,
+              `<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Pix, dinheiro..."></div>`,
+              (f) => {
+                Fiados.receber(c.id, f.get("valor"), f.get("observacao"));
+                toast("Pagamento registrado");
+              },
+              "Confirmar recebimento",
+            );
+          }),
+      );
+    if (route === "configuracoes") bindConfig();
+  }
+  function confirmarEstoqueInsuficiente(faltas, acao) {
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Estoque insuficiente</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Alguns produtos não têm estoque suficiente.</p><ul>${faltas.map((f) => `<li><b>${escapar(f.produto.nome)}</b>: falta ${f.falta} un.</li>`).join("")}</ul><p>Deseja continuar mesmo assim?</p></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary yes">Continuar venda</button></footer></section></div>`;
+    $$("#modal .close,#modal .cancel").forEach(
+      (b) => (b.onclick = Modais.fechar),
+    );
+    $("#modal .yes").onclick = () => {
+      Modais.fechar();
+      acao();
+    };
+    window.lucide?.createIcons();
+  }
+  function bindVenda() {
+    let ajusteManual = false,
+      descontoTipo = null;
+    const distribuir = (valor) => {
+      const t = totaisCarrinho(),
+        alvo = Math.max(0, Number(valor) || 0),
+        fator = t.subtotalOriginal ? alvo / t.subtotalOriginal : 0;
+      carrinho.forEach(
+        (i) =>
+          (i.precoFinalUnitario = Number((i.precoOriginal * fator).toFixed(4))),
+      );
+    };
+    const redesenhar = () => {
+      const t = totaisCarrinho();
+      $("#cart").innerHTML = carrinhoHTML();
+      $("#sale-totals").innerHTML =
+        `<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.subtotalOriginal)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.descontoTotal)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.valorFinal)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.custoTotal)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.lucro)}</b></div>`;
+      $("#manual-total").value = t.valorFinal.toFixed(2);
+      const c = Clientes.obter($("#sale-client").value),
+        fiado = $("#sale-status").value === "fiado";
+      $("#debt-preview").innerHTML =
+        fiado && c
+          ? `<div class="debt-preview"><div><span>Saldo anterior</span><b>${dinheiro(Math.abs(Math.min(0, c.saldo)))}</b></div><div><span>Valor desta venda</span><b>${dinheiro(t.valorFinal)}</b></div><div><span>Novo total em aberto</span><b>${dinheiro(Math.abs(Math.min(0, c.saldo - t.valorFinal)))}</b></div></div>`
+          : "";
+      $$("[data-item-qty]").forEach(
+        (x) =>
+          (x.onchange = () => {
+            const i = carrinho.find((y) => cartKey(y) === x.dataset.itemQty);
+            i.quantidade = Math.max(1, Number(x.value) || 1);
+            redesenhar();
+          }),
+      );
+      $$("[data-item-price]").forEach(
+        (x) =>
+          (x.onchange = () => {
+            const i = carrinho.find((y) => cartKey(y) === x.dataset.itemPrice);
+            i.precoFinalUnitario = Math.max(0, Number(x.value) || 0);
+            ajusteManual = true;
+            descontoTipo = "item";
+            redesenhar();
+          }),
+      );
+      $$("[data-remove]").forEach(
+        (x) =>
+          (x.onclick = () => {
+            carrinho = carrinho.filter((i) => cartKey(i) !== x.dataset.remove);
+            redesenhar();
+          }),
+      );
+      window.lucide?.createIcons();
+    };
+    const addDesktopItem = (item) => {
+      const current = carrinho.find((entry) => cartKey(entry) === cartKey(item));
+      if (current) current.quantidade += Number(item.quantidade || 1);
+      else carrinho.push(item);
+      redesenhar();
+    };
+    const chooseDesktopVariant = async (product) => {
+      const variants = await ProductVariations.ensure(product.id);
+      if (!variants.length)
+        return toast("Este produto não possui variações disponíveis", true);
+      $("#modal").innerHTML = `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${escapar(product.nome)}</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Escolha a variação para adicionar:</p><div class="desktop-variation-picker">${variants.map((variant) => `<button class="btn btn-light" data-desktop-variant="${variant.id}" ${!variant.allowNegativeStock && Number(variant.stock) <= 0 ? "disabled" : ""}><span>${escapar(ProductVariations.displayName(variant))}</span><b>${dinheiro(variant.price)}</b><small>${Number(variant.stock)} un.</small></button>`).join("")}</div></div></section></div>`;
+      $("#modal .close").onclick = Modais.fechar;
+      $$("[data-desktop-variant]", $("#modal")).forEach(
+        (button) =>
+          (button.onclick = () => {
+            const variant = ProductVariations.get(button.dataset.desktopVariant);
+            addDesktopItem(ProductVariations.saleItem(product, variant, 1));
+            Modais.fechar();
+          }),
+      );
+      window.lucide?.createIcons();
+    };
+    $$("[data-add]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const p = Produtos.obter(b.dataset.add);
+          if (ProductVariations.isVariable(p)) return chooseDesktopVariant(p);
+          addDesktopItem(ProductVariations.saleItem(p, null, 1));
+        }),
+    );
+    $("#discount-value").onchange = (e) => {
+      const t = totaisCarrinho();
+      distribuir(t.subtotalOriginal - Math.max(0, Number(e.target.value) || 0));
+      descontoTipo = "valor";
+      ajusteManual = false;
+      $("#discount-percent").value = "0";
+      redesenhar();
+    };
+    $("#discount-percent").onchange = (e) => {
+      const t = totaisCarrinho(),
+        pct = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+      distribuir(t.subtotalOriginal * (1 - pct / 100));
+      descontoTipo = "percentual";
+      ajusteManual = false;
+      $("#discount-value").value = "0";
+      redesenhar();
+    };
+    $("#manual-total").onchange = (e) => {
+      distribuir(e.target.value);
+      descontoTipo = "valor_final_manual";
+      ajusteManual = true;
+      redesenhar();
+    };
+    $("#sale-client").onchange = $("#sale-status").onchange = redesenhar;
+    $("#product-search").oninput = (e) =>
+      $$(".pick-product").forEach(
+        (p) =>
+          (p.hidden =
+            !`${p.textContent} ${Produtos.obter(p.dataset.add)?.barcode || ""}`
+              .toLowerCase()
+              .includes(e.target.value.toLowerCase())),
+      );
+    $("#finish-sale").onclick = () => {
+      if (!carrinho.length) return toast("Adicione ao menos um produto", true);
+      const clienteId = $("#sale-client").value || null,
+        status = $("#sale-status").value;
+      if (status === "fiado" && !clienteId)
+        return toast("Selecione um cliente para vender fiado", true);
+      const cliente = clienteId ? Clientes.obter(clienteId) : null,
+        seguir = () => {
+          const venda = Vendas.registrar({
+            clienteId,
+            status,
+            observacao: $("#sale-note").value,
+            itens: carrinho,
+            ajusteManual,
+            descontoTipo,
+          });
+          carrinho = [];
+          Recibos.mostrar(venda, cliente);
+        },
+        faltas = Vendas.estoqueInsuficiente(carrinho);
+      if (faltas.length) return confirmarEstoqueInsuficiente(faltas, seguir);
+      seguir();
+    };
+    redesenhar();
+  }
+  function baixarBackup(prefixo = "backup") {
+    const backup = DB.criarBackup(),
+      slug = (backup.businessName || backup.businessId || "empresa")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+    const a = document.createElement("a"),
+      url = URL.createObjectURL(
+        new Blob([JSON.stringify(backup, null, 2)], {
+          type: "application/json",
+        }),
+      );
+    a.href = url;
+    a.download = `${prefixo}-${slug}-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function mostrarResultadoRestauracao(relatorio) {
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Restauração concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon("check")}</div><p><b>${relatorio.counts.clientes}</b> clientes · <b>${relatorio.counts.produtos}</b> produtos · <b>${relatorio.counts.vendas}</b> vendas</p><p>${relatorio.updated} existentes atualizados · ${relatorio.added} novos adicionados</p><p>${relatorio.duplicates} duplicação(ões) detectada(s) após a conferência</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(relatorio.totals.fiado)}</strong></div>${relatorio.cloudTotals ? `<p>Fiado local: <b>${dinheiro(relatorio.totals.fiado)}</b><br>Fiado na nuvem: <b>${dinheiro(relatorio.cloudTotals.fiado)}</b></p><p>${relatorio.matches ? "Contagens e totais conferidos." : "A conferência ainda encontrou diferenças."}</p>` : ""}<p>${relatorio.pending ? `${relatorio.pending} trabalho(s) aguardando sincronização.` : "Restauração idempotente finalizada."}</p></div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;
+    $("#modal .done").onclick = () => {
+      Modais.fechar();
+      render("configuracoes");
+    };
+    window.lucide?.createIcons();
+  }
+  function mostrarPreviaBackup(prepared) {
+    const p = BackupManager.preview(prepared, DB.carregar());
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Prévia do backup</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><div class="import-stats"><div><small>Clientes</small><b>${p.clientes}</b></div><div><small>Produtos</small><b>${p.produtos}</b></div><div><small>Vendas</small><b>${p.vendas}</b></div><div><small>Pagamentos</small><b>${p.pagamentos}</b></div><div><small>Campanhas</small><b>${p.campanhas}</b></div><div><small>Mov. estoque</small><b>${p.movimentosEstoque}</b></div><div><small>Total do fiado</small><b>${dinheiro(p.totals.fiado)}</b></div></div><p>Data: <b>${prepared.exportedAt ? dataHora(prepared.exportedAt) : "Backup antigo"}</b> · Schema ${prepared.schemaVersion} · Negócio ${escapar(prepared.businessId)}</p><p>${p.validos} registro(s) válido(s) · ${p.duplicates} duplicado(s) no arquivo que serão mesclados · ${p.novos} novo(s) · ${p.atualizados} existente(s) serão atualizados.</p><label class="backup-mode"><input type="radio" name="backup-mode" value="merge" checked> <b>Mesclar com os dados atuais</b><small>Atualiza IDs existentes e adiciona apenas registros novos.</small></label><label class="backup-mode"><input type="radio" name="backup-mode" value="replace"> <b>Substituir os dados deste negócio</b><small>Substitui aparelho e nuvem. Um backup de segurança será criado.</small></label><div id="replace-confirm" hidden><div class="backup-warning"><b>Atenção:</b> digite SUBSTITUIR para confirmar a substituição completa.</div><input class="search" id="replace-word" autocomplete="off" placeholder="SUBSTITUIR"></div></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary confirm">Mesclar backup</button></footer></section></div>`;
+    $$("#modal .close,#modal .cancel").forEach(
+      (button) => (button.onclick = Modais.fechar),
+    );
+    $$('input[name="backup-mode"]', $("#modal")).forEach(
+      (input) =>
+        (input.onchange = () => {
+          const replace = input.value === "replace" && input.checked;
+          $("#replace-confirm").hidden = !replace;
+          $("#modal .confirm").textContent = replace
+            ? "Substituir dados"
+            : "Mesclar backup";
+        }),
+    );
+    $("#modal .confirm").onclick = async () => {
+      const mode = $('input[name="backup-mode"]:checked', $("#modal")).value;
+      if (
+        mode === "replace" &&
+        $("#replace-word").value.trim() !== "SUBSTITUIR"
+      )
+        return toast("Digite SUBSTITUIR para confirmar.", true);
+      baixarBackup("adi-festa-backup-automatico");
+      const button = $("#modal .confirm");
+      button.disabled = true;
+      button.textContent = "Restaurando…";
+      try {
+        const report = await SyncFirebase.restoreBackupData(prepared, mode);
+        mostrarResultadoRestauracao(report);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent =
+          mode === "replace" ? "Substituir dados" : "Mesclar backup";
+        toast(error.message || "Não foi possível restaurar o backup.", true);
+      }
+    };
+    window.lucide?.createIcons();
+  }
+  function limparDadosAparelho() {
+    const pending = SyncFirebase.getFirebaseDiagnostic().pendingOperations;
+    $("#modal").innerHTML =
+      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Limpar os dados deste aparelho?</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Os dados da nuvem permanecerão intactos. Ao entrar ou sincronizar novamente, eles serão baixados para este dispositivo.</p><p>Esta ação também remove operações locais que ainda não foram sincronizadas.</p>${pending ? `<div class="backup-warning"><b>Existem ${pending} alterações ainda não sincronizadas.</b></div>` : ""}</div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button>${pending ? '<button class="btn btn-primary sync-first">Sincronizar antes de limpar</button><button class="btn btn-danger discard">Descartar alterações locais e limpar</button>' : '<button class="btn btn-danger clear-now">Limpar este aparelho</button>'}</footer></section></div>`;
+    $$("#modal .close,#modal .cancel").forEach(
+      (button) => (button.onclick = Modais.fechar),
+    );
+    const finish = async (discard) => {
+      try {
+        await SyncFirebase.clearLocalDevice({ discard });
+        Modais.fechar();
+        toast("Dados locais limpos. A nuvem permanece intacta.");
+        render("configuracoes");
+      } catch (error) {
+        toast(error.message || "Não foi possível limpar este aparelho.", true);
+      }
+    };
+    if (pending) {
+      $("#modal .sync-first").onclick = async () => {
+        const button = $("#modal .sync-first");
+        button.disabled = true;
+        button.textContent = "Sincronizando…";
+        try {
+          await SyncFirebase.synchronizeNow();
+          if (SyncFirebase.getFirebaseDiagnostic().pendingOperations)
+            return toast(
+              "Ainda existem alterações pendentes. Tente novamente.",
+              true,
+            );
+          await finish(false);
+        } finally {
+          button.disabled = false;
+          button.textContent = "Sincronizar antes de limpar";
+        }
+      };
+      $("#modal .discard").onclick = () => {
+        if (
+          confirm(
+            "Descartar definitivamente as alterações locais ainda não sincronizadas?",
+          )
+        )
+          finish(true);
+      };
+    } else $("#modal .clear-now").onclick = () => finish(false);
+    window.lucide?.createIcons();
+  }
+  function bindConfig() {
+    const store = $("#store-name"),
+      exportButton = $("#export"),
+      importInput = $("#import"),
+      clearButton = $("#clear-device");
+    if (store)
+      store.onchange = (e) =>
+        DB.alterar(
+          (d) =>
+            (d.config.nome =
+              e.target.value.trim() ||
+              window.FirebaseSession?.business?.name ||
+              "Meu negócio"),
+        );
+    if (exportButton) exportButton.onclick = () => baixarBackup();
+    if (importInput)
+      importInput.onchange = (e) => {
+        const arquivo = e.target.files[0];
+        if (!arquivo) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const raw = JSON.parse(reader.result),
+              businessId = DB.getBusinessId(),
+              prepared = BackupManager.normalizeBackup(raw, businessId);
+            mostrarPreviaBackup(prepared);
+          } catch (error) {
+            toast(error.message || "Backup inválido", true);
+          } finally {
+            e.target.value = "";
+          }
+        };
+        reader.readAsText(arquivo);
+      };
+    if (clearButton) clearButton.onclick = limparDadosAparelho;
+    window.ConfiguracoesMobile?.bind?.();
+  }
+  async function copiarTexto(texto) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast("Mensagem copiada");
+    } catch {
+      const t = document.createElement("textarea");
+      t.value = texto;
+      document.body.append(t);
+      t.select();
+      document.execCommand("copy");
+      t.remove();
+      toast("Mensagem copiada");
+    }
+  }
+  const mensagemCobranca = (c) =>
+    `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${DB.carregar().config.nome || "nossa loja"} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
+  function syncResponsiveNavigation() {
+    const mobile = matchMedia("(max-width:767px)").matches,
+      link = $('[data-route="relatorios"]');
+    if (!link) return;
+    link.hidden = mobile;
+    link.setAttribute("aria-hidden", String(mobile));
+    mobile
+      ? link.setAttribute("tabindex", "-1")
+      : link.removeAttribute("tabindex");
+  }
+  function render(route) {
+    if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
+    window.SyncFirebase?.setScreen?.(route);
+    syncResponsiveNavigation();
+    $("#app").innerHTML = views[route]();
+    $("#title").textContent = titles[route];
+    $("#date").textContent =
+      route === "clientes"
+        ? "Contas, compras e contato em um só lugar."
+        : route === "produtos" && matchMedia("(max-width:767px)").matches
+          ? "Preços, custos e estoque dos seus doces."
+          : route === "campanhas"
+            ? "Fidelização, pontos e recompensas."
+            : route === "catalogo"
+              ? "Link permanente, produtos e disponibilidade."
+              : route === "pedidos"
+                ? "Gestão dos pedidos recebidos pelo catálogo."
+                : route === "relatorios"
+                  ? "Análises detalhadas do seu negócio."
+                  : route === "configuracoes" &&
+                      matchMedia("(max-width:767px)").matches
+                    ? "Gerencie sua conta, empresa e dados."
+                    : route === "planos"
+                      ? "Escolha o plano ideal para o seu negócio."
+                      : new Date().toLocaleDateString("pt-BR", {
+                          weekday: "long",
+                          day: "2-digit",
+                          month: "long",
+                        });
+    $$("[data-route]").forEach((a) =>
+      a.classList.toggle("active", a.dataset.route === route),
+    );
+    $$("[data-mobile-route]").forEach((a) =>
+      a.classList.toggle("active", a.dataset.mobileRoute === route),
+    );
+    window.BarcodePrimaryFab?.update?.();
+    fecharMenu();
+    aplicarInputModes($("#app"));
+    bind(route);
+    if (route === "catalogo") CatalogoUI.bind();
+    if (route === "pedidos") VisitasUI.bindOrdersPage();
+    if (route === "campanhas") CampanhasUI.bind();
+    if (route === "planos") window.PlansUI.bind($("#app"));
+    window.PlansUI?.syncNavigation?.();
+    window.lucide?.createIcons();
+  }
+  const sidebar = $("#sidebar"),
+    overlay = $("#overlay"),
+    fecharMenu = () => {
+      sidebar.classList.remove("open");
+      overlay.classList.remove("show");
+    };
+  $("#menu").onclick = () => {
+    sidebar.classList.toggle("open");
+    overlay.classList.toggle("show");
+  };
+  overlay.onclick = fecharMenu;
+  $("#date").textContent = new Date().toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  });
+  syncResponsiveNavigation();
+  matchMedia("(max-width:767px)").addEventListener(
+    "change",
+    syncResponsiveNavigation,
+  );
+  document.addEventListener("input", (e) => {
+    if (e.target.id === "fiado-search") {
+      const q = e.target.value.trim().toLowerCase();
+      $$(".fiado-card").forEach(
+        (c) => (c.hidden = !c.dataset.name.includes(q)),
+      );
+    }
+  });
+  document.addEventListener("focusin", (e) => {
+    if (e.target.matches('input[type="number"]'))
+      e.target.inputMode = "decimal";
+    if (e.target.matches('input[name*="telefone"],input[type="tel"]'))
+      e.target.inputMode = "tel";
+  });
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.copyCharge) {
+      const c = Clientes.obter(b.dataset.copyCharge);
+      copiarTexto(mensagemCobranca(c));
+    }
+    if (b.dataset.chargeWhatsapp) {
+      const c = Clientes.obter(b.dataset.chargeWhatsapp);
+      window.open(
+        `https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(mensagemCobranca(c))}`,
+        "_blank",
+      );
+    }
+    if (b.hasAttribute("data-copy-closing"))
+      copiarTexto(resumoFechamento().texto);
+    if (b.hasAttribute("data-share-closing"))
+      window.open(
+        `https://wa.me/?text=${encodeURIComponent(resumoFechamento().texto)}`,
+        "_blank",
+      );
+    if (b.hasAttribute("data-load-history")) {
+      historicoLimite += 100;
+      render("historico");
+    }
+    if (b.hasAttribute("data-undo-sale"))
+      abrirFormulario(
+        "Desfazer última venda",
+        "<p>Tem certeza que deseja desfazer a última venda? O saldo e o estoque serão restaurados.</p>",
+        () => {
+          Vendas.desfazerUltima();
+          toast("Venda desfeita com sucesso");
+        },
+        "Desfazer venda",
+      );
+  });
+  addEventListener("load", () => window.lucide?.createIcons());
+  let cloudRenderTimer = null,
+    cloudRenderPending = false;
+  function scheduleCloudRender() {
+    cloudRenderPending = true;
+    clearTimeout(cloudRenderTimer);
+    cloudRenderTimer = setTimeout(() => {
+      const active = document.activeElement,
+        editing =
+          active &&
+          active.closest?.("#app") &&
+          active.matches('input,textarea,select,[contenteditable="true"]');
+      if (
+        editing ||
+        document.querySelector("#modal")?.children.length ||
+        document.querySelector(".message-center-page") ||
+        Router.atual() === "vender"
+      )
+        return;
+      cloudRenderPending = false;
+      render(Router.atual());
+    }, 220);
+  }
+  addEventListener("cloud-data-updated", scheduleCloudRender);
+  document.addEventListener("focusout", () => {
+    if (cloudRenderPending) setTimeout(scheduleCloudRender, 80);
+  });
+  let stableSearchTimer = null;
+  document.addEventListener(
+    "input",
+    (event) => {
+      const client = event.target.id === "mobile-client-search",
+        product = event.target.id === "mobile-product-search";
+      if (!client && !product) return;
+      event.stopImmediatePropagation();
+      clearTimeout(stableSearchTimer);
+      const value = event.target.value;
+      stableSearchTimer = setTimeout(
+        () =>
+          client
+            ? window.ClientesMobile?.search(value)
+            : window.ProdutosMobile?.search(value),
+        100,
+      );
+    },
+    true,
+  );
+  if (
+    "serviceWorker" in navigator &&
+    location.protocol.startsWith("http") &&
+    !["localhost", "127.0.0.1"].includes(location.hostname)
+  )
+    navigator.serviceWorker
+      .register("./service-worker.js")
+      .then((registration) => {
+        const offerUpdate = (worker) => {
+          if (!worker) return;
+          if (confirm("Nova versão disponível. Deseja atualizar agora?"))
+            worker.postMessage("SKIP_WAITING");
+        };
+        if (registration.waiting) offerUpdate(registration.waiting);
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          worker?.addEventListener("statechange", () => {
+            if (
+              worker.state === "installed" &&
+              navigator.serviceWorker.controller
+            )
+              offerUpdate(worker);
+          });
+        });
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (!refreshing) {
+            refreshing = true;
+            location.reload();
+          }
+        });
+      })
+      .catch((error) => console.error("[Service worker registration]", error));
+  let appRouterStarted = false;
+  addEventListener("firebase-auth-ready", () => {
+    if (!appRouterStarted) {
+      appRouterStarted = true;
+      Router.iniciar(render);
+    } else render(Router.atual());
+  });
+  addEventListener("firebase-session-cleared", () => {
+    carrinho = [];
+    historicoLimite = 100;
+    $("#modal").innerHTML = "";
+    document.body.classList.remove("sale-sheet-open");
+  });
+  addEventListener("clientes-import-csv", importarCSV);
 })();
