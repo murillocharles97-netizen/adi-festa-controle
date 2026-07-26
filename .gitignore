@@ -2,5 +2,10 @@
 .DS_Store
 Thumbs.db
 functions/node_modules/
+node_modules/
 .firebase/
 firebase-debug.log
+firestore-debug.log
+ui-debug.log
+functions/.env.*
+functions/.secret.local

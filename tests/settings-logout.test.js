@@ -22,9 +22,9 @@ assert.match(auth,/sessionStorage\.removeItem\('adiFestaMessagePendingReturn_v1'
 assert.doesNotMatch(auth,/\[Sync before logout\]/);
 assert.doesNotMatch(auth,/type:'logout'/);
 
-assert.match(app,/else render\(Router\.atual\(\)\)/);
-assert.match(app,/addEventListener\('firebase-session-cleared'/);
-assert.match(app,/carrinho=\[\]/);
+assert.match(app,/else\s+render\(Router\.atual\(\)\)/);
+assert.match(app,/addEventListener\(["']firebase-session-cleared["']/);
+assert.match(app,/carrinho\s*=\s*\[\]/);
 assert.match(app,/ConfiguracoesMobile\.render\(\)/);
 
 assert.match(mobile,/Minha empresa/);
@@ -38,10 +38,10 @@ assert.match(mobile,/SyncFirebase\.synchronizeNow\(\)/);
 assert.match(css,/@media \(max-width:767px\)/);
 assert.match(css,/@media \(min-width:768px\)/);
 assert.match(ui,/if\(document\.querySelector\('\.mobile-settings-page'\)\)/);
-assert.match(worker,/adi-festa-v55-universal-catalog/);
+assert.match(worker,/adi-festa-v56-product-variations/);
 assert.match(worker,/configuracoes-mobile\.js/);
 assert.match(worker,/configuracoes-mobile\.css/);
-assert.match(read('js/checkout.js'),/addEventListener\('firebase-session-cleared',resetSession\)/);
+assert.match(read('js/checkout.js'),/addEventListener\(\s*["']firebase-session-cleared["']\s*,\s*resetSession\s*\)/);
 assert.match(read('js/checkout-mobile.js'),/addEventListener\('firebase-session-cleared'/);
 assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound==='true'/);
 assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound='true'/);

@@ -1,0 +1,29 @@
+{
+  "businessId": "empresa_emulador_a",
+  "products": [
+    {"id":"simple-1","nome":"Brownie","productType":"simple","preco":8,"custo":3,"estoqueAtual":10},
+    {"id":"simple-2","nome":"Água","productType":"simple","preco":4,"custo":1.5,"estoqueAtual":20},
+    {"id":"simple-3","nome":"Bolo no pote","productType":"simple","preco":14,"custo":6,"estoqueAtual":6},
+    {"id":"variable-1","nome":"Cone recheado","productType":"variable","attributes":[{"id":"sabor","name":"Sabor","values":["Ferrero","Nutella","Prestígio"]}]},
+    {"id":"variable-2","nome":"Gloss labial","productType":"variable","attributes":[{"id":"cor","name":"Cor","values":["Rosa","Nude"]}]},
+    {"id":"variable-3","nome":"Anel coração","productType":"variable","attributes":[{"id":"tamanho","name":"Tamanho","values":["16","18","20"]}]}
+  ],
+  "productVariants": [
+    {"id":"cone-fer","parentProductId":"variable-1","displayName":"Ferrero","attributeValues":{"sabor":"Ferrero"},"price":14,"cost":6,"stock":8},
+    {"id":"cone-nut","parentProductId":"variable-1","displayName":"Nutella","attributeValues":{"sabor":"Nutella"},"price":14,"cost":6,"stock":12},
+    {"id":"cone-pre","parentProductId":"variable-1","displayName":"Prestígio","attributeValues":{"sabor":"Prestígio"},"price":12,"cost":5,"stock":5},
+    {"id":"gloss-rosa","parentProductId":"variable-2","displayName":"Rosa","attributeValues":{"cor":"Rosa"},"price":10,"cost":4,"stock":6},
+    {"id":"gloss-nude","parentProductId":"variable-2","displayName":"Nude","attributeValues":{"cor":"Nude"},"price":10,"cost":4,"stock":9},
+    {"id":"anel-16","parentProductId":"variable-3","displayName":"16","attributeValues":{"tamanho":"16"},"price":29,"cost":12,"stock":4},
+    {"id":"anel-18","parentProductId":"variable-3","displayName":"18","attributeValues":{"tamanho":"18"},"price":31,"cost":12,"stock":3},
+    {"id":"anel-20","parentProductId":"variable-3","displayName":"20","attributeValues":{"tamanho":"20"},"price":33,"cost":12,"stock":2}
+  ],
+  "clients": [
+    {"id":"client-1","nome":"Cliente Um","saldo":0},
+    {"id":"client-2","nome":"Cliente Dois","saldo":-20}
+  ],
+  "sales": [
+    {"id":"sale-1","clienteId":"client-1","itens":[{"produtoId":"simple-1","quantidade":1}]},
+    {"id":"sale-2","clienteId":"client-2","itens":[{"produtoId":"variable-1","variantId":"cone-fer","quantidade":2}]}
+  ]
+}
