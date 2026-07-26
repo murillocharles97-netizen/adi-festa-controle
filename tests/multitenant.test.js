@@ -43,8 +43,8 @@ assert.ok(memory.has('adiFestaDB_v1:biz_empresa_b'));
 
 const sync=read('js/firebase/sync.js');
 assert.match(sync,/adiFesta:\$\{namespace\(\)\}:syncQueue/);
-assert.match(sync,/item\.businessId&&item\.businessId!==businessId\|\|item\.userId&&item\.userId!==currentUser\.uid/);
-assert.match(sync,/businessId:activeBusinessId\(\)/);
+assert.match(sync,/item\.businessId\s*&&\s*item\.businessId\s*!==\s*businessId[\s\S]*\|\|[\s\S]*item\.userId\s*&&\s*item\.userId\s*!==\s*currentUser\.uid/);
+assert.match(sync,/businessId\s*:\s*activeBusinessId\(\)/);
 assert.doesNotMatch(sync,/profile\?\.businessId\|\|'adi-festa'/);
 
 const repository=read('js/firebase/firestore-repository.js');

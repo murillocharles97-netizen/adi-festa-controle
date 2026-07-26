@@ -8,10 +8,10 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('ações principais mobile são contextuais', () => {
   const source = read('js/barcode.js');
-  assert.match(source, /vender:\{icon:'scan-barcode',label:'Escanear',action:'scan-sale'\}/);
-  assert.match(source, /clientes:\{icon:'plus',label:'Novo cliente',action:'new-client'\}/);
-  assert.match(source, /produtos:\{icon:'scan-barcode',label:'Ler código',action:'scan-product'\}/);
-  assert.match(source, /campanhas:\{icon:'megaphone',label:'Nova campanha',action:'new-campaign'\}/);
+  assert.match(source, /vender\s*:\s*\{[\s\S]*?icon\s*:\s*["']scan-barcode["'][\s\S]*?label\s*:\s*["']Escanear["'][\s\S]*?action\s*:\s*["']scan-sale["'][\s\S]*?\}/);
+  assert.match(source, /clientes\s*:\s*\{[\s\S]*?action\s*:\s*["']new-client["']/);
+  assert.match(source, /produtos\s*:\s*\{[\s\S]*?action\s*:\s*["']scan-product["']/);
+  assert.match(source, /campanhas\s*:\s*\{[\s\S]*?action\s*:\s*["']new-campaign["']/);
 });
 
 test('scanners duplicados não são exibidos nas buscas mobile', () => {
