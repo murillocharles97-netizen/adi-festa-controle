@@ -19,9 +19,9 @@ assert.match(index,/js\/crm-ui\.js/);
 assert.match(index,/css\/crm\.css/);
 assert.match(storageSource,/contatosCliente/);
 assert.match(backupSource,/contatosCliente/);
-assert.match(syncSource,/clientContacts:\{key:'contatosCliente'\}/);
+assert.match(syncSource,/clientContacts\s*:\s*\{\s*key\s*:\s*["']contatosCliente["']/);
 assert.match(rules,/'clientContacts'/);
-assert.match(worker,/adi-festa-v55-universal-catalog/);
+assert.match(worker,/adi-festa-v56-product-variations/);
 
 const data={
   clientes:[{id:'c1',nome:'Cliente Teste',telefone:'17999999999',email:'cliente@teste.com',saldo:-25,totalComprado:999,quantidadeVendas:99,ativo:true,criadoEm:'2026-01-01T10:00:00.000Z'}],

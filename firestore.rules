@@ -280,11 +280,45 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId;
         allow update, delete: if false;
       }
-      match /{collectionName}/{documentId} {
+      match /productVariants/{variantId} {
+        function parentProduct(productId) {
+          return get(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId));
+        }
+        function validVariant(data) {
+          return data.id == variantId
+            && data.businessId == businessId
+            && data.parentProductId is string
+            && data.displayName is string
+            && data.attributeValues is map
+            && data.price is number
+            && data.stock is number
+            && data.active is bool
+            && data.keys().hasOnly([
+              'id', 'businessId', 'ownerId', 'parentProductId',
+              'attributeValues', 'displayName', 'displayNameNormalized',
+              'searchTokens', 'sku', 'barcode', 'price', 'cost', 'stock',
+              'minStock', 'active', 'catalogVisible', 'allowNegativeStock',
+              'imageUrl', 'createdAt', 'updatedAt', 'schemaVersion', 'version'
+            ]);
+        }
         allow read: if belongsToBusiness(businessId);
-        allow create: if (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId))
+        allow create: if canWriteCollection(businessId, 'productVariants')
+          && validVariant(request.resource.data)
+          && parentProduct(request.resource.data.parentProductId).data.businessId == businessId;
+        allow update: if canWriteCollection(businessId, 'productVariants')
+          && validVariant(request.resource.data)
+          && request.resource.data.parentProductId == resource.data.parentProductId
+          && request.resource.data.businessId == resource.data.businessId;
+        allow delete: if false;
+      }
+      match /{collectionName}/{documentId} {
+        allow read: if collectionName != 'productVariants'
+          && belongsToBusiness(businessId);
+        allow create: if collectionName != 'productVariants'
+          && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId))
           && request.resource.data.businessId == businessId;
-        allow update: if canWriteCollection(businessId, collectionName)
+        allow update: if collectionName != 'productVariants'
+          && canWriteCollection(businessId, collectionName)
           && (
             resource.data.businessId == businessId
             || (businessId == 'adi-festa' && !('businessId' in resource.data))

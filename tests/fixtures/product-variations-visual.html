@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Variações — teste visual</title>
+    <link rel="stylesheet" href="../../css/style.css" />
+    <link rel="stylesheet" href="../../css/produtos-mobile.css" />
+    <link rel="stylesheet" href="../../css/checkout.css" />
+    <link rel="stylesheet" href="../../css/checkout-mobile.css" />
+    <link rel="stylesheet" href="../../css/product-variations.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section class="products-mobile-page">
+        <div class="mobile-product-search">
+          <label
+            ><input
+              id="mobile-product-search"
+              placeholder="Buscar produto" /></label
+          ><button><span>Filtros</span></button>
+        </div>
+        <div class="mobile-product-compact-actions">
+          <button>Novo produto</button><button>Entrada por código</button>
+        </div>
+        <div class="product-filter-scroll">
+          <button class="product-filter-chip active">
+            <span>Todos</span><b>6</b></button
+          ><button class="product-filter-chip">
+            <span>Com variações</span><b>3</b>
+          </button>
+        </div>
+        <div class="mobile-products list">
+          <div class="mobile-product-swipe variable disponivel">
+            <article class="mobile-product-card">
+              <div class="mobile-product-avatar">CR</div>
+              <div class="mobile-product-copy">
+                <h3>Cone Recheado com nome muito longo para conferir</h3>
+                <span class="product-variation-badge">4 variações</span
+                ><strong>R$ 12,00 – R$ 14,00</strong>
+              </div>
+              <div class="mobile-product-stock disponivel">
+                <strong>36 un.</strong
+                ><span class="product-stock-track"
+                  ><i style="width: 70%"></i></span
+                ><em>Disponível</em>
+              </div>
+              <button class="mobile-product-star">☆</button
+              ><button class="mobile-product-more">⋮</button>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section class="mobile-sale-page">
+        <button class="pos-bag" data-count="3">
+          <svg width="24" height="24"></svg><span>3 itens</span><b>R$ 41,80</b>
+        </button>
+      </section>
+      <button id="open-picker" class="btn btn-primary">Abrir variações</button>
+    </main>
+    <div id="modal"></div>
+    <script>
+      document.querySelector("#open-picker").onclick = () => {
+        document.querySelector("#modal").innerHTML =
+          '<div class="modal-bg variation-picker-bg"><section class="variation-picker"><span class="sheet-handle"></span><header><div><h3>Cone Recheado</h3><p>Escolha uma opção</p></div></header><div class="variation-picker-list">' +
+          ["Ferrero", "Nutella", "Ovomaltine", "Prestígio"]
+            .map(
+              (name, index) =>
+                '<article class="variation-picker-row"><div><b>' +
+                name +
+                "</b><small>Sabor · " +
+                name +
+                "</small><strong>R$ " +
+                (14 - index).toFixed(2).replace(".", ",") +
+                '</strong></div><span class="variation-stock">Estoque: ' +
+                (8 + index) +
+                ' un.</span><div class="variation-qty"><button>−</button><b>' +
+                (index ? 0 : 1) +
+                "</b><button>+</button></div></article>",
+            )
+            .join("") +
+          '</div><footer><button class="btn btn-primary">Adicionar 1 item à sacola</button></footer></section></div>';
+      };
+    </script>
+  </body>
+</html>
