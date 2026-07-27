@@ -62,6 +62,13 @@ service cloud.firestore {
     function isAdmin(businessId) {
       return belongsToBusiness(businessId) && userProfile().role in ['owner', 'admin'];
     }
+    function hasPermission(businessId, permission) {
+      return belongsToBusiness(businessId) && (
+        userProfile().role in ['owner', 'platform_admin']
+        || (userProfile().role == 'admin' && permission != 'exportCRM')
+        || (userProfile().permissions is map && userProfile().permissions[permission] == true)
+      );
+    }
     function canWriteCollection(businessId, collectionName) {
       return belongsToBusiness(businessId)
         && subscriptionAllowsWrites(businessId)
@@ -313,17 +320,22 @@ service cloud.firestore {
       }
       match /{collectionName}/{documentId} {
         allow read: if collectionName != 'productVariants'
-          && belongsToBusiness(businessId);
+          && belongsToBusiness(businessId)
+          && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
         allow create: if collectionName != 'productVariants'
           && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId))
-          && request.resource.data.businessId == businessId;
+          && request.resource.data.businessId == businessId
+          && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
+          && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
         allow update: if collectionName != 'productVariants'
           && canWriteCollection(businessId, collectionName)
           && (
             resource.data.businessId == businessId
             || (businessId == 'adi-festa' && !('businessId' in resource.data))
           )
-          && request.resource.data.businessId == businessId;
+          && request.resource.data.businessId == businessId
+          && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
+          && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
         allow delete: if false;
       }
     }

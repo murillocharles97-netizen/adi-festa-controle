@@ -39,6 +39,7 @@ const SOURCES = {
   messageTemplates: { key: "messageTemplates" },
   messageSequences: { key: "messageSequences" },
   clientContacts: { key: "contatosCliente" },
+  customerSegments: { key: "segmentosClientes" },
   visits: { key: "visitas" },
   catalogOrders: { key: "catalogOrders" },
 };
@@ -1004,8 +1005,8 @@ function stopCloudSubscriptions() {
 }
 async function pullCloudCollections(options = {}) {
   await validateUser();
-  const force = Boolean(options.force),
-    names = options.names || DEFAULT_PULL_NAMES;
+  const force = Boolean(options.force),crmSources=new Set(['customerMetrics','customerMonthlyMetrics','customerSegments']),
+    names = (options.names || DEFAULT_PULL_NAMES).filter(name=>!crmSources.has(name)||window.OperationMode?.can?.('viewCRM')!==false);
   if (!force && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
   let received = 0;
   const pullState = readPullState(),

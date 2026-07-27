@@ -29,6 +29,8 @@
         <button class="settings-mobile-secondary" data-open-plans>${icon('gem')} ${internal?'Plano interno':'Ver planos'}</button>
       </section>
 
+      ${window.OperationMode?.renderSettings?.()||''}
+
       <section class="mobile-settings-card">
         <header class="settings-section-head"><span>${icon('store')}</span><div><h3>Minha empresa</h3><p>Dados usados em recibos e catálogos.</p></div><button class="settings-chevron" data-edit-business aria-label="Editar empresa">${icon('chevron-right')}</button></header>
         <div class="settings-info-grid company-info">
@@ -87,6 +89,7 @@
   }
   function bind(){
     if(!mq.matches)return;
+    window.OperationMode?.bindSettings?.(document);
     $$('[data-edit-business]').forEach(button=>button.onclick=editBusiness);
     $('[data-my-data]')?.addEventListener('click',editProfile);
     $('[data-reset-password]')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await window.FirebaseAuthActions.sendPasswordReset();Utils.toast('Enviamos as instruções para o seu e-mail.')}catch(error){Utils.toast(error.message||'Não foi possível enviar as instruções.',true)}finally{button.disabled=false}});
