@@ -5,7 +5,7 @@ const {initializeApp}=require('firebase-admin/app');
 const {getFirestore,FieldValue,Timestamp}=require('firebase-admin/firestore');
 const {onCall,onRequest,HttpsError}=require('firebase-functions/v2/https');
 const {onSchedule}=require('firebase-functions/v2/scheduler');
-const {onDocumentCreated}=require('firebase-functions/v2/firestore');
+const {onDocumentCreated,onDocumentWritten}=require('firebase-functions/v2/firestore');
 const {defineSecret,defineString}=require('firebase-functions/params');
 const {logger}=require('firebase-functions');
 const {mercadoPagoService}=require('./services/mercado-pago-service');
@@ -30,6 +30,7 @@ const validPhone=value=>/^55\d{10,11}$/.test(value);
 const sha=value=>crypto.createHash('sha256').update(String(value||'')).digest('hex');
 const maskPublicPhone=value=>{const phone=normalizePhone(value),tail=phone.slice(-5);return tail?`•••••-${tail}`:''};
 const maskPublicName=value=>{const parts=String(value||'Cliente').trim().split(/\s+/);return parts.length>1?`${parts[0]} ${parts.at(-1).slice(0,1)}.`:parts[0]};
+const effectiveSale=snapshot=>{if(!snapshot?.exists)return null;const sale=snapshot.data()||{};if(sale.deletedAt||!sale.clienteId)return null;return{clientId:String(sale.clienteId),value:Number(sale.valorFinal??sale.valorTotal??0),items:(sale.itens||[]).reduce((sum,item)=>sum+Number(item.quantidade||0),0),date:String(sale.data||sale.createdAt||new Date().toISOString())}};
 async function enforcePublicRateLimit(request,catalogToken,action,limit){const ip=String(request.rawRequest?.ip||request.rawRequest?.headers?.['x-forwarded-for']||'unknown').split(',')[0].trim(),bucket=Math.floor(Date.now()/(15*60*1000)),ref=db.doc(`publicRateLimits/${sha(`${action}:${catalogToken}:${ip}:${bucket}`)}`);await db.runTransaction(async transaction=>{const snapshot=await transaction.get(ref),count=Number(snapshot.data()?.count||0);if(count>=limit)throw new HttpsError('resource-exhausted','Muitas tentativas. Aguarde alguns minutos.');transaction.set(ref,{action,catalogHash:sha(catalogToken).slice(0,16),count:count+1,expiresAt:Timestamp.fromMillis(Date.now()+30*60*1000),updatedAt:FieldValue.serverTimestamp()},{merge:true})})}
 async function publicCatalog(request){const catalogToken=String(request.data?.catalogToken||'').trim();if(!validCatalogToken(catalogToken))throw new HttpsError('invalid-argument','Catálogo inválido.');const ref=db.doc(`publicCatalogs/${catalogToken}`),snapshot=await ref.get();if(!snapshot.exists)throw new HttpsError('not-found','Catálogo não encontrado.');const catalog=snapshot.data()||{};if(catalog.legacyRedirect&&validCatalogToken(catalog.universalCatalogToken)){const redirectRef=db.doc(`publicCatalogs/${catalog.universalCatalogToken}`),redirect=await redirectRef.get();if(!redirect.exists)throw new HttpsError('not-found','Catálogo não encontrado.');return{catalogToken:catalog.universalCatalogToken,ref:redirectRef,catalog:redirect.data()}}if(catalog.active!==true||catalog.catalogVisible===false)throw new HttpsError('failed-precondition','Catálogo indisponível.');return{catalogToken,ref,catalog}}
 function withinCatalogHours(catalog,date=new Date()){if(catalog.acceptOutsideHours||catalog.scheduleMode!=='weekly')return true;const timezone=catalog.timezone||'America/Sao_Paulo',parts=new Intl.DateTimeFormat('en-US',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date),part=type=>parts.find(item=>item.type===type)?.value||'',day=part('weekday').toLowerCase(),entry=catalog.weeklyHours?.[day];if(!entry||entry.closed===true||!entry.open||!entry.close)return false;const current=`${part('hour')}:${part('minute')}`;return current>=entry.open&&current<=entry.close}
@@ -126,6 +127,15 @@ exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{busines
   const snapshot=event.data;if(!snapshot)return;const business=snapshot.data();if(business.subscription)return;
   const now=Timestamp.now(),trialEndsAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000);await snapshot.ref.update({subscription:{status:'trial',planId:'trial',trialStartedAt:now,trialEndsAt,startedAt:now,expiresAt:trialEndsAt,nextBillingDate:null,lastPaymentDate:null,mercadoPago:{subscriptionId:null,customerId:null,preapprovalId:null,lastWebhook:null}},updatedAt:now});
   logger.info('[Subscriptions] trial initialized',{businessId:event.params.businessId});
+});
+
+// Um evento de venda atualiza apenas o cliente e o mês afetados. O marcador do
+// eventId torna reentregas do Firestore idempotentes e evita contagem duplicada.
+exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20},async event=>{
+  const before=effectiveSale(event.data?.before),after=effectiveSale(event.data?.after),businessId=event.params.businessId,eventId=event.id;
+  if(!before&&!after)return;
+  const targets=new Map();for(const [sale,sign] of [[before,-1],[after,1]])if(sale){const month=sale.date.slice(0,7),key=`${sale.clientId}:${month}`,row=targets.get(key)||{clientId:sale.clientId,month,spent:0,purchases:0,items:0,lastPurchaseAt:null};row.spent+=sign*sale.value;row.purchases+=sign;row.items+=sign*sale.items;if(sign>0)row.lastPurchaseAt=sale.date;targets.set(key,row)}
+  await db.runTransaction(async transaction=>{const marker=db.doc(`businesses/${businessId}/metricEvents/${eventId}`),seen=await transaction.get(marker);if(seen.exists)return;for(const row of targets.values()){const metric=db.doc(`businesses/${businessId}/customerMetrics/${row.clientId}`),monthly=db.doc(`businesses/${businessId}/customerMonthlyMetrics/${row.clientId}__${row.month}`);transaction.set(metric,{id:row.clientId,businessId,totalSpent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),lastPurchaseAt:row.lastPurchaseAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:1},{merge:true});transaction.set(monthly,{id:`${row.clientId}__${row.month}`,businessId,clientId:row.clientId,month:row.month,spent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),itemsCount:FieldValue.increment(row.items),lastPurchaseAt:row.lastPurchaseAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:1},{merge:true})}transaction.create(marker,{businessId,eventId,type:'sale_metrics_v1',createdAt:FieldValue.serverTimestamp()})});
 });
 
 exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
