@@ -1,7 +1,7 @@
 'use strict';
 
 const BASE_FEATURES={products:true,stock:true,sales:true,clients:true,creditAccounts:true,payments:true,barcode:true,receipts:true,recentHistory:true,basicDashboard:true};
-const GROWTH_FEATURES={campaigns:true,crm:true,bulkMessages:true,advancedDashboard:true,onlineCatalog:true,onlineOrders:true,loyalty:true,dataImport:true};
+const GROWTH_FEATURES={campaigns:true,crm:true,crmExport:true,bulkMessages:true,advancedDashboard:true,onlineCatalog:true,onlineOrders:true,loyalty:true,dataImport:true};
 const PREMIUM_FEATURES={multipleUsers:true,rolesPermissions:true,advancedReports:true,advancedExports:true,automations:true,futureApi:true,futureIntegrations:true};
 
 const PLANS=Object.freeze({

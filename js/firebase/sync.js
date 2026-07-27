@@ -64,7 +64,8 @@ let currentUser = null,
   currentPath = "",
   lastUserValidationAt = 0,
   lastPullAt = 0,
-  cloudPaused = false;
+  cloudPaused = false,
+  readOnlyMode = false;
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -507,13 +508,15 @@ function diffWrites(before, after) {
           data: { active: false, deletedAt: now() },
         });
   }
-  if (JSON.stringify(before.config) !== JSON.stringify(after.config))
+  const beforeConfig={...(before.config||{})},afterConfig={...(after.config||{})};
+  delete beforeConfig.operation;delete afterConfig.operation;
+  if (JSON.stringify(beforeConfig) !== JSON.stringify(afterConfig))
     writes.push({
       entityType: "settings",
       entityId: "default",
       operation: "update",
-      before: before.config,
-      data: changedFields(before.config, after.config),
+      before: beforeConfig,
+      data: changedFields(beforeConfig, afterConfig),
     });
   return writes;
 }
@@ -734,6 +737,7 @@ async function commitQueueItem(item) {
 }
 async function processSyncQueue(options = {}) {
   if (processingPromise) return processingPromise;
+  if (readOnlyMode) return {sent:0,pending:readQueue().length,errors:queueCounts().errors,paused:true,reason:'subscription_read_only'};
   const force = Boolean(options.force);
   processingPromise = (async () => {
     if (!currentUser)
@@ -1365,6 +1369,7 @@ async function clearLocalDevice(options = {}) {
 function setUser(user, profile = null, business = null) {
   currentUser = user || null;
   cloudPaused = false;
+  readOnlyMode=Boolean(user&&window.BusinessContext?.get?.().access?.readOnly);
   const trustedBootstrap = Boolean(
     user &&
       profile?.uid === user.uid &&
@@ -1384,6 +1389,7 @@ function setUser(user, profile = null, business = null) {
       : "",
   });
   if (!user) {
+    readOnlyMode=false;
     stopAutoSync();
     stopCloudSubscriptions();
     emit({

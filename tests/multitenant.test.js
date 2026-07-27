@@ -94,6 +94,7 @@ assert.equal(endingTrial.showBillingWarning,true);
 const expiredTrial=getSubscriptionAccess({status:'trial',trialEndsAt:'2026-07-22T12:00:00Z'},{},base);
 assert.equal(expiredTrial.canCreateData,false);
 assert.equal(expiredTrial.reason,'trial_expired');
-assert.equal(PLANS.internal.limits.clients,999999);
+assert.equal(PLANS.internal.limits.clients,null);
+assert.equal(PLANS.internal.unlimited,true);
 
 console.log('multitenant.test.js: OK');

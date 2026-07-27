@@ -33,7 +33,7 @@ service cloud.firestore {
         && (
           (subscription.planId == 'internal' && subscription.status == 'active')
           || subscription.status == 'active'
-          || (subscription.status == 'trial' && subscription.trialEndsAt > request.time)
+          || (subscription.status in ['trial', 'trialing'] && subscription.trialEndsAt > request.time)
           || (
             subscription.status == 'grace_period'
             && (!('gracePeriodEndsAt' in subscription) || subscription.gracePeriodEndsAt > request.time)
@@ -224,7 +224,7 @@ service cloud.firestore {
         && request.resource.data.active == true
         && request.resource.data.onboardingCompleted == true
         && request.resource.data.subscription.planId == 'trial'
-        && request.resource.data.subscription.status == 'trial'
+        && request.resource.data.subscription.status in ['trial', 'trialing']
         && request.resource.data.subscription.trialStartedAt <= request.time
         && request.resource.data.subscription.trialEndsAt > request.time + duration.value(6, 'd')
         && request.resource.data.subscription.trialEndsAt <= request.time + duration.value(8, 'd')
@@ -323,12 +323,12 @@ service cloud.firestore {
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
         allow create: if collectionName != 'productVariants'
-          && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId))
+          && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
           && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
         allow update: if collectionName != 'productVariants'
-          && canWriteCollection(businessId, collectionName)
+          && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId
             || (businessId == 'adi-festa' && !('businessId' in resource.data))

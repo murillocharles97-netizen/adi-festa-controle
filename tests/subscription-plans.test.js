@@ -63,6 +63,8 @@ assert.deepEqual(Array.from(internalFallback.warnings),['SUBSCRIPTION_FALLBACK']
 const tenantFallback=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{},now});
 assert.equal(tenantFallback.canUseApp,true);
 assert.equal(tenantFallback.effectivePlanId,'essential');
+assert.equal(tenantFallback.accessMode,'read_only');
+assert.equal(tenantFallback.canCreateData,false);
 assert.deepEqual(Array.from(tenantFallback.warnings),['SUBSCRIPTION_FALLBACK']);
 
 const unknownPlan=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{planId:'not-a-plan',status:'active'},now});
@@ -71,8 +73,16 @@ assert.equal(unknownPlan.effectivePlanId,'essential');
 assert.deepEqual(Array.from(unknownPlan.warnings),['INVALID_PLAN_FALLBACK']);
 
 const invalidStatus=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{planId:'professional',status:'invalid-status'},now});
-assert.equal(invalidStatus.canUseApp,false);
-assert.equal(invalidStatus.accessMode,'blocked');
+assert.equal(invalidStatus.canUseApp,true);
+assert.equal(invalidStatus.accessMode,'read_only');
+assert.equal(invalidStatus.canCreateData,false);
+
+for(const status of ['past_due','canceled','expired','inactive']){
+  const readOnly=resolveSubscriptionAccess({business:{id:'biz_new'},subscription:{planId:'professional',status},now});
+  assert.equal(readOnly.canAccessApp,true,status);
+  assert.equal(readOnly.accessMode,'read_only',status);
+  assert.equal(readOnly.canMutate,false,status);
+}
 
 const contextSnapshot=BusinessContext.set({
   business:{id:'adi-festa',name:'Adi Festa',ownerId:'owner-1',active:true},
@@ -105,7 +115,7 @@ assert.match(index,/data-route="planos"/);
 assert.match(index,/data-plan-feature="campaigns"/);
 assert.match(index,/data-plan-feature="onlineCatalog"/);
 assert.match(index,/data-plan-feature="onlineOrders"/);
-assert.match(worker,/adi-festa-v57-full-crm-operation/);
+assert.match(worker,/adi-festa-v58-read-only-subscription-crm/);
 assert.match(worker,/css\/plans\.css/);
 assert.match(worker,/js\/plans\.js/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);
