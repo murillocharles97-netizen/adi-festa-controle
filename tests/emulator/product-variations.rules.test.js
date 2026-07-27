@@ -6,7 +6,7 @@ const {doc,getDoc,runTransaction,setDoc}=require('firebase/firestore');
 
 let env;
 const projectId='adi-festa-variations-test';
-const businessA='empresa_emulador_a',businessB='empresa_emulador_b';
+const businessA='empresa_emulador_a',businessB='empresa_emulador_b',businessExpired='empresa_expirada';
 
 test.before(async()=>{
   env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});
@@ -14,12 +14,15 @@ test.before(async()=>{
     const db=context.firestore(),subscription={planId:'internal',status:'active'};
     await setDoc(doc(db,'businesses',businessA),{id:businessA,ownerId:'owner-a',active:true,subscription});
     await setDoc(doc(db,'businesses',businessB),{id:businessB,ownerId:'owner-b',active:true,subscription});
+    await setDoc(doc(db,'businesses',businessExpired),{id:businessExpired,ownerId:'owner-expired',active:true,subscription:{planId:'professional',status:'expired'}});
     await setDoc(doc(db,'users','owner-a'),{uid:'owner-a',businessId:businessA,role:'owner',active:true});
     await setDoc(doc(db,'users','owner-b'),{uid:'owner-b',businessId:businessB,role:'owner',active:true});
+    await setDoc(doc(db,'users','owner-expired'),{uid:'owner-expired',businessId:businessExpired,role:'owner',active:true});
     await setDoc(doc(db,'users','manager-crm'),{uid:'manager-crm',businessId:businessA,role:'manager',active:true,permissions:{viewCRM:true,manageCustomerSegments:true}});
     await setDoc(doc(db,'users','cashier-no-crm'),{uid:'cashier-no-crm',businessId:businessA,role:'cashier',active:true,permissions:{}});
     await setDoc(doc(db,'businesses',businessA,'products','parent-1'),{id:'parent-1',businessId:businessA,nome:'Cone',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessB,'products','parent-2'),{id:'parent-2',businessId:businessB,nome:'Gloss',productType:'variable',active:true});
+    await setDoc(doc(db,'businesses',businessExpired,'clients','existing-client'),{id:'existing-client',businessId:businessExpired,nome:'Cliente existente',active:true});
   });
 });
 
@@ -77,4 +80,11 @@ test('métricas e segmentos CRM respeitam permissão e empresa',async()=>{
   await assertFails(getDoc(doc(cashier,'businesses',businessA,'customerMetrics','client-1')));
   await assertSucceeds(setDoc(doc(manager,'businesses',businessA,'customerSegments','vip'),{id:'vip',businessId:businessA,name:'VIP',type:'dynamic'}));
   await assertFails(setDoc(doc(cashier,'businesses',businessA,'customerSegments','blocked'),{id:'blocked',businessId:businessA,name:'Bloqueado',type:'dynamic'}));
+});
+
+test('assinatura expirada mantém leitura e bloqueia somente novas operações',async()=>{
+  const db=env.authenticatedContext('owner-expired').firestore();
+  await assertSucceeds(getDoc(doc(db,'businesses',businessExpired,'clients','existing-client')));
+  await assertFails(setDoc(doc(db,'businesses',businessExpired,'sales','new-sale'),{id:'new-sale',businessId:businessExpired,clienteId:'existing-client',valorFinal:20,data:new Date()}));
+  await assertSucceeds(setDoc(doc(db,'businesses',businessExpired,'settings','operation'),{id:'operation',businessId:businessExpired,ownerId:'owner-expired',operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:true}));
 });

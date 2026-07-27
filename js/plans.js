@@ -18,12 +18,19 @@
     onlineOrders:{title:'Pedidos online fazem parte do Plano Profissional',text:'Receba, organize e acompanhe pedidos enviados pelo catálogo.',benefits:['Fila de pedidos','Status do pedido','Integração com clientes','Conversão em venda']},
     bulkMessages:{title:'Disparos e cobranças fazem parte do Plano Profissional',text:'Organize mensagens e cobranças pelo WhatsApp com segurança.',benefits:['Central de mensagens','Cobrança em sequência','Modelos personalizados','Histórico de contatos']}
   };
+  Object.assign(proDetails,{
+    'sales.create':{title:'Novas vendas precisam de uma assinatura ativa',text:'Suas vendas anteriores e todos os dados continuam disponíveis para consulta.',benefits:['Registrar novas vendas','Atualizar estoque automaticamente','Gerar recibos e histórico']},
+    'customers.create':{title:'Cadastro de clientes',text:'Seus clientes atuais continuam visíveis. Escolha um plano para cadastrar novos clientes.',benefits:['Novos cadastros','Histórico de relacionamento','Dados sempre preservados']},
+    'products.create':{title:'Cadastro de produtos',text:'Seus produtos e estoque continuam visíveis. Escolha um plano para adicionar novos itens.',benefits:['Novos produtos','Variações e estoque','Uso no ponto de venda']},
+    'campaigns.create':proDetails.campaigns,'catalog.publish':proDetails.onlineCatalog,'orders.receive':proDetails.onlineOrders,
+    'crm.export':{title:'Exportação de CRM',text:'Esse recurso está disponível no Plano Profissional.',benefits:['Exportar segmentos','Criar públicos de marketing','Trabalhar os melhores clientes']}
+  });
   const routeFeatures={campanhas:'campaigns',visitas:'onlineCatalog',catalogo:'onlineCatalog',pedidos:'onlineOrders'};
   let options={};
 
   function context(){
     const state=window.BusinessContext?.get?.()||{},session=window.FirebaseSession||{},subscription=state.subscription||session.subscription||{},access=state.access||session.access||{},business=state.business||session.business||{};
-    return{state,session,subscription,access,business,internal:subscription.planId==='internal'&&subscription.status==='active'};
+    return{state,session,subscription,access,business,internal:access.internal===true||subscription.planId==='internal'&&['active','internal'].includes(subscription.status)};
   }
   function plans(){return window.SubscriptionService?.getPlans?.()||window.SubscriptionService?.plans?.()||[]}
   function savings(plan){return Math.max(0,Math.round((1-plan.yearlyPrice/(plan.monthlyPrice*12))*100))}
@@ -70,7 +77,7 @@
   }
   function render(renderOptions={}){
     options=renderOptions;
-    const ctx=context(),publicMode=Boolean(renderOptions.publicMode),showBack=publicMode||Boolean(renderOptions.authMode),currentPlan=ctx.subscription.status==='trial'?'professional':ctx.subscription.planId,view={...ctx,publicMode,currentPlan},available=plans();
+    const ctx=context(),publicMode=Boolean(renderOptions.publicMode),showBack=publicMode||Boolean(renderOptions.authMode),currentPlan=['trial','trialing'].includes(ctx.subscription.status)?'professional':ctx.subscription.planId,view={...ctx,publicMode,currentPlan},available=plans();
     return`<section class="plans-page ${publicMode?'public-plans-page':''} ${renderOptions.authMode?'auth-plans-page':''}" data-plans-root>
       <header class="plans-heading">${showBack?'<button type="button" data-plans-back aria-label="Voltar">'+icon('arrow-left')+'</button>':''}<div><h1>Planos e assinatura</h1><p>Escolha o plano ideal para o seu negócio.</p></div>${publicMode?'<span class="plans-public-logo">AF</span>':''}</header>
       ${view.internal?`<div class="internal-plan-notice">${icon('shield-check')}<span><b>Conta interna</b> — todos os recursos liberados, sem vencimento ou cobrança.</span></div>`:''}
@@ -97,13 +104,13 @@
     root.innerHTML=`<div class="modal-bg"><section class="modal-box plan-comparison-sheet"><header class="modal-head"><h3>Comparação completa</h3><button class="icon-btn" data-close-comparison aria-label="Fechar">${icon('x')}</button></header><div class="modal-body">${Object.entries(categories).map(([category,features])=>`<section><h4>${category}</h4>${features.map(feature=>`<div class="comparison-row"><b>${featureLabels[feature]}</b>${available.map(plan=>`<span class="${plan.features[feature]?'yes':'no'}">${futureFeatures.has(feature)?'<em>Em breve</em>':plan.features[feature]?icon('check'):'—'}<small>${plan.name}</small></span>`).join('')}</div>`).join('')}</section>`).join('')}<section><h4>Limites</h4>${limitRows.map(([label,key,format])=>`<div class="comparison-row comparison-limit-row"><b>${label}</b>${available.map(plan=>`<span class="yes"><strong>${format(plan.limits[key])}</strong><small>${plan.name}</small></span>`).join('')}</div>`).join('')}</section></div></section></div>`;
     $('[data-close-comparison]',root).onclick=()=>root.innerHTML='';window.lucide?.createIcons();
   }
-  function openProModal(feature){
+  function openProModal(feature,decision={}){
     const details=proDetails[feature]||{title:'Este recurso faz parte do Plano Profissional',text:'Tenha mais ferramentas para vender e administrar seu negócio.',benefits:['Mais produtividade','Mais controle','Dados preservados','Upgrade quando estiver disponível']},root=$('#modal');
     if(!root)return;
-    root.innerHTML=`<div class="modal-bg"><section class="modal-box pro-feature-modal"><header class="modal-head"><div class="pro-modal-icon">${icon('gem')}</div><h3>${esc(details.title)}</h3><button class="icon-btn" data-close-pro aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p>${esc(details.text)}</p><ul>${details.benefits.map(item=>`<li>${icon('circle-check')} ${esc(item)}</li>`).join('')}</ul></div><footer class="modal-foot"><button class="btn btn-light" data-close-pro>Agora não</button><button class="btn btn-light" data-pro-trial>Experimentar por 7 dias</button><button class="btn btn-primary" data-pro-plans>Ver Plano Profissional</button></footer></section></div>`;
+    const limitCopy=decision.kind==='limit'?`<p class="plan-limit-context">Você atingiu o limite de <b>${decision.limit}</b>. Os ${decision.current||0} registros existentes continuam disponíveis.</p>`:'';
+    root.innerHTML=`<div class="modal-bg"><section class="modal-box pro-feature-modal" role="dialog" aria-modal="true" aria-labelledby="upgrade-required-title"><header class="modal-head"><div class="pro-modal-icon">${icon(decision.kind==='subscription'?'lock-keyhole':'gem')}</div><h3 id="upgrade-required-title">${esc(details.title)}</h3><button class="icon-btn" data-close-pro aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p>${esc(details.text)}</p>${limitCopy}<ul>${details.benefits.map(item=>`<li>${icon('circle-check')} ${esc(item)}</li>`).join('')}</ul><small>Você pode continuar navegando e consultando todos os dados existentes.</small></div><footer class="modal-foot"><button class="btn btn-light" data-close-pro>Agora não</button><button class="btn btn-primary" data-pro-plans>Ver planos</button></footer></section></div>`;
     $$('[data-close-pro]',root).forEach(button=>button.onclick=()=>root.innerHTML='');
     $('[data-pro-plans]',root).onclick=()=>{root.innerHTML='';window.Router?.ir?.('planos')};
-    $('[data-pro-trial]',root).onclick=async()=>{const result=await window.SubscriptionService?.startFreeTrial?.();window.Utils?.toast?.(result?.message||'Teste ainda não disponível.',true)};
     window.lucide?.createIcons();
   }
   function manageSubscription(){
@@ -126,7 +133,7 @@
   }
   function bind(root=document,bindOptions={}){
     options={...options,...bindOptions};const scope=$('[data-plans-root]',root)||root;if(scope.dataset?.plansBound)return;scope.dataset.plansBound='true';
-    const carousel=$('[data-plans-carousel]',scope),cards=$$('[data-plan-card]',scope),ctx=context(),target=ctx.subscription.status==='trial'?'professional':ctx.subscription.planId||'professional',targetIndex=Math.max(0,cards.findIndex(card=>card.dataset.planCard===target));
+    const carousel=$('[data-plans-carousel]',scope),cards=$$('[data-plan-card]',scope),ctx=context(),target=['trial','trialing'].includes(ctx.subscription.status)?'professional':ctx.subscription.planId||'professional',targetIndex=Math.max(0,cards.findIndex(card=>card.dataset.planCard===target));
     let selectedIndex=targetIndex;
     const selectPlan=(index)=>{selectedIndex=Math.max(0,Math.min(cards.length-1,index));scrollToIndex(carousel,selectedIndex)};
     requestAnimationFrame(()=>{selectPlan(targetIndex);updateIndicators(scope)});
@@ -149,9 +156,9 @@
     $$('[data-plan-feature]').forEach(link=>{const feature=link.dataset.planFeature,allowed=canUse(feature);link.classList.toggle('plan-locked',!allowed);let badge=$('.plan-pro-badge',link);if(!allowed&&!badge){badge=document.createElement('span');badge.className='plan-pro-badge';badge.textContent='◇ PRO';link.append(badge)}if(allowed)badge?.remove()});
     const plansLink=$('[data-route="planos"]'),ctx=context();if(plansLink){const label=$('[data-plan-link-label]',plansLink);if(label)label.textContent=ctx.subscription.status==='trial'&&ctx.access.daysRemaining!==null?`Planos · ${ctx.access.daysRemaining} dias`:'Planos'}
   }
-  function guardRoute(route){const feature=routeFeatures[route];if(!feature||canUse(feature))return true;openProModal(feature);return false}
-  document.addEventListener('click',event=>{const link=event.target.closest('[data-plan-feature]');if(!link||canUse(link.dataset.planFeature))return;event.preventDefault();event.stopImmediatePropagation();openProModal(link.dataset.planFeature)},true);
+  function guardRoute(){return true}
+  document.addEventListener('click',event=>{const action=event.target.closest('[data-requires-feature-action]');if(!action)return;const feature=action.dataset.requiresFeatureAction,decision=window.PlanLimitService?.canUseAction?.(feature);if(decision?.ok!==false)return;event.preventDefault();event.stopImmediatePropagation();openProModal(feature,decision)},true);
   addEventListener('business-context-changed',syncNavigation);
   addEventListener('firebase-auth-ready',syncNavigation);
-  window.PlansUI={render,bind,fullComparison,openProModal,syncNavigation,guardRoute,routeFeatures,canUseFeature:canUse};
+  window.PlansUI={render,bind,fullComparison,openProModal,openUpgradeRequiredModal:openProModal,syncNavigation,guardRoute,routeFeatures,canUseFeature:canUse};
 })();

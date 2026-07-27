@@ -10,8 +10,8 @@ const {defineSecret,defineString}=require('firebase-functions/params');
 const {logger}=require('firebase-functions');
 const {mercadoPagoService}=require('./services/mercado-pago-service');
 const {permissionService}=require('./services/permission-service');
-const {requirePlan}=require('./services/plan-service');
-const {pendingSubscription,sanitize}=require('./services/subscription-service');
+const {requirePlan,getPlan}=require('./services/plan-service');
+const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
 const {firestoreSubscriptionService}=require('./services/firestore-subscription-service');
 const {verifyWebhookSignature,eventId,eventData}=require('./services/webhook-service');
 
@@ -28,6 +28,7 @@ const validCatalogToken=value=>/^[A-Za-z0-9_-]{20,128}$/.test(String(value||''))
 const normalizePhone=value=>{let digits=String(value||'').replace(/\D/g,'');digits=digits.replace(/^0+/,'');if(digits.length===10||digits.length===11)digits=`55${digits}`;return digits};
 const validPhone=value=>/^55\d{10,11}$/.test(value);
 const sha=value=>crypto.createHash('sha256').update(String(value||'')).digest('hex');
+async function requireBusinessFeature(businessId,feature,featureKey){const snapshot=await db.doc(`businesses/${businessId}`).get(),business=snapshot.data()||{},access=computeAccess(business.subscription||{}),plan=getPlan(access.planId);if(!snapshot.exists||business.active===false||!access.canMutate||(!access.unlimited&&plan?.features?.[feature]!==true))throw new HttpsError('failed-precondition','Uma assinatura ativa é necessária para concluir esta ação.',{code:'subscription_feature_required',feature:featureKey,requiredPlan:'professional'});return{business,access}}
 const maskPublicPhone=value=>{const phone=normalizePhone(value),tail=phone.slice(-5);return tail?`•••••-${tail}`:''};
 const maskPublicName=value=>{const parts=String(value||'Cliente').trim().split(/\s+/);return parts.length>1?`${parts[0]} ${parts.at(-1).slice(0,1)}.`:parts[0]};
 const effectiveSale=snapshot=>{if(!snapshot?.exists)return null;const sale=snapshot.data()||{};if(sale.deletedAt||!sale.clienteId)return null;return{clientId:String(sale.clienteId),value:Number(sale.valorFinal??sale.valorTotal??0),items:(sale.itens||[]).reduce((sum,item)=>sum+Number(item.quantidade||0),0),date:String(sale.data||sale.createdAt||new Date().toISOString())}};
@@ -125,7 +126,7 @@ exports.expireSubscriptionsDaily=onSchedule({region:REGION,schedule:'15 3 * * *'
 
 exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{businessId}',region:REGION},async event=>{
   const snapshot=event.data;if(!snapshot)return;const business=snapshot.data();if(business.subscription)return;
-  const now=Timestamp.now(),trialEndsAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000);await snapshot.ref.update({subscription:{status:'trial',planId:'trial',trialStartedAt:now,trialEndsAt,startedAt:now,expiresAt:trialEndsAt,nextBillingDate:null,lastPaymentDate:null,mercadoPago:{subscriptionId:null,customerId:null,preapprovalId:null,lastWebhook:null}},updatedAt:now});
+  const now=Timestamp.now(),trialEndsAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000);await snapshot.ref.update({subscription:{status:'trialing',subscriptionStatus:'trialing',planId:'trial',trialStartedAt:now,trialEndsAt,startedAt:now,expiresAt:trialEndsAt,nextBillingDate:null,lastPaymentDate:null,mercadoPago:{subscriptionId:null,customerId:null,preapprovalId:null,lastWebhook:null}},updatedAt:now});
   logger.info('[Subscriptions] trial initialized',{businessId:event.params.businessId});
 });
 
@@ -158,6 +159,7 @@ exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
 exports.submitCatalogOrder=onCall(CATALOG_OPTIONS,async request=>{
   try{
     const context=await publicCatalog(request),data=request.data||{};
+    await requireBusinessFeature(context.catalog.businessId,'onlineOrders','orders.receive');
     await enforcePublicRateLimit(request,context.catalogToken,'order',24);
     const canReceive=(context.catalog.acceptingOrders===true&&withinCatalogHours(context.catalog))||context.catalog.closedBehavior==='accept_for_later';if(!canReceive)throw new HttpsError('failed-precondition','Este catálogo não está recebendo pedidos.');
     const orderId=String(data.id||'');if(!/^[A-Za-z0-9_-]{16,100}$/.test(orderId))throw new HttpsError('invalid-argument','Identificador de pedido inválido.');

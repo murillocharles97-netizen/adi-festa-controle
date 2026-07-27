@@ -18,12 +18,23 @@ test('mapeia estados oficiais do provedor',()=>{
 
 test('preserva trial enquanto checkout aguarda pagamento',()=>{
   const now='2026-07-25T12:00:00.000Z',existing={status:'trial',planId:'trial',trialEndsAt:'2026-07-30T12:00:00.000Z'},plan=requirePlan('professional'),provider={id:'sub_1',status:'pending'};
-  assert.equal(isTrialActive(existing,new Date(now)),true);const pending=pendingSubscription({existing,plan,provider,now});assert.equal(pending.status,'trial');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.mercadoPago.subscriptionId,'sub_1');
+  assert.equal(isTrialActive(existing,new Date(now)),true);const pending=pendingSubscription({existing,plan,provider,now});assert.equal(pending.status,'trialing');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.mercadoPago.subscriptionId,'sub_1');
 });
 
 test('webhook autorizado ativa plano e datas',()=>{
   const patch=providerPatch({id:'sub_1',status:'authorized',payer_id:123,date_created:'2026-07-25T10:00:00Z',next_payment_date:'2026-08-25T10:00:00Z',summarized:{last_charged_date:'2026-07-25T10:01:00Z'}},{planId:'professional',now:'2026-07-25T10:02:00Z',existing:{status:'pending'}});
   assert.equal(patch.status,'active');assert.equal(patch.planId,'professional');assert.equal(patch.lastPaymentDate,'2026-07-25T10:01:00Z');assert.equal(patch.mercadoPago.customerId,'123');assert.equal(computeAccess(patch).canAccessApp,true);
+});
+
+test('assinatura vencida mantém acesso e bloqueia somente mutações',()=>{
+  for(const status of ['past_due','canceled','expired','inactive']){
+    const access=computeAccess({planId:'professional',status});
+    assert.equal(access.canAccessApp,true,status);
+    assert.equal(access.readOnly,true,status);
+    assert.equal(access.canMutate,false,status);
+  }
+  const internal=computeAccess({planId:'internal',status:'internal',isInternal:true});
+  assert.equal(internal.canAccessApp,true);assert.equal(internal.canMutate,true);assert.equal(internal.unlimited,true);
 });
 
 test('valida HMAC do Mercado Pago com proteção de replay',()=>{
