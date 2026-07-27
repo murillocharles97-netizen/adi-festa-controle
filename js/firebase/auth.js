@@ -88,7 +88,7 @@ async function provisionBusinessAccount(user,data){
   batch.set(doc(db,'businesses',businessId),business);
   batch.set(profileRef,profile);
   batch.set(doc(db,'businesses',businessId,'settings','default'),{id:'default',businessId,nome:business.name,businessName:business.name,receiptName:business.name,telefone:business.phone,currency:'BRL',timezone:'America/Sao_Paulo',onboardingStep:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
-  batch.set(doc(db,'businesses',businessId,'settings','operation'),{id:'operation',businessId,ownerId:user.uid,profile:'custom',modules:{creditSales:false,inventory:true,onlineCatalog:false,onlineOrders:false,delivery:false,pickup:false,physicalStore:false,scheduledVisits:false,campaigns:false,loyalty:false,crm:true,inPersonSales:true},smartCardMode:'automatic',cardMetrics:[],migrationVersion:1,schemaVersion:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
+  batch.set(doc(db,'businesses',businessId,'settings','operation'),{id:'operation',businessId,ownerId:user.uid,operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:false,modules:{creditSales:false,inventory:true,onlineCatalog:false,onlineOrders:false,delivery:false,pickup:false,physicalStore:true,scheduledVisits:false,campaigns:false,loyalty:false,crm:true,inPersonSales:true},smartCardMode:'automatic',cardMetrics:[],migrationVersion:2,schemaVersion:2,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
   batch.set(doc(db,'businesses',businessId,'auditLogs',`account_created_${user.uid}`),{id:`account_created_${user.uid}`,businessId,type:'account_created',actorId:user.uid,createdAt:Timestamp.fromDate(now)});
   await batch.commit();
   return profile;
@@ -188,13 +188,18 @@ function showFirstBusinessOnboarding(context){
   modal.querySelector('[data-skip-onboarding]').onclick=()=>finish('');
   modal.querySelector('[data-start-onboarding]').onclick=()=>finish('produtos');
 }
+function showSubscriptionBanner(access){
+  document.querySelector('#subscription-access-banner')?.remove();
+  if(access.internal||(!access.readOnly&&!access.showBillingWarning))return;
+  const messages={trialing:access.readOnly?'Seu período de teste terminou. Você ainda pode visualizar todos os seus dados.':`Teste grátis — ${access.daysRemaining??0} dia(s) restante(s).`,expired:'Teste encerrado — visualização disponível.',past_due:'Pagamento pendente — revise sua assinatura.',pending:'Pagamento em processamento — seus dados seguem disponíveis.',canceled:'Plano cancelado — acesso de visualização mantido.',inactive:'Você está no modo de visualização. Escolha um plano para criar novos registros.'};
+  const banner=document.createElement('aside');banner.id='subscription-access-banner';banner.className=`subscription-access-banner ${access.readOnly?'read-only':'warning'}`;banner.innerHTML=`<i data-lucide="${access.readOnly?'eye':'clock-3'}"></i><span><b>${esc(messages[access.status]||'Assinatura requer atenção.')}</b>${access.readOnly?'<small>Clientes, estoque, histórico e CRM continuam acessíveis.</small>':''}</span><button type="button">Ver planos</button>`;banner.querySelector('button').onclick=()=>Router.ir('planos');document.querySelector('.shell')?.prepend(banner);window.lucide?.createIcons();
+}
 function allowed(user,profile,business){
   const context=BusinessContext.set({business,userProfile:profile});
   DB.useBusiness(profile.businessId,{migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID});
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
   window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,sendPasswordReset};
-  if(!context.access.canAccessApp){setBootstrapState('subscription_blocked',{businessId:profile.businessId});return blockedScreen(user,context)}
   setBootstrapState('ready',{businessId:profile.businessId});
   gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
@@ -202,6 +207,7 @@ function allowed(user,profile,business){
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
   const topbar=document.querySelector('.topbar'),oldPlan=topbar?.querySelector('.subscription-badge');oldPlan?.remove();
   if(topbar){const plan=PLANS[context.subscription?.planId]||PLANS.trial,badge=document.createElement('span');badge.className='subscription-badge';badge.textContent=context.subscription?.status==='trial'?`Teste · ${context.access.daysRemaining} dia(s)`:plan.name;topbar.insertBefore(badge,document.querySelector('.local-badge'))}
+  showSubscriptionBanner(context.access);
   try{
     window.SyncFirebase.setUser(user,profile,business);
     badgeSubscription?.();badgeSubscription=window.SyncFirebase.subscribe(updateCloudBadge);
@@ -215,7 +221,6 @@ function allowed(user,profile,business){
   }
   window.lucide?.createIcons();
   dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:{uid:user.uid,businessId:profile.businessId,business,access:context.access}}));
-  setTimeout(()=>showFirstBusinessOnboarding(context),350);
   bootstrapLog('completed',{businessId:profile.businessId});
 }
 async function updateBusinessDetails(values={}){
@@ -305,7 +310,7 @@ async function bootstrapCore(user,token,mode){
   allowed(user,profile,business);
   bootstrapLog('subscription resolved',{planId:window.FirebaseSession?.subscription?.planId||'fallback',status:window.FirebaseSession?.subscription?.status||'fallback'});
   bootstrapLog('permissions resolved',{role:profile.role});
-  if(['ready','subscription_blocked'].includes(bootstrapState))readyUid=user.uid;
+  if(bootstrapState==='ready')readyUid=user.uid;
 }
 function handleBootstrapError(user,error){
   const code=normalizedCode(error);
@@ -344,7 +349,7 @@ function handleBootstrapError(user,error){
 }
 function startBootstrap(user,{mode='automatic'}={}){
   if(!user){setBootstrapState('unauthenticated');login();return Promise.resolve()}
-  if(readyUid===user.uid&&['ready','subscription_blocked'].includes(bootstrapState))return Promise.resolve(window.FirebaseSession);
+  if(readyUid===user.uid&&bootstrapState==='ready')return Promise.resolve(window.FirebaseSession);
   if(bootstrapRun?.uid===user.uid)return bootstrapRun.promise;
   if(mode==='automatic'&&automaticBootstrapAttempts.has(user.uid))return Promise.resolve();
   if(mode==='automatic')automaticBootstrapAttempts.add(user.uid);

@@ -9,7 +9,7 @@
   };
   function adapt(){
     const operation=window.OperationMode?.get?.();if(!operation||window.OperationMode?.can?.('viewCRM')===false)return;
-    const credit=operation.modules.creditSales,loyalty=operation.modules.loyalty,summary=window.CRMDashboard?.snapshot?.(),db=DB.carregar(),clients=(db.clientes||[]).filter(c=>c.ativo!==false),metrics=new Map((summary?.results||db.metricasClientes||[]).map(x=>[x.client?.id||x.id,x.metric||x])),profiles=clients.map(c=>({client:c,metrics:metrics.get(c.id)||{totalSpent:Number(c.totalComprado||0),purchaseCount:Number(c.quantidadeVendas||0),daysSinceLastPurchase:999,activity:'no_data',availableRewards:0}})),revenue=profiles.reduce((s,p)=>s+p.metrics.totalSpent,0),purchases=profiles.reduce((s,p)=>s+p.metrics.purchaseCount,0);
+    const credit=operation.creditMode==='enabled',occasional=operation.creditMode==='occasional',loyalty=operation.modules.loyalty,summary=window.CRMDashboard?.snapshot?.(),db=DB.carregar(),clients=(db.clientes||[]).filter(c=>c.ativo!==false),metrics=new Map((summary?.results||db.metricasClientes||[]).map(x=>[x.client?.id||x.id,x.metric||x])),profiles=clients.map(c=>({client:c,metrics:metrics.get(c.id)||{totalSpent:Number(c.totalComprado||0),purchaseCount:Number(c.quantidadeVendas||0),daysSinceLastPurchase:999,activity:'no_data',availableRewards:0}})),revenue=profiles.reduce((s,p)=>s+p.metrics.totalSpent,0),purchases=profiles.reduce((s,p)=>s+p.metrics.purchaseCount,0);
     const actions=document.querySelector('.client-head .head-actions');
     if(actions&&!actions.querySelector('[data-go="crm"]'))actions.insertAdjacentHTML('afterbegin',`<button class="btn btn-light" data-go="crm">${icon('contact-round')} CRM</button>`);
     document.querySelectorAll('[data-go="crm"]').forEach(b=>b.onclick=()=>Router.ir('crm'));
@@ -22,6 +22,7 @@
         const badge=card.querySelector('.client-status'),balance=card.querySelector('.client-balance'),receive=card.querySelector('[data-receive-client]');
         if(badge){badge.textContent=CRMCliente.formatActivity(metric.activity).replace('Cliente ','');badge.className=`client-status ${metric.activity==='active'?'credit':'zero'}`}
         if(balance)balance.innerHTML=`<strong>${money(metric.totalSpent)}</strong><span>em compras</span>`;
+        if(occasional&&Number(client.saldo)<0&&!card.querySelector('.occasional-pending'))balance?.insertAdjacentHTML('afterend',`<span class="occasional-pending">Pendência: ${money(Math.abs(client.saldo))}</span>`);
         if(receive){receive.disabled=false;receive.removeAttribute('data-receive-client');receive.dataset.smartSale=client.id;receive.innerHTML=`${icon('shopping-bag')} Nova venda`}
       });
       const mobileKpis=document.querySelector('.mobile-client-kpis');
@@ -32,6 +33,7 @@
         const status=shell.querySelector('.mobile-client-status'),balance=shell.querySelector('.mobile-client-balance strong'),caption=shell.querySelector('.mobile-client-balance small'),receive=shell.querySelector('.mobile-receive');
         if(status){status.className=`mobile-client-status ${metric.activity==='active'?'credit':'zero'}`;status.textContent=CRMCliente.formatActivity(metric.activity).replace('Cliente ','')}
         if(balance)balance.textContent=money(metric.totalSpent);if(caption)caption.textContent='em compras';
+        if(occasional&&Number(client.saldo)<0&&!shell.querySelector('.occasional-pending'))shell.querySelector('.mobile-client-balance')?.insertAdjacentHTML('afterend',`<span class="occasional-pending">Pendência ${money(Math.abs(client.saldo))}</span>`);
         const facts=shell.querySelectorAll('.mobile-client-facts>span');if(facts[1]){facts[1].querySelector('small').textContent='Último contato';facts[1].querySelector('b').textContent=metric.lastContactAt?new Date(metric.lastContactAt).toLocaleDateString('pt-BR'):'Nunca'}
         if(receive){receive.disabled=false;receive.dataset.mobileSale=client.id;delete receive.dataset.mobileReceive;receive.innerHTML=`${icon('shopping-bag')} Nova venda`}shell.querySelector('.swipe-charge')?.remove();
       });
