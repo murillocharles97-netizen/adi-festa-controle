@@ -62,6 +62,7 @@
       lucro,
       vendas: vendas.length,
       clientes,
+      crm: () => window.OperationMode?.enabled?.('crm')!==false&&window.OperationMode?.can?.('viewCRM')!==false?CRMDashboard.render():`<section class="panel empty-state"><h2>CRM indisponível</h2><p>O módulo está desativado ou seu perfil não possui permissão para visualizar dados de relacionamento.</p><button class="btn btn-primary" data-go="clientes">Voltar para Clientes</button></section>`,
       texto: `Fechamento do dia - ${new Date().toLocaleDateString("pt-BR")}\nTotal vendido: ${dinheiro(vendido)}\nTotal recebido: ${dinheiro(recebido)}\nTotal fiado: ${dinheiro(fiado)}\nLucro estimado: ${dinheiro(lucro)}\nVendas: ${vendas.length}\nClientes atendidos: ${clientes}`,
     };
   }
@@ -302,7 +303,7 @@
         "Configurações",
         "Conta, backup e armazenamento deste aparelho.",
       ) +
-      `<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name || data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId || DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role || "")}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status === "trial" && access.daysRemaining !== null ? ` · ${access.daysRemaining} dia(s)` : ""}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan === "internal" ? "Todos os recursos liberados" : subscription.status === "trial" ? `Teste grátis · ${access.daysRemaining ?? 0} dia(s) restante(s)` : `Status: ${subscription.status || "não informado"}`} · Produtos: ${data.produtos.length} de ${limits.products ?? "—"} · Clientes: ${data.clientes.length} de ${limits.clients ?? "—"}</small></div><button class="btn btn-primary" data-go="planos">${icon("gem")} ${plan === "internal" ? "Plano interno" : "Ver planos"}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name || data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon("download")} Exportar backup</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>`
+      `<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name || data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId || DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role || "")}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status === "trial" && access.daysRemaining !== null ? ` · ${access.daysRemaining} dia(s)` : ""}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan === "internal" ? "Todos os recursos liberados" : subscription.status === "trial" ? `Teste grátis · ${access.daysRemaining ?? 0} dia(s) restante(s)` : `Status: ${subscription.status || "não informado"}`} · Produtos: ${data.produtos.length} de ${limits.products ?? "—"} · Clientes: ${data.clientes.length} de ${limits.clients ?? "—"}</small></div><button class="btn btn-primary" data-go="planos">${icon("gem")} ${plan === "internal" ? "Plano interno" : "Ver planos"}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name || data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon("download")} Exportar backup</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>${window.OperationMode?.renderSettings?.()||""}`
     );
   }
   function planos() {
@@ -314,6 +315,7 @@
       inicio: inicioCompleto,
       vender,
       clientes,
+      crm: () => CRMDashboard.render(),
       cobrancas,
       fiados,
       produtos,
@@ -329,6 +331,7 @@
       inicio: "Início",
       vender: "Vender",
       clientes: "Clientes",
+      crm: "CRM e Relacionamento",
       cobrancas: "Cobranças",
       fiados: "Fiados",
       produtos: "Produtos",
@@ -547,6 +550,7 @@
         }
       };
     }
+    if (route === "crm") window.CRMDashboard?.bind?.();
     if (route === "produtos") {
       $("#new-product").onclick = () => formularioProduto();
       $("#search").oninput = (e) => {
@@ -606,7 +610,7 @@
             );
           }),
       );
-    if (route === "configuracoes") bindConfig();
+    if (route === "configuracoes") { bindConfig(); window.OperationMode?.bindSettings?.(document); }
   }
   function confirmarEstoqueInsuficiente(faltas, acao) {
     $("#modal").innerHTML =

@@ -15,6 +15,22 @@
         { "fieldPath": "subscription.status", "order": "ASCENDING" },
         { "fieldPath": "subscription.expiresAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "customerMetrics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "totalSpent", "order": "DESCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerMonthlyMetrics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "month", "order": "ASCENDING" },
+        { "fieldPath": "spent", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

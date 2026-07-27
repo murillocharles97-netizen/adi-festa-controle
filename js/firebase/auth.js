@@ -88,6 +88,7 @@ async function provisionBusinessAccount(user,data){
   batch.set(doc(db,'businesses',businessId),business);
   batch.set(profileRef,profile);
   batch.set(doc(db,'businesses',businessId,'settings','default'),{id:'default',businessId,nome:business.name,businessName:business.name,receiptName:business.name,telefone:business.phone,currency:'BRL',timezone:'America/Sao_Paulo',onboardingStep:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
+  batch.set(doc(db,'businesses',businessId,'settings','operation'),{id:'operation',businessId,ownerId:user.uid,profile:'custom',modules:{creditSales:false,inventory:true,onlineCatalog:false,onlineOrders:false,delivery:false,pickup:false,physicalStore:false,scheduledVisits:false,campaigns:false,loyalty:false,crm:true,inPersonSales:true},smartCardMode:'automatic',cardMetrics:[],migrationVersion:1,schemaVersion:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
   batch.set(doc(db,'businesses',businessId,'auditLogs',`account_created_${user.uid}`),{id:`account_created_${user.uid}`,businessId,type:'account_created',actorId:user.uid,createdAt:Timestamp.fromDate(now)});
   await batch.commit();
   return profile;

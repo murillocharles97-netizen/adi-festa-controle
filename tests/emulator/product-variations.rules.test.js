@@ -16,6 +16,8 @@ test.before(async()=>{
     await setDoc(doc(db,'businesses',businessB),{id:businessB,ownerId:'owner-b',active:true,subscription});
     await setDoc(doc(db,'users','owner-a'),{uid:'owner-a',businessId:businessA,role:'owner',active:true});
     await setDoc(doc(db,'users','owner-b'),{uid:'owner-b',businessId:businessB,role:'owner',active:true});
+    await setDoc(doc(db,'users','manager-crm'),{uid:'manager-crm',businessId:businessA,role:'manager',active:true,permissions:{viewCRM:true,manageCustomerSegments:true}});
+    await setDoc(doc(db,'users','cashier-no-crm'),{uid:'cashier-no-crm',businessId:businessA,role:'cashier',active:true,permissions:{}});
     await setDoc(doc(db,'businesses',businessA,'products','parent-1'),{id:'parent-1',businessId:businessA,nome:'Cone',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessB,'products','parent-2'),{id:'parent-2',businessId:businessB,nome:'Gloss',productType:'variable',active:true});
   });
@@ -60,4 +62,19 @@ test('baixa transacional atualiza a variação e o agregado do produto pai',asyn
   });
   assert.equal((await getDoc(variantRef)).data().stock,6);
   assert.equal((await getDoc(parentRef)).data().totalStock,6);
+});
+
+test('configuração operacional é isolada e gerenciada pelo proprietário',async()=>{
+  const owner=env.authenticatedContext('owner-a').firestore(),foreign=env.authenticatedContext('owner-b').firestore(),ref=doc(owner,'businesses',businessA,'settings','operation'),payload={id:'operation',businessId:businessA,ownerId:'owner-a',profile:'physical_store',modules:{creditSales:false,crm:true},smartCardMode:'automatic'};
+  await assertSucceeds(setDoc(ref,payload));
+  await assertFails(getDoc(doc(foreign,'businesses',businessA,'settings','operation')));
+});
+
+test('métricas e segmentos CRM respeitam permissão e empresa',async()=>{
+  const owner=env.authenticatedContext('owner-a').firestore(),manager=env.authenticatedContext('manager-crm').firestore(),cashier=env.authenticatedContext('cashier-no-crm').firestore(),metric=doc(owner,'businesses',businessA,'customerMetrics','client-1');
+  await assertSucceeds(setDoc(metric,{id:'client-1',businessId:businessA,totalSpent:120,purchaseCount:2}));
+  await assertSucceeds(getDoc(doc(manager,'businesses',businessA,'customerMetrics','client-1')));
+  await assertFails(getDoc(doc(cashier,'businesses',businessA,'customerMetrics','client-1')));
+  await assertSucceeds(setDoc(doc(manager,'businesses',businessA,'customerSegments','vip'),{id:'vip',businessId:businessA,name:'VIP',type:'dynamic'}));
+  await assertFails(setDoc(doc(cashier,'businesses',businessA,'customerSegments','blocked'),{id:'blocked',businessId:businessA,name:'Bloqueado',type:'dynamic'}));
 });
