@@ -38,7 +38,7 @@ assert.match(mobile,/SyncFirebase\.synchronizeNow\(\)/);
 assert.match(css,/@media \(max-width:767px\)/);
 assert.match(css,/@media \(min-width:768px\)/);
 assert.match(ui,/if\(document\.querySelector\('\.mobile-settings-page'\)\)/);
-assert.match(worker,/adi-festa-v57-full-crm-operation/);
+assert.match(worker,/adi-festa-v58-read-only-subscription-crm/);
 assert.match(worker,/configuracoes-mobile\.js/);
 assert.match(worker,/configuracoes-mobile\.css/);
 assert.match(read('js/checkout.js'),/addEventListener\(\s*["']firebase-session-cleared["']\s*,\s*resetSession\s*\)/);

@@ -14,6 +14,8 @@ const worker=fs.readFileSync('service-worker.js','utf8');
 assert.doesNotMatch(crmSource,/getDocs|onSnapshot|collection\(/,'CRM deve calcular indicadores localmente');
 assert.match(uiSource,/Registrar contato/);
 assert.match(uiSource,/Linha do tempo/);
+assert.match(uiSource,/timeline\.slice\(0,10\)/,'perfil deve renderizar somente 10 eventos inicialmente');
+assert.match(uiSource,/profile\.timeline\.length>10/,'perfil deve oferecer carregamento incremental');
 assert.match(index,/js\/crm\.js/);
 assert.match(index,/js\/crm-ui\.js/);
 assert.match(index,/css\/crm\.css/);
@@ -21,7 +23,7 @@ assert.match(storageSource,/contatosCliente/);
 assert.match(backupSource,/contatosCliente/);
 assert.match(syncSource,/clientContacts\s*:\s*\{\s*key\s*:\s*["']contatosCliente["']/);
 assert.match(rules,/'clientContacts'/);
-assert.match(worker,/adi-festa-v57-full-crm-operation/);
+assert.match(worker,/adi-festa-v58-read-only-subscription-crm/);
 
 const data={
   clientes:[{id:'c1',nome:'Cliente Teste',telefone:'17999999999',email:'cliente@teste.com',saldo:-25,totalComprado:999,quantidadeVendas:99,ativo:true,criadoEm:'2026-01-01T10:00:00.000Z'}],
