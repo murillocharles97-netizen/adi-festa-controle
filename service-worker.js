@@ -3,6 +3,7 @@ const ARQUIVOS=['./','./index.html','./catalogo.html','./404.html','./manifest.j
 ARQUIVOS.push('./js/phone.js','./css/campanhas-mobile.css','./js/campanhas-mobile.js','./css/configuracoes-mobile.css','./js/configuracoes-mobile.js','./css/barcode.css','./js/barcode.js','./assets/zxing-browser.min.js','./css/plans.css','./js/plans.js','./css/sale-completion.css','./js/firebase/legacy-migration.js','./js/firebase/profile-validation.js','./js/firebase/session-lifecycle.js','./css/crm.css','./js/crm.js','./js/crm-ui.js','./css/catalogo-admin.css','./js/catalogo-admin.js','./assets/qrcode.min.js');
 ARQUIVOS.push('./js/product-variations.js','./css/product-variations.css');
 ARQUIVOS.push('./js/operation-mode.js','./js/crm-dashboard.js','./js/client-smart-mode.js','./js/runtime-access.js','./js/firebase/operation-settings.js','./css/crm-dashboard.css','./css/runtime-access.css');
+ARQUIVOS.push('./js/desktop-dashboard.js','./css/desktop-dashboard.css');
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ARQUIVOS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('message',event=>{if(event.data==='SKIP_WAITING')self.skipWaiting()});

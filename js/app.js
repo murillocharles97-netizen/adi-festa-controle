@@ -310,7 +310,9 @@
     return window.PlansUI.render();
   }
   const inicioCompleto = () =>
-    `${window.MobileHome?.isMobile() ? MobileHome.render() : inicio()}${window.CampanhasUI?.dashboard?.() || ""}`;
+    window.MobileHome?.isMobile()
+      ? `${MobileHome.render()}${window.CampanhasUI?.dashboard?.() || ""}`
+      : window.DesktopDashboard?.render?.() || inicio();
   const views = {
       inicio: inicioCompleto,
       vender,
@@ -491,6 +493,8 @@
   }
   function bind(route) {
     $$("[data-go]").forEach((b) => (b.onclick = () => Router.ir(b.dataset.go)));
+    if (route === "inicio" && !window.MobileHome?.isMobile())
+      window.DesktopDashboard?.bind?.();
     if (route === "clientes") {
       $("#new-client").onclick = () => formularioCliente();
       $("#import-csv").onclick = importarCSV;
