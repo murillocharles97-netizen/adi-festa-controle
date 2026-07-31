@@ -233,6 +233,7 @@ async function updateBusinessDetails(values={}){
   const business={...session.business,...patch,updatedAt:new Date().toISOString()};
   BusinessContext.set({business,userProfile:session.profile});
   DB.alterar(data=>{data.config.nome=patch.name;data.config.telefone=patch.phone});
+  window.SyncFirebase?.notifyRemoteChange?.(['businessProfile']).catch(()=>{});
   return business;
 }
 async function updateProfileDetails(values={}){
@@ -244,6 +245,7 @@ async function updateProfileDetails(values={}){
   const profile={...session.profile,...patch,updatedAt:new Date().toISOString()};
   BusinessContext.set({business:session.business,userProfile:profile});
   document.querySelector('.avatar').textContent=(profile.name||session.user.email||'A')[0].toUpperCase();
+  window.SyncFirebase?.notifyRemoteChange?.(['userProfile']).catch(()=>{});
   return profile;
 }
 async function sendPasswordReset(){

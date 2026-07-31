@@ -45,12 +45,15 @@ const SOURCES = {
 };
 const REALTIME_NAMES = new Set();
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
+const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
 const DEFAULT_PULL_NAMES = CLOUD_NAMES.filter(
   (name) => name !== "productVariants" && !REALTIME_NAMES.has(name),
 );
 const repositories = Object.fromEntries(
-  CLOUD_NAMES.map((name) => [name, createFirestoreRepository(name)]),
-);
+    CLOUD_NAMES.map((name) => [name, createFirestoreRepository(name)]),
+  ),
+  syncSignalRepository = createFirestoreRepository("syncMetadata"),
+  syncSessionId = crypto.randomUUID();
 let currentUser = null,
   originalAlter = null,
   applyingCloud = false,
@@ -65,7 +68,9 @@ let currentUser = null,
   lastUserValidationAt = 0,
   lastPullAt = 0,
   cloudPaused = false,
-  readOnlyMode = false;
+  readOnlyMode = false,
+  signalPullTimer = null,
+  signalCollections = new Set();
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -508,8 +513,10 @@ function diffWrites(before, after) {
           data: { active: false, deletedAt: now() },
         });
   }
-  const beforeConfig={...(before.config||{})},afterConfig={...(after.config||{})};
-  delete beforeConfig.operation;delete afterConfig.operation;
+  const beforeConfig = { ...(before.config || {}) },
+    afterConfig = { ...(after.config || {}) };
+  delete beforeConfig.operation;
+  delete afterConfig.operation;
   if (JSON.stringify(beforeConfig) !== JSON.stringify(afterConfig))
     writes.push({
       entityType: "settings",
@@ -737,7 +744,15 @@ async function commitQueueItem(item) {
 }
 async function processSyncQueue(options = {}) {
   if (processingPromise) return processingPromise;
-  if (readOnlyMode) return {sent:0,pending:readQueue().length,errors:queueCounts().errors,paused:true,reason:'subscription_read_only'};
+  if (readOnlyMode)
+    return {
+      sent: 0,
+      pending: readQueue().length,
+      errors: queueCounts().errors,
+      paused: true,
+      reason: "subscription_read_only",
+      collections: [],
+    };
   const force = Boolean(options.force);
   processingPromise = (async () => {
     if (!currentUser)
@@ -760,7 +775,8 @@ async function processSyncQueue(options = {}) {
     await validateUser();
     let sent = 0,
       index = 0,
-      queue = readQueue();
+      queue = readQueue(),
+      changedCollections = new Set();
     for (const queued of [...queue]) {
       if (
         queued.businessId !== activeBusinessId() ||
@@ -793,6 +809,9 @@ async function processSyncQueue(options = {}) {
           (item) => item.queueId !== queued.queueId,
         );
         saveQueue(after);
+        for (const write of live[position].payload?.writes || [])
+          if (CLOUD_NAMES.includes(write.entityType))
+            changedCollections.add(write.entityType);
         sent++;
       } catch (error) {
         const failed = readQueue(),
@@ -841,6 +860,7 @@ async function processSyncQueue(options = {}) {
       pending: counts.total,
       errors: counts.errors,
       paused: cloudPaused,
+      collections: [...changedCollections],
     };
   })();
   try {
@@ -976,30 +996,70 @@ function applyCloudCollection(name, documents) {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
-  for (const name of REALTIME_NAMES) {
-    const unsubscribe = repositories[name].subscribe(
-      (documents) => {
-        state.cloudCounts[name] = documents.filter(
-          (item) => !item.deletedAt,
-        ).length;
-        const received = applyCloudCollection(name, documents),
-          pullState = readPullState(),
-          latest = newestTimestamp(documents);
-        pullState[`${activeBusinessId()}:${name}`] = latest || now();
-        writePullState(pullState);
-        emit({
-          cloudCounts: { ...state.cloudCounts },
-          received: state.received + received,
-          activeListeners: usageSnapshot().activeListeners,
-        });
-      },
-      (error) => reportError(error, "Realtime listener", { collection: name }),
-    );
-    unsubscribers.push(unsubscribe);
-  }
+  let initialSignal = true,
+    lastRevision = "";
+  const unsubscribe = syncSignalRepository.subscribeById(
+    "last-sync",
+    (signal) => {
+      const revision = String(
+        signal?.revision || signal?.updatedAt || signal?.syncedAt || "",
+      );
+      if (initialSignal) {
+        initialSignal = false;
+        lastRevision = revision;
+        return;
+      }
+      if (
+        !signal ||
+        signal.sourceSessionId === syncSessionId ||
+        (revision && revision === lastRevision)
+      )
+        return;
+      lastRevision = revision;
+      const names = Array.isArray(signal.changedCollections)
+        ? signal.changedCollections.filter((name) =>
+            SIGNAL_NAMES.includes(name),
+          )
+        : DEFAULT_PULL_NAMES;
+      names.forEach((name) => signalCollections.add(name));
+      clearTimeout(signalPullTimer);
+      signalPullTimer = setTimeout(async () => {
+        const changed = [...signalCollections],
+          cloudNames = changed.filter((name) => CLOUD_NAMES.includes(name));
+        signalCollections.clear();
+        if (!changed.length || !currentUser || !navigator.onLine) return;
+        try {
+          if (cloudNames.length)
+            await pullCloudCollections({ force: true, names: cloudNames });
+          if (changed.includes("businessProfile"))
+            await refreshBusinessContext();
+          if (changed.includes("userProfile")) await refreshUserContext();
+          const time = now();
+          localStorage.setItem(lastSyncKey(), time);
+          emit({
+            status: "success",
+            message: "Alterações recebidas de outro dispositivo.",
+            lastSync: time,
+          });
+        } catch (error) {
+          reportError(error, "Realtime sync signal", {
+            collections: changed,
+          });
+        }
+      }, 120);
+    },
+    (error) =>
+      reportError(error, "Realtime sync signal listener", {
+        collection: "syncMetadata/last-sync",
+      }),
+  );
+  unsubscribers.push(unsubscribe);
   emit({ activeListeners: usageSnapshot().activeListeners });
 }
 function stopCloudSubscriptions() {
+  clearTimeout(signalPullTimer);
+  signalPullTimer = null;
+  signalCollections.clear();
   for (const unsubscribe of unsubscribers)
     try {
       unsubscribe();
@@ -1007,10 +1067,96 @@ function stopCloudSubscriptions() {
   unsubscribers = [];
   emit({ activeListeners: 0 });
 }
+
+async function publishSyncSignal(collections, status = "ok") {
+  const changedCollections = [
+    ...new Set(
+      (collections || []).filter((name) => SIGNAL_NAMES.includes(name)),
+    ),
+  ];
+  if (!changedCollections.length && status === "ok") return false;
+  const businessId = activeBusinessId();
+  await setDoc(
+    doc(db, "businesses", businessId, "syncMetadata", "last-sync"),
+    {
+      id: "last-sync",
+      businessId,
+      ownerId: currentUser.uid,
+      status,
+      changedCollections,
+      sourceSessionId: syncSessionId,
+      revision: crypto.randomUUID(),
+      pendingOperations: queueCounts().total,
+      syncedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+  return true;
+}
+
+async function refreshBusinessContext() {
+  const snapshot = await getDoc(doc(db, "businesses", activeBusinessId()));
+  if (!snapshot.exists()) return false;
+  const business = normalizeFirestoreData({
+      id: snapshot.id,
+      ...snapshot.data(),
+    }),
+    session = window.FirebaseSession;
+  if (!session || business.active === false) return false;
+  const context = window.BusinessContext?.set?.({
+    business,
+    userProfile: session.profile,
+  });
+  session.business = context?.business || business;
+  session.subscription = context?.subscription || business.subscription;
+  session.access = context?.access || session.access;
+  dispatchEvent(
+    new CustomEvent("cloud-data-updated", {
+      detail: { collection: "businessProfile", count: 1, source: "cloud" },
+    }),
+  );
+  return true;
+}
+
+async function refreshUserContext() {
+  if (!currentUser?.uid) return false;
+  const snapshot = await getDoc(doc(db, "users", currentUser.uid));
+  if (!snapshot.exists()) return false;
+  const profile = normalizeFirestoreData({
+      id: snapshot.id,
+      ...snapshot.data(),
+    }),
+    session = window.FirebaseSession;
+  if (!session || (profile.uid && profile.uid !== currentUser.uid))
+    return false;
+  profile.uid ??= currentUser.uid;
+  state.userProfile = profile;
+  session.profile = profile;
+  window.BusinessContext?.set?.({
+    business: session.business,
+    userProfile: profile,
+  });
+  dispatchEvent(
+    new CustomEvent("cloud-data-updated", {
+      detail: { collection: "userProfile", count: 1, source: "cloud" },
+    }),
+  );
+  return true;
+}
 async function pullCloudCollections(options = {}) {
   await validateUser();
-  const force = Boolean(options.force),crmSources=new Set(['customerMetrics','customerMonthlyMetrics','customerSegments']),
-    names = (options.names || DEFAULT_PULL_NAMES).filter(name=>!crmSources.has(name)||window.OperationMode?.can?.('viewCRM')!==false);
+  const force = Boolean(options.force),
+    crmSources = new Set([
+      "customerMetrics",
+      "customerMonthlyMetrics",
+      "customerSegments",
+    ]),
+    names = (options.names || DEFAULT_PULL_NAMES).filter(
+      (name) =>
+        !crmSources.has(name) ||
+        window.OperationMode?.can?.("viewCRM") !== false,
+    );
   if (!force && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
   let received = 0;
   const pullState = readPullState(),
@@ -1097,22 +1243,9 @@ async function synchronizeNow() {
   if (push.paused) return { ...push, received: 0, comparison: null };
   const received = await pullCloudCollections({ force: true }),
     comparison = await compareLocalAndCloud(),
-    time = now(),
-    businessId = activeBusinessId();
-  if (push.sent || push.errors || received)
-    await setDoc(
-      doc(db, "businesses", businessId, "syncMetadata", "last-sync"),
-      {
-        id: "last-sync",
-        businessId,
-        ownerId: currentUser.uid,
-        status: push.errors ? "error" : "ok",
-        pendingOperations: push.pending,
-        syncedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    time = now();
+  if (push.sent || push.errors)
+    await publishSyncSignal(push.collections, push.errors ? "error" : "ok");
   localStorage.setItem(lastSyncKey(), time);
   emit({
     status: push.errors ? "error" : "success",
@@ -1139,6 +1272,8 @@ async function automaticSync() {
         document.visibilityState === "visible"
           ? await pullCloudCollections()
           : 0;
+    if (push.sent || push.errors)
+      await publishSyncSignal(push.collections, push.errors ? "error" : "ok");
     if (push.sent || received) {
       const time = now();
       localStorage.setItem(lastSyncKey(), time);
@@ -1285,10 +1420,10 @@ async function restoreBackupData(prepared, mode = "merge") {
     cloud = navigator.onLine ? await cloudRestoreSummary() : null,
     matches = Boolean(
       cloud &&
-        JSON.stringify(localCounts) === JSON.stringify(cloud.counts) &&
-        Math.abs(localTotals.fiado - cloud.totals.fiado) < 0.01 &&
-        Math.abs(localTotals.estoque - cloud.totals.estoque) < 0.01 &&
-        Math.abs(localTotals.vendido - cloud.totals.vendido) < 0.01,
+      JSON.stringify(localCounts) === JSON.stringify(cloud.counts) &&
+      Math.abs(localTotals.fiado - cloud.totals.fiado) < 0.01 &&
+      Math.abs(localTotals.estoque - cloud.totals.estoque) < 0.01 &&
+      Math.abs(localTotals.vendido - cloud.totals.vendido) < 0.01,
     ),
     report = {
       mode,
@@ -1369,12 +1504,14 @@ async function clearLocalDevice(options = {}) {
 function setUser(user, profile = null, business = null) {
   currentUser = user || null;
   cloudPaused = false;
-  readOnlyMode=Boolean(user&&window.BusinessContext?.get?.().access?.readOnly);
+  readOnlyMode = Boolean(
+    user && window.BusinessContext?.get?.().access?.readOnly,
+  );
   const trustedBootstrap = Boolean(
     user &&
-      profile?.uid === user.uid &&
-      business?.id === profile.businessId &&
-      business.active !== false,
+    profile?.uid === user.uid &&
+    business?.id === profile.businessId &&
+    business.active !== false,
   );
   lastUserValidationAt = trustedBootstrap ? Date.now() : 0;
   emit({
@@ -1389,7 +1526,7 @@ function setUser(user, profile = null, business = null) {
       : "",
   });
   if (!user) {
-    readOnlyMode=false;
+    readOnlyMode = false;
     stopAutoSync();
     stopCloudSubscriptions();
     emit({
@@ -1453,6 +1590,7 @@ window.SyncFirebase = {
   startAutoSync,
   stopAutoSync,
   schedule: scheduleImmediate,
+  notifyRemoteChange: (collections) => publishSyncSignal(collections),
   captureExternalChange,
   restoreBackupData: safeRestoreBackupData,
   clearLocalDevice,

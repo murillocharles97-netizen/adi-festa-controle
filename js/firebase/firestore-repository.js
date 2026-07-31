@@ -149,7 +149,9 @@ export function createFirestoreRepository(collectionName) {
       );
       return cachePut(
         key,
-        snapshot.docs.map((item) => convert(item)).filter((item) => !item.deletedAt),
+        snapshot.docs
+          .map((item) => convert(item))
+          .filter((item) => !item.deletedAt),
       );
     },
     async create(data) {
@@ -286,6 +288,43 @@ export function createFirestoreRepository(collectionName) {
         if (opened) {
           opened = false;
           listenerClosed(collectionName);
+        }
+        stop();
+      };
+    },
+    subscribeById(id, callback, onError) {
+      let first = true,
+        opened = true;
+      const listenerName = `${collectionName}/${String(id)}`;
+      listenerOpened(listenerName);
+      const stop = onSnapshot(
+        documentRef(id),
+        (snapshot) => {
+          recordFirestoreOperation("listen", {
+            collection: listenerName,
+            documents: snapshot.exists() ? 1 : 0,
+            source: first ? "initial" : "realtime",
+          });
+          first = false;
+          callback(convert(snapshot));
+        },
+        (error) => {
+          recordFirestoreOperation("listen", {
+            collection: listenerName,
+            error,
+          });
+          console.error("[Firestore document listener failed]", {
+            collection: listenerName,
+            code: error.code,
+            message: error.message,
+          });
+          onError?.(error);
+        },
+      );
+      return () => {
+        if (opened) {
+          opened = false;
+          listenerClosed(listenerName);
         }
         stop();
       };
