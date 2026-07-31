@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard Desktop v2</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/visual.css">
+  <link rel="stylesheet" href="../css/desktop-dashboard.css">
+</head>
+<body>
+  <aside class="sidebar"><div class="brand"><span class="brand-logo">AF</span><div><strong>Adi Festa</strong><small>Controle de vendas</small></div></div><nav><a class="active">Início</a><a>Vender</a><a>Clientes</a><a>CRM e Relacionamento</a><a>Produtos</a><a>Campanhas</a><a>Histórico</a><a>Configurações</a></nav></aside>
+  <div class="shell"><header class="topbar"><button class="icon-btn menu-btn"><i data-lucide="menu"></i></button><div><h1>Início</h1><small>sexta-feira, 31 de julho</small></div><span class="local-badge">Plano interno</span><span class="avatar">M</span></header><main id="app"></main></div>
+  <script src="../assets/lucide.min.js"></script>
+  <script>
+    const now=new Date(),iso=days=>new Date(now.getTime()-days*86400000).toISOString();
+    const products=[{id:'p1',nome:'Cone recheado',ativo:true,estoqueAtual:0,estoqueMinimo:5},{id:'p2',nome:'Brownie',ativo:true,estoqueAtual:3,estoqueMinimo:6},{id:'p3',nome:'Brigadeiro',ativo:true,estoqueAtual:24,estoqueMinimo:5}];
+    const clients=Array.from({length:18},(_,index)=>({id:`c${index}`,nome:`Cliente ${index+1}`,ativo:true,totalComprado:180+index*90,quantidadeVendas:1+index,saldo:index<5?-(40+index*25):0,ultimaCompra:iso(index*3),criadoEm:iso(index*9)}));
+    const sales=Array.from({length:20},(_,index)=>({id:`v${index}`,data:iso(index%12),valorFinal:45+index*8,lucro:20+index*3,status:index%3?'pago':'fiado',clienteNome:clients[index%clients.length].nome,itens:[{produtoId:products[index%3].id,nome:products[index%3].nome,quantidade:1+index%4,subtotalFinal:45+index*8}]}));
+    const db={vendas:sales,pagamentos:sales.slice(0,8).map((sale,index)=>({id:`pg${index}`,data:sale.data,valor:sale.valorFinal})),clientes:clients,produtos:products,campanhas:[{id:'ca1',status:'ativa',dataFim:iso(-4)}],progressosCampanha:clients.slice(0,7).map(client=>({clientId:client.id})),recompensas:[{type:'campaign_redemption'}],catalogOrders:[{id:'o1',orderStatus:'pendente'}]};
+    window.Utils={escapar:value=>String(value??''),dinheiro:value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),hoje:value=>new Date(value).toDateString()===now.toDateString()};
+    window.DB={carregar:()=>db};window.OperationMode={enabled:()=>true};window.getProductStockStatus=product=>product.estoqueAtual<=0?'esgotado':product.estoqueAtual<=product.estoqueMinimo?'baixo':'disponivel';window.Campanhas={metricas:()=>({active:1,participants:7,redemptions:1,conversion:14.3}),status:campaign=>campaign.status};window.Router={ir(){}};
+  </script>
+  <script src="../js/desktop-dashboard.js"></script>
+  <script>document.querySelector('#app').innerHTML=DesktopDashboard.render();DesktopDashboard.bind();</script>
+</body>
+</html>
