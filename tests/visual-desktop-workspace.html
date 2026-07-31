@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Validação Desktop</title>
+    <link rel="stylesheet" href="../css/style.css" />
+    <link rel="stylesheet" href="../css/desktop-sales.css" />
+    <link rel="stylesheet" href="../css/desktop-settings.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #f5f7f9;
+      }
+      .fixture-nav {
+        display: flex;
+        gap: 8px;
+        padding: 10px 24px;
+        background: #263447;
+      }
+      .fixture-nav button {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 14px;
+      }
+      .fixture-nav button.active {
+        background: #31d0ad;
+      }
+      main {
+        margin: 0 auto;
+        max-width: none;
+      }
+      .page-head {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="fixture-nav">
+      <button data-view="sales" class="active">Vendas</button
+      ><button data-view="settings">Configurações</button>
+    </nav>
+    <main id="app"></main>
+    <div id="modal"></div>
+    <div id="toasts"></div>
+    <script src="../js/utils.js"></script>
+    <script>
+      window.matchMedia =
+        window.matchMedia || (() => ({ matches: true, addEventListener() {} }));
+      const products = [
+        {
+          id: "p1",
+          nome: "Monster tradicional",
+          categoria: "Energético",
+          marca: "Monster",
+          preco: 8,
+          estoqueAtual: 24,
+          ativo: true,
+          favorito: true,
+        },
+        {
+          id: "p2",
+          nome: "Brownie recheado",
+          categoria: "Doce",
+          preco: 5,
+          estoqueAtual: 15,
+          ativo: true,
+        },
+        {
+          id: "p3",
+          nome: "Cone brigadeiro",
+          categoria: "Doce",
+          preco: 4,
+          estoqueAtual: 30,
+          ativo: true,
+        },
+        {
+          id: "p4",
+          nome: "Coca Zero 220ml",
+          categoria: "Refrigerante",
+          marca: "Coca-Cola",
+          preco: 3.5,
+          estoqueAtual: 18,
+          ativo: true,
+        },
+        {
+          id: "p5",
+          nome: "Poty 220ml",
+          categoria: "Suco",
+          marca: "Poty",
+          preco: 3.5,
+          estoqueAtual: 12,
+          ativo: true,
+        },
+        {
+          id: "p6",
+          nome: "Brownie de ninho",
+          categoria: "Doce",
+          preco: 4.5,
+          estoqueAtual: 10,
+          ativo: true,
+        },
+        {
+          id: "p7",
+          nome: "Fanta Uva 220ml",
+          categoria: "Refrigerante",
+          marca: "Fanta",
+          preco: 3.5,
+          estoqueAtual: 20,
+          ativo: true,
+        },
+        {
+          id: "p8",
+          nome: "Brigadeiro",
+          categoria: "Doce",
+          preco: 2.5,
+          estoqueAtual: 45,
+          ativo: true,
+        },
+        {
+          id: "p9",
+          nome: "Schweppes 220ml",
+          categoria: "Refrigerante",
+          preco: 3.5,
+          estoqueAtual: 14,
+          ativo: true,
+        },
+      ];
+      const clients = [
+        { id: "c1", nome: "Nat Stanley", saldo: -45, ativo: true },
+        { id: "c2", nome: "Aline", saldo: 0, ativo: true },
+      ];
+      const cart = [
+        {
+          produtoId: "p1",
+          nome: "Monster tradicional",
+          categoria: "Energético",
+          quantidade: 2,
+          precoFinalUnitario: 8,
+          precoOriginal: 8,
+          custoUnitario: 4,
+        },
+        {
+          produtoId: "p2",
+          nome: "Brownie recheado",
+          categoria: "Doce",
+          quantidade: 1,
+          precoFinalUnitario: 5,
+          precoOriginal: 5,
+          custoUnitario: 2,
+        },
+      ];
+      window.Produtos = {
+        listar: () => products,
+        obter: (id) => products.find((item) => item.id === id),
+      };
+      window.Clientes = { listar: () => clients };
+      window.ProductVariations = { itemKey: (item) => item.produtoId };
+      window.DB = {
+        carregar: () => ({
+          config: { nome: "Adi Festa", telefone: "(17) 99999-9999" },
+          produtos: products,
+          clientes: clients,
+        }),
+      };
+      window.FirebaseSession = {
+        business: {
+          name: "Adi Festa",
+          document: "23.308.090/0001-84",
+          businessType: "Doces e Festas",
+          phone: "(17) 99999-9999",
+          active: true,
+          subscription: { planId: "internal", status: "active" },
+        },
+        profile: { name: "Murillo", role: "owner", active: true },
+        user: { email: "murillo@exemplo.com" },
+        subscription: { planId: "internal", status: "active" },
+      };
+      window.SyncFirebaseState = {
+        message: "Sincronizado",
+        pending: 0,
+        errors: 0,
+        lastSync: new Date().toISOString(),
+      };
+      window.OperationMode = {
+        get: () => ({ operationMode: "external_sales", creditMode: "enabled" }),
+        MODES: {
+          external_sales: {
+            label: "Venda externa",
+            description: "Visitas e vendas externas.",
+            icon: "map-pinned",
+          },
+        },
+        CREDIT_MODES: { enabled: { label: "Trabalho com fiado" } },
+        bindSettings() {},
+      };
+    </script>
+    <script src="../js/desktop-sales.js"></script>
+    <script src="../js/desktop-settings.js"></script>
+    <script>
+      const app = document.querySelector("#app");
+      function show(view) {
+        document
+          .querySelectorAll("[data-view]")
+          .forEach((button) =>
+            button.classList.toggle("active", button.dataset.view === view),
+          );
+        app.innerHTML =
+          view === "sales"
+            ? DesktopSales.render({
+                products,
+                clients,
+                cart,
+                totals: {
+                  subtotalOriginal: 21,
+                  descontoTotal: 0,
+                  valorFinal: 21,
+                },
+              })
+            : DesktopSettings.render();
+        if (view === "sales") DesktopSales.bind();
+      }
+      document
+        .querySelectorAll("[data-view]")
+        .forEach(
+          (button) => (button.onclick = () => show(button.dataset.view)),
+        );
+      show(
+        new URLSearchParams(location.search).get("view") === "settings"
+          ? "settings"
+          : "sales",
+      );
+    </script>
+  </body>
+</html>

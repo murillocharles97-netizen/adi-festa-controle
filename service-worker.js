@@ -4,6 +4,7 @@ ARQUIVOS.push('./js/phone.js','./css/campanhas-mobile.css','./js/campanhas-mobil
 ARQUIVOS.push('./js/product-variations.js','./css/product-variations.css');
 ARQUIVOS.push('./js/operation-mode.js','./js/crm-dashboard.js','./js/client-smart-mode.js','./js/runtime-access.js','./js/firebase/operation-settings.js','./css/crm-dashboard.css','./css/runtime-access.css');
 ARQUIVOS.push('./js/desktop-dashboard.js','./css/desktop-dashboard.css');
+ARQUIVOS.push('./js/desktop-sales.js','./css/desktop-sales.css','./js/desktop-settings.js','./css/desktop-settings.css');
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ARQUIVOS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('message',event=>{if(event.data==='SKIP_WAITING')self.skipWaiting()});

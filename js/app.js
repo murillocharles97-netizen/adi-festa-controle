@@ -7,7 +7,8 @@
     historicoLimite = 100;
   const icon = (n) => `<i data-lucide="${n}"></i>`,
     cartKey = (item) =>
-      window.ProductVariations?.itemKey?.(item) || String(item?.produtoId || ""),
+      window.ProductVariations?.itemKey?.(item) ||
+      String(item?.produtoId || ""),
     cabecalho = (titulo, sub, acoes = "") =>
       `<div class="page-head"><div><h2>${titulo}</h2><p>${sub}</p></div>${acoes ? `<div class="head-actions">${acoes}</div>` : ""}</div>`,
     vazio = (texto) =>
@@ -62,7 +63,11 @@
       lucro,
       vendas: vendas.length,
       clientes,
-      crm: () => window.OperationMode?.enabled?.('crm')!==false&&window.OperationMode?.can?.('viewCRM')!==false?CRMDashboard.render():`<section class="panel empty-state"><h2>CRM indisponível</h2><p>O módulo está desativado ou seu perfil não possui permissão para visualizar dados de relacionamento.</p><button class="btn btn-primary" data-go="clientes">Voltar para Clientes</button></section>`,
+      crm: () =>
+        window.OperationMode?.enabled?.("crm") !== false &&
+        window.OperationMode?.can?.("viewCRM") !== false
+          ? CRMDashboard.render()
+          : `<section class="panel empty-state"><h2>CRM indisponível</h2><p>O módulo está desativado ou seu perfil não possui permissão para visualizar dados de relacionamento.</p><button class="btn btn-primary" data-go="clientes">Voltar para Clientes</button></section>`,
       texto: `Fechamento do dia - ${new Date().toLocaleDateString("pt-BR")}\nTotal vendido: ${dinheiro(vendido)}\nTotal recebido: ${dinheiro(recebido)}\nTotal fiado: ${dinheiro(fiado)}\nLucro estimado: ${dinheiro(lucro)}\nVendas: ${vendas.length}\nClientes atendidos: ${clientes}`,
     };
   }
@@ -191,18 +196,27 @@
       };
     },
     carrinhoHTML = () =>
-      carrinho.length
-        ? carrinho
-            .map(
-              (i) =>
-                `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(cartKey(i))}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(cartKey(i))}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(cartKey(i))}">${icon("trash-2")}</button></div>`,
-            )
-            .join("")
-        : vazio("Adicione produtos");
+      window.DesktopSales?.isDesktop?.()
+        ? window.DesktopSales.cartHTML(carrinho)
+        : carrinho.length
+          ? carrinho
+              .map(
+                (i) =>
+                  `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(cartKey(i))}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(cartKey(i))}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(cartKey(i))}">${icon("trash-2")}</button></div>`,
+              )
+              .join("")
+          : vazio("Adicione produtos");
   function vender() {
     const ps = Produtos.listar().filter((p) => p.ativo),
       cs = Clientes.listar().filter((c) => c.ativo),
       t = totaisCarrinho();
+    if (window.DesktopSales?.isDesktop?.())
+      return window.DesktopSales.render({
+        products: ps,
+        clients: cs,
+        cart: carrinho,
+        totals: t,
+      });
     return (
       cabecalho(
         "Nova venda",
@@ -288,6 +302,7 @@
   function configuracoes() {
     if (window.ConfiguracoesMobile?.isMobile())
       return ConfiguracoesMobile.render();
+    if (window.DesktopSettings?.isDesktop?.()) return DesktopSettings.render();
     const session = window.FirebaseSession || {},
       business = session.business || {},
       subscription = session.subscription || {},
@@ -303,7 +318,7 @@
         "Configurações",
         "Conta, backup e armazenamento deste aparelho.",
       ) +
-      `<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name || data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId || DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role || "")}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status === "trial" && access.daysRemaining !== null ? ` · ${access.daysRemaining} dia(s)` : ""}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan === "internal" ? "Todos os recursos liberados" : subscription.status === "trial" ? `Teste grátis · ${access.daysRemaining ?? 0} dia(s) restante(s)` : `Status: ${subscription.status || "não informado"}`} · Produtos: ${data.produtos.length} de ${limits.products ?? "—"} · Clientes: ${data.clientes.length} de ${limits.clients ?? "—"}</small></div><button class="btn btn-primary" data-go="planos">${icon("gem")} ${plan === "internal" ? "Plano interno" : "Ver planos"}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name || data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon("download")} Exportar backup</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>${window.OperationMode?.renderSettings?.()||""}`
+      `<section class="panel settings"><div class="setting tenant-summary"><div><b>${escapar(business.name || data.config.nome)}</b><br><small class="muted">Empresa: ${escapar(session.businessId || DB.getBusinessId())} · Perfil: ${escapar(session.profile?.role || "")}</small></div><span class="badge badge-paid">${escapar(plan)}${subscription.status === "trial" && access.daysRemaining !== null ? ` · ${access.daysRemaining} dia(s)` : ""}</span></div><div class="setting"><div><b>Plano e assinatura</b><br><small class="muted">${plan === "internal" ? "Todos os recursos liberados" : subscription.status === "trial" ? `Teste grátis · ${access.daysRemaining ?? 0} dia(s) restante(s)` : `Status: ${subscription.status || "não informado"}`} · Produtos: ${data.produtos.length} de ${limits.products ?? "—"} · Clientes: ${data.clientes.length} de ${limits.clients ?? "—"}</small></div><button class="btn btn-primary" data-go="planos">${icon("gem")} ${plan === "internal" ? "Plano interno" : "Ver planos"}</button></div><div class="setting"><div><b>Nome do negócio</b><br><small class="muted">Usado nos recibos e na identidade do catálogo</small></div><input class="search" id="store-name" style="max-width:250px" value="${escapar(data.config.nome)}"></div><div class="setting"><div><b>Backup e restauração desta empresa</b><br><small class="muted">O JSON inclui somente os dados de ${escapar(business.name || data.config.nome)} e não pode ser restaurado em outra empresa.</small></div><div class="actions"><button class="btn btn-dark" id="export">${icon("download")} Exportar backup</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label></div></div><div class="setting"><div><b>Armazenamento deste aparelho</b><br><small class="muted">Remove somente o cache local desta empresa. A nuvem não será apagada e voltará após sincronizar.</small></div><button class="btn btn-danger" id="clear-device">Limpar dados deste aparelho</button></div></section>${window.OperationMode?.renderSettings?.() || ""}`
     );
   }
   function planos() {
@@ -596,7 +611,10 @@
       };
     }
     if (route === "cobrancas") bindCobrancas();
-    if (route === "vender") bindVenda();
+    if (route === "vender") {
+      bindVenda();
+      window.DesktopSales?.bind?.();
+    }
     if (route === "fiados")
       $$("[data-receive]").forEach(
         (b) =>
@@ -614,7 +632,11 @@
             );
           }),
       );
-    if (route === "configuracoes") { bindConfig(); window.OperationMode?.bindSettings?.(document); }
+    if (route === "configuracoes") {
+      bindConfig();
+      window.DesktopSettings?.bind?.();
+      window.OperationMode?.bindSettings?.(document);
+    }
   }
   function confirmarEstoqueInsuficiente(faltas, acao) {
     $("#modal").innerHTML =
@@ -646,6 +668,12 @@
       $("#sale-totals").innerHTML =
         `<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.subtotalOriginal)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.descontoTotal)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.valorFinal)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.custoTotal)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.lucro)}</b></div>`;
       $("#manual-total").value = t.valorFinal.toFixed(2);
+      const desktopDiscount = $("#desktop-discount-preview"),
+        desktopCount = $("#desktop-cart-count");
+      if (desktopDiscount)
+        desktopDiscount.textContent = dinheiro(t.descontoTotal);
+      if (desktopCount)
+        desktopCount.textContent = `${carrinho.reduce((sum, item) => sum + Number(item.quantidade || 0), 0)} itens`;
       const c = Clientes.obter($("#sale-client").value),
         fiado = $("#sale-status").value === "fiado";
       $("#debt-preview").innerHTML =
@@ -677,10 +705,26 @@
             redesenhar();
           }),
       );
+      $$("[data-cart-step]").forEach(
+        (button) =>
+          (button.onclick = () => {
+            const item = carrinho.find(
+              (entry) => cartKey(entry) === button.dataset.cartKey,
+            );
+            if (!item) return;
+            item.quantidade = Math.max(
+              1,
+              Number(item.quantidade || 1) + Number(button.dataset.cartStep),
+            );
+            redesenhar();
+          }),
+      );
       window.lucide?.createIcons();
     };
     const addDesktopItem = (item) => {
-      const current = carrinho.find((entry) => cartKey(entry) === cartKey(item));
+      const current = carrinho.find(
+        (entry) => cartKey(entry) === cartKey(item),
+      );
       if (current) current.quantidade += Number(item.quantidade || 1);
       else carrinho.push(item);
       redesenhar();
@@ -689,26 +733,31 @@
       const variants = await ProductVariations.ensure(product.id);
       if (!variants.length)
         return toast("Este produto não possui variações disponíveis", true);
-      $("#modal").innerHTML = `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${escapar(product.nome)}</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Escolha a variação para adicionar:</p><div class="desktop-variation-picker">${variants.map((variant) => `<button class="btn btn-light" data-desktop-variant="${variant.id}" ${!variant.allowNegativeStock && Number(variant.stock) <= 0 ? "disabled" : ""}><span>${escapar(ProductVariations.displayName(variant))}</span><b>${dinheiro(variant.price)}</b><small>${Number(variant.stock)} un.</small></button>`).join("")}</div></div></section></div>`;
+      $("#modal").innerHTML =
+        `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${escapar(product.nome)}</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><p>Escolha a variação para adicionar:</p><div class="desktop-variation-picker">${variants.map((variant) => `<button class="btn btn-light" data-desktop-variant="${variant.id}" ${!variant.allowNegativeStock && Number(variant.stock) <= 0 ? "disabled" : ""}><span>${escapar(ProductVariations.displayName(variant))}</span><b>${dinheiro(variant.price)}</b><small>${Number(variant.stock)} un.</small></button>`).join("")}</div></div></section></div>`;
       $("#modal .close").onclick = Modais.fechar;
       $$("[data-desktop-variant]", $("#modal")).forEach(
         (button) =>
           (button.onclick = () => {
-            const variant = ProductVariations.get(button.dataset.desktopVariant);
+            const variant = ProductVariations.get(
+              button.dataset.desktopVariant,
+            );
             addDesktopItem(ProductVariations.saleItem(product, variant, 1));
             Modais.fechar();
           }),
       );
       window.lucide?.createIcons();
     };
-    $$("[data-add]").forEach(
-      (b) =>
-        (b.onclick = async () => {
-          const p = Produtos.obter(b.dataset.add);
-          if (ProductVariations.isVariable(p)) return chooseDesktopVariant(p);
-          addDesktopItem(ProductVariations.saleItem(p, null, 1));
-        }),
-    );
+    const productPicker = $(".product-picker");
+    if (productPicker)
+      productPicker.onclick = async (event) => {
+        const button = event.target.closest("[data-add]");
+        if (!button) return;
+        const product = Produtos.obter(button.dataset.add);
+        if (ProductVariations.isVariable(product))
+          return chooseDesktopVariant(product);
+        addDesktopItem(ProductVariations.saleItem(product, null, 1));
+      };
     $("#discount-value").onchange = (e) => {
       const t = totaisCarrinho();
       distribuir(t.subtotalOriginal - Math.max(0, Number(e.target.value) || 0));
@@ -733,14 +782,22 @@
       redesenhar();
     };
     $("#sale-client").onchange = $("#sale-status").onchange = redesenhar;
-    $("#product-search").oninput = (e) =>
-      $$(".pick-product").forEach(
-        (p) =>
-          (p.hidden =
-            !`${p.textContent} ${Produtos.obter(p.dataset.add)?.barcode || ""}`
-              .toLowerCase()
-              .includes(e.target.value.toLowerCase())),
-      );
+    if (!window.DesktopSales?.isDesktop?.())
+      $("#product-search").oninput = (e) =>
+        $$(".pick-product").forEach(
+          (p) =>
+            (p.hidden =
+              !`${p.textContent} ${Produtos.obter(p.dataset.add)?.barcode || ""}`
+                .toLowerCase()
+                .includes(e.target.value.toLowerCase())),
+        );
+    $("#desktop-clear-cart")?.addEventListener("click", () => {
+      if (!carrinho.length) return;
+      if (confirm("Limpar todos os itens do carrinho?")) {
+        carrinho = [];
+        redesenhar();
+      }
+    });
     $("#finish-sale").onclick = () => {
       if (!carrinho.length) return toast("Adicione ao menos um produto", true);
       const clienteId = $("#sale-client").value || null,
@@ -1075,10 +1132,15 @@
       if (
         editing ||
         document.querySelector("#modal")?.children.length ||
-        document.querySelector(".message-center-page") ||
-        Router.atual() === "vender"
+        document.querySelector(".message-center-page")
       )
         return;
+      if (Router.atual() === "vender") {
+        window.DesktopSales?.refreshProducts?.();
+        window.DesktopSales?.refreshClients?.();
+        cloudRenderPending = false;
+        return;
+      }
       cloudRenderPending = false;
       render(Router.atual());
     }, 220);
