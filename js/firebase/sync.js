@@ -78,6 +78,19 @@ const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
 const DEFAULT_PULL_NAMES = CLOUD_NAMES.filter(
   (name) => name !== "productVariants" && !REALTIME_NAMES.has(name),
 );
+const AUDIT_NAMES = [
+    "products",
+    "productVariants",
+    "clients",
+    "sales",
+    "payments",
+    "balanceAdjustments",
+  ],
+  FINANCIAL_AUDIT_NAMES = new Set([
+    "sales",
+    "payments",
+    "balanceAdjustments",
+  ]);
 const repositories = Object.fromEntries(
     CLOUD_NAMES.map((name) => [name, createFirestoreRepository(name)]),
   ),
@@ -101,7 +114,8 @@ let currentUser = null,
   signalPullTimer = null,
   signalCollections = new Set(),
   signalVersions = new Map(),
-  listenerRegistry = new Map();
+  listenerRegistry = new Map(),
+  lastDataAuditRaw = null;
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -126,6 +140,7 @@ const state = {
   listenerConnected: false,
   cloudNewest: {},
   cloudFinancial: {},
+  dataAudit: null,
 };
 
 const now = () => new Date().toISOString();
@@ -377,6 +392,213 @@ const localSummary = () => {
     ),
   };
 };
+const stableComparable = (value) => {
+  if (Array.isArray(value)) return value.map(stableComparable);
+  if (!value || typeof value !== "object") return value;
+  const ignored = new Set([
+      "ownerId",
+      "businessId",
+      "source",
+      "createdAt",
+      "criadoEm",
+      "updatedAt",
+      "atualizadoEm",
+      "serverUpdatedAt",
+      "localUpdatedAt",
+      "version",
+      "revision",
+      "schemaVersion",
+      "idempotencyKey",
+      "entityType",
+      "action",
+      "recoveryChecksum",
+      "createdBy",
+      "sourceDeviceId",
+      "appliedAt",
+    ]),
+    result = {};
+  for (const key of Object.keys(value).sort())
+    if (!ignored.has(key) && value[key] !== undefined)
+      result[key] = stableComparable(value[key]);
+  return result;
+};
+const checksumValue = (value) => {
+  const source = JSON.stringify(stableComparable(sanitizeForFirestore(value)));
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+};
+const containsInvalidFirestoreValue = (value, seen = new WeakSet()) => {
+  if (["undefined", "function", "symbol"].includes(typeof value)) return true;
+  if (!value || typeof value !== "object") return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (Array.isArray(value))
+    return value.some((item) => containsInvalidFirestoreValue(item, seen));
+  return Object.values(value).some((item) =>
+    containsInvalidFirestoreValue(item, seen),
+  );
+};
+const recordTimestamp = (item = {}) =>
+  item.updatedAt ||
+  item.atualizadoEm ||
+  item.data ||
+  item.createdAt ||
+  item.criadoEm ||
+  "";
+const auditRecord = (item, origin, entityType) => ({
+  documentId: String(item?.id || ""),
+  operationId: String(item?.operationId || item?.sourceOperationId || ""),
+  businessId: String(item?.businessId || activeBusinessId()),
+  createdAt: item?.createdAt || item?.criadoEm || item?.data || "",
+  updatedAt: recordTimestamp(item),
+  revision: item?.revision ?? item?.version ?? null,
+  active: item?.active ?? item?.ativo ?? null,
+  deleted: Boolean(item?.deletedAt),
+  deletedAt: item?.deletedAt || "",
+  checksum: checksumValue(item),
+  origin,
+  entityType,
+});
+const financialKey = (item = {}) =>
+  String(item.operationId || item.sourceOperationId || item.id || "");
+const collectionAuditKey = (name, item = {}) =>
+  FINANCIAL_AUDIT_NAMES.has(name)
+    ? financialKey(item)
+    : String(item.id || "");
+const duplicateOperationIds = (items = []) => {
+  const counts = new Map();
+  for (const item of items) {
+    const id = financialKey(item);
+    if (id) counts.set(id, Number(counts.get(id) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([operationId, count]) => ({ operationId, count }));
+};
+function classifyCollectionAudit(name, localItems, remoteItems, queue) {
+  const localMap = new Map(),
+    remoteMap = new Map(),
+    queuedWrites = [];
+  for (const item of localItems || []) {
+    const key = collectionAuditKey(name, item);
+    if (key) localMap.set(key, item);
+  }
+  for (const item of remoteItems || []) {
+    const key = collectionAuditKey(name, item);
+    if (key) remoteMap.set(key, item);
+  }
+  for (const queueItem of queue)
+    for (const write of queueItem.payload?.writes || [])
+      if (write.entityType === name)
+        queuedWrites.push({ queueItem, write });
+  const result = {
+    entityType: name,
+    localTotal: localMap.size,
+    remoteTotal: remoteMap.size,
+    onlyLocal: [],
+    onlyRemote: [],
+    divergent: [],
+    equal: [],
+    possibleDuplicates: {
+      local: duplicateOperationIds(localItems),
+      remote: duplicateOperationIds(remoteItems),
+    },
+    latestLocal: newestTimestamp(localItems),
+    latestRemote: newestTimestamp(remoteItems),
+  };
+  for (const [key, item] of localMap) {
+    const remote = remoteMap.get(key),
+      metadata = auditRecord(item, "local", name),
+      queueMatch = queuedWrites.find(
+        ({ queueItem, write }) =>
+          String(write.entityId) === String(item.id) ||
+          String(queueItem.operationId || "") === financialKey(item),
+      );
+    if (!remote) {
+      const canonicalPath = `businesses/${activeBusinessId()}/${name}/${item.id}`,
+        actualPath = queueMatch
+          ? `businesses/${queueMatch.queueItem.businessId}/${queueMatch.write.entityType}/${queueMatch.write.entityId}`
+          : "";
+      result.onlyLocal.push({
+        ...metadata,
+        classification: queueMatch
+          ? actualPath === canonicalPath
+            ? "A"
+            : "C"
+          : "B",
+        queueOperationId: String(queueMatch?.queueItem?.operationId || ""),
+        queueStatus: queueMatch?.queueItem?.status || "missing",
+        destinationPath: canonicalPath,
+        actualPath,
+        reason: queueMatch
+          ? actualPath === canonicalPath
+            ? queueMatch.queueItem.lastErrorMessage || "Aguardando envio da fila."
+            : "A operação aponta para um caminho diferente do canônico."
+          : "Registro local sem operação correspondente na fila.",
+      });
+      continue;
+    }
+    const remoteMetadata = auditRecord(remote, "remote", name);
+    if (
+      metadata.checksum === remoteMetadata.checksum ||
+      String(remote.recoveryChecksum || "") === metadata.checksum
+    )
+      result.equal.push(metadata);
+    else
+      result.divergent.push({
+        classification: "E",
+        documentId: metadata.documentId,
+        operationId: metadata.operationId || remoteMetadata.operationId,
+        local: metadata,
+        remote: remoteMetadata,
+        hasPendingLocal: Boolean(queueMatch),
+      });
+  }
+  for (const [key, item] of remoteMap)
+    if (!localMap.has(key))
+      result.onlyRemote.push(auditRecord(item, "remote", name));
+  return result;
+}
+async function indexedDbInventory() {
+  if (!globalThis.indexedDB?.databases) return [];
+  const databases = await indexedDB.databases().catch(() => []),
+    inventory = [];
+  for (const info of databases) {
+    if (!info.name) continue;
+    const entry = { name: info.name, version: info.version || null, stores: [] };
+    try {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(info.name);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        request.onupgradeneeded = () => request.transaction?.abort();
+      });
+      for (const storeName of [...database.objectStoreNames]) {
+        let count = null;
+        try {
+          count = await new Promise((resolve, reject) => {
+            const request = database
+              .transaction(storeName, "readonly")
+              .objectStore(storeName)
+              .count();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        } catch {}
+        entry.stores.push({ name: storeName, count });
+      }
+      database.close();
+    } catch {
+      entry.unavailable = true;
+    }
+    inventory.push(entry);
+  }
+  return inventory;
+}
 const diagnostic = () => {
   const q = queueCounts(),
     local = localSummary(),
@@ -422,6 +644,7 @@ const diagnostic = () => {
     hydrated: state.hydrated,
     listenerConnected: state.listenerConnected,
     schemaVersion: 3,
+    deviceId: deviceId(),
     lastErrorCode,
     lastErrorMessage: lastError,
     localClients: local.clientes,
@@ -437,6 +660,7 @@ const diagnostic = () => {
     cloudPayments: state.cloudCounts.payments ?? "—",
     localFiado: local.fiado,
     comparison: state.comparison,
+    dataAudit: state.dataAudit || null,
   };
 };
 const emit = (patch) => {
@@ -748,7 +972,11 @@ function queueWrites(
   if (!writes.length) return 0;
   const queue = readQueue(),
     businessId = activeBusinessId(),
-    stableOperationId = String(operationId || crypto.randomUUID());
+    stableOperationId = String(operationId || crypto.randomUUID()),
+    existingOperationIds = new Set(
+      queue.map((item) => String(item.operationId || "")),
+    );
+  let queuedWrites = 0;
   for (let index = 0; index < writes.length; index += MAX_WRITES) {
     const part = writes.slice(index, index + MAX_WRITES).map((write) => ({
         ...write,
@@ -762,6 +990,7 @@ function queueWrites(
           : stableOperationId,
       action = part.length === 1 ? part[0].operation : "transaction",
       createdAt = now();
+    if (existingOperationIds.has(id)) continue;
     const queued = {
       queueId: crypto.randomUUID(),
       operationId: id,
@@ -790,10 +1019,12 @@ function queueWrites(
     };
     queued.subtype = queueSubtype(queued);
     queue.push(queued);
+    existingOperationIds.add(id);
+    queuedWrites += part.length;
   }
   saveQueue(queue);
-  scheduleImmediate();
-  return writes.length;
+  if (queuedWrites) scheduleImmediate();
+  return queuedWrites;
 }
 function changedFields(previous, item) {
   const patch = {};
@@ -1273,6 +1504,26 @@ function cleanCloudItem(item) {
   clean.atualizadoEm ??= clean.updatedAt || clean.data;
   return clean;
 }
+const completenessScore = (item = {}) =>
+  Object.entries(item).reduce((score, [key, value]) => {
+    if (
+      [
+        "ownerId",
+        "businessId",
+        "updatedAt",
+        "atualizadoEm",
+        "version",
+        "revision",
+        "schemaVersion",
+        "source",
+      ].includes(key)
+    )
+      return score;
+    if (value === null || value === undefined || value === "") return score;
+    if (Array.isArray(value)) return score + Math.max(1, value.length);
+    if (typeof value === "object") return score + completenessScore(value);
+    return score + 1;
+  }, 0);
 function reconcileLocalAndCloud(
   entityType,
   local,
@@ -1332,28 +1583,15 @@ function reconcileLocalAndCloud(
       localTime = new Date(
         existing.updatedAt || existing.atualizadoEm || 0,
       ).getTime();
-    if (!localTime || remoteTime >= localTime)
+    if (
+      !localTime ||
+      (remoteTime >= localTime &&
+        completenessScore(item) >= completenessScore(existing))
+    )
       byId.set(id, { ...existing, ...item });
   }
-  if (authoritative) {
-    const cloudIds = new Set(
-      (cloud || [])
-        .filter((item) => item?.id && !item.deletedAt)
-        .map((item) => String(item.id)),
-    );
-    for (const [id, item] of [...byId.entries()]) {
-      if (pending.has(id) || cloudIds.has(id)) continue;
-      const operationId = item?.operationId ? String(item.operationId) : "";
-      const representedByCloud = operationId
-        ? (cloud || []).some(
-            (remote) =>
-              !remote?.deletedAt &&
-              String(remote?.operationId || "") === operationId,
-          )
-        : false;
-      if (!representedByCloud) byId.delete(id);
-    }
-  }
+  // Ausência na nuvem não é tombstone. Registros locais sem fila precisam
+  // ser auditados e recuperados, nunca apagados silenciosamente por um pull.
   return [...byId.values()];
 }
 function applyCloudCollection(name, documents, options = {}) {
@@ -1746,6 +1984,329 @@ async function findProductVariantByBarcode(barcode) {
   applyCloudCollection("productVariants", documents);
   return documents;
 }
+async function compareDeviceWithCloud() {
+  await validateUser();
+  if (!navigator.onLine)
+    throw Object.assign(new Error("A comparação precisa de conexão com a internet."), {
+      code: "network-request-failed",
+    });
+  const businessId = activeBusinessId(),
+    data = DB.carregar(),
+    queue = readQueue(),
+    collections = {},
+    raw = {};
+  for (const name of AUDIT_NAMES) {
+    const localItems = sourceItems(data, name),
+      remoteItems = await repositories[name].listAllPaged(200);
+    raw[name] = { localItems, remoteItems };
+    collections[name] = classifyCollectionAudit(
+      name,
+      localItems,
+      remoteItems,
+      queue,
+    );
+  }
+  const localBalance = (data.clientes || []).reduce(
+      (total, client) => total + Number(client.saldo || 0),
+      0,
+    ),
+    remoteBalance = raw.clients.remoteItems.reduce(
+      (total, client) => total + Number(client.saldo || 0),
+      0,
+    ),
+    summarize = (names) => ({
+      local: names.reduce(
+        (total, name) => total + collections[name].localTotal,
+        0,
+      ),
+      remote: names.reduce(
+        (total, name) => total + collections[name].remoteTotal,
+        0,
+      ),
+      onlyLocal: names.reduce(
+        (total, name) => total + collections[name].onlyLocal.length,
+        0,
+      ),
+      onlyRemote: names.reduce(
+        (total, name) => total + collections[name].onlyRemote.length,
+        0,
+      ),
+      divergent: names.reduce(
+        (total, name) => total + collections[name].divergent.length,
+        0,
+      ),
+      equal: names.reduce(
+        (total, name) => total + collections[name].equal.length,
+        0,
+      ),
+    }),
+    report = {
+      generatedAt: now(),
+      businessId,
+      deviceId: deviceId(),
+      collections,
+      products: summarize(["products", "productVariants"]),
+      clients: summarize(["clients"]),
+      financial: {
+        ...summarize(["sales", "payments", "balanceAdjustments"]),
+        localBalance,
+        remoteBalance,
+        balanceDifference: Number((localBalance - remoteBalance).toFixed(2)),
+        possibleDuplicates: [
+          ...collections.sales.possibleDuplicates.local,
+          ...collections.payments.possibleDuplicates.local,
+          ...collections.balanceAdjustments.possibleDuplicates.local,
+          ...collections.sales.possibleDuplicates.remote,
+          ...collections.payments.possibleDuplicates.remote,
+          ...collections.balanceAdjustments.possibleDuplicates.remote,
+        ],
+      },
+      queue: queueCounts(),
+    };
+  lastDataAuditRaw = { businessId, generatedAt: report.generatedAt, raw, report };
+  emit({ dataAudit: report });
+  return report;
+}
+async function exportLocalDiagnostic() {
+  await validateUser();
+  const businessId = activeBusinessId(),
+    data = DB.carregar(),
+    queue = readQueue(),
+    profile = state.userProfile || {},
+    entities = {};
+  for (const name of AUDIT_NAMES)
+    entities[name] = sourceItems(data, name).map((item) =>
+      auditRecord(item, "local", name),
+    );
+  return {
+    diagnosticVersion: 1,
+    generatedAt: now(),
+    build: window.AdiFestaBuild || null,
+    projectId: PROJECT_ID,
+    businessId,
+    uid: currentUser?.uid
+      ? `${currentUser.uid.slice(0, 6)}…${currentUser.uid.slice(-4)}`
+      : "—",
+    role: profile.role || "",
+    schemaVersion: 3,
+    deviceId: deviceId(),
+    indexedDb: await indexedDbInventory(),
+    localCounts: Object.fromEntries(
+      Object.entries(entities).map(([name, items]) => [name, items.length]),
+    ),
+    queueCounts: queueCounts(),
+    queue: queue.map((item) => ({
+      operationId: String(item.operationId || item.queueId || ""),
+      entityType: item.entityType || "unknown",
+      subtype: item.subtype || queueSubtype(item),
+      action: item.action || "transaction",
+      documentId: item.entityId || "",
+      destinationPath:
+        item.businessId && item.payload?.writes?.[0]
+          ? `businesses/${item.businessId}/${item.payload.writes[0].entityType}/${item.payload.writes[0].entityId}`
+          : "indefinido",
+      destinationPaths: (item.payload?.writes || []).map((write) =>
+        item.businessId && write.entityType && write.entityId
+          ? `businesses/${item.businessId}/${write.entityType}/${write.entityId}`
+          : "indefinido",
+      ),
+      createdAt: item.createdAtLocal || item.createdAt || "",
+      updatedAt: item.updatedAt || "",
+      retryCount: Number(item.retryCount || item.attempts || 0),
+      status: item.status || "pending",
+      errorCode: item.lastErrorCode || "",
+      errorMessage: item.lastErrorMessage || "",
+      payloadVersion: Number(item.payloadVersion || 1),
+      invalidPayload: containsInvalidFirestoreValue(item.payload),
+      payloadChecksum: checksumValue(item.payload || {}),
+    })),
+    entities,
+    lastCloudComparison: state.dataAudit || null,
+  };
+}
+function downloadJsonFile(value, filename) {
+  const url = URL.createObjectURL(
+      new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
+    ),
+    link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function automaticRecoveryBackup() {
+  const backup = DB.criarBackup();
+  downloadJsonFile(
+    backup,
+    `backup-antes-recuperacao-${activeBusinessId()}-${Date.now()}.json`,
+  );
+  return backup.backupId;
+}
+const currentAuditOrThrow = () => {
+  if (
+    !lastDataAuditRaw ||
+    lastDataAuditRaw.businessId !== activeBusinessId()
+  )
+    throw Object.assign(
+      new Error("Compare os dados com a nuvem antes de iniciar a recuperação."),
+      { code: "audit-required" },
+    );
+  return lastDataAuditRaw;
+};
+async function recoverMissingNonFinancial() {
+  const audit = currentAuditOrThrow(),
+    businessId = activeBusinessId(),
+    names = ["products", "productVariants", "clients"],
+    queued = [];
+  automaticRecoveryBackup();
+  for (const name of names) {
+    const missing = new Set(
+      audit.report.collections[name].onlyLocal
+        .filter((item) => item.classification === "B")
+        .map((item) => item.documentId),
+    );
+    for (const item of audit.raw[name].localItems) {
+      if (!missing.has(String(item.id))) continue;
+      if (item.businessId && item.businessId !== businessId) continue;
+      const clean = sanitizeForFirestore({
+          ...item,
+          businessId,
+          source: "recovery_local_orphan",
+          recoveryChecksum: checksumValue(item),
+        }),
+        operationId = `recovery:${businessId}:${name}:${checksumValue({ documentId: item.id, checksum: checksumValue(item) }).slice(-8)}`;
+      if (name === "clients") {
+        delete clean.saldo;
+        clean.financialRecoveryRequired = true;
+      }
+      queueWrites(
+        [
+          {
+            entityType: name,
+            entityId: String(item.id),
+            operation: "create",
+            before: null,
+            data: clean,
+          },
+        ],
+        operationId,
+        "recovery_local_orphan",
+        { source: "recovery_local_orphan" },
+      );
+      queued.push({ entityType: name, documentId: String(item.id), operationId });
+    }
+  }
+  const sync = queued.length
+    ? await processSyncQueue({ force: true })
+    : { sent: 0, pending: queueCounts().total, errors: queueCounts().errors };
+  if (sync.sent) await safePublishSyncSignal(names, sync.errors ? "error" : "ok");
+  const comparison = await compareDeviceWithCloud();
+  return { backupCreated: true, queued: queued.length, sync, comparison };
+}
+const financialDelta = (name, item) => {
+  if (name === "sales")
+    return item.status === "fiado"
+      ? -Math.abs(Number(item.valorFinal ?? item.valorTotal ?? 0))
+      : 0;
+  if (name === "payments") return Math.abs(Number(item.valor || 0));
+  if (name === "balanceAdjustments")
+    return Number(item.saldoNovo || 0) - Number(item.saldoAnterior || 0);
+  return Number.NaN;
+};
+async function recoverMissingFinancialMovements() {
+  const audit = currentAuditOrThrow(),
+    businessId = activeBusinessId(),
+    names = ["sales", "payments", "balanceAdjustments"],
+    queued = [],
+    blocked = [];
+  if (audit.report.products.onlyLocal || audit.report.clients.onlyLocal)
+    throw Object.assign(
+      new Error("Recupere e confirme produtos e clientes antes do financeiro."),
+      { code: "non-financial-recovery-required" },
+    );
+  automaticRecoveryBackup();
+  const remoteClientIds = new Set(
+    audit.raw.clients.remoteItems.map((item) => String(item.id)),
+  );
+  for (const name of names) {
+    const missingOperations = new Set(
+      audit.report.collections[name].onlyLocal.map(
+        (item) => item.operationId || item.documentId,
+      ),
+    );
+    for (const item of audit.raw[name].localItems) {
+      const operationId = financialKey(item),
+        clientId = String(item.clienteId || item.customerId || ""),
+        delta = financialDelta(name, item);
+      if (!missingOperations.has(operationId)) continue;
+      if (!operationId || !clientId || !Number.isFinite(delta) || !remoteClientIds.has(clientId)) {
+        blocked.push({ entityType: name, documentId: String(item.id), operationId });
+        continue;
+      }
+      const eventKind =
+          name === "sales"
+            ? "sale"
+            : name === "payments"
+              ? "payment"
+              : "balance_adjustment",
+        writes = [
+          {
+            entityType: name,
+            entityId: String(item.id),
+            operation: "create",
+            before: null,
+            data: {
+              ...item,
+              operationId,
+              businessId,
+              customerId: clientId,
+              type: item.type || item.tipo || eventKind,
+              amount: Number(item.amount ?? item.valor ?? item.valorFinal ?? item.valorTotal ?? 0),
+              createdBy: item.createdBy || currentUser.uid,
+              sourceDeviceId: item.sourceDeviceId || deviceId(),
+              appliedAt: item.appliedAt || item.data || item.createdAt || now(),
+              schemaVersion: 3,
+              source: "recovery_local_orphan",
+              recoveryChecksum: checksumValue(item),
+            },
+          },
+        ];
+      if (delta)
+        writes.push({
+          entityType: "clients",
+          entityId: clientId,
+          operation: "update",
+          before: { saldo: 0 },
+          data: { saldo: delta },
+        });
+      queueWrites(writes, operationId, eventKind, {
+        source: "recovery_local_orphan",
+      });
+      queued.push({ entityType: name, documentId: String(item.id), operationId, delta });
+    }
+  }
+  const sync = queued.length
+    ? await processSyncQueue({ force: true })
+    : { sent: 0, pending: queueCounts().total, errors: queueCounts().errors };
+  if (sync.sent) await safePublishSyncSignal([...names, "clients"], sync.errors ? "error" : "ok");
+  const comparison = await compareDeviceWithCloud();
+  return { backupCreated: true, queued: queued.length, blocked, sync, comparison };
+}
+async function refreshSafelyFromServer() {
+  const audit = currentAuditOrThrow(),
+    hasRisk =
+      queueCounts().total > 0 ||
+      Object.values(audit.report.collections).some(
+        (item) => item.onlyLocal.length || item.divergent.length,
+      );
+  if (hasRisk)
+    throw Object.assign(
+      new Error("Existem dados locais que poderiam ser perdidos. Resolva a auditoria primeiro."),
+      { code: "local-data-at-risk" },
+    );
+  const received = await pullCloudCollections({ force: true, full: true });
+  return { received, comparison: await compareDeviceWithCloud() };
+}
 async function compareLocalAndCloud() {
   const local = localSummary(),
     remote = {
@@ -2118,6 +2679,7 @@ async function clearLocalDevice(options = {}) {
 }
 function setUser(user, profile = null, business = null) {
   currentUser = user || null;
+  lastDataAuditRaw = null;
   cloudPaused = false;
   readOnlyMode = Boolean(
     user && window.BusinessContext?.get?.().access?.readOnly,
@@ -2136,6 +2698,7 @@ function setUser(user, profile = null, business = null) {
     businessOwnerId: business?.ownerId || "",
     ownerMatches: Boolean(user && business?.ownerId === user.uid),
     testPassed: trustedBootstrap,
+    dataAudit: null,
     lastSync: profile?.businessId
       ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) || ""
       : "",
@@ -2215,6 +2778,13 @@ window.SyncFirebase = {
   loadProductVariants,
   findProductVariantByBarcode,
   compare: compareLocalAndCloud,
+  compareDeviceWithCloud,
+  exportLocalDiagnostic,
+  downloadJsonFile,
+  recoverMissingNonFinancial,
+  recoverMissingFinancialMovements,
+  refreshSafelyFromServer,
+  checksumValue,
   reconcileLocalAndCloud,
   startCloudSubscriptions,
   stopCloudSubscriptions,

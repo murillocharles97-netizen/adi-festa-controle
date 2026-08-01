@@ -43,9 +43,10 @@ test("variações removem campos legados e saldo usa operação transacional", (
   assert.match(sync, /processedOperations/);
 });
 
-test("snapshot completo torna a nuvem canonica sem apagar pendencias", () => {
+test("snapshot completo preserva registros locais ausentes até auditoria", () => {
   assert.match(sync, /authoritative = false/);
-  assert.match(sync, /pending\.has\(id\) \|\| cloudIds\.has\(id\)/);
+  assert.match(sync, /Ausência na nuvem não é tombstone/);
+  assert.doesNotMatch(sync, /if \(!representedByCloud\) byId\.delete\(id\)/);
   assert.match(sync, /authoritative: !since/);
   assert.match(sync, /authoritative: mode === "all"/);
 });
@@ -64,4 +65,27 @@ test("cloudPayload é sanitizado depois de preencher operationId e idempotência
   assert.match(sync, /clean\.idempotencyKey \|\|= clean\.operationId/);
   assert.match(sync, /return sanitizeForFirestore\(\{/);
   assert.match(sync, /status: "recovered_existing"/);
+});
+
+test("auditoria compara IDs, checksums e movimentos por operationId", () => {
+  assert.match(sync, /compareDeviceWithCloud/);
+  assert.match(sync, /checksumValue/);
+  assert.match(sync, /FINANCIAL_AUDIT_NAMES\.has\(name\)/);
+  assert.match(sync, /classification: "E"/);
+  assert.match(sync, /recovery_local_orphan/);
+  assert.match(sync, /recoverMissingNonFinancial/);
+  assert.match(sync, /recoverMissingFinancialMovements/);
+  assert.match(sync, /existingOperationIds\.has\(id\)/);
+});
+
+test("diagnóstico exportável omite payload e dados pessoais integrais", () => {
+  assert.match(sync, /exportLocalDiagnostic/);
+  assert.match(sync, /indexedDbInventory/);
+  assert.match(sync, /payloadChecksum: checksumValue/);
+  assert.match(sync, /invalidPayload: containsInvalidFirestoreValue/);
+  assert.doesNotMatch(sync, /queue: queue\.map\(.*payload:/s);
+  assert.match(ui, /Exportar diagnóstico/);
+  assert.match(ui, /Comparar com a nuvem/);
+  assert.match(ui, /Recuperar dados locais ausentes/);
+  assert.match(ui, /Atualizar deste servidor/);
 });
