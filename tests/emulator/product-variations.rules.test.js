@@ -37,6 +37,20 @@ test('proprietário cria e lê variação da própria empresa',async()=>{
   await assertSucceeds(getDoc(ref));
 });
 
+test('fila cria produto pai, variação e marcador na mesma transação',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),productId='queued-parent',variantId='queued-variant',operationId='queued-product-op',
+    productRef=doc(db,'businesses',businessA,'products',productId),
+    variantRef=doc(db,'businesses',businessA,'productVariants',variantId),
+    markerRef=doc(db,'businesses',businessA,'processedOperations',operationId);
+  await assertSucceeds(runTransaction(db,async transaction=>{
+    assert.equal((await transaction.get(markerRef)).exists(),false);
+    transaction.set(productRef,{id:productId,businessId:businessA,ownerId:'owner-a',nome:'Produto criado pela fila',productType:'variable',ativo:true,active:true,createdAt:new Date(),updatedAt:new Date(),schemaVersion:3,version:1});
+    transaction.set(variantRef,variant(businessA,productId,variantId));
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'simple',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  }));
+  assert.equal((await getDoc(variantRef)).data().parentProductId,productId);
+});
+
 test('multiempresa bloqueia leitura e gravação cruzadas',async()=>{
   const dbA=env.authenticatedContext('owner-a').firestore(),foreign=doc(dbA,'businesses',businessB,'productVariants','foreign');
   await assertFails(getDoc(foreign));

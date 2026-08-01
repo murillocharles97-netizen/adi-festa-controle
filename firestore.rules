@@ -289,7 +289,11 @@ service cloud.firestore {
       }
       match /productVariants/{variantId} {
         function parentProduct(productId) {
-          return get(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId));
+          // A criação de um produto variável grava o pai e suas variações na
+          // mesma transação offline-first. getAfter também enxerga o produto
+          // pai que será criado por essa transação; get enxergava apenas o
+          // estado anterior e rejeitava toda a operação com permission-denied.
+          return getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId));
         }
         function validVariant(data) {
           return data.id == variantId
