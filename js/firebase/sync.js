@@ -63,6 +63,16 @@ const QUEUE_ENTITY_ALIASES = {
 // imediatamente em todos os caixas. As demais coleções usam o sinal central e
 // são reconciliadas no pull, evitando um listener por tela ou por card.
 const REALTIME_NAMES = new Set(["clients", "products", "settings"]);
+const IDEMPOTENT_EVENT_NAMES = new Set([
+  "sales",
+  "payments",
+  "balanceAdjustments",
+  "stockMovements",
+  "rewards",
+  "messageHistory",
+  "messageSequences",
+  "clientContacts",
+]);
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
 const DEFAULT_PULL_NAMES = CLOUD_NAMES.filter(
@@ -162,6 +172,41 @@ const deviceId = () => {
   }
   return value;
 };
+const stableLegacyOperationId = (item = {}) => {
+  if (item.operationId) return String(item.operationId);
+  if (item.queueId) return `legacy:${String(item.queueId)}`;
+  const source = JSON.stringify({
+    businessId: item.businessId || "",
+    entityType: item.entityType || "",
+    entityId: item.entityId || "",
+    createdAt: item.createdAtLocal || item.createdAt || "",
+    writes: (item.payload?.writes || []).map((write) => ({
+      entityType: write.entityType || write.collection || "",
+      entityId: write.entityId || write.id || "",
+      operation: write.operation || "update",
+    })),
+  });
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `legacy:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+};
+const queueSubtype = (item = {}) => {
+  const kind = String(item.payload?.eventKind || "");
+  if (kind && !["simple", "legacy"].includes(kind)) return kind;
+  const names = new Set(
+    (item.payload?.writes || []).map((write) => write.entityType),
+  );
+  if (names.has("payments")) return "payment_received";
+  if (names.has("balanceAdjustments")) return "balance_adjustment";
+  if (names.has("sales")) return "credit_sale";
+  if (names.has("messageHistory")) return "message_history";
+  if (names.has("clientContacts")) return "customer_contact";
+  if (names.has("stockMovements")) return "stock_movement";
+  return kind || "simple";
+};
 const readSignalVersions = () => {
   try {
     const parsed = JSON.parse(localStorage.getItem(signalVersionKey()) || "{}");
@@ -192,6 +237,23 @@ const queueCounts = () => {
     total: queue.length,
   };
 };
+const queueErrorBreakdown = () => {
+  const errors = readQueue().filter((item) => item.status === "error");
+  return {
+    permission: errors.filter((item) => item.lastErrorCode === "permission-denied").length,
+    invalid: errors.filter((item) => item.lastErrorCode === "invalid-argument").length,
+    structural: errors.filter((item) =>
+      [
+        "queue-owner-mismatch",
+        "business-mismatch",
+        "user-mismatch",
+        "invalid-path",
+        "empty-transaction",
+        "legacy-payload-unsupported",
+      ].includes(item.lastErrorCode),
+    ).length,
+  };
+};
 const queueDiagnostics = () =>
   readQueue().map((item) => ({
     operationId: String(item.operationId || item.queueId || ""),
@@ -199,10 +261,13 @@ const queueDiagnostics = () =>
     action: String(item.action || item.operation || "unknown"),
     documentId: String(item.entityId || ""),
     businessId: String(item.businessId || ""),
-    firestorePath: item.businessId && item.entityType && item.entityId
-      ? `businesses/${item.businessId}/${item.entityType}/${item.entityId}`
-      : "indefinido",
+    firestorePath:
+      item.lastErrorPath ||
+      (item.businessId && item.entityType && item.entityId
+        ? `businesses/${item.businessId}/${item.entityType}/${item.entityId}`
+        : "indefinido"),
     createdAt: item.createdAtLocal || item.createdAt || "",
+    lastAttemptAt: item.lastAttemptAt || "",
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
@@ -211,6 +276,21 @@ const queueDiagnostics = () =>
     deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
     origin: item.origin || item.source || "legado",
     status: item.status || "pending",
+    subtype: item.subtype || queueSubtype(item),
+    collection: String(item.payload?.writes?.[0]?.entityType || ""),
+    paths: (item.payload?.writes || []).map((write) =>
+      item.businessId && write.entityType && write.entityId
+        ? `businesses/${item.businessId}/${write.entityType}/${write.entityId}`
+        : "indefinido",
+    ),
+    currentBusinessId: String(state.userProfile?.businessId || ""),
+    authUid: currentUser?.uid
+      ? `${String(currentUser.uid).slice(0, 6)}…${String(currentUser.uid).slice(-4)}`
+      : "—",
+    role: String(state.userProfile?.role || ""),
+    createdBeforeMultiTenant:
+      Number(item.payloadVersion || 1) < PAYLOAD_VERSION ||
+      ["legacy", "legacy_queue"].includes(item.origin || item.source),
   }));
 const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
@@ -221,6 +301,39 @@ const canAttempt = (item, force = false) =>
   !item.lastAttemptAt ||
   Date.now() - new Date(item.lastAttemptAt).getTime() >=
     retryDelay(item.attempts || 0, item.lastErrorCode);
+const queuePreflight = (item) => {
+  const businessId = activeBusinessId(),
+    writes = Array.isArray(item.payload?.writes) ? item.payload.writes : [];
+  if (!item.operationId)
+    return { ok: false, code: "operation-id-missing", message: "OperationId ausente." };
+  if (item.businessId !== businessId)
+    return {
+      ok: false,
+      code: "business-mismatch",
+      message: "O businessId da operação não corresponde à empresa atual.",
+    };
+  if (item.userId && item.userId !== currentUser?.uid)
+    return {
+      ok: false,
+      code: "user-mismatch",
+      message: "A operação pertence a outra sessão autenticada.",
+    };
+  if (!writes.length)
+    return { ok: false, code: "empty-transaction", message: "A operação não possui gravações." };
+  const invalid = writes.find(
+    (write) =>
+      !CLOUD_NAMES.includes(write.entityType) ||
+      !String(write.entityId || "") ||
+      !["create", "update"].includes(write.operation),
+  );
+  if (invalid)
+    return {
+      ok: false,
+      code: "invalid-path",
+      message: `Caminho não suportado: ${invalid.entityType || "coleção ausente"}.`,
+    };
+  return { ok: true };
+};
 const readPullState = () => {
   try {
     return JSON.parse(localStorage.getItem(pullStateKey())) || {};
@@ -411,26 +524,21 @@ function enrich(name, item) {
     ]);
     for (const key of Object.keys(clean)) if (!allowed.has(key)) delete clean[key];
   }
-  if (
-    [
-      "sales",
-      "payments",
-      "balanceAdjustments",
-      "stockMovements",
-      "rewards",
-      "messageHistory",
-      "messageSequences",
-      "clientContacts",
-    ].includes(name)
-  )
-    clean.operationId = clean.operationId || clean.id;
+  if (IDEMPOTENT_EVENT_NAMES.has(name) && !clean.operationId && clean.id)
+    clean.operationId = clean.id;
   return clean;
 }
 function cloudPayload(name, id, data, creating = false) {
   const clean = enrich(name, data),
     businessId = activeBusinessId();
   delete clean.version;
-  return {
+  if (IDEMPOTENT_EVENT_NAMES.has(name)) {
+    clean.operationId ||= String(id);
+    clean.idempotencyKey ||= clean.operationId;
+    clean.entityType ||= name;
+    clean.action ||= creating ? "create" : "update";
+  }
+  return sanitizeForFirestore({
     ...clean,
     id: String(id),
     businessId,
@@ -447,7 +555,7 @@ function cloudPayload(name, id, data, creating = false) {
       : {}),
     updatedAt: serverTimestamp(),
     version: increment(1),
-  };
+  });
 }
 function archiveQueue(reason) {
   const queue = readQueue();
@@ -562,6 +670,9 @@ function migrateScopedQueueCompatibility() {
   const next = queue.map((item) => {
     const copy = structuredClone(item),
       writes = Array.isArray(copy.payload?.writes) ? copy.payload.writes : [];
+    copy.queueId ||= crypto.randomUUID();
+    copy.operationId = stableLegacyOperationId(copy);
+    copy.idempotencyKey = copy.operationId;
     copy.businessId ||= businessId;
     copy.userId ||= currentUser.uid;
     copy.deviceId ||= deviceId();
@@ -572,15 +683,34 @@ function migrateScopedQueueCompatibility() {
     copy.payload.writes = writes.map((write) => {
       const entityType = QUEUE_ENTITY_ALIASES[write.entityType] || write.entityType;
       if (entityType !== write.entityType) migrated++;
+      const entityId = String(write.entityId || write.id || ""),
+        clean = sanitizeForFirestore(write.data || {}) || {};
+      if (IDEMPOTENT_EVENT_NAMES.has(entityType)) {
+        clean.operationId ||= copy.operationId;
+        clean.idempotencyKey ||= clean.operationId;
+        clean.businessId ||= copy.businessId;
+        clean.entityType ||= entityType;
+        clean.action ||= write.operation || "update";
+        clean.createdAt ||= clean.data || copy.createdAtLocal || copy.createdAt || now();
+        clean.schemaVersion ||= 3;
+      }
       return {
         ...write,
         entityType,
-        entityId: String(write.entityId || write.id || ""),
-        data: sanitizeForFirestore(write.data || {}) || {},
+        entityId,
+        operation: write.operation === "create" ? "create" : "update",
+        data: clean,
       };
     });
     copy.entityType =
       QUEUE_ENTITY_ALIASES[copy.entityType] || copy.entityType || "unknown";
+    copy.subtype = queueSubtype(copy);
+    copy.entityId ||= copy.payload.writes.length === 1
+      ? copy.payload.writes[0].entityId
+      : copy.operationId;
+    copy.action ||= copy.payload.writes.length === 1
+      ? copy.payload.writes[0].operation
+      : "transaction";
     const invalidWrite = copy.payload.writes.find(
       (write) =>
         !CLOUD_NAMES.includes(write.entityType) || !String(write.entityId || ""),
@@ -590,7 +720,17 @@ function migrateScopedQueueCompatibility() {
       copy.status = "error";
       copy.lastErrorCode = "legacy-payload-unsupported";
       copy.lastErrorMessage = `Operação legada preservada: coleção ${invalidWrite.entityType || "indefinida"} não reconhecida.`;
-    } else if (copy.status === "syncing") copy.status = "pending";
+    } else if (
+      copy.status === "syncing" ||
+      ["invalid-argument", "legacy-payload-unsupported"].includes(
+        copy.lastErrorCode,
+      )
+    ) {
+      copy.status = "pending";
+      copy.lastErrorCode = null;
+      copy.lastErrorMessage = null;
+      migrated++;
+    }
     return copy;
   });
   if (JSON.stringify(next) !== JSON.stringify(queue)) {
@@ -607,18 +747,25 @@ function queueWrites(
 ) {
   if (!writes.length) return 0;
   const queue = readQueue(),
-    businessId = activeBusinessId();
+    businessId = activeBusinessId(),
+    stableOperationId = String(operationId || crypto.randomUUID());
   for (let index = 0; index < writes.length; index += MAX_WRITES) {
-    const part = writes.slice(index, index + MAX_WRITES),
+    const part = writes.slice(index, index + MAX_WRITES).map((write) => ({
+        ...write,
+        entityId: String(write.entityId || ""),
+        operation: write.operation === "create" ? "create" : "update",
+        data: sanitizeForFirestore(write.data || {}) || {},
+      })),
       id =
         writes.length > MAX_WRITES
-          ? `${operationId}:${index / MAX_WRITES}`
-          : operationId,
+          ? `${stableOperationId}:${index / MAX_WRITES}`
+          : stableOperationId,
       action = part.length === 1 ? part[0].operation : "transaction",
       createdAt = now();
-    queue.push({
+    const queued = {
       queueId: crypto.randomUUID(),
       operationId: id,
+      idempotencyKey: id,
       entityType: part.length === 1 ? part[0].entityType : "transaction",
       entityId: part.length === 1 ? part[0].entityId : id,
       operation: action,
@@ -640,7 +787,9 @@ function queueWrites(
       lastAttemptAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
-    });
+    };
+    queued.subtype = queueSubtype(queued);
+    queue.push(queued);
   }
   saveQueue(queue);
   scheduleImmediate();
@@ -825,12 +974,13 @@ async function testFirestoreConnection() {
 }
 async function commitQueueItem(item) {
   const businessId = activeBusinessId(),
+    operationId = stableLegacyOperationId(item),
     marker = doc(
       db,
       "businesses",
       businessId,
       "processedOperations",
-      item.operationId,
+      operationId,
     ),
     writes = item.payload.writes || [],
     transactional = [
@@ -846,9 +996,12 @@ async function commitQueueItem(item) {
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
     const snapshots = new Map();
-    if (transactional)
-      for (const write of writes)
-        if (deltaEntities.includes(write.entityType)) {
+    for (const write of writes)
+      if (
+        (transactional && deltaEntities.includes(write.entityType)) ||
+        (IDEMPOTENT_EVENT_NAMES.has(write.entityType) &&
+          write.data?.operationId)
+      ) {
           const reference = doc(
             db,
             "businesses",
@@ -860,8 +1013,34 @@ async function commitQueueItem(item) {
             `${write.entityType}:${write.entityId}`,
             await transaction.get(reference),
           );
-        }
+      }
+    const alreadyApplied = writes.some((write) => {
+      if (!IDEMPOTENT_EVENT_NAMES.has(write.entityType)) return false;
+      const snapshot = snapshots.get(`${write.entityType}:${write.entityId}`);
+      return (
+        snapshot?.exists() &&
+        String(snapshot.data()?.operationId || "") === operationId
+      );
+    });
+    if (alreadyApplied) {
+      transaction.set(
+        marker,
+        sanitizeForFirestore({
+          id: operationId,
+          idempotencyKey: operationId,
+          businessId,
+          ownerId: currentUser.uid,
+          status: "recovered_existing",
+          eventKind: item.payload.eventKind || item.subtype || "simple",
+          processedAt: serverTimestamp(),
+          createdAtLocal: item.createdAtLocal || item.createdAt || null,
+          schemaVersion: 3,
+        }),
+      );
+      return;
+    }
     for (const write of writes) {
+      currentPath = `businesses/${businessId}/${write.entityType}/${write.entityId}`;
       const reference = doc(
         db,
         "businesses",
@@ -905,15 +1084,21 @@ async function commitQueueItem(item) {
         { merge: true },
       );
     }
-    transaction.set(marker, {
-      id: item.operationId,
-      businessId,
-      ownerId: currentUser.uid,
-      status: "processed",
-      eventKind: item.payload.eventKind || "simple",
-      processedAt: serverTimestamp(),
-      createdAtLocal: item.createdAtLocal,
-    });
+    currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
+    transaction.set(
+      marker,
+      sanitizeForFirestore({
+        id: operationId,
+        idempotencyKey: operationId,
+        businessId,
+        ownerId: currentUser.uid,
+        status: "processed",
+        eventKind: item.payload.eventKind || item.subtype || "simple",
+        processedAt: serverTimestamp(),
+        createdAtLocal: item.createdAtLocal || item.createdAt || null,
+        schemaVersion: 3,
+      }),
+    );
   });
 }
 async function processSyncQueue(options = {}) {
@@ -972,6 +1157,24 @@ async function processSyncQueue(options = {}) {
         }
         continue;
       }
+      const preflight = queuePreflight(queued);
+      if (!preflight.ok) {
+        const blocked = readQueue(),
+          blockedIndex = blocked.findIndex(
+            (item) => item.queueId === queued.queueId,
+          );
+        if (blockedIndex >= 0) {
+          blocked[blockedIndex] = {
+            ...blocked[blockedIndex],
+            status: "error",
+            lastAttemptAt: now(),
+            lastErrorCode: preflight.code,
+            lastErrorMessage: preflight.message,
+          };
+          saveQueue(blocked);
+        }
+        continue;
+      }
       if (!canAttempt(queued, force)) continue;
       const live = readQueue(),
         position = live.findIndex((item) => item.queueId === queued.queueId);
@@ -1019,10 +1222,8 @@ async function processSyncQueue(options = {}) {
             status: retryable ? "pending" : "error",
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
-            lastErrorMessage: String(error?.message || friendlyError(error)).slice(
-              0,
-              240,
-            ),
+            lastErrorMessage: String(error?.message || friendlyError(error)).slice(0,800),
+            lastErrorPath: currentPath || null,
           };
           saveQueue(failed);
         }
@@ -1033,7 +1234,6 @@ async function processSyncQueue(options = {}) {
         if (errorCode(error) === "resource-exhausted") cloudPaused = true;
         if (
           [
-            "permission-denied",
             "unauthenticated",
             "resource-exhausted",
             "failed-precondition",
@@ -1048,6 +1248,7 @@ async function processSyncQueue(options = {}) {
       sent,
       pending: counts.total,
       errors: counts.errors,
+      errorBreakdown: queueErrorBreakdown(),
       paused: cloudPaused,
       reason: cloudPaused ? lastErrorCode || "cloud_paused" : "",
       collections: [...changedCollections],
@@ -1578,6 +1779,10 @@ function describeSyncResult(result = {}) {
     errors = Number(result.errors || 0),
     sent = Number(result.sent || 0);
   if (result.complete) return "Todos os dados estão sincronizados.";
+  if (sent && result.errorBreakdown?.permission)
+    return `${sent} operação(ões) sincronizada(s). ${result.errorBreakdown.permission} continuam bloqueadas por permissão.`;
+  if (!sent && result.errorBreakdown?.invalid)
+    return `Não foi possível sincronizar: ${result.errorBreakdown.invalid} operação(ões) ainda contêm dados inválidos.`;
   if (sent && (errors || pending))
     return `${sent} alteração(ões) sincronizada(s). ${errors || pending} ainda precisam de atenção.`;
   if (errors || pending)
@@ -1606,13 +1811,14 @@ async function synchronizeNow() {
   cloudPaused = false;
   await validateUser();
   if (!state.testPassed) await testFirestoreConnection();
-  migrateScopedQueueCompatibility();
+  const migration = migrateScopedQueueCompatibility();
   validateQueueOwnership();
   const push = await processSyncQueue({ force: true });
   if (push.paused && push.reason !== "subscription_read_only") {
-    const counts = queueCounts(),
+      const counts = queueCounts(),
       result = {
         ...push,
+        migration,
         received: 0,
         comparison: null,
         pending: counts.pending,
@@ -1630,6 +1836,7 @@ async function synchronizeNow() {
     time = now(),
     result = {
       ...push,
+      migration,
       received,
       comparison,
       pending: counts.pending,

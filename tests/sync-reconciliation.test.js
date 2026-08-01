@@ -49,3 +49,19 @@ test("snapshot completo torna a nuvem canonica sem apagar pendencias", () => {
   assert.match(sync, /authoritative: !since/);
   assert.match(sync, /authoritative: mode === "all"/);
 });
+
+test("fila legada recebe operationId estável, metadados e preflight", () => {
+  assert.match(sync, /stableLegacyOperationId/);
+  assert.match(sync, /copy\.operationId = stableLegacyOperationId\(copy\)/);
+  assert.match(sync, /copy\.idempotencyKey = copy\.operationId/);
+  assert.match(sync, /clean\.operationId \|\|= copy\.operationId/);
+  assert.match(sync, /queuePreflight/);
+  assert.match(sync, /IDEMPOTENT_EVENT_NAMES/);
+});
+
+test("cloudPayload é sanitizado depois de preencher operationId e idempotência", () => {
+  assert.match(sync, /clean\.operationId \|\|= String\(id\)/);
+  assert.match(sync, /clean\.idempotencyKey \|\|= clean\.operationId/);
+  assert.match(sync, /return sanitizeForFirestore\(\{/);
+  assert.match(sync, /status: "recovered_existing"/);
+});

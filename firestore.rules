@@ -318,16 +318,33 @@ service cloud.firestore {
           && request.resource.data.businessId == resource.data.businessId;
         allow delete: if false;
       }
+      match /processedOperations/{operationId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if belongsToBusiness(businessId)
+          && subscriptionAllowsWrites(businessId)
+          && userProfile().role in ['owner', 'admin', 'manager', 'cashier']
+          && request.resource.data.id == operationId
+          && request.resource.data.idempotencyKey == operationId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.status in ['processed', 'recovered_existing']
+          && request.resource.data.schemaVersion == 3
+          && request.resource.data.keys().hasOnly([
+            'id', 'idempotencyKey', 'businessId', 'ownerId', 'status',
+            'eventKind', 'processedAt', 'createdAtLocal', 'schemaVersion'
+          ]);
+        allow update, delete: if false;
+      }
       match /{collectionName}/{documentId} {
-        allow read: if collectionName != 'productVariants'
+        allow read: if !(collectionName in ['productVariants', 'processedOperations'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if collectionName != 'productVariants'
+        allow create: if !(collectionName in ['productVariants', 'processedOperations'])
           && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
           && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
-        allow update: if collectionName != 'productVariants'
+        allow update: if !(collectionName in ['productVariants', 'processedOperations'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId

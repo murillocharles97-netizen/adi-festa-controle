@@ -23,6 +23,7 @@ test.before(async()=>{
     await setDoc(doc(db,'businesses',businessA,'products','parent-1'),{id:'parent-1',businessId:businessA,nome:'Cone',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessB,'products','parent-2'),{id:'parent-2',businessId:businessB,nome:'Gloss',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessExpired,'clients','existing-client'),{id:'existing-client',businessId:businessExpired,nome:'Cliente existente',active:true});
+    await setDoc(doc(db,'businesses',businessA,'clients','financial-client'),{id:'financial-client',businessId:businessA,ownerId:'owner-a',nome:'Cliente financeiro',saldo:-50,active:true});
   });
 });
 
@@ -156,4 +157,56 @@ test('duas sessoes recebem atualizacoes em tempo real e reconciliam apos retorno
     {products:productsA.size,clients:clientsA.size},
     {products:productsB.size,clients:clientsB.size},
   );
+});
+
+test('messageHistory e marcador idempotente passam juntos para owner da mesma empresa',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),operationId='message-op-1',messageId='message-1',
+    messageRef=doc(db,'businesses',businessA,'messageHistory',messageId),
+    markerRef=doc(db,'businesses',businessA,'processedOperations',operationId);
+  await assertSucceeds(runTransaction(db,async transaction=>{
+    assert.equal((await transaction.get(markerRef)).exists(),false);
+    transaction.set(messageRef,{id:messageId,operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',entityType:'messageHistory',action:'create',clientId:'client-1',type:'charge',source:'individual',finalMessage:'Mensagem sanitizada',status:'opened_whatsapp',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3,version:1});
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'message_opened',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  }));
+  assert.equal((await getDoc(messageRef)).data().operationId,operationId);
+});
+
+test('caixa pode registrar mensagem e marcador restrito na mesma transação',async()=>{
+  const db=env.authenticatedContext('cashier-no-crm').firestore(),operationId='cashier-message-op',messageId='cashier-message',
+    messageRef=doc(db,'businesses',businessA,'messageHistory',messageId),markerRef=doc(db,'businesses',businessA,'processedOperations',operationId);
+  await assertSucceeds(runTransaction(db,async transaction=>{
+    await transaction.get(markerRef);
+    transaction.set(messageRef,{id:messageId,operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'cashier-no-crm',entityType:'messageHistory',action:'create',clientId:'client-1',type:'custom',source:'individual',finalMessage:'Contato',status:'opened_whatsapp',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'cashier-no-crm',status:'processed',eventKind:'message_opened',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  }));
+  assert.equal((await getDoc(messageRef)).data().operationId,operationId);
+});
+
+test('pagamento e ajuste de saldo são idempotentes e não duplicam em retry',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),operationId='payment-op-1',
+    markerRef=doc(db,'businesses',businessA,'processedOperations',operationId),
+    clientRef=doc(db,'businesses',businessA,'clients','financial-client'),
+    paymentRef=doc(db,'businesses',businessA,'payments','payment-1'),
+    adjustmentRef=doc(db,'businesses',businessA,'balanceAdjustments','adjustment-1');
+  const apply=()=>runTransaction(db,async transaction=>{
+    const marker=await transaction.get(markerRef);if(marker.exists())return;
+    const client=await transaction.get(clientRef),next=Number(client.data().saldo)+10;
+    transaction.set(clientRef,{saldo:next,updatedAt:new Date()},{merge:true});
+    transaction.set(paymentRef,{id:'payment-1',operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',entityType:'payments',action:'create',clienteId:'financial-client',valor:10,createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(adjustmentRef,{id:'adjustment-1',operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',entityType:'balanceAdjustments',action:'create',clienteId:'financial-client',saldoAnterior:-50,saldoNovo:next,createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'payment',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  });
+  await assertSucceeds(apply());await assertSucceeds(apply());
+  assert.equal((await getDoc(clientRef)).data().saldo,-40);
+  assert.equal((await getDocs(collection(db,'businesses',businessA,'payments'))).docs.filter(item=>item.id==='payment-1').length,1);
+});
+
+test('Rules negam marcador inválido, outra empresa, businessId ausente e path legado',async()=>{
+  const owner=env.authenticatedContext('owner-a').firestore(),base={id:'blocked-op',idempotencyKey:'blocked-op',businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'payment',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3};
+  const missingIdempotency={...base};delete missingIdempotency.idempotencyKey;
+  await assertFails(setDoc(doc(owner,'businesses',businessA,'processedOperations','blocked-op'),missingIdempotency));
+  await assertFails(setDoc(doc(owner,'businesses',businessB,'processedOperations','blocked-op'),{...base,businessId:businessB}));
+  await assertFails(setDoc(doc(owner,'businesses',businessA,'payments','missing-business'),{id:'missing-business',ownerId:'owner-a',valor:1}));
+  await assertFails(setDoc(doc(owner,'businesses',businessA,'payments','wrong-business'),{id:'wrong-business',businessId:businessB,ownerId:'owner-a',valor:1}));
+  await assertFails(setDoc(doc(owner,'transactions','legacy-op'),{...base}));
 });

@@ -2,12 +2,18 @@ export function sanitizeForFirestore(value,seen=new WeakSet()){
   if(value===undefined||typeof value==='function'||typeof value==='symbol')return undefined;
   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
   if(typeof value==='number')return Number.isFinite(value)?value:0;
-  if(value instanceof Date)return value.toISOString();
+  if(value instanceof Date)return value;
   if(typeof Element!=='undefined'&&value instanceof Element)return undefined;
   if(Array.isArray(value))return value.map(item=>sanitizeForFirestore(item,seen)).filter(item=>item!==undefined);
   if(typeof value==='object'){
     if(seen.has(value))return undefined;
-    if(typeof value.toDate==='function')return value.toDate().toISOString();
+    // Timestamp, GeoPoint, DocumentReference e sentinelas FieldValue precisam
+    // conservar sua identidade para que o SDK do Firestore os serialize.
+    if(
+      (typeof value.toDate==='function'&&typeof value.toMillis==='function')||
+      typeof value._methodName==='string'||
+      (typeof value.isEqual==='function'&&value.constructor?.name!=='Object')
+    )return value;
     const prototype=Object.getPrototypeOf(value);
     if(prototype!==Object.prototype&&prototype!==null)return undefined;
     seen.add(value);
