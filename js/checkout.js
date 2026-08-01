@@ -605,6 +605,7 @@ window.Checkout = (() => {
   function mount() {
     const paint = () => {
       if (Router.atual() !== "vender") return;
+      if (window.DesktopSales?.isDesktop?.()) return;
       finishing = false;
       discountKind = null;
       manual = false;

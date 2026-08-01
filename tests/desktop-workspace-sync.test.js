@@ -12,6 +12,7 @@ test("PDV e Configurações desktop são isolados do mobile e não consultam Fir
     salesCss = read("css/desktop-sales.css"),
     settingsCss = read("css/desktop-settings.css"),
     app = read("js/app.js"),
+    checkout = read("js/checkout.js"),
     index = read("index.html");
 
   assert.match(sales, /matchMedia\("\(min-width:768px\)"\)/);
@@ -29,6 +30,7 @@ test("PDV e Configurações desktop são isolados do mobile e não consultam Fir
   );
   assert.match(app, /DesktopSales\.render/);
   assert.match(app, /DesktopSettings\.render/);
+  assert.match(checkout, /DesktopSales\?\.isDesktop\?\.\(\)/);
   assert.match(index, /desktop-sales\.js/);
   assert.match(index, /desktop-settings\.js/);
 });
@@ -68,7 +70,7 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
   assert.match(index, /build-info\.js\?v=61/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
-  assert.match(worker, /adi-festa-v61-desktop-sync-build/);
+  assert.match(worker, /adi-festa-v62-desktop-checkout-sync/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[Adi Festa\] Build/);
   assert.match(build, /__adiFestaBuildLogged/);
