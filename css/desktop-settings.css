@@ -245,6 +245,26 @@
     width: 16px;
   }
 
+  .desktop-settings-technical {
+    grid-column: 1 / -1;
+  }
+
+  .desktop-technical-details summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: #087d64;
+    font-weight: 800;
+  }
+
+  .desktop-technical-details .firebase-details {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr) minmax(160px, 1.4fr));
+    gap: 8px 14px;
+  }
+
   @media (max-width: 1180px) {
     .desktop-settings-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
