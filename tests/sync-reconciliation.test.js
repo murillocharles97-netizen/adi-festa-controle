@@ -98,6 +98,8 @@ test("venda fiado confirma movimento, saldo e marcador na mesma transação", ()
 test("reconciliação financeira usa cadeia de movimentos e prévia idempotente", () => {
   assert.match(sync, /buildFinancialBalanceAudit/);
   assert.match(sync, /safe_missing_effects/);
+  assert.match(sync, /safe_effect_backfill/);
+  assert.match(sync, /balanceAlreadyApplied/);
   assert.match(sync, /financial-preview-stale/);
   assert.match(sync, /reconcileFinancialBalances/);
   assert.match(sync, /balance_reconciliation/);

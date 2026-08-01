@@ -28,5 +28,5 @@ assert.match(functions,/where\('normalizedPhone','==',phone\)\.limit\(2\)/);
 assert.match(functions,/publicRateLimits/);
 assert.match(rules,/match \/orders\/\{orderId\}[\s\S]*allow create: if false/);
 assert.match(rules,/match \/phoneIndex\/\{phoneHash\}[\s\S]*allow get: if false/);
-assert.match(worker,/adi-festa-v69-authoritative-cloud-merge/);
+assert.match(worker,/adi-festa-v70-financial-effect-backfill/);
 console.log('universal-catalog.test.js: OK');
