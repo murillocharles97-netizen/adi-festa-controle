@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService}
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js';
+import './sync.js?v=61';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000;
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
@@ -177,7 +177,7 @@ async function completeLegacyMigrationManually(){
 }
 
 let badgeSubscription=null;
-function updateCloudBadge(syncState){const badge=document.querySelector('.local-badge');if(!badge)return;const count=Number(syncState.queueTotal||0),map=syncState.status==='error'?['cloud-off','Nuvem','error']:syncState.status==='offline'?['cloud-off','Nuvem','offline']:['testing','waiting','syncing'].includes(syncState.status)?['refresh-cw','Nuvem','syncing']:syncState.testPassed&&syncState.status==='success'?['cloud','Nuvem','success']:['cloud','Nuvem','idle'];const[icon,text,status]=map;badge.dataset.syncStatus=status;badge.setAttribute('role','button');badge.setAttribute('tabindex','0');badge.setAttribute('aria-label',`${text}. ${count} alterações pendentes`);badge.innerHTML=`<i data-lucide="${icon}"></i> ${text}${count?`<b class="cloud-count">${count}</b>`:''}`;window.lucide?.createIcons()}
+function updateCloudBadge(syncState){const badge=document.querySelector('.local-badge');if(!badge)return;const count=Number(syncState.queueTotal||0),ready=syncState.testPassed&&syncState.hydrated&&syncState.listenerConnected&&!count,map=syncState.status==='error'?['cloud-off','Nuvem','error']:syncState.status==='offline'?['cloud-off','Nuvem','offline']:['testing','waiting','syncing'].includes(syncState.status)||!ready?['refresh-cw','Nuvem','syncing']:syncState.status==='success'?['cloud','Nuvem','success']:['cloud','Nuvem','idle'];const[icon,text,status]=map;badge.dataset.syncStatus=status;badge.setAttribute('role','button');badge.setAttribute('tabindex','0');badge.setAttribute('aria-label',`${text}. ${count} alterações pendentes`);badge.innerHTML=`<i data-lucide="${icon}"></i> ${text}${count?`<b class="cloud-count">${count}</b>`:''}`;window.lucide?.createIcons()}
 function showFirstBusinessOnboarding(context){
   if(context.businessId===INTERNAL_BUSINESS_ID)return;
   const key=`adiFesta:${context.businessId}:onboardingSeen`,data=DB.carregar();

@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
-const {doc,getDoc,runTransaction,setDoc}=require('firebase/firestore');
+const {doc,getDoc,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
 
 let env;
 const projectId='adi-festa-variations-test';
@@ -87,4 +87,32 @@ test('assinatura expirada mantém leitura e bloqueia somente novas operações',
   await assertSucceeds(getDoc(doc(db,'businesses',businessExpired,'clients','existing-client')));
   await assertFails(setDoc(doc(db,'businesses',businessExpired,'sales','new-sale'),{id:'new-sale',businessId:businessExpired,clienteId:'existing-client',valorFinal:20,data:new Date()}));
   await assertSucceeds(setDoc(doc(db,'businesses',businessExpired,'settings','operation'),{id:'operation',businessId:businessExpired,ownerId:'owner-expired',operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:true}));
+});
+
+test('duas sessoes da mesma empresa compartilham produtos, clientes, vendas e pagamentos',async()=>{
+  const sessionA=env.authenticatedContext('owner-a').firestore(),sessionB=env.authenticatedContext('owner-a').firestore(),
+    productRef=doc(sessionA,'businesses',businessA,'products','sync-product'),
+    clientRef=doc(sessionA,'businesses',businessA,'clients','sync-client'),
+    saleRef=doc(sessionA,'businesses',businessA,'sales','sync-sale'),
+    paymentRef=doc(sessionA,'businesses',businessA,'payments','sync-payment'),
+    signalRef=doc(sessionA,'businesses',businessA,'syncMetadata','last-sync');
+
+  await assertSucceeds(setDoc(productRef,{id:'sync-product',businessId:businessA,ownerId:'owner-a',nome:'Produto sincronizado',preco:10,estoqueAtual:4,ativo:true,updatedAt:new Date()}));
+  assert.equal((await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'products','sync-product')))).data().nome,'Produto sincronizado');
+  await assertSucceeds(updateDoc(doc(sessionB,'businesses',businessA,'products','sync-product'),{preco:12,estoqueAtual:3,updatedAt:new Date()}));
+  assert.equal((await assertSucceeds(getDoc(productRef))).data().preco,12);
+
+  await assertSucceeds(setDoc(clientRef,{id:'sync-client',businessId:businessA,ownerId:'owner-a',nome:'Cliente sincronizado',saldo:-20,ativo:true,updatedAt:new Date()}));
+  await assertSucceeds(updateDoc(doc(sessionB,'businesses',businessA,'clients','sync-client'),{saldo:-15,updatedAt:new Date()}));
+  assert.equal((await assertSucceeds(getDoc(clientRef))).data().saldo,-15);
+
+  await assertSucceeds(setDoc(saleRef,{id:'sync-sale',businessId:businessA,ownerId:'owner-a',clienteId:'sync-client',valorFinal:12,status:'fiado',data:new Date(),updatedAt:new Date()}));
+  assert.equal((await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'sales','sync-sale')))).data().valorFinal,12);
+  await assertSucceeds(setDoc(paymentRef,{id:'sync-payment',businessId:businessA,ownerId:'owner-a',clienteId:'sync-client',valor:5,data:new Date(),updatedAt:new Date()}));
+  assert.equal((await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'payments','sync-payment')))).data().valor,5);
+
+  await assertSucceeds(setDoc(signalRef,{id:'last-sync',businessId:businessA,ownerId:'owner-a',sourceSessionId:'session-a',changedCollections:['products','clients','sales','payments'],collectionVersions:{products:'r1',clients:'r1',sales:'r1',payments:'r1'},revision:'r1',updatedAt:new Date()}));
+  const signal=(await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'syncMetadata','last-sync')))).data();
+  assert.deepEqual(signal.changedCollections,['products','clients','sales','payments']);
+  assert.equal(signal.collectionVersions.clients,'r1');
 });

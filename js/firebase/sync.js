@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js";
+import { createFirestoreRepository } from "./firestore-repository.js?v=61";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -70,7 +70,8 @@ let currentUser = null,
   cloudPaused = false,
   readOnlyMode = false,
   signalPullTimer = null,
-  signalCollections = new Set();
+  signalCollections = new Set(),
+  signalVersions = new Map();
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -89,6 +90,8 @@ const state = {
   sent: 0,
   received: 0,
   comparison: null,
+  hydrated: false,
+  listenerConnected: false,
 };
 
 const now = () => new Date().toISOString();
@@ -124,6 +127,17 @@ const namespace = () =>
 const queueKey = () => `adiFesta:${namespace()}:syncQueue`;
 const pullStateKey = () => `adiFesta:${namespace()}:incrementalPull`;
 const lastSyncKey = () => `adiFesta:${namespace()}:lastSync`;
+const signalVersionKey = () => `adiFesta:${namespace()}:syncSignalVersions`;
+const readSignalVersions = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(signalVersionKey()) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+const saveSignalVersions = (versions) =>
+  localStorage.setItem(signalVersionKey(), JSON.stringify(versions || {}));
 const readQueue = () => {
   try {
     const parsed = JSON.parse(localStorage.getItem(queueKey()));
@@ -234,6 +248,9 @@ const diagnostic = () => {
     lastSyncAt: state.lastSync,
     lastSync: state.lastSync || "nunca",
     currentPath: currentPath || `businesses/${profile.businessId || "—"}`,
+    hydrated: state.hydrated,
+    listenerConnected: state.listenerConnected,
+    schemaVersion: 3,
     lastErrorCode,
     lastErrorMessage: lastError,
     localClients: local.clientes,
@@ -996,37 +1013,63 @@ function applyCloudCollection(name, documents) {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
-  let initialSignal = true,
-    lastRevision = "";
   const unsubscribe = syncSignalRepository.subscribeById(
     "last-sync",
     (signal) => {
       const revision = String(
         signal?.revision || signal?.updatedAt || signal?.syncedAt || "",
-      );
-      if (initialSignal) {
-        initialSignal = false;
-        lastRevision = revision;
+      ),
+        storedVersions = readSignalVersions(),
+        remoteVersions =
+          signal?.collectionVersions &&
+          typeof signal.collectionVersions === "object"
+            ? signal.collectionVersions
+            : Object.fromEntries(
+                (signal?.changedCollections || []).map((name) => [
+                  name,
+                  revision,
+                ]),
+              );
+      emit({ listenerConnected: true });
+      if (!signal) return;
+      if (signal.sourceSessionId === syncSessionId) {
+        const ownVersions = Object.fromEntries(
+          (signal.changedCollections || [])
+            .filter((name) => SIGNAL_NAMES.includes(name))
+            .map((name) => [name, remoteVersions[name] || revision]),
+        );
+        saveSignalVersions({ ...storedVersions, ...ownVersions });
         return;
       }
-      if (
-        !signal ||
-        signal.sourceSessionId === syncSessionId ||
-        (revision && revision === lastRevision)
-      )
-        return;
-      lastRevision = revision;
-      const names = Array.isArray(signal.changedCollections)
-        ? signal.changedCollections.filter((name) =>
-            SIGNAL_NAMES.includes(name),
+      const names = Object.entries(remoteVersions)
+          .filter(
+            ([name, version]) =>
+              SIGNAL_NAMES.includes(name) &&
+              String(storedVersions[name] || "") !==
+                String(version || revision),
           )
-        : DEFAULT_PULL_NAMES;
-      names.forEach((name) => signalCollections.add(name));
+          .map(([name]) => name),
+        pendingNames = names.length
+          ? names
+          : !Object.keys(remoteVersions).length && revision
+            ? (signal.changedCollections || DEFAULT_PULL_NAMES).filter((name) =>
+                SIGNAL_NAMES.includes(name),
+              )
+            : [];
+      pendingNames.forEach((name) => {
+        signalCollections.add(name);
+        signalVersions.set(name, remoteVersions[name] || revision);
+      });
+      if (!pendingNames.length) return;
       clearTimeout(signalPullTimer);
       signalPullTimer = setTimeout(async () => {
         const changed = [...signalCollections],
-          cloudNames = changed.filter((name) => CLOUD_NAMES.includes(name));
+          cloudNames = changed.filter((name) => CLOUD_NAMES.includes(name)),
+          versions = Object.fromEntries(
+            changed.map((name) => [name, signalVersions.get(name) || revision]),
+          );
         signalCollections.clear();
+        changed.forEach((name) => signalVersions.delete(name));
         if (!changed.length || !currentUser || !navigator.onLine) return;
         try {
           if (cloudNames.length)
@@ -1036,6 +1079,7 @@ function startCloudSubscriptions() {
           if (changed.includes("userProfile")) await refreshUserContext();
           const time = now();
           localStorage.setItem(lastSyncKey(), time);
+          saveSignalVersions({ ...readSignalVersions(), ...versions });
           emit({
             status: "success",
             message: "Alterações recebidas de outro dispositivo.",
@@ -1054,18 +1098,22 @@ function startCloudSubscriptions() {
       }),
   );
   unsubscribers.push(unsubscribe);
-  emit({ activeListeners: usageSnapshot().activeListeners });
+  emit({
+    activeListeners: usageSnapshot().activeListeners,
+    listenerConnected: false,
+  });
 }
 function stopCloudSubscriptions() {
   clearTimeout(signalPullTimer);
   signalPullTimer = null;
   signalCollections.clear();
+  signalVersions.clear();
   for (const unsubscribe of unsubscribers)
     try {
       unsubscribe();
     } catch {}
   unsubscribers = [];
-  emit({ activeListeners: 0 });
+  emit({ activeListeners: 0, listenerConnected: false });
 }
 
 async function publishSyncSignal(collections, status = "ok") {
@@ -1075,7 +1123,11 @@ async function publishSyncSignal(collections, status = "ok") {
     ),
   ];
   if (!changedCollections.length && status === "ok") return false;
-  const businessId = activeBusinessId();
+  const businessId = activeBusinessId(),
+    revision = crypto.randomUUID(),
+    collectionVersions = Object.fromEntries(
+      changedCollections.map((name) => [name, revision]),
+    );
   await setDoc(
     doc(db, "businesses", businessId, "syncMetadata", "last-sync"),
     {
@@ -1085,13 +1137,15 @@ async function publishSyncSignal(collections, status = "ok") {
       status,
       changedCollections,
       sourceSessionId: syncSessionId,
-      revision: crypto.randomUUID(),
+      revision,
+      collectionVersions,
       pendingOperations: queueCounts().total,
       syncedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
     { merge: true },
   );
+  saveSignalVersions({ ...readSignalVersions(), ...collectionVersions });
   return true;
 }
 
@@ -1184,7 +1238,7 @@ async function pullCloudCollections(options = {}) {
   }
   writePullState(pullState);
   lastPullAt = Date.now();
-  emit({ cloudCounts: { ...state.cloudCounts }, received });
+  emit({ cloudCounts: { ...state.cloudCounts }, received, hydrated: true });
   return received;
 }
 async function loadProductVariants(parentProductId, options = {}) {
@@ -1535,12 +1589,15 @@ function setUser(user, profile = null, business = null) {
       status: "idle",
       message: "Sessão encerrada",
       cloudCounts: {},
+      hydrated: false,
+      listenerConnected: false,
     });
     return;
   }
   migrateLegacyQueue();
   validateQueueOwnership();
   installOfflineFirstStorage();
+  emit({ hydrated: false, listenerConnected: false });
   startCloudSubscriptions();
   startAutoSync();
   updateQueueState();

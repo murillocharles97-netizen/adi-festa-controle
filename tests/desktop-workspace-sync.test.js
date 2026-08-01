@@ -41,6 +41,9 @@ test("sincronização usa um único sinal por empresa e puxa só coleções alte
   assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\)/);
   assert.match(sync, /syncSignalRepository\.subscribeById\(\s*"last-sync"/);
   assert.match(sync, /changedCollections/);
+  assert.match(sync, /collectionVersions/);
+  assert.match(sync, /readSignalVersions/);
+  assert.doesNotMatch(sync, /initialSignal/);
   assert.match(
     sync,
     /pullCloudCollections\(\{ force: true, names: cloudNames \}\)/,
@@ -52,4 +55,19 @@ test("sincronização usa um único sinal por empresa e puxa só coleções alte
   assert.doesNotMatch(sync, /setInterval\(/);
   assert.match(app, /DesktopSales\?\.refreshProducts/);
   assert.match(app, /DesktopSales\?\.refreshClients/);
+});
+
+test("publica os arquivos desktop e o identificador do build em cache novo", () => {
+  const index = read("index.html"),
+    worker = read("service-worker.js"),
+    build = read("js/build-info.js");
+
+  assert.match(index, /desktop-sales\.js\?v=61/);
+  assert.match(index, /desktop-settings\.js\?v=61/);
+  assert.match(index, /app\.js\?v=61/);
+  assert.match(index, /build-info\.js\?v=61/);
+  assert.match(worker, /adi-festa-v61-desktop-sync-build/);
+  assert.match(worker, /build-info\.js/);
+  assert.match(build, /\[Adi Festa\] Build/);
+  assert.match(build, /__adiFestaBuildLogged/);
 });
