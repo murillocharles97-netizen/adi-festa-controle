@@ -94,6 +94,7 @@ const AUDIT_NAMES = [
 const repositories = Object.fromEntries(
     CLOUD_NAMES.map((name) => [name, createFirestoreRepository(name)]),
   ),
+  financialEffectsRepository = createFirestoreRepository("balanceEvents"),
   syncSignalRepository = createFirestoreRepository("syncMetadata"),
   syncSessionId = crypto.randomUUID();
 let currentUser = null,
@@ -170,6 +171,10 @@ const friendlyError = (error) =>
     "failed-precondition":
       "A sincronização ainda não está pronta neste aparelho.",
     "invalid-argument": "Uma alteração contém dados inválidos.",
+    "financial-composite-incomplete":
+      "Venda sincronizada, mas o saldo do cliente precisa de correção.",
+    "financial-reconciliation-required":
+      "Venda sincronizada, mas o saldo do cliente precisa de correção.",
   })[errorCode(error)] || "Não foi possível sincronizar agora.";
 const namespace = () =>
   String(state.userProfile?.businessId || "__signed_out__");
@@ -222,6 +227,93 @@ const queueSubtype = (item = {}) => {
   if (names.has("stockMovements")) return "stock_movement";
   return kind || "simple";
 };
+const roundedMoney = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? Number(number.toFixed(2)) : Number.NaN;
+};
+const balanceEffectId = (type, sourceId) =>
+  `${type}:${String(sourceId || "").replaceAll("/", "_")}`;
+function financialEffectFromWrites(
+  writes = [],
+  businessId,
+  operationId,
+  eventKind = "simple",
+) {
+  const sale = writes.find((write) => write.entityType === "sales"),
+    payment = writes.find(
+      (write) =>
+        write.entityType === "payments" && write.operation === "create",
+    ),
+    adjustment = writes.find(
+      (write) =>
+        write.entityType === "balanceAdjustments" &&
+        write.operation === "create",
+    );
+  let source = null,
+    type = "",
+    customerId = "",
+    amount = 0,
+    delta = 0;
+  if (sale) {
+    const original = sale.before || {},
+      current = { ...original, ...(sale.data || {}) },
+      isUndo = Boolean(sale.data?.deletedAt || sale.data?.active === false),
+      isCredit = String(current.status || "") === "fiado";
+    if (isCredit && (sale.operation === "create" || isUndo)) {
+      source = sale;
+      type = isUndo ? "credit_sale_reversal" : "credit_sale";
+      customerId = String(current.clienteId || current.customerId || "");
+      amount = Math.abs(
+        roundedMoney(current.valorFinal ?? current.valorTotal ?? 0),
+      );
+      delta = isUndo ? amount : -amount;
+    }
+  } else if (payment) {
+    source = payment;
+    type = "payment_received";
+    customerId = String(
+      payment.data?.clienteId || payment.data?.customerId || "",
+    );
+    amount = Math.abs(roundedMoney(payment.data?.valor ?? payment.data?.amount));
+    delta = amount;
+  } else if (adjustment) {
+    source = adjustment;
+    type = "balance_adjustment";
+    customerId = String(
+      adjustment.data?.clienteId || adjustment.data?.customerId || "",
+    );
+    delta = roundedMoney(
+      Number(adjustment.data?.saldoNovo || 0) -
+        Number(adjustment.data?.saldoAnterior || 0),
+    );
+    amount = Math.abs(delta);
+  }
+  if (!source || !customerId || !amount || !delta) return null;
+  const sourceId = String(source.entityId || ""),
+    id = balanceEffectId(type, sourceId);
+  return {
+    id,
+    operationId: String(operationId),
+    idempotencyKey: id,
+    businessId,
+    customerId,
+    clientId: customerId,
+    saleId: source.entityType === "sales" ? sourceId : null,
+    sourceCollection: source.entityType,
+    sourceDocumentId: sourceId,
+    type,
+    direction: delta < 0 ? "debit" : "credit",
+    amount,
+    balanceDelta: delta,
+    eventKind,
+    sourceCreatedAt:
+      source.data?.data ||
+      source.data?.createdAt ||
+      source.before?.data ||
+      source.before?.createdAt ||
+      now(),
+  };
+}
 const readSignalVersions = () => {
   try {
     const parsed = JSON.parse(localStorage.getItem(signalVersionKey()) || "{}");
@@ -415,6 +507,11 @@ const stableComparable = (value) => {
       "createdBy",
       "sourceDeviceId",
       "appliedAt",
+      "financialAppliedAt",
+      "financialOperationId",
+      "financialRevision",
+      "financialReconciledAt",
+      "openBalance",
     ]),
     result = {};
   for (const key of Object.keys(value).sort())
@@ -1092,8 +1189,11 @@ function captureChanges(before, after) {
         write.entityType === "stockMovements" && write.operation === "create",
     ),
     operationId = eventWrite?.data?.operationId || crypto.randomUUID(),
-    eventKind = writes.some((write) => write.entityType === "sales")
-      ? "sale"
+    saleWrite = writes.find((write) => write.entityType === "sales"),
+    eventKind = saleWrite
+      ? saleWrite.data?.deletedAt || saleWrite.data?.active === false
+        ? "sale_undo"
+        : "sale"
       : writes.some((write) => write.entityType === "payments")
         ? "payment"
         : writes.some((write) => write.entityType === "clientContacts")
@@ -1222,7 +1322,37 @@ async function commitQueueItem(item) {
       "stock_adjustment",
       "sale_undo",
     ].includes(item.payload.eventKind),
-    deltaEntities = ["clients", "products", "productVariants"];
+    deltaEntities = ["clients", "products", "productVariants"],
+    eventKind = item.payload.eventKind || item.subtype || "simple",
+    financialEffect = financialEffectFromWrites(
+      writes,
+      businessId,
+      operationId,
+      eventKind,
+    ),
+    financialEffectReference = financialEffect
+      ? doc(
+          db,
+          "businesses",
+          businessId,
+          "balanceEvents",
+          financialEffect.id,
+        )
+      : null;
+  if (
+    financialEffect &&
+    !writes.some(
+      (write) =>
+        write.entityType === "clients" &&
+        String(write.entityId) === financialEffect.customerId,
+    )
+  )
+    throw Object.assign(
+      new Error(
+        "A operação financeira não contém a atualização do saldo do cliente.",
+      ),
+      { code: "financial-composite-incomplete" },
+    );
   await runTransaction(db, async (transaction) => {
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
@@ -1245,6 +1375,9 @@ async function commitQueueItem(item) {
             await transaction.get(reference),
           );
       }
+    const financialEffectSnapshot = financialEffectReference
+      ? await transaction.get(financialEffectReference)
+      : null;
     const alreadyApplied = writes.some((write) => {
       if (!IDEMPOTENT_EVENT_NAMES.has(write.entityType)) return false;
       const snapshot = snapshots.get(`${write.entityType}:${write.entityId}`);
@@ -1253,7 +1386,7 @@ async function commitQueueItem(item) {
         String(snapshot.data()?.operationId || "") === operationId
       );
     });
-    if (alreadyApplied) {
+    if (financialEffectSnapshot?.exists() && !alreadyApplied) {
       transaction.set(
         marker,
         sanitizeForFirestore({
@@ -1262,7 +1395,31 @@ async function commitQueueItem(item) {
           businessId,
           ownerId: currentUser.uid,
           status: "recovered_existing",
-          eventKind: item.payload.eventKind || item.subtype || "simple",
+          eventKind,
+          processedAt: serverTimestamp(),
+          createdAtLocal: item.createdAtLocal || item.createdAt || null,
+          schemaVersion: 3,
+        }),
+      );
+      return;
+    }
+    if (alreadyApplied) {
+      if (financialEffect && !financialEffectSnapshot?.exists())
+        throw Object.assign(
+          new Error(
+            "A venda existe na nuvem, mas o movimento financeiro correspondente não foi confirmado.",
+          ),
+          { code: "financial-reconciliation-required" },
+        );
+      transaction.set(
+        marker,
+        sanitizeForFirestore({
+          id: operationId,
+          idempotencyKey: operationId,
+          businessId,
+          ownerId: currentUser.uid,
+          status: "recovered_existing",
+          eventKind,
           processedAt: serverTimestamp(),
           createdAtLocal: item.createdAtLocal || item.createdAt || null,
           schemaVersion: 3,
@@ -1315,6 +1472,37 @@ async function commitQueueItem(item) {
         { merge: true },
       );
     }
+    if (financialEffectReference && !financialEffectSnapshot?.exists()) {
+      currentPath = `businesses/${businessId}/balanceEvents/${financialEffect.id}`;
+      transaction.set(
+        financialEffectReference,
+        sanitizeForFirestore({
+          ...financialEffect,
+          ownerId: currentUser.uid,
+          sourceDeviceId: item.deviceId || deviceId(),
+          status: "applied",
+          appliedAt: serverTimestamp(),
+          createdAt: financialEffect.sourceCreatedAt || serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          schemaVersion: 3,
+        }),
+      );
+      transaction.set(
+        doc(
+          db,
+          "businesses",
+          businessId,
+          financialEffect.sourceCollection,
+          financialEffect.sourceDocumentId,
+        ),
+        {
+          financialAppliedAt: serverTimestamp(),
+          financialOperationId: financialEffect.id,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
     currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
     transaction.set(
       marker,
@@ -1324,7 +1512,7 @@ async function commitQueueItem(item) {
         businessId,
         ownerId: currentUser.uid,
         status: "processed",
-        eventKind: item.payload.eventKind || item.subtype || "simple",
+        eventKind,
         processedAt: serverTimestamp(),
         createdAtLocal: item.createdAtLocal || item.createdAt || null,
         schemaVersion: 3,
@@ -1984,6 +2172,141 @@ async function findProductVariantByBarcode(barcode) {
   applyCloudCollection("productVariants", documents);
   return documents;
 }
+function financialLedgerEntry(name, item = {}) {
+  if (item.deletedAt || item.active === false) return null;
+  const customerId = String(item.clienteId || item.customerId || ""),
+    sourceDocumentId = String(item.id || ""),
+    operationId = financialKey(item) || sourceDocumentId;
+  if (!customerId || !sourceDocumentId || !operationId) return null;
+  let type = "",
+    amount = 0,
+    before = Number.NaN,
+    after = Number.NaN;
+  if (name === "sales" && String(item.status || "") === "fiado") {
+    type = "credit_sale";
+    amount = Math.abs(
+      roundedMoney(item.valorFinal ?? item.valorTotal ?? item.amount),
+    );
+    before = roundedMoney(item.saldoAnterior);
+    after = Number.isFinite(Number(item.saldoAtual))
+      ? roundedMoney(item.saldoAtual)
+      : roundedMoney(before - amount);
+  } else if (name === "payments") {
+    type = "payment_received";
+    amount = Math.abs(roundedMoney(item.valor ?? item.amount));
+    before = roundedMoney(item.saldoAnterior);
+    after = Number.isFinite(Number(item.saldoNovo))
+      ? roundedMoney(item.saldoNovo)
+      : roundedMoney(before + amount);
+  } else if (name === "balanceAdjustments") {
+    type = "balance_adjustment";
+    before = roundedMoney(item.saldoAnterior);
+    after = roundedMoney(item.saldoNovo);
+    amount = Math.abs(roundedMoney(after - before));
+  }
+  if (
+    !type ||
+    !amount ||
+    !Number.isFinite(before) ||
+    !Number.isFinite(after)
+  )
+    return null;
+  return {
+    customerId,
+    sourceCollection: name,
+    sourceDocumentId,
+    operationId,
+    effectId: balanceEffectId(type, sourceDocumentId),
+    type,
+    amount,
+    balanceDelta: roundedMoney(after - before),
+    before,
+    after,
+    date: item.data || item.createdAt || item.criadoEm || "",
+    sourceChecksum: checksumValue(item),
+  };
+}
+const sameMoney = (left, right) =>
+  Math.abs(roundedMoney(left) - roundedMoney(right)) < 0.005;
+function buildFinancialBalanceAudit(raw, effectItems = []) {
+  const clients = new Map(
+      (raw.clients?.remoteItems || []).map((item) => [String(item.id), item]),
+    ),
+    effects = new Set(effectItems.map((item) => String(item.id || ""))),
+    eventsByClient = new Map();
+  for (const name of ["sales", "payments", "balanceAdjustments"])
+    for (const item of raw[name]?.remoteItems || []) {
+      const event = financialLedgerEntry(name, item);
+      if (!event) continue;
+      if (!eventsByClient.has(event.customerId))
+        eventsByClient.set(event.customerId, []);
+      eventsByClient.get(event.customerId).push(event);
+    }
+  const divergent = [],
+    safeRepairs = [],
+    unsafe = [];
+  let actualOpenDebt = 0,
+    expectedOpenDebt = 0,
+    ledgerEvents = 0;
+  for (const [clientId, client] of clients) {
+    const events = (eventsByClient.get(clientId) || []).sort((left, right) =>
+        `${left.date}|${left.sourceDocumentId}`.localeCompare(
+          `${right.date}|${right.sourceDocumentId}`,
+        ),
+      ),
+      actual = roundedMoney(client.saldo || 0),
+      expected = events.length ? events.at(-1).after : actual;
+    ledgerEvents += events.length;
+    actualOpenDebt += Math.abs(Math.min(0, actual));
+    expectedOpenDebt += Math.abs(Math.min(0, expected));
+    if (sameMoney(actual, expected)) continue;
+    let start = -1;
+    for (let index = events.length - 1; index >= 0; index--) {
+      if (!sameMoney(events[index].before, actual)) continue;
+      const chain = events.slice(index),
+        continuous = chain.every(
+          (event, position) =>
+            position === 0 || sameMoney(event.before, chain[position - 1].after),
+        ),
+        effectsMissing = chain.every((event) => !effects.has(event.effectId));
+      if (continuous && effectsMissing) {
+        start = index;
+        break;
+      }
+    }
+    const row = {
+      clientId,
+      actualBalance: actual,
+      expectedBalance: expected,
+      difference: roundedMoney(expected - actual),
+      latestOperationId: events.at(-1)?.operationId || "",
+      latestOperationAt: events.at(-1)?.date || "",
+      clientChecksum: checksumValue(client),
+      status: start >= 0 ? "safe_missing_effects" : "manual_review",
+      missingEffects:
+        start >= 0
+          ? events.slice(start).map((event) => ({ ...event }))
+          : [],
+    };
+    divergent.push(row);
+    (start >= 0 ? safeRepairs : unsafe).push(row);
+  }
+  return {
+    generatedAt: now(),
+    clientsChecked: clients.size,
+    ledgerEvents,
+    effectsConfirmed: effects.size,
+    divergentCount: divergent.length,
+    safeCount: safeRepairs.length,
+    unsafeCount: unsafe.length,
+    actualOpenDebt: roundedMoney(actualOpenDebt),
+    expectedOpenDebt: roundedMoney(expectedOpenDebt),
+    openDebtDifference: roundedMoney(expectedOpenDebt - actualOpenDebt),
+    divergent,
+    safeRepairs,
+    unsafe,
+  };
+}
 async function compareDeviceWithCloud() {
   await validateUser();
   if (!navigator.onLine)
@@ -2006,6 +2329,9 @@ async function compareDeviceWithCloud() {
       queue,
     );
   }
+  const remoteFinancialEffects =
+      await financialEffectsRepository.listAllPaged(200),
+    balanceAudit = buildFinancialBalanceAudit(raw, remoteFinancialEffects);
   const localBalance = (data.clientes || []).reduce(
       (total, client) => total + Number(client.saldo || 0),
       0,
@@ -2060,10 +2386,17 @@ async function compareDeviceWithCloud() {
           ...collections.payments.possibleDuplicates.remote,
           ...collections.balanceAdjustments.possibleDuplicates.remote,
         ],
+        balanceAudit,
       },
       queue: queueCounts(),
     };
-  lastDataAuditRaw = { businessId, generatedAt: report.generatedAt, raw, report };
+  lastDataAuditRaw = {
+    businessId,
+    generatedAt: report.generatedAt,
+    raw,
+    remoteFinancialEffects,
+    report,
+  };
   emit({ dataAudit: report });
   return report;
 }
@@ -2291,6 +2624,227 @@ async function recoverMissingFinancialMovements() {
   if (sync.sent) await safePublishSyncSignal([...names, "clients"], sync.errors ? "error" : "ok");
   const comparison = await compareDeviceWithCloud();
   return { backupCreated: true, queued: queued.length, blocked, sync, comparison };
+}
+async function reconcileFinancialBalances() {
+  await compareDeviceWithCloud();
+  const audit = currentAuditOrThrow(),
+    businessId = activeBusinessId(),
+    balanceAudit = audit.report.financial.balanceAudit,
+    repairs = balanceAudit?.safeRepairs || [],
+    applied = [],
+    blocked = [];
+  if (audit.report.products.onlyLocal || audit.report.clients.onlyLocal)
+    throw Object.assign(
+      new Error(
+        "Confirme primeiro os produtos e clientes ausentes antes de reconciliar saldos.",
+      ),
+      { code: "non-financial-recovery-required" },
+    );
+  if (!repairs.length)
+    return {
+      backupCreated: false,
+      applied,
+      blocked: balanceAudit?.unsafe || [],
+      audit: balanceAudit,
+      estimatedReads: 0,
+    };
+  const backupId = automaticRecoveryBackup();
+  let estimatedReads = 0;
+  for (const repair of repairs) {
+    const reconciliationId = `balance-reconcile:${checksumValue({
+        businessId,
+        clientId: repair.clientId,
+        latestOperationId: repair.latestOperationId,
+        expectedBalance: repair.expectedBalance,
+      }).slice(-8)}`,
+      marker = doc(
+        db,
+        "businesses",
+        businessId,
+        "processedOperations",
+        reconciliationId,
+      ),
+      clientReference = doc(
+        db,
+        "businesses",
+        businessId,
+        "clients",
+        repair.clientId,
+      );
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const markerSnapshot = await transaction.get(marker),
+          clientSnapshot = await transaction.get(clientReference);
+        estimatedReads += 2;
+        if (markerSnapshot.exists()) return { idempotent: true };
+        if (!clientSnapshot.exists())
+          throw Object.assign(new Error("Cliente não encontrado na nuvem."), {
+            code: "financial-client-missing",
+          });
+        const currentClient = normalizeFirestoreData(clientSnapshot.data());
+        if (!sameMoney(currentClient.saldo || 0, repair.actualBalance))
+          throw Object.assign(
+            new Error(
+              "O saldo mudou depois da prévia. Execute uma nova auditoria.",
+            ),
+            { code: "financial-preview-stale" },
+          );
+        const confirmations = [];
+        for (const event of repair.missingEffects) {
+          const effectReference = doc(
+              db,
+              "businesses",
+              businessId,
+              "balanceEvents",
+              event.effectId,
+            ),
+            sourceReference = doc(
+              db,
+              "businesses",
+              businessId,
+              event.sourceCollection,
+              event.sourceDocumentId,
+            ),
+            effectSnapshot = await transaction.get(effectReference),
+            sourceSnapshot = await transaction.get(sourceReference);
+          estimatedReads += 2;
+          if (effectSnapshot.exists())
+            throw Object.assign(
+              new Error(
+                "Um movimento já foi aplicado depois da prévia. Execute novamente.",
+              ),
+              { code: "financial-preview-stale" },
+            );
+          if (
+            !sourceSnapshot.exists() ||
+            checksumValue(normalizeFirestoreData(sourceSnapshot.data())) !==
+              event.sourceChecksum
+          )
+            throw Object.assign(
+              new Error(
+                "A operação de origem mudou depois da prévia. Nenhum saldo foi alterado.",
+              ),
+              { code: "financial-preview-stale" },
+            );
+          confirmations.push({ event, effectReference, sourceReference });
+        }
+        for (const { event, effectReference, sourceReference } of confirmations) {
+          transaction.set(
+            effectReference,
+            sanitizeForFirestore({
+              id: event.effectId,
+              operationId: event.operationId,
+              idempotencyKey: event.effectId,
+              businessId,
+              ownerId: currentUser.uid,
+              customerId: event.customerId,
+              clientId: event.customerId,
+              saleId:
+                event.sourceCollection === "sales"
+                  ? event.sourceDocumentId
+                  : null,
+              sourceCollection: event.sourceCollection,
+              sourceDocumentId: event.sourceDocumentId,
+              type: event.type,
+              direction: event.balanceDelta < 0 ? "debit" : "credit",
+              amount: event.amount,
+              balanceDelta: event.balanceDelta,
+              sourceDeviceId: deviceId(),
+              status: "applied_by_reconciliation",
+              sourceCreatedAt: event.date,
+              appliedAt: serverTimestamp(),
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              schemaVersion: 3,
+            }),
+          );
+          transaction.set(
+            sourceReference,
+            {
+              financialAppliedAt: serverTimestamp(),
+              financialOperationId: event.effectId,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+        const missingSales = repair.missingEffects.filter(
+            (event) => event.type === "credit_sale",
+          ),
+          reversedSales = repair.missingEffects.filter(
+            (event) => event.type === "credit_sale_reversal",
+          ),
+          purchaseValueDelta = roundedMoney(
+            missingSales.reduce((sum, event) => sum + event.amount, 0) -
+              reversedSales.reduce((sum, event) => sum + event.amount, 0),
+          ),
+          purchaseCountDelta = missingSales.length - reversedSales.length,
+          latestPurchaseAt = missingSales
+            .map((event) => event.date)
+            .filter(Boolean)
+            .sort()
+            .at(-1),
+          clientPatch = {
+            saldo: roundedMoney(repair.expectedBalance),
+            openBalance: Math.abs(
+              Math.min(0, roundedMoney(repair.expectedBalance)),
+            ),
+            financialRevision: repair.latestOperationId,
+            financialReconciledAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            revision: increment(1),
+          };
+        if (purchaseValueDelta)
+          clientPatch.totalComprado = increment(purchaseValueDelta);
+        if (purchaseCountDelta)
+          clientPatch.quantidadeVendas = increment(purchaseCountDelta);
+        if (latestPurchaseAt) clientPatch.ultimaCompra = latestPurchaseAt;
+        transaction.set(clientReference, clientPatch, { merge: true });
+        transaction.set(
+          marker,
+          sanitizeForFirestore({
+            id: reconciliationId,
+            idempotencyKey: reconciliationId,
+            businessId,
+            ownerId: currentUser.uid,
+            status: "processed",
+            eventKind: "balance_reconciliation",
+            processedAt: serverTimestamp(),
+            createdAtLocal: now(),
+            schemaVersion: 3,
+          }),
+        );
+        return { idempotent: false };
+      });
+      applied.push({
+        clientId: repair.clientId,
+        reconciliationId,
+        expectedBalance: repair.expectedBalance,
+        effects: repair.missingEffects.length,
+        idempotent: Boolean(result?.idempotent),
+      });
+    } catch (error) {
+      blocked.push({
+        clientId: repair.clientId,
+        code: errorCode(error) || error.code || "unknown",
+        message: String(error.message || "Falha na reconciliação.").slice(0, 240),
+      });
+    }
+  }
+  if (applied.length)
+    await safePublishSyncSignal(
+      ["clients", "sales", "payments", "balanceAdjustments"],
+      blocked.length ? "error" : "ok",
+    );
+  const comparison = await compareDeviceWithCloud();
+  return {
+    backupCreated: true,
+    backupId,
+    applied,
+    blocked,
+    estimatedReads,
+    comparison,
+  };
 }
 async function refreshSafelyFromServer() {
   const audit = currentAuditOrThrow(),
@@ -2783,6 +3337,7 @@ window.SyncFirebase = {
   downloadJsonFile,
   recoverMissingNonFinancial,
   recoverMissingFinancialMovements,
+  reconcileFinancialBalances,
   refreshSafelyFromServer,
   checksumValue,
   reconcileLocalAndCloud,

@@ -196,6 +196,45 @@ test('caixa pode registrar mensagem e marcador restrito na mesma transação',as
   assert.equal((await getDoc(messageRef)).data().operationId,operationId);
 });
 
+test('venda fiado aplica saldo e movimento uma única vez em retries',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),clientId='credit-client',saleId='credit-sale-1',operationId='credit-operation-1',effectId=`credit_sale:${saleId}`,
+    clientRef=doc(db,'businesses',businessA,'clients',clientId),saleRef=doc(db,'businesses',businessA,'sales',saleId),
+    effectRef=doc(db,'businesses',businessA,'balanceEvents',effectId),markerRef=doc(db,'businesses',businessA,'processedOperations',operationId);
+  await setDoc(clientRef,{id:clientId,businessId:businessA,ownerId:'owner-a',nome:'Cliente fiado',saldo:0,active:true,updatedAt:new Date()});
+  const apply=()=>runTransaction(db,async transaction=>{
+    const marker=await transaction.get(markerRef);if(marker.exists())return;
+    const client=await transaction.get(clientRef),effect=await transaction.get(effectRef);if(effect.exists())return;
+    transaction.set(saleRef,{id:saleId,operationId,businessId:businessA,ownerId:'owner-a',clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),financialAppliedAt:new Date(),financialOperationId:effectId,updatedAt:new Date(),schemaVersion:3},{merge:true});
+    transaction.set(effectRef,{id:effectId,operationId,idempotencyKey:effectId,businessId:businessA,ownerId:'owner-a',customerId:clientId,clientId,type:'credit_sale',direction:'debit',amount:25,balanceDelta:-25,status:'applied',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(clientRef,{saldo:Number(client.data().saldo)-25,openBalance:25,financialRevision:operationId,updatedAt:new Date()},{merge:true});
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'sale',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  });
+  await assertSucceeds(apply());await assertSucceeds(apply());
+  assert.equal((await getDoc(clientRef)).data().saldo,-25);
+  assert.equal((await getDoc(effectRef)).data().amount,25);
+  assert.equal((await getDocs(collection(db,'businesses',businessA,'sales'))).docs.filter(item=>item.id===saleId).length,1);
+});
+
+test('reparação de venda existente cria só o efeito ausente e é idempotente',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),clientId='repaired-client',saleId='orphan-credit-sale',effectId=`credit_sale:${saleId}`,reconciliationId='balance-reconcile:test',
+    clientRef=doc(db,'businesses',businessA,'clients',clientId),saleRef=doc(db,'businesses',businessA,'sales',saleId),
+    effectRef=doc(db,'businesses',businessA,'balanceEvents',effectId),markerRef=doc(db,'businesses',businessA,'processedOperations',reconciliationId);
+  await setDoc(clientRef,{id:clientId,businessId:businessA,ownerId:'owner-a',nome:'Cliente reparo',saldo:0,active:true,updatedAt:new Date()});
+  await setDoc(saleRef,{id:saleId,operationId:'orphan-operation',businessId:businessA,ownerId:'owner-a',clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),updatedAt:new Date()});
+  const repair=()=>runTransaction(db,async transaction=>{
+    const marker=await transaction.get(markerRef);if(marker.exists())return;
+    const client=await transaction.get(clientRef),effect=await transaction.get(effectRef),sale=await transaction.get(saleRef);assert.equal(sale.exists(),true);
+    if(effect.exists())return;
+    transaction.set(effectRef,{id:effectId,operationId:'orphan-operation',idempotencyKey:effectId,businessId:businessA,ownerId:'owner-a',customerId:clientId,clientId,type:'credit_sale',direction:'debit',amount:25,balanceDelta:-25,status:'applied_by_reconciliation',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(saleRef,{financialAppliedAt:new Date(),financialOperationId:effectId,updatedAt:new Date()},{merge:true});
+    transaction.set(clientRef,{saldo:-25,openBalance:25,financialRevision:'orphan-operation',updatedAt:new Date()},{merge:true});
+    transaction.set(markerRef,{id:reconciliationId,idempotencyKey:reconciliationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'balance_reconciliation',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  });
+  await assertSucceeds(repair());await assertSucceeds(repair());
+  assert.equal((await getDoc(clientRef)).data().saldo,-25);
+  assert.equal((await getDocs(collection(db,'businesses',businessA,'balanceEvents'))).docs.filter(item=>item.id===effectId).length,1);
+});
+
 test('pagamento e ajuste de saldo são idempotentes e não duplicam em retry',async()=>{
   const db=env.authenticatedContext('owner-a').firestore(),operationId='payment-op-1',
     markerRef=doc(db,'businesses',businessA,'processedOperations',operationId),
@@ -222,5 +261,6 @@ test('Rules negam marcador inválido, outra empresa, businessId ausente e path l
   await assertFails(setDoc(doc(owner,'businesses',businessB,'processedOperations','blocked-op'),{...base,businessId:businessB}));
   await assertFails(setDoc(doc(owner,'businesses',businessA,'payments','missing-business'),{id:'missing-business',ownerId:'owner-a',valor:1}));
   await assertFails(setDoc(doc(owner,'businesses',businessA,'payments','wrong-business'),{id:'wrong-business',businessId:businessB,ownerId:'owner-a',valor:1}));
+  await assertFails(setDoc(doc(owner,'businesses',businessB,'balanceEvents','foreign-effect'),{id:'foreign-effect',operationId:'foreign-operation',businessId:businessB,ownerId:'owner-a',customerId:'foreign-client',type:'credit_sale',amount:25,balanceDelta:-25}));
   await assertFails(setDoc(doc(owner,'transactions','legacy-op'),{...base}));
 });
