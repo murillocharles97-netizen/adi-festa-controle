@@ -85,7 +85,7 @@
     $('#settings-profile-form',root).onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;button.textContent='Salvando…';try{await window.FirebaseAuthActions.updateProfile(Object.fromEntries(new FormData(event.currentTarget)));close();Utils.toast('Seus dados foram atualizados.');dispatchEvent(new Event('hashchange'))}catch(error){button.disabled=false;button.textContent='Salvar alterações';Utils.toast(error.message||'Não foi possível atualizar seus dados.',true)}};
   }
   async function syncNow(button){
-    const original=button.innerHTML;button.disabled=true;button.innerHTML=`${icon('loader-circle')} Sincronizando…`;try{const result=await SyncFirebase.synchronizeNow();Utils.toast(result.offline?'Sem conexão. Seus dados continuam salvos neste aparelho.':'Sincronização concluída.',Boolean(result.errors))}catch(error){Utils.toast('Não foi possível sincronizar agora.',true)}finally{button.disabled=false;button.innerHTML=original;window.lucide?.createIcons()}
+    const original=button.innerHTML;button.disabled=true;button.innerHTML=`${icon('loader-circle')} Sincronizando…`;try{const result=await SyncFirebase.synchronizeNow();Utils.toast(SyncFirebase.describeResult?.(result)||'Não foi possível confirmar a sincronização.',!result.complete)}catch(error){Utils.toast('Não foi possível sincronizar agora.',true)}finally{button.disabled=false;button.innerHTML=original;window.lucide?.createIcons()}
   }
   function bind(){
     if(!mq.matches)return;

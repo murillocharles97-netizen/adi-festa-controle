@@ -19,7 +19,9 @@ import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 const LEGACY_QUEUE_KEY = "adiFestaFirestoreQueue_v1",
   PULL_TTL_MS = 300000,
   PROFILE_TTL_MS = 300000,
-  MAX_WRITES = 350;
+  MAX_WRITES = 350,
+  PAYLOAD_VERSION = 4,
+  DEVICE_ID_KEY = "adiFestaDeviceId";
 const SOURCES = {
   clients: { key: "clientes" },
   products: { key: "produtos" },
@@ -43,7 +45,24 @@ const SOURCES = {
   visits: { key: "visitas" },
   catalogOrders: { key: "catalogOrders" },
 };
-const REALTIME_NAMES = new Set();
+const QUEUE_ENTITY_ALIASES = {
+  clientes: "clients",
+  produtos: "products",
+  variacoesProdutos: "productVariants",
+  vendas: "sales",
+  pagamentos: "payments",
+  ajustesSaldo: "balanceAdjustments",
+  movimentacoesEstoque: "stockMovements",
+  campanhas: "campaigns",
+  cobrancas: "charges",
+  contatosCliente: "clientContacts",
+  pedidos: "catalogOrders",
+  configuracoes: "settings",
+};
+// Clientes e produtos são as duas coleções canônicas que precisam refletir
+// imediatamente em todos os caixas. As demais coleções usam o sinal central e
+// são reconciliadas no pull, evitando um listener por tela ou por card.
+const REALTIME_NAMES = new Set(["clients", "products", "settings"]);
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
 const DEFAULT_PULL_NAMES = CLOUD_NAMES.filter(
@@ -71,7 +90,8 @@ let currentUser = null,
   readOnlyMode = false,
   signalPullTimer = null,
   signalCollections = new Set(),
-  signalVersions = new Map();
+  signalVersions = new Map(),
+  listenerRegistry = new Map();
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -81,6 +101,8 @@ const state = {
   progress: 0,
   testPassed: false,
   lastSync: "",
+  lastAttempt: "",
+  lastCompleteSync: "",
   cloudCounts: {},
   activeListeners: 0,
   userProfile: null,
@@ -92,6 +114,8 @@ const state = {
   comparison: null,
   hydrated: false,
   listenerConnected: false,
+  cloudNewest: {},
+  cloudFinancial: {},
 };
 
 const now = () => new Date().toISOString();
@@ -127,7 +151,17 @@ const namespace = () =>
 const queueKey = () => `adiFesta:${namespace()}:syncQueue`;
 const pullStateKey = () => `adiFesta:${namespace()}:incrementalPull`;
 const lastSyncKey = () => `adiFesta:${namespace()}:lastSync`;
+const lastAttemptKey = () => `adiFesta:${namespace()}:lastSyncAttempt`;
+const lastCompleteKey = () => `adiFesta:${namespace()}:lastCompleteSync`;
 const signalVersionKey = () => `adiFesta:${namespace()}:syncSignalVersions`;
+const deviceId = () => {
+  let value = localStorage.getItem(DEVICE_ID_KEY);
+  if (!value) {
+    value = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, value);
+  }
+  return value;
+};
 const readSignalVersions = () => {
   try {
     const parsed = JSON.parse(localStorage.getItem(signalVersionKey()) || "{}");
@@ -158,6 +192,26 @@ const queueCounts = () => {
     total: queue.length,
   };
 };
+const queueDiagnostics = () =>
+  readQueue().map((item) => ({
+    operationId: String(item.operationId || item.queueId || ""),
+    entityType: String(item.entityType || "unknown"),
+    action: String(item.action || item.operation || "unknown"),
+    documentId: String(item.entityId || ""),
+    businessId: String(item.businessId || ""),
+    firestorePath: item.businessId && item.entityType && item.entityId
+      ? `businesses/${item.businessId}/${item.entityType}/${item.entityId}`
+      : "indefinido",
+    createdAt: item.createdAtLocal || item.createdAt || "",
+    retryCount: Number(item.retryCount || item.attempts || 0),
+    errorCode: item.lastErrorCode || "",
+    errorMessage: item.lastErrorMessage || "",
+    payloadVersion: Number(item.payloadVersion || 1),
+    schemaVersion: Number(item.schemaVersion || 1),
+    deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
+    origin: item.origin || item.source || "legado",
+    status: item.status || "pending",
+  }));
 const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
@@ -245,6 +299,10 @@ const diagnostic = () => {
     pendingOperations: q.total,
     pending: q.pending,
     syncErrors: q.errors,
+    processingOperations: readQueue().filter((item) => item.status === "syncing")
+      .length,
+    lastAttemptAt: state.lastAttempt,
+    lastCompleteSyncAt: state.lastCompleteSync,
     lastSyncAt: state.lastSync,
     lastSync: state.lastSync || "nunca",
     currentPath: currentPath || `businesses/${profile.businessId || "—"}`,
@@ -256,6 +314,9 @@ const diagnostic = () => {
     localClients: local.clientes,
     cloudClients: state.cloudCounts.clients ?? "—",
     localProducts: local.produtos,
+    cloudFiado: state.cloudFinancial.fiado ?? "—",
+    cloudNewest: state.cloudNewest,
+    queueErrors: queueDiagnostics().filter((item) => item.status === "error"),
     cloudProducts: state.cloudCounts.products ?? "—",
   };
 };
@@ -286,7 +347,7 @@ function updateQueueState() {
     emit({
       status: q.errors ? "error" : "waiting",
       message: q.errors
-        ? `${q.errors} alteração(ões) precisam de nova tentativa`
+        ? `Sincronização incompleta: ${q.errors} alteração(ões) com erro e ${q.pending} pendente(s).`
         : `${q.total} alteração(ões) aguardando sincronização`,
     });
 }
@@ -313,7 +374,7 @@ function enrich(name, item) {
       nomeNormalizado: normalizeText(clean.nome),
       controlaEstoque: !clean.semControleEstoque,
     });
-  if (name === "productVariants")
+  if (name === "productVariants") {
     Object.assign(clean, {
       displayNameNormalized: normalizeText(clean.displayName),
       searchTokens: [
@@ -324,6 +385,26 @@ function enrich(name, item) {
         .map(normalizeText)
         .filter(Boolean),
     });
+    const allowed = new Set([
+      "parentProductId",
+      "attributeValues",
+      "displayName",
+      "displayNameNormalized",
+      "searchTokens",
+      "sku",
+      "barcode",
+      "price",
+      "cost",
+      "stock",
+      "minStock",
+      "active",
+      "catalogVisible",
+      "allowNegativeStock",
+      "imageUrl",
+      "createdAt",
+    ]);
+    for (const key of Object.keys(clean)) if (!allowed.has(key)) delete clean[key];
+  }
   if (
     [
       "sales",
@@ -378,13 +459,22 @@ function archiveQueue(reason) {
   return queue.length;
 }
 function migrateLegacyQueue() {
-  if (activeBusinessId() !== "adi-festa" || localStorage.getItem(queueKey()))
+  const migratedKey = `${queueKey()}:legacyMigrated`;
+  if (
+    activeBusinessId() !== "adi-festa" ||
+    localStorage.getItem(queueKey()) ||
+    localStorage.getItem(migratedKey)
+  )
     return;
   let legacy = [];
   try {
     legacy = JSON.parse(localStorage.getItem(LEGACY_QUEUE_KEY)) || [];
   } catch {}
   if (!legacy.length) return;
+  localStorage.setItem(
+    `${queueKey()}:legacyBackup:${Date.now()}`,
+    JSON.stringify(legacy),
+  );
   const groups = new Map(),
     businessId = activeBusinessId();
   for (const item of legacy) {
@@ -417,8 +507,11 @@ function migrateLegacyQueue() {
         operation: action,
         action,
         payload: { writes, eventKind: "legacy" },
+        payloadVersion: PAYLOAD_VERSION,
         businessId,
         userId: currentUser.uid,
+        deviceId: deviceId(),
+        origin: "legacy",
         schemaVersion: 3,
         source: "legacy_queue",
         createdAt,
@@ -432,19 +525,73 @@ function migrateLegacyQueue() {
       });
     }
   localStorage.setItem(queueKey(), JSON.stringify(migrated));
-  localStorage.removeItem(LEGACY_QUEUE_KEY);
+  localStorage.setItem(migratedKey, now());
 }
 function validateQueueOwnership() {
   const businessId = activeBusinessId(),
-    foreign = readQueue().some(
-      (item) =>
+    queue = readQueue(),
+    next = queue.map((item) => {
+      const mismatch =
         (item.businessId && item.businessId !== businessId) ||
-        (item.userId && item.userId !== currentUser.uid),
+        (item.userId && item.userId !== currentUser.uid);
+      return mismatch
+        ? {
+            ...item,
+            status: "error",
+            lastErrorCode: "queue-owner-mismatch",
+            lastErrorMessage:
+              "Esta alteração pertence a outra empresa ou sessão e foi preservada para revisão.",
+          }
+        : item;
+    });
+  if (JSON.stringify(next) !== JSON.stringify(queue)) saveQueue(next);
+}
+function migrateScopedQueueCompatibility() {
+  const queue = readQueue();
+  if (!queue.length) return { migrated: 0, blocked: 0 };
+  const businessId = activeBusinessId(),
+    backupKey = `${queueKey()}:compatBackup:${Date.now()}`;
+  let migrated = 0,
+    blocked = 0;
+  const next = queue.map((item) => {
+    const copy = structuredClone(item),
+      writes = Array.isArray(copy.payload?.writes) ? copy.payload.writes : [];
+    copy.businessId ||= businessId;
+    copy.userId ||= currentUser.uid;
+    copy.deviceId ||= deviceId();
+    copy.origin ||= copy.source || "legacy";
+    copy.payloadVersion = PAYLOAD_VERSION;
+    copy.schemaVersion = 3;
+    copy.payload ||= { writes: [], eventKind: "legacy" };
+    copy.payload.writes = writes.map((write) => {
+      const entityType = QUEUE_ENTITY_ALIASES[write.entityType] || write.entityType;
+      if (entityType !== write.entityType) migrated++;
+      return {
+        ...write,
+        entityType,
+        entityId: String(write.entityId || write.id || ""),
+        data: sanitizeForFirestore(write.data || {}) || {},
+      };
+    });
+    copy.entityType =
+      QUEUE_ENTITY_ALIASES[copy.entityType] || copy.entityType || "unknown";
+    const invalidWrite = copy.payload.writes.find(
+      (write) =>
+        !CLOUD_NAMES.includes(write.entityType) || !String(write.entityId || ""),
     );
-  if (foreign) {
-    archiveQueue("queue_owner_mismatch");
-    saveQueue([]);
+    if (invalidWrite) {
+      blocked++;
+      copy.status = "error";
+      copy.lastErrorCode = "legacy-payload-unsupported";
+      copy.lastErrorMessage = `Operação legada preservada: coleção ${invalidWrite.entityType || "indefinida"} não reconhecida.`;
+    } else if (copy.status === "syncing") copy.status = "pending";
+    return copy;
+  });
+  if (JSON.stringify(next) !== JSON.stringify(queue)) {
+    localStorage.setItem(backupKey, JSON.stringify(queue));
+    saveQueue(next);
   }
+  return { migrated, blocked };
 }
 function queueWrites(
   writes,
@@ -471,8 +618,11 @@ function queueWrites(
       operation: action,
       action,
       payload: { writes: part, eventKind },
+      payloadVersion: PAYLOAD_VERSION,
       businessId,
       userId: currentUser.uid,
+      deviceId: deviceId(),
+      origin: matchMedia("(max-width:767px)").matches ? "mobile" : "desktop",
       schemaVersion: 3,
       baseBackupId: options.baseBackupId || null,
       source: options.source || "local",
@@ -680,6 +830,7 @@ async function commitQueueItem(item) {
     transactional = [
       "sale",
       "payment",
+      "balance_adjustment",
       "stock_entry",
       "stock_adjustment",
       "sale_undo",
@@ -799,10 +950,20 @@ async function processSyncQueue(options = {}) {
         queued.businessId !== activeBusinessId() ||
         queued.userId !== currentUser.uid
       ) {
-        archiveQueue("queue_owner_mismatch");
-        saveQueue(
-          readQueue().filter((item) => item.queueId !== queued.queueId),
-        );
+        const blocked = readQueue(),
+          blockedIndex = blocked.findIndex(
+            (item) => item.queueId === queued.queueId,
+          );
+        if (blockedIndex >= 0) {
+          blocked[blockedIndex] = {
+            ...blocked[blockedIndex],
+            status: "error",
+            lastErrorCode: "queue-owner-mismatch",
+            lastErrorMessage:
+              "Empresa ou usuário da operação não corresponde à sessão atual.",
+          };
+          saveQueue(blocked);
+        }
         continue;
       }
       if (!canAttempt(queued, force)) continue;
@@ -842,15 +1003,20 @@ async function processSyncQueue(options = {}) {
               "deadline-exceeded",
               "resource-exhausted",
               "network-request-failed",
-            ].includes(errorCode(error));
+              "aborted",
+            ].includes(errorCode(error)),
+            retryable = temporary && attempts < 6;
           failed[failedIndex] = {
             ...failed[failedIndex],
             attempts,
             retryCount: attempts,
-            status: !temporary && attempts >= 3 ? "error" : "pending",
+            status: retryable ? "pending" : "error",
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
-            lastErrorMessage: friendlyError(error),
+            lastErrorMessage: String(error?.message || friendlyError(error)).slice(
+              0,
+              240,
+            ),
           };
           saveQueue(failed);
         }
@@ -877,6 +1043,7 @@ async function processSyncQueue(options = {}) {
       pending: counts.total,
       errors: counts.errors,
       paused: cloudPaused,
+      reason: cloudPaused ? lastErrorCode || "cloud_paused" : "",
       collections: [...changedCollections],
     };
   })();
@@ -1010,9 +1177,48 @@ function applyCloudCollection(name, documents) {
     );
   return changed;
 }
+function registerRealtimeCollection(name, mode = "all") {
+  const key = `${activeBusinessId()}:${name}:${mode}`;
+  if (listenerRegistry.has(key)) return listenerRegistry.get(key);
+  const onDocuments = (documents) => {
+      const list = Array.isArray(documents)
+        ? documents
+        : documents
+          ? [documents]
+          : [];
+      state.cloudCounts[name] = list.filter((item) => !item?.deletedAt).length;
+      state.cloudNewest[name] = newestTimestamp(list);
+      if (name === "clients")
+        state.cloudFinancial.fiado = list.reduce(
+          (total, item) =>
+            total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
+          0,
+        );
+      const received = applyCloudCollection(name, list);
+      emit({
+        cloudCounts: { ...state.cloudCounts },
+        cloudNewest: { ...state.cloudNewest },
+        cloudFinancial: { ...state.cloudFinancial },
+        received,
+        hydrated: true,
+        listenerConnected: true,
+      });
+    },
+    onError = (error) =>
+      reportError(error, "Realtime collection listener", { collection: name });
+  const unsubscribe =
+    mode === "document"
+      ? repositories[name].subscribeById("default", onDocuments, onError)
+      : repositories[name].subscribe(onDocuments, onError);
+  listenerRegistry.set(key, unsubscribe);
+  return unsubscribe;
+}
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
+  registerRealtimeCollection("clients");
+  registerRealtimeCollection("products");
+  registerRealtimeCollection("settings", "document");
   const unsubscribe = syncSignalRepository.subscribeById(
     "last-sync",
     (signal) => {
@@ -1064,7 +1270,9 @@ function startCloudSubscriptions() {
       clearTimeout(signalPullTimer);
       signalPullTimer = setTimeout(async () => {
         const changed = [...signalCollections],
-          cloudNames = changed.filter((name) => CLOUD_NAMES.includes(name)),
+          cloudNames = changed.filter(
+            (name) => CLOUD_NAMES.includes(name) && !REALTIME_NAMES.has(name),
+          ),
           versions = Object.fromEntries(
             changed.map((name) => [name, signalVersions.get(name) || revision]),
           );
@@ -1108,6 +1316,11 @@ function stopCloudSubscriptions() {
   signalPullTimer = null;
   signalCollections.clear();
   signalVersions.clear();
+  for (const unsubscribe of listenerRegistry.values())
+    try {
+      unsubscribe();
+    } catch {}
+  listenerRegistry.clear();
   for (const unsubscribe of unsubscribers)
     try {
       unsubscribe();
@@ -1147,6 +1360,19 @@ async function publishSyncSignal(collections, status = "ok") {
   );
   saveSignalVersions({ ...readSignalVersions(), ...collectionVersions });
   return true;
+}
+async function safePublishSyncSignal(collections, status = "ok") {
+  try {
+    return await publishSyncSignal(collections, status);
+  } catch (error) {
+    lastErrorCode = errorCode(error) || "signal-publish-failed";
+    lastError = friendlyError(error);
+    console.error("[Sync signal publish]", {
+      code: error?.code,
+      message: error?.message,
+    });
+    return false;
+  }
 }
 
 async function refreshBusinessContext() {
@@ -1201,23 +1427,24 @@ async function refreshUserContext() {
 async function pullCloudCollections(options = {}) {
   await validateUser();
   const force = Boolean(options.force),
+    full = Boolean(options.full),
     crmSources = new Set([
       "customerMetrics",
       "customerMonthlyMetrics",
       "customerSegments",
     ]),
-    names = (options.names || DEFAULT_PULL_NAMES).filter(
+    names = (options.names || (full ? CLOUD_NAMES : DEFAULT_PULL_NAMES)).filter(
       (name) =>
         !crmSources.has(name) ||
         window.OperationMode?.can?.("viewCRM") !== false,
     );
-  if (!force && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
+  if (!force && !full && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
   let received = 0;
   const pullState = readPullState(),
     businessId = activeBusinessId();
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
-      since = pullState[markerKey] || "",
+      since = full ? "" : pullState[markerKey] || "",
       documents = since
         ? await repositories[name].listChangedSince(since, 500)
         : await repositories[name].listAllPaged(200);
@@ -1233,12 +1460,27 @@ async function pullCloudCollections(options = {}) {
             (name === "settings" ? 1 : sourceItems(DB.carregar(), name).length),
         ),
       );
+    state.cloudNewest[name] = newestTimestamp(documents);
+    if (name === "clients" && !since)
+      state.cloudFinancial.fiado = documents.reduce(
+        (total, item) =>
+          total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
+        0,
+      );
     received += applyCloudCollection(name, documents);
-    pullState[markerKey] = newestTimestamp(documents) || since || now();
+    // Nunca avance o cursor usando o relógio do aparelho. Um celular com hora
+    // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
+    pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
   writePullState(pullState);
   lastPullAt = Date.now();
-  emit({ cloudCounts: { ...state.cloudCounts }, received, hydrated: true });
+  emit({
+    cloudCounts: { ...state.cloudCounts },
+    cloudNewest: { ...state.cloudNewest },
+    cloudFinancial: { ...state.cloudFinancial },
+    received,
+    hydrated: true,
+  });
   return received;
 }
 async function loadProductVariants(parentProductId, options = {}) {
@@ -1274,46 +1516,109 @@ async function compareLocalAndCloud() {
       products: state.cloudCounts.products ?? 0,
       sales: state.cloudCounts.sales ?? 0,
       payments: state.cloudCounts.payments ?? 0,
+      fiado: Number(state.cloudFinancial.fiado || 0),
     };
-  const comparison = { local, remote, ok: queueCounts().total === 0 };
+  const countsMatch =
+      local.clientes === remote.clients &&
+      local.produtos === remote.products &&
+      local.vendas === remote.sales &&
+      local.pagamentos === remote.payments,
+    balancesMatch = Math.abs(local.fiado - remote.fiado) < 0.01,
+    comparison = {
+      local,
+      remote,
+      countsMatch,
+      balancesMatch,
+      ok: queueCounts().total === 0 && countsMatch && balancesMatch,
+      newestByCollection: { ...state.cloudNewest },
+    };
   emit({ comparison });
   return comparison;
 }
+function describeSyncResult(result = {}) {
+  if (result.offline)
+    return "Sem conexão. As alterações continuam salvas neste aparelho.";
+  const pending = Number(result.pending || 0),
+    errors = Number(result.errors || 0),
+    sent = Number(result.sent || 0);
+  if (result.complete) return "Todos os dados estão sincronizados.";
+  if (sent && (errors || pending))
+    return `${sent} alteração(ões) sincronizada(s). ${errors || pending} ainda precisam de atenção.`;
+  if (errors || pending)
+    return `Sincronização incompleta: ${errors} alteração(ões) com erro e ${pending} pendente(s).`;
+  if (result.comparison && !result.comparison.ok)
+    return "Sincronização incompleta: os dados locais e da nuvem ainda divergem.";
+  return "Sincronização incompleta. Tente novamente ou veja os detalhes.";
+}
 async function synchronizeNow() {
+  const attemptTime = now();
+  localStorage.setItem(lastAttemptKey(), attemptTime);
+  emit({ lastAttempt: attemptTime });
   if (!navigator.onLine) {
     updateQueueState();
+    const counts = queueCounts();
     return {
       offline: true,
       sent: 0,
       received: 0,
-      pending: queueCounts().total,
-      errors: queueCounts().errors,
+      pending: counts.pending,
+      errors: counts.errors,
+      queueTotal: counts.total,
+      complete: false,
     };
   }
   cloudPaused = false;
   await validateUser();
   if (!state.testPassed) await testFirestoreConnection();
+  migrateScopedQueueCompatibility();
+  validateQueueOwnership();
   const push = await processSyncQueue({ force: true });
-  if (push.paused) return { ...push, received: 0, comparison: null };
-  const received = await pullCloudCollections({ force: true }),
+  if (push.paused && push.reason !== "subscription_read_only") {
+    const counts = queueCounts(),
+      result = {
+        ...push,
+        received: 0,
+        comparison: null,
+        pending: counts.pending,
+        errors: counts.errors,
+        queueTotal: counts.total,
+        complete: false,
+      };
+    emit({ status: "error", message: describeSyncResult(result) });
+    return result;
+  }
+  const received = await pullCloudCollections({ force: true, full: true }),
     comparison = await compareLocalAndCloud(),
-    time = now();
-  if (push.sent || push.errors)
-    await publishSyncSignal(push.collections, push.errors ? "error" : "ok");
-  localStorage.setItem(lastSyncKey(), time);
+    counts = queueCounts(),
+    complete = counts.total === 0 && counts.errors === 0 && comparison.ok,
+    time = now(),
+    result = {
+      ...push,
+      received,
+      comparison,
+      pending: counts.pending,
+      errors: counts.errors,
+      queueTotal: counts.total,
+      complete,
+      attemptedAt: attemptTime,
+    };
+  if (push.sent || counts.errors)
+    await safePublishSyncSignal(push.collections, counts.errors ? "error" : "ok");
+  if (complete) {
+    localStorage.setItem(lastSyncKey(), time);
+    localStorage.setItem(lastCompleteKey(), time);
+  }
   emit({
-    status: push.errors ? "error" : "success",
-    message: push.pending
-      ? `${push.pending} alteração(ões) ainda pendente(s)`
-      : push.sent || received
-        ? `Sincronizado às ${new Date(time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
-        : "Tudo já está sincronizado.",
-    lastSync: time,
+    status: complete ? "success" : "error",
+    message: describeSyncResult(result),
+    lastSync: complete ? time : state.lastSync,
+    lastCompleteSync: complete ? time : state.lastCompleteSync,
+    lastAttempt: attemptTime,
     progress: 100,
     sent: push.sent,
     received,
   });
-  return { ...push, received, comparison };
+  return result;
 }
 async function automaticSync() {
   quickTimer = null;
@@ -1327,16 +1632,29 @@ async function automaticSync() {
           ? await pullCloudCollections()
           : 0;
     if (push.sent || push.errors)
-      await publishSyncSignal(push.collections, push.errors ? "error" : "ok");
+      await safePublishSyncSignal(push.collections, push.errors ? "error" : "ok");
     if (push.sent || received) {
-      const time = now();
-      localStorage.setItem(lastSyncKey(), time);
+      const time = now(),
+        counts = queueCounts(),
+        complete = counts.total === 0 && counts.errors === 0;
+      localStorage.setItem(lastAttemptKey(), time);
+      if (complete) {
+        localStorage.setItem(lastSyncKey(), time);
+        localStorage.setItem(lastCompleteKey(), time);
+      }
       emit({
-        status: queueCounts().total ? "waiting" : "success",
-        message: queueCounts().total
-          ? `${queueCounts().total} alteração(ões) aguardando nova tentativa`
-          : "Dados sincronizados.",
-        lastSync: time,
+        status: complete ? "success" : counts.errors ? "error" : "waiting",
+        message: complete
+          ? "Todos os dados estão sincronizados."
+          : describeSyncResult({
+              sent: push.sent,
+              pending: counts.pending,
+              errors: counts.errors,
+              complete: false,
+            }),
+        lastSync: complete ? time : state.lastSync,
+        lastCompleteSync: complete ? time : state.lastCompleteSync,
+        lastAttempt: time,
         sent: push.sent,
         received,
       });
@@ -1578,6 +1896,15 @@ function setUser(user, profile = null, business = null) {
     lastSync: profile?.businessId
       ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) || ""
       : "",
+    lastAttempt: profile?.businessId
+      ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSyncAttempt`) ||
+        ""
+      : "",
+    lastCompleteSync: profile?.businessId
+      ? localStorage.getItem(`adiFesta:${profile.businessId}:lastCompleteSync`) ||
+        localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) ||
+        ""
+      : "",
   });
   if (!user) {
     readOnlyMode = false;
@@ -1595,6 +1922,7 @@ function setUser(user, profile = null, business = null) {
     return;
   }
   migrateLegacyQueue();
+  migrateScopedQueueCompatibility();
   validateQueueOwnership();
   installOfflineFirstStorage();
   emit({ hydrated: false, listenerConnected: false });
@@ -1633,6 +1961,9 @@ window.SyncFirebase = {
   testFirestoreConnection,
   runFirebaseDiagnostic,
   getFirebaseDiagnostic: diagnostic,
+  getQueueDiagnostics: queueDiagnostics,
+  describeResult: describeSyncResult,
+  migrateQueueCompatibility: migrateScopedQueueCompatibility,
   processSyncQueue,
   synchronizeNow,
   syncAll: synchronizeNow,
