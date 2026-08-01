@@ -42,3 +42,10 @@ test("variações removem campos legados e saldo usa operação transacional", (
   assert.match(sync, /"balance_adjustment"/);
   assert.match(sync, /processedOperations/);
 });
+
+test("snapshot completo torna a nuvem canonica sem apagar pendencias", () => {
+  assert.match(sync, /authoritative = false/);
+  assert.match(sync, /pending\.has\(id\) \|\| cloudIds\.has\(id\)/);
+  assert.match(sync, /authoritative: !since/);
+  assert.match(sync, /authoritative: mode === "all"/);
+});

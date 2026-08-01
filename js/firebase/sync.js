@@ -318,6 +318,12 @@ const diagnostic = () => {
     cloudNewest: state.cloudNewest,
     queueErrors: queueDiagnostics().filter((item) => item.status === "error"),
     cloudProducts: state.cloudCounts.products ?? "—",
+    localSales: local.vendas,
+    cloudSales: state.cloudCounts.sales ?? "—",
+    localPayments: local.pagamentos,
+    cloudPayments: state.cloudCounts.payments ?? "—",
+    localFiado: local.fiado,
+    comparison: state.comparison,
   };
 };
 const emit = (patch) => {
@@ -1071,6 +1077,7 @@ function reconcileLocalAndCloud(
   local,
   cloud,
   pending = pendingIds(entityType),
+  authoritative = false,
 ) {
   const byId = new Map(),
     operations = new Map();
@@ -1127,9 +1134,28 @@ function reconcileLocalAndCloud(
     if (!localTime || remoteTime >= localTime)
       byId.set(id, { ...existing, ...item });
   }
+  if (authoritative) {
+    const cloudIds = new Set(
+      (cloud || [])
+        .filter((item) => item?.id && !item.deletedAt)
+        .map((item) => String(item.id)),
+    );
+    for (const [id, item] of [...byId.entries()]) {
+      if (pending.has(id) || cloudIds.has(id)) continue;
+      const operationId = item?.operationId ? String(item.operationId) : "";
+      const representedByCloud = operationId
+        ? (cloud || []).some(
+            (remote) =>
+              !remote?.deletedAt &&
+              String(remote?.operationId || "") === operationId,
+          )
+        : false;
+      if (!representedByCloud) byId.delete(id);
+    }
+  }
   return [...byId.values()];
 }
-function applyCloudCollection(name, documents) {
+function applyCloudCollection(name, documents, options = {}) {
   if (!originalAlter) return 0;
   const pending = pendingIds(name),
     source = SOURCES[name];
@@ -1160,7 +1186,13 @@ function applyCloudCollection(name, documents) {
         return;
       }
       const current = Array.isArray(data[source.key]) ? data[source.key] : [],
-        next = reconcileLocalAndCloud(name, current, documents, pending);
+        next = reconcileLocalAndCloud(
+          name,
+          current,
+          documents,
+          pending,
+          Boolean(options.authoritative),
+        );
       if (JSON.stringify(current) !== JSON.stringify(next)) {
         data[source.key] = next;
         changed = Math.max(1, Math.abs(next.length - current.length));
@@ -1194,7 +1226,9 @@ function registerRealtimeCollection(name, mode = "all") {
             total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
           0,
         );
-      const received = applyCloudCollection(name, list);
+      const received = applyCloudCollection(name, list, {
+        authoritative: mode === "all",
+      });
       emit({
         cloudCounts: { ...state.cloudCounts },
         cloudNewest: { ...state.cloudNewest },
@@ -1467,7 +1501,9 @@ async function pullCloudCollections(options = {}) {
           total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
         0,
       );
-    received += applyCloudCollection(name, documents);
+    received += applyCloudCollection(name, documents, {
+      authoritative: !since,
+    });
     // Nunca avance o cursor usando o relógio do aparelho. Um celular com hora
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
