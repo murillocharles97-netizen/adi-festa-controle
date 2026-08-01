@@ -38,7 +38,7 @@ assert.match(mobile,/SyncFirebase\.synchronizeNow\(\)/);
 assert.match(css,/@media \(max-width:767px\)/);
 assert.match(css,/@media \(min-width:768px\)/);
 assert.match(ui,/if\(document\.querySelector\('\.mobile-settings-page'\)\)/);
-assert.match(worker,/adi-festa-v62-desktop-checkout-sync/);
+assert.match(worker,/adi-festa-v63-desktop-diagnostics-sync/);
 assert.match(worker,/configuracoes-mobile\.js/);
 assert.match(worker,/configuracoes-mobile\.css/);
 assert.match(read('js/checkout.js'),/addEventListener\(\s*["']firebase-session-cleared["']\s*,\s*resetSession\s*\)/);
@@ -46,6 +46,8 @@ assert.match(read('js/checkout-mobile.js'),/addEventListener\('firebase-session-
 assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound==='true'/);
 assert.match(ui,/mobileSettings\.dataset\.firebaseUiBound='true'/);
 assert.match(ui,/if\(element&&element\.textContent!==text\)/);
+assert.match(ui,/settingsPanel\(\);if\(lastState\)renderState\(lastState\)/);
+assert.match(ui,/setHtml\(document\.querySelector\('#firebase-details'\),technicalDetails/);
 const mobilePanel=ui.slice(ui.indexOf('function settingsPanel()'),ui.indexOf('async function manualSync'));
 assert.ok(
   mobilePanel.indexOf("mobileSettings.dataset.firebaseUiBound='true'")<

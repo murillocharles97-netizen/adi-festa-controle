@@ -8,7 +8,7 @@ const checkoutMobile=fs.readFileSync('js/checkout-mobile.js','utf8');
 const clientsMobile=fs.readFileSync('js/clientes-mobile.js','utf8');
 assert.ok(!/getDocs|onSnapshot|firebase-firestore|collection\(/i.test(source),'scanner must not query Firebase or create listeners');
 assert.match(worker,/assets\/zxing-browser\.min\.js/);
-assert.match(worker,/adi-festa-v62-desktop-checkout-sync/);
+assert.match(worker,/adi-festa-v63-desktop-diagnostics-sync/);
 assert.match(source,/mode\s*:\s*["']sale["']/);
 assert.match(source,/mode\s*:\s*["']products["']/);
 assert.match(source,/mode\s*:\s*["']stock["']/);
