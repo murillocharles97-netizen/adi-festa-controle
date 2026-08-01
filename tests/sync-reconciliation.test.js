@@ -51,6 +51,13 @@ test("snapshot completo preserva registros locais ausentes até auditoria", () =
   assert.match(sync, /authoritative: mode === "all"/);
 });
 
+test("snapshot oficial atualiza valores remotos sem apagar campos legados", () => {
+  assert.match(sync, /if \(authoritative\) \{/);
+  assert.match(sync, /byId\.set\(id, \{ \.\.\.existing, \.\.\.item, id \}\)/);
+  assert.match(sync, /if \(authoritative \|\| remoteTime >= localTime\)/);
+  assert.match(sync, /if \(pending\.has\(id\)\) continue/);
+});
+
 test("fila legada recebe operationId estável, metadados e preflight", () => {
   assert.match(sync, /stableLegacyOperationId/);
   assert.match(sync, /copy\.operationId = stableLegacyOperationId\(copy\)/);

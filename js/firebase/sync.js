@@ -1752,9 +1752,9 @@ function reconcileLocalAndCloud(
         localTime = new Date(
           existing?.updatedAt || existing?.atualizadoEm || 0,
         ).getTime();
-      if (remoteTime >= localTime) {
+      if (authoritative || remoteTime >= localTime) {
         byId.delete(operationMatch);
-        byId.set(id, item);
+        byId.set(id, { ...(existing || {}), ...item, id });
         operations.set(operationId, id);
       }
       continue;
@@ -1763,6 +1763,13 @@ function reconcileLocalAndCloud(
     if (!existing) {
       byId.set(id, item);
       if (operationId) operations.set(operationId, id);
+      continue;
+    }
+    // Um snapshot completo e sem pendência local é a fonte oficial. Preserve
+    // campos legados que ainda não existem na nuvem, mas nunca deixe esses
+    // campos impedirem que saldo e demais valores remotos sejam atualizados.
+    if (authoritative) {
+      byId.set(id, { ...existing, ...item, id });
       continue;
     }
     const remoteTime = new Date(
