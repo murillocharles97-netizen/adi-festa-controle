@@ -28,5 +28,5 @@ assert.match(functions,/where\('normalizedPhone','==',phone\)\.limit\(2\)/);
 assert.match(functions,/publicRateLimits/);
 assert.match(rules,/match \/orders\/\{orderId\}[\s\S]*allow create: if false/);
 assert.match(rules,/match \/phoneIndex\/\{phoneHash\}[\s\S]*allow get: if false/);
-assert.match(worker,/adi-festa-v62-desktop-checkout-sync/);
+assert.match(worker,/adi-festa-v63-desktop-diagnostics-sync/);
 console.log('universal-catalog.test.js: OK');
