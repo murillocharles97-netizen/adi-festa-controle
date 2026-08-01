@@ -2251,6 +2251,7 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
     }
   const divergent = [],
     safeRepairs = [],
+    effectBackfills = [],
     unsafe = [];
   let actualOpenDebt = 0,
     expectedOpenDebt = 0,
@@ -2266,7 +2267,23 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
     ledgerEvents += events.length;
     actualOpenDebt += Math.abs(Math.min(0, actual));
     expectedOpenDebt += Math.abs(Math.min(0, expected));
-    if (sameMoney(actual, expected)) continue;
+    if (sameMoney(actual, expected)) {
+      const latest = events.at(-1);
+      if (latest && !effects.has(latest.effectId))
+        effectBackfills.push({
+          clientId,
+          actualBalance: actual,
+          expectedBalance: actual,
+          difference: 0,
+          latestOperationId: latest.operationId,
+          latestOperationAt: latest.date,
+          clientChecksum: checksumValue(client),
+          status: "safe_effect_backfill",
+          balanceAlreadyApplied: true,
+          missingEffects: [{ ...latest }],
+        });
+      continue;
+    }
     let start = -1;
     for (let index = events.length - 1; index >= 0; index--) {
       if (!sameMoney(events[index].before, actual)) continue;
@@ -2304,13 +2321,16 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
     ledgerEvents,
     effectsConfirmed: effects.size,
     divergentCount: divergent.length,
-    safeCount: safeRepairs.length,
+    safeCount: safeRepairs.length + effectBackfills.length,
+    safeBalanceCount: safeRepairs.length,
+    effectBackfillCount: effectBackfills.length,
     unsafeCount: unsafe.length,
     actualOpenDebt: roundedMoney(actualOpenDebt),
     expectedOpenDebt: roundedMoney(expectedOpenDebt),
     openDebtDifference: roundedMoney(expectedOpenDebt - actualOpenDebt),
     divergent,
     safeRepairs,
+    effectBackfills,
     unsafe,
   };
 }
@@ -2637,7 +2657,10 @@ async function reconcileFinancialBalances() {
   const audit = currentAuditOrThrow(),
     businessId = activeBusinessId(),
     balanceAudit = audit.report.financial.balanceAudit,
-    repairs = balanceAudit?.safeRepairs || [],
+    repairs = [
+      ...(balanceAudit?.safeRepairs || []),
+      ...(balanceAudit?.effectBackfills || []),
+    ],
     applied = [],
     blocked = [];
   if (audit.report.products.onlyLocal || audit.report.clients.onlyLocal)
@@ -2801,11 +2824,12 @@ async function reconcileFinancialBalances() {
             updatedAt: serverTimestamp(),
             revision: increment(1),
           };
-        if (purchaseValueDelta)
+        if (purchaseValueDelta && !repair.balanceAlreadyApplied)
           clientPatch.totalComprado = increment(purchaseValueDelta);
-        if (purchaseCountDelta)
+        if (purchaseCountDelta && !repair.balanceAlreadyApplied)
           clientPatch.quantidadeVendas = increment(purchaseCountDelta);
-        if (latestPurchaseAt) clientPatch.ultimaCompra = latestPurchaseAt;
+        if (latestPurchaseAt && !repair.balanceAlreadyApplied)
+          clientPatch.ultimaCompra = latestPurchaseAt;
         transaction.set(clientReference, clientPatch, { merge: true });
         transaction.set(
           marker,
