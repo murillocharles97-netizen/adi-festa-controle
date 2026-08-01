@@ -78,6 +78,26 @@ test("auditoria compara IDs, checksums e movimentos por operationId", () => {
   assert.match(sync, /existingOperationIds\.has\(id\)/);
 });
 
+test("venda fiado confirma movimento, saldo e marcador na mesma transação", () => {
+  assert.match(sync, /financialEffectFromWrites/);
+  assert.match(sync, /"balanceEvents"/);
+  assert.match(sync, /type = "credit_sale"/);
+  assert.match(sync, /financialAppliedAt: serverTimestamp\(\)/);
+  assert.match(sync, /financialOperationId: financialEffect\.id/);
+  assert.match(sync, /financial-composite-incomplete/);
+  assert.match(sync, /financial-reconciliation-required/);
+});
+
+test("reconciliação financeira usa cadeia de movimentos e prévia idempotente", () => {
+  assert.match(sync, /buildFinancialBalanceAudit/);
+  assert.match(sync, /safe_missing_effects/);
+  assert.match(sync, /financial-preview-stale/);
+  assert.match(sync, /reconcileFinancialBalances/);
+  assert.match(sync, /balance_reconciliation/);
+  assert.match(ui, /Reconciliar saldos/);
+  assert.match(ui, /Aplicar somente as correções seguras/);
+});
+
 test("diagnóstico exportável omite payload e dados pessoais integrais", () => {
   assert.match(sync, /exportLocalDiagnostic/);
   assert.match(sync, /indexedDbInventory/);
