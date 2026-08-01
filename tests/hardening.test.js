@@ -15,7 +15,7 @@ const lifecycle = read('js/firebase/session-lifecycle.js');
 const worker = read('service-worker.js');
 const rules = read('firestore.rules');
 
-assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\)/);
+assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["clients", "products", "settings"\]\)/);
 assert.match(sync, /PULL_TTL_MS\s*=\s*300000/);
 assert.match(sync, /listChangedSince\(since,\s*500\)/);
 assert.match(sync, /listAllPaged\(200\)/);
@@ -25,6 +25,14 @@ assert.match(sync, /["']permission-denied["'][\s\S]*["']unauthenticated["'][\s\S
 assert.doesNotMatch(sync, /connection-test/);
 assert.match(sync, /function setUser\(user,\s*profile\s*=\s*null,\s*business\s*=\s*null\)/);
 assert.match(sync, /testPassed\s*:\s*trustedBootstrap/);
+assert.match(sync, /payloadVersion:\s*PAYLOAD_VERSION/);
+assert.match(sync, /legacyBackup/);
+assert.match(sync, /compatBackup/);
+assert.match(sync, /getQueueDiagnostics/);
+assert.match(sync, /describeResult:\s*describeSyncResult/);
+assert.match(sync, /full:\s*true/);
+assert.match(sync, /balance_adjustment/);
+assert.doesNotMatch(sync, /localStorage\.clear\(/);
 
 assert.match(repository, /CACHE_TTL_MS\s*=\s*60000/);
 assert.match(repository, /async listAllPaged\(max\s*=\s*200\)/);
@@ -39,7 +47,7 @@ assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
 assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
-assert.match(worker, /adi-festa-v63-desktop-diagnostics-sync/);
+assert.match(worker, /adi-festa-v64-sync-reconciliation/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
 assert.match(worker, /then\(\(\)=>self\.skipWaiting\(\)\)/);

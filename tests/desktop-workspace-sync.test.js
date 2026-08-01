@@ -35,12 +35,15 @@ test("PDV e Configurações desktop são isolados do mobile e não consultam Fir
   assert.match(index, /desktop-settings\.js/);
 });
 
-test("sincronização usa um único sinal por empresa e puxa só coleções alteradas", () => {
+test("sincronização combina listeners compartilhados e reconciliação canônica", () => {
   const sync = read("js/firebase/sync.js"),
     repository = read("js/firebase/firestore-repository.js"),
     app = read("js/app.js");
 
-  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\)/);
+  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["clients", "products", "settings"\]\)/);
+  assert.match(sync, /listenerRegistry\s*=\s*new Map/);
+  assert.match(sync, /registerRealtimeCollection\("clients"\)/);
+  assert.match(sync, /registerRealtimeCollection\("products"\)/);
   assert.match(sync, /syncSignalRepository\.subscribeById\(\s*"last-sync"/);
   assert.match(sync, /changedCollections/);
   assert.match(sync, /collectionVersions/);
@@ -50,6 +53,11 @@ test("sincronização usa um único sinal por empresa e puxa só coleções alte
     sync,
     /pullCloudCollections\(\{ force: true, names: cloudNames \}\)/,
   );
+  assert.match(sync, /pullCloudCollections\(\{ force: true, full: true \}\)/);
+  assert.match(sync, /lastCompleteSync/);
+  assert.match(sync, /Sincronização incompleta/);
+  assert.match(sync, /queue-owner-mismatch/);
+  assert.doesNotMatch(sync, /archiveQueue\("queue_owner_mismatch"\)/);
   assert.match(sync, /sourceSessionId:\s*syncSessionId/);
   assert.match(sync, /refreshBusinessContext\(\)/);
   assert.match(sync, /refreshUserContext\(\)/);
@@ -70,8 +78,8 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
   assert.match(index, /build-info\.js\?v=61/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
-  assert.match(worker, /adi-festa-v63-desktop-diagnostics-sync/);
-  assert.match(index, /firebase-ui\.js\?v=63/);
+  assert.match(worker, /adi-festa-v64-sync-reconciliation/);
+  assert.match(index, /firebase-ui\.js\?v=64/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[Adi Festa\] Build/);
   assert.match(build, /__adiFestaBuildLogged/);

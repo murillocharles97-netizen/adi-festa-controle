@@ -136,10 +136,9 @@
     try {
       const result = await SyncFirebase.synchronizeNow();
       Utils.toast(
-        result.offline
-          ? "Sem conexão. Os dados continuam salvos neste aparelho."
-          : "Sincronização concluída.",
-        Boolean(result.errors),
+        SyncFirebase.describeResult?.(result) ||
+          "Não foi possível confirmar a sincronização.",
+        !result.complete,
       );
     } catch (error) {
       Utils.toast("Não foi possível sincronizar agora.", true);

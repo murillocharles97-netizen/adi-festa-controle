@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
-const {doc,getDoc,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
+const {collection,doc,getDoc,getDocs,onSnapshot,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
 
 let env;
 const projectId='adi-festa-variations-test';
@@ -115,4 +115,45 @@ test('duas sessoes da mesma empresa compartilham produtos, clientes, vendas e pa
   const signal=(await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'syncMetadata','last-sync')))).data();
   assert.deepEqual(signal.changedCollections,['products','clients','sales','payments']);
   assert.equal(signal.collectionVersions.clients,'r1');
+});
+
+test('duas sessoes recebem atualizacoes em tempo real e reconciliam apos retorno',async()=>{
+  const sessionA=env.authenticatedContext('owner-a').firestore(),sessionB=env.authenticatedContext('owner-a').firestore();
+  const waitForDocument=(db,path,predicate)=>new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>{unsubscribe();reject(new Error(`timeout aguardando ${path.join('/')}`))},4000);
+    const unsubscribe=onSnapshot(doc(db,...path),snapshot=>{
+      if(snapshot.exists()&&predicate(snapshot.data())){clearTimeout(timeout);unsubscribe();resolve(snapshot.data())}
+    },error=>{clearTimeout(timeout);unsubscribe();reject(error)});
+  });
+  const productPath=['businesses',businessA,'products','realtime-product'];
+  const clientPath=['businesses',businessA,'clients','realtime-client'];
+
+  const productOnB=waitForDocument(sessionB,productPath,data=>data.estoqueAtual===5);
+  await assertSucceeds(setDoc(doc(sessionA,...productPath),{id:'realtime-product',businessId:businessA,ownerId:'owner-a',nome:'Produto em tempo real',preco:10,estoqueAtual:5,ativo:true,updatedAt:new Date()}));
+  assert.equal((await productOnB).nome,'Produto em tempo real');
+
+  const productOnA=waitForDocument(sessionA,productPath,data=>data.estoqueAtual===4);
+  await assertSucceeds(updateDoc(doc(sessionB,...productPath),{estoqueAtual:4,updatedAt:new Date()}));
+  assert.equal((await productOnA).estoqueAtual,4);
+
+  const clientOnB=waitForDocument(sessionB,clientPath,data=>data.saldo===-42.5);
+  await assertSucceeds(setDoc(doc(sessionA,...clientPath),{id:'realtime-client',businessId:businessA,ownerId:'owner-a',nome:'Cliente em tempo real',saldo:-42.5,ativo:true,updatedAt:new Date()}));
+  assert.equal((await clientOnB).saldo,-42.5);
+
+  // Simula o aparelho B fora da tela: a alteração acontece sem listener e é
+  // recuperada pela leitura canônica ao retomar.
+  await assertSucceeds(updateDoc(doc(sessionA,...productPath),{preco:13,updatedAt:new Date()}));
+  const resumed=await assertSucceeds(getDoc(doc(sessionB,...productPath)));
+  assert.equal(resumed.data().preco,13);
+
+  const [productsA,productsB,clientsA,clientsB]=await Promise.all([
+    assertSucceeds(getDocs(collection(sessionA,'businesses',businessA,'products'))),
+    assertSucceeds(getDocs(collection(sessionB,'businesses',businessA,'products'))),
+    assertSucceeds(getDocs(collection(sessionA,'businesses',businessA,'clients'))),
+    assertSucceeds(getDocs(collection(sessionB,'businesses',businessA,'clients'))),
+  ]);
+  assert.deepEqual(
+    {products:productsA.size,clients:clientsA.size},
+    {products:productsB.size,clients:clientsB.size},
+  );
 });
