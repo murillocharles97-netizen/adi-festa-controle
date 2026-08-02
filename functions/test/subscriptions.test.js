@@ -47,3 +47,9 @@ test('cliente Mercado Pago envia token somente no backend e chave idempotente',a
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('essential');await service.createSubscription({businessId:'biz_1',userId:'uid_1',email:'owner@example.com',plan,backUrl:'https://app.example',operationId:'op_1'});
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1');const body=JSON.parse(captured.options.body);assert.equal(body.external_reference,'biz_1');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal('notification_url' in body,false);
 });
+
+test('cliente Mercado Pago restaura valor com a moeda exigida pelo provedor',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:200,text:async()=>JSON.stringify({id:'sub_1',status:'authorized'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.updateSubscriptionAmount('sub_1',59.9);
+  assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{auto_recurring:{transaction_amount:59.9,currency_id:'BRL'}});
+});
