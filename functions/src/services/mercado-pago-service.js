@@ -20,7 +20,7 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     },
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'canceled'}})},
-    updateSubscriptionAmount(subscriptionId,amount){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount)}}})},
+    updateSubscriptionAmount(subscriptionId,amount,currency='BRL'){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount),currency_id:String(currency||'BRL')}}})},
     getAuthorizedPayment(paymentId){return request(`/authorized_payments/${encodeURIComponent(paymentId)}`)},
     getPayment(paymentId){return request(`/v1/payments/${encodeURIComponent(paymentId)}`)}
   };
