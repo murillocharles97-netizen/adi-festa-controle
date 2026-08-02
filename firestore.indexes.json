@@ -31,6 +31,14 @@
         { "fieldPath": "month", "order": "ASCENDING" },
         { "fieldPath": "spent", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "couponRedemptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "couponId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -10,10 +10,12 @@ const {defineSecret,defineString}=require('firebase-functions/params');
 const {logger}=require('firebase-functions');
 const {mercadoPagoService}=require('./services/mercado-pago-service');
 const {permissionService}=require('./services/permission-service');
-const {requirePlan,getPlan}=require('./services/plan-service');
+const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
 const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
 const {firestoreSubscriptionService}=require('./services/firestore-subscription-service');
 const {verifyWebhookSignature,eventId,eventData}=require('./services/webhook-service');
+const {CouponError}=require('./services/coupon-service');
+const {couponFirestoreService}=require('./services/coupon-firestore-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -40,6 +42,7 @@ const token=()=>MP_ENV.value()==='test'?MP_TEST_TOKEN.value():MP_TOKEN.value();
 const mp=()=>mercadoPagoService({accessToken:token()});
 const permissions=()=>permissionService(db);
 const providerStore=()=>firestoreSubscriptionService(db);
+const coupons=()=>couponFirestoreService(db);
 const iso=()=>new Date().toISOString();
 const operationId=(raw,businessId,planId,uid)=>{
   const supplied=String(raw||'').trim();
@@ -49,28 +52,43 @@ const operationId=(raw,businessId,planId,uid)=>{
 };
 function callableError(error){
   if(error instanceof HttpsError)return error;
+  if(error instanceof CouponError){const code=error.code==='permission_denied'?'permission-denied':error.code==='duplicate_code'?'already-exists':'failed-precondition';return new HttpsError(code,error.message,{couponCode:error.publicCode})}
   logger.error('[Subscriptions]',{code:error?.code||'unknown',status:error?.status||null,message:String(error?.message||error).slice(0,240)});
   if(error?.code==='invalid-plan')return new HttpsError('invalid-argument','Plano inválido.');
+  if(error?.code==='invalid-billing-cycle')return new HttpsError('invalid-argument','Periodicidade inválida.');
   if(error?.code==='mercado-pago-error')return new HttpsError('unavailable','O Mercado Pago não respondeu como esperado. Tente novamente em instantes.');
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
 function requestedBusinessId(request){return String(request.data?.companyId||request.data?.businessId||'').trim()}
 
+async function internalCouponContext(request){const businessId=requestedBusinessId(request)||'adi-festa',context=await permissions().authenticatedContext(request,businessId);coupons().assertInternal(context);return context}
+
+exports.validateCoupon=onCall(FUNCTION_OPTIONS,async request=>{
+  try{const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId),result=await coupons().validateAndQuote({context,code:request.data?.couponCode,planId:request.data?.planId,billingCycle:String(request.data?.billingCycle||'monthly')});logger.info('[Coupons] quote created',{businessId,planId:result.planId,billingCycle:result.billingCycle});return result}catch(error){throw callableError(error)}
+});
+
+exports.listAdminCoupons=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request);return await coupons().listCoupons({context,limit:request.data?.limit,cursor:request.data?.cursor})}catch(error){throw callableError(error)}});
+exports.getAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request);return await coupons().couponDetails({context,couponId:String(request.data?.couponId||'')})}catch(error){throw callableError(error)}});
+exports.saveAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request),coupon=await coupons().saveCoupon({context,input:request.data?.coupon||{},couponId:String(request.data?.couponId||'')||null});logger.info('[Coupons] saved',{couponId:coupon.id,actorUid:context.uid,version:coupon.version});return{coupon}}catch(error){throw callableError(error)}});
+exports.actionAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request),coupon=await coupons().actionCoupon({context,couponId:String(request.data?.couponId||''),action:String(request.data?.action||'')});logger.info('[Coupons] status changed',{couponId:coupon.id,action:request.data?.action});return{coupon}}catch(error){throw callableError(error)}});
+exports.duplicateAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request),coupon=await coupons().duplicateCoupon({context,couponId:String(request.data?.couponId||''),code:request.data?.code});return{coupon}}catch(error){throw callableError(error)}});
+
 exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
   try{
-    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),context=await permissions().authenticatedContext(request,businessId);
+    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),context=await permissions().authenticatedContext(request,businessId);
     if(request.data?.userId&&request.data.userId!==context.uid)throw new HttpsError('permission-denied','Usuário divergente.');
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
-    const currentId=context.business.subscription?.mercadoPago?.subscriptionId;
-    if(currentId&&context.business.subscription?.pendingPlanId===plan.id){const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${currentId}`).get();const checkoutUrl=intent.data()?.checkoutUrl;if(checkoutUrl)return{checkoutUrl}}
-    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),provider=await mp().createSubscription({businessId,userId:context.uid,email:context.email,plan,backUrl:`${APP_URL.value()}#/planos`,operationId:opId});
+    const quoteId=String(request.data?.quoteId||''),currentId=context.business.subscription?.mercadoPago?.subscriptionId;
+    if(currentId&&context.business.subscription?.pendingPlanId===plan.id){const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${currentId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;if(checkoutUrl)return{checkoutUrl}}
+    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),redemption=quoteId?await coupons().reserveQuote({quoteId,context,planId:plan.id,billingCycle}):null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount};
+    let provider;try{provider=await mp().createSubscription({businessId,userId:context.uid,email:context.email,plan,billing,backUrl:`${APP_URL.value()}#/planos`,operationId:opId,coupon:redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId}:null})}catch(error){if(redemption&&!redemption.idempotent)await coupons().releaseReservation(redemption.id,'provider_checkout_failed');throw error}
     if(!provider?.id||!provider?.init_point)throw new HttpsError('unavailable','O checkout não foi criado pelo Mercado Pago.');
-    const now=iso(),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),indexRef=db.doc(`subscriptionIndex/${provider.id}`);
+    const now=iso(),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),indexRef=db.doc(`subscriptionIndex/${provider.id}`);
     batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
-    batch.set(intentRef,{businessId,requestedBy:context.uid,operationId:opId,planId:plan.id,status:'pending',providerStatus:String(provider.status||'pending'),subscriptionId:String(provider.id),customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point),createdAt:now,updatedAt:now});
-    batch.set(indexRef,{businessId,ownerId:context.uid,planId:plan.id,subscriptionId:String(provider.id),status:'pending',createdAt:now,updatedAt:now});
-    await batch.commit();logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,environment:MP_ENV.value()});
+    batch.set(intentRef,{businessId,requestedBy:context.uid,operationId:opId,planId:plan.id,billingCycle,officialPrice:officialBilling.amount,chargedPrice:billing.amount,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,status:'pending',providerStatus:String(provider.status||'pending'),subscriptionId:String(provider.id),customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point),createdAt:now,updatedAt:now});
+    batch.set(indexRef,{businessId,ownerId:context.uid,planId:plan.id,billingCycle,officialPrice:officialBilling.amount,chargedPrice:billing.amount,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,subscriptionId:String(provider.id),status:'pending',createdAt:now,updatedAt:now});
+    await batch.commit();if(redemption)await coupons().markCheckout({redemptionId:redemption.id,subscriptionId:String(provider.id),internalSubscriptionId:opId});logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,billingCycle,coupon:Boolean(redemption),environment:MP_ENV.value()});
     return{checkoutUrl:String(provider.init_point)};
   }catch(error){throw callableError(error)}
 });
@@ -113,7 +131,7 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
     if(event.type==='subscription_authorized_payment'){const payment=await mp().getAuthorizedPayment(event.dataId);subscriptionId=String(payment.preapproval_id||payment.subscription_id||'')}
     if(event.type==='payment'){const payment=await mp().getPayment(event.dataId);subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'')}
     if(!subscriptionId){await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
-    const provider=await mp().getSubscription(subscriptionId),result=await providerStore().applyProviderSubscription(provider,{source:'webhook',eventId:id});await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription.status,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
+    const provider=await mp().getSubscription(subscriptionId),store=providerStore(),result=await store.applyProviderSubscription(provider,{source:'webhook',eventId:id});if(event.type==='subscription_authorized_payment'||event.type==='payment'){const cycle=await store.recordDiscountPayment(subscriptionId,id);if(cycle.restoreAmount){await mp().updateSubscriptionAmount(subscriptionId,cycle.restoreAmount);await store.completeDiscountRestoration(subscriptionId,id)}}await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription.status,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
     logger.info('[Webhook] processed',{type:event.type,businessId:result.businessId,status:result.subscription.status});res.status(200).send('ok');
   }catch(error){logger.error('[Webhook] failed',{eventId:id,type:event.type,code:error?.code||'unknown',message:String(error?.message||error).slice(0,240)});await eventRef.set({status:'failed',errorCode:error?.code||'unknown',updatedAt:FieldValue.serverTimestamp()},{merge:true});res.status(500).send('retry')}
 });
@@ -121,7 +139,8 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
 exports.expireSubscriptionsDaily=onSchedule({region:REGION,schedule:'15 3 * * *',timeZone:'America/Sao_Paulo',memory:'256MiB',timeoutSeconds:300,maxInstances:1},async()=>{
   const now=Timestamp.now(),queries=[db.collection('businesses').where('subscription.status','==','trial').where('subscription.trialEndsAt','<=',now).limit(450),db.collection('businesses').where('subscription.status','in',['active','grace_period']).where('subscription.expiresAt','<=',now.toDate().toISOString()).limit(450)];
   let changed=0;for(const query of queries){const snapshot=await query.get();if(snapshot.empty)continue;const batch=db.batch();snapshot.docs.forEach(doc=>{batch.update(doc.ref,{'subscription.status':'expired','subscription.expiredAt':now,updatedAt:now});changed++});await batch.commit()}
-  logger.info('[Subscriptions] daily expiration completed',{changed});
+  let discountsRestored=0;const discounts=await db.collection('businesses').where('subscription.discount.restoreDueAt','<=',now.toDate().toISOString()).limit(100).get();for(const business of discounts.docs){const subscription=business.data().subscription||{},subscriptionId=subscription.mercadoPago?.subscriptionId,discount=subscription.discount||{};if(subscription.status!=='active'||discount.durationType!=='until_date'||!subscriptionId)continue;try{await mp().updateSubscriptionAmount(subscriptionId,Number(discount.originalPrice));await providerStore().completeDiscountRestoration(subscriptionId,`coupon-expiry:${business.id}:${discount.endsAt}`);discountsRestored++}catch(error){logger.error('[Subscriptions] coupon restoration failed',{businessId:business.id,code:error?.code||'unknown'})}}
+  logger.info('[Subscriptions] daily expiration completed',{changed,discountsRestored});
 });
 
 exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{businessId}',region:REGION},async event=>{

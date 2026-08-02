@@ -14,11 +14,13 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     return payload;
   }
   return{
-    createSubscription({businessId,userId,email,plan,backUrl,operationId}){
-      return request('/preapproval',{method:'POST',idempotencyKey:operationId,body:{reason:`Adi Festa Controle - ${plan.name}`,external_reference:businessId,payer_email:email,back_url:backUrl,status:'pending',auto_recurring:{frequency:plan.frequency,frequency_type:plan.frequencyType,transaction_amount:plan.amount,currency_id:plan.currency},metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,operation_id:operationId}}});
+    createSubscription({businessId,userId,email,plan,billing,backUrl,operationId,coupon=null}){
+      const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
+      return request('/preapproval',{method:'POST',idempotencyKey:operationId,body:{reason:`Adi Festa Controle - ${plan.name}`,external_reference:businessId,payer_email:email,back_url:backUrl,status:'pending',auto_recurring:{frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency},metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}}});
     },
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'canceled'}})},
+    updateSubscriptionAmount(subscriptionId,amount){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount)}}})},
     getAuthorizedPayment(paymentId){return request(`/authorized_payments/${encodeURIComponent(paymentId)}`)},
     getPayment(paymentId){return request(`/v1/payments/${encodeURIComponent(paymentId)}`)}
   };
