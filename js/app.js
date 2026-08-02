@@ -324,6 +324,9 @@
   function planos() {
     return window.PlansUI.render();
   }
+  function cupons() {
+    return window.CouponsAdmin?.render?.() || vazio("Área administrativa indisponível");
+  }
   const inicioCompleto = () =>
     window.MobileHome?.isMobile()
       ? `${MobileHome.render()}${window.CampanhasUI?.dashboard?.() || ""}`
@@ -343,6 +346,7 @@
       relatorios,
       configuracoes,
       planos,
+      cupons,
     },
     titles = {
       inicio: "Início",
@@ -359,6 +363,7 @@
       relatorios: "Desempenho",
       configuracoes: "Configurações",
       planos: "Planos e assinatura",
+      cupons: "Cupons de desconto",
     };
   function formularioCliente(id) {
     const c = id ? Clientes.obter(id) : {};
@@ -1043,6 +1048,7 @@
     if (route === "pedidos") VisitasUI.bindOrdersPage();
     if (route === "campanhas") CampanhasUI.bind();
     if (route === "planos") window.PlansUI.bind($("#app"));
+    if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
     window.lucide?.createIcons();
   }

@@ -22,6 +22,9 @@
 
   const formatTime = (value) =>
     value ? new Date(value).toLocaleString("pt-BR") : "Ainda não sincronizado";
+  const couponSummary = () => {
+    try { return JSON.parse(localStorage.getItem('adi_coupon_admin_summary') || '{}'); } catch { return {}; }
+  };
 
   function card(iconName, title, subtitle, body, className = "") {
     return `<article class="desktop-settings-card ${className}"><header><span>${icon(iconName)}</span><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div></header>${body}</article>`;
@@ -39,11 +42,13 @@
       mode = window.OperationMode?.MODES?.[operation.operationMode] || {},
       credit = window.OperationMode?.CREDIT_MODES?.[operation.creditMode] || {},
       businessName = business.name || config.nome || "Meu negócio",
-      plan =
-        planNames[subscription.planId] || subscription.planId || "Plano atual";
+      plan = planNames[subscription.planId] || subscription.planId || "Plano atual",
+      internal = business.id === "adi-festa" && subscription.planId === "internal" && ["active", "internal"].includes(subscription.status) && profile.role === "owner",
+      couponStats = couponSummary();
 
     return `<section class="desktop-settings settings" data-desktop-settings>
       <div class="desktop-settings-grid">
+        ${internal ? card("ticket-percent", "Cupons de desconto", "Crie condições especiais para familiares, parceiros e campanhas promocionais.", `<dl><dt>Ativos</dt><dd>${Number(couponStats.active||0)}</dd><dt>Utilizações</dt><dd>${Number(couponStats.redemptions||0)}</dd><dt>Assinaturas com desconto</dt><dd>${Number(couponStats.activeSubscriptions||0)}</dd><dt>Desconto concedido</dt><dd>${Number(couponStats.discountGrantedTotal||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</dd></dl><button class="btn btn-primary" type="button" data-go="cupons">Gerenciar cupons</button>`, "internal-coupon-settings") : ""}
         ${card("building-2", "Empresa", "Informações da sua empresa e dados cadastrais.", `<dl><dt>Nome fantasia</dt><dd>${esc(businessName)}</dd><dt>Documento</dt><dd>${esc(business.document || business.cnpj || config.documento || "Não informado")}</dd><dt>Segmento</dt><dd>${esc(business.businessType || config.segmento || "Não informado")}</dd><dt>Telefone</dt><dd>${esc(business.phone || config.telefone || "Não informado")}</dd></dl><button class="btn btn-light" type="button" data-desktop-edit-business>Editar empresa</button>`)}
         ${card("gem", "Plano e assinatura", "Gerencie seu plano e veja o que está incluso.", `<div class="desktop-settings-highlight"><span>${icon("gem")}</span><div><b>${esc(plan)}</b><small>${subscription.status === "active" ? "Conta ativa" : esc(subscription.status || "Status não informado")}</small></div></div><button class="btn btn-light" type="button" data-go="planos">Ver detalhes do plano</button>`)}
         ${card(mode.icon || "store", "Modelo de operação", "Como sua empresa trabalha no dia a dia.", `<div class="desktop-operation-summary"><small>Modelo atual</small><b>${esc(mode.label || "Não definido")}</b><p>${esc(mode.description || "")}</p>${credit.label ? `<span>${icon("check")} ${esc(credit.label)}</span>` : ""}</div><button class="btn btn-light" type="button" data-edit-operation>Alterar modelo</button>`)}

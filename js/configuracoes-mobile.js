@@ -10,10 +10,11 @@
   const formatTime=value=>value?new Date(value).toLocaleString('pt-BR'):'Ainda não sincronizado';
   const initials=value=>String(value||'Empresa').trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
   const state=()=>window.SyncFirebaseState||window.SyncFirebase?.snapshot?.()||{};
+  const couponSummary=()=>{try{return JSON.parse(localStorage.getItem('adi_coupon_admin_summary')||'{}')}catch{return{}}};
 
   function render(){
     const session=window.FirebaseSession||{},business=session.business||{},profile=session.profile||{},subscription=session.subscription||business.subscription||{},access=session.access||window.BusinessContext?.get?.().access||{},sync=window.SyncFirebaseState||{},data=window.DB?.carregar?.()||{},config=data.config||{},limits=access.limits||business.limits||{};
-    const name=business.name||config.nome||'Meu negócio',phone=business.phone||config.telefone||'Não informado',type=business.businessType||'Não informado',plan=planNames[subscription.planId]||subscription.planId||'Plano atual',accountActive=business.active!==false&&profile.active!==false,internal=subscription.planId==='internal'&&subscription.status==='active';
+    const name=business.name||config.nome||'Meu negócio',phone=business.phone||config.telefone||'Não informado',type=business.businessType||'Não informado',plan=planNames[subscription.planId]||subscription.planId||'Plano atual',accountActive=business.active!==false&&profile.active!==false,internal=business.id==='adi-festa'&&subscription.planId==='internal'&&['active','internal'].includes(subscription.status)&&profile.role==='owner',couponStats=couponSummary();
     return `<div class="mobile-settings-page">
       <section class="mobile-settings-card settings-hero">
         <div class="settings-company-row"><span class="settings-logo">${esc(initials(name))}</span><div><h2>${esc(name)}</h2><p><span class="settings-plan">${esc(plan)}</span><span class="settings-account-dot"></span>${accountActive?'Conta ativa':'Conta inativa'}</p></div></div>
@@ -28,6 +29,8 @@
         <div class="settings-plan-usage"><span><small>Produtos</small><b>${Number(data.produtos?.length||0)} de ${limits.products??'—'}</b><i style="--usage:${Math.min(100,Number(data.produtos?.length||0)/Math.max(1,Number(limits.products||1))*100)}%"></i></span><span><small>Clientes</small><b>${Number(data.clientes?.length||0)} de ${limits.clients??'—'}</b><i style="--usage:${Math.min(100,Number(data.clientes?.length||0)/Math.max(1,Number(limits.clients||1))*100)}%"></i></span></div>
         <button class="settings-mobile-secondary" data-open-plans>${icon('gem')} ${internal?'Plano interno':'Ver planos'}</button>
       </section>
+
+      ${internal?`<section class="mobile-settings-card internal-coupon-settings"><header class="settings-section-head"><span>${icon('ticket-percent')}</span><div><h3>Cupons de desconto</h3><p>Condições especiais para parceiros e campanhas.</p></div><button class="settings-chevron" data-open-coupons aria-label="Gerenciar cupons">${icon('chevron-right')}</button></header><div class="settings-info-grid"><span><b>${Number(couponStats.active||0)}</b><small>Ativos</small></span><span><b>${Number(couponStats.redemptions||0)}</b><small>Usos</small></span><span><b>${Number(couponStats.activeSubscriptions||0)}</b><small>Assinaturas</small></span></div><button class="settings-mobile-secondary" data-open-coupons>${icon('ticket-percent')} Gerenciar cupons</button></section>`:''}
 
       ${window.OperationMode?.renderSettings?.()||''}
 
@@ -95,6 +98,7 @@
     $('[data-reset-password]')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await window.FirebaseAuthActions.sendPasswordReset();Utils.toast('Enviamos as instruções para o seu e-mail.')}catch(error){Utils.toast(error.message||'Não foi possível enviar as instruções.',true)}finally{button.disabled=false}});
     $$('[data-settings-logout]').forEach(button=>button.onclick=()=>window.FirebaseAuthActions?.signOut?.());
     $$('[data-open-plans]').forEach(button=>button.onclick=()=>window.Router?.ir?.('planos'));
+    $$('[data-open-coupons]').forEach(button=>button.onclick=()=>window.Router?.ir?.('cupons'));
     $('#firebase-sync')?.addEventListener('click',event=>syncNow(event.currentTarget));
     $('#firebase-details-toggle')?.addEventListener('click',event=>{const details=$('#firebase-details'),open=details.hidden;details.hidden=!open;event.currentTarget.setAttribute('aria-expanded',String(open));$('em',event.currentTarget).textContent=open?'Expandido':'Recolhido'});
     $('#risk-clear-device')?.addEventListener('click',()=>$('#clear-device')?.click());

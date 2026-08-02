@@ -1,0 +1,43 @@
+'use strict';
+
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const {normalizeCouponCode,deriveCouponStatus,normalizeCouponDefinition,calculateDiscount,privateAuthorized,validateCouponUse,discountSnapshot,CouponError}=require('../src/services/coupon-service');
+
+const now=new Date('2026-08-02T12:00:00.000Z');
+const base=(patch={})=>({id:'coupon_1',name:'Black Friday',code:'BLACK40',category:'promotional',description:'',discountType:'percentage',discountValue:40,durationType:'billing_cycles',billingCycles:3,discountEndsAt:null,allowedPlanIds:['professional','premium'],allowedBillingCycles:['monthly','yearly'],validFrom:'2026-08-01T00:00:00.000Z',validUntil:'2026-08-30T23:59:59.000Z',maxRedemptions:50,maxUsesPerBusiness:1,maxUsesPerUser:null,authorizedEmails:[],authorizedUids:[],authorizedBusinessIds:[],authorizedEmailDomains:[],newSubscribersOnly:false,allowUpgrade:true,allowDowngrade:false,stackable:false,firstPaidSubscriptionOnly:false,businessCreatedAfter:null,status:'active',version:1,redemptionCount:0,reservedCount:0,...patch});
+const use=(coupon=base(),patch={})=>validateCouponUse({coupon,planId:'professional',billingCycle:'monthly',business:{id:'biz_1',createdAt:'2026-07-01',subscription:{}},uid:'u1',email:'owner@example.com',globalCounts:{},businessCounts:{},userCounts:{},now,...patch});
+const code=fn=>{try{fn();return''}catch(error){return error.code}};
+
+test('1 normaliza código',()=>assert.equal(normalizeCouponCode(' familia 40! '),'FAMILIA40'));
+test('2 índice determinístico permite impedir código duplicado',()=>{const {couponCodeKey}=require('../src/services/coupon-service');assert.equal(couponCodeKey('black40'),couponCodeKey('BLACK40'))});
+test('3 percentual válido',()=>assert.equal(calculateDiscount(base(),49.9).discountedPrice,29.94));
+test('4 percentual inválido',()=>assert.throws(()=>normalizeCouponDefinition(base({discountValue:101})),CouponError));
+test('5 valor fixo',()=>assert.equal(calculateDiscount(base({discountType:'fixed_amount',discountValue:20}),49.9).discountedPrice,29.9));
+test('6 preço final',()=>assert.equal(calculateDiscount(base({discountType:'final_price',discountValue:39.9}),49.9).discountedPrice,39.9));
+test('7 preço não negativo',()=>assert.equal(calculateDiscount(base({discountType:'fixed_amount',discountValue:200}),49.9).discountedPrice,0));
+test('8 validade ativa',()=>assert.equal(deriveCouponStatus(base(),now),'active'));
+test('9 cupom agendado',()=>assert.equal(deriveCouponStatus(base({validFrom:'2026-09-01'}),now),'scheduled'));
+test('10 cupom expirado',()=>assert.equal(deriveCouponStatus(base({validUntil:'2026-08-01'}),now),'expired'));
+test('11 cupom pausado',()=>assert.equal(code(()=>use(base({status:'paused'}))),'paused'));
+test('12 plano incompatível',()=>assert.equal(code(()=>use(base(),{planId:'essential'})),'plan_incompatible'));
+test('13 periodicidade incompatível',()=>assert.equal(code(()=>use(base({allowedBillingCycles:['monthly']}),{billingCycle:'yearly'})),'billing_incompatible'));
+test('14 limite total',()=>assert.equal(code(()=>use(base({maxRedemptions:1}),{globalCounts:{confirmed:1,reserved:0}})),'limit_reached'));
+test('15 limite por empresa',()=>assert.equal(code(()=>use(base(),{businessCounts:{confirmed:0,reserved:1}})),'already_used'));
+test('16 e-mail autorizado',()=>assert.equal(privateAuthorized(base({category:'private',authorizedEmails:['owner@example.com']}),{uid:'u1',email:'OWNER@example.com',businessId:'biz_1'}),true));
+test('17 e-mail não autorizado',()=>assert.equal(code(()=>use(base({category:'private',authorizedEmails:['partner@example.com']}))),'private_forbidden'));
+test('18 novo assinante',()=>assert.equal(use(base({newSubscribersOnly:true})).valid,true));
+test('19 assinante existente',()=>assert.equal(code(()=>use(base({newSubscribersOnly:true}),{business:{id:'biz_1',subscription:{lastPaymentDate:'2026-07-01'}}})),'new_subscribers_only'));
+test('20 primeiro pagamento gera um ciclo',()=>assert.equal(discountSnapshot(base({durationType:'first_payment'}),use().billing,now).remainingBillingCycles,1));
+test('21 três ciclos são preservados',()=>assert.equal(discountSnapshot(base(),use().billing,now).remainingBillingCycles,3));
+test('22 duração permanente',()=>assert.equal(discountSnapshot(base({durationType:'while_subscription_active'}),use().billing,now).validWhileSubscriptionActive,true));
+test('23 cupom nunca é cumulativo',()=>assert.equal(normalizeCouponDefinition(base({stackable:true})).stackable,false));
+test('24 cotação expirada possui erro público seguro',()=>assert.equal(new CouponError('quote_expired').message,'A condição expirou. Aplique o cupom novamente.'));
+test('25 preço do frontend não participa do cálculo',()=>{const source=fs.readFileSync(path.join(__dirname,'../src/index.js'),'utf8');assert.doesNotMatch(source,/request\.data\?\.(price|amount|discountValue)/);assert.match(source,/planBilling\(plan,billingCycle\)/)});
+test('26 último uso é reservado em transação',()=>{const source=fs.readFileSync(path.join(__dirname,'../src/services/coupon-firestore-service.js'),'utf8');assert.match(source,/reserveQuote/);assert.match(source,/runTransaction/);assert.match(source,/reservedCount:\s*FieldValue\.increment\(1\)/)});
+test('27 webhook duplicado não confirma resgate duas vezes',()=>{const source=fs.readFileSync(path.join(__dirname,'../src/services/firestore-subscription-service.js'),'utf8');assert.match(source,/redemption\.status\s*!==\s*["']active["']/);assert.match(source,/couponBillingEvents/)});
+test('28 assinatura cancelada encerra o resgate sem apagar histórico',()=>{const source=fs.readFileSync(path.join(__dirname,'../src/services/firestore-subscription-service.js'),'utf8');assert.match(source,/status:\s*["']canceled["']/);assert.doesNotMatch(source,/transaction\.delete\(redemptionRef/)});
+test('29 snapshot não muda após editar cupom',()=>{const coupon=base(),snapshot=discountSnapshot(coupon,use(coupon).billing,now);coupon.discountValue=5;assert.equal(snapshot.discountValue,40);assert.equal(snapshot.discountedPrice,29.94)});
+test('30 usuário comum não administra',()=>{const source=fs.readFileSync(path.join(__dirname,'../src/services/coupon-firestore-service.js'),'utf8');assert.match(source,/profile\?\.role\s*!==\s*["']owner["']/);assert.match(source,/subscription\?\.planId\s*===\s*["']internal["']/)});

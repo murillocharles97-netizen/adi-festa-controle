@@ -365,6 +365,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Cupons, cotações, contadores, resgates e auditoria são acessados apenas
+    // pelas Cloud Functions. Nem a conta interna altera valores diretamente.
+    match /adminCoupons/{couponId} {
+      allow read, write: if false;
+    }
+    match /adminCouponCodes/{codeHash} {
+      allow read, write: if false;
+    }
+    match /couponQuotes/{quoteId} {
+      allow read, write: if false;
+    }
+    match /couponRedemptions/{redemptionId} {
+      allow read, write: if false;
+    }
+    match /couponUsageCounters/{counterId} {
+      allow read, write: if false;
+    }
+    match /couponAuditLogs/{logId} {
+      allow read, write: if false;
+    }
+    match /couponBillingEvents/{eventId} {
+      allow read, write: if false;
+    }
+
     match /webhookEvents/{eventId} {
       allow read, write: if false;
     }
