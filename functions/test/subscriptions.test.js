@@ -53,3 +53,9 @@ test('cliente Mercado Pago restaura valor com a moeda exigida pelo provedor',asy
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.updateSubscriptionAmount('sub_1',59.9);
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{auto_recurring:{transaction_amount:59.9,currency_id:'BRL'}});
 });
+
+test('cliente Mercado Pago cancela assinatura com o estado aceito pelo provedor',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:200,text:async()=>JSON.stringify({id:'sub_1',status:'cancelled'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.cancelSubscription('sub_1');
+  assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{status:'cancelled'});
+});
