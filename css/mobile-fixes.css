@@ -37,7 +37,6 @@
   .modal-body,.modal-foot{min-width:0}.modal-foot{flex-wrap:wrap}.modal-foot .btn{flex:1 1 130px}
   .table-wrap{max-width:100%}
 
-  .sidebar [data-route="relatorios"]{display:none!important}
   .mobile-desempenho-notice{display:grid;justify-items:center;gap:10px;margin:18px auto;padding:34px 20px;border:1px solid #dfe6ed;border-radius:22px;background:#fff;text-align:center;box-shadow:0 10px 28px rgba(31,48,73,.07)}
   .mobile-desempenho-notice>svg{width:48px;height:48px;padding:11px;border-radius:16px;background:#e5f8f3;color:#078d70}
   .mobile-desempenho-notice h2,.mobile-desempenho-notice p{margin:0}.mobile-desempenho-notice p{color:#728096}

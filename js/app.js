@@ -1040,6 +1040,7 @@
     $$("[data-mobile-route]").forEach((a) =>
       a.classList.toggle("active", a.dataset.mobileRoute === route),
     );
+    window.MobileNavigation?.update?.(route);
     window.BarcodePrimaryFab?.update?.();
     fecharMenu();
     aplicarInputModes($("#app"));
@@ -1055,14 +1056,25 @@
   const sidebar = $("#sidebar"),
     overlay = $("#overlay"),
     fecharMenu = () => {
+      if (window.MobileNavigation && matchMedia("(max-width:767px)").matches) {
+        window.MobileNavigation.close({ consumeHistory: false });
+        return;
+      }
       sidebar.classList.remove("open");
       overlay.classList.remove("show");
     };
   $("#menu").onclick = () => {
+    if (window.MobileNavigation) {
+      window.MobileNavigation.toggle();
+      return;
+    }
     sidebar.classList.toggle("open");
     overlay.classList.toggle("show");
   };
-  overlay.onclick = fecharMenu;
+  overlay.onclick = () => {
+    if (window.MobileNavigation) window.MobileNavigation.close();
+    else fecharMenu();
+  };
   $("#date").textContent = new Date().toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",

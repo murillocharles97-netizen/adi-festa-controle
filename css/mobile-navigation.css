@@ -1,0 +1,75 @@
+.sidebar .mobile-sidebar-scroll,.sidebar .mobile-sidebar-nav,.sidebar .mobile-sidebar-footer,.sidebar .mobile-drawer-close,.sidebar .mobile-plan-pill{display:none}
+.sidebar [hidden]{display:none!important}
+
+@media(max-width:767px){
+  :root{--mobile-drawer-width:min(86vw,380px)}
+  html.drawer-open,html.drawer-open body{overflow:hidden;overscroll-behavior:none}
+  .sidebar{
+    inset:0 auto 0 0;width:var(--mobile-drawer-width);max-width:88vw;height:100dvh;padding:0;
+    overflow:hidden;background:linear-gradient(155deg,#152337 0%,#0e1a2b 72%,#142438 100%);
+    box-shadow:18px 0 50px rgba(5,14,28,.28);transition:transform .24s cubic-bezier(.2,.75,.25,1);
+  }
+  .sidebar.open{transform:translateX(0)}
+  .sidebar .desktop-sidebar-nav,.sidebar .desktop-sidebar-footer{display:none!important}
+  .sidebar .brand{
+    position:relative;flex:0 0 auto;gap:14px;margin:0;padding:calc(20px + env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) 19px max(18px,env(safe-area-inset-left,0px));
+    border-bottom:1px solid rgba(255,255,255,.08)
+  }
+  .sidebar .brand-logo{flex:0 0 58px;width:58px;height:58px;border-radius:18px;background:linear-gradient(145deg,#25d4ae,#08a887);color:#102139;font-size:20px}
+  .sidebar .brand-copy{min-width:0;padding-right:38px}
+  .sidebar .brand strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;color:#fff}
+  .sidebar .brand small{font-size:12px;color:#aeb9c9}
+  .sidebar .mobile-plan-pill{display:inline-flex;align-items:center;max-width:100%;margin-top:8px;padding:5px 9px;border-radius:999px;background:rgba(49,208,173,.18);color:#bff9eb;font-size:10px;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sidebar .mobile-drawer-close{position:absolute;right:max(10px,env(safe-area-inset-right,0px));top:calc(14px + env(safe-area-inset-top,0px));display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:14px;background:transparent;color:#dce4ed}
+  .mobile-drawer-close svg{width:24px;height:24px}
+  .mobile-drawer-close:focus-visible,.mobile-sidebar-nav :is(a,button):focus-visible{outline:3px solid rgba(49,208,173,.62);outline-offset:2px}
+  .sidebar .mobile-sidebar-scroll{display:block;min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#40516a transparent}
+  .mobile-sidebar-nav{display:flex!important;flex-direction:column;gap:4px;padding:12px max(14px,env(safe-area-inset-right,0px)) 22px max(14px,env(safe-area-inset-left,0px))}
+  .sidebar .mobile-nav-section{display:block;margin:14px 10px 5px;color:#8190a5;font-size:11px;font-weight:800;letter-spacing:.11em;text-transform:uppercase}
+  .mobile-nav-group{display:grid;gap:2px}
+  .mobile-nav-group-trigger,.mobile-sidebar-nav>a,.mobile-nav-group-items>a{
+    display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:11px 13px;border:0;border-radius:13px;background:transparent;color:#d4dce7;text-align:left;text-decoration:none;font-weight:760
+  }
+  .mobile-nav-group-trigger>span:nth-of-type(1),.mobile-sidebar-nav>a>span,.mobile-nav-group-items>a>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mobile-nav-group-trigger>svg:first-child,.mobile-sidebar-nav>a>svg,.mobile-nav-group-items>a>svg{flex:0 0 21px;width:21px;height:21px;color:#aeb9c8}
+  .mobile-nav-group-trigger>svg:last-child{flex:0 0 18px;width:18px;height:18px;transition:transform .18s ease}
+  .mobile-nav-group-trigger[aria-expanded="true"]{color:#fff;background:rgba(255,255,255,.055)}
+  .mobile-nav-group-trigger[aria-expanded="true"]>svg:first-child{color:#31d0ad}
+  .mobile-nav-group-trigger[aria-expanded="true"]>svg:last-child{transform:rotate(180deg)}
+  .mobile-nav-group-items{display:grid;position:relative;gap:2px;margin:0 0 4px 22px;padding:2px 0 2px 15px;border-left:1px solid rgba(130,148,172,.22)}
+  .mobile-nav-group-items[hidden]{display:none}
+  .mobile-nav-group-items>a{min-height:44px;padding-block:9px;color:#aeb9c8;font-weight:650}
+  .mobile-nav-group-items>a.active,.mobile-sidebar-nav>a.active{background:linear-gradient(90deg,rgba(49,208,173,.2),rgba(49,208,173,.08));color:#fff;box-shadow:inset 3px 0 #31d0ad}
+  .mobile-nav-group-items>a.active>svg,.mobile-sidebar-nav>a.active>svg{color:#31d0ad}
+  .mobile-nav-count{display:inline-grid!important;place-items:center;flex:0 0 auto!important;min-width:22px!important;height:22px;padding:0 6px;border-radius:999px;background:#15b991;color:#fff!important;font-size:10px;font-style:normal;font-weight:900;overflow:visible!important}
+  .mobile-nav-count[hidden]{display:none!important}
+  .mobile-developer-nav{display:contents}
+  .mobile-developer-nav[hidden]{display:none}
+  .mobile-developer-nav a em{margin-left:auto;padding:4px 7px;border-radius:999px;background:#6842ae;color:#fff;font-size:9px;font-style:normal}
+  .sidebar .mobile-sidebar-footer{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:10px;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));border-top:1px solid rgba(255,255,255,.09);color:#99a7b8;font-size:10px}
+  .sidebar .mobile-sidebar-footer>span,.sidebar .mobile-sync-state{display:flex;align-items:center;gap:5px;min-width:0;width:auto;height:auto;margin:0;border-radius:0;background:none}
+  .mobile-sync-state{color:#5ce0bd}
+  .mobile-sync-state svg{width:15px;height:15px}
+  .mobile-sync-state b{max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750}
+  .overlay.show{inset:0;background:rgba(8,17,30,.64);backdrop-filter:blur(2px)}
+  .bottom-nav{height:calc(var(--bottom-nav-height,76px) + env(safe-area-inset-bottom,0px));padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
+  body{padding-bottom:calc(var(--bottom-nav-height,76px) + env(safe-area-inset-bottom,0px))}
+}
+
+@media(max-width:360px){
+  :root{--mobile-drawer-width:88vw}
+  .sidebar .brand{padding-inline:14px}.sidebar .brand-logo{flex-basis:52px;width:52px;height:52px}.mobile-sidebar-nav{padding-inline:10px}
+}
+
+/* O projeto usa algumas regras legadas em 780px. Entre 768px e 780px,
+   mantemos explicitamente o padrão desktop para não exibir duas navegações. */
+@media(min-width:768px) and (max-width:780px){
+  body{padding-bottom:0}
+  .sidebar{transform:none}
+  .shell{margin-left:270px}
+  .menu-btn,.bottom-nav{display:none!important}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .sidebar,.mobile-nav-group-trigger>svg:last-child{transition:none!important}
+}
