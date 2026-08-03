@@ -11,7 +11,7 @@ test("publica painel, rota e cache dos cupons", () => {
   assert.match(html, /coupons-admin\.js/);
   assert.match(html, /coupons\.css/);
   assert.match(router, /'cupons'/);
-  assert.match(worker, /adi-festa-v71-subscription-coupons/);
+  assert.match(worker, /adi-festa-v72-mobile-navigation-safe-area/);
   assert.match(worker, /coupons-admin\.js/);
 });
 

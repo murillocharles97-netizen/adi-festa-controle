@@ -392,8 +392,8 @@
     load();
   }
   function syncAccess() {
-    const link = $('[data-route="cupons"]');
-    if (link) link.hidden = !context().internal;
+    $$('[data-route="cupons"]').forEach((link) => (link.hidden = !context().internal));
+    $$('[data-mobile-developer]').forEach((section) => (section.hidden = !context().internal));
   }
   addEventListener("business-context-changed", syncAccess);
   addEventListener("firebase-auth-ready", syncAccess);

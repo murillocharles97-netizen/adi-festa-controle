@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Validação da navegação</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/visual.css">
+  <link rel="stylesheet" href="../css/mobile-fixes.css">
+  <link rel="stylesheet" href="../css/mobile-navigation.css">
+  <style>
+    .visual-main{display:grid;gap:18px}.visual-main>section{padding:22px;border:1px solid var(--line);border-radius:20px;background:#fff;box-shadow:var(--shadow)}
+    .visual-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.visual-kpis article{padding:18px;border-radius:16px;background:#f1faf7}.visual-kpis strong{display:block;margin-top:8px;font-size:22px;color:#087d64}
+    @media(max-width:767px){.visual-kpis{grid-template-columns:1fr 1fr}.shell{filter:brightness(.48)}.bottom-nav{filter:brightness(.6)}}
+  </style>
+</head>
+<body>
+  <div id="sidebar-slot"></div>
+  <div class="overlay"></div>
+  <div class="shell"><header class="topbar"><button class="icon-btn menu-btn"><i data-lucide="menu"></i></button><div><h1>Início</h1><small>segunda-feira, 3 de agosto</small></div><span class="local-badge"><i data-lucide="cloud"></i> Nuvem</span><span class="avatar">M</span></header><main class="visual-main"><section><h2>Visão geral</h2><p class="muted">Seu negócio organizado em um só lugar.</p><div class="visual-kpis"><article>Vendido hoje<strong>R$ 480,00</strong></article><article>Clientes<strong>127</strong></article><article>Produtos<strong>42</strong></article></div></section><section><h2>Ações rápidas</h2><p class="muted">Conteúdo ilustrativo para validar o drawer e o overlay.</p></section></main></div>
+  <nav class="bottom-nav"><a><i data-lucide="house"></i><span>Início</span></a><a><i data-lucide="shopping-bag"></i><span>Vender</span></a><button class="mobile-client-fab"><i data-lucide="plus"></i><span>Ação rápida</span></button><a><i data-lucide="users"></i><span>Clientes</span></a><a><i data-lucide="candy"></i><span>Produtos</span></a></nav>
+  <script src="../assets/lucide.min.js"></script>
+  <script>
+    fetch('../index.html?visual-navigation=72',{cache:'no-store'}).then(response=>response.text()).then(html=>{
+      const parsed=new DOMParser().parseFromString(html,'text/html'),aside=parsed.querySelector('#sidebar');
+      document.querySelector('#sidebar-slot').replaceWith(aside);
+      const mobile=matchMedia('(max-width:767px)').matches;
+      if(mobile){aside.classList.add('open');document.querySelector('.overlay').classList.add('show');document.documentElement.classList.add('drawer-open');
+        ['crm','online','history'].forEach(name=>{const root=aside.querySelector(`[data-mobile-nav-group="${name}"]`);if(!root)return;const trigger=root.querySelector('button'),items=root.querySelector('.mobile-nav-group-items');trigger.setAttribute('aria-expanded',name==='crm'?'true':'false');items.hidden=name!=='crm'});
+        aside.querySelector('[data-mobile-developer]').hidden=false;aside.querySelector('[data-mobile-coupons]').hidden=false;
+      }
+      lucide.createIcons();
+    });
+  </script>
+</body>
+</html>
