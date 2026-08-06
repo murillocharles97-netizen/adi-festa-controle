@@ -16,6 +16,7 @@ const {firestoreSubscriptionService}=require('./services/firestore-subscription-
 const {verifyWebhookSignature,eventId,eventData}=require('./services/webhook-service');
 const {CouponError}=require('./services/coupon-service');
 const {couponFirestoreService}=require('./services/coupon-firestore-service');
+const {onboardingService}=require('./services/onboarding-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -26,6 +27,7 @@ const MP_ENV=defineString('MERCADO_PAGO_ENV',{default:'production'});
 const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles97-netizen.github.io/adi-festa-controle/'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
+const ONBOARDING_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20};
 const validCatalogToken=value=>/^[A-Za-z0-9_-]{20,128}$/.test(String(value||''));
 const normalizePhone=value=>{let digits=String(value||'').replace(/\D/g,'');digits=digits.replace(/^0+/,'');if(digits.length===10||digits.length===11)digits=`55${digits}`;return digits};
 const validPhone=value=>/^55\d{10,11}$/.test(value);
@@ -60,6 +62,20 @@ function callableError(error){
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
 function requestedBusinessId(request){return String(request.data?.companyId||request.data?.businessId||'').trim()}
+
+exports.completeBusinessOnboarding=onCall(ONBOARDING_OPTIONS,async request=>{
+  const uid=request.auth?.uid,email=String(request.auth?.token?.email||'').trim().toLowerCase();
+  if(!uid)throw new HttpsError('unauthenticated','Entre na sua conta para concluir o cadastro.');
+  try{
+    const result=await onboardingService(db,{Timestamp,FieldValue,professionalLimits:getPlan('professional').limits}).complete({uid,email,input:request.data||{}});
+    logger.info('[Onboarding] completed',{uidHash:sha(uid).slice(0,12),businessId:result.businessId,created:result.created,trialPreserved:result.trial.preserved});
+    return result;
+  }catch(error){
+    logger.warn('[Onboarding] failed',{uidHash:sha(uid).slice(0,12),code:error?.code||'unknown'});
+    if(error instanceof HttpsError)throw error;
+    throw new HttpsError('internal','Não foi possível concluir a empresa agora. Seus dados foram preservados.');
+  }
+});
 
 async function internalCouponContext(request){const businessId=requestedBusinessId(request)||'adi-festa',context=await permissions().authenticatedContext(request,businessId);coupons().assertInternal(context);return context}
 
