@@ -340,15 +340,20 @@ service cloud.firestore {
         allow update, delete: if false;
       }
       match /{collectionName}/{documentId} {
-        allow read: if !(collectionName in ['productVariants', 'processedOperations'])
+        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if !(collectionName in ['productVariants', 'processedOperations'])
+        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
           && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
-          && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
-        allow update: if !(collectionName in ['productVariants', 'processedOperations'])
+          && (
+            collectionName != 'settings'
+            || documentId != 'operation'
+            || hasPermission(businessId, 'manageOperationSettings')
+            || onboardingOwner(businessId)
+          );
+        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId

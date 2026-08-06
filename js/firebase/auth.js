@@ -90,7 +90,22 @@ async function provisionBusinessAccount(user,data){
   batch.set(doc(db,'businesses',businessId,'settings','default'),{id:'default',businessId,nome:business.name,businessName:business.name,receiptName:business.name,telefone:business.phone,currency:'BRL',timezone:'America/Sao_Paulo',onboardingStep:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
   batch.set(doc(db,'businesses',businessId,'settings','operation'),{id:'operation',businessId,ownerId:user.uid,operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:false,modules:{creditSales:false,inventory:true,onlineCatalog:false,onlineOrders:false,delivery:false,pickup:false,physicalStore:true,scheduledVisits:false,campaigns:false,loyalty:false,crm:true,inPersonSales:true},smartCardMode:'automatic',cardMetrics:[],migrationVersion:2,schemaVersion:2,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
   batch.set(doc(db,'businesses',businessId,'auditLogs',`account_created_${user.uid}`),{id:`account_created_${user.uid}`,businessId,type:'account_created',actorId:user.uid,createdAt:Timestamp.fromDate(now)});
-  await batch.commit();
+  try{await batch.commit()}
+  catch(error){
+    console.error('[Onboarding Firestore]',{
+      code:normalizedCode(error),
+      authUid:abbreviateTechnicalId(user.uid),
+      operation:'atomic create/set',
+      writes:[
+        `businesses/${businessId}`,
+        `users/${abbreviateTechnicalId(user.uid)}`,
+        `businesses/${businessId}/settings/default`,
+        `businesses/${businessId}/settings/operation`,
+        `businesses/${businessId}/auditLogs/account_created_${abbreviateTechnicalId(user.uid)}`
+      ]
+    });
+    throw error;
+  }
   return profile;
 }
 
