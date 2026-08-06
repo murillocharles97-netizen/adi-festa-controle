@@ -30,27 +30,10 @@ function onboardingBatch(db,uid,email,options={}){
   return{data,commit:()=>batch.commit()};
 }
 
-test('diagnóstico: lote inicial sem settings/operation é aceito',async()=>{
+test('cliente autenticado não provisiona empresa diretamente, com ou sem configuração operacional',async()=>{
   const uid='onboarding-baseline',email='baseline@example.test',db=env.authenticatedContext(uid,{email}).firestore();
-  const batch=onboardingBatch(db,uid,email,{includeOperation:false});
-  await assertSucceeds(batch.commit());
-});
-
-test('onboarding completo cria empresa, perfil, configurações e auditoria atomicamente',async()=>{
-  const uid='onboarding-complete',email='complete@example.test',db=env.authenticatedContext(uid,{email}).firestore();
-  const {data,commit}=onboardingBatch(db,uid,email);
-  await assertSucceeds(commit());
-  for(const path of [
-    ['users',uid],
-    ['businesses',data.businessId],
-    ['businesses',data.businessId,'settings','default'],
-    ['businesses',data.businessId,'settings','operation'],
-    ['businesses',data.businessId,'auditLogs',data.audit.id]
-  ])assert.equal((await getDoc(doc(db,...path))).exists(),true,`documento ausente: ${path.join('/')}`);
-  const saved=(await getDoc(doc(db,'businesses',data.businessId))).data();
-  assert.equal(saved.subscription.planId,'trial');
-  assert.equal(saved.subscription.status,'trial');
-  assert.ok(saved.subscription.trialEndsAt.toMillis()-saved.subscription.trialStartedAt.toMillis()>=7*86400000);
+  await assertFails(onboardingBatch(db,uid,email,{includeOperation:false}).commit());
+  await assertFails(onboardingBatch(db,uid,email).commit());
 });
 
 test('onboarding rejeita empresa fora do ID determinístico do usuário',async()=>{
@@ -73,25 +56,30 @@ test('planos são somente leitura e não existem gravações públicas paralelas
   for(const collection of ['memberships','subscriptions','onboarding','trials']){
     await assertFails(setDoc(doc(db,collection,uid),{uid,businessId:`biz_${uid}`}));
   }
-  const {data,commit}=onboardingBatch(db,uid,email);
-  await assertSucceeds(commit());
+  const data=onboardingData(uid,email);
+  await env.withSecurityRulesDisabled(async context=>{
+    const admin=context.firestore();
+    await setDoc(doc(admin,'businesses',data.businessId),data.business);
+    await setDoc(doc(admin,'users',uid),data.profile);
+  });
   await assertFails(setDoc(doc(db,'businesses',data.businessId,'subscriptionIntents','client-created'),{businessId:data.businessId,status:'pending'}));
 });
 
-test('conta nova autentica, cria a empresa e entra novamente imediatamente',async()=>{
+test('conta nova autentica novamente, mas criação empresarial direta continua bloqueada',async()=>{
   const suffix=Date.now(),email=`new-company-${suffix}@example.test`,password='Test@123456';
   const signUp=await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
   const signUpBody=await signUp.json();
   assert.equal(signUp.status,200,JSON.stringify(signUpBody));
   const created=signUpBody,uid=created.localId;
-  const db=env.authenticatedContext(uid,{email}).firestore(),{data,commit}=onboardingBatch(db,uid,email);
-  await assertSucceeds(commit());
+  const db=env.authenticatedContext(uid,{email}).firestore(),{commit}=onboardingBatch(db,uid,email);
+  await assertFails(commit());
   const login=await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
   const loginBody=await login.json();
   assert.equal(login.status,200,JSON.stringify(loginBody));
   const authenticated=loginBody;
   assert.equal(authenticated.localId,uid);
   assert.ok(authenticated.idToken);
-  assert.equal((await getDoc(doc(db,'businesses',data.businessId))).data().ownerId,uid);
-  assert.equal((await getDoc(doc(db,'users',uid))).data().businessId,data.businessId);
+  let profileSnapshot;
+  await env.withSecurityRulesDisabled(async context=>{profileSnapshot=await getDoc(doc(context.firestore(),'users',uid))});
+  assert.equal(profileSnapshot.exists(),false);
 });

@@ -1,7 +1,7 @@
 import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';
 import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
-import {doc,getDoc,serverTimestamp,setDoc,Timestamp,writeBatch} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS,SubscriptionService} from './business-context.js';
+import {doc,getDoc,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
@@ -15,8 +15,7 @@ const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
 const esc=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
-const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/email-already-in-use':'Este e-mail já possui uma conta. Entre com sua senha.','auth/weak-password':'Use uma senha mais forte, com pelo menos 6 caracteres.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-disabled':'Esta conta está desativada.','auth/too-many-requests':'Muitas tentativas. Aguarde e tente novamente.','auth/network-request-failed':'Não foi possível conectar. Verifique sua internet.','permission-denied':'A operação foi bloqueada pelas regras de segurança.','resource-exhausted':'O limite temporário do Firebase foi atingido. Tente novamente mais tarde.'}[String(code||'').replace('firestore/','')]||'Não foi possível concluir agora. Tente novamente.');
-const slugify=value=>String(value||'negocio').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,42)||'negocio';
+const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/email-already-in-use':'Este e-mail já possui uma conta. Entre com sua senha.','auth/weak-password':'Use uma senha mais forte, com pelo menos 6 caracteres.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-disabled':'Esta conta está desativada.','auth/too-many-requests':'Muitas tentativas. Aguarde e tente novamente.','auth/network-request-failed':'Não foi possível conectar. Verifique sua internet.','permission-denied':'A operação foi bloqueada pelas regras de segurança.','resource-exhausted':'O limite temporário do Firebase foi atingido. Tente novamente mais tarde.'}[String(code||'').replace(/^(firestore|functions)\//,'')]||'Não foi possível concluir agora. Tente novamente.');
 const businessIdFor=user=>`biz_${user.uid}`;
 const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
 function screen(html){gate.innerHTML=html;gate.hidden=false;document.documentElement.classList.add('auth-pending');window.lucide?.createIcons()}
@@ -27,7 +26,7 @@ function setBootstrapState(state,details={}){
   window.FirebaseBootstrap={state,details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout(),completeLegacyMigration:()=>completeLegacyMigrationManually()};
   dispatchEvent(new CustomEvent('firebase-bootstrap-state',{detail:{state,...details}}));
 }
-function normalizedCode(error){return String(error?.code||'').replace('firestore/','')}
+function normalizedCode(error){return String(error?.code||'').replace(/^(firestore|functions)\//,'')}
 function isDevelopment(){
   return ['localhost','127.0.0.1'].includes(location.hostname)||localStorage.getItem('adiFestaDevMetrics')==='1';
 }
@@ -42,8 +41,9 @@ function withTimeout(promise,token){
 }
 function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapSequence)throw Object.assign(new Error('Bootstrap substituído por uma nova tentativa.'),{code:'bootstrap/cancelled'})}
 
-function login(message=''){
+function login(message='',presetEmail=''){
   screen(`<section class="auth-card auth-entry-card"><div class="auth-logo">AF</div><h1>${APP_NAME}</h1><p>Controle seu negócio com segurança, de qualquer aparelho.</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha">👁</button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar</button><button class="btn btn-light" type="button" id="show-register">Criar minha conta</button><button class="auth-link" type="button" data-show-plans>Ver planos</button></form></section>`);
+  const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
   document.querySelector('#toggle-password').onclick=()=>{const input=document.querySelector('[name=password]');input.type=input.type==='password'?'text':'password'};
   document.querySelector('#show-register').onclick=()=>{registerState.step=1;register()};
   document.querySelector('[data-show-plans]').onclick=()=>plansScreen(false);
@@ -75,38 +75,22 @@ function register(message=''){
       await provisionBusinessAccount(result.user,d);
       localStorage.removeItem(pendingKey(result.user.uid));
       location.reload();
-    }catch(error){console.error('[SaaS onboarding]',{code:error.code,message:error.message});register(friendly(error.code))}
+    }catch(error){
+      console.error('[SaaS onboarding]',{code:normalizedCode(error),message:error.message});
+      if(error.code==='auth/email-already-in-use')return login('Este e-mail já possui uma conta. Entre com sua senha para continuar.',d.email);
+      if(auth.currentUser)return unauthorized(auth.currentUser,normalizedCode(error)==='permission-denied'?'Não foi possível concluir a empresa por uma restrição de segurança.':'Não foi possível concluir agora. Seus dados foram preservados.',true,'Seu cadastro foi iniciado');
+      register(friendly(error.code));
+    }
   };
 }
 
 async function provisionBusinessAccount(user,data){
-  const profileRef=doc(db,'users',user.uid),existing=await getDoc(profileRef);
-  if(existing.exists())return existing.data();
-  const businessId=businessIdFor(user),now=new Date(),trialEnd=new Date(now.getTime()+7*86400000),slug=`${slugify(data.businessName)}-${user.uid.slice(0,6).toLowerCase()}`,plan=PLANS.trial,batch=writeBatch(db);
-  const profile={uid:user.uid,email:user.email,name:String(data.name||'Administrador').trim(),phone:String(data.phone||''),active:true,businessId,role:'owner',permissions:[],onboardingCompleted:true,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now),lastLoginAt:Timestamp.fromDate(now)};
-  const business={id:businessId,slug,name:String(data.businessName).trim(),legalName:'',document:String(data.document||''),phone:String(data.businessPhone||data.phone||''),email:user.email,ownerId:user.uid,active:true,onboardingCompleted:true,businessType:String(data.businessType||'Comércio geral'),city:String(data.city||''),state:String(data.state||'').toUpperCase(),createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now),subscription:{planId:'trial',status:'trial',trialStartedAt:Timestamp.fromDate(now),trialEndsAt:Timestamp.fromDate(trialEnd),currentPeriodStart:null,currentPeriodEnd:null,cancelAtPeriodEnd:false,suspendedAt:null,gracePeriodEndsAt:null},limits:{maxUsers:plan.limits.users,maxProducts:plan.limits.products,maxClients:plan.limits.clients,maxMonthlySales:plan.limits.monthlySales,users:plan.limits.users,products:plan.limits.products,clients:plan.limits.clients,monthlySales:plan.limits.monthlySales,catalogEnabled:true,campaignsEnabled:true}};
-  batch.set(doc(db,'businesses',businessId),business);
-  batch.set(profileRef,profile);
-  batch.set(doc(db,'businesses',businessId,'settings','default'),{id:'default',businessId,nome:business.name,businessName:business.name,receiptName:business.name,telefone:business.phone,currency:'BRL',timezone:'America/Sao_Paulo',onboardingStep:1,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
-  batch.set(doc(db,'businesses',businessId,'settings','operation'),{id:'operation',businessId,ownerId:user.uid,operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:false,modules:{creditSales:false,inventory:true,onlineCatalog:false,onlineOrders:false,delivery:false,pickup:false,physicalStore:true,scheduledVisits:false,campaigns:false,loyalty:false,crm:true,inPersonSales:true},smartCardMode:'automatic',cardMetrics:[],migrationVersion:2,schemaVersion:2,createdAt:Timestamp.fromDate(now),updatedAt:Timestamp.fromDate(now)});
-  batch.set(doc(db,'businesses',businessId,'auditLogs',`account_created_${user.uid}`),{id:`account_created_${user.uid}`,businessId,type:'account_created',actorId:user.uid,createdAt:Timestamp.fromDate(now)});
-  try{await batch.commit()}
-  catch(error){
-    console.error('[Onboarding Firestore]',{
-      code:normalizedCode(error),
-      authUid:abbreviateTechnicalId(user.uid),
-      operation:'atomic create/set',
-      writes:[
-        `businesses/${businessId}`,
-        `users/${abbreviateTechnicalId(user.uid)}`,
-        `businesses/${businessId}/settings/default`,
-        `businesses/${businessId}/settings/operation`,
-        `businesses/${businessId}/auditLogs/account_created_${abbreviateTechnicalId(user.uid)}`
-      ]
-    });
-    throw error;
-  }
-  return profile;
+  const payload={ownerName:String(data.name||data.ownerName||'').trim(),phone:String(data.phone||''),businessName:String(data.businessName||'').trim(),businessPhone:String(data.businessPhone||data.phone||''),segment:String(data.businessType||data.segment||'Comércio geral'),city:String(data.city||'').trim(),state:String(data.state||'').trim().toUpperCase(),document:String(data.document||'').trim()};
+  console.info('[Onboarding Recovery]',{status:'started',authUid:abbreviateTechnicalId(user.uid),businessId:businessIdFor(user)});
+  const response=await window.FirebaseCallable('completeBusinessOnboarding',payload),profileSnapshot=await getDoc(doc(db,'users',user.uid));
+  if(!profileSnapshot.exists())throw Object.assign(new Error('A conclusão não criou o perfil esperado.'),{code:'onboarding/profile-missing'});
+  console.info('[Onboarding Recovery]',{status:'completed',authUid:abbreviateTechnicalId(user.uid),businessId:response.data?.businessId||businessIdFor(user),trialPreserved:Boolean(response.data?.trial?.preserved)});
+  return profileSnapshot.data();
 }
 
 async function migrateLegacy(user,profile,business,mode='automatic'){
@@ -134,9 +118,21 @@ function blockedScreen(user,context){
   document.querySelector('[data-export-data]').onclick=downloadBackup;
   document.querySelector('[data-blocked-logout]').onclick=()=>logout(true);
 }
+function pendingOnboarding(uid){try{return JSON.parse(localStorage.getItem(pendingKey(uid))||'null')||{}}catch{return{}}}
+function resumeOnboarding(user,message='',draft=pendingOnboarding(user.uid)){
+  const data={name:draft.name||draft.ownerName||user.displayName||'',phone:draft.phone||'',businessName:draft.businessName||'',businessType:draft.businessType||draft.segment||'Doceria',businessPhone:draft.businessPhone||draft.phone||'',city:draft.city||'',state:draft.state||'SP',document:draft.document||''};
+  screen(`<section class="auth-card auth-register-card"><div class="auth-logo">AF</div><h1>Concluir sua empresa</h1><p>Seu acesso já existe. Complete apenas os dados que faltam — nenhuma nova conta será criada.</p><form id="resume-onboarding-form"><label>E-mail<input value="${esc(user.email||'')}" readonly></label><label>Seu nome<input name="name" required autocomplete="name" value="${esc(data.name)}"></label><label>WhatsApp<input name="phone" required inputmode="tel" value="${esc(data.phone)}"></label><label>Nome da empresa<input name="businessName" required value="${esc(data.businessName)}"></label><label>Segmento<select name="businessType">${businessTypes.map(type=>`<option ${data.businessType===type?'selected':''}>${type}</option>`).join('')}</select></label><label>WhatsApp comercial<input name="businessPhone" required inputmode="tel" value="${esc(data.businessPhone)}"></label><div class="auth-form-grid"><label>Cidade<input name="city" required value="${esc(data.city)}"></label><label>Estado<input name="state" maxlength="2" required value="${esc(data.state)}"></label></div><label>CPF/CNPJ <small>(opcional)</small><input name="document" value="${esc(data.document)}"></label><p class="auth-error">${esc(message)}</p><div class="auth-form-actions"><button class="btn btn-light" type="button" id="resume-logout">Sair</button><button class="btn btn-primary" id="resume-submit">Concluir empresa</button></div></form></section>`);
+  document.querySelector('#resume-logout').onclick=bootstrapLogout;
+  document.querySelector('#resume-onboarding-form').onsubmit=async event=>{
+    event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget)),button=document.querySelector('#resume-submit'),saved={...data,...values,currentStep:3,updatedAt:new Date().toISOString()};
+    localStorage.setItem(pendingKey(user.uid),JSON.stringify(saved));setButtonLoading(button,true,'Concluindo…');
+    try{await provisionBusinessAccount(user,saved);localStorage.removeItem(pendingKey(user.uid));automaticBootstrapAttempts.delete(user.uid);await startBootstrap(user,{mode:'retry'})}
+    catch(error){resumeOnboarding(user,normalizedCode(error)==='permission-denied'?'Não foi possível concluir a empresa por uma restrição de segurança.':'Não foi possível concluir agora. Seus dados foram preservados.',saved)}
+  };
+}
 function unauthorized(user,message,canResume=false,title='Acesso não configurado'){
   screen(`<section class="auth-card"><div class="auth-logo">AF</div><h1>${esc(title)}</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
-  document.querySelector('#resume-onboarding')?.addEventListener('click',async()=>{const saved=JSON.parse(localStorage.getItem(pendingKey(user.uid))||'null');if(!saved)return login('Os dados do cadastro não estão mais neste aparelho.');try{await provisionBusinessAccount(user,saved);localStorage.removeItem(pendingKey(user.uid));location.reload()}catch(error){unauthorized(user,friendly(error.code),true)}});
+  document.querySelector('#resume-onboarding')?.addEventListener('click',()=>resumeOnboarding(user));
   document.querySelector('#logout-unauthorized').onclick=bootstrapLogout;
 }
 function bootstrapTechnicalDetails(details={}){
@@ -296,7 +292,7 @@ async function bootstrapCore(user,token,mode){
   if(!profileSnapshot.exists()){
     setBootstrapState('onboarding_required');
     bootstrapLog('profile loaded',{profileFound:false});
-    return unauthorized(user,'Não existe um perfil em users/{UID} para esta conta. Seu cadastro pode ter sido iniciado sem concluir a empresa.',Boolean(localStorage.getItem(pendingKey(user.uid))),'Perfil não encontrado');
+    return unauthorized(user,'Seu cadastro foi iniciado, mas a empresa ainda não foi concluída.',true,'Cadastro incompleto');
   }
   let profile=profileSnapshot.data();
   bootstrapLog('profile loaded',{profileFound:true,businessId:profile.businessId||'',role:profile.role||'',active:profile.active===true});
@@ -308,7 +304,10 @@ async function bootstrapCore(user,token,mode){
   bootstrapLog('business loading',{businessId:profile.businessId});
   const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
   assertCurrentRun(token);
-  if(!businessSnapshot.exists())throw Object.assign(new Error('A empresa vinculada ao perfil não foi encontrada.'),{code:'business/not-found',details:{authUid:user.uid,profileDocumentId:profileSnapshot.id,businessId:profile.businessId}});
+  if(!businessSnapshot.exists()){
+    setBootstrapState('onboarding_required',{businessId:profile.businessId});
+    return unauthorized(user,'Encontramos seu perfil e vamos concluir os dados restantes da empresa.',true,'Empresa incompleta');
+  }
   let business={id:businessSnapshot.id,...businessSnapshot.data()};
   bootstrapLog('business loaded',{businessId:business.id});
   const businessAccess=validateAuthenticatedBusiness({authUser:user,profile,businessId:businessSnapshot.id,business});

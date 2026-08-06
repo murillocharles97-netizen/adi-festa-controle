@@ -84,16 +84,6 @@ service cloud.firestore {
           )
         );
     }
-    function selfOnboardingBusinessId() {
-      return 'biz_' + request.auth.uid;
-    }
-    function onboardingOwner(businessId) {
-      return signedIn()
-        && businessId == selfOnboardingBusinessId()
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
-        && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
-    }
-
     match /plans/{planId} {
       allow read: if true;
       allow write: if false;
@@ -101,14 +91,8 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.uid == uid
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.active == true
-        && request.resource.data.role == 'owner'
-        && request.resource.data.businessId == selfOnboardingBusinessId()
-        && getAfter(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.ownerId == uid;
+      // O primeiro perfil é criado apenas pela completeBusinessOnboarding.
+      allow create: if false;
       allow update: if signedIn()
         && request.auth.uid == uid
         && (
@@ -217,19 +201,8 @@ service cloud.firestore {
     }
 
     match /businesses/{businessId} {
-      allow create: if signedIn()
-        && businessId == selfOnboardingBusinessId()
-        && request.resource.data.id == businessId
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.active == true
-        && request.resource.data.onboardingCompleted == true
-        && request.resource.data.subscription.planId == 'trial'
-        && request.resource.data.subscription.status in ['trial', 'trialing']
-        && request.resource.data.subscription.trialStartedAt <= request.time
-        && request.resource.data.subscription.trialEndsAt > request.time + duration.value(6, 'd')
-        && request.resource.data.subscription.trialEndsAt <= request.time + duration.value(8, 'd')
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+      // Empresas e trials iniciais são provisionados exclusivamente pelo backend.
+      allow create: if false;
       allow read: if belongsToBusiness(businessId);
       allow update: if (
         isOwner(businessId)
@@ -283,7 +256,7 @@ service cloud.firestore {
       }
       match /auditLogs/{logId} {
         allow read: if isOwner(businessId);
-        allow create: if (belongsToBusiness(businessId) || onboardingOwner(businessId))
+        allow create: if belongsToBusiness(businessId)
           && request.resource.data.businessId == businessId;
         allow update, delete: if false;
       }
@@ -344,14 +317,13 @@ service cloud.firestore {
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
         allow create: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
-          && (canWriteCollection(businessId, collectionName) || onboardingOwner(businessId) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
+          && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
           && (
             collectionName != 'settings'
             || documentId != 'operation'
             || hasPermission(businessId, 'manageOperationSettings')
-            || onboardingOwner(businessId)
           );
         allow update: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
