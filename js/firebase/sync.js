@@ -2210,6 +2210,35 @@ async function queryClientsPage(options = {}) {
   applyCloudCollection("clients", result.items, { authoritative: false });
   return result;
 }
+async function queryAllClientsForAction(options = {}) {
+  const items = [];
+  let cursor = null,
+    hasMore = true,
+    documentsRead = 0,
+    pages = 0;
+  while (hasMore && pages < 200) {
+    const result = await queryClientsPage({
+      search: options.search || "",
+      filter: "todos",
+      sort: "nomeAsc",
+      limit: 50,
+      cursor,
+    });
+    if (result.unsupported) break;
+    items.push(...result.items);
+    documentsRead += Number(result.documentsRead || result.items.length);
+    hasMore = Boolean(result.hasMore);
+    cursor = result.cursor || null;
+    pages += 1;
+    if (hasMore && !cursor) break;
+  }
+  return {
+    items: [...new Map(items.map((item) => [item.id, item])).values()],
+    documentsRead,
+    pages,
+    complete: !hasMore,
+  };
+}
 async function loadProductVariants(parentProductId, options = {}) {
   const parentId = String(parentProductId || "").trim();
   if (!parentId) return [];
@@ -3418,6 +3447,7 @@ window.SyncFirebase = {
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
   queryClientsPage,
+  queryAllClientsForAction,
   loadProductVariants,
   findProductVariantByBarcode,
   compare: compareLocalAndCloud,
