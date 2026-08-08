@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   documentId,
+  endAt,
   getDoc,
   getDocs,
   limit,
@@ -12,6 +13,7 @@ import {
   serverTimestamp,
   setDoc,
   startAfter,
+  startAt,
   Timestamp,
   where,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
@@ -237,6 +239,39 @@ export function createFirestoreRepository(collectionName) {
           .filter((item) => !item.deletedAt),
         cursor: snapshot.docs.at(-1) || null,
         hasMore: snapshot.docs.length === max,
+      };
+    },
+    async listQueryPage(options = {}) {
+      const max = Math.min(50, Math.max(1, Number(options.max || 20))),
+        filters = Array.isArray(options.filters) ? options.filters : [],
+        orders = Array.isArray(options.orders) && options.orders.length
+          ? options.orders
+          : [{ field: "nomeNormalizado", direction: "asc" }],
+        constraints = filters.map((item) =>
+          where(String(item.field), String(item.operator || "=="), item.value),
+        );
+      orders.forEach((item) =>
+        constraints.push(
+          orderBy(String(item.field), item.direction === "desc" ? "desc" : "asc"),
+        ),
+      );
+      if (options.prefix !== undefined && options.prefix !== null) {
+        const prefix = String(options.prefix);
+        if (options.cursor) constraints.push(startAfter(options.cursor));
+        else constraints.push(startAt(prefix));
+        constraints.push(endAt(`${prefix}\uf8ff`));
+      } else if (options.cursor) constraints.push(startAfter(options.cursor));
+      constraints.push(limit(max));
+      const snapshot = await timed("read", collectionName, () =>
+        getDocs(query(collectionRef(), ...constraints)),
+      );
+      return {
+        items: snapshot.docs
+          .map((item) => convert(item))
+          .filter((item) => !item.deletedAt && item.active !== false),
+        cursor: snapshot.docs.at(-1) || null,
+        hasMore: snapshot.docs.length === max,
+        documentsRead: snapshot.size,
       };
     },
     async listAllPaged(max = 200) {

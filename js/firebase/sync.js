@@ -59,10 +59,10 @@ const QUEUE_ENTITY_ALIASES = {
   pedidos: "catalogOrders",
   configuracoes: "settings",
 };
-// Clientes e produtos são as duas coleções canônicas que precisam refletir
-// imediatamente em todos os caixas. As demais coleções usam o sinal central e
-// são reconciliadas no pull, evitando um listener por tela ou por card.
-const REALTIME_NAMES = new Set(["clients", "products", "settings"]);
+// Produtos continuam em tempo real porque participam diretamente do caixa.
+// Clientes usam o sinal central e pull incremental por updatedAt, preservando
+// a atualização entre aparelhos sem escutar a coleção inteira.
+const REALTIME_NAMES = new Set(["products", "settings"]);
 const IDEMPOTENT_EVENT_NAMES = new Set([
   "sales",
   "payments",
@@ -1884,7 +1884,6 @@ function registerRealtimeCollection(name, mode = "all") {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
-  registerRealtimeCollection("clients");
   registerRealtimeCollection("products");
   registerRealtimeCollection("settings", "document");
   const unsubscribe = syncSignalRepository.subscribeById(
@@ -2152,6 +2151,64 @@ async function pullCloudCollections(options = {}) {
     hydrated: true,
   });
   return received;
+}
+async function queryClientsPage(options = {}) {
+  await validateUser();
+  const max = Math.min(50, Math.max(1, Number(options.limit || 20))),
+    filter = String(options.filter || "todos"),
+    sort = String(options.sort || "nomeAsc"),
+    search = normalizeText(options.search || ""),
+    phoneSearch = String(options.search || "").replace(/\D/g, ""),
+    unsupported = new Set(["nunca", "pagamento"]);
+  if (unsupported.has(filter))
+    return { items: [], cursor: null, hasMore: false, unsupported: true };
+  const filters = [];
+  if (filter === "debito") filters.push({ field: "saldo", operator: "<", value: 0 });
+  if (filter === "credito") filters.push({ field: "saldo", operator: ">", value: 0 });
+  if (filter === "zero") filters.push({ field: "saldo", operator: "==", value: 0 });
+  if (filter === "semTelefone")
+    filters.push({ field: "telefoneNormalizado", operator: "==", value: "" });
+  let orders;
+  if (search || phoneSearch) {
+    if (filter !== "todos")
+      return { items: [], cursor: null, hasMore: false, unsupported: true };
+    const field = phoneSearch ? "telefoneNormalizado" : "nomeNormalizado";
+    orders = [{ field, direction: "asc" }];
+    const result = await repositories.clients.listQueryPage({
+      filters: [],
+      orders,
+      prefix: phoneSearch || search,
+      cursor: options.cursor || null,
+      max,
+    });
+    applyCloudCollection("clients", result.items, { authoritative: false });
+    return { ...result, queryField: field };
+  }
+  const sortMap = {
+    maiorDebito: [{ field: "saldo", direction: "asc" }],
+    menorDebito: [{ field: "saldo", direction: "desc" }],
+    nomeAsc: [{ field: "nomeNormalizado", direction: "asc" }],
+    nomeDesc: [{ field: "nomeNormalizado", direction: "desc" }],
+    compraRecente: [{ field: "ultimaCompra", direction: "desc" }],
+    ultimaCompra: [{ field: "ultimaCompra", direction: "desc" }],
+    cobrancaAntiga: [{ field: "lastChargeAt", direction: "asc" }],
+    ultimaCobranca: [{ field: "lastChargeAt", direction: "desc" }],
+    totalComprado: [{ field: "totalComprado", direction: "desc" }],
+    quantidade: [{ field: "quantidadeVendas", direction: "desc" }],
+  };
+  orders = sortMap[sort] || sortMap.nomeAsc;
+  if (["debito", "credito"].includes(filter) && orders[0]?.field !== "saldo")
+    orders = [{ field: "saldo", direction: filter === "debito" ? "asc" : "desc" }];
+  if (filter === "semTelefone")
+    orders = [{ field: "telefoneNormalizado", direction: "asc" }];
+  const result = await repositories.clients.listQueryPage({
+    filters,
+    orders,
+    cursor: options.cursor || null,
+    max,
+  });
+  applyCloudCollection("clients", result.items, { authoritative: false });
+  return result;
 }
 async function loadProductVariants(parentProductId, options = {}) {
   const parentId = String(parentProductId || "").trim();
@@ -3360,6 +3417,7 @@ window.SyncFirebase = {
   syncAll: synchronizeNow,
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
+  queryClientsPage,
   loadProductVariants,
   findProductVariantByBarcode,
   compare: compareLocalAndCloud,

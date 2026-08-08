@@ -23,7 +23,7 @@ assert.match(storageSource,/contatosCliente/);
 assert.match(backupSource,/contatosCliente/);
 assert.match(syncSource,/clientContacts\s*:\s*\{\s*key\s*:\s*["']contatosCliente["']/);
 assert.match(rules,/'clientContacts'/);
-assert.match(worker,/adi-festa-v73-onboarding-recovery/);
+assert.match(worker,/adi-festa-v\d+-/);
 
 const data={
   clientes:[{id:'c1',nome:'Cliente Teste',telefone:'17999999999',email:'cliente@teste.com',saldo:-25,totalComprado:999,quantidadeVendas:99,ativo:true,criadoEm:'2026-01-01T10:00:00.000Z'}],

@@ -29,7 +29,8 @@ test("fila incompatível é preservada, diagnosticada e nunca descartada", () =>
 
 test("clientes, produtos e configurações compartilham listeners centrais", () => {
   assert.match(sync, /listenerRegistry\s*=\s*new Map/);
-  assert.match(sync, /registerRealtimeCollection\("clients"\)/);
+  assert.doesNotMatch(sync, /registerRealtimeCollection\("clients"\)/);
+  assert.match(sync, /queryClientsPage/);
   assert.match(sync, /registerRealtimeCollection\("products"\)/);
   assert.match(sync, /registerRealtimeCollection\("settings", "document"\)/);
   assert.match(sync, /listenerRegistry\.clear\(\)/);

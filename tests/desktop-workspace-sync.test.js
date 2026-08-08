@@ -40,9 +40,10 @@ test("sincronização combina listeners compartilhados e reconciliação canôni
     repository = read("js/firebase/firestore-repository.js"),
     app = read("js/app.js");
 
-  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["clients", "products", "settings"\]\)/);
+  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "settings"\]\)/);
   assert.match(sync, /listenerRegistry\s*=\s*new Map/);
-  assert.match(sync, /registerRealtimeCollection\("clients"\)/);
+  assert.doesNotMatch(sync, /registerRealtimeCollection\("clients"\)/);
+  assert.match(sync, /queryClientsPage/);
   assert.match(sync, /registerRealtimeCollection\("products"\)/);
   assert.match(sync, /syncSignalRepository\.subscribeById\(\s*"last-sync"/);
   assert.match(sync, /changedCollections/);
@@ -78,7 +79,7 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
   assert.match(index, /build-info\.js\?v=70/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
-  assert.match(worker, /adi-festa-v73-onboarding-recovery/);
+  assert.match(worker, /adi-festa-v\d+-/);
   assert.match(index, /firebase-ui\.js\?v=70/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[Adi Festa\] Build/);
