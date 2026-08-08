@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="../css/style.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/crm-dashboard.css">
+  <link rel="stylesheet" href="../css/crm-mobile.css">
+  <link rel="stylesheet" href="../css/clientes-mobile.css">
   <link rel="stylesheet" href="../css/runtime-access.css">
   <script src="../assets/lucide.min.js" defer></script>
 </head>
@@ -25,17 +27,21 @@
   <script src="../js/phone.js"></script>
   <script src="../js/storage.js"></script>
   <script src="../js/operation-mode.js"></script>
+  <script src="../js/clientes.js"></script>
   <script src="../js/crm-dashboard.js"></script>
+  <script src="../js/crm-mobile.js"></script>
+  <script src="../js/client-actions.js"></script>
   <script>
     DB.useBusiness('visual-test');
     DB.alterar(data=>{
       data.config.operation={operationMode:'physical_store',creditMode:'disabled',operationOnboardingCompleted:true,migrationVersion:2,schemaVersion:2,modules:{inventory:true,crm:true,physicalStore:true,creditSales:false}};
-      data.clientes=Array.from({length:15},(_,index)=>({id:`c${index}`,nome:`${['Ana Souza','Carla Lima','João Pedro','Nat Stanley','Mariana Oliveira'][index%5]} ${index+1}`,telefone:`1799999${1000+index}`,email:`cliente${index}@teste.local`,cidade:'Rio Preto',ativo:true,totalComprado:160+index*75,quantidadeVendas:1+index%7,saldo:index%4===0?-35-index:0,ultimaCompra:new Date(Date.now()-index*5*86400000).toISOString(),criadoEm:new Date(Date.now()-index*10*86400000).toISOString(),marketingConsent:index%2===0}));
+      data.clientes=Array.from({length:45},(_,index)=>({id:`c${index}`,nome:`${['Ana Souza','Carla Lima','João Pedro','Nat Stanley','Mariana Oliveira'][index%5]} ${index+1}`,telefone:`1799999${1000+index}`,email:`cliente${index}@teste.local`,cidade:'Rio Preto',ativo:index!==43,totalComprado:160+index*75,quantidadeVendas:1+index%7,saldo:index%4===0?-35-index:0,ultimaCompra:index===44?null:new Date(Date.now()-index*5*86400000).toISOString(),criadoEm:new Date(Date.now()-index*10*86400000).toISOString(),marketingConsent:index%2===0}));
       data.vendas=data.clientes.flatMap((client,index)=>Array.from({length:1+index%3},(_,saleIndex)=>({id:`v${index}-${saleIndex}`,clienteId:client.id,clienteNome:client.nome,valorFinal:35+index*5,data:new Date(Date.now()-(index+saleIndex)*4*86400000).toISOString(),itens:[]})));
       data.metricasClientes=[];
     });
     window.FirebaseSession={profile:{role:'owner'},businessId:'visual-test',access:{readOnly:false}};
     window.Router={ir(){}};
+    window.CRMClienteUI={open(id){document.body.dataset.openedProfile=id}};
     document.querySelector('#app').innerHTML=CRMDashboard.render();
     CRMDashboard.bind();
     const view=new URLSearchParams(location.search).get('view');
