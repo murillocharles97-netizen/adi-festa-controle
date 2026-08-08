@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../css/clientes-mobile.css">
+  <script src="../../assets/lucide.min.js"></script>
+</head>
+<body>
+  <main id="app"><button type="button" data-open-actions>...</button></main><div id="modal"></div>
+  <script>
+    window.Utils={escapar:v=>String(v),toast:()=>{}};
+    window.Clientes={obter:id=>id==='c1'?{id:'c1',nome:'Gu Oficina',telefone:'5517997532859',saldo:-501.5}:null,excluir:()=>{}};
+    window.ClientesPage={profile:()=>{},receive:()=>{},adjust:()=>{},promise:()=>{},clientForm:()=>{},refresh:()=>{}};
+    window.CRMClienteUI={open:()=>{},contactForm:()=>{}};
+    window.Checkout={prepareClientSale:()=>{}};
+    window.MobileMessages={openComposer:()=>{}};
+    window.Modais={confirmar:()=>{}};
+    window.OperationMode={enabled:()=>true};
+  </script>
+  <script src="../../js/client-actions.js"></script>
+  <script>document.querySelector('[data-open-actions]').onclick=()=>ClientActions.openSheet('c1')</script>
+</body>
+</html>

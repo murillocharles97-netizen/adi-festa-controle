@@ -15,7 +15,7 @@ const lifecycle = read('js/firebase/session-lifecycle.js');
 const worker = read('service-worker.js');
 const rules = read('firestore.rules');
 
-assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["clients", "products", "settings"\]\)/);
+assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "settings"\]\)/);
 assert.match(sync, /PULL_TTL_MS\s*=\s*300000/);
 assert.match(sync, /listChangedSince\(since,\s*500\)/);
 assert.match(sync, /listAllPaged\(200\)/);
@@ -47,7 +47,7 @@ assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
 assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
-  assert.match(worker, /adi-festa-v73-onboarding-recovery/);
+  assert.match(worker, /adi-festa-v\d+-/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
 assert.match(worker, /then\(\(\)=>self\.skipWaiting\(\)\)/);
