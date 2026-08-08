@@ -1177,12 +1177,13 @@
       event.stopImmediatePropagation();
       clearTimeout(stableSearchTimer);
       const value = event.target.value;
+      if (client) window.ClientCloudPagination?.cancel?.();
       stableSearchTimer = setTimeout(
         () =>
           client
             ? window.ClientesMobile?.search(value)
             : window.ProdutosMobile?.search(value),
-        100,
+        300,
       );
     },
     true,

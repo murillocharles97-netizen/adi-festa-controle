@@ -434,13 +434,14 @@
 
   function openMobileWizard(id) {
     const old = id ? Campanhas.obter(id) : null;
+    const pendingAudience = old ? null : desktop.takePendingAudience?.();
     const blank = Campanhas.normalize({
       id: Utils.uuid(),
       type: 'buy_get',
       name: '',
       description: '',
       startDate: today(),
-      audience: { type: 'all', clientIds: [] },
+      audience: pendingAudience || { type: 'all', clientIds: [] },
       status: 'ativa',
       published: true
     });

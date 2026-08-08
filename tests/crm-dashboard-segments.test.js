@@ -107,3 +107,37 @@ test("desktop preserva o dashboard existente", () => {
   assert.match(html, /crm-dashboard-kpis/);
   assert.doesNotMatch(html, /crm-mobile-page/);
 });
+
+test("CRM mantém o resultado completo separado dos 20 cards visíveis", () => {
+  assert.match(source, /currentCRMResult=\{clientIds:\[\],count:0/);
+  assert.match(source, /clientIds:list\.map\(row=>row\.client\.id\)/);
+  assert.match(source, /queryAllClientsForAction/);
+  assert.match(source, /complete:true/);
+});
+
+test("ações mobile reutilizam os três CSVs e criam campanha com o segmento", () => {
+  const mobileSource = fs.readFileSync("js/crm-mobile.js", "utf8");
+  const fixture = fs.readFileSync("tests/crm-segment-actions.fixture.html", "utf8");
+  assert.match(mobileSource, /data-crm-actions/);
+  assert.match(mobileSource, /CRMDashboard\.openActions/);
+  for (const kind of ["complete", "contacts", "marketing"])
+    assert.match(source, new RegExp(`data-segment-export=\\"${kind}\\"`));
+  assert.match(source, /adiFestaCampaignAudience/);
+  assert.match(fixture, /Ações do segmento/);
+});
+
+test("wizard consome público CRM somente dentro da mesma empresa", () => {
+  const desktopCampaigns = fs.readFileSync("js/campanhas-ui.js", "utf8");
+  const mobileCampaigns = fs.readFileSync("js/campanhas-mobile.js", "utf8");
+  assert.match(desktopCampaigns, /payload\.businessId&&payload\.businessId!==businessId/);
+  assert.match(desktopCampaigns, /takePendingAudience/);
+  assert.match(mobileCampaigns, /desktop\.takePendingAudience/);
+  assert.match(desktopCampaigns, /type:'clients',clientIds/);
+});
+
+test("cache PWA publica a revisão da busca e das ações", () => {
+  const worker = fs.readFileSync("service-worker.js", "utf8");
+  assert.match(worker, /adi-festa-v76-crm-search-actions/);
+  assert.match(worker, /client-cloud-pagination\.js/);
+  assert.match(worker, /crm-mobile\.js/);
+});

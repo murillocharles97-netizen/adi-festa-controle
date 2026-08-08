@@ -125,7 +125,7 @@
         ${quick.map(([id, label, ico]) => `<button type="button" class="${current.segment === id ? "active" : ""}" data-crm-segment="${id}">${ico ? icon(ico) : ""}${label}</button>`).join("")}
         <button type="button" data-crm-more-filters>Mais ${icon("chevron-down")}</button>
       </nav>
-      <section class="crm-mobile-list-head"><span><b>${snapshot.list.length}</b> clientes encontrados</span><button type="button" data-crm-more-filters>Ordenar: <b>${esc(sortLabel[current.sort] || "Maior gasto")}</b> ${icon("arrow-down-up")}</button></section>
+      <section class="crm-mobile-list-head"><span><b>${snapshot.list.length}</b> clientes encontrados</span><div><button type="button" data-crm-more-filters>Ordenar: <b>${esc(sortLabel[current.sort] || "Maior gasto")}</b> ${icon("arrow-down-up")}</button><button type="button" class="crm-mobile-segment-actions" data-crm-actions aria-label="Abrir ações do segmento">${icon("ellipsis")} Ações</button></div></section>
       <section class="crm-mobile-list" id="crm-mobile-list">
         ${rows.map((row, index) => card(row, index, credit)).join("") || `<div class="crm-mobile-empty">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Tente alterar o período, mudar o filtro ou visualizar todos os clientes.</p><button type="button" data-crm-reset>Visualizar todos</button></div>`}
       </section>
@@ -253,7 +253,7 @@
           input?.focus({ preventScroll: true });
           input?.setSelectionRange(value.length, value.length);
         });
-      }, 180);
+      }, 300);
     });
     $$('[data-crm-segment]').forEach((button) => button.onclick = () => {
       current.segment = button.dataset.crmSegment;
@@ -261,6 +261,7 @@
       window.CRMDashboard.refresh();
     });
     $$('[data-crm-more-filters]').forEach((button) => button.onclick = filtersSheet);
+    $(`[data-crm-actions]`)?.addEventListener("click", () => window.CRMDashboard.openActions());
     $("[data-crm-full-summary]")?.addEventListener("click", fullSummary);
     $("[data-crm-reset]")?.addEventListener("click", () => {
       current.segment = "";

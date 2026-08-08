@@ -3,7 +3,8 @@
   const PAGE_SIZE = 20;
   const controllers = new Map();
   let scheduled = false;
-  let pagingRequest = false;
+  let pagingRequests = 0;
+  let activeRequest = 0;
   function current() {
     const mobile = matchMedia("(max-width: 767px)").matches;
     const page = document.querySelector("#app .clients-page");
@@ -15,9 +16,14 @@
         ? value === true
         : value !== "todos" && value !== "todas",
     );
-    return { page, mobile, advanced, params: { search: raw.query || "", filter: (mobile ? raw.filter : raw.quick) || "todos", sort: raw.sort || "nomeAsc", limit: PAGE_SIZE } };
+    const search = String(raw.query || "").trim();
+    return { page, mobile, advanced, mode: search ? "search" : "default", params: { search, filter: (mobile ? raw.filter : raw.quick) || "todos", sort: raw.sort || "nomeAsc", limit: PAGE_SIZE } };
   }
-  const keyOf = (context) => JSON.stringify({ mobile: context.mobile, ...context.params });
+  const keyOf = (context) => JSON.stringify({ mobile: context.mobile, mode: context.mode, ...context.params });
+  function isCurrent(context, key, requestId) {
+    const live = current();
+    return requestId === activeRequest && live?.page === context.page && keyOf(live) === key;
+  }
   function loading(context, active) {
     context.page.classList.toggle("client-cloud-loading", active);
     context.page.setAttribute("aria-busy", String(active));
@@ -54,37 +60,43 @@
     if (controller.loading || (!reset && !controller.hasMore)) return;
     if (reset && controller.items.length && Date.now() - controller.at < 30000) { render(context, controller); return; }
     if (reset) { controller.items = []; controller.cursor = null; controller.hasMore = true; }
+    const requestId = ++activeRequest, expectedKey = key;
     controller.loading = true; controllers.set(key, controller); loading(context, true);
     try {
-      pagingRequest = true;
+      pagingRequests += 1;
       const result = await window.SyncFirebase.queryClientsPage({ ...context.params, cursor: reset ? null : controller.cursor });
+      if (!isCurrent(context, expectedKey, requestId)) return;
       if (result.unsupported) return;
-      if (reset && !result.items.length && context.page.querySelector("[data-client-id],[data-mobile-card]")) {
+      if (context.mode === "default" && reset && !result.items.length && context.page.querySelector("[data-client-id],[data-mobile-card]")) {
         context.page.dataset.clientCloudMode = "local-schema-fallback";
         return;
       }
       const combined = reset ? result.items : [...controller.items, ...result.items];
       controller.items = [...new Map(combined.map((item) => [item.id, item])).values()];
       controller.cursor = result.cursor; controller.hasMore = result.hasMore; controller.at = Date.now();
-      context.page.dataset.clientCloudMode = "paged";
+      context.page.dataset.clientCloudMode = context.mode;
       context.page.dataset.clientDocumentsRead = String(Number(context.page.dataset.clientDocumentsRead || 0) + Number(result.documentsRead || result.items.length));
       render(context, controller);
     } catch (error) {
       context.page.dataset.clientCloudMode = "local-fallback";
       console.warn("[Clients Pagination] mantendo cache local", { code: error?.code || "unknown", message: error?.message || "Falha na consulta paginada." });
-    } finally { pagingRequest = false; controller.loading = false; loading(context, false); }
+    } finally {
+      pagingRequests = Math.max(0, pagingRequests - 1);
+      controller.loading = false;
+      if (isCurrent(context, expectedKey, requestId)) loading(context, false);
+    }
   }
-  function activate() {
+  function activate(force = false) {
     scheduled = false;
     const context = current();
-    if (!context || context.page.dataset.clientCloudBound === "true") return;
+    if (!context || (!force && context.page.dataset.clientCloudBound === "true")) return;
     context.page.dataset.clientCloudBound = "true";
     queueMicrotask(() => load(context, true));
   }
   function schedule() { if (!scheduled) { scheduled = true; queueMicrotask(activate); } }
   new MutationObserver(schedule).observe(document.querySelector("#app"), { childList: true, subtree: false });
   addEventListener("cloud-data-updated", (event) => {
-    if (event.detail?.collection !== "clients" || pagingRequest) return;
+    if (event.detail?.collection !== "clients" || pagingRequests) return;
     controllers.clear();
     const page = document.querySelector("#app .clients-page");
     if (page) { delete page.dataset.clientCloudBound; schedule(); }
@@ -95,6 +107,12 @@
     delete page.dataset.clientCloudBound;
     schedule();
   });
-  window.ClientCloudPagination = { activate, clear: () => controllers.clear() };
+  window.ClientCloudPagination = {
+    activate,
+    refresh: () => activate(true),
+    cancel: () => { activeRequest += 1; },
+    clear: () => { activeRequest += 1; controllers.clear(); },
+    mode: () => current()?.mode || "default",
+  };
   schedule();
 })();
