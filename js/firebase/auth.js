@@ -5,12 +5,12 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=61';
+import './sync.js?v=79';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000;
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
 const NON_TERMINAL_STATES=new Set(['initializing','loading_profile','loading_business','migration_required','loading_access']);
-let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0;
+let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0,bootstrapStartedAt=0,bootstrapTimeline=[];
 const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
@@ -23,7 +23,7 @@ function setButtonLoading(button,loading,text){if(!button)return;button.disabled
 function setBootstrapState(state,details={}){
   if(!BOOTSTRAP_STATES.has(state))throw Error(`Estado de bootstrap inválido: ${state}`);
   bootstrapState=state;
-  window.FirebaseBootstrap={state,details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout(),completeLegacyMigration:()=>completeLegacyMigrationManually()};
+  window.FirebaseBootstrap={state,details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION,timings:[...bootstrapTimeline]},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout(),completeLegacyMigration:()=>completeLegacyMigrationManually()};
   dispatchEvent(new CustomEvent('firebase-bootstrap-state',{detail:{state,...details}}));
 }
 function normalizedCode(error){return String(error?.code||'').replace(/^(firestore|functions)\//,'')}
@@ -31,7 +31,10 @@ function isDevelopment(){
   return ['localhost','127.0.0.1'].includes(location.hostname)||localStorage.getItem('adiFestaDevMetrics')==='1';
 }
 function bootstrapLog(message,details){
-  if(isDevelopment())console.info(`[Bootstrap] ${message}`,details||'');
+  const elapsedMs=Math.max(0,Math.round(performance.now()-(bootstrapStartedAt||performance.now()))),entry={step:message,elapsedMs};
+  bootstrapTimeline.push(entry);if(bootstrapTimeline.length>30)bootstrapTimeline.shift();
+  if(window.FirebaseBootstrap?.details)window.FirebaseBootstrap.details.timings=[...bootstrapTimeline];
+  if(isDevelopment())console.info(`[BOOT] ${message} +${elapsedMs}ms`,details||'');
 }
 function timeoutError(){return Object.assign(new Error('O bootstrap excedeu 15 segundos.'),{code:'bootstrap/timeout'})}
 function withTimeout(promise,token){
@@ -206,13 +209,13 @@ function showSubscriptionBanner(access){
   const banner=document.createElement('aside');banner.id='subscription-access-banner';banner.className=`subscription-access-banner ${access.readOnly?'read-only':'warning'}`;banner.innerHTML=`<i data-lucide="${access.readOnly?'eye':'clock-3'}"></i><span><b>${esc(messages[access.status]||'Assinatura requer atenção.')}</b>${access.readOnly?'<small>Clientes, estoque, histórico e CRM continuam acessíveis.</small>':''}</span><button type="button">Ver planos</button>`;banner.querySelector('button').onclick=()=>Router.ir('planos');document.querySelector('.shell')?.prepend(banner);window.lucide?.createIcons();
 }
 function allowed(user,profile,business){
+  bootstrapLog('preparing business context');
   const context=BusinessContext.set({business,userProfile:profile});
   DB.useBusiness(profile.businessId,{migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID});
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
+  bootstrapLog('local environment loaded');
   window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
   window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,sendPasswordReset};
-  setBootstrapState('ready',{businessId:profile.businessId});
-  gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
@@ -230,9 +233,19 @@ function allowed(user,profile,business){
     window.FirebaseBootstrap.details={...(window.FirebaseBootstrap.details||{}),warning:'SYNC_UNAVAILABLE'};
     bootstrapLog('sync prepared',{degraded:true});
   }
+  setBootstrapState('ready',{businessId:profile.businessId});
+  gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   window.lucide?.createIcons();
-  dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:{uid:user.uid,businessId:profile.businessId,business,access:context.access}}));
-  bootstrapLog('completed',{businessId:profile.businessId});
+  const readyDetail={uid:user.uid,businessId:profile.businessId,business,access:context.access};
+  bootstrapLog('environment ready',{businessId:profile.businessId});
+  setTimeout(()=>{
+    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='ready')return;
+    const mountStartedAt=performance.now();
+    dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:readyDetail}));
+    const mountMs=Math.max(0,Math.round(performance.now()-mountStartedAt));
+    bootstrapLog('ui listeners completed',{durationMs:mountMs});
+    dispatchEvent(new CustomEvent('firebase-ui-mounted',{detail:{durationMs:mountMs}}));
+  },0);
 }
 async function updateBusinessDetails(values={}){
   const session=window.FirebaseSession;
@@ -370,6 +383,7 @@ function startBootstrap(user,{mode='automatic'}={}){
   if(mode==='automatic'&&automaticBootstrapAttempts.has(user.uid))return Promise.resolve();
   if(mode==='automatic')automaticBootstrapAttempts.add(user.uid);
   const token={sequence:++bootstrapSequence,cancelled:false},run={uid:user.uid,token,promise:null};
+  bootstrapStartedAt=performance.now();bootstrapTimeline=[];
   setBootstrapState('initializing',{mode});
   bootstrapLog('started',{mode});
   bootstrapLog('auth resolved',{authenticated:Boolean(user)});

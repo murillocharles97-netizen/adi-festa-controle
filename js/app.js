@@ -1222,11 +1222,34 @@
       })
       .catch((error) => console.error("[Service worker registration]", error));
   let appRouterStarted = false;
+  function showAppMountError(error) {
+    console.error("[BOOT] app mount failed", {
+      code: String(error?.code || "UI_MOUNT_FAILED"),
+      message: error?.message || "Falha ao montar a interface",
+    });
+    const root = $("#app");
+    root.innerHTML = `<section class="empty-state boot-recovery"><i data-lucide="triangle-alert"></i><h2>Não conseguimos abrir o aplicativo.</h2><p>Seu login e seus dados continuam preservados.</p><div class="actions"><button class="btn btn-primary" data-retry-app-mount>Tentar novamente</button><button class="btn btn-light" data-logout-app-mount>Sair da conta</button></div></section>`;
+    root.querySelector("[data-retry-app-mount]").onclick = () => {
+      try {
+        appRouterStarted ? render(Router.atual()) : Router.iniciar(render);
+        appRouterStarted = true;
+      } catch (retryError) {
+        showAppMountError(retryError);
+      }
+    };
+    root.querySelector("[data-logout-app-mount]").onclick = () =>
+      window.FirebaseAuthActions?.signOut?.();
+    window.lucide?.createIcons();
+  }
   addEventListener("firebase-auth-ready", () => {
-    if (!appRouterStarted) {
-      appRouterStarted = true;
-      Router.iniciar(render);
-    } else render(Router.atual());
+    try {
+      if (!appRouterStarted) {
+        appRouterStarted = true;
+        Router.iniciar(render);
+      } else render(Router.atual());
+    } catch (error) {
+      showAppMountError(error);
+    }
   });
   addEventListener("firebase-session-cleared", () => {
     carrinho = [];
