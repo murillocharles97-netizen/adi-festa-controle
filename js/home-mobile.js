@@ -80,6 +80,11 @@
   }
   function refresh(){if(Router.atual()!=='inicio'||!mq.matches)return;const app=$('#app'),scroll=scrollY;app.innerHTML=render();bind();scrollTo({top:scroll});window.lucide?.createIcons()}
   new MutationObserver(()=>queueMicrotask(bind)).observe($('#app'),{childList:true});
-  mq.addEventListener('change',()=>{if(Router.atual()==='inicio')location.reload()});
+  mq.addEventListener('change',()=>{
+    if(Router.atual()!=='inicio')return;
+    // Trocar apenas o renderer da rota atual. Reiniciar a pÃ¡gina inteira aqui
+    // refazia auth/bootstrap e podia deixar o shell sem conteÃºdo na mudanÃ§a de breakpoint.
+    window.AppPageRuntime?.mount?.('inicio');
+  });
   window.MobileHome={isMobile:()=>mq.matches,render,bind,refresh,model};
 })();

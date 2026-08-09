@@ -112,22 +112,35 @@
 
   function enhanceDesktopMenus() {
     if (matchMedia("(max-width: 767px)").matches) return;
+    let enhanced = false;
     document.querySelectorAll(".client-more-menu:not([data-shared-actions])").forEach((menu) => {
       const clientId = menu.dataset.menuFor;
       const client = clientId && Clientes.obter(clientId);
       if (!client) return;
       menu.dataset.sharedActions = "true";
       menu.innerHTML = flatMenu(client);
+      enhanced = true;
     });
-    window.lucide?.createIcons();
+    // Lucide substitui elementos no DOM. ChamÃ¡-lo sem haver menus novos fazia
+    // este MutationObserver observar a troca dos Ã­cones e iniciar outro ciclo.
+    if (enhanced) window.lucide?.createIcons();
   }
   const app = document.querySelector("#app");
+  let enhanceQueued = false;
+  const scheduleDesktopEnhancement = () => {
+    if (enhanceQueued) return;
+    enhanceQueued = true;
+    queueMicrotask(() => {
+      enhanceQueued = false;
+      enhanceDesktopMenus();
+    });
+  };
   if (app)
-    new MutationObserver(() => queueMicrotask(enhanceDesktopMenus)).observe(app, {
+    new MutationObserver(scheduleDesktopEnhancement).observe(app, {
       childList: true,
       subtree: true,
     });
-  queueMicrotask(enhanceDesktopMenus);
+  scheduleDesktopEnhancement();
 
   window.ClientActions = { actions, flatMenu, openSheet, close, run };
 })();
