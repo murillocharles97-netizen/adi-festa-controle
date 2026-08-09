@@ -31,6 +31,29 @@
     context.page.classList.toggle("client-cloud-loading", active);
     context.page.setAttribute("aria-busy", String(active));
   }
+  function localMatches(context) {
+    if (context.mode !== "search" || !window.ClientFilterRules || !window.Clientes?.listar)
+      return [];
+    return window.ClientFilterRules.filter(window.Clientes.listar(), {
+      query: context.params.search,
+      status: context.params.filter,
+    });
+  }
+  function sortItems(items, sort) {
+    const time = (value) => value ? new Date(value).getTime() || 0 : 0;
+    const debt = (client) => Math.abs(Math.min(0, Number(client.saldo || 0)));
+    const compare = {
+      maiorDebito: (a, b) => debt(b) - debt(a),
+      menorDebito: (a, b) => debt(a) - debt(b),
+      nomeAsc: (a, b) => window.ClientFilterRules.normalize(a.nome).localeCompare(window.ClientFilterRules.normalize(b.nome), "pt-BR"),
+      nomeDesc: (a, b) => window.ClientFilterRules.normalize(b.nome).localeCompare(window.ClientFilterRules.normalize(a.nome), "pt-BR"),
+      compraRecente: (a, b) => time(b.ultimaCompra) - time(a.ultimaCompra),
+      ultimaCompra: (a, b) => time(b.ultimaCompra) - time(a.ultimaCompra),
+      totalComprado: (a, b) => Number(b.totalComprado || 0) - Number(a.totalComprado || 0),
+      quantidade: (a, b) => Number(b.quantidadeVendas || 0) - Number(a.quantidadeVendas || 0),
+    }[sort];
+    return compare ? items.sort(compare) : items;
+  }
   function render(context, controller) {
     if (!document.contains(context.page)) return;
     const renderer = context.mobile ? window.ClientesMobile?.renderCard : window.ClientesPage?.renderCard;
@@ -105,13 +128,26 @@
       const result = await window.SyncFirebase.queryClientsPage({ ...context.params, cursor: reset ? null : controller.cursor });
       const live = liveContext(expectedKey, requestId);
       if (!live) return;
-      if (result.unsupported) return;
+      if (result.unsupported) {
+        live.page.dataset.clientCloudMode = "local-filter";
+        return;
+      }
       if (live.mode === "default" && reset && !result.items.length && live.page.querySelector("[data-client-id],[data-mobile-card]")) {
         live.page.dataset.clientCloudMode = "local-schema-fallback";
         return;
       }
-      const combined = reset ? result.items : [...controller.items, ...result.items];
-      controller.items = [...new Map(combined.map((item) => [item.id, item])).values()];
+      // A busca cloud por prefixo exige campos normalizados. Clientes legados
+      // que ainda não possuem esses campos continuam disponíveis no cache
+      // local; eles não podem desaparecer do filtro Todos. O dado local fica
+      // por último para refletir imediatamente pagamentos ainda em sync.
+      const local = localMatches(live);
+      const combined = reset
+        ? [...result.items, ...local]
+        : [...controller.items, ...result.items, ...local];
+      controller.items = sortItems(
+        [...new Map(combined.map((item) => [item.id, item])).values()],
+        live.params.sort,
+      );
       controller.cursor = result.cursor; controller.hasMore = result.hasMore; controller.at = Date.now();
       live.page.dataset.clientCloudMode = live.mode;
       live.page.dataset.clientDocumentsRead = String(Number(live.page.dataset.clientDocumentsRead || 0) + Number(result.documentsRead || result.items.length));
