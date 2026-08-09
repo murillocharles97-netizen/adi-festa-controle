@@ -78,7 +78,32 @@ const {
   assert.ok(metric, "agregado do cliente não foi criado");
   assert.equal(Number(metric.totalSpent), 42.5);
   assert.equal(Number(metric.purchaseCount), 1);
-  console.log("Agregação CRM idempotente validada no emulador.");
+  await admin.doc(`businesses/${business}/sales/${saleId}`).update({
+    status: "cancelado",
+    updatedAt: new Date().toISOString(),
+  });
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    metric = (await admin.doc(`businesses/${business}/customerMetrics/${clientId}`).get()).data();
+    if (Number(metric?.purchaseCount) === 0) break;
+  }
+  assert.equal(Number(metric.totalSpent), 0);
+  assert.equal(Number(metric.purchaseCount), 0);
+  assert.equal(metric.lastPurchaseAtNeedsRebuild, true);
+  await admin.doc(`businesses/${business}/sales/sale-alias`).set({
+    customerId: clientId,
+    total: 10,
+    createdAt: "2026-07-28T12:00:00.000Z",
+    items: [{ quantity: 1 }],
+  });
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    metric = (await admin.doc(`businesses/${business}/customerMetrics/${clientId}`).get()).data();
+    if (Number(metric?.purchaseCount) === 1) break;
+  }
+  assert.equal(Number(metric.totalSpent), 10);
+  assert.equal(Number(metric.purchaseCount), 1);
+  console.log("Agregação CRM, aliases e cancelamento validados no emulador.");
   const clientApp = initializeApp(
       { apiKey: "emulator-key", projectId: "adi-festa-variations-test" },
       "coupon-functions-test",

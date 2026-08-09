@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const source = fs.readFileSync("js/crm-dashboard.js", "utf8");
+const metricsSource = fs.readFileSync("js/customer-metrics.js", "utf8");
 const DAY = 86400000;
 const isoDaysAgo = (days) => new Date(Date.now() - days * DAY).toISOString();
 
@@ -41,6 +42,7 @@ function setup() {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(metricsSource, context);
   vm.runInContext(source, context);
   return context;
 }
@@ -89,6 +91,12 @@ test("aliases de cliente nas vendas alimentam o mesmo CRM", () => {
   assert.equal(rows.get("b").period.spent, 100);
   assert.equal(rows.get("c").period.spent, 50);
   assert.equal(rows.get("b").metric.availableRewards, 1);
+  const central = context.CustomerMetricsService.build(context.DB.carregar()).byClient;
+  for (const id of ["a", "b", "c"]) {
+    assert.equal(rows.get(id).metric.totalSpent, central.get(id).totalSpent);
+    assert.equal(rows.get(id).metric.purchaseCount, central.get(id).purchaseCount);
+    assert.equal(rows.get(id).metric.lastPurchaseAt, central.get(id).lastPurchaseAt);
+  }
 });
 
 test("CRM mobile é exclusivo do breakpoint e reutiliza ClientActions", () => {
@@ -137,7 +145,8 @@ test("wizard consome público CRM somente dentro da mesma empresa", () => {
 
 test("cache PWA publica a revisão da busca e das ações", () => {
   const worker = fs.readFileSync("service-worker.js", "utf8");
-  assert.match(worker, /adi-festa-v77-mobile-safe-area/);
+  assert.match(worker, /adi-festa-v78-crm-data-foundation/);
+  assert.match(worker, /customer-metrics\.js/);
   assert.match(worker, /client-cloud-pagination\.js/);
   assert.match(worker, /crm-mobile\.js/);
 });

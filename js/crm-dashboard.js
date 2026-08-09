@@ -3,45 +3,34 @@
   const DAY=86400000,money=value=>Utils.dinheiro(Number(value||0)),esc=value=>Utils.escapar(String(value??'')),norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),icon=name=>`<i data-lucide="${name}"></i>`;
   const state={period:'30d',segment:'',query:'',sort:'spent',limit:20,resultsVisible:false,selected:new Set(),filters:{phone:false,email:false,marketing:false,min:'',max:'',purchases:'',inactive:'',product:'',category:'',city:'',birthday:false,debt:false,reward:false,overdue:false,noCharge:false},customStart:'',customEnd:''};
   let currentCRMResult={clientIds:[],count:0,complete:false,rows:[],source:'local-cache'};
-  function range(){const end=new Date(),start=new Date(0);end.setHours(23,59,59,999);if(state.period==='today')start.setTime(new Date().setHours(0,0,0,0));if(state.period==='7d')start.setTime(Date.now()-6*DAY);if(state.period==='30d')start.setTime(Date.now()-29*DAY);if(state.period==='month')start.setTime(new Date(end.getFullYear(),end.getMonth(),1).getTime());if(state.period==='previous'){start.setTime(new Date(end.getFullYear(),end.getMonth()-1,1).getTime());end.setTime(new Date(end.getFullYear(),end.getMonth(),0,23,59,59,999).getTime())}if(state.period==='year')start.setTime(new Date(end.getFullYear(),0,1).getTime());if(state.period==='custom'){start.setTime(new Date(`${state.customStart||new Date().toISOString().slice(0,10)}T00:00:00`).getTime());end.setTime(new Date(`${state.customEnd||new Date().toISOString().slice(0,10)}T23:59:59`).getTime())}return{start,end,label:`${start.getFullYear()===1970?'Início':start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`}}
+  function range(){
+    const end=new Date(),start=new Date(0),startDaysAgo=days=>{start.setTime(end.getTime());start.setDate(start.getDate()-days);start.setHours(0,0,0,0)};
+    end.setHours(23,59,59,999);
+    if(state.period==='today')startDaysAgo(0);
+    if(state.period==='7d')startDaysAgo(6);
+    if(state.period==='30d')startDaysAgo(29);
+    if(state.period==='month')start.setTime(new Date(end.getFullYear(),end.getMonth(),1).getTime());
+    if(state.period==='previous'){start.setTime(new Date(end.getFullYear(),end.getMonth()-1,1).getTime());end.setTime(new Date(end.getFullYear(),end.getMonth(),0,23,59,59,999).getTime())}
+    if(state.period==='year')start.setTime(new Date(end.getFullYear(),0,1).getTime());
+    if(state.period==='custom'){const fallback=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo'}).format(new Date());start.setTime(new Date(`${state.customStart||fallback}T00:00:00`).getTime());end.setTime(new Date(`${state.customEnd||fallback}T23:59:59.999`).getTime())}
+    return{start,end,label:`${start.getFullYear()===1970?'Início':start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`}
+  }
   function activity(metric){const days=metric.daysSinceLastPurchase;return days<=30?'active':days<=60?'risk':days<99999?'inactive':'no_data'}
-  function buildMetrics(data,clients){
-    const cached=new Map((data.metricasClientes||[]).map(row=>[row.id,row])),salesByClient=new Map(),products=new Map((data.produtos||[]).map(row=>[row.id,row])),rewards=new Map();
-    for(const progress of data.progressosCampanha||[]){const id=progress.clientId||progress.clienteId;if(id)rewards.set(id,(rewards.get(id)||0)+Number(progress.availableRewards??progress.recompensasDisponiveis??0))}
-    for(const sale of data.vendas||[]){
-      const clientId=sale.clienteId||sale.clientId||sale.customerId;
-      if(!clientId||sale.deletedAt)continue;
-      const row=salesByClient.get(clientId)||{total:0,count:0,largest:0,first:null,last:null,products:new Map(),categories:new Map()},value=Number(sale.valorFinal??sale.valorTotal??sale.total??0),date=sale.data||sale.createdAt||null;
-      row.total+=value;row.count++;row.largest=Math.max(row.largest,value);
-      if(date&&(!row.first||date<row.first))row.first=date;if(date&&(!row.last||date>row.last))row.last=date;
-      for(const item of sale.itens||[]){const qty=Number(item.quantidade||0),product=products.get(item.produtoId),name=item.nome||product?.nome||'Produto',category=item.categoria||product?.categoria||'Sem categoria';row.products.set(item.produtoId||name,(row.products.get(item.produtoId||name)||0)+qty);row.categories.set(category,(row.categories.get(category)||0)+qty)}
-      salesByClient.set(clientId,row)
-    }
-    const contacts=new Map();for(const item of [...(data.contatosCliente||[]),...(data.messageHistory||[])]){const id=item.clienteId||item.clientId,date=item.data||item.openedWhatsAppAt||item.createdAt;if(id&&date&&date>(contacts.get(id)||''))contacts.set(id,date)}
+  function buildMetrics(data,clients,engine=CustomerMetricsService.build(data,{businessId:DB.getBusinessId?.()||''})){
     return new Map(clients.map(client=>{
-      const sale=salesByClient.get(client.id),old=cached.get(client.id)||{},aggregateTotal=Number(client.totalComprado||old.totalSpent||0),aggregateCount=Number(client.quantidadeVendas||old.purchaseCount||0),last=[sale?.last,client.ultimaCompra,old.lastPurchaseAt].filter(Boolean).sort().at(-1)||null,days=last?Math.max(0,Math.floor((Date.now()-new Date(last))/DAY)):99999,top=sale?[...sale.products].sort((a,b)=>b[1]-a[1])[0]:null,category=sale?[...sale.categories].sort((a,b)=>b[1]-a[1])[0]:null;
-      const metric={...old,id:client.id,totalSpent:Math.max(Number(sale?.total||0),aggregateTotal),purchaseCount:Math.max(Number(sale?.count||0),aggregateCount),firstPurchaseAt:sale?.first||old.firstPurchaseAt||null,lastPurchaseAt:last,daysSinceLastPurchase:days,largestPurchase:Math.max(Number(sale?.largest||0),Number(old.largestPurchase||0)),favoriteProductName:products.get(top?.[0])?.nome||top?.[0]||old.favoriteProductName||'Sem dados',favoriteCategoryId:category?.[0]||old.favoriteCategoryId||'Sem dados',lastContactAt:contacts.get(client.id)||old.lastContactAt||null,openBalance:Math.abs(Math.min(0,Number(client.saldo||0))),lastCollectionAt:client.lastChargeAt||old.lastCollectionAt||null,currentPoints:Number(old.currentPoints||0),availableRewards:Math.max(Number(old.availableRewards||0),Number(rewards.get(client.id)||0)),updatedAt:new Date().toISOString()};
-      metric.averageTicket=metric.purchaseCount?metric.totalSpent/metric.purchaseCount:0;metric.activity=activity(metric);return[client.id,metric]
+      const central=engine.byClient.get(client.id)||{},metric={...central,id:client.id,daysSinceLastPurchase:central.daysSinceLastPurchase??99999,favoriteCategoryId:central.favoriteCategoryName||'Sem dados',updatedAt:new Date().toISOString()};
+      metric.activity=activity(metric);return[client.id,metric]
     }))
   }
   function classes(client,metric){const tags=[];if(metric.purchaseCount<=1)tags.push('Novo');if(metric.activity==='active')tags.push('Ativo');if(metric.purchaseCount>=3)tags.push('Recorrente');if(metric.totalSpent>=1000||metric.purchaseCount>=10)tags.push('VIP');if(metric.activity==='risk')tags.push('Em risco');if(metric.activity==='inactive')tags.push('Inativo');if(Number(client.saldo)<0)tags.push('Devedor');if(metric.availableRewards>0)tags.push('Com recompensa');return[...new Set(tags)]}
   let cachedSignature='',cachedBase=null;
   function aggregate(){
-    const data=DB.carregar(),period=range(),clients=data.clientes||[],revision=list=>(list||[]).reduce((sum,item,index)=>{const time=new Date(item.atualizadoEm||item.updatedAt||item.deletedAt||item.data||item.createdAt||0).getTime(),value=Number(item.valorFinal??item.valorTotal??item.totalComprado??item.saldo??item.availableRewards??0);return sum+value+(Number.isFinite(time)?time%(1000003+index):0)},0),signature=`${clients.length}:${revision(clients)}:${revision(data.vendas)}:${revision(data.contatosCliente)}:${revision(data.progressosCampanha)}:${period.start.toISOString()}:${period.end.toISOString()}`;
+    const data=DB.carregar(),period=range(),clients=data.clientes||[],revision=list=>(list||[]).reduce((sum,item,index)=>{const time=new Date(item.atualizadoEm||item.updatedAt||item.deletedAt||item.data||item.createdAt||0).getTime(),value=Number(item.valorFinal??item.valorTotal??item.totalComprado??item.saldo??item.availableRewards??0),identity=`${item.id||''}:${item.clienteId||item.clientId||item.customerId||''}:${item.status||''}:${item.active??item.ativo??''}`,textHash=[...identity].reduce((hash,char)=>((hash*31)+char.charCodeAt(0))%10000019,0);return sum+value+textHash+(Number.isFinite(time)?time%(1000003+index):0)},0),signature=`${clients.length}:${revision(clients)}:${revision(data.vendas)}:${revision(data.contatosCliente)}:${revision(data.progressosCampanha)}:${period.start.toISOString()}:${period.end.toISOString()}`;
     if(cachedSignature===signature&&cachedBase)return cachedBase;
-    const allSales=(data.vendas||[]).filter(sale=>!sale.deletedAt),sales=allSales.filter(sale=>{const date=new Date(sale.data||sale.createdAt);return date>=period.start&&date<=period.end}),periodRows=new Map();
-    for(const sale of sales){
-      const clientId=sale.clienteId||sale.clientId||sale.customerId;if(!clientId)continue;
-      const row=periodRows.get(clientId)||{spent:0,purchases:0,products:new Set(),categories:new Set(),firstPurchase:false};
-      row.spent+=Number(sale.valorFinal??sale.valorTotal??sale.total??0);row.purchases++;
-      for(const item of sale.itens||[]){if(item.produtoId)row.products.add(item.produtoId);if(item.categoria)row.categories.add(norm(item.categoria))}
-      periodRows.set(clientId,row)
-    }
-    const previousPurchaseByClient=new Map();
-    for(const sale of allSales){const clientId=sale.clienteId||sale.clientId||sale.customerId,date=new Date(sale.data||sale.createdAt);if(!clientId||Number.isNaN(date.getTime())||date>=period.start)continue;const previous=previousPurchaseByClient.get(clientId);if(!previous||date>previous)previousPurchaseByClient.set(clientId,date)}
-    const metrics=buildMetrics(data,clients),results=clients.map(client=>{
-      const metric=metrics.get(client.id),periodData=periodRows.get(client.id)||{spent:0,purchases:0,products:new Set(),categories:new Set(),firstPurchase:false},first=metric.firstPurchaseAt?new Date(metric.firstPurchaseAt):null;
-      periodData.firstPurchase=Boolean(first&&!Number.isNaN(first.getTime())&&first>=period.start&&first<=period.end);
+    const engine=CustomerMetricsService.build(data,{businessId:DB.getBusinessId?.()||''}),allSales=engine.sales,periodRows=engine.period(period.start,period.end),sales=allSales.filter(sale=>{const date=CustomerMetricsService.dateValue(CustomerMetricsService.saleDate(sale));return date>=period.start&&date<=period.end}),previousPurchaseByClient=new Map();
+    for(const [clientId,row] of periodRows)if(row.previousPurchaseAt)previousPurchaseByClient.set(clientId,new Date(row.previousPurchaseAt));
+    const metrics=buildMetrics(data,clients,engine),results=clients.map(client=>{
+      const metric=metrics.get(client.id),periodData=periodRows.get(client.id)||{spent:0,purchases:0,products:new Set(),categories:new Set(),firstPurchase:false};
       return{client,metric,period:periodData,classifications:classes(client,metric)}
     }),buyers=results.filter(row=>row.period.purchases>0),revenue=buyers.reduce((sum,row)=>sum+row.period.spent,0),newClients=results.filter(row=>row.period.firstPurchase).length,active=results.filter(row=>row.client.ativo!==false&&row.metric.daysSinceLastPurchase<=30).length;
     const recovered=buyers.filter(row=>{const previous=previousPurchaseByClient.get(row.client.id);return previous&&period.start-previous>=30*DAY}).length;

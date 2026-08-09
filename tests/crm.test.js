@@ -3,6 +3,7 @@ const fs=require('fs');
 const vm=require('vm');
 
 const crmSource=fs.readFileSync('js/crm.js','utf8');
+const metricsSource=fs.readFileSync('js/customer-metrics.js','utf8');
 const uiSource=fs.readFileSync('js/crm-ui.js','utf8');
 const storageSource=fs.readFileSync('js/storage.js','utf8');
 const backupSource=fs.readFileSync('js/backup.js','utf8');
@@ -45,6 +46,7 @@ const listeners={};
 const context={console,Date,Map,Set,Math,Number,String,Array,Object,JSON,structuredClone,crypto,window:null,DB:{carregar:()=>data,getBusinessId:()=>'biz_test',alterar:fn=>{fn(data);return data}},Utils:{uuid:()=>`id-${Math.random()}`},Mensagens:{latestCharge:()=>({date:'2026-02-17T10:00:00.000Z'})},FirebaseSession:{user:{uid:'u1'}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail}},addEventListener:(name,callback)=>{listeners[name]=callback},dispatchEvent:event=>listeners[event.type]?.(event)};
 context.window=context;
 vm.createContext(context);
+vm.runInContext(metricsSource,context);
 vm.runInContext(crmSource,context);
 
 const profile=context.CRMCliente.build('c1');

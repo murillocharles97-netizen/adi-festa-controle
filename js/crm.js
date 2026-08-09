@@ -42,7 +42,8 @@
     ];
     const related = groups.map((key) => {
       const list = (data[key] || []).filter(
-          (item) => (item.clienteId || item.clientId) === clientId,
+          (item) =>
+            (item.clienteId || item.clientId || item.customerId) === clientId,
         ),
         last = list.at(-1);
       return `${key}:${list.length}:${last?.updatedAt || last?.data || last?.createdAt || ""}`;
@@ -74,6 +75,12 @@
     };
   }
   function clientSales(data, id) {
+    if (window.CustomerMetricsService)
+      return (
+        CustomerMetricsService.build(data, {
+          businessId: DB.getBusinessId?.() || "",
+        }).byClient.get(id)?.sales || []
+      );
     return (data.vendas || [])
       .filter((item) => item.clienteId === id && !item.deletedAt)
       .sort((a, b) => stamp(a.data) - stamp(b.data));
@@ -378,18 +385,22 @@
       sig = signature(data, clientId),
       cached = cache.get(key);
     if (!options.force && cached?.signature === sig) return cached.value;
-    const sales = clientSales(data, clientId),
-      products = favoriteProducts(data, sales),
+    const centralMetric = window.CustomerMetricsService
+        ?.build(data, { businessId: DB.getBusinessId?.() || "" })
+        .byClient.get(clientId),
+      sales = centralMetric?.sales || clientSales(data, clientId),
+      products = centralMetric?.products || favoriteProducts(data, sales),
       dates = sales.map((item) => item.data).filter(Boolean),
-      totalSpent = sales.length
+      totalSpent = centralMetric?.totalSpent ?? (sales.length
         ? sales.reduce(
             (sum, item) => sum + num(item.valorFinal ?? item.valorTotal),
             0,
           )
-        : num(client.totalComprado),
-      purchaseCount = sales.length || num(client.quantidadeVendas),
-      lastPurchase = dates.at(-1) || client.ultimaCompra || null,
-      firstPurchase = dates[0] || null,
+        : num(client.totalComprado)),
+      purchaseCount = centralMetric?.purchaseCount ??
+        (sales.length || num(client.quantidadeVendas)),
+      lastPurchase = centralMetric?.lastPurchaseAt || dates.at(-1) || client.ultimaCompra || null,
+      firstPurchase = centralMetric?.firstPurchaseAt || dates[0] || null,
       lastCharge =
         window.Mensagens?.latestCharge?.(client, data)?.date ||
         client.lastChargeAt ||
@@ -404,7 +415,7 @@
         [...contacts, ...messages]
           .map((item) => item.data || item.openedWhatsAppAt || item.createdAt)
           .sort((a, b) => stamp(b) - stamp(a))[0] || null,
-      daysWithoutPurchase = dayDiff(lastPurchase),
+      daysWithoutPurchase = centralMetric?.daysSinceLastPurchase ?? dayDiff(lastPurchase),
       activity = !lastPurchase
         ? "no_data"
         : daysWithoutPurchase <= 30
@@ -419,7 +430,9 @@
         num(categoryTotals.get(product.categoria)) + product.quantidade,
       );
     const favoriteCategory =
-        [...categoryTotals].sort((a, b) => b[1] - a[1])[0]?.[0] || "Sem dados",
+        centralMetric?.favoriteCategoryName ||
+        [...categoryTotals].sort((a, b) => b[1] - a[1])[0]?.[0] ||
+        "Sem dados",
       campaigns = campaignSummary(data, clientId),
       value = {
         client,
@@ -427,11 +440,15 @@
         metrics: {
           totalSpent,
           purchaseCount,
-          averageTicket: purchaseCount ? totalSpent / purchaseCount : 0,
+          averageTicket:
+            centralMetric?.averageTicket ??
+            (purchaseCount ? totalSpent / purchaseCount : 0),
           firstPurchase,
           lastPurchase,
           daysWithoutPurchase,
-          largestPurchase: sales.reduce(
+          averagePurchaseIntervalDays:
+            centralMetric?.averagePurchaseIntervalDays ?? null,
+          largestPurchase: centralMetric?.largestPurchase ?? sales.reduce(
             (max, item) =>
               Math.max(max, num(item.valorFinal ?? item.valorTotal)),
             0,
@@ -439,7 +456,8 @@
           openBalance: Math.abs(Math.min(0, num(client.saldo))),
           lastCharge,
           lastContact,
-          topProduct: products[0]?.nome || "Sem dados",
+          topProduct:
+            centralMetric?.favoriteProductName || products[0]?.nome || "Sem dados",
           favoriteCategory,
           activity,
         },
