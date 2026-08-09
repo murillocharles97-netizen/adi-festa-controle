@@ -8,7 +8,7 @@ const metricsSource = fs.readFileSync("js/customer-metrics.js", "utf8");
 const DAY = 86400000;
 const isoDaysAgo = (days) => new Date(Date.now() - days * DAY).toISOString();
 
-function setup() {
+function setup(customize) {
   const clients = [
     { id: "a", nome: "Cliente A", telefone: "17999990001", ativo: true, totalComprado: 200, quantidadeVendas: 4, ultimaCompra: isoDaysAgo(0), dataNascimento: new Date().toISOString().slice(0, 10) },
     { id: "b", nome: "Cliente B", telefone: "17999990002", ativo: true, totalComprado: 100, quantidadeVendas: 2, ultimaCompra: isoDaysAgo(35) },
@@ -29,6 +29,7 @@ function setup() {
     metricasClientes: [],
     progressosCampanha: [{ id: "reward-b", clientId: "b", availableRewards: 1 }],
   };
+  customize?.(data);
   const context = {
     window: null,
     DB: { carregar: () => structuredClone(data), alterar() {} },
@@ -59,12 +60,56 @@ test("Melhores clientes usa compras do período e não exige classificação VIP
 
 test("segmentos de 30 e 60 dias ignoram quem nunca comprou", () => {
   const context = setup();
-  context.CRMDashboard.state.period = "all";
+  context.CRMDashboard.state.period = "30d";
   context.CRMDashboard.state.segment = "inactive30";
   context.CRMDashboard.invalidate();
   assert.deepEqual(ids(context.CRMDashboard.snapshot()), ["b", "c"]);
   context.CRMDashboard.state.segment = "inactive60";
-  assert.deepEqual(ids(context.CRMDashboard.snapshot()), ["c"]);
+  const inactive60 = context.CRMDashboard.snapshot();
+  assert.deepEqual(ids(inactive60), ["c"]);
+  assert.equal(inactive60.summary.inactive, 1, "quem nunca comprou não entra no KPI de inatividade");
+});
+
+test("clientes recuperados reutilizam o histórico central de compras", () => {
+  const context = setup((data) => {
+    data.clientes.push({ id: "recovered", nome: "Cliente recuperado", ativo: true });
+    data.vendas.push(
+      { id: "recovered-old", clienteId: "recovered", valorFinal: 10, data: isoDaysAgo(70), itens: [] },
+      { id: "recovered-new", clienteId: "recovered", valorFinal: 20, data: isoDaysAgo(5), itens: [] },
+    );
+  });
+  context.CRMDashboard.state.period = "30d";
+  context.CRMDashboard.invalidate();
+  assert.equal(context.CRMDashboard.snapshot().summary.recovered, 1);
+});
+
+test("período analítico não limita o universo dos segmentos de inatividade", () => {
+  const context = setup();
+  for (const period of ["today", "7d", "30d", "month"]) {
+    context.CRMDashboard.state.period = period;
+    context.CRMDashboard.state.segment = "inactive30";
+    context.CRMDashboard.invalidate();
+    assert.deepEqual(ids(context.CRMDashboard.snapshot()), ["b", "c"], period);
+  }
+});
+
+test("CRM mobile e desktop compartilham a mesma seleção central", () => {
+  const context = setup();
+  context.CRMDashboard.state.period = "30d";
+  context.CRMDashboard.state.segment = "inactive30";
+  context.CRMDashboard.invalidate();
+  const centralIds = ids(context.CRMDashboard.snapshot());
+  assert.deepEqual(centralIds, ["b", "c"]);
+  assert.match(fs.readFileSync("js/crm-mobile.js", "utf8"), /CRMDashboard\.snapshot\(\)/);
+  assert.match(source, /CustomerMetricsService\.isInactive\(metric,30\)/);
+});
+
+test("segmento remoto busca somente ultimaCompra anterior ao limite", () => {
+  const sync = fs.readFileSync("js/firebase/sync.js", "utf8");
+  assert.match(sync, /queryClientsByInactivity/);
+  assert.match(sync, /field: "ultimaCompra", operator: "<=", value: cutoff/);
+  assert.match(sync, /includeInactive: true/);
+  assert.doesNotMatch(sync.match(/async function queryClientsByInactivity[\s\S]*?\n\}/)?.[0] || "", /queryAllClientsForAction/);
 });
 
 test("novos, aniversariantes, sem contato e recompensas usam dados reais", () => {
@@ -145,7 +190,7 @@ test("wizard consome público CRM somente dentro da mesma empresa", () => {
 
 test("cache PWA publica a revisão da busca e das ações", () => {
   const worker = fs.readFileSync("service-worker.js", "utf8");
-  assert.match(worker, /adi-festa-v79-desktop-bootstrap-recovery/);
+  assert.match(worker, /adi-festa-v82-client-search-resume/);
   assert.match(worker, /customer-metrics\.js/);
   assert.match(worker, /client-cloud-pagination\.js/);
   assert.match(worker, /crm-mobile\.js/);

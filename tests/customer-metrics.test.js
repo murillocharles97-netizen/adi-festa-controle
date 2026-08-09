@@ -114,6 +114,29 @@ test("segmentos controlados usam primeira e última compra reais", () => {
   );
 });
 
+test("inatividade usa dias civis do Brasil e inclui exatamente o trigésimo dia", () => {
+  const clientes = [5, 29, 30, 31, 90].map((days) => ({ id: `d${days}`, nome: `${days} dias` }));
+  clientes.push({ id: "never", nome: "Nunca comprou" });
+  const vendas = [5, 29, 30, 31, 90].map((days) =>
+    sale(`sale-${days}`, "clienteId", `d${days}`, 10, days),
+  );
+  const engine = Metrics.build({ clientes, vendas }, { businessId: "empresa-a", now: NOW });
+  const inactive30 = [...engine.byClient.values()]
+    .filter((metric) => Metrics.isInactive(metric, 30))
+    .map((metric) => metric.id);
+  const inactive60 = [...engine.byClient.values()]
+    .filter((metric) => Metrics.isInactive(metric, 60))
+    .map((metric) => metric.id);
+  assert.deepEqual(inactive30, ["d30", "d31", "d90"]);
+  assert.deepEqual(inactive60, ["d90"]);
+  assert.equal(Metrics.isInactive(engine.byClient.get("never"), 30), false);
+  assert.equal(
+    Metrics.daysBetween("2026-07-09T23:59:59-03:00", "2026-08-08T00:01:00-03:00"),
+    30,
+  );
+  assert.equal(Metrics.inactivityCutoff(30, NOW), "2026-07-10T02:59:59.999Z");
+});
+
 test("cancelamento, exclusão e repetição idempotente não entram nas métricas", () => {
   const data = fixture();
   data.vendas.push(sale("cancelada", "clienteId", "ana", 500, 1, { status: "cancelada" }));

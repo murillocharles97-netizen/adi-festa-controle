@@ -388,11 +388,19 @@
       .join("")}</div></section>`;
   }
   function render() {
-    const view = aggregate(DB.carregar()),
+    window.AppBootDiagnostics?.count?.("dashboardRenderCount");
+    const renderStartedAt = window.performance?.now?.() ?? Date.now(),
+      view = aggregate(DB.carregar()),
       receivableTitle = view.creditEnabled ? "A receber" : "Receita da base",
       receivableValue = view.creditEnabled
         ? view.openBalance
         : view.baseRevenue;
+    window.AppBootDiagnostics?.phase?.("dashboard data aggregated", {
+      durationMs: Math.round((window.performance?.now?.() ?? Date.now()) - renderStartedAt),
+      clients: view.clients.length,
+      sales: view.sales.length,
+      products: view.products.length,
+    });
     return `<section class="desktop-dashboard" data-desktop-dashboard><section class="desktop-kpis">${kpi("Vendas hoje", money(view.todayRevenue), `${view.today.length} venda(s)`, "shopping-cart", null)}${kpi("Recebido hoje", money(view.receivedToday), "pagamentos recebidos", "circle-dollar-sign", null)}${kpi("Clientes ativos", view.clients.length, "cadastrados", "users", null)}${kpi("Produtos cadastrados", view.products.length, "itens ativos", "package", null)}${kpi("Lucro estimado", money(view.todayProfit), "hoje", "trending-up", null)}${kpi(receivableTitle, money(receivableValue), view.creditEnabled ? "saldo de clientes" : "histórico da base", view.creditEnabled ? "hand-coins" : "chart-line", null, view.creditEnabled ? "danger" : "default")}</section><section class="desktop-performance-grid"><article class="desktop-panel desktop-sales-performance">${panelHeader("Desempenho de vendas")}<label>Período<select id="desktop-dashboard-period"><option value="today">Hoje</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="month">Mês atual</option></select></label><div class="desktop-performance-value"><strong>${money(view.revenue)}</strong>${trend(view.revenueGrowth)}</div><div class="desktop-chart-layout">${chart(view.daily)}<aside><span><small>Média diária</small><b>${money(view.averageDaily)}</b></span><span><small>Melhor dia</small><b>${view.best.date ? view.best.date.toLocaleDateString("pt-BR") : "—"}</b><em>${money(view.best.value)}</em></span><span><small>Ticket médio</small><b>${money(view.ticket)}</b></span><span><small>Crescimento</small><b>${view.revenueGrowth.toFixed(1).replace(".", ",")}%</b></span></aside></div></article><section class="desktop-panel desktop-finance">${panelHeader("Painel financeiro")}<div><span><small>Recebido no período</small><b class="positive">${money((view.db.pagamentos || []).filter((payment) => within(payment.data || payment.createdAt, view.selected.start, view.selected.end)).reduce((sum, payment) => sum + number(payment.valor), 0))}</b></span><span><small>A receber</small><b class="negative">${money(view.openBalance)}</b></span><span><small>Despesas</small><b>${money(0)} <em>placeholder</em></b></span><span class="forecast"><small>Saldo previsto</small><b>${money(view.revenue - view.openBalance)}</b></span></div></section>${topProducts(view)}</section>${quickActions()}<section class="desktop-command-grid">${recentSales(view)}${alerts(view)}${crmSummary(view)}</section>${campaignSummary(view)}</section>`;
   }
   function bind() {

@@ -268,7 +268,10 @@ export function createFirestoreRepository(collectionName) {
       return {
         items: snapshot.docs
           .map((item) => convert(item))
-          .filter((item) => !item.deletedAt && item.active !== false),
+          .filter(
+            (item) =>
+              !item.deletedAt && (options.includeInactive || item.active !== false),
+          ),
         cursor: snapshot.docs.at(-1) || null,
         hasMore: snapshot.docs.length === max,
         documentsRead: snapshot.size,

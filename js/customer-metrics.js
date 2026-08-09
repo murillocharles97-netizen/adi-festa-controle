@@ -64,6 +64,28 @@
     return start == null || end == null ? null : Math.max(0, end - start);
   }
 
+  function inactivityCutoff(days, now = new Date()) {
+    const currentDay = brazilDayNumber(now),
+      threshold = Math.max(0, Number(days) || 0);
+    if (currentDay == null) return null;
+    const target = new Date((currentDay - threshold) * DAY),
+      year = target.getUTCFullYear(),
+      month = String(target.getUTCMonth() + 1).padStart(2, "0"),
+      day = String(target.getUTCDate()).padStart(2, "0");
+    // O Brasil não adota horário de verão desde 2019. O fim do dia em
+    // São Paulo inclui toda a data-limite na consulta remota; a decisão final
+    // continua sendo feita por daysBetween(), com o timezone explícito.
+    return new Date(`${year}-${month}-${day}T23:59:59.999-03:00`).toISOString();
+  }
+
+  function isInactive(metric = {}, days = 30) {
+    return Boolean(
+      metric.lastPurchaseAt &&
+        Number.isFinite(Number(metric.daysSinceLastPurchase)) &&
+        Number(metric.daysSinceLastPurchase) >= Math.max(0, Number(days) || 0),
+    );
+  }
+
   function saleClientId(sale = {}) {
     return text(sale.clienteId || sale.clientId || sale.customerId);
   }
@@ -323,6 +345,8 @@
     build,
     dateValue,
     daysBetween,
+    inactivityCutoff,
+    isInactive,
     isValidSale,
     itemProductId,
     saleClientId,
