@@ -127,7 +127,7 @@
       </nav>
       <section class="crm-mobile-list-head"><span><b>${snapshot.list.length}</b> clientes encontrados</span><div><button type="button" data-crm-more-filters>Ordenar: <b>${esc(sortLabel[current.sort] || "Maior gasto")}</b> ${icon("arrow-down-up")}</button><button type="button" class="crm-mobile-segment-actions" data-crm-actions aria-label="Abrir ações do segmento">${icon("ellipsis")} Ações</button></div></section>
       <section class="crm-mobile-list" id="crm-mobile-list">
-        ${rows.map((row, index) => card(row, index, credit)).join("") || `<div class="crm-mobile-empty">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Tente alterar o período, mudar o filtro ou visualizar todos os clientes.</p><button type="button" data-crm-reset>Visualizar todos</button></div>`}
+        ${rows.map((row, index) => card(row, index, credit)).join("") || (current.loadingSegment ? `<div class="crm-mobile-empty" aria-live="polite">${icon("loader-circle")}<b>Atualizando segmento…</b><p>Buscando somente os clientes com compra antiga.</p></div>` : `<div class="crm-mobile-empty">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Não há clientes com compra registrada que atendam a este limite.</p><button type="button" data-crm-reset>Visualizar todos</button></div>`)}
       </section>
       ${rows.length < snapshot.list.length ? `<button type="button" class="crm-mobile-load" id="crm-more">Carregar mais 20 clientes</button><div class="crm-mobile-sentinel" aria-hidden="true"></div>` : ""}
     </section>`;
@@ -203,7 +203,6 @@
       window.CRMDashboard.refresh();
     };
     $("[data-crm-apply]").onclick = () => {
-      current.segment = segment;
       current.sort = sort;
       current.filters.phone = Boolean($("#crm-phone")?.checked);
       current.filters.email = Boolean($("#crm-email")?.checked);
@@ -211,7 +210,7 @@
       current.filters.debt = Boolean($("#crm-debt")?.checked);
       current.limit = 20;
       closeSheet();
-      window.CRMDashboard.refresh();
+      window.CRMDashboard.selectSegment(segment);
     };
     window.lucide?.createIcons();
   }
@@ -256,9 +255,7 @@
       }, 300);
     });
     $$('[data-crm-segment]').forEach((button) => button.onclick = () => {
-      current.segment = button.dataset.crmSegment;
-      current.limit = 20;
-      window.CRMDashboard.refresh();
+      window.CRMDashboard.selectSegment(button.dataset.crmSegment);
     });
     $$('[data-crm-more-filters]').forEach((button) => button.onclick = filtersSheet);
     $(`[data-crm-actions]`)?.addEventListener("click", () => window.CRMDashboard.openActions());

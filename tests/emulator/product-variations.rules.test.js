@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
-const {collection,doc,getDoc,getDocs,limit,onSnapshot,orderBy,query,runTransaction,setDoc,startAfter,updateDoc}=require('firebase/firestore');
+const {collection,doc,getDoc,getDocs,limit,onSnapshot,orderBy,query,runTransaction,setDoc,startAfter,updateDoc,where}=require('firebase/firestore');
 
 let env;
 const projectId='adi-festa-variations-test';
@@ -25,6 +25,7 @@ test.before(async()=>{
     await setDoc(doc(db,'businesses',businessExpired,'clients','existing-client'),{id:'existing-client',businessId:businessExpired,nome:'Cliente existente',active:true});
     await setDoc(doc(db,'businesses',businessA,'clients','financial-client'),{id:'financial-client',businessId:businessA,ownerId:'owner-a',nome:'Cliente financeiro',saldo:-50,active:true});
     for(let index=0;index<25;index++)await setDoc(doc(db,'businesses',businessA,'clients',`paged-${String(index).padStart(2,'0')}`),{id:`paged-${String(index).padStart(2,'0')}`,businessId:businessA,ownerId:'owner-a',nome:`Cliente ${String(index).padStart(2,'0')}`,nomeNormalizado:`cliente ${String(index).padStart(2,'0')}`,telefoneNormalizado:`55170000${String(index).padStart(4,'0')}`,saldo:index%2?-index:0,active:true});
+    for(const [id,date] of [['inactivity-29','2026-07-10T15:00:00.000Z'],['inactivity-30','2026-07-09T15:00:00.000Z'],['inactivity-90','2026-05-10T15:00:00.000Z']])await setDoc(doc(db,'businesses',businessA,'clients',id),{id,businessId:businessA,ownerId:'owner-a',nome:id,nomeNormalizado:id,ultimaCompra:date,active:true});
   });
 });
 
@@ -35,8 +36,15 @@ test('pagina clientes em blocos de 20 e mantém isolamento por empresa',async()=
   const first=await assertSucceeds(getDocs(query(ref,orderBy('nomeNormalizado'),limit(20))));
   assert.equal(first.size,20);
   const second=await assertSucceeds(getDocs(query(ref,orderBy('nomeNormalizado'),startAfter(first.docs.at(-1)),limit(20))));
-  assert.equal(second.size,5);
+  assert.equal(second.size,8);
   await assertFails(getDocs(query(collection(db,'businesses',businessB,'clients'),orderBy('nomeNormalizado'),limit(20))));
+});
+
+test('segmento de inatividade consulta ultimaCompra sem atravessar empresas',async()=>{
+  const cutoff='2026-07-10T02:59:59.999Z',db=env.authenticatedContext('owner-a').firestore(),ref=collection(db,'businesses',businessA,'clients');
+  const result=await assertSucceeds(getDocs(query(ref,where('ultimaCompra','<=',cutoff),orderBy('ultimaCompra','desc'))));
+  assert.deepEqual(result.docs.map(item=>item.id),['inactivity-30','inactivity-90']);
+  await assertFails(getDocs(query(collection(db,'businesses',businessB,'clients'),where('ultimaCompra','<=',cutoff),orderBy('ultimaCompra','desc'))));
 });
 
 const variant=(businessId,parentProductId,id='variant-1')=>({id,businessId,ownerId:businessId===businessA?'owner-a':'owner-b',parentProductId,attributeValues:{sabor:'Ferrero'},displayName:'Ferrero',displayNameNormalized:'ferrero',searchTokens:['ferrero','789'],sku:'FER',barcode:'789',price:14,cost:6,stock:8,minStock:2,active:true,catalogVisible:true,allowNegativeStock:false,imageUrl:null,createdAt:new Date(),updatedAt:new Date(),schemaVersion:10,version:1});

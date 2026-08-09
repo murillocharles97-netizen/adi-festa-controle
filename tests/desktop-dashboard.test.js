@@ -2,6 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
+const {performance}=require('node:perf_hooks');
 
 const source=fs.readFileSync('js/desktop-dashboard.js','utf8');
 const app=fs.readFileSync('js/app.js','utf8');
@@ -25,4 +26,16 @@ test('mobile continua usando MobileHome e estilos desktop começam em 768px',()=
   assert.match(app,/window\.MobileHome\?\.isMobile\(\)[\s\S]*MobileHome\.render\(\)/);
   assert.match(css,/@media\s*\(min-width:\s*768px\)/);
   assert.doesNotMatch(css,/@media\s*\(max-width:\s*767px\)/);
+});
+
+test('dashboard permanece responsivo com historico local grande',()=>{
+  const now=Date.now(),clients=Array.from({length:1000},(_,index)=>({id:`c${index}`,nome:`Cliente ${index}`,ativo:true,totalComprado:100,quantidadeVendas:10,saldo:index%4?-20:0,ultimaCompra:new Date(now-index*86400000).toISOString(),criadoEm:new Date(now-40*86400000).toISOString()}));
+  const sales=Array.from({length:10000},(_,index)=>({id:`v${index}`,data:new Date(now-(index%45)*86400000).toISOString(),valorFinal:20,lucro:8,status:'pago',clienteNome:`Cliente ${index%1000}`,itens:[{produtoId:`p${index%20}`,nome:`Produto ${index%20}`,quantidade:1,subtotalFinal:20}]}));
+  const db={vendas:sales,pagamentos:[],clientes:clients,produtos:[],campanhas:[],progressosCampanha:[],recompensas:[],catalogOrders:[]};
+  const sandbox={window:null,DB:{carregar:()=>db},Utils:{hoje:value=>new Date(value).toDateString()===new Date(now).toDateString(),dinheiro:value=>String(value),escapar:value=>String(value)},OperationMode:{enabled:()=>false},Campanhas:{metricas:()=>({active:0,participants:0,redemptions:0,conversion:0}),status:()=>''},getProductStockStatus:()=> 'disponivel',performance,Date,Map,Set,Math,Number,String,Array,Object,JSON};
+  sandbox.window=sandbox;vm.createContext(sandbox);vm.runInContext(source,sandbox);
+  const started=performance.now(),html=sandbox.DesktopDashboard.render(),duration=performance.now()-started;
+  console.log(`[dashboard benchmark] sales=10000 clients=1000 render=${duration.toFixed(2)}ms`);
+  assert.match(html,/desktop-dashboard/);
+  assert.ok(duration<2000,`dashboard levou ${duration.toFixed(2)}ms`);
 });

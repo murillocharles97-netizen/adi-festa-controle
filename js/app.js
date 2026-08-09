@@ -1006,6 +1006,8 @@
       : link.removeAttribute("tabindex");
   }
   function render(route) {
+    window.AppBootDiagnostics?.count?.("routeRenderCount", { route });
+    const renderStartedAt = performance.now();
     if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
@@ -1052,6 +1054,10 @@
     if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
     window.lucide?.createIcons();
+    window.AppBootDiagnostics?.phase?.("route rendered", {
+      route,
+      durationMs: Math.round(performance.now() - renderStartedAt),
+    });
   }
   const sidebar = $("#sidebar"),
     overlay = $("#overlay"),
@@ -1139,6 +1145,9 @@
   let cloudRenderTimer = null,
     cloudRenderPending = false;
   function scheduleCloudRender() {
+    window.AppBootDiagnostics?.count?.("dataChangedCount", {
+      route: Router.atual(),
+    });
     cloudRenderPending = true;
     clearTimeout(cloudRenderTimer);
     cloudRenderTimer = setTimeout(() => {
@@ -1177,7 +1186,10 @@
       event.stopImmediatePropagation();
       clearTimeout(stableSearchTimer);
       const value = event.target.value;
-      if (client) window.ClientCloudPagination?.cancel?.();
+      if (client) {
+        window.ClientesMobile?.setSearchTerm?.(value);
+        window.ClientCloudPagination?.cancel?.();
+      }
       stableSearchTimer = setTimeout(
         () =>
           client

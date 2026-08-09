@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=61";
+import { createFirestoreRepository } from "./firestore-repository.js?v=62";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -75,9 +75,33 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
 ]);
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
-const DEFAULT_PULL_NAMES = CLOUD_NAMES.filter(
-  (name) => name !== "productVariants" && !REALTIME_NAMES.has(name),
-);
+// O boot precisa apenas dos dados que alimentam o dashboard. As demais
+// coleções continuam chegando pelo sinal incremental ou por sincronização
+// manual, sem varrer todo o histórico de uma conta nova no dispositivo.
+const DEFAULT_PULL_NAMES = [
+    "clients",
+    "sales",
+    "payments",
+    "campaigns",
+    "campaignProgress",
+    "rewards",
+  ],
+  INITIAL_FULL_NAMES = new Set(["clients", "campaigns"]),
+  INITIAL_RECENT_LIMITS = {
+    sales: 200,
+    payments: 200,
+    campaignProgress: 100,
+    rewards: 100,
+    balanceAdjustments: 100,
+    stockMovements: 100,
+    charges: 100,
+    messageHistory: 100,
+    messageSequences: 50,
+    clientContacts: 100,
+    customerSegments: 100,
+    visits: 50,
+    catalogOrders: 100,
+  };
 const AUDIT_NAMES = [
     "products",
     "productVariants",
@@ -101,6 +125,7 @@ let currentUser = null,
   originalAlter = null,
   applyingCloud = false,
   processingPromise = null,
+  automaticSyncPromise = null,
   autoTimer = null,
   quickTimer = null,
   unsubscribers = [],
@@ -1848,7 +1873,7 @@ function applyCloudCollection(name, documents, options = {}) {
   } finally {
     applyingCloud = false;
   }
-  notifyCloudCollectionChange(name, changed);
+  if (options.notify !== false) notifyCloudCollectionChange(name, changed);
   return changed;
 }
 function applyCloudCollectionBatch(entries) {
@@ -2126,6 +2151,7 @@ async function refreshUserContext() {
 }
 async function pullCloudCollections(options = {}) {
   await validateUser();
+  const hydrateStartedAt = performance.now();
   const force = Boolean(options.force),
     full = Boolean(options.full),
     crmSources = new Set([
@@ -2143,12 +2169,21 @@ async function pullCloudCollections(options = {}) {
   const pullState = readPullState(),
     businessId = activeBusinessId(),
     pendingApplications = [];
+  let initialCollections = 0,
+    documentsRead = 0;
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
       since = full ? "" : pullState[markerKey] || "",
       documents = since
         ? await repositories[name].listChangedSince(since, 500)
-        : await repositories[name].listAllPaged(200);
+        : full || INITIAL_FULL_NAMES.has(name)
+          ? await repositories[name].listAllPaged(200)
+          : await repositories[name].listRecent(
+              INITIAL_RECENT_LIMITS[name] || 100,
+              { force: true },
+            );
+    if (!since) initialCollections++;
+    documentsRead += documents.length;
     if (!since)
       state.cloudCounts[name] = documents.filter(
         (item) => !item.deletedAt,
@@ -2178,6 +2213,11 @@ async function pullCloudCollections(options = {}) {
     pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
   received = applyCloudCollectionBatch(pendingApplications);
+  if (initialCollections)
+    window.AppBootDiagnostics?.count?.("hydrateCount", {
+      collections: initialCollections,
+      documents: documentsRead,
+    });
   writePullState(pullState);
   lastPullAt = Date.now();
   emit({
@@ -2186,6 +2226,13 @@ async function pullCloudCollections(options = {}) {
     cloudFinancial: { ...state.cloudFinancial },
     received,
     hydrated: true,
+  });
+  window.AppBootDiagnostics?.phase?.("cloud hydration completed", {
+    durationMs: Math.round(performance.now() - hydrateStartedAt),
+    collections: names.length,
+    initialCollections,
+    documents: documentsRead,
+    full,
   });
   return received;
 }
@@ -2218,7 +2265,10 @@ async function queryClientsPage(options = {}) {
       cursor: options.cursor || null,
       max,
     });
-    applyCloudCollection("clients", result.items, { authoritative: false });
+    applyCloudCollection("clients", result.items, {
+      authoritative: false,
+      notify: false,
+    });
     return { ...result, queryField: field };
   }
   const sortMap = {
@@ -2244,7 +2294,10 @@ async function queryClientsPage(options = {}) {
     cursor: options.cursor || null,
     max,
   });
-  applyCloudCollection("clients", result.items, { authoritative: false });
+  applyCloudCollection("clients", result.items, {
+    authoritative: false,
+    notify: false,
+  });
   return result;
 }
 async function queryAllClientsForAction(options = {}) {
@@ -2271,6 +2324,47 @@ async function queryAllClientsForAction(options = {}) {
   }
   return {
     items: [...new Map(items.map((item) => [item.id, item])).values()],
+    documentsRead,
+    pages,
+    complete: !hasMore,
+  };
+}
+async function queryClientsByInactivity(options = {}) {
+  await validateUser();
+  const days = Math.max(1, Number(options.days || 30)),
+    cutoff =
+      options.cutoff ||
+      window.CustomerMetricsService?.inactivityCutoff?.(days, options.now || new Date());
+  if (!cutoff)
+    throw Object.assign(new Error("Não foi possível calcular a data-limite do segmento."), {
+      code: "invalid-argument",
+    });
+  const items = [];
+  let cursor = null,
+    hasMore = true,
+    documentsRead = 0,
+    pages = 0;
+  while (hasMore && pages < 200) {
+    const result = await repositories.clients.listQueryPage({
+      filters: [{ field: "ultimaCompra", operator: "<=", value: cutoff }],
+      orders: [{ field: "ultimaCompra", direction: "desc" }],
+      cursor,
+      max: 50,
+      includeInactive: true,
+    });
+    items.push(...result.items);
+    documentsRead += Number(result.documentsRead || result.items.length);
+    hasMore = Boolean(result.hasMore);
+    cursor = result.cursor || null;
+    pages += 1;
+    if (hasMore && !cursor) break;
+  }
+  const unique = [...new Map(items.map((item) => [item.id, item])).values()];
+  applyCloudCollection("clients", unique, { authoritative: false });
+  return {
+    items: unique,
+    cutoff,
+    days,
     documentsRead,
     pages,
     complete: !hasMore,
@@ -3132,10 +3226,11 @@ async function synchronizeNow() {
   });
   return result;
 }
-async function automaticSync() {
+async function runAutomaticSync() {
   quickTimer = null;
   if (!currentUser || !navigator.onLine || processingPromise || cloudPaused)
     return;
+  window.AppBootDiagnostics?.count?.("initialSyncCount");
   try {
     if (!state.testPassed) await testFirestoreConnection();
     const push = await processSyncQueue(),
@@ -3175,6 +3270,13 @@ async function automaticSync() {
     if (errorCode(error) === "resource-exhausted") cloudPaused = true;
     if (state.status !== "error") reportError(error, "Automatic sync");
   }
+}
+function automaticSync() {
+  if (automaticSyncPromise) return automaticSyncPromise;
+  automaticSyncPromise = runAutomaticSync().finally(() => {
+    automaticSyncPromise = null;
+  });
+  return automaticSyncPromise;
 }
 function scheduleImmediate() {
   clearTimeout(quickTimer);
@@ -3450,7 +3552,10 @@ addEventListener("online", () => {
 });
 addEventListener("offline", updateQueueState);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") scheduleImmediate();
+  if (document.visibilityState === "visible") {
+    window.ClientCloudPagination?.resume?.("visibilitychange");
+    scheduleImmediate();
+  }
 });
 
 window.FirestoreRepositories = repositories;
@@ -3485,6 +3590,7 @@ window.SyncFirebase = {
   pullCloudCollections,
   queryClientsPage,
   queryAllClientsForAction,
+  queryClientsByInactivity,
   loadProductVariants,
   findProductVariantByBarcode,
   compare: compareLocalAndCloud,

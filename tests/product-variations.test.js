@@ -67,7 +67,8 @@ test('integrações usam variação sem listeners por card',()=>{
   const checkout=fs.readFileSync('js/checkout.js','utf8'),sync=fs.readFileSync('js/firebase/sync.js','utf8'),catalog=fs.readFileSync('js/catalogo-admin.js','utf8'),portal=fs.readFileSync('js/catalogo-publico.js','utf8'),rules=fs.readFileSync('firestore.rules','utf8');
   assert.match(checkout,/openVariantPicker|variablePicker/);
   assert.match(sync,/productVariants\s*:\s*\{\s*key\s*:\s*["']variacoesProdutos["']/);
-  assert.match(sync,/name\s*!==\s*["']productVariants["']/);
+  const bootstrapPull=sync.slice(sync.indexOf('const DEFAULT_PULL_NAMES'),sync.indexOf('const AUDIT_NAMES'));
+  assert.doesNotMatch(bootstrapPull,/["']productVariants["']/);
   assert.match(sync,/listWhere\(\s*["']parentProductId["']/);
   assert.match(catalog,/variants/);
   assert.match(portal,/variantId/);
