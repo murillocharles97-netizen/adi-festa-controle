@@ -82,6 +82,10 @@ window.Vendas = (() => {
             produto?.imagem ||
             "",
           imageUpdatedAt: i.imageUpdatedAt || produto?.imageUpdatedAt || null,
+          categoryId:
+            i.categoryId || i.categoriaId || produto?.categoryId || produto?.categoriaId || null,
+          categoryNameSnapshot:
+            i.categoryNameSnapshot || i.categoria || produto?.categoria || "Sem categoria",
           quantidade,
           quantity: quantidade,
           precoOriginal,
@@ -112,6 +116,9 @@ window.Vendas = (() => {
         id: Utils.uuid(),
         operationId,
         clienteId: d.clienteId || null,
+        clientId: d.clienteId || null,
+        customerId: d.clienteId || null,
+        businessId: DB.getBusinessId?.() || null,
         clienteNome: cliente?.nome || "Venda avulsa",
         itens,
         subtotalOriginal,
@@ -126,6 +133,7 @@ window.Vendas = (() => {
           window.CheckoutPaymentMethod ||
           (d.status === "fiado" ? "fiado" : "pago"),
         data,
+        createdAt: data,
         observacao: d.observacao || "",
         saldoAnterior,
         saldoAtual,
@@ -313,7 +321,14 @@ window.Vendas = (() => {
           0,
           Number(cliente.quantidadeVendas || 0) - 1,
         );
-        const anteriores = db.vendas.filter((v) => v.clienteId === cliente.id);
+        const anteriores = db.vendas.filter((v) =>
+          window.CustomerMetricsService
+            ? CustomerMetricsService.saleClientId(v) === cliente.id &&
+              CustomerMetricsService.isValidSale(v, {
+                businessId: DB.getBusinessId?.() || "",
+              })
+            : v.clienteId === cliente.id,
+        );
         cliente.ultimaCompra = anteriores.length
           ? anteriores[anteriores.length - 1].data
           : null;

@@ -55,12 +55,15 @@ test("infraestrutura global publica safe areas e preserva botão existente", () 
   assert.match(css, /\.bottom-nav\{[^}]*height:var\(--mobile-bottom-safe-height\)/);
   assert.match(navigation, /if \(initialized\) return;/);
   assert.match(navigation, /bindGestures\(\)/);
+  assert.match(navigation, /addEventListener\("touchstart", onTouchStart/);
+  assert.match(navigation, /addEventListener\("touchmove", onTouchMove, \{ passive: false, capture: true \}\)/);
+  assert.match(navigation, /Date\.now\(\) - lastTouchAt < 750/);
   assert.match(navigation, /#mobile-drawer-close["']\)\?\.addEventListener\(["']click/);
   assert.match(app, /overlay\.onclick\s*=/);
   assert.match(app, /MobileNavigation\.toggle\(\)/);
   assert.match(navigation, /\[data-swipe-client\]/);
   assert.match(navigation, /\[data-product-shell\]/);
   assert.match(navigation, /#modal > \*/);
-  assert.match(serviceWorker, /adi-festa-v77-mobile-safe-area/);
+  assert.match(serviceWorker, /adi-festa-v78-crm-data-foundation/);
   assert.match(serviceWorker, /mobile-navigation-gesture\.js/);
 });

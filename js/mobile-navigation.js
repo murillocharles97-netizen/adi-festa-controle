@@ -11,6 +11,8 @@
   let initialized = false;
   let pendingRoute = "";
   let pointerState = null;
+  let touchState = null;
+  let lastTouchAt = 0;
 
   const sidebar = () => document.querySelector("#sidebar");
   const overlay = () => document.querySelector("#overlay");
@@ -38,7 +40,7 @@
   }
 
   function onPointerDown(event) {
-    if (!gesture || !isMobile() || event.isPrimary === false || event.pointerType === "mouse") return;
+    if (!gesture || !isMobile() || event.isPrimary === false || event.pointerType === "mouse" || Date.now() - lastTouchAt < 750) return;
     const openNow = Boolean(sidebar()?.classList.contains("open"));
     if (!openNow && document.querySelector("#modal > *, .product-sheet-overlay.open, .message-overlay")) return;
     if (openNow && !event.target.closest?.("#sidebar")) return;
@@ -85,11 +87,79 @@
     if (action === "close") close();
   }
 
+  function touchById(list, identifier) {
+    return [...(list || [])].find((touch) => touch.identifier === identifier) || null;
+  }
+
+  function resetTouch() {
+    touchState = null;
+  }
+
+  function onTouchStart(event) {
+    lastTouchAt = Date.now();
+    if (!gesture || !isMobile() || event.touches.length !== 1) return resetTouch();
+    const touch = event.touches[0],
+      openNow = Boolean(sidebar()?.classList.contains("open"));
+    if (!openNow && document.querySelector("#modal > *, .product-sheet-overlay.open, .message-overlay")) return;
+    if (openNow && !event.target.closest?.("#sidebar")) return;
+    const safeLeft = cssPixels("--safe-left"),
+      horizontalOwner = !openNow && ownsHorizontalGesture(event.target);
+    if (!openNow && (touch.clientX > safeLeft + gesture.EDGE_ZONE || horizontalOwner)) return;
+    touchState = {
+      identifier: touch.identifier,
+      pointerType: "touch",
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      drawerOpen: openNow,
+      safeLeft,
+      horizontalOwner,
+      vertical: false,
+    };
+  }
+
+  function onTouchMove(event) {
+    if (!touchState) return;
+    const touch = touchById(event.touches, touchState.identifier);
+    if (!touch) return;
+    touchState.lastX = touch.clientX;
+    touchState.lastY = touch.clientY;
+    const deltaX = touch.clientX - touchState.startX,
+      deltaY = touch.clientY - touchState.startY;
+    if (!touchState.vertical && Math.abs(deltaY) > Math.abs(deltaX) + 8 && Math.abs(deltaY) > 10)
+      touchState.vertical = true;
+    if (touchState.vertical) return;
+    const correctDirection = touchState.drawerOpen ? deltaX < 0 : deltaX > 0;
+    if (correctDirection && gesture.horizontalIntent(deltaX, deltaY)) event.preventDefault();
+  }
+
+  function onTouchEnd(event) {
+    if (!touchState) return;
+    const state = touchState,
+      touch = touchById(event.changedTouches, state.identifier);
+    resetTouch();
+    if (state.vertical) return;
+    const action = gesture.classifySwipe({
+      ...state,
+      endX: touch?.clientX ?? state.lastX,
+      endY: touch?.clientY ?? state.lastY,
+    });
+    if (action === "open") open();
+    if (action === "close") close();
+  }
+
   function bindGestures() {
     document.addEventListener("pointerdown", onPointerDown, { passive: true });
     document.addEventListener("pointermove", onPointerMove, { passive: false });
     document.addEventListener("pointerup", onPointerEnd, { passive: true });
     document.addEventListener("pointercancel", resetPointer, { passive: true });
+    // O Safari em PWA pode cancelar Pointer Events iniciados na borda. Touch
+    // Events em capture preservam o gesto real sem disputar o scroll vertical.
+    document.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
+    document.addEventListener("touchcancel", resetTouch, { passive: true, capture: true });
   }
 
   function setGroup(name, expanded) {
