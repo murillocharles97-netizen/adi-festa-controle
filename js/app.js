@@ -34,7 +34,7 @@
       try {
         salvar(new FormData(e.target));
         Modais.fechar();
-        render(Router.atual());
+        mountRoute(Router.atual());
       } catch (err) {
         toast(err.message, true);
       }
@@ -448,7 +448,7 @@
               `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Importação concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon("check")}</div><h2>${r.clientes} clientes importados</h2><p>${r.telefones} telefones importados</p><p>${r.devedores} clientes com saldo devedor</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(r.totalEmAberto)}</strong></div>${r.creditores ? `<p>${r.creditores} clientes com crédito</p>` : ""}</div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;
             $("#modal .done").onclick = () => {
               Modais.fechar();
-              render("clientes");
+              mountRoute("clientes");
             };
             window.lucide?.createIcons();
           };
@@ -507,7 +507,7 @@
       if (b.dataset.ignoreCharge) {
         Cobrancas.registrar(b.dataset.ignoreCharge, "ignorado");
         toast("Cobrança ignorada por hoje");
-        render("cobrancas");
+        mountRoute("cobrancas");
       }
     };
   }
@@ -556,7 +556,7 @@
           Modais.confirmar("cliente", () => {
             Clientes.excluir(b.dataset.deleteClient);
             toast("Cliente excluído");
-            render(route);
+            mountRoute(route);
           });
         if (b.dataset.clientWhatsapp) {
           const c = Clientes.obter(b.dataset.clientWhatsapp),
@@ -611,7 +611,7 @@
           Modais.confirmar("produto", () => {
             Produtos.excluir(b.dataset.deleteProduct);
             toast("Produto excluído");
-            render(route);
+            mountRoute(route);
           });
       };
     }
@@ -852,7 +852,7 @@
       `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Restauração concluída</h3></header><div class="modal-body import-result"><div class="confirm-icon import-success">${icon("check")}</div><p><b>${relatorio.counts.clientes}</b> clientes · <b>${relatorio.counts.produtos}</b> produtos · <b>${relatorio.counts.vendas}</b> vendas</p><p>${relatorio.updated} existentes atualizados · ${relatorio.added} novos adicionados</p><p>${relatorio.duplicates} duplicação(ões) detectada(s) após a conferência</p><div class="import-total"><small>Total em aberto</small><strong>${dinheiro(relatorio.totals.fiado)}</strong></div>${relatorio.cloudTotals ? `<p>Fiado local: <b>${dinheiro(relatorio.totals.fiado)}</b><br>Fiado na nuvem: <b>${dinheiro(relatorio.cloudTotals.fiado)}</b></p><p>${relatorio.matches ? "Contagens e totais conferidos." : "A conferência ainda encontrou diferenças."}</p>` : ""}<p>${relatorio.pending ? `${relatorio.pending} trabalho(s) aguardando sincronização.` : "Restauração idempotente finalizada."}</p></div><footer class="modal-foot"><button class="btn btn-primary done">Concluir</button></footer></section></div>`;
     $("#modal .done").onclick = () => {
       Modais.fechar();
-      render("configuracoes");
+      mountRoute("configuracoes");
     };
     window.lucide?.createIcons();
   }
@@ -908,7 +908,7 @@
         await SyncFirebase.clearLocalDevice({ discard });
         Modais.fechar();
         toast("Dados locais limpos. A nuvem permanece intacta.");
-        render("configuracoes");
+        mountRoute("configuracoes");
       } catch (error) {
         toast(error.message || "Não foi possível limpar este aparelho.", true);
       }
@@ -1011,7 +1011,10 @@
     if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
-    $("#app").innerHTML = views[route]();
+    const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
+    root.dataset.pageInstance = String(Number(previousInstance) + 1);
+    root.dataset.route = route;
+    root.innerHTML = views[route]();
     $("#title").textContent = titles[route];
     $("#date").textContent =
       route === "clientes"
@@ -1128,7 +1131,7 @@
       );
     if (b.hasAttribute("data-load-history")) {
       historicoLimite += 100;
-      render("historico");
+      mountRoute("historico");
     }
     if (b.hasAttribute("data-undo-sale"))
       abrirFormulario(
@@ -1148,6 +1151,9 @@
     window.AppBootDiagnostics?.count?.("dataChangedCount", {
       route: Router.atual(),
     });
+    // Clientes possui controller próprio. Eventos de nuvem atualizam o estado
+    // paginado sem destruir a página, o input ativo ou o modal de pagamento.
+    if (Router.atual() === "clientes") return;
     cloudRenderPending = true;
     clearTimeout(cloudRenderTimer);
     cloudRenderTimer = setTimeout(() => {
@@ -1169,7 +1175,11 @@
         return;
       }
       cloudRenderPending = false;
-      render(Router.atual());
+      try {
+        mountRoute(Router.atual());
+      } catch (error) {
+        showAppMountError(error);
+      }
     }, 220);
   }
   addEventListener("cloud-data-updated", scheduleCloudRender);
@@ -1233,7 +1243,8 @@
         });
       })
       .catch((error) => console.error("[Service worker registration]", error));
-  let appRouterStarted = false;
+  let appRouterStarted = false,
+    pageRuntime = null;
   function showAppMountError(error) {
     console.error("[BOOT] app mount failed", {
       code: String(error?.code || "UI_MOUNT_FAILED"),
@@ -1242,26 +1253,38 @@
     const root = $("#app");
     root.innerHTML = `<section class="empty-state boot-recovery"><i data-lucide="triangle-alert"></i><h2>Não conseguimos abrir o aplicativo.</h2><p>Seu login e seus dados continuam preservados.</p><div class="actions"><button class="btn btn-primary" data-retry-app-mount>Tentar novamente</button><button class="btn btn-light" data-logout-app-mount>Sair da conta</button></div></section>`;
     root.querySelector("[data-retry-app-mount]").onclick = () => {
-      try {
-        appRouterStarted ? render(Router.atual()) : Router.iniciar(render);
-        appRouterStarted = true;
-      } catch (retryError) {
-        showAppMountError(retryError);
-      }
+      appRouterStarted ? mountRoute(Router.atual()) : Router.iniciar(mountRoute);
+      appRouterStarted = true;
     };
     root.querySelector("[data-logout-app-mount]").onclick = () =>
       window.FirebaseAuthActions?.signOut?.();
     window.lucide?.createIcons();
   }
-  addEventListener("firebase-auth-ready", () => {
-    try {
-      if (!appRouterStarted) {
-        appRouterStarted = true;
-        Router.iniciar(render);
-      } else render(Router.atual());
-    } catch (error) {
+  function mountRoute(route) {
+    return pageRuntime?.mount(route) ?? false;
+  }
+  pageRuntime = window.PageRuntime.create({
+    render,
+    snapshot: () => ({
+      pageInstanceId: $("#app")?.dataset.pageInstance || "",
+      renderedChildren: $("#app")?.children.length || 0,
+    }),
+    onReady: (route, detail) =>
+      window.AppBootDiagnostics?.phase?.("page ready", { route, ...detail }),
+    onError: (error, route) => {
+      window.AppBootDiagnostics?.phase?.("page failed", {
+        route,
+        code: error?.code || "PAGE_MOUNT_FAILED",
+        message: error?.message || "Falha ao montar a página.",
+      });
       showAppMountError(error);
-    }
+    },
+  });
+  addEventListener("firebase-auth-ready", () => {
+    if (!appRouterStarted) {
+      appRouterStarted = true;
+      Router.iniciar(mountRoute);
+    } else mountRoute(Router.atual());
   });
   addEventListener("firebase-session-cleared", () => {
     carrinho = [];
@@ -1270,4 +1293,5 @@
     document.body.classList.remove("sale-sheet-open");
   });
   addEventListener("clientes-import-csv", importarCSV);
+  window.AppPageRuntime = pageRuntime;
 })();

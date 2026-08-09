@@ -22,7 +22,7 @@ assert.match(auth,/sessionStorage\.removeItem\('adiFestaMessagePendingReturn_v1'
 assert.doesNotMatch(auth,/\[Sync before logout\]/);
 assert.doesNotMatch(auth,/type:'logout'/);
 
-assert.match(app,/else\s+render\(Router\.atual\(\)\)/);
+assert.match(app,/else mountRoute\(Router\.atual\(\)\)/);
 assert.match(app,/addEventListener\(["']firebase-session-cleared["']/);
 assert.match(app,/carrinho\s*=\s*\[\]/);
 assert.match(app,/ConfiguracoesMobile\.render\(\)/);

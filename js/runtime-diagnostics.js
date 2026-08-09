@@ -66,6 +66,22 @@
   };
   window.AppBootDiagnostics = api;
 
+  addEventListener("error", (event) => {
+    phase("uncaught error", {
+      route: window.Router?.atual?.() || "",
+      message: event.error?.message || event.message || "Erro JavaScript",
+      source: event.filename || "",
+      line: event.lineno || 0,
+    });
+  });
+  addEventListener("unhandledrejection", (event) => {
+    phase("unhandled rejection", {
+      route: window.Router?.atual?.() || "",
+      code: event.reason?.code || "UNHANDLED_REJECTION",
+      message: event.reason?.message || String(event.reason || "Promise rejeitada"),
+    });
+  });
+
   if (typeof PerformanceObserver === "function") {
     try {
       const observer = new PerformanceObserver((list) => {

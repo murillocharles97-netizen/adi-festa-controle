@@ -1029,8 +1029,8 @@
     if (!event.detail?.collection || event.detail.collection === "products")
       invalidate();
   });
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && BarcodeScannerService.isActive()) close();
+  window.AppLifecycle?.onBackground?.(() => {
+    if (BarcodeScannerService.isActive()) close();
   });
   addEventListener("DOMContentLoaded", updatePrimaryFab, { once: true });
 })();
