@@ -3551,12 +3551,7 @@ addEventListener("online", () => {
   scheduleImmediate();
 });
 addEventListener("offline", updateQueueState);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    window.ClientCloudPagination?.resume?.("visibilitychange");
-    scheduleImmediate();
-  }
-});
+window.AppLifecycle?.onResume?.(() => scheduleImmediate());
 
 window.FirestoreRepositories = repositories;
 window.dataRepository = repositories;

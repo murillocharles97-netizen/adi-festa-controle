@@ -31,7 +31,7 @@ test("paginação separa modo padrão e busca e descarta resposta antiga", () =>
   assert.match(pager, /mode: search \? "search" : "default"/);
   assert.match(pager, /requestId === activeRequest/);
   assert.match(pager, /keyOf\(live\) === key/);
-  assert.match(pager, /context\.page\.dataset\.clientCloudMode = context\.mode/);
+  assert.match(pager, /live\.page\.dataset\.clientCloudMode = live\.mode/);
 });
 
 test("busca mobile usa debounce de 300 ms e aciona paginação cloud", () => {

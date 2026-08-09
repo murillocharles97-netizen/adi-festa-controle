@@ -50,7 +50,9 @@ assert.match(publicCatalog, /addEventListener\('pagehide'/);
   assert.match(worker, /adi-festa-v\d+-/);
 assert.match(worker, /const copy=response\.clone\(\);await caches\.open\(CACHE\)/);
 assert.doesNotMatch(worker, /cache\.put\(event\.request,response\)\.then\(\(\)=>response\.clone/);
-assert.match(worker, /then\(\(\)=>self\.skipWaiting\(\)\)/);
+assert.doesNotMatch(worker, /addAll\(ARQUIVOS\)\)\.then\(\(\)=>self\.skipWaiting/);
+assert.match(worker, /event\.data==='SKIP_WAITING'\)self\.skipWaiting/);
+assert.match(worker, /fetch\(event\.request,\{cache:'no-store'\}\)/);
 
 assert.match(firebaseConfig,/persistentLocalCache/);
 assert.doesNotMatch(firebaseConfig,/enableIndexedDbPersistence/);
