@@ -5,6 +5,7 @@ const vm = require("node:vm");
 
 const pagerSource = fs.readFileSync("js/client-cloud-pagination.js", "utf8");
 const lifecycleSource = fs.readFileSync("js/lifecycle-manager.js", "utf8");
+const filterRulesSource = fs.readFileSync("js/client-filter-rules.js", "utf8");
 const mobileSource = fs.readFileSync("js/clientes-mobile.js", "utf8");
 const syncSource = fs.readFileSync("js/firebase/sync.js", "utf8");
 const appSource = fs.readFileSync("js/app.js", "utf8");
@@ -29,6 +30,7 @@ function pageFixture() {
 function environment() {
   const state = { query: "kaique", filter: "todos", sort: "nomeAsc" };
   let active = pageFixture();
+  let localClients = [];
   const pending = [];
   const listeners = new Map();
   const listen = (name, callback) => {
@@ -70,10 +72,12 @@ function environment() {
     renderCard: (client) => `<article data-mobile-card="${client.id}">${client.nome}:${client.saldo}</article>`,
     bindCard() {},
   };
+  context.Clientes = { listar: () => localClients };
   context.SyncFirebase = {
     queryClientsPage: (options) => new Promise((resolve) => pending.push({ options, resolve })),
   };
   vm.createContext(context);
+  vm.runInContext(filterRulesSource, context);
   vm.runInContext(lifecycleSource, context);
   vm.runInContext(pagerSource, context);
   return {
@@ -81,6 +85,7 @@ function environment() {
     state,
     pending,
     active: () => active,
+    setLocalClients: (items) => { localClients = items; },
     replacePage: () => { active = pageFixture(); return active; },
     async emit(name, detail = {}) {
       const event = { type: name, detail, persisted: Boolean(detail.persisted) };
@@ -91,6 +96,16 @@ function environment() {
     },
   };
 }
+
+test("Todos preserva cliente local zerado ausente do índice cloud legado", async () => {
+  const env = environment();
+  env.setLocalClients([{ id: "j", nome: "Jessica Arezzo", saldo: 0, ativo: true }]);
+  env.state.query = "Jessic";
+  await tick();
+  env.pending[0].resolve({ items: [], cursor: null, hasMore: false, documentsRead: 0 });
+  await tick();
+  assert.match(env.active().list.innerHTML, /Jessica Arezzo:0/);
+});
 
 test("retomada preserva busca e refaz somente a query ativa", async () => {
   const env = environment();
@@ -190,8 +205,7 @@ test("estado, filtros e eventos de retorno permanecem centralizados", () => {
   assert.match(appSource, /ClientesMobile\?\.setSearchTerm\?\.\(value\)/);
   assert.match(mobileSource, /setSearchTerm\(query\)/);
   assert.match(mobileSource, /restoreActiveState/);
-  assert.match(mobileSource, /state\.filter==='todos'/);
-  assert.match(mobileSource, /state\.filter==='debito'&&Number\(c\.saldo\)<0/);
+  assert.match(mobileSource, /ClientFilterRules\.filter/);
   assert.match(syncSource, /AppLifecycle\?\.onResume/);
   assert.match(pagerSource, /AppLifecycle\?\.onResume/);
   assert.doesNotMatch(syncSource, /document\.addEventListener\("visibilitychange"/);
