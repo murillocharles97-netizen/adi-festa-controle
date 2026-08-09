@@ -1789,59 +1789,92 @@ function reconcileLocalAndCloud(
   // ser auditados e recuperados, nunca apagados silenciosamente por um pull.
   return [...byId.values()];
 }
-function applyCloudCollection(name, documents, options = {}) {
-  if (!originalAlter) return 0;
+function mergeCloudCollectionIntoData(data, name, documents, options = {}) {
   const pending = pendingIds(name),
     source = SOURCES[name];
   let changed = 0;
-  applyingCloud = true;
-  try {
-    originalAlter((data) => {
-      if (name === "settings") {
-        const remote = documents.find(
-          (item) => item.id === "default" && !item.deletedAt,
-        );
-        if (!remote || pending.has("default")) return;
-        const {
-            id,
-            businessId,
-            ownerId,
-            schemaVersion,
-            createdAt,
-            updatedAt,
-            version,
-            ...config
-          } = cleanCloudItem(remote),
-          next = { ...data.config, ...config };
-        if (JSON.stringify(next) !== JSON.stringify(data.config)) {
-          data.config = next;
-          changed++;
-        }
-        return;
-      }
-      const current = Array.isArray(data[source.key]) ? data[source.key] : [],
-        next = reconcileLocalAndCloud(
-          name,
-          current,
-          documents,
-          pending,
-          Boolean(options.authoritative),
-        );
-      if (JSON.stringify(current) !== JSON.stringify(next)) {
-        data[source.key] = next;
-        changed = Math.max(1, Math.abs(next.length - current.length));
-      }
-    });
-  } finally {
-    applyingCloud = false;
+  if (name === "settings") {
+    const remote = documents.find(
+      (item) => item.id === "default" && !item.deletedAt,
+    );
+    if (!remote || pending.has("default")) return 0;
+    const {
+        id,
+        businessId,
+        ownerId,
+        schemaVersion,
+        createdAt,
+        updatedAt,
+        version,
+        ...config
+      } = cleanCloudItem(remote),
+      next = { ...data.config, ...config };
+    if (JSON.stringify(next) !== JSON.stringify(data.config)) {
+      data.config = next;
+      changed++;
+    }
+    return changed;
   }
+  const current = Array.isArray(data[source.key]) ? data[source.key] : [],
+    next = reconcileLocalAndCloud(
+      name,
+      current,
+      documents,
+      pending,
+      Boolean(options.authoritative),
+    );
+  if (JSON.stringify(current) !== JSON.stringify(next)) {
+    data[source.key] = next;
+    changed = Math.max(1, Math.abs(next.length - current.length));
+  }
+  return changed;
+}
+function notifyCloudCollectionChange(name, changed) {
   if (changed)
     dispatchEvent(
       new CustomEvent("cloud-data-updated", {
         detail: { collection: name, count: changed, source: "cloud" },
       }),
     );
+}
+function applyCloudCollection(name, documents, options = {}) {
+  if (!originalAlter) return 0;
+  let changed = 0;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      changed = mergeCloudCollectionIntoData(data, name, documents, options);
+    });
+  } finally {
+    applyingCloud = false;
+  }
+  notifyCloudCollectionChange(name, changed);
   return changed;
+}
+function applyCloudCollectionBatch(entries) {
+  if (!originalAlter || !entries.length) return 0;
+  const changes = [];
+  let total = 0;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      for (const entry of entries) {
+        const changed = mergeCloudCollectionIntoData(
+          data,
+          entry.name,
+          entry.documents,
+          entry.options,
+        );
+        changes.push([entry.name, changed]);
+        total += changed;
+      }
+    });
+  } finally {
+    applyingCloud = false;
+  }
+  for (const [name, changed] of changes)
+    notifyCloudCollectionChange(name, changed);
+  return total;
 }
 function registerRealtimeCollection(name, mode = "all") {
   const key = `${activeBusinessId()}:${name}:${mode}`;
@@ -2108,7 +2141,8 @@ async function pullCloudCollections(options = {}) {
   if (!force && !full && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
   let received = 0;
   const pullState = readPullState(),
-    businessId = activeBusinessId();
+    businessId = activeBusinessId(),
+    pendingApplications = [];
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
       since = full ? "" : pullState[markerKey] || "",
@@ -2134,13 +2168,16 @@ async function pullCloudCollections(options = {}) {
           total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
         0,
       );
-    received += applyCloudCollection(name, documents, {
-      authoritative: !since,
+    pendingApplications.push({
+      name,
+      documents,
+      options: { authoritative: !since },
     });
     // Nunca avance o cursor usando o relógio do aparelho. Um celular com hora
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
+  received = applyCloudCollectionBatch(pendingApplications);
   writePullState(pullState);
   lastPullAt = Date.now();
   emit({

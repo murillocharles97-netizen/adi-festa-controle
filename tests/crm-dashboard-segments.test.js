@@ -145,7 +145,7 @@ test("wizard consome público CRM somente dentro da mesma empresa", () => {
 
 test("cache PWA publica a revisão da busca e das ações", () => {
   const worker = fs.readFileSync("service-worker.js", "utf8");
-  assert.match(worker, /adi-festa-v78-crm-data-foundation/);
+  assert.match(worker, /adi-festa-v79-desktop-bootstrap-recovery/);
   assert.match(worker, /customer-metrics\.js/);
   assert.match(worker, /client-cloud-pagination\.js/);
   assert.match(worker, /crm-mobile\.js/);
