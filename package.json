@@ -5,6 +5,7 @@
   "scripts": {
     "lint": "node scripts/check-project.js",
     "test": "node --test tests/*.test.js",
+    "test:desktop-browser": "node scripts/audit-desktop-browser.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth --project adi-festa-variations-test \"node --test tests/emulator/*.rules.test.js\"",
     "test:functions-emulator": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/onboarding-functions-smoke.js && node tests/emulator/functions-smoke.js\"",
     "build": "node scripts/check-project.js --build"
