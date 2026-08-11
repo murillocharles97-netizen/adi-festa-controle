@@ -64,8 +64,8 @@
     return `<article class="campaign-admin-card" data-campaign-card="${campaign.id}">
       ${cover(campaign)}
       <div class="campaign-card-main"><div class="campaign-title-line"><div><h3>${esc(campaign.name)}</h3><p>${esc(campaign.description || info.description)}</p></div></div><span class="campaign-type-pill">${esc(info.label)}</span></div>
-      <div class="campaign-card-meta"><span><small>Público</small><b>${esc(audienceLabel(campaign))}</b></span><span><small>Período</small><b>${date(campaign.startsAt)} · ${date(campaign.endsAt)}</b></span><span><small>Com progresso</small><b>${campaignStats?.withProgress || 0}</b></span><span><small>Resgates</small><b>${campaignStats?.redemptions || 0}</b></span></div>
-      <span class="campaign-status ${status.class}">${status.label}</span>
+      <div class="campaign-card-meta"><span>${icon("users")}<small>Público</small><b>${esc(audienceLabel(campaign))}</b></span><span>${icon("calendar-days")}<small>Período</small><b>${date(campaign.startsAt)} · ${date(campaign.endsAt)}</b></span><span>${icon("activity")}<small>Com progresso</small><b>${campaignStats?.withProgress || 0}</b></span><span>${icon("gift")}<small>Resgates</small><b>${campaignStats?.redemptions || 0}</b></span></div>
+      <span class="campaign-status ${status.class}" data-mobile-label="${status.class === "scheduled" ? "Programada" : status.label}">${status.label}</span>
       <button class="campaign-details-button" data-campaign-details="${campaign.id}">Ver detalhes</button>
       <button class="campaign-more" data-campaign-menu="${campaign.id}" aria-label="Mais ações">${icon("ellipsis-vertical")}</button>${state.menuId === campaign.id ? menu(campaign) : ""}
     </article>`;
@@ -73,7 +73,7 @@
 
   function metrics() {
     const value = Campanhas.metricas();
-    return `<section class="campaign-metrics"><article><span>${icon("users")}</span><div><small>Elegíveis</small><b>${value.eligible}</b><em>Clientes que podem participar</em></div></article><article><span>${icon("activity")}</span><div><small>Com progresso</small><b>${value.participants}</b><em>Clientes participando</em></div></article><article><span>${icon("sparkles")}</span><div><small>Próximos de ganhar</small><b>${value.nearReward}</b><em>75% ou mais da meta</em></div></article><article><span>${icon("gift")}</span><div><small>Pode resgatar</small><b>${value.redeemable}</b><em>Benefícios disponíveis</em></div></article><article><span>${icon("badge-check")}</span><div><small>Resgates</small><b>${value.redemptions}</b><em>Total confirmado</em></div></article></section>`;
+    return `<section class="campaign-metrics" aria-label="Indicadores de campanhas"><article data-campaign-metric="0"><span>${icon("users")}</span><div><small>Elegíveis</small><b>${value.eligible}</b><em>Clientes que podem participar</em></div></article><article data-campaign-metric="1"><span>${icon("activity")}</span><div><small>Com progresso</small><b>${value.participants}</b><em>Clientes participando</em></div></article><article data-campaign-metric="2"><span>${icon("sparkles")}</span><div><small>Próximos de ganhar</small><b>${value.nearReward}</b><em>75% ou mais da meta</em></div></article><article data-campaign-metric="3"><span>${icon("gift")}</span><div><small>Pode resgatar</small><b>${value.redeemable}</b><em>Benefícios disponíveis</em></div></article><article data-campaign-metric="4"><span>${icon("badge-check")}</span><div><small>Resgates</small><b>${value.redemptions}</b><em>Total confirmado</em></div></article></section>`;
   }
 
   function listPage() {
@@ -87,7 +87,8 @@
     };
     const list = filtered();
     return `<section class="campaigns-page campaign-v2-page"><header class="campaign-page-head"><div><h2>Campanhas</h2><p>Fidelização, pontos e recompensas.</p></div><button class="btn btn-primary" data-new-campaign>${icon("plus")} Nova campanha</button></header>${metrics()}
-      <div class="campaign-toolbar"><div class="campaign-filter-chips">${[["all", "Todas"], ["ativa", "Ativas"], ["agendada", "Programadas"], ["pausada", "Pausadas"], ["encerrada", "Encerradas"]].map(([key, label]) => `<button class="${state.filter === key ? "active" : ""}" data-campaign-filter="${key}">${label}<b>${counts[key]}</b></button>`).join("")}</div><label>${icon("search")}<input id="campaign-search" value="${esc(state.query)}" placeholder="Buscar campanha..."></label></div>
+      <div class="campaign-metric-dots" aria-label="Navegação dos indicadores">${Array.from({ length: 5 }, (_, index) => `<button class="${index === 0 ? "active" : ""}" data-campaign-metric-dot="${index}" aria-label="Mostrar indicador ${index + 1}"></button>`).join("")}</div>
+      <div class="campaign-toolbar"><div class="campaign-filter-chips">${[["all", "Todas"], ["ativa", "Ativas"], ["agendada", "Programadas"], ["pausada", "Pausadas"], ["encerrada", "Encerradas"]].map(([key, label]) => `<button class="${state.filter === key ? "active" : ""}" data-campaign-filter="${key}">${label}<b>${counts[key]}</b></button>`).join("")}</div><div class="campaign-search-row"><label>${icon("search")}<input id="campaign-search" value="${esc(state.query)}" placeholder="Buscar campanha..."></label><button class="campaign-filter-button" data-campaign-filter-shortcut aria-label="Mostrar filtros de status">${icon("list-filter")}<span>Filtros</span></button></div></div>
       <div class="campaign-list">${list.map(card).join("") || `<div class="campaign-empty">${icon("party-popper")}<h3>Nenhuma campanha criada ainda.</h3><p>Crie sua primeira campanha para incentivar clientes a comprar mais e voltar com mais frequência.</p><button class="btn btn-primary" data-new-campaign>${icon("plus")} Criar campanha</button></div>`}</div>
       <button class="campaign-fab" data-new-campaign aria-label="Nova campanha">${icon("plus")}</button></section>`;
   }
@@ -459,11 +460,48 @@
     window.lucide?.createIcons();
   }
 
+  function bindMetricCarousel() {
+    const rail = $(".campaign-metrics"), dots = $$("[data-campaign-metric-dot]");
+    if (!rail || !dots.length || !matchMedia("(max-width: 767px)").matches) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const center = rail.scrollLeft + rail.clientWidth / 2;
+      const cards = $$('[data-campaign-metric]', rail);
+      const active = cards.reduce((best, card, index) => {
+        const distance = Math.abs(card.offsetLeft + card.offsetWidth / 2 - center);
+        return distance < best.distance ? { index, distance } : best;
+      }, { index: 0, distance: Infinity }).index;
+      dots.forEach((dot, index) => dot.classList.toggle("active", index === active));
+    };
+    rail.addEventListener("scroll", () => { if (!frame) frame = requestAnimationFrame(update); }, { passive: true });
+    dots.forEach((dot) => dot.addEventListener("click", () => {
+      const target = $(`[data-campaign-metric="${dot.dataset.campaignMetricDot}"]`, rail);
+      target?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+    }));
+    update();
+  }
+
+  function bindMobilePrimaryAction() {
+    const button = $("#mobile-client-fab");
+    if (!button || button.dataset.campaignActionBound === "true") return;
+    button.dataset.campaignActionBound = "true";
+    button.addEventListener("click", (event) => {
+      const route = window.Router?.atual?.() || location.hash.split("/")[1];
+      if (!matchMedia("(max-width: 767px)").matches || route !== "campanhas" || button.dataset.primaryAction !== "new-campaign") return;
+      event.preventDefault();
+      openWizard();
+    });
+  }
+
   function bind() {
     const search = $("#campaign-search");
     if (search) { let timer; search.oninput = (event) => { clearTimeout(timer); state.query = event.target.value; timer = setTimeout(refresh, 140); }; }
     $$('[data-new-campaign]').forEach((button) => button.onclick = () => openWizard());
     $$('[data-campaign-filter]').forEach((button) => button.onclick = () => { state.filter = button.dataset.campaignFilter; refresh(); });
+    $("[data-campaign-filter-shortcut]")?.addEventListener("click", () => {
+      $("[data-campaign-filter].active")?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    });
     $$('[data-campaign-details]').forEach((button) => button.onclick = () => { state.detailId = button.dataset.campaignDetails; state.menuId = null; refresh(); });
     $$('[data-campaign-card]').forEach((cardElement) => {
       cardElement.tabIndex = 0;
@@ -483,6 +521,8 @@
     $$('[data-participant-filter]').forEach((button) => button.onclick = () => { state.participantFilter = button.dataset.participantFilter; state.participantPage = 1; refresh(); });
     $$('[data-participant-page]').forEach((button) => button.onclick = () => { if (button.disabled) return; state.participantPage = Number(button.dataset.participantPage); refresh(); });
     $("#campaign-client-search")?.addEventListener("input", (event) => { state.participantQuery = event.target.value; state.participantPage = 1; clearTimeout(state.participantSearchTimer); state.participantSearchTimer = setTimeout(refresh, 160); });
+    bindMetricCarousel();
+    bindMobilePrimaryAction();
     window.lucide?.createIcons();
   }
 

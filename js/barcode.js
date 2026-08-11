@@ -719,8 +719,8 @@
         action: "scan-product",
       },
       campanhas: {
-        icon: "megaphone",
-        label: "Nova campanha",
+        icon: "plus",
+        label: "Campanhas",
         action: "new-campaign",
       },
     };
