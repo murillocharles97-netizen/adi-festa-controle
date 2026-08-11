@@ -72,6 +72,7 @@ window.Vendas = (() => {
           productImage:
             i.productImage ||
             i.imageThumbUrl ||
+            window.getProductDisplayImage?.(produto, variacao)?.url ||
             variacao?.imageUrl ||
             produto?.imageThumbUrl ||
             produto?.imageUrl ||
@@ -80,6 +81,9 @@ window.Vendas = (() => {
           productMainImage:
             i.productMainImage ||
             i.imageUrl ||
+            window.getProductDisplayImage?.(produto, variacao, {
+              preferMain: true,
+            })?.url ||
             produto?.imageUrl ||
             produto?.imagem ||
             "",
@@ -162,6 +166,7 @@ window.Vendas = (() => {
       itens.forEach((i) => {
         const p = db.produtos.find((x) => x.id === i.produtoId);
         if (!p) return;
+        if (p.semControleEstoque || p.controlaEstoque === false) return;
         if (i.variantId) {
           const v = (db.variacoesProdutos || []).find(
             (x) => x.id === i.variantId,
@@ -281,6 +286,7 @@ window.Vendas = (() => {
       venda.itens.forEach((i) => {
         const p = db.produtos.find((x) => x.id === i.produtoId);
         if (!p) return;
+        if (p.semControleEstoque || p.controlaEstoque === false) return;
         if (i.variantId) {
           const v = (db.variacoesProdutos || []).find(
             (x) => x.id === i.variantId,

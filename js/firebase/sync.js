@@ -880,7 +880,15 @@ function enrich(name, item) {
       "active",
       "catalogVisible",
       "allowNegativeStock",
+      "image",
+      "imageMode",
       "imageUrl",
+      "imageStoragePath",
+      "imageThumbUrl",
+      "imageThumbStoragePath",
+      "imageUpdatedAt",
+      "imageUploadStatus",
+      "imageOperationId",
       "createdAt",
     ]);
     for (const key of Object.keys(clean)) if (!allowed.has(key)) delete clean[key];

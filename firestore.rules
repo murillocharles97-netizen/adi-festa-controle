@@ -285,7 +285,10 @@ service cloud.firestore {
               'attributeValues', 'displayName', 'displayNameNormalized',
               'searchTokens', 'sku', 'barcode', 'price', 'cost', 'stock',
               'minStock', 'active', 'catalogVisible', 'allowNegativeStock',
-              'imageUrl', 'createdAt', 'updatedAt', 'schemaVersion', 'version'
+              'image', 'imageMode', 'imageUrl', 'imageStoragePath',
+              'imageThumbUrl', 'imageThumbStoragePath', 'imageUpdatedAt',
+              'imageUploadStatus', 'imageOperationId',
+              'createdAt', 'updatedAt', 'schemaVersion', 'version'
             ]);
         }
         allow read: if belongsToBusiness(businessId);
