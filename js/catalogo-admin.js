@@ -140,7 +140,8 @@ window.CatalogoUniversal = (() => {
               active: v.active !== false,
               catalogVisible: v.catalogVisible !== false,
               allowNegativeStock: Boolean(v.allowNegativeStock),
-              imageUrl: v.imageUrl || "",
+              imageUrl:
+                window.getProductDisplayImage?.(p, v)?.url || v.imageUrl || "",
             }))
         : [];
     return {
@@ -148,8 +149,17 @@ window.CatalogoUniversal = (() => {
       productId: p.id,
       productType: variable ? "variable" : "simple",
       productName: p.nome,
-      productImage: p.imageThumbUrl || p.imageUrl || p.imagem || "",
-      productMainImage: p.imageUrl || p.imagem || "",
+      productImage:
+        window.getProductDisplayImage?.(p)?.url ||
+        p.imageThumbUrl ||
+        p.imageUrl ||
+        p.imagem ||
+        "",
+      productMainImage:
+        window.getProductDisplayImage?.(p, null, { preferMain: true })?.url ||
+        p.imageUrl ||
+        p.imagem ||
+        "",
       imageUpdatedAt: p.imageUpdatedAt || null,
       category: p.catalogCategory || p.categoria || "Outros",
       description: p.catalogDescription || p.descricao || p.palavrasChave || "",

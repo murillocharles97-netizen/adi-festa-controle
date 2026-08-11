@@ -18,6 +18,9 @@
   <link rel="stylesheet" href="../css/desktop-sales.css">
   <link rel="stylesheet" href="../css/desktop-settings.css">
   <link rel="stylesheet" href="../css/produtos-mobile.css">
+  <link rel="stylesheet" href="../css/product-images.css">
+  <link rel="stylesheet" href="../css/produtos-desktop.css">
+  <link rel="stylesheet" href="../css/product-variations.css">
   <link rel="stylesheet" href="../css/home-mobile.css">
   <link rel="stylesheet" href="../css/mobile-fixes.css">
   <link rel="stylesheet" href="../css/mobile-navigation.css">
@@ -54,6 +57,8 @@
   <script src="../js/barcode.js"></script>
   <script src="../js/plans.js"></script>
   <script src="../js/produtos.js"></script>
+  <script src="../js/product-images.js"></script>
+  <script src="../js/product-variations.js"></script>
   <script src="../js/campaign-engine-v2.js"></script>
   <script src="../js/campanhas.js"></script>
   <script src="../js/vendas.js"></script>
@@ -86,7 +91,18 @@
     DB.alterar(data => {
       data.config.nome = "Empresa fixture";
       data.config.operation = { operationMode: "physical_store", creditMode: "enabled", operationOnboardingCompleted: true, modules: { inventory: true, crm: true, creditSales: true } };
-      data.produtos = [{ id: "p1", nome: "Cone", preco: 12, estoqueAtual: 8, estoqueMinimo: 3, ativo: true }];
+      data.produtos = [
+        { id: "p1", nome: "Cone recheado", categoria: "Doces", preco: 12, estoqueAtual: 18, estoqueMinimo: 5, favorito: true, ativo: true, image:{url:"../tests/fixtures/sample-product.svg",thumbnailUrl:"../tests/fixtures/sample-product.svg",updatedAt:"2026-08-11T12:00:00.000Z"} },
+        { id: "p2", nome: "Brownie", categoria: "Doces", productType:"variable", preco: 10, minPrice:10, maxPrice:12, estoqueAtual:5, totalStock:5, estoqueMinimo:5, activeVariationCount:2, ativo:true },
+        { id: "p3", nome: "Monster", categoria: "Bebidas", preco:13, estoqueAtual:24, estoqueMinimo:6, favorito:true, ativo:true },
+        { id: "p4", nome: "IPTV", categoria: "Serviços", preco:25.9, estoqueAtual:0, estoqueMinimo:0, semControleEstoque:true, controlaEstoque:false, ativo:true },
+        { id: "p5", nome: "Poty 220ml", categoria: "Bebidas", preco:2.5, estoqueAtual:0, estoqueMinimo:3, ativo:true },
+        { id: "p6", nome: "Coca zero 220ml", categoria: "Bebidas", preco:2.8, estoqueAtual:2, estoqueMinimo:3, ativo:true }
+      ];
+      data.variacoesProdutos = [
+        {id:"v1",parentProductId:"p2",displayName:"Tradicional",attributeValues:{sabor:"Tradicional"},price:10,cost:4,stock:3,minStock:2,active:true,catalogVisible:true},
+        {id:"v2",parentProductId:"p2",displayName:"Ninho",attributeValues:{sabor:"Ninho"},price:12,cost:5,stock:2,minStock:3,active:true,catalogVisible:true}
+      ];
       data.clientes = [{ id: "c1", nome: "Ana", telefone: "17999999999", saldo: -20, ativo: true, totalComprado: 100, quantidadeVendas: 2, ultimaCompra: iso(2), criadoEm: iso(30) }];
       data.vendas = [{ id: "v1", clienteId: "c1", clienteNome: "Ana", data: iso(1), valorFinal: 50, lucro: 20, status: "pago", itens: [{ produtoId: "p1", nome: "Cone", quantidade: 2, subtotalFinal: 50 }] }];
       data.pagamentos = [{ id: "pg1", clienteId: "c1", data: iso(1), valor: 20 }];
@@ -111,6 +127,13 @@
     async function runAudit() {
       dispatchEvent(new CustomEvent("firebase-auth-ready", { detail: { uid: "fixture-owner", businessId: "desktop-shell-fixture" } }));
       await delay(120);
+      const visualRoute = new URLSearchParams(location.search).get("visual");
+      if (visualRoute) {
+        Router.ir(visualRoute);
+        await delay(160);
+        document.body.dataset.visualReady = visualRoute;
+        return;
+      }
       const results = [snapshot("inicio")];
       if (new URLSearchParams(location.search).has("single")) {
         const output = document.createElement("pre"); output.id = "desktop-browser-audit"; output.style.cssText = "position:fixed;inset:10px;z-index:99999;background:white;color:black;overflow:auto;white-space:pre-wrap;font-size:11px"; output.textContent = JSON.stringify({ results, errors: window.__desktopAuditErrors }); document.body.append(output); return;

@@ -5,6 +5,7 @@
     { dinheiro, dataHora, escapar, telefoneWhatsApp, toast } = Utils;
   let carrinho = [],
     historicoLimite = 100;
+  const desktopProductState = { query: "", filter: "todos", limit: 40 };
   const icon = (n) => `<i data-lucide="${n}"></i>`,
     cartKey = (item) =>
       window.ProductVariations?.itemKey?.(item) ||
@@ -175,24 +176,87 @@
         "sem-controle": "Sem controle",
       }[st],
       variable = p.productType === "variable",
+      controlsStock = !p.semControleEstoque && p.controlaEstoque !== false,
       estoque = Number(variable ? p.totalStock : p.estoqueAtual || 0),
-      minimo = Number(p.estoqueMinimo || 0),
+      stockTone = window.getProductStockTone?.(p) || "neutral",
+      stockToneClass = `stock-${stockTone}`,
       preco =
         variable && Number(p.minPrice) !== Number(p.maxPrice)
           ? `${dinheiro(p.minPrice)} – ${dinheiro(p.maxPrice)}`
           : dinheiro(variable ? p.minPrice : p.preco);
-    return `<article class="entity-card product-card ${st}"><div class="entity-head"><div><h3>${escapar(p.nome)}</h3><p>${escapar(p.categoria) || "Sem categoria"}${variable ? ` · <b>${Number(p.activeVariationCount || 0)} variações</b>` : ""}</p></div><span class="badge stock-badge ${st}">${rotulo}</span></div><div class="entity-stats"><div class="entity-stat"><small>Preço</small><strong>${preco}</strong></div>${variable ? `<div class="entity-stat"><small>Variações</small><strong>${Number(p.activeVariationCount || 0)}</strong></div>` : `<div class="entity-stat"><small>Custo</small><strong>${p.custo === null ? "—" : dinheiro(p.custo)}</strong></div>`}<div class="entity-stat"><small>Estoque total</small><strong>${estoque}</strong></div><div class="entity-stat"><small>Estoque mínimo</small><strong>${minimo}</strong></div><div class="entity-stat"><small>Status</small><strong>${rotulo}</strong></div></div><div class="actions"><button class="btn btn-primary btn-sm" data-stock-entry="${p.id}">${icon("plus")} Adicionar entrada</button>${variable ? "" : `<button class="btn btn-dark btn-sm" data-stock-adjust="${p.id}">${icon("sliders-horizontal")} Ajustar estoque</button>`}<button class="btn btn-light btn-sm" data-stock-history="${p.id}">${icon("history")} Histórico</button><button class="btn btn-light btn-sm" data-edit-product="${p.id}">${icon("pencil")} ${variable ? "Variações" : "Editar"}</button><button class="btn btn-danger btn-sm" data-delete-product="${p.id}">${icon("trash-2")} Excluir</button></div></article>`;
+    return `<article class="desktop-product-card ${st}" data-product-card="${p.id}"><div class="desktop-product-card-media">${window.ProductImages?.markup(p, { className: "desktop-product-card-photo" }) || `<span class="desktop-product-card-photo product-photo-shell is-fallback"><span class="product-photo-fallback">${escapar(String(p.nome || "?").slice(0, 2).toUpperCase())}</span></span>`}<button class="desktop-product-favorite ${p.favorito ? "active" : ""}" data-product-favorite="${p.id}" aria-label="${p.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(p.favorito)}">${icon("star")}</button></div><div class="desktop-product-card-body"><header class="desktop-product-card-head"><div class="desktop-product-card-title"><h3 title="${escapar(p.nome)}">${escapar(p.nome)}</h3><p>${escapar(p.categoria) || "Sem categoria"}${variable ? ` · ${Number(p.activeVariationCount || 0)} variações` : p.codigo ? ` · ${escapar(p.codigo)}` : ""}</p>${p._variationMatch ? `<small class="variation-search-match">Encontrado em ${escapar(p._variationMatch)}</small>` : ""}</div><span class="desktop-product-status ${st} ${st === "baixo" ? stockTone === "warning" ? "stock-at-minimum" : "stock-below-minimum" : ""}">${rotulo}</span></header><section class="desktop-product-metrics"><div class="desktop-product-metric"><small>Preço</small><strong>${preco}</strong></div><div class="desktop-product-metric ${stockToneClass}"><small>Estoque</small><strong>${controlsStock ? `${estoque} un.` : "—"}</strong></div><div class="desktop-product-metric"><small>Variações</small><strong>${variable ? Number(p.activeVariationCount || 0) : "—"}</strong></div></section><footer class="desktop-product-card-actions">${controlsStock ? `<button class="btn btn-primary btn-sm" data-stock-entry="${p.id}">${icon("plus")} Adicionar entrada</button>` : ""}<button class="btn btn-light btn-sm" data-stock-history="${p.id}">${icon("history")} Histórico</button>${variable ? `<button class="btn btn-light btn-sm" data-edit-product="${p.id}">${icon("tags")} Variações</button>` : ""}<details class="desktop-product-more"><summary aria-label="Mais ações de ${escapar(p.nome)}">${icon("ellipsis-vertical")}</summary><div class="desktop-product-more-menu"><button data-edit-main-product="${p.id}">${icon("pencil")} Editar produto</button>${controlsStock && !variable ? `<button data-stock-adjust="${p.id}">${icon("sliders-horizontal")} Ajustar estoque</button>` : ""}<button class="danger" data-delete-product="${p.id}">${icon("trash-2")} Excluir produto</button></div></details></footer></div></article>`;
+  }
+  function desktopProductRows() {
+    const query = desktopProductState.query.trim().toLowerCase(),
+      variationMatches = new Map(
+        (window.ProductVariations?.search(desktopProductState.query) || []).map(
+          (match) => [match.product.id, match.match],
+        ),
+      );
+    return Produtos.listar()
+      .filter((product) => product.ativo !== false)
+      .filter((product) => {
+        if (!query) return true;
+        return (
+          `${product.nome} ${product.codigo || ""} ${product.barcode || ""} ${product.categoria || ""}`
+            .toLowerCase()
+            .includes(query) || variationMatches.has(product.id)
+        );
+      })
+      .filter((product) => {
+        if (desktopProductState.filter === "todos") return true;
+        return Produtos.status(product) === desktopProductState.filter;
+      })
+      .map((product) => ({
+        ...product,
+        _variationMatch: variationMatches.get(product.id),
+      }))
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.favorito)) - Number(Boolean(a.favorito)) ||
+          String(a.nome).localeCompare(String(b.nome), "pt-BR"),
+      );
+  }
+  function desktopProductCounts() {
+    const products = Produtos.listar().filter((product) => product.ativo !== false);
+    return {
+      todos: products.length,
+      disponivel: products.filter((product) => Produtos.status(product) === "disponivel").length,
+      baixo: products.filter((product) => Produtos.status(product) === "baixo").length,
+      esgotado: products.filter((product) => Produtos.status(product) === "esgotado").length,
+      "sem-controle": products.filter((product) => Produtos.status(product) === "sem-controle").length,
+    };
+  }
+  function desktopProductGrid() {
+    const rows = desktopProductRows(),
+      shown = rows.slice(0, desktopProductState.limit);
+    return `${shown.map(produtoCard).join("") || `<div class="desktop-product-empty">${vazio(desktopProductState.query ? "Nenhum produto encontrado" : "Nenhum produto cadastrado")}</div>`}${shown.length < rows.length ? `<button class="desktop-product-load-more" data-product-load-more>Carregar mais ${Math.min(40, rows.length - shown.length)} produtos</button>` : ""}`;
+  }
+  function desktopProductFilter(label, value, count, dot = true) {
+    return `<button class="desktop-product-filter ${desktopProductState.filter === value ? "active" : ""}" data-product-filter="${value}">${dot ? "<i></i>" : ""}${label}<b>${count}</b></button>`;
+  }
+  function refreshDesktopProducts() {
+    const grid = $("#desktop-product-grid"),
+      counts = desktopProductCounts();
+    if (!grid) return;
+    grid.innerHTML = desktopProductGrid();
+    $$("[data-product-filter]", $(".desktop-products-page")).forEach((button) => {
+      button.classList.toggle("active", button.dataset.productFilter === desktopProductState.filter);
+      const count = button.querySelector("b");
+      if (count) count.textContent = counts[button.dataset.productFilter] ?? 0;
+    });
+    window.lucide?.createIcons();
   }
   function produtos() {
     if (window.ProdutosMobile?.isMobile()) return ProdutosMobile.render();
-    const lista = Produtos.listar();
+    const counts = desktopProductCounts();
     return (
       cabecalho(
         "Produtos",
         "Preços, custos e estoque dos seus doces.",
         `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button>`,
       ) +
-      `<div class="toolbar"><input class="search" id="search" placeholder="Buscar produto por nome ou código..."><button class="desktop-barcode-button" data-scan-product aria-label="Ler código"><i data-lucide="scan-barcode"></i></button><button class="btn btn-light" data-scan-stock><i data-lucide="package-plus"></i> Entrada por código</button></div><section class="entity-grid" id="entity-list">${lista.map(produtoCard).join("") || vazio("Nenhum produto cadastrado")}</section>`
+      `<section class="desktop-products-page"><div class="desktop-product-toolbar"><input class="search" id="search" value="${escapar(desktopProductState.query)}" placeholder="Buscar produto por nome ou código..."><button class="desktop-product-filter-toggle" data-focus-product-filters aria-label="Ir para filtros">${icon("sliders-horizontal")}</button><button class="btn btn-light" data-scan-stock>${icon("package-plus")} Entrada por código</button></div><div class="desktop-product-filters" id="desktop-product-filters">${desktopProductFilter("Todos", "todos", counts.todos, false)}${desktopProductFilter("Em estoque", "disponivel", counts.disponivel)}${desktopProductFilter("Estoque baixo", "baixo", counts.baixo)}${desktopProductFilter("Esgotados", "esgotado", counts.esgotado)}${desktopProductFilter("Sem controle", "sem-controle", counts["sem-controle"])}</div><section class="desktop-product-grid" id="desktop-product-grid">${desktopProductGrid()}</section></section>`
     );
   }
   const totaisCarrinho = (items = carrinho) => {
@@ -597,42 +661,60 @@
     }
     if (route === "crm") window.CRMDashboard?.bind?.();
     if (route === "produtos") {
+      if (window.ProdutosMobile?.isMobile()) return;
       $("#new-product").onclick = () => formularioProduto();
       $("#search").oninput = (e) => {
-        const query = e.target.value.toLowerCase(),
-          variationMatches = new Map(
-            (window.ProductVariations?.search(e.target.value) || []).map(
-              (match) => [match.product.id, match.match],
-            ),
-          );
-        $("#entity-list").innerHTML =
-          Produtos.listar()
-            .filter(
-              (p) =>
-                `${p.nome} ${p.codigo || ""} ${p.barcode || ""} ${p.categoria || ""}`
-                  .toLowerCase()
-                  .includes(query) || variationMatches.has(p.id),
-            )
-            .map((p) => ({ ...p, _variationMatch: variationMatches.get(p.id) }))
-            .map(produtoCard)
-            .join("") || vazio("Nenhum produto encontrado");
-        window.lucide?.createIcons();
+        desktopProductState.query = e.target.value;
+        desktopProductState.limit = 40;
+        refreshDesktopProducts();
       };
-      $("#entity-list").onclick = (e) => {
+      $("[data-focus-product-filters]").onclick = () =>
+        $("#desktop-product-filters")?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      $("#desktop-product-filters").onclick = (e) => {
+        const button = e.target.closest("[data-product-filter]");
+        if (!button) return;
+        desktopProductState.filter = button.dataset.productFilter;
+        desktopProductState.limit = 40;
+        refreshDesktopProducts();
+      };
+      $("#desktop-product-grid").onclick = (e) => {
         const b = e.target.closest("button");
         if (!b) return;
         if (b.dataset.editProduct) formularioProduto(b.dataset.editProduct);
+        if (b.dataset.editMainProduct)
+          window.ProductImages?.openForm?.(b.dataset.editMainProduct);
         if (b.dataset.stockEntry)
           formularioEntradaEstoque(b.dataset.stockEntry);
         if (b.dataset.stockAdjust)
           formularioAjusteEstoque(b.dataset.stockAdjust);
         if (b.dataset.stockHistory)
           mostrarHistoricoEstoque(b.dataset.stockHistory);
+        if (b.dataset.productFavorite) {
+          const product = Produtos.obter(b.dataset.productFavorite),
+            next = !Boolean(product?.favorito);
+          Produtos.favoritar(product.id, next);
+          refreshDesktopProducts();
+          toast(next ? "Produto adicionado aos favoritos" : "Produto removido dos favoritos");
+        }
+        if (b.dataset.productLoadMore) {
+          desktopProductState.limit += 40;
+          refreshDesktopProducts();
+        }
         if (b.dataset.deleteProduct)
           Modais.confirmar("produto", () => {
-            Produtos.excluir(b.dataset.deleteProduct);
-            toast("Produto excluído");
-            mountRoute(route);
+            const id = b.dataset.deleteProduct;
+            window.ProductImages
+              ?.deleteProduct?.(id)
+              .then(() => {
+                toast("Produto e imagens excluídos");
+                mountRoute(route);
+              })
+              .catch((error) =>
+                toast(error.message || "Não foi possível excluir o produto", true),
+              );
           });
       };
     }

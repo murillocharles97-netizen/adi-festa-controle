@@ -1,0 +1,118 @@
+const test = require("node:test");
+const fs = require("node:fs");
+const {
+  initializeTestEnvironment,
+  assertSucceeds,
+  assertFails,
+} = require("@firebase/rules-unit-testing");
+const { doc, setDoc } = require("firebase/firestore");
+const { ref, uploadBytes, getMetadata } = require("firebase/storage");
+
+let env;
+const projectId = "adi-festa-variations-test",
+  businessA = "empresa-imagem-a",
+  businessB = "empresa-imagem-b";
+
+test.before(async () => {
+  env = await initializeTestEnvironment({
+    projectId,
+    firestore: { rules: fs.readFileSync("firestore.rules", "utf8") },
+    storage: { rules: fs.readFileSync("storage.rules", "utf8") },
+  });
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "users", "owner-a"), {
+      uid: "owner-a",
+      businessId: businessA,
+      role: "owner",
+      active: true,
+    });
+    await setDoc(doc(db, "users", "owner-b"), {
+      uid: "owner-b",
+      businessId: businessB,
+      role: "owner",
+      active: true,
+    });
+    await setDoc(doc(db, "users", "cashier-a"), {
+      uid: "cashier-a",
+      businessId: businessA,
+      role: "cashier",
+      active: true,
+    });
+  });
+});
+
+test.after(async () => env?.cleanup());
+
+const metadata = (productId, entityType = "product", variantId = "") => ({
+  contentType: "image/webp",
+  customMetadata: {
+    businessId: businessA,
+    productId,
+    entityType,
+    operationId: "operation-1",
+    ...(variantId ? { variantId } : {}),
+  },
+});
+
+test("owner grava e lê imagem versionada do próprio produto", async () => {
+  const storage = env.authenticatedContext("owner-a").storage(),
+    imageRef = ref(
+      storage,
+      `businesses/${businessA}/products/product-1/main-operation-1.webp`,
+    );
+  await assertSucceeds(
+    uploadBytes(imageRef, new Uint8Array([1, 2, 3]), metadata("product-1")),
+  );
+  await assertSucceeds(getMetadata(imageRef));
+});
+
+test("variação exige metadados e path correspondentes", async () => {
+  const storage = env.authenticatedContext("owner-a").storage(),
+    valid = ref(
+      storage,
+      `businesses/${businessA}/products/product-1/variants/variant-1/thumb-operation-1.webp`,
+    ),
+    invalid = ref(
+      storage,
+      `businesses/${businessA}/products/product-1/variants/variant-1/thumb-operation-2.webp`,
+    );
+  await assertSucceeds(
+    uploadBytes(
+      valid,
+      new Uint8Array([1]),
+      metadata("product-1", "productVariant", "variant-1"),
+    ),
+  );
+  await assertFails(
+    uploadBytes(
+      invalid,
+      new Uint8Array([1]),
+      metadata("product-1", "product", "variant-1"),
+    ),
+  );
+});
+
+test("outra empresa, caixa, anônimo e arquivo fora do padrão são bloqueados", async () => {
+  const ownPath = `businesses/${businessA}/products/product-1/main-operation-1.webp`,
+    other = env.authenticatedContext("owner-b").storage(),
+    cashier = env.authenticatedContext("cashier-a").storage(),
+    anonymous = env.unauthenticatedContext().storage(),
+    owner = env.authenticatedContext("owner-a").storage();
+  await assertFails(getMetadata(ref(other, ownPath)));
+  await assertFails(
+    uploadBytes(
+      ref(cashier, `businesses/${businessA}/products/product-2/main-x.webp`),
+      new Uint8Array([1]),
+      metadata("product-2"),
+    ),
+  );
+  await assertFails(getMetadata(ref(anonymous, ownPath)));
+  await assertFails(
+    uploadBytes(
+      ref(owner, `businesses/${businessA}/products/product-2/original.png`),
+      new Uint8Array([1]),
+      { ...metadata("product-2"), contentType: "image/png" },
+    ),
+  );
+});

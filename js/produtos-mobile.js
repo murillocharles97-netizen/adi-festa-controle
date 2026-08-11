@@ -215,8 +215,9 @@
             0,
           ),
         ) % 6,
-      variable = product.productType === "variable";
-    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}"><div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div><div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${statusInfo(product).label}"><div class="mobile-product-avatar color-${color}">${product.imagem ? `<img src="${esc(product.imagem)}" alt="">` : esc(initials(product.nome))}<span class="favorite-dot ${product.favorito ? "show" : ""}">${icon("star")}</span></div><div class="mobile-product-copy"><h3 title="${esc(product.nome)}">${esc(product.nome)}</h3>${variable ? `<span class="product-variation-badge">${Number(product.activeVariationCount || 0)} variações</span>` : `<p>${esc(product.categoria) || "Sem categoria"}${product.codigo ? ` <b>·</b> ${esc(product.codigo)}` : ""}</p>`}${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong>${priceLabel(product)}</strong></div>${stock(product)}${star(product)}<button class="mobile-product-more" type="button" data-product-menu="${product.id}" aria-label="Mais ações de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button></article></div>`;
+      variable = product.productType === "variable",
+      controlsStock = !product.semControleEstoque && product.controlaEstoque !== false;
+    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${statusInfo(product).label}"><div class="mobile-product-avatar color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<span class="favorite-dot ${product.favorito ? "show" : ""}">${icon("star")}</span></div><div class="mobile-product-copy"><h3 title="${esc(product.nome)}">${esc(product.nome)}</h3>${variable ? `<span class="product-variation-badge">${Number(product.activeVariationCount || 0)} variações</span>` : `<p>${esc(product.categoria) || "Sem categoria"}${product.codigo ? ` <b>·</b> ${esc(product.codigo)}` : ""}</p>`}${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong>${priceLabel(product)}</strong></div>${stock(product)}${star(product)}<button class="mobile-product-more" type="button" data-product-menu="${product.id}" aria-label="Mais ações de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button></article></div>`;
   }
   function empty(list) {
     if (list.length) return "";
@@ -246,7 +247,8 @@
     if (!state.menuId) return "";
     const product = Produtos.obter(state.menuId);
     if (!product) return "";
-    return `<section class="product-action-sheet open"><div class="sheet-handle"></div><header><div class="mobile-product-avatar">${esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${money(product.preco)} · ${statusInfo(product).label}</p></div><button data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header><div class="product-sheet-actions"><button data-product-entry="${product.id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button data-product-adjust="${product.id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button><button data-product-history="${product.id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button><button data-product-edit="${product.id}">${icon("pencil")}<span><b>Editar produto</b><small>Alterar dados e preços</small></span></button><button class="danger" data-product-delete="${product.id}">${icon("trash-2")}<span><b>Excluir produto</b><small>Esta ação exige confirmação</small></span></button></div></section>`;
+    const controlsStock = !product.semControleEstoque && product.controlaEstoque !== false;
+    return `<section class="product-action-sheet open"><div class="sheet-handle"></div><header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${money(product.preco)} · ${statusInfo(product).label}</p></div><button data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header><div class="product-sheet-actions">${controlsStock?`<button data-product-entry="${product.id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button data-product-adjust="${product.id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button>`:""}<button data-product-history="${product.id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button><button data-product-edit="${product.id}">${icon("pencil")}<span><b>Editar produto</b><small>Alterar dados e preços</small></span></button><button class="danger" data-product-delete="${product.id}">${icon("trash-2")}<span><b>Excluir produto</b><small>Esta ação exige confirmação</small></span></button></div></section>`;
   }
   function render() {
     dataCache = null;
@@ -272,14 +274,21 @@
     const root = $("#modal");
     root.innerHTML = `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${title}</h3><button class="icon-btn close" type="button">${icon("x")}</button></header><form><div class="modal-body">${body}</div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;
     $$(".close", root).forEach((button) => (button.onclick = Modais.fechar));
-    $("form", root).onsubmit = (event) => {
+    $("form", root).onsubmit = async (event) => {
       event.preventDefault();
+      const submit = event.submitter || $("button[type='submit'],.btn-primary", event.currentTarget),
+        original = submit?.textContent;
+      if (submit) submit.disabled = true;
       try {
-        onSave(new FormData(event.target));
+        await onSave(new FormData(event.target));
         Modais.fechar();
         refresh();
       } catch (error) {
         Utils.toast(error.message || "Não foi possível salvar", true);
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = original;
+        }
       }
     };
     window.lucide?.createIcons();
@@ -297,16 +306,20 @@
     const draft = {
         step: 1,
         product: {
+          id: Utils.uuid(),
           nome: "",
           categoria: "",
           observacao: "",
+          semControleEstoque: false,
+          controlaEstoque: true,
           ativo: true,
           favorito: false,
         },
         attributes: [{ id: "sabor", name: "Sabor", values: [] }],
         variants: [],
       },
-      root = $("#modal");
+      root = $("#modal"),
+      imageDraft = ProductImages.createDraft(null);
     const syncCombinations = () => {
       const existing = new Map(
         draft.variants.map((item) => [
@@ -335,7 +348,7 @@
     };
     const stepBody = () =>
       draft.step === 1
-        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div><div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label>`
+        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div><div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label><label class="check"><input name="controlaEstoque" type="checkbox" ${draft.product.semControleEstoque ? "" : "checked"}> Controlar estoque deste produto</label>${ProductImages.editorMarkup(imageDraft)}`
         : draft.step === 2
           ? `<p>Cadastre um ou dois atributos. Separe os valores por vírgula.</p>${draft.attributes.map((attribute, index) => `<section class="wizard-attribute"><div class="field"><label>Atributo ${index + 1}</label><input name="attributeName:${index}" value="${esc(attribute.name)}" placeholder="Ex.: Sabor"></div><div class="field"><label>Valores</label><input name="attributeValues:${index}" value="${esc(attribute.values.join(", "))}" placeholder="Ferrero, Nutella, Prestígio"></div>${index ? `<button type="button" data-remove-attribute="${index}">${icon("trash-2")} Remover atributo</button>` : ""}</section>`).join("")}<button type="button" class="btn btn-light" data-add-attribute ${draft.attributes.length >= 2 ? "disabled" : ""}>${icon("plus")} Adicionar outro atributo</button>`
           : draft.step === 3
@@ -365,6 +378,8 @@
           categoria: String(fd.get("categoria") || "").trim(),
           observacao: String(fd.get("observacao") || "").trim(),
           favorito: fd.has("favorito"),
+          semControleEstoque: !fd.has("controlaEstoque"),
+          controlaEstoque: fd.has("controlaEstoque"),
         };
       if (draft.step === 2) {
         draft.attributes = draft.attributes
@@ -405,7 +420,12 @@
     };
     const paint = () => {
       root.innerHTML = `<div class="modal-bg variable-wizard-bg"><section class="modal-box variable-wizard"><header class="modal-head"><div><small>Novo produto com variações</small><h3>Etapa ${draft.step} de 5</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="wizard-progress">${[1, 2, 3, 4, 5].map((step) => `<i class="${step <= draft.step ? "active" : ""}">${step}</i>`).join("")}</div><form><div class="modal-body">${stepBody()}</div><footer class="modal-foot">${draft.step > 1 ? '<button type="button" class="btn btn-light" data-wizard-back>Voltar</button>' : '<button type="button" class="btn btn-light close">Cancelar</button>'}<button class="btn btn-primary">${draft.step === 5 ? "Salvar produto" : "Continuar"}</button></footer></form></section></div>`;
-      $$(".close", root).forEach((button) => (button.onclick = Modais.fechar));
+      $$(".close", root).forEach((button) =>
+        (button.onclick = () => {
+          ProductImages.cleanupDraft(imageDraft);
+          Modais.fechar();
+        }),
+      );
       $("[data-wizard-back]", root)?.addEventListener("click", () => {
         draft.step--;
         paint();
@@ -440,8 +460,11 @@
           });
         paint();
       });
-      $("form", root).onsubmit = (event) => {
+      ProductImages.bindEditor(root, imageDraft);
+      $("form", root).onsubmit = async (event) => {
         event.preventDefault();
+        const submit = event.submitter,
+          original = submit?.textContent;
         try {
           collect();
           if (draft.step === 1 && !draft.product.nome)
@@ -458,16 +481,29 @@
             paint();
             return;
           }
+          if (submit) {
+            submit.disabled = true;
+            submit.textContent = "Salvando...";
+          }
+          const imageData = await ProductImages.commit(imageDraft, {
+            productId: draft.product.id,
+            oldSubject: {},
+          });
           ProductVariations.createProduct({
-            product: draft.product,
+            product: { ...draft.product, ...imageData },
             attributes: draft.attributes,
             variants: draft.variants.filter((v) => v.active !== false),
           });
           Modais.fechar();
+          ProductImages.cleanupDraft(imageDraft);
           refresh(true);
           Utils.toast("Produto com variações criado.");
         } catch (error) {
           Utils.toast(error.message || "Não foi possível continuar", true);
+          if (submit) {
+            submit.disabled = false;
+            submit.textContent = original;
+          }
         }
       };
       window.lucide?.createIcons();
@@ -476,13 +512,23 @@
   }
   function editVariant(parentId, variantId = null) {
     const product = Produtos.obter(parentId),
-      variant = variantId ? ProductVariations.get(variantId) : null;
+      variant = variantId ? ProductVariations.get(variantId) : null,
+      resolvedVariantId = variant?.id || Utils.uuid(),
+      imageDraft = ProductImages.createDraft(variant, {
+        allowInherit: true,
+        inheritedSubject: product,
+      });
     modal(
       variant ? "Editar variação" : "Nova variação",
-      `<p><b>${esc(product.nome)}</b></p><div class="field"><label>Nome da variação *</label><input name="displayName" value="${esc(variant?.displayName || "")}" required></div><div class="field"><label>Preço *</label><input name="price" inputmode="decimal" value="${variant?.price ?? ""}" required></div><div class="field"><label>Custo</label><input name="cost" inputmode="decimal" value="${variant?.cost ?? ""}"></div><div class="field"><label>Estoque</label><input name="stock" inputmode="numeric" value="${variant?.stock ?? 0}"></div><div class="field"><label>Estoque mínimo</label><input name="minStock" inputmode="numeric" value="${variant?.minStock ?? 0}"></div><div class="field"><label>SKU</label><input name="sku" value="${esc(variant?.sku || "")}"></div><div class="field"><label>Código de barras</label><input name="barcode" inputmode="numeric" value="${esc(variant?.barcode || "")}"></div><label class="check"><input name="catalogVisible" type="checkbox" ${variant?.catalogVisible !== false ? "checked" : ""}> Visível no catálogo</label>`,
-      (form) =>
+      `<p><b>${esc(product.nome)}</b></p>${ProductImages.editorMarkup(imageDraft,{label:"Foto da variação",description:"Por padrão, a variação usa a foto principal do produto."})}<div class="field"><label>Nome da variação *</label><input name="displayName" value="${esc(variant?.displayName || "")}" required></div><div class="field"><label>Preço *</label><input name="price" inputmode="decimal" value="${variant?.price ?? ""}" required></div><div class="field"><label>Custo</label><input name="cost" inputmode="decimal" value="${variant?.cost ?? ""}"></div><div class="field"><label>Estoque</label><input name="stock" inputmode="numeric" value="${variant?.stock ?? 0}"></div><div class="field"><label>Estoque mínimo</label><input name="minStock" inputmode="numeric" value="${variant?.minStock ?? 0}"></div><div class="field"><label>SKU</label><input name="sku" value="${esc(variant?.sku || "")}"></div><div class="field"><label>Código de barras</label><input name="barcode" inputmode="numeric" value="${esc(variant?.barcode || "")}"></div><label class="check"><input name="catalogVisible" type="checkbox" ${variant?.catalogVisible !== false ? "checked" : ""}> Visível no catálogo</label>`,
+      async (form) => {
+        const imageData = await ProductImages.commit(imageDraft, {
+          productId: parentId,
+          variantId: resolvedVariantId,
+          oldSubject: variant || {},
+        });
         ProductVariations.save({
-          id: variant?.id,
+          id: resolvedVariantId,
           parentProductId: parentId,
           displayName: form.get("displayName"),
           attributeValues: variant?.attributeValues || {
@@ -496,16 +542,27 @@
           barcode: form.get("barcode"),
           active: true,
           catalogVisible: form.has("catalogVisible"),
-        }),
+          ...imageData,
+        });
+        ProductImages.cleanupDraft(imageDraft);
+      },
       variant ? "Salvar variação" : "Adicionar variação",
+    );
+    ProductImages.bindEditor($("#modal"), imageDraft, {
+      label: "Foto da variação",
+      description: "Por padrão, a variação usa a foto principal do produto.",
+    });
+    $$("#modal .close").forEach((button) =>
+      button.addEventListener("click", () => ProductImages.cleanupDraft(imageDraft)),
     );
   }
   async function variableDetails(id) {
     const product = Produtos.obter(id),
       variants = await ProductVariations.ensure(id),
-      moves = Produtos.historico(id);
+      moves = Produtos.historico(id),
+      controlsStock = !product.semControleEstoque && product.controlaEstoque !== false;
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>Produto com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>Estoque total</small><b>${Number(product.totalStock || 0)} un.</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section><div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div><div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}"><div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${Number(variant.stock)} un.</small></span><button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button><button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button><button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button></article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div><p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p></div></section></div>`;
+      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>Produto com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>Estoque</small><b>${controlsStock ? `${Number(product.totalStock || 0)} un.` : "Sem controle"}</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section><div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div><div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}">${ProductImages.markup(product, { variant, className: "variation-row-photo" })}<div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${controlsStock ? `${Number(variant.stock)} un.` : "Sem controle"}</small></span><button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button>${controlsStock ? `<button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button>` : ""}<button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button></article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div><p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p></div></section></div>`;
     $(".close", $("#modal")).onclick = Modais.fechar;
     $("[data-edit-parent]", $("#modal")).onclick = () =>
       ProductImages.openForm(id);
@@ -521,14 +578,31 @@
     );
     $$("[data-remove-variant]", $("#modal")).forEach(
       (button) =>
-        (button.onclick = () => {
-          const result = ProductVariations.remove(button.dataset.removeVariant);
-          Utils.toast(
-            result.deactivated
-              ? "Variação desativada porque possui histórico."
-              : "Variação excluída.",
-          );
-          variableDetails(id);
+        (button.onclick = async () => {
+          try {
+            const variantId = button.dataset.removeVariant,
+              variant = ProductVariations.get(variantId),
+              sold = DB.carregar().vendas.some((sale) =>
+                (sale.itens || []).some((item) => item.variantId === variantId),
+              );
+            if (!sold && window.getProductDisplayImage(product, variant).own)
+              await ProductImageStorage.remove(variant, {
+                productId: id,
+                variantId,
+              });
+            const result = ProductVariations.remove(variantId);
+            Utils.toast(
+              result.deactivated
+                ? "Variação desativada porque possui histórico."
+                : "Variação e foto excluídas.",
+            );
+            variableDetails(id);
+          } catch (error) {
+            Utils.toast(
+              error.message || "Não foi possível excluir a variação",
+              true,
+            );
+          }
         }),
     );
     window.lucide?.createIcons();
@@ -729,6 +803,7 @@
       }
       if (Math.abs(dx) > 8) horizontal = true;
       if (!horizontal) return;
+      if (dx > 0 && shell.dataset.controlsStock !== "true") return;
       delta = Math.max(
         -card.offsetWidth * 0.62,
         Math.min(card.offsetWidth * 0.62, dx),
@@ -746,6 +821,8 @@
       dragging = false;
       if (horizontal && Math.abs(delta) >= card.offsetWidth * 0.4) {
         const action = delta > 0 ? "entry" : "edit";
+        if (action === "entry" && shell.dataset.controlsStock !== "true")
+          return reset();
         card.style.transition = "transform .2s ease";
         card.style.transform = `translateX(${delta > 0 ? card.offsetWidth : -card.offsetWidth}px)`;
         navigator.vibrate?.(30);
@@ -872,9 +949,18 @@
       (button) =>
         (button.onclick = () =>
           Modais.confirmar("produto", () => {
-            Produtos.excluir(button.dataset.productDelete);
-            state.menuId = null;
-            refresh();
+            ProductImages.deleteProduct(button.dataset.productDelete)
+              .then(() => {
+                state.menuId = null;
+                refresh();
+                Utils.toast("Produto e imagens excluídos.");
+              })
+              .catch((error) =>
+                Utils.toast(
+                  error.message || "Não foi possível excluir o produto",
+                  true,
+                ),
+              );
           })),
     );
     $$("[data-product-shell]").forEach(bindSwipe);

@@ -139,7 +139,27 @@
       allowNegativeStock: Boolean(
         raw.allowNegativeStock ?? existing?.allowNegativeStock,
       ),
+      image:
+        raw.image !== undefined
+          ? raw.image
+          : existing?.image && typeof existing.image === "object"
+            ? existing.image
+            : null,
+      imageMode:
+        raw.imageMode ||
+        existing?.imageMode ||
+        (raw.imageUrl || existing?.imageUrl ? "own" : "inherit"),
       imageUrl: raw.imageUrl ?? existing?.imageUrl ?? null,
+      imageStoragePath:
+        raw.imageStoragePath ?? existing?.imageStoragePath ?? null,
+      imageThumbUrl: raw.imageThumbUrl ?? existing?.imageThumbUrl ?? null,
+      imageThumbStoragePath:
+        raw.imageThumbStoragePath ?? existing?.imageThumbStoragePath ?? null,
+      imageUpdatedAt: raw.imageUpdatedAt ?? existing?.imageUpdatedAt ?? null,
+      imageUploadStatus:
+        raw.imageUploadStatus ?? existing?.imageUploadStatus ?? "none",
+      imageOperationId:
+        raw.imageOperationId ?? existing?.imageOperationId ?? null,
       createdAt: existing?.createdAt || raw.createdAt || timestamp,
       updatedAt: timestamp,
       schemaVersion: 10,
@@ -297,6 +317,8 @@
       if (!variant || variant.parentProductId !== parentProductId)
         throw Error("Variação não encontrada.");
       const product = parent(variant, data);
+      if (product?.semControleEstoque || product?.controlaEstoque === false)
+        throw Error("Este produto não usa controle de estoque.");
       const previous = num(variant.stock),
         next =
           newStock === undefined ? previous + num(quantity) : num(newStock);
@@ -431,6 +453,8 @@
       unitPriceSnapshot: num(variant?.price ?? product.preco),
       costSnapshot: num(variant?.cost ?? product.custo),
       productImage:
+        window.getProductDisplayImage?.(product, variant)?.url ||
+        variant?.imageThumbUrl ||
         variant?.imageUrl ||
         product.imageThumbUrl ||
         product.imageUrl ||

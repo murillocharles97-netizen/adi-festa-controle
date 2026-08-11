@@ -14,13 +14,26 @@ service firebase.storage {
         && profile().role in ['owner', 'admin', 'manager'];
     }
     match /businesses/{businessId}/products/{productId}/{fileName} {
-      allow read: if true;
+      allow read: if canAccess(businessId);
       allow create, update: if canManageProducts(businessId)
-        && fileName.matches('^(main|thumb)\\.(webp|jpg)$')
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
-        && request.resource.metadata.productId == productId;
+        && request.resource.metadata.productId == productId
+        && request.resource.metadata.entityType == 'product';
+      allow delete: if canManageProducts(businessId);
+    }
+    match /businesses/{businessId}/products/{productId}/variants/{variantId}/{fileName} {
+      allow read: if canAccess(businessId);
+      allow create, update: if canManageProducts(businessId)
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(webp|jpeg)')
+        && request.resource.metadata.businessId == businessId
+        && request.resource.metadata.productId == productId
+        && request.resource.metadata.variantId == variantId
+        && request.resource.metadata.entityType == 'productVariant';
       allow delete: if canManageProducts(businessId);
     }
   }

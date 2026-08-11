@@ -9,8 +9,12 @@
     key = (item) =>
       window.ProductVariations?.itemKey?.(item) ||
       String(item?.produtoId || ""),
-    image = (product) =>
-      product.imageThumbUrl || product.imageUrl || product.imagem || "";
+    image = (product, variant = null) =>
+      window.getProductDisplayImage?.(product, variant)?.url ||
+      product.imageThumbUrl ||
+      product.imageUrl ||
+      product.imagem ||
+      "";
 
   const activeProducts = () =>
     Produtos.listar().filter((product) => product.ativo !== false);

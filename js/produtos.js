@@ -1,7 +1,19 @@
+window.getProductStockMinimum=product=>{
+  if(product?.productType==='variable'&&window.ProductVariations?.list){
+    const variants=ProductVariations.list(product.id).filter(item=>item.active!==false);
+    if(variants.length)return variants.reduce((sum,item)=>sum+Number(item.minStock||0),0);
+  }
+  return Number(product?.estoqueMinimo||0);
+};
 window.getProductStockStatus=product=>{
   if(product?.semControleEstoque||product?.controlaEstoque===false)return'sem-controle';
-  const current=Number(product?.productType==='variable'?product?.totalStock:(product?.estoqueAtual??product?.estoque??0)),minimum=Number(product?.estoqueMinimo||0);
+  const current=Number(product?.productType==='variable'?product?.totalStock:(product?.estoqueAtual??product?.estoque??0)),minimum=getProductStockMinimum(product);
   return current<=0?'esgotado':current<=minimum?'baixo':'disponivel';
+};
+window.getProductStockTone=product=>{
+  if(product?.semControleEstoque||product?.controlaEstoque===false)return'neutral';
+  const current=Number(product?.productType==='variable'?product?.totalStock:(product?.estoqueAtual??product?.estoque??0)),minimum=getProductStockMinimum(product);
+  return current<=0?'danger':current<minimum?'danger':current===minimum?'warning':'good';
 };
 window.Produtos=(()=>{
   const listar=()=>DB.carregar().produtos;
@@ -12,13 +24,14 @@ window.Produtos=(()=>{
     const estoque=d.estoqueAtual??d.estoque;
     const imageField=(name,fallback=null)=>d[name]!==undefined?d[name]:(atual?.[name]??fallback);
     const productType=d.productType==='variable'||atual?.productType==='variable'?'variable':'simple';
-    const v={nome:String(d.nome||'').trim(),productType,attributes:Array.isArray(d.attributes)?d.attributes:(atual?.attributes||[]),codigo:d.codigo??atual?.codigo??'',barcode,barcodeType,barcodeUpdatedAt:barcodeChanged?agora:(atual?.barcodeUpdatedAt||null),alternateBarcodes:Array.isArray(atual?.alternateBarcodes)?atual.alternateBarcodes:[],preco:productType==='variable'?Number(d.minPrice??atual?.minPrice??0):Number(d.preco||0),minPrice:Number(d.minPrice??atual?.minPrice??d.preco??0),maxPrice:Number(d.maxPrice??atual?.maxPrice??d.preco??0),custo:d.custo===''||d.custo===null?null:Number(d.custo??atual?.custo??0),estoqueAtual:productType==='variable'?Number(d.totalStock??atual?.totalStock??0):(estoque===''||estoque===null||estoque===undefined?0:Number(estoque)),totalStock:Number(d.totalStock??atual?.totalStock??estoque??0),activeVariationCount:Number(d.activeVariationCount??atual?.activeVariationCount??0),hasAvailableStock:Boolean(d.hasAvailableStock??atual?.hasAvailableStock),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',observacao:d.observacao??atual?.observacao??'',semControleEstoque:d.semControleEstoque===undefined?Boolean(atual?.semControleEstoque):Boolean(d.semControleEstoque),favorito:Boolean(d.favorito??atual?.favorito),ativo:d.ativo!==false,imagem:imageField('imagem',''),imageUrl:imageField('imageUrl'),imageStoragePath:imageField('imageStoragePath'),imageThumbUrl:imageField('imageThumbUrl'),imageThumbStoragePath:imageField('imageThumbStoragePath'),imageUpdatedAt:imageField('imageUpdatedAt'),imageUploadStatus:imageField('imageUploadStatus','none'),imageOperationId:imageField('imageOperationId'),schemaVersion:10,atualizadoEm:agora};
+    const v={nome:String(d.nome||'').trim(),productType,attributes:Array.isArray(d.attributes)?d.attributes:(atual?.attributes||[]),codigo:d.codigo??atual?.codigo??'',barcode,barcodeType,barcodeUpdatedAt:barcodeChanged?agora:(atual?.barcodeUpdatedAt||null),alternateBarcodes:Array.isArray(atual?.alternateBarcodes)?atual.alternateBarcodes:[],preco:productType==='variable'?Number(d.minPrice??atual?.minPrice??0):Number(d.preco||0),minPrice:Number(d.minPrice??atual?.minPrice??d.preco??0),maxPrice:Number(d.maxPrice??atual?.maxPrice??d.preco??0),custo:d.custo===''||d.custo===null?null:Number(d.custo??atual?.custo??0),estoqueAtual:productType==='variable'?Number(d.totalStock??atual?.totalStock??0):(estoque===''||estoque===null||estoque===undefined?0:Number(estoque)),totalStock:Number(d.totalStock??atual?.totalStock??estoque??0),activeVariationCount:Number(d.activeVariationCount??atual?.activeVariationCount??0),hasAvailableStock:Boolean(d.hasAvailableStock??atual?.hasAvailableStock),estoqueMinimo:Number(d.estoqueMinimo||0),categoria:d.categoria||'',observacao:d.observacao??atual?.observacao??'',semControleEstoque:d.semControleEstoque===undefined?Boolean(atual?.semControleEstoque):Boolean(d.semControleEstoque),controlaEstoque:d.semControleEstoque===undefined?(atual?.controlaEstoque??!atual?.semControleEstoque):!Boolean(d.semControleEstoque),favorito:Boolean(d.favorito??atual?.favorito),ativo:d.ativo!==false,image:imageField('image'),imageMode:imageField('imageMode','own'),imagem:imageField('imagem',''),imageUrl:imageField('imageUrl'),imageStoragePath:imageField('imageStoragePath'),imageThumbUrl:imageField('imageThumbUrl'),imageThumbStoragePath:imageField('imageThumbStoragePath'),imageUpdatedAt:imageField('imageUpdatedAt'),imageUploadStatus:imageField('imageUploadStatus','none'),imageOperationId:imageField('imageOperationId'),schemaVersion:11,atualizadoEm:agora};
     v.estoque=v.estoqueAtual;
     if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{const result=DB.alterar(db=>{db.produtos=db.produtos.filter(p=>p.id!==id);db.variacoesProdutos=(db.variacoesProdutos||[]).filter(v=>v.parentProductId!==id)});window.BarcodeIndex?.invalidate?.();return result};
   const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
+    if(p.semControleEstoque||p.controlaEstoque===false)throw Error('Este produto não usa controle de estoque');
     const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
     const anterior=Number(p.estoqueAtual||0),novo=anterior+q,agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
@@ -28,6 +41,7 @@ window.Produtos=(()=>{
   });return mov};
   const ajustarEstoque=(produtoId,novoEstoque,motivo)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
+    if(p.semControleEstoque||p.controlaEstoque===false)throw Error('Este produto não usa controle de estoque');
     const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora};
