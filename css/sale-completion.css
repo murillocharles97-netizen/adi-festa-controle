@@ -9,6 +9,8 @@
 .sale-payment-confirmed{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding:10px;border-radius:12px;background:#e6faf5;color:#087d64}
 .sale-payment-confirmed svg{width:19px}.sale-payment-confirmed span{display:grid}.sale-payment-confirmed small{font-size:10px}
 .sale-receipt-note{display:grid;gap:4px;margin-top:10px;padding:10px;border-radius:10px;background:#f5f6f8;overflow-wrap:anywhere}
+.sale-receipt-campaigns{display:grid;gap:8px;margin-top:10px;padding:11px;border-radius:11px;background:#edfbf6;color:#344052}
+.sale-receipt-campaigns>span{display:flex;align-items:flex-start;gap:8px}.sale-receipt-campaigns svg{width:16px;flex:none;color:#087d64}.sale-receipt-campaigns span span{display:grid}.sale-receipt-campaigns small{color:#627083;overflow-wrap:anywhere}
 .sale-operation-status{display:flex;flex-wrap:wrap;gap:7px;padding:12px 16px}
 .sale-operation-status>span{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:20px;background:#e9f9f4;color:#087d64;font-size:11px;font-weight:800}
 .sale-operation-status svg{width:14px}

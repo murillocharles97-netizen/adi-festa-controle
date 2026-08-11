@@ -11,7 +11,8 @@ const maskedName=name=>{const parts=String(name||'Cliente').trim().split(/\s+/);
 
 function publicCampaign(c){
   c=window.Campanhas?.normalize?.(c)||c;
-  return{id:c.id,nome:c.name||c.nome||'Campanha',descricao:c.description||c.descricao||'',tipo:c.type||c.tipo||'custom',imagem:c.imageUrl||null,icone:c.imageIcon||'megaphone',dataInicio:c.startDate||c.dataInicio||'',dataFim:c.endDate||c.dataFim||'',produtoIds:c.productIds||[],produtoPremioId:c.rewardProductId||'',regras:c.rules||{},participantes:Number(c.participantsCount||0),resgates:Number(c.redemptionsCount||0)};
+  const rule=c.rule||c.rules||{},qualification=c.qualification||{},rewards=c.rewards||[];
+  return{id:c.id,engineVersion:2,nome:c.name||c.nome||'Campanha',descricao:c.description||c.descricao||'',tipo:c.type||c.tipo||'buy_get',imagem:c.imageUrl||null,icone:c.imageIcon||'megaphone',dataInicio:c.startsAt||c.startDate||c.dataInicio||'',dataFim:c.endsAt||c.endDate||c.dataFim||'',produtoIds:qualification.productIds||c.productIds||[],categoriaIds:qualification.categoryIds||[],varianteIds:qualification.variantIds||[],produtoPremioId:rewards.find(reward=>reward.type==='product')?.productId||c.rewardProductId||'',regras:{...rule,rewardPoints:rewards.filter(reward=>Number(reward.pointsCost)>0).sort((a,b)=>a.pointsCost-b.pointsCost)[0]?.pointsCost||0},rule,qualification,rewards,participantes:Number(c.participantsCount||0),resgates:Number(c.redemptionsCount||0)};
 }
 
 function publicPayload(visit){
@@ -25,14 +26,14 @@ function safeOrders(local,visit,client){
 }
 
 async function publishPortalData(visit){
-  const local=DB.carregar(),campaigns=new Map((local.campanhas||[]).map(c=>[c.id,c])),progressByClient=new Map();
-  for(const item of local.progressosCampanha||[]){const clientId=item.clientId||item.clienteId,campaign=campaigns.get(item.campaignId||item.campanhaId);if(!clientId||!campaign||campaign.publica===false)continue;if(!progressByClient.has(clientId))progressByClient.set(clientId,[]);progressByClient.get(clientId).push({...publicCampaign(campaign),campaignId:campaign.id,currentProgress:Number(item.currentProgress??item.progress??item.progresso??0),points:Number(item.points??item.pontos??0),target:Number(item.target??item.threshold??0),rewardsAvailable:Number(item.rewardsAvailable??item.availableRewards??item.recompensasDisponiveis??0),totalEarned:Number(item.totalEarned??item.redeemedRewards??item.resgates??0)+Number(item.availableRewards??0),totalRedeemed:Number(item.totalRedeemed??item.redeemedRewards??item.resgates??0),updatedAt:item.updatedAt||null})}
+  const local=DB.carregar(),campaigns=new Map((local.campanhas||[]).map(c=>[c.id,window.Campanhas?.normalize?.(c)||c])),progressByKey=new Map((local.progressosCampanha||[]).map(item=>[`${item.campaignId||item.campanhaId}:${item.clientId||item.clienteId}`,item])),segments=Object.fromEntries((local.segmentosClientes||[]).map(segment=>[String(segment.id),(segment.clientIds||segment.clienteIds||[]).map(String)]));
+  const profileCampaigns=client=>[...campaigns.values()].filter(campaign=>(window.Campanhas?.status?.(campaign)||campaign.status)==='ativa'&&campaign.publica!==false&&window.Campanhas?.elegivel?.(campaign,client,{segmentClientIdsById:segments})!==false).map(campaign=>{const item=progressByKey.get(`${campaign.id}:${client.id}`)||{};return{...publicCampaign(campaign),campaignId:campaign.id,currentProgress:Number(item.cycleRemainder??item.confirmedProgress??item.currentProgress??0),pendingProgress:Number(item.pendingProgress||0),points:Number(item.availablePoints??item.points??0),pendingPoints:Number(item.pendingPoints||0),target:Number(campaign.type==='points'?(campaign.rewards||[]).filter(reward=>Number(reward.pointsCost)>0).sort((a,b)=>a.pointsCost-b.pointsCost)[0]?.pointsCost:campaign.type==='nth_product'?campaign.rule?.requiredPurchases:campaign.rule?.requiredQuantity)||0,rewardsAvailable:Number(item.availableRewards??item.rewardsAvailable??0),totalEarned:Number(item.redeemedRewards||0)+Number(item.availableRewards||0),totalRedeemed:Number(item.redeemedRewards||0),updatedAt:item.updatedAt||null}});
   const jobs=[],fingerprintKey=`adiFestaPortalFingerprints:${businessId()}:${visit.publicToken}`,fingerprints=(()=>{try{return JSON.parse(localStorage.getItem(fingerprintKey))||{}}catch{return{}}})();
   for(const client of local.clientes||[]){
     if(client.ativo===false)continue;
     const normalizedPhone=normalizeBrazilianPhone(client.normalizedPhone||client.telefone),clientRefToken=client.portalRefToken;
     if(normalizedPhone.length<12||!clientRefToken)continue;
-    const profile={clientRefToken,businessId:businessId(),visitId:visit.id,displayName:client.nome,maskedPhone:maskPhone(normalizedPhone),campaigns:progressByClient.get(client.id)||[],orders:safeOrders(local,visit,client),active:true,accessVersion:2},profileFingerprint=JSON.stringify(profile);
+    const profile={clientRefToken,businessId:businessId(),visitId:visit.id,displayName:client.nome,maskedPhone:maskPhone(normalizedPhone),campaigns:profileCampaigns(client),orders:safeOrders(local,visit,client),active:true,accessVersion:3},profileFingerprint=JSON.stringify(profile);
     if(fingerprints[`${client.id}:profile`]!==profileFingerprint){jobs.push(setDoc(doc(db,'publicCatalogs',visit.publicToken,'portalProfiles',clientRefToken),{...profile,updatedAt:serverTimestamp()},{merge:true}).then(()=>{fingerprints[`${client.id}:profile`]=profileFingerprint;recordFirestoreOperation('write',{collection:'publicCatalogs/portalProfiles',documents:1})}))}
   }
   await Promise.all(jobs);

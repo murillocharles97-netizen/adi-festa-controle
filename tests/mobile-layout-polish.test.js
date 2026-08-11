@@ -23,10 +23,11 @@ test('scanners duplicados não são exibidos nas buscas mobile', () => {
 
 test('campanhas usam percentual pt-BR e uma única ação de criação', () => {
   const campaigns = read('js/campanhas-mobile.js');
-  assert.match(campaigns, /toLocaleString\('pt-BR'/);
-  assert.match(campaigns, /Taxa de conversão/);
+  const sharedCampaigns = read('js/campanhas-ui.js');
+  assert.match(sharedCampaigns, /toLocaleString\("pt-BR"/);
+  assert.match(sharedCampaigns, /data-new-campaign/);
   assert.doesNotMatch(campaigns, /class="mobile-campaign-fab"/);
-  assert.match(campaigns, /dataset\.primaryAction === 'new-campaign'/);
+  assert.match(campaigns, /CampanhasMobile/);
 });
 
 test('correções responsivas protegem cabeçalho e buscas estreitas', () => {

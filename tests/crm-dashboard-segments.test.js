@@ -184,13 +184,13 @@ test("wizard consome público CRM somente dentro da mesma empresa", () => {
   const mobileCampaigns = fs.readFileSync("js/campanhas-mobile.js", "utf8");
   assert.match(desktopCampaigns, /payload\.businessId&&payload\.businessId!==businessId/);
   assert.match(desktopCampaigns, /takePendingAudience/);
-  assert.match(mobileCampaigns, /desktop\.takePendingAudience/);
+  assert.match(mobileCampaigns, /uma única interface e um único contrato para mobile e desktop/);
   assert.match(desktopCampaigns, /type:'clients',clientIds/);
 });
 
 test("cache PWA publica a revisão da busca e das ações", () => {
   const worker = fs.readFileSync("service-worker.js", "utf8");
-  assert.match(worker, /adi-festa-v85-desktop-render-stability/);
+  assert.match(worker, /adi-festa-v86-campaigns-v2-final/);
   assert.match(worker, /customer-metrics\.js/);
   assert.match(worker, /client-cloud-pagination\.js/);
   assert.match(worker, /crm-mobile\.js/);

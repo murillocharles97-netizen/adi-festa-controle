@@ -79,13 +79,14 @@ window.Checkout = (() => {
   function refresh() {
     const st = state(),
       items = Object.values(st).reduce((a, b) => a + b, 0),
-      total = [...document.querySelectorAll(".editable-cart")].reduce(
+      rawTotal = [...document.querySelectorAll(".editable-cart")].reduce(
         (s, row) =>
           s +
           Number(row.querySelector("[data-item-qty]")?.value || 0) *
             Number(row.querySelector("[data-item-price]")?.value || 0),
         0,
-      );
+      ),
+      total = Number(document.querySelector("#manual-total")?.value || rawTotal);
     document.querySelectorAll("[data-pos-qty]").forEach((e) => {
       const q = cart
         .filter((item) => item.produtoId === e.dataset.posQty)
@@ -305,14 +306,15 @@ window.Checkout = (() => {
     discountKind = null,
     manual = false,
     finishing = false,
-    pendingClient = null;
-  const totals = () => {
-    const original = cart.reduce(
+    pendingClient = null,
+    selectedCampaignIds = new Set();
+  const totals = (items = cart) => {
+    const original = items.reduce(
         (s, i) => s + i.quantidade * i.precoOriginal,
         0,
       ),
-      final = cart.reduce((s, i) => s + i.quantidade * i.precoFinalUnitario, 0),
-      cost = cart.reduce((s, i) => s + i.quantidade * i.custoUnitario, 0);
+      final = items.reduce((s, i) => s + i.quantidade * i.precoFinalUnitario, 0),
+      cost = items.reduce((s, i) => s + i.quantidade * i.custoUnitario, 0);
     return {
       original,
       final,
@@ -324,7 +326,14 @@ window.Checkout = (() => {
   function drawCart() {
     const host = document.querySelector("#cart");
     if (!host) return;
-    const t = totals();
+    const clientId = document.querySelector("#sale-client")?.value || null;
+    const displayItems = !manual && clientId
+      ? (window.Campanhas?.aplicarBeneficios?.(cart, clientId, {
+          selectedCampaignIds: [...selectedCampaignIds],
+          status: document.querySelector("#sale-status")?.value || "pago",
+        }) || cart)
+      : cart;
+    const t = totals(displayItems);
     host.innerHTML = cart.length
       ? cart
           .map((i) => {
@@ -336,8 +345,40 @@ window.Checkout = (() => {
     document.querySelector("#sale-totals").innerHTML =
       `<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.original)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.discount)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.final)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.cost)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.profit)}</b></div>`;
     document.querySelector("#manual-total").value = t.final.toFixed(2);
+    drawCampaignBenefits();
     refresh();
     window.lucide?.createIcons();
+  }
+
+  function drawCampaignBenefits() {
+    const totalsHost = document.querySelector("#sale-totals");
+    if (!totalsHost) return;
+    let host = document.querySelector("#campaign-benefits");
+    if (!host) {
+      totalsHost.insertAdjacentHTML("beforebegin", '<section id="campaign-benefits" class="campaign-cart-benefits"></section>');
+      host = document.querySelector("#campaign-benefits");
+    }
+    const clientId = document.querySelector("#sale-client")?.value || null;
+    const status = document.querySelector("#sale-status")?.value || "pago";
+    const summaries = window.Campanhas?.resumoCarrinho?.(cart, clientId, [...selectedCampaignIds], status) || [];
+    const visible = summaries;
+    host.innerHTML = !clientId || !visible.length
+      ? ""
+      : `<h4>Benefícios desta compra</h4>${visible.map((item) => `<article class="${item.selected ? "selected" : ""}"><div><b>${escapar(item.name)}</b><small>${escapar(item.message)}</small></div>${item.requiresSelection ? `<button type="button" data-apply-campaign="${escapar(item.campaignId)}">${item.selected ? "Campanha escolhida" : item.benefit ? "Aplicar benefício" : "Escolher campanha"}</button>` : '<span>Automático</span>'}</article>`).join("")}`;
+    host.onclick = (event) => {
+      const button = event.target.closest("[data-apply-campaign]");
+      if (!button) return;
+      const id = button.dataset.applyCampaign;
+      if (selectedCampaignIds.has(id)) selectedCampaignIds.delete(id);
+      else {
+        const selectedSummary = summaries.find((item) => item.campaignId === id);
+        if (selectedSummary?.conflict) {
+          summaries.filter((item) => item.conflictGroup === selectedSummary.conflictGroup).forEach((item) => selectedCampaignIds.delete(item.campaignId));
+        }
+        selectedCampaignIds.add(id);
+      }
+      drawCart();
+    };
   }
   const distribute = (value) => {
     const t = totals(),
@@ -472,8 +513,11 @@ window.Checkout = (() => {
       scrollTo({ top: 0, behavior: "smooth" });
     };
     document.querySelector("#open-client-picker").onclick = picker;
-    document.querySelector("#sale-client").onchange = refresh;
-    document.querySelector("#sale-status").onchange = refresh;
+    document.querySelector("#sale-client").onchange = () => {
+      selectedCampaignIds.clear();
+      drawCart();
+    };
+    document.querySelector("#sale-status").onchange = drawCart;
     document.querySelector("#selected-client-card").onclick = (e) => {
       if (e.target.closest("[data-change-client]")) picker();
       const b = e.target.closest("[data-client-wa]");
@@ -496,6 +540,7 @@ window.Checkout = (() => {
         const i = cart.find((x) => cartKey(x) === price.dataset.itemPrice);
         i.precoFinalUnitario = Math.max(0, Number(price.value) || 0);
         manual = true;
+        selectedCampaignIds.clear();
         discountKind = "item";
       }
       drawCart();
@@ -511,6 +556,7 @@ window.Checkout = (() => {
       distribute(totals().original - Math.max(0, Number(e.target.value) || 0));
       discountKind = "valor";
       manual = false;
+      selectedCampaignIds.clear();
       document.querySelector("#discount-percent").value = "0";
       drawCart();
     };
@@ -519,6 +565,7 @@ window.Checkout = (() => {
       distribute(totals().original * (1 - n / 100));
       discountKind = "percentual";
       manual = false;
+      selectedCampaignIds.clear();
       document.querySelector("#discount-value").value = "0";
       drawCart();
     };
@@ -526,6 +573,7 @@ window.Checkout = (() => {
       distribute(e.target.value);
       discountKind = "valor_final_manual";
       manual = true;
+      selectedCampaignIds.clear();
       drawCart();
     };
     document.querySelector("#finish-sale").onclick = () => {
@@ -549,6 +597,7 @@ window.Checkout = (() => {
             itens: cart,
             ajusteManual: manual,
             descontoTipo: discountKind,
+            appliedCampaignIds: [...selectedCampaignIds],
           });
           cart = [];
           Recibos.mostrar(sale, client);
@@ -601,6 +650,7 @@ window.Checkout = (() => {
     manual = false;
     finishing = false;
     pendingClient = null;
+    selectedCampaignIds.clear();
   }
   function mount() {
     const paint = () => {

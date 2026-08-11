@@ -31,6 +31,8 @@ window.Vendas = (() => {
       const itensComCampanha =
         window.Campanhas?.aplicarBeneficios?.(d.itens, d.clienteId, {
           manualAdjustment: Boolean(d.ajusteManual),
+          selectedCampaignIds: d.appliedCampaignIds || [],
+          status: d.status,
         }) || d.itens;
       const itens = itensComCampanha.map((i) => {
         const produto = db.produtos.find((p) => p.id === i.produtoId),
@@ -112,6 +114,11 @@ window.Vendas = (() => {
         saldoAnterior = cliente ? Number(cliente.saldo || 0) : 0,
         saldoAtual =
           d.status === "fiado" ? saldoAnterior - valorFinal : saldoAnterior;
+      if (cliente && d.status === "fiado" && cliente.legacyBalance === undefined) {
+        cliente.legacyBalance = Math.abs(Math.min(0, saldoAnterior));
+        cliente.legacyBalanceRemaining = cliente.legacyBalance;
+        cliente.campaignFinanceVersion = 2;
+      }
       criada = {
         id: Utils.uuid(),
         operationId,
@@ -139,6 +146,17 @@ window.Vendas = (() => {
         saldoAtual,
         ajusteManual: Boolean(d.ajusteManual),
         descontoTipo: d.descontoTipo || null,
+        campaignEngineVersion: 2,
+        appliedCampaignIds: [...new Set(d.appliedCampaignIds || [])],
+        ...(d.status === "fiado"
+          ? {
+              creditOriginalAmount: valorFinal,
+              creditPaidAmount: 0,
+              creditRemainingAmount: valorFinal,
+              creditSettled: false,
+              creditSettledAt: null,
+            }
+          : {}),
       };
       db.vendas.push(criada);
       itens.forEach((i) => {
@@ -247,7 +265,7 @@ window.Vendas = (() => {
       v && Date.now() - new Date(v.data).getTime() <= 5 * 60 * 1000,
     );
   };
-  const desfazerUltima = () => {
+  const desfazerUltima = (options = {}) => {
     let removida;
     const operationId = Utils.uuid();
     DB.alterar((db) => {
@@ -255,6 +273,8 @@ window.Vendas = (() => {
       if (!venda) throw Error("Nenhuma venda para desfazer");
       if (Date.now() - new Date(venda.data).getTime() > 5 * 60 * 1000)
         throw Error("O prazo de 5 minutos para desfazer terminou");
+      if (!options.administrativeResolution)
+        window.Campanhas?.validarReversaoVendaNoBanco?.(db, venda);
       removida = { ...venda };
       db.vendas.pop();
       const agora = new Date().toISOString();
@@ -344,7 +364,20 @@ window.Vendas = (() => {
         valor: Number(venda.valorFinal ?? venda.valorTotal),
         data: agora,
       });
-      window.Campanhas?.reverterVendaNoBanco(db, venda);
+      const campaignReversal = window.Campanhas?.reverterVendaNoBanco(db, venda, options);
+      if (campaignReversal?.administrativeResolution) {
+        db.movimentacoes.push({
+          id: `${operationId}:campaign-resolution`,
+          operationId,
+          clienteId: venda.clienteId,
+          clienteNome: venda.clienteNome,
+          tipo: "ajuste_administrativo_campanha",
+          vendaId: venda.id,
+          motivo: options.administrativeResolution.reason,
+          conflitos: campaignReversal.administrativeResolution.conflicts,
+          data: agora,
+        });
+      }
     });
     return removida;
   };

@@ -56,6 +56,8 @@ window.Modais=(()=>{
       if(Number(sale.troco)>0)lines.push('','↩️ Troco:',dinheiro(sale.troco));
       lines.push('','✅ Pagamento confirmado','','Obrigado pela preferência! 💚','Até a próxima.');
     }
+    const campaignLines=(sale.campaignReceiptSummary||[]).map(item=>`🎁 ${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`);
+    if(campaignLines.length)lines.push('','Benefícios da compra:',...campaignLines);
     return lines.join('\n');
   }
   function wrapText(context,text,maxWidth){
@@ -67,7 +69,8 @@ window.Modais=(()=>{
     const scale=2,width=450,probe=document.createElement('canvas').getContext('2d');probe.font='bold 15px Arial';
     const itemLines=(sale.itens||[]).map(item=>wrapText(probe,item.nome,285));
     const extraLines=itemLines.reduce((sum,lines)=>sum+Math.max(0,lines.length-1),0);
-    const height=520+(sale.itens||[]).length*70+extraLines*20+(sale.status==='fiado'?125:0)+(sale.observacao?70:0);
+    const campaignLines=(sale.campaignReceiptSummary||[]).length;
+    const height=520+(sale.itens||[]).length*70+extraLines*20+(sale.status==='fiado'?125:0)+(sale.observacao?70:0)+campaignLines*48;
     const canvas=document.createElement('canvas');canvas.width=width*scale;canvas.height=height*scale;
     const context=canvas.getContext('2d');context.scale(scale,scale);context.fillStyle='#fff';context.fillRect(0,0,width,height);context.textBaseline='alphabetic';
     context.fillStyle='#344052';context.textAlign='center';context.font='bold 27px Arial';context.fillText(business.receiptName||business.name,width/2,43);
@@ -87,6 +90,7 @@ window.Modais=(()=>{
     y+=36;context.fillStyle='#344052';context.font='bold 19px Arial';context.fillText('VALOR FINAL',25,y);context.textAlign='right';context.fillText(dinheiro(value(sale)),width-25,y);
     y+=38;context.textAlign='center';context.fillStyle=sale.status==='fiado'?'#a86600':'#087d64';context.font='bold 15px Arial';context.fillText(`FORMA DE PAGAMENTO: ${paymentLabel(sale).toUpperCase()}`,width/2,y);
     if(sale.status==='fiado'){y+=36;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';context.fillText(`Saldo anterior: ${dinheiro(debt(sale.saldoAnterior))}`,35,y);y+=25;context.fillText(`Valor fiado nesta venda: ${dinheiro(value(sale))}`,35,y);y+=28;context.font='bold 16px Arial';context.fillText(`Total em aberto agora: ${dinheiro(debt(sale.saldoAtual))}`,35,y)}
+    if((sale.campaignReceiptSummary||[]).length){y+=38;context.textAlign='left';context.fillStyle='#087d64';context.font='bold 14px Arial';context.fillText('BENEFÍCIOS DA COMPRA',25,y);for(const item of sale.campaignReceiptSummary){y+=23;context.fillStyle='#344052';context.font='13px Arial';wrapText(context,`${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`,390).slice(0,2).forEach(line=>{context.fillText(line,25,y);y+=17})}}
     if(sale.observacao){y+=38;context.textAlign='left';context.fillStyle='#697586';context.font='13px Arial';wrapText(context,`Observação: ${sale.observacao}`,390).slice(0,3).forEach(line=>{context.fillText(line,25,y);y+=18})}
     return canvas;
   }
@@ -111,7 +115,8 @@ window.Modais=(()=>{
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';
     const financed=sale.status==='fiado'?`<div class="receipt-debt"><div><span>Saldo anterior</span><strong>${dinheiro(debt(sale.saldoAnterior))}</strong></div><div><span>Valor fiado nesta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>Total em aberto agora</span><strong>${dinheiro(debt(sale.saldoAtual))}</strong></div></div>`:'';
     const paid=sale.status!=='fiado'?`<div class="sale-payment-confirmed"><i data-lucide="badge-check"></i><span><b>${paymentLabel(sale)}</b><small>Pagamento confirmado</small>${Number(sale.valorRecebido)>0?`<small>Recebido: ${dinheiro(sale.valorRecebido)}</small>`:''}${Number(sale.troco)>0?`<small>Troco: ${dinheiro(sale.troco)}</small>`:''}</span></div>`:'';
-    return`<section class="receipt-paper sale-receipt-paper"><header><h2>${escapar(business.receiptName||business.name)}</h2><span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
+    const campaigns=(sale.campaignReceiptSummary||[]).length?`<div class="sale-receipt-campaigns"><b>Benefícios da compra</b>${sale.campaignReceiptSummary.map(item=>`<span><i data-lucide="gift"></i><span><strong>${escapar(item.campaignName)}</strong><small>${escapar(item.text)}${item.rewardUnlocked?` · ${Number(item.rewardUnlocked)} recompensa disponível`:''}</small></span></span>`).join('')}</div>`:'';
+    return`<section class="receipt-paper sale-receipt-paper"><header><h2>${escapar(business.receiptName||business.name)}</h2><span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
   }
   function closeCompletion(goHome=true){
     document.removeEventListener('keydown',active?.escapeHandler);const trigger=active?.trigger;active=null;Modais.fechar();
