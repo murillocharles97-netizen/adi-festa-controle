@@ -64,6 +64,6 @@ test("infraestrutura global publica safe areas e preserva botão existente", () 
   assert.match(navigation, /\[data-swipe-client\]/);
   assert.match(navigation, /\[data-product-shell\]/);
   assert.match(navigation, /#modal > \*/);
-  assert.match(serviceWorker, /adi-festa-v85-desktop-render-stability/);
+  assert.match(serviceWorker, /adi-festa-v86-campaigns-v2-final/);
   assert.match(serviceWorker, /mobile-navigation-gesture\.js/);
 });

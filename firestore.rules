@@ -43,7 +43,8 @@ service cloud.firestore {
     function planAllowsCollection(businessId, collectionName) {
       let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
       return !(collectionName in [
-          'campaigns', 'campaignProgress', 'rewards', 'charges',
+          'campaigns', 'campaignProgress', 'campaignEvents',
+          'campaignRedemptions', 'paymentAllocations', 'rewards', 'charges',
           'messageHistory', 'messageTemplates', 'messageSequences',
           'visits', 'catalogOrders'
         ])
@@ -79,7 +80,9 @@ service cloud.firestore {
             userProfile().role == 'cashier'
             && collectionName in [
               'clients', 'sales', 'payments', 'balanceEvents',
-              'charges', 'messageHistory', 'clientContacts', 'catalogOrders'
+              'charges', 'messageHistory', 'clientContacts', 'catalogOrders',
+              'campaignProgress', 'campaignEvents', 'campaignRedemptions',
+              'paymentAllocations'
             ]
           )
         );
@@ -312,11 +315,47 @@ service cloud.firestore {
           ]);
         allow update, delete: if false;
       }
+      match /campaignEvents/{eventId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'campaignEvents')
+          && request.resource.data.id == eventId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.campaignId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.sourceType in ['sale', 'payment', 'cancellation', 'redemption', 'expiration']
+          && request.resource.data.transition in ['earned', 'confirmed', 'reversed', 'redeemed', 'expired'];
+        allow update, delete: if false;
+      }
+      match /campaignRedemptions/{redemptionId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'campaignRedemptions')
+          && request.resource.data.id == redemptionId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.campaignId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.status == 'redeemed';
+        allow update, delete: if false;
+      }
+      match /paymentAllocations/{allocationId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'paymentAllocations')
+          && request.resource.data.id == allocationId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.paymentId is string
+          && request.resource.data.saleId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+        allow update, delete: if false;
+      }
       match /{collectionName}/{documentId} {
-        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
+        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
+        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
@@ -325,7 +364,7 @@ service cloud.firestore {
             || documentId != 'operation'
             || hasPermission(businessId, 'manageOperationSettings')
           );
-        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents'])
+        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId

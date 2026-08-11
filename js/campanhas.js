@@ -1,560 +1,375 @@
 (function () {
   "use strict";
-  const TYPES = {
-    buy_get: { label: "Compre X e ganhe Y", icon: "shopping-cart" },
-    points: { label: "Acúmulo de pontos", icon: "award" },
-    quantity_discount: {
-      label: "Desconto por quantidade",
-      icon: "badge-percent",
-    },
-    nth_product: { label: "Produto X vezes", icon: "package-check" },
-    combo: { label: "Combo promocional", icon: "shopping-basket" },
-    custom: { label: "Campanha livre", icon: "megaphone" },
-  };
-  const now = () => new Date().toISOString(),
-    number = (value) => Number(value || 0),
-    dateOnly = (value) => (value ? String(value).slice(0, 10) : "");
-  const status = (campaign) => {
-    if (campaign.status === "encerrada" || campaign.ativo === false)
-      return "encerrada";
-    const today = dateOnly(now()),
-      start = dateOnly(campaign.startDate || campaign.dataInicio),
-      end = dateOnly(campaign.endDate || campaign.dataFim);
-    if (start && start > today) return "agendada";
-    if (end && end < today) return "encerrada";
-    if (campaign.status === "pausada") return "pausada";
-    return "ativa";
-  };
-  const normalize = (raw) => {
-    const created = raw.createdAt || raw.criadoEm || now(),
-      type = TYPES[raw.type] ? raw.type : TYPES[raw.tipo] ? raw.tipo : "custom",
-      rules = raw.rules && typeof raw.rules === "object" ? raw.rules : {};
+
+  const Engine = window.CampaignEngineV2;
+  if (!Engine) throw new Error("Campaign Engine V2 não foi carregado.");
+
+  const TYPES = Engine.TYPES;
+  const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  const now = () => new Date().toISOString();
+
+  function view(raw) {
+    const campaign = Engine.normalizeCampaign(raw);
     return {
-      ...raw,
-      id: raw.id || Utils.uuid(),
-      operationId: raw.operationId || raw.id || Utils.uuid(),
-      name: raw.name || raw.nome || "Campanha sem nome",
-      nome: raw.name || raw.nome || "Campanha sem nome",
-      description: raw.description || raw.descricao || "",
-      descricao: raw.description || raw.descricao || "",
-      type,
-      tipo: type,
-      status: raw.status || "ativa",
-      active: raw.active ?? raw.ativo ?? true,
-      ativo: raw.active ?? raw.ativo ?? true,
-      published: raw.published ?? raw.publica ?? true,
-      publica: raw.published ?? raw.publica ?? true,
-      startDate: raw.startDate || raw.dataInicio || dateOnly(now()),
-      dataInicio: raw.startDate || raw.dataInicio || dateOnly(now()),
-      endDate: raw.endDate || raw.dataFim || "",
-      dataFim: raw.endDate || raw.dataFim || "",
-      imageUrl: raw.imageUrl || raw.imagem || null,
-      imageIcon: raw.imageIcon || TYPES[type].icon,
-      productIds: Array.isArray(raw.productIds)
-        ? raw.productIds
-        : raw.produtoId
-          ? [raw.produtoId]
-          : [],
-      rewardProductId:
-        raw.rewardProductId || raw.produtoPremioId || raw.produtoId || "",
-      categoryIds: Array.isArray(raw.categoryIds) ? raw.categoryIds : [],
-      rules: {
-        requiredQuantity: number(
-          rules.requiredQuantity ?? raw.quantidadeNecessaria ?? 5,
-        ),
-        rewardQuantity: number(
-          rules.rewardQuantity ?? raw.quantidadePremio ?? 1,
-        ),
-        pointsPerReal: number(rules.pointsPerReal ?? raw.pontosPorReal ?? 1),
-        rewardPoints: number(rules.rewardPoints ?? raw.pontos ?? 100),
-        discountPercent: number(
-          rules.discountPercent ?? raw.descontoPercentual ?? 10,
-        ),
-        requiredPurchases: number(
-          rules.requiredPurchases ?? raw.quantidadeNecessaria ?? 5,
-        ),
-        comboProductIds: Array.isArray(rules.comboProductIds)
-          ? rules.comboProductIds
-          : [],
-        comboPrice: number(rules.comboPrice ?? raw.precoCombo),
-        customRule: rules.customRule || raw.regraLivre || "",
-      },
+      ...campaign,
+      nome: campaign.name,
+      descricao: campaign.description,
+      ativo: campaign.active,
+      publica: campaign.published,
+      startDate: campaign.startsAt,
+      endDate: campaign.endsAt || "",
+      dataInicio: campaign.startsAt,
+      dataFim: campaign.endsAt || "",
+      productIds: campaign.qualification.productIds,
+      variantIds: campaign.qualification.variantIds,
+      categoryIds: campaign.qualification.categoryIds,
+      rewardProductId: campaign.rewards.find((reward) => reward.type === "product")?.productId || "",
       audience: {
-        type: raw.audience?.type || raw.participantesTipo || "all",
-        clientIds: Array.isArray(raw.audience?.clientIds)
-          ? raw.audience.clientIds
-          : [],
-        groupIds: Array.isArray(raw.audience?.groupIds)
-          ? raw.audience.groupIds
-          : [],
-        tags: Array.isArray(raw.audience?.tags) ? raw.audience.tags : [],
+        type: campaign.eligibility.audienceType,
+        clientIds: campaign.eligibility.clientIds,
+        segmentId: campaign.eligibility.segmentId,
+        tags: campaign.eligibility.tagIds,
       },
-      schedule: {
-        recurring: Boolean(raw.schedule?.recurring),
-        frequency: raw.schedule?.frequency || null,
-        birthday: Boolean(raw.schedule?.birthday),
+      rules: {
+        requiredQuantity: campaign.rule.requiredQuantity,
+        requiredPurchases: campaign.rule.requiredPurchases,
+        multipleCycles: campaign.rule.multipleCycles,
+        pointsPerReal: campaign.rule.pointsAward / Math.max(0.01, campaign.rule.pointsAmount),
+        pointsAmount: campaign.rule.pointsAmount,
+        pointsAward: campaign.rule.pointsAward,
+        rewardPoints: campaign.rewards[0]?.pointsCost || 0,
+        thresholds: campaign.rule.thresholds,
+        requiredItems: campaign.rule.requiredItems,
+        comboProductIds: campaign.rule.requiredItems.map((item) => item.productId),
+        comboPrice: campaign.rule.comboPrice,
+        rewardQuantity: campaign.rewards[0]?.quantity || 1,
       },
-      participantsCount: number(raw.participantsCount ?? raw.participantes),
-      redemptionsCount: number(raw.redemptionsCount ?? raw.quantidadeResgates),
-      distributedProducts: number(raw.distributedProducts),
-      createdBy:
-        raw.createdBy ||
-        raw.criador ||
-        window.FirebaseSession?.user?.uid ||
-        "local",
-      createdAt: created,
-      criadoEm: created,
-      updatedAt: raw.updatedAt || raw.atualizadoEm || created,
-      atualizadoEm: raw.updatedAt || raw.atualizadoEm || created,
     };
-  };
-  const all = () => DB.carregar().campanhas.map(normalize),
-    get = (id) => all().find((item) => item.id === id),
-    active = () => all().filter((c) => status(c) === "ativa");
-  function eligible(campaign, client) {
-    if (!client || client.ativo === false) return false;
-    const audience = campaign.audience || {};
-    if (audience.type === "clients")
-      return audience.clientIds.includes(client.id);
-    if (audience.type === "vip")
-      return Boolean(
-        client.vip ||
-          client.etiquetas?.includes?.("vip") ||
-          number(client.totalComprado) >= 500,
-      );
-    return true;
   }
+
+  const all = () => (DB.carregar().campanhas || []).map(view);
+  const get = (id) => all().find((campaign) => campaign.id === id) || null;
+  const active = () => all().filter((campaign) => Engine.campaignStatus(campaign) === "active");
+  const status = (campaign) => ({
+    active: "ativa",
+    scheduled: "agendada",
+    paused: "pausada",
+    ended: "encerrada",
+  }[Engine.campaignStatus(campaign)] || "encerrada");
+
+  function canonical(data) {
+    const base = Engine.normalizeCampaign({
+      ...data,
+      startsAt: data.startsAt || data.startDate || data.dataInicio,
+      endsAt: data.endsAt || data.endDate || data.dataFim || null,
+      active: data.active ?? data.ativo,
+      published: data.published ?? data.publica,
+      eligibility: data.eligibility || (data.audience ? {
+        audienceType: data.audience.type,
+        clientIds: data.audience.clientIds,
+        segmentId: data.audience.segmentId,
+        tagIds: data.audience.tags,
+      } : undefined),
+      qualification: data.qualification || {
+        productIds: data.productIds || [],
+        variantIds: data.variantIds || [],
+        categoryIds: data.categoryIds || [],
+        paymentPolicy: "confirm_when_settled",
+        countMode: data.rules?.countMode || "quantity",
+        dailyLimit: data.rules?.dailyLimit ?? null,
+        pointsMode: data.rules?.pointsMode || "value",
+      },
+      rule: data.rule || {
+        requiredQuantity: data.rules?.requiredQuantity,
+        requiredPurchases: data.rules?.requiredPurchases,
+        multipleCycles: data.rules?.multipleCycles ?? true,
+        pointsAmount: data.rules?.pointsAmount || 1,
+        pointsAward: data.rules?.pointsAward || data.rules?.pointsPerReal,
+        pointsMode: data.rules?.pointsMode,
+        thresholds: data.rules?.thresholds,
+        requiredItems: data.rules?.requiredItems,
+        comboPrice: data.rules?.comboPrice,
+        countMode: data.rules?.countMode,
+      },
+    });
+    const oldReward = data.rewardProductId || data.produtoPremioId;
+    if ((!Array.isArray(data.rewards) || !data.rewards.length) && oldReward) {
+      base.rewards = [{
+        id: "reward-1",
+        type: "product",
+        productId: oldReward,
+        variantId: data.rewardVariantId || null,
+        quantity: Math.max(1, number(data.rules?.rewardQuantity || 1)),
+        name: data.rewardName || "Produto grátis",
+        description: "",
+        pointsCost: Math.max(0, number(data.rules?.rewardPoints || 0)),
+      }];
+    }
+    return base;
+  }
+
   function save(data) {
-    if (!data.id && window.PlanLimitService)
-      PlanLimitService.assert(
-        PlanLimitService.canUseCampaigns(),
-        "usar campanhas",
-      );
-    let saved;
+    if (!data.id && window.PlanLimitService) {
+      PlanLimitService.assert(PlanLimitService.canUseCampaigns(), "usar campanhas");
+    }
+    if (!Object.hasOwn(TYPES, data.type || data.tipo)) throw new Error("Selecione um dos cinco tipos oficiais de campanha.");
+    let stored;
     DB.alterar((db) => {
-      const campaign = normalize(data),
-        index = db.campanhas.findIndex((item) => item.id === campaign.id),
-        old = index >= 0 ? normalize(db.campanhas[index]) : null,
-        time = now();
-      saved = {
-        ...old,
+      const campaign = canonical(data);
+      const index = (db.campanhas || []).findIndex((item) => item.id === campaign.id);
+      const old = index >= 0 ? db.campanhas[index] : null;
+      stored = {
         ...campaign,
-        id: campaign.id || Utils.uuid(),
-        operationId: campaign.operationId || old?.operationId || Utils.uuid(),
-        createdAt: old?.createdAt || time,
-        criadoEm: old?.createdAt || time,
-        updatedAt: time,
-        atualizadoEm: time,
+        id: campaign.id,
+        operationId: campaign.operationId || old?.operationId || campaign.id,
+        createdAt: old?.createdAt || campaign.createdAt || now(),
+        updatedAt: now(),
       };
-      saved.status = status(saved);
-      saved.active = saved.ativo = saved.status !== "encerrada";
-      if (index >= 0) db.campanhas[index] = saved;
-      else db.campanhas.push(saved);
+      db.campanhas ||= [];
+      if (index >= 0) db.campanhas[index] = stored;
+      else db.campanhas.push(stored);
     });
-    return saved;
+    return view(stored);
   }
-  const setStatus = (id, value) =>
-    save({
-      ...get(id),
-      status: value,
-      active: value !== "encerrada",
-      ativo: value !== "encerrada",
-    });
-  const duplicate = (id) => {
+
+  function setStatus(id, value) {
+    const current = get(id);
+    if (!current) throw new Error("Campanha não encontrada.");
+    const mapped = { ativa: "active", agendada: "active", pausada: "paused", encerrada: "ended" }[value] || value;
+    return save({ ...current, status: mapped, active: mapped !== "ended" });
+  }
+
+  function duplicate(id) {
     const source = get(id);
+    if (!source) throw new Error("Campanha não encontrada.");
     return save({
       ...source,
       id: Utils.uuid(),
       operationId: Utils.uuid(),
       name: `${source.name} (cópia)`,
-      nome: `${source.name} (cópia)`,
-      status: "agendada",
-      startDate: dateOnly(now()),
-      endDate: "",
-      participantsCount: 0,
-      redemptionsCount: 0,
+      status: "paused",
+      startsAt: Engine.dayKey(Date.now()),
+      endsAt: null,
       createdAt: now(),
     });
-  };
-  const remove = (id) =>
+  }
+
+  function remove(id) {
     DB.alterar((db) => {
-      db.campanhas = db.campanhas.filter((item) => item.id !== id);
-      db.progressosCampanha = db.progressosCampanha.filter(
-        (item) => item.campaignId !== id && item.campanhaId !== id,
-      );
+      const campaign = db.campanhas.find((item) => item.id === id);
+      if (!campaign) return;
+      campaign.active = false;
+      campaign.status = "ended";
+      campaign.deletedAt = now();
+      campaign.updatedAt = campaign.deletedAt;
     });
-  const progressId = (campaignId, clientId) => `${clientId}__${campaignId}`;
-  function matchesCampaignItem(campaign, item) {
-    const productIds = new Set(
-        campaign.productIds || campaign.produtoIds || [],
-      ),
-      variantIds = new Set(campaign.variantIds || campaign.variationIds || []);
-    if (variantIds.size)
-      return Boolean(item.variantId && variantIds.has(item.variantId));
-    return !productIds.size || productIds.has(item.produtoId);
   }
-  function compatibleQuantity(campaign, sale) {
-    return (sale.itens || [])
-      .filter((item) => matchesCampaignItem(campaign, item))
-      .reduce((sum, item) => sum + number(item.quantidade), 0);
+
+  function cartEvaluation(items, clientId, options = {}) {
+    const db = DB.carregar();
+    const client = (db.clientes || []).find((item) => item.id === clientId);
+    if (!client) return { evaluations: [], progress: [], benefits: [], appliedBenefits: [], conflicts: [] };
+    const segmentClientIdsById = Object.fromEntries((db.segmentosClientes || []).map((segment) => [
+      String(segment.id),
+      (segment.clientIds || segment.clienteIds || []).map(String),
+    ]));
+    const sale = { itens: items || [], data: now(), status: options.status || "pago" };
+    const evaluations = active().map((campaign) => Engine.evaluateOne(campaign, sale, {
+      client,
+      products: db.produtos,
+      events: db.eventosCampanha || [],
+      segmentClientIds: options.segmentClientIds,
+      segmentClientIdsById,
+    })).filter(Boolean);
+    return { evaluations, ...Engine.resolveConflicts(evaluations, options.selectedCampaignIds || []) };
   }
-  function comboCompleted(campaign, sale) {
-    const ids = campaign.rules?.comboProductIds || [];
-    return ids.length &&
-      ids.every((id) =>
-        (sale.itens || []).some(
-          (item) => item.produtoId === id && number(item.quantidade) > 0,
-        ),
-      )
-      ? 1
-      : 0;
+
+  function cartSummary(items, clientId, selectedCampaignIds = [], status = "pago") {
+    const evaluated = cartEvaluation(items, clientId, { selectedCampaignIds });
+    const selected = new Set(selectedCampaignIds);
+    return evaluated.evaluations.map((entry) => {
+      const opportunity = entry.opportunity;
+      const conflict = evaluated.conflicts.some((group) => group.campaignIds.includes(entry.campaign.id));
+      let message = "Esta compra gera progresso na campanha.";
+      if (entry.points) message = `${entry.points} ponto(s) serão ${status === "fiado" ? "mantidos pendentes" : "adicionados"}.`;
+      if (opportunity?.kind === "quantity_discount") {
+        message = opportunity.available
+          ? `${opportunity.discountPercent}% disponível.`
+          : `Falta${opportunity.missingQuantity === 1 ? "" : "m"} ${opportunity.missingQuantity} unidade(s) para liberar ${opportunity.nextDiscountPercent}%.`;
+      }
+      if (opportunity?.kind === "combo") message = opportunity.available ? "Combo disponível." : "Adicione os itens do combo para liberar o preço especial.";
+      return {
+        campaignId: entry.campaign.id,
+        name: entry.campaign.name,
+        type: entry.campaign.type,
+        message,
+        benefit: Boolean(opportunity?.available),
+        requiresSelection: Boolean(opportunity?.available || conflict),
+        conflict,
+        conflictGroup: entry.campaign.stacking.conflictGroup || "sale-benefit",
+        selected: selected.has(entry.campaign.id),
+        stackingAllowed: entry.campaign.stacking.allowed,
+      };
+    });
   }
+
   function applyBenefits(items, clientId, options = {}) {
-    const result = (items || []).map((item) => ({
-      ...item,
-      campaignDiscounts: [...(item.campaignDiscounts || [])],
-    }));
-    if (options.manualAdjustment) return result;
-    const db = DB.carregar(),
-      client = db.clientes.find((item) => item.id === clientId);
-    for (const campaign of active()) {
-      if (clientId && !eligible(campaign, client)) continue;
-      if (campaign.type === "quantity_discount") {
-        const matched = result.filter((item) =>
-            matchesCampaignItem(campaign, item),
-          ),
-          quantity = matched.reduce(
-            (sum, item) => sum + number(item.quantidade),
-            0,
-          );
-        if (quantity < Math.max(1, number(campaign.rules.requiredQuantity)))
-          continue;
-        const factor = Math.max(
-          0,
-          1 - number(campaign.rules.discountPercent) / 100,
-        );
+    const result = (items || []).map((item) => ({ ...item, campaignDiscounts: [] }));
+    if (options.manualAdjustment || !clientId) return result;
+    const evaluation = cartEvaluation(result, clientId, options);
+    for (const entry of evaluation.appliedBenefits) {
+      if (entry.campaign.type === "quantity_discount") {
+        const matched = Engine.matchingItems(entry.campaign, result, DB.carregar().produtos);
+        const factor = Math.max(0, 1 - entry.opportunity.discountPercent / 100);
         for (const item of matched) {
-          const base = number(
-            item.precoFinalUnitario ?? item.precoOriginal ?? item.precoUnitario,
-          );
+          const base = number(item.precoOriginal ?? item.precoFinalUnitario ?? item.precoUnitario);
           item.precoFinalUnitario = Number((base * factor).toFixed(4));
-          item.campaignDiscounts.push({
-            campaignId: campaign.id,
-            type: "quantity_discount",
-            percent: number(campaign.rules.discountPercent),
-          });
+          item.campaignDiscounts.push({ campaignId: entry.campaign.id, type: "quantity_discount", percent: entry.opportunity.discountPercent });
         }
       }
-      if (campaign.type === "combo") {
-        const ids = campaign.rules.comboProductIds?.length
-            ? campaign.rules.comboProductIds
-            : campaign.productIds || [],
-          matched = result.filter((item) => ids.includes(item.produtoId));
-        if (
-          !ids.length ||
-          !ids.every((id) => matched.some((item) => item.produtoId === id)) ||
-          number(campaign.rules.comboPrice) <= 0
-        )
-          continue;
-        const original = matched.reduce(
-            (sum, item) =>
-              sum +
-              number(item.quantidade) *
-                number(
-                  item.precoFinalUnitario ??
-                    item.precoOriginal ??
-                    item.precoUnitario,
-                ),
-            0,
-          ),
-          factor = original
-            ? Math.min(1, number(campaign.rules.comboPrice) / original)
-            : 1;
-        for (const item of matched) {
-          const base = number(
-            item.precoFinalUnitario ?? item.precoOriginal ?? item.precoUnitario,
-          );
+      if (entry.campaign.type === "combo") {
+        const cycles = entry.opportunity.cycles;
+        const required = entry.campaign.rule.requiredItems;
+        const selected = [];
+        for (const requirement of required) {
+          let left = requirement.quantity * cycles;
+          for (const item of result.filter((candidate) => candidate.produtoId === requirement.productId && (!requirement.variantId || candidate.variantId === requirement.variantId))) {
+            const used = Math.min(left, number(item.quantidade));
+            if (used) selected.push({ item, used });
+            left -= used;
+            if (left <= 0) break;
+          }
+        }
+        const original = selected.reduce((sum, entryItem) => sum + entryItem.used * number(entryItem.item.precoOriginal ?? entryItem.item.precoFinalUnitario), 0);
+        const target = entry.campaign.rule.comboPrice * cycles;
+        const factor = original ? Math.min(1, target / original) : 1;
+        for (const { item } of selected) {
+          const base = number(item.precoOriginal ?? item.precoFinalUnitario);
           item.precoFinalUnitario = Number((base * factor).toFixed(4));
-          item.campaignDiscounts.push({
-            campaignId: campaign.id,
-            type: "combo",
-            comboPrice: number(campaign.rules.comboPrice),
-          });
+          item.campaignDiscounts.push({ campaignId: entry.campaign.id, type: "combo", cycles, comboPrice: entry.campaign.rule.comboPrice });
         }
       }
     }
     return result;
   }
+
   function applySaleInDb(db, sale) {
-    if (!sale.clienteId) return [];
-    const client = db.clientes.find((item) => item.id === sale.clienteId);
-    if (!client) return [];
-    const updates = [];
-    for (const raw of db.campanhas || []) {
-      const campaign = normalize(raw);
-      if (status(campaign) !== "ativa" || !eligible(campaign, client)) continue;
-      const id = progressId(campaign.id, client.id),
-        index = db.progressosCampanha.findIndex(
-          (item) =>
-            item.id === id ||
-            ((item.campaignId || item.campanhaId) === campaign.id &&
-              (item.clientId || item.clienteId) === client.id),
-        ),
-        before =
-          index >= 0 ? structuredClone(db.progressosCampanha[index]) : null,
-        progress = before
-          ? { ...before, id, operationId: id }
-          : {
-              id,
-              operationId: id,
-              campaignId: campaign.id,
-              campanhaId: campaign.id,
-              clientId: client.id,
-              clienteId: client.id,
-              clientName: client.nome,
-              progress: 0,
-              progresso: 0,
-              points: 0,
-              pontos: 0,
-              availableRewards: 0,
-              recompensasDisponiveis: 0,
-              redeemedRewards: 0,
-              resgates: 0,
-              totalEarned: 0,
-              totalRedeemed: 0,
-              salesCount: 0,
-              processedSaleIds: [],
-              createdAt: sale.data,
-            };
-      if (progress.processedSaleIds?.includes(sale.id)) continue;
-      let increment = 0,
-        threshold = 1,
-        rewards = 0;
-      if (campaign.type === "buy_get") {
-        increment = compatibleQuantity(campaign, sale);
-        threshold = Math.max(1, number(campaign.rules.requiredQuantity));
-        const total = number(progress.progress) + increment;
-        rewards = Math.floor(total / threshold);
-        progress.progress = progress.progresso = total % threshold;
-      } else if (campaign.type === "points") {
-        increment =
-          number(sale.valorFinal ?? sale.valorTotal) *
-          Math.max(0, number(campaign.rules.pointsPerReal));
-        progress.points = progress.pontos = number(progress.points) + increment;
-        threshold = Math.max(1, number(campaign.rules.rewardPoints));
-        rewards =
-          Math.floor(progress.points / threshold) -
-          Math.floor(number(before?.points) / threshold);
-      } else if (campaign.type === "nth_product") {
-        increment = compatibleQuantity(campaign, sale) > 0 ? 1 : 0;
-        threshold = Math.max(1, number(campaign.rules.requiredPurchases));
-        const total = number(progress.progress) + increment;
-        rewards = Math.floor(total / threshold);
-        progress.progress = progress.progresso = total % threshold;
-      } else if (campaign.type === "quantity_discount") {
-        increment = compatibleQuantity(campaign, sale);
-        threshold = Math.max(1, number(campaign.rules.requiredQuantity));
-        if (increment >= threshold) rewards = 1;
-        progress.progress = progress.progresso = Math.min(
-          threshold,
-          number(progress.progress) + increment,
-        );
-      } else if (campaign.type === "combo") {
-        increment = comboCompleted(campaign, sale);
-        threshold = 1;
-        rewards = increment;
-        progress.progress = progress.progresso =
-          number(progress.progress) + increment;
-      } else {
-        increment = 1;
-        progress.progress = progress.progresso = number(progress.progress) + 1;
-      }
-      if (increment <= 0) continue;
-      progress.availableRewards = progress.recompensasDisponiveis =
-        number(progress.availableRewards) + Math.max(0, rewards);
-      progress.currentProgress = number(progress.progress);
-      progress.target = threshold;
-      progress.rewardsAvailable = number(progress.availableRewards);
-      progress.totalEarned =
-        number(progress.totalEarned) + Math.max(0, rewards);
-      progress.totalRedeemed = number(
-        progress.redeemedRewards ?? progress.resgates,
-      );
-      progress.salesCount = number(progress.salesCount) + 1;
-      progress.processedSaleIds = [
-        ...(progress.processedSaleIds || []),
-        sale.id,
-      ].slice(-100);
-      progress.lastSaleId = sale.id;
-      progress.lastQualifiedSaleId = sale.id;
-      progress.lastSaleAt = sale.data;
-      progress.updatedAt = sale.data;
-      progress.threshold = threshold;
-      progress.type = campaign.type;
-      progress.status = progress.availableRewards > 0 ? "available" : "active";
-      if (index >= 0) db.progressosCampanha[index] = progress;
-      else db.progressosCampanha.push(progress);
-      updates.push({
-        progressId: id,
-        campaignId: campaign.id,
-        before,
-        after: structuredClone(progress),
-      });
-      raw.participantsCount = (db.progressosCampanha || []).filter(
-        (item) => (item.campaignId || item.campanhaId) === campaign.id,
-      ).length;
-      raw.participantes = raw.participantsCount;
-      raw.updatedAt = sale.data;
-    }
-    return updates;
+    const result = Engine.applySale(db, sale);
+    sale.campaignEvents = result.events.map((event) => event.id);
+    sale.campaignSnapshot = result.snapshots;
+    sale.campaignReceiptSummary = Engine.receiptSummary(result.snapshots);
+    sale.campaignConflicts = result.conflicts;
+    return result.snapshots;
   }
-  function revertSaleInDb(db, sale) {
-    for (const update of sale.campaignUpdates || []) {
-      const index = db.progressosCampanha.findIndex(
-        (item) => item.id === update.progressId,
-      );
-      if (update.before) {
-        if (index >= 0) db.progressosCampanha[index] = update.before;
-        else db.progressosCampanha.push(update.before);
-      } else if (index >= 0) db.progressosCampanha.splice(index, 1);
-    }
-  }
-  function redeem(campaignId, clientId, note = "") {
-    let reward;
+
+  const validateReverseSaleInDb = (db, sale) => Engine.validateSaleReversal(db, sale);
+  const reverseSaleInDb = (db, sale, options) => Engine.reverseSale(db, sale, options);
+  const saleReversalImpactInDb = (db, sale) => Engine.saleReversalImpact(db, sale);
+
+  function redeem(campaignId, clientId, rewardId, options = {}) {
+    let redemption;
     DB.alterar((db) => {
-      const campaign = db.campanhas.find((item) => item.id === campaignId),
-        progress = db.progressosCampanha.find(
-          (item) =>
-            (item.campaignId || item.campanhaId) === campaignId &&
-            (item.clientId || item.clienteId) === clientId,
-        );
-      if (!campaign || !progress) throw Error("Progresso não encontrado");
-      if (
-        number(progress.availableRewards ?? progress.recompensasDisponiveis) < 1
-      )
-        throw Error("Este cliente ainda não possui prêmio disponível");
-      const time = now(),
-        id = Utils.uuid();
-      progress.availableRewards = progress.recompensasDisponiveis =
-        number(progress.availableRewards ?? progress.recompensasDisponiveis) -
-        1;
-      progress.rewardsAvailable = number(progress.availableRewards);
-      progress.redeemedRewards = progress.resgates =
-        number(progress.redeemedRewards ?? progress.resgates) + 1;
-      progress.totalRedeemed = number(progress.redeemedRewards);
-      progress.status = progress.availableRewards > 0 ? "available" : "active";
-      progress.updatedAt = time;
-      campaign.redemptionsCount = campaign.quantidadeResgates =
-        number(campaign.redemptionsCount ?? campaign.quantidadeResgates) + 1;
-      campaign.distributedProducts =
-        number(campaign.distributedProducts) +
-        Math.max(1, number(normalize(campaign).rules.rewardQuantity));
-      campaign.updatedAt = time;
-      reward = {
-        id,
-        operationId: id,
-        campaignId,
-        campanhaId: campaignId,
-        clientId,
-        clienteId: clientId,
-        type: "campaign_redemption",
-        tipo: "resgate_campanha",
-        quantity: Math.max(1, number(normalize(campaign).rules.rewardQuantity)),
-        status: "redeemed",
-        note,
-        createdAt: time,
-        data: time,
-      };
-      db.recompensas.push(reward);
+      const draft = structuredClone(db);
+      redemption = Engine.redeem(draft, campaignId, clientId, rewardId, options);
+      Object.assign(db, draft);
     });
-    return reward;
+    return redemption;
   }
+
   function approveRequest(requestId) {
-    const request = DB.carregar().recompensas.find(
-      (item) => item.id === requestId && item.tipo === "solicitacao_resgate",
-    );
-    if (!request) throw Error("Solicitação não encontrada");
-    if (request.status !== "solicitado")
-      throw Error("Esta solicitação já foi processada");
-    const client = DB.carregar().clientes.find(
-      (item) =>
-        item.id === (request.clientId || request.clienteId) ||
-        item.portalRefToken === request.clientRefToken,
-    );
-    if (!client) throw Error("Cliente da solicitação não encontrado");
-    const reward = redeem(
-      request.campaignId || request.campanhaId,
-      client.id,
-      "Resgate solicitado pelo Portal do Cliente",
-    );
+    const request = (DB.carregar().recompensas || []).find((item) => item.id === requestId && item.tipo === "solicitacao_resgate");
+    if (!request || request.status !== "solicitado") throw new Error("Solicitação não encontrada ou já processada.");
+    const client = DB.carregar().clientes.find((item) => item.id === (request.clientId || request.clienteId) || item.portalRefToken === request.clientRefToken);
+    if (!client) throw new Error("Cliente da solicitação não encontrado.");
+    let redemption;
     DB.alterar((db) => {
-      const current = db.recompensas.find((item) => item.id === requestId);
+      const draft = structuredClone(db);
+      redemption = Engine.redeem(draft, request.campaignId || request.campanhaId, client.id, request.rewardId, { operationId: `request:${request.id}` });
+      const current = draft.recompensas.find((item) => item.id === requestId);
       current.clientId = current.clienteId = client.id;
       current.status = "resgatado";
-      current.rewardId = reward.id;
+      current.redemptionId = redemption.id;
       current.updatedAt = now();
+      Object.assign(db, draft);
     });
-    dispatchEvent(
-      new CustomEvent("catalog-redemption-status-request", {
-        detail: {
-          requestId,
-          status: "resgatado",
-          rewardId: reward.id,
-          visitId: request.visitId,
-        },
-      }),
-    );
-    return reward;
+    return redemption;
   }
+
   function metrics() {
-    const db = DB.carregar(),
-      campaigns = all(),
-      progress = db.progressosCampanha || [],
-      rewards = (db.recompensas || []).filter(
-        (item) =>
-          item.type === "campaign_redemption" ||
-          item.tipo === "resgate_campanha",
-      ),
-      participants = new Set(
-        progress.map((item) => item.clientId || item.clienteId).filter(Boolean),
-      );
+    const db = DB.carregar();
+    const campaigns = all();
+    const activeCampaigns = campaigns.filter((campaign) => status(campaign) === "ativa");
+    const progress = db.progressosCampanha || [];
+    const redemptions = db.resgatesCampanha || [];
+    const participants = new Set(progress.filter((item) => activeCampaigns.some((campaign) => campaign.id === item.campaignId)).map((item) => item.clientId)).size;
+    const campaignStats = activeCampaigns.map((campaign) => campaignMetrics(campaign.id));
     return {
-      active: campaigns.filter((item) => status(item) === "ativa").length,
-      participants: participants.size,
-      redemptions: rewards.length,
-      distributed: rewards.reduce(
-        (sum, item) => sum + number(item.quantity || 1),
-        0,
-      ),
-      conversion: progress.length
-        ? (rewards.length / progress.length) * 100
-        : 0,
+      active: activeCampaigns.length,
+      participants,
+      redemptions: redemptions.length,
+      distributed: redemptions.filter((item) => item.rewardSnapshot?.type === "product").reduce((sum, item) => sum + number(item.rewardSnapshot?.quantity || 1), 0),
+      conversion: participants ? (redemptions.length / participants) * 100 : 0,
+      eligible: new Set(activeCampaigns.flatMap((campaign) => eligibleClients(campaign, db).map((client) => client.id))).size,
+      nearReward: campaignStats.reduce((sum, item) => sum + number(item?.nearReward), 0),
+      redeemable: campaignStats.reduce((sum, item) => sum + number(item?.redeemable), 0),
+      rewardsAvailable: campaignStats.reduce((sum, item) => sum + number(item?.rewardsAvailable), 0),
     };
   }
-  const progressFor = (campaignId, clientId) =>
-    DB.carregar().progressosCampanha.find(
-      (item) =>
-        (item.campaignId || item.campanhaId) === campaignId &&
-        (item.clientId || item.clienteId) === clientId,
-    ) || null;
+
+  function campaignMetrics(id) {
+    const db = DB.carregar();
+    const campaign = get(id);
+    if (!campaign) return null;
+    const segmentClientIdsById = Object.fromEntries((db.segmentosClientes || []).map((segment) => [
+      String(segment.id),
+      (segment.clientIds || segment.clienteIds || []).map(String),
+    ]));
+    return Engine.campaignMetrics(db, campaign, {
+      businessId: DB.getBusinessId?.() || null,
+      segmentClientIdsById,
+    });
+  }
+
+  function eligibleClients(rawCampaign, data = DB.carregar()) {
+    const campaign = canonical(rawCampaign);
+    const segmentClientIdsById = Object.fromEntries((data.segmentosClientes || []).map((segment) => [
+      String(segment.id),
+      (segment.clientIds || segment.clienteIds || []).map(String),
+    ]));
+    return (data.clientes || []).filter((client) => Engine.eligible(campaign, client, { segmentClientIdsById }));
+  }
+
+  function getProgress(campaignId, clientId) {
+    const db = DB.carregar();
+    const index = Engine.findProgressIndex(db, campaignId, clientId, DB.getBusinessId?.());
+    return index >= 0 ? db.progressosCampanha[index] : null;
+  }
+
   window.Campanhas = {
+    ENGINE_VERSION: Engine.VERSION,
     TYPES,
-    normalize,
-    status,
+    normalize: view,
     listar: all,
     obter: get,
     ativas: active,
+    status,
+    elegivel: (campaign, client, context) => Engine.eligible(campaign, client, context),
+    elegiveis: eligibleClients,
     salvar: save,
     alterarStatus: setStatus,
     duplicar: duplicate,
     excluir: remove,
-    elegivel: eligible,
+    avaliarCarrinho: cartEvaluation,
+    resumoCarrinho: cartSummary,
     aplicarBeneficios: applyBenefits,
     aplicarVendaNoBanco: applySaleInDb,
-    reverterVendaNoBanco: revertSaleInDb,
+    validarReversaoVendaNoBanco: validateReverseSaleInDb,
+    impactoReversaoVendaNoBanco: saleReversalImpactInDb,
+    reverterVendaNoBanco: reverseSaleInDb,
     resgatar: redeem,
     aprovarSolicitacao: approveRequest,
     metricas: metrics,
-    progresso: progressFor,
+    metricasCampanha: campaignMetrics,
+    progresso: getProgress,
   };
 })();

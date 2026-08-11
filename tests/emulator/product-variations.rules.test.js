@@ -80,6 +80,45 @@ test('público não cria variação nem altera preço ou estoque',async()=>{
   await assertFails(setDoc(ref,variant(businessA,'parent-1','public')));
 });
 
+test('Campaign Engine V2 grava ledger imutável e projeção na própria empresa',async()=>{
+  const db=env.authenticatedContext('cashier-no-crm').firestore(),campaignId='campaign-v2',clientId='financial-client',eventId='campaign-v2-event',progressId=`${campaignId}__${clientId}`,
+    eventRef=doc(db,'businesses',businessA,'campaignEvents',eventId),progressRef=doc(db,'businesses',businessA,'campaignProgress',progressId);
+  await assertSucceeds(setDoc(eventRef,{id:eventId,operationId:'campaign-v2-op',businessId:businessA,ownerId:'cashier-no-crm',engineVersion:2,schemaVersion:3,campaignId,clientId,sourceType:'sale',sourceId:'sale-v2',transition:'earned',status:'confirmed',delta:{progress:1,points:0,rewards:0},createdAt:new Date(),updatedAt:new Date(),version:1}));
+  await assertSucceeds(setDoc(progressRef,{id:progressId,operationId:progressId,businessId:businessA,ownerId:'cashier-no-crm',engineVersion:2,schemaVersion:3,campaignId,clientId,pendingProgress:0,confirmedProgress:1,pendingPoints:0,availablePoints:0,availableRewards:0,redeemedRewards:0,cycleRemainder:1,version:1,createdAt:new Date(),updatedAt:new Date()}));
+  await assertFails(updateDoc(eventRef,{status:'reversed',updatedAt:new Date()}));
+});
+
+test('Campaign Engine V2 bloqueia ledger cruzado e público',async()=>{
+  const ownerA=env.authenticatedContext('owner-a').firestore(),anonymous=env.unauthenticatedContext().firestore(),payload={id:'foreign-event',operationId:'foreign-op',businessId:businessB,ownerId:'owner-a',engineVersion:2,schemaVersion:3,campaignId:'campaign',clientId:'client',sourceType:'sale',sourceId:'sale',transition:'earned',status:'confirmed',delta:{progress:1,points:0,rewards:0},createdAt:new Date(),updatedAt:new Date(),version:1};
+  await assertFails(setDoc(doc(ownerA,'businesses',businessB,'campaignEvents','foreign-event'),payload));
+  await assertFails(setDoc(doc(anonymous,'businesses',businessA,'campaignEvents','public-event'),{...payload,id:'public-event',businessId:businessA}));
+});
+
+test('resgate V2 atomico atualiza progresso e estoque em outra sessao',async()=>{
+  const sessionA=env.authenticatedContext('owner-a').firestore(),sessionB=env.authenticatedContext('owner-a').firestore(),
+    campaignId='campaign-live-sync',clientId='financial-client',progressId=`${campaignId}__${clientId}`,
+    productId='campaign-reward-product',eventId='campaign-live-sync:redemption',redemptionId='campaign-live-sync-redemption',
+    progressRefA=doc(sessionA,'businesses',businessA,'campaignProgress',progressId),
+    progressRefB=doc(sessionB,'businesses',businessA,'campaignProgress',progressId),
+    productRefA=doc(sessionA,'businesses',businessA,'products',productId),
+    productRefB=doc(sessionB,'businesses',businessA,'products',productId);
+  await assertSucceeds(setDoc(progressRefA,{id:progressId,operationId:progressId,businessId:businessA,ownerId:'owner-a',engineVersion:2,schemaVersion:3,campaignId,clientId,pendingProgress:0,confirmedProgress:0,pendingPoints:0,availablePoints:200,availableRewards:0,redeemedRewards:0,cycleRemainder:0,version:1,createdAt:new Date(),updatedAt:new Date()}));
+  await assertSucceeds(setDoc(productRefA,{id:productId,businessId:businessA,ownerId:'owner-a',nome:'Premio sincronizado',preco:8,estoqueAtual:2,estoque:2,totalStock:2,ativo:true,active:true,updatedAt:new Date()}));
+  const waitFor=(ref,predicate)=>new Promise((resolve,reject)=>{let unsubscribe=()=>{};const timer=setTimeout(()=>{unsubscribe();reject(new Error('Tempo excedido aguardando atualizacao em outra sessao.'))},3000);unsubscribe=onSnapshot(ref,snapshot=>{if(!snapshot.exists()||!predicate(snapshot.data()))return;clearTimeout(timer);unsubscribe();resolve(snapshot.data())},error=>{clearTimeout(timer);unsubscribe();reject(error)})});
+  const progressUpdated=waitFor(progressRefB,data=>Number(data.availablePoints)===100),productUpdated=waitFor(productRefB,data=>Number(data.estoqueAtual)===1);
+  await assertSucceeds(runTransaction(sessionA,async transaction=>{
+    const [progress,product]=await Promise.all([transaction.get(progressRefA),transaction.get(productRefA)]);
+    transaction.set(progressRefA,{...progress.data(),availablePoints:100,redeemedRewards:1,updatedAt:new Date(),version:2});
+    transaction.set(productRefA,{...product.data(),estoqueAtual:1,estoque:1,totalStock:1,updatedAt:new Date()});
+    transaction.set(doc(sessionA,'businesses',businessA,'campaignEvents',eventId),{id:eventId,operationId:redemptionId,businessId:businessA,ownerId:'owner-a',engineVersion:2,schemaVersion:3,campaignId,clientId,sourceType:'redemption',sourceId:redemptionId,transition:'redeemed',status:'confirmed',delta:{progress:0,points:-100,rewards:0},createdAt:new Date(),updatedAt:new Date(),version:1});
+    transaction.set(doc(sessionA,'businesses',businessA,'campaignRedemptions',redemptionId),{id:redemptionId,operationId:redemptionId,businessId:businessA,ownerId:'owner-a',engineVersion:2,schemaVersion:3,campaignId,clientId,status:'redeemed',pointsCost:100,productId,quantity:1,createdAt:new Date(),updatedAt:new Date(),version:1});
+  }));
+  const [remoteProgress,remoteProduct]=await Promise.all([progressUpdated,productUpdated]);
+  assert.equal(remoteProgress.availablePoints,100);
+  assert.equal(remoteProduct.estoqueAtual,1);
+  assert.equal((await getDoc(doc(sessionB,'businesses',businessA,'campaignRedemptions',redemptionId))).data().status,'redeemed');
+});
+
 test('regra rejeita campo administrativo inesperado e pai de outra empresa',async()=>{
   const db=env.authenticatedContext('owner-a').firestore();
   await assertFails(setDoc(doc(db,'businesses',businessA,'productVariants','invalid-field'),{...variant(businessA,'parent-1','invalid-field'),secretCostOverride:1}));

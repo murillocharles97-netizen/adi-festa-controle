@@ -36,6 +36,9 @@ const SOURCES = {
   campaigns: { key: "campanhas" },
   campaignProgress: { key: "progressosCampanha" },
   rewards: { key: "recompensas" },
+  campaignEvents: { key: "eventosCampanha" },
+  campaignRedemptions: { key: "resgatesCampanha" },
+  paymentAllocations: { key: "alocacoesPagamento" },
   charges: { key: "cobrancas" },
   messageHistory: { key: "messageHistory" },
   messageTemplates: { key: "messageTemplates" },
@@ -54,6 +57,9 @@ const QUEUE_ENTITY_ALIASES = {
   ajustesSaldo: "balanceAdjustments",
   movimentacoesEstoque: "stockMovements",
   campanhas: "campaigns",
+  eventosCampanha: "campaignEvents",
+  resgatesCampanha: "campaignRedemptions",
+  alocacoesPagamento: "paymentAllocations",
   cobrancas: "charges",
   contatosCliente: "clientContacts",
   pedidos: "catalogOrders",
@@ -69,6 +75,9 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
   "balanceAdjustments",
   "stockMovements",
   "rewards",
+  "campaignEvents",
+  "campaignRedemptions",
+  "paymentAllocations",
   "messageHistory",
   "messageSequences",
   "clientContacts",
@@ -85,6 +94,9 @@ const DEFAULT_PULL_NAMES = [
     "campaigns",
     "campaignProgress",
     "rewards",
+    "campaignEvents",
+    "campaignRedemptions",
+    "paymentAllocations",
   ],
   INITIAL_FULL_NAMES = new Set(["clients", "campaigns"]),
   INITIAL_RECENT_LIMITS = {
@@ -92,6 +104,9 @@ const DEFAULT_PULL_NAMES = [
     payments: 200,
     campaignProgress: 100,
     rewards: 100,
+    campaignEvents: 200,
+    campaignRedemptions: 100,
+    paymentAllocations: 200,
     balanceAdjustments: 100,
     stockMovements: 100,
     charges: 100,
@@ -1221,6 +1236,8 @@ function captureChanges(before, after) {
         : "sale"
       : writes.some((write) => write.entityType === "payments")
         ? "payment"
+        : writes.some((write) => write.entityType === "campaignRedemptions")
+          ? "campaign_redemption"
         : writes.some((write) => write.entityType === "clientContacts")
           ? "client_contact"
           : writes.some((write) => write.entityType === "messageHistory")
@@ -1346,8 +1363,9 @@ async function commitQueueItem(item) {
       "stock_entry",
       "stock_adjustment",
       "sale_undo",
+      "campaign_redemption",
     ].includes(item.payload.eventKind),
-    deltaEntities = ["clients", "products", "productVariants"],
+    deltaEntities = ["clients", "products", "productVariants", "campaignProgress"],
     eventKind = item.payload.eventKind || item.subtype || "simple",
     financialEffect = financialEffectFromWrites(
       writes,
@@ -1400,6 +1418,14 @@ async function commitQueueItem(item) {
             await transaction.get(reference),
           );
       }
+    const campaignIds = [...new Set(writes
+      .filter((write) => write.entityType === "campaignProgress")
+      .map((write) => String(write.data?.campaignId || write.before?.campaignId || ""))
+      .filter(Boolean))];
+    for (const campaignId of campaignIds) {
+      const reference = doc(db, "businesses", businessId, "campaigns", campaignId);
+      snapshots.set(`campaigns:${campaignId}`, await transaction.get(reference));
+    }
     const financialEffectSnapshot = financialEffectReference
       ? await transaction.get(financialEffectReference)
       : null;
@@ -1411,6 +1437,43 @@ async function commitQueueItem(item) {
         String(snapshot.data()?.operationId || "") === operationId
       );
     });
+    if (eventKind === "campaign_redemption" && !alreadyApplied) {
+      const progressWrite = writes.find((write) => write.entityType === "campaignProgress");
+      if (!progressWrite?.before) {
+        throw Object.assign(new Error("O resgate não contém a projeção anterior da campanha."), {
+          code: "campaign-redemption-incomplete",
+        });
+      }
+      const progressSnapshot = snapshots.get(`campaignProgress:${progressWrite.entityId}`);
+      if (!progressSnapshot?.exists()) {
+        throw Object.assign(new Error("O progresso da campanha não existe mais na nuvem."), {
+          code: "campaign-progress-not-found",
+        });
+      }
+      const remoteProgress = progressSnapshot.data() || {};
+      for (const field of ["availablePoints", "availableRewards"]) {
+        if (!Number.isFinite(Number(progressWrite.data?.[field])) || !Number.isFinite(Number(progressWrite.before?.[field]))) continue;
+        const delta = Number(progressWrite.data[field]) - Number(progressWrite.before[field]);
+        if (delta < 0 && Number(remoteProgress[field] || 0) + delta < 0) {
+          throw Object.assign(new Error(field === "availablePoints" ? "Os pontos já foram utilizados em outro dispositivo." : "A recompensa já foi resgatada em outro dispositivo."), {
+            code: "campaign-redemption-conflict",
+          });
+        }
+      }
+      for (const write of writes.filter((entry) => ["products", "productVariants"].includes(entry.entityType) && entry.before)) {
+        const field = write.entityType === "productVariants" ? "stock" : "estoqueAtual";
+        if (!Number.isFinite(Number(write.data?.[field])) || !Number.isFinite(Number(write.before?.[field]))) continue;
+        const delta = Number(write.data[field]) - Number(write.before[field]);
+        if (delta >= 0) continue;
+        const remote = snapshots.get(`${write.entityType}:${write.entityId}`)?.data() || {};
+        const allowsNegative = write.entityType === "productVariants" ? remote.allowNegativeStock === true : remote.semControleEstoque === true;
+        if (!allowsNegative && Number(remote[field] || 0) + delta < 0) {
+          throw Object.assign(new Error("O estoque da recompensa foi alterado em outro dispositivo."), {
+            code: "campaign-stock-conflict",
+          });
+        }
+      }
+    }
     if (financialEffectSnapshot?.exists() && !alreadyApplied) {
       transaction.set(
         marker,
@@ -1464,7 +1527,7 @@ async function commitQueueItem(item) {
       let data = write.data;
       if (
         transactional &&
-        write.before &&
+        (write.before || write.entityType === "campaignProgress") &&
         deltaEntities.includes(write.entityType)
       ) {
         const remote = snapshots.get(`${write.entityType}:${write.entityId}`),
@@ -1475,15 +1538,30 @@ async function commitQueueItem(item) {
             ? ["saldo", "totalComprado", "quantidadeVendas"]
             : write.entityType === "productVariants"
               ? ["stock"]
-              : ["estoqueAtual", "estoque", "totalStock"];
+              : write.entityType === "campaignProgress"
+                ? ["pendingProgress", "confirmedProgress", "pendingPoints", "availablePoints", "redeemedRewards"]
+                : ["estoqueAtual", "estoque", "totalStock"];
         for (const field of fields)
           if (
             Number.isFinite(Number(data[field])) &&
-            Number.isFinite(Number(write.before[field]))
+            Number.isFinite(Number(write.before?.[field] ?? 0))
           )
             merged[field] =
-              Number(base[field] ?? write.before[field] ?? 0) +
-              (Number(data[field]) - Number(write.before[field]));
+              Number(base[field] ?? write.before?.[field] ?? 0) +
+              (Number(data[field]) - Number(write.before?.[field] ?? 0));
+        if (write.entityType === "campaignProgress") {
+          const campaignId = String(data.campaignId || write.before?.campaignId || ""),
+            campaign = snapshots.get(`campaigns:${campaignId}`)?.data() || {},
+            rule = campaign.rule || {},
+            type = campaign.type || campaign.tipo;
+          if (["buy_get", "nth_product"].includes(type)) {
+            const threshold = Math.max(1, Number(type === "nth_product" ? rule.requiredPurchases : rule.requiredQuantity) || 1),
+              cycles = Math.floor(Math.max(0, Number(merged.confirmedProgress || 0)) / threshold),
+              entitled = rule.multipleCycles === false ? Math.min(1, cycles) : cycles;
+            merged.availableRewards = Math.max(0, entitled - Math.max(0, Number(merged.redeemedRewards || 0)));
+            merged.cycleRemainder = Math.max(0, Number(merged.confirmedProgress || 0)) % threshold;
+          }
+        }
         data = merged;
       }
       transaction.set(

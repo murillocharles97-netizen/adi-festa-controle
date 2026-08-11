@@ -42,6 +42,27 @@
     aplicarInputModes(root);
     window.lucide?.createIcons();
   }
+  function abrirResolucaoCancelamento(error) {
+    const conflitos = error?.conflicts || [];
+    abrirFormulario(
+      "Benefícios já utilizados",
+      `<section class="campaign-cancellation-warning">${icon("triangle-alert")}<div><h4>Esta venda gerou benefícios que já foram utilizados.</h4><p>O cancelamento será registrado sem apagar o histórico. O saldo utilizado ficará como dívida de pontos ou recompensa no progresso do cliente.</p></div></section><div class="campaign-cancellation-impact">${conflitos.map((item) => `<article><b>${escapar(item.campaignName || "Campanha")}</b><span>${item.pointsDebt ? `${Number(item.pointsDebt)} ponto(s) utilizados` : ""}${item.pointsDebt && item.rewardDebt ? " · " : ""}${item.rewardDebt ? `${Number(item.rewardDebt)} recompensa(s) utilizada(s)` : ""}</span></article>`).join("")}</div><div class="field"><label>Motivo da resolução administrativa</label><textarea name="campaignResolutionReason" required minlength="8" placeholder="Ex.: Venda cancelada após devolução do pedido"></textarea><small>Esta justificativa ficará registrada no histórico da campanha.</small></div><label class="campaign-resolution-consent"><input type="checkbox" name="confirmBenefitDebt" required> Entendo que o benefício já entregue será registrado como pendência no progresso do cliente.</label>`,
+      (form) => {
+        const reason = String(form.get("campaignResolutionReason") || "").trim();
+        if (reason.length < 8) throw Error("Informe um motivo com pelo menos 8 caracteres.");
+        if (!form.get("confirmBenefitDebt")) throw Error("Confirme o registro da pendência de benefício.");
+        Vendas.desfazerUltima({
+          administrativeResolution: {
+            mode: "record_benefit_debt",
+            reason,
+            actorId: window.FirebaseSession?.profile?.uid || null,
+          },
+        });
+        toast("Venda cancelada com ajuste de campanha registrado");
+      },
+      "Cancelar e registrar ajuste",
+    );
+  }
   function resumoFechamento() {
     const d = DB.carregar(),
       vendas = d.vendas.filter((v) => Utils.hoje(v.data)),
@@ -174,16 +195,16 @@
       `<div class="toolbar"><input class="search" id="search" placeholder="Buscar produto por nome ou código..."><button class="desktop-barcode-button" data-scan-product aria-label="Ler código"><i data-lucide="scan-barcode"></i></button><button class="btn btn-light" data-scan-stock><i data-lucide="package-plus"></i> Entrada por código</button></div><section class="entity-grid" id="entity-list">${lista.map(produtoCard).join("") || vazio("Nenhum produto cadastrado")}</section>`
     );
   }
-  const totaisCarrinho = () => {
-      const subtotalOriginal = carrinho.reduce(
+  const totaisCarrinho = (items = carrinho) => {
+      const subtotalOriginal = items.reduce(
           (s, i) => s + i.quantidade * i.precoOriginal,
           0,
         ),
-        valorFinal = carrinho.reduce(
+        valorFinal = items.reduce(
           (s, i) => s + i.quantidade * i.precoFinalUnitario,
           0,
         ),
-        custoTotal = carrinho.reduce(
+        custoTotal = items.reduce(
           (s, i) => s + i.quantidade * i.custoUnitario,
           0,
         );
@@ -657,7 +678,37 @@
   }
   function bindVenda() {
     let ajusteManual = false,
-      descontoTipo = null;
+      descontoTipo = null,
+      appliedCampaignIds = new Set();
+
+    const desenharCampanhas = () => {
+      const totalsHost = $("#sale-totals");
+      if (!totalsHost) return;
+      let host = $("#campaign-benefits");
+      if (!host) {
+        totalsHost.insertAdjacentHTML("beforebegin", '<section id="campaign-benefits" class="campaign-cart-benefits"></section>');
+        host = $("#campaign-benefits");
+      }
+      const clientId = $("#sale-client")?.value || null,
+        saleStatus = $("#sale-status")?.value || "pago",
+        summaries = window.Campanhas?.resumoCarrinho?.(carrinho, clientId, [...appliedCampaignIds], saleStatus) || [],
+        visible = summaries;
+      host.innerHTML = !clientId || !visible.length ? "" : `<h4>Benefícios desta compra</h4>${visible.map((item) => `<article class="${item.selected ? "selected" : ""}"><div><b>${escapar(item.name)}</b><small>${escapar(item.message)}</small></div>${item.requiresSelection ? `<button type="button" data-apply-campaign="${escapar(item.campaignId)}">${item.selected ? "Campanha escolhida" : item.benefit ? "Aplicar benefício" : "Escolher campanha"}</button>` : '<span>Automático</span>'}</article>`).join("")}`;
+      host.onclick = (event) => {
+        const button = event.target.closest("[data-apply-campaign]");
+        if (!button) return;
+        const id = button.dataset.applyCampaign;
+        if (appliedCampaignIds.has(id)) appliedCampaignIds.delete(id);
+        else {
+          const selectedSummary = summaries.find((item) => item.campaignId === id);
+          if (selectedSummary?.conflict) {
+            summaries.filter((item) => item.conflictGroup === selectedSummary.conflictGroup).forEach((item) => appliedCampaignIds.delete(item.campaignId));
+          }
+          appliedCampaignIds.add(id);
+        }
+        redesenhar();
+      };
+    };
     const distribuir = (valor) => {
       const t = totaisCarrinho(),
         alvo = Math.max(0, Number(valor) || 0),
@@ -668,7 +719,14 @@
       );
     };
     const redesenhar = () => {
-      const t = totaisCarrinho();
+      const clientId = $("#sale-client")?.value || null,
+        displayItems = !ajusteManual && clientId
+          ? (window.Campanhas?.aplicarBeneficios?.(carrinho, clientId, {
+              selectedCampaignIds: [...appliedCampaignIds],
+              status: $("#sale-status")?.value || "pago",
+            }) || carrinho)
+          : carrinho,
+        t = totaisCarrinho(displayItems);
       $("#cart").innerHTML = carrinhoHTML();
       $("#sale-totals").innerHTML =
         `<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.subtotalOriginal)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.descontoTotal)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.valorFinal)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.custoTotal)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.lucro)}</b></div>`;
@@ -679,6 +737,7 @@
         desktopDiscount.textContent = dinheiro(t.descontoTotal);
       if (desktopCount)
         desktopCount.textContent = `${carrinho.reduce((sum, item) => sum + Number(item.quantidade || 0), 0)} itens`;
+      desenharCampanhas();
       const c = Clientes.obter($("#sale-client").value),
         fiado = $("#sale-status").value === "fiado";
       $("#debt-preview").innerHTML =
@@ -699,6 +758,7 @@
             const i = carrinho.find((y) => cartKey(y) === x.dataset.itemPrice);
             i.precoFinalUnitario = Math.max(0, Number(x.value) || 0);
             ajusteManual = true;
+            appliedCampaignIds.clear();
             descontoTipo = "item";
             redesenhar();
           }),
@@ -768,6 +828,7 @@
       distribuir(t.subtotalOriginal - Math.max(0, Number(e.target.value) || 0));
       descontoTipo = "valor";
       ajusteManual = false;
+      appliedCampaignIds.clear();
       $("#discount-percent").value = "0";
       redesenhar();
     };
@@ -777,6 +838,7 @@
       distribuir(t.subtotalOriginal * (1 - pct / 100));
       descontoTipo = "percentual";
       ajusteManual = false;
+      appliedCampaignIds.clear();
       $("#discount-value").value = "0";
       redesenhar();
     };
@@ -784,9 +846,14 @@
       distribuir(e.target.value);
       descontoTipo = "valor_final_manual";
       ajusteManual = true;
+      appliedCampaignIds.clear();
       redesenhar();
     };
-    $("#sale-client").onchange = $("#sale-status").onchange = redesenhar;
+    $("#sale-client").onchange = () => {
+      appliedCampaignIds.clear();
+      redesenhar();
+    };
+    $("#sale-status").onchange = redesenhar;
     if (!window.DesktopSales?.isDesktop?.())
       $("#product-search").oninput = (e) =>
         $$(".pick-product").forEach(
@@ -818,6 +885,7 @@
             itens: carrinho,
             ajusteManual,
             descontoTipo,
+            appliedCampaignIds: [...appliedCampaignIds],
           });
           carrinho = [];
           Recibos.mostrar(venda, cliente);
@@ -1138,8 +1206,13 @@
         "Desfazer última venda",
         "<p>Tem certeza que deseja desfazer a última venda? O saldo e o estoque serão restaurados.</p>",
         () => {
-          Vendas.desfazerUltima();
-          toast("Venda desfeita com sucesso");
+          try {
+            Vendas.desfazerUltima();
+            toast("Venda desfeita com sucesso");
+          } catch (error) {
+            if (error?.code !== "campaign-redemption-conflict") throw error;
+            setTimeout(() => abrirResolucaoCancelamento(error), 0);
+          }
         },
         "Desfazer venda",
       );
