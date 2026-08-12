@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Validação visual — enquadramento de produtos</title>
+  <link rel="stylesheet" href="../../css/product-images.css">
+  <style>
+    .btn{min-height:44px;padding:0 18px;border:1px solid #dce3ea;border-radius:12px;background:#fff;color:#344052;font-weight:800}.btn-primary{border-color:#0bb487;background:#0bb487;color:#fff}.btn-light{background:#f3f6f8}
+    :root{--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);font-family:Inter,system-ui,sans-serif;color:#192943;background:#f5f7f9}
+    *{box-sizing:border-box}body{margin:0;background:#f5f7f9}.demo{max-width:1180px;margin:auto;padding:32px}.demo>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.demo h1{margin:0;font-size:28px}.demo header p{margin:5px 0 0;color:#6f7c90}.demo-badge{padding:8px 12px;border-radius:999px;background:#ddf7f0;color:#087f65;font-weight:800}.demo-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.demo-product{min-width:0;padding:12px;border:1px solid #e1e7ed;border-radius:20px;background:#fff;box-shadow:0 9px 25px rgba(27,48,73,.07)}.demo-media{position:relative;width:100%;aspect-ratio:145/205}.demo-photo{position:absolute;inset:0;width:100%;height:100%;border-radius:16px}.demo-favorite{position:absolute;right:9px;top:9px;z-index:3;width:38px;height:38px;border:0;border-radius:50%;background:rgba(255,255,255,.94);color:#f2a900;font-size:21px;box-shadow:0 4px 14px rgba(27,48,73,.16)}.demo-product h2{margin:13px 2px 3px;font-size:17px}.demo-product p{margin:0 2px 12px;color:#758196;font-size:12px}.demo-meta{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:12px;background:#f5f8f9}.demo-meta b{color:#08a77d}.demo-open{display:flex;align-items:center;gap:8px;margin-top:24px;padding:13px 18px;border:0;border-radius:13px;background:#0bb487;color:#fff;font-weight:850}
+    @media(max-width:767px){.demo{padding:calc(18px + var(--safe-top)) 14px calc(100px + var(--safe-bottom))}.demo>header{align-items:flex-start}.demo h1{font-size:24px}.demo-badge{font-size:11px}.demo-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.demo-product{padding:9px;border-radius:17px}.demo-media{aspect-ratio:145/205}.demo-photo{border-radius:13px}.demo-product h2{font-size:14px}.demo-product p{min-height:28px;font-size:10px}.demo-meta{font-size:11px}.demo-open{width:100%;justify-content:center}}
+  </style>
+</head>
+<body>
+  <main class="demo">
+    <header><div><h1>Fotos dos produtos</h1><p>O mesmo enquadramento acompanha todos os cards.</p></div><span class="demo-badge">Preview v89</span></header>
+    <section class="demo-grid" id="demo-grid"></section>
+    <button class="demo-open" id="open-editor" type="button">Ajustar foto horizontal</button>
+  </main>
+  <script src="../../assets/lucide.min.js"></script>
+  <script src="../../js/product-images.js"></script>
+  <script>
+    const svg = (width, height, body, background = "#eef8f5") => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" rx="32" fill="${background}"/>${body}</svg>`)}`;
+    const images = {
+      vertical: svg(360,720,'<ellipse cx="180" cy="650" rx="96" ry="24" fill="#b9c8c3" opacity=".45"/><path d="M135 92h90l-9 85 40 62v330c0 48-24 72-76 72s-76-24-76-72V239l40-62z" fill="#171f29"/><path d="M127 286h106v190H127z" rx="18" fill="#19d45f"/><text x="180" y="400" text-anchor="middle" font-size="56" font-weight="900" fill="#07140d">M</text>','#edf8f3'),
+      square: svg(620,620,'<g transform="translate(90 105)"><rect x="20" y="55" width="420" height="330" rx="32" fill="#4e2416"/><path d="M35 105c55-42 115 18 170-12s105 24 170-12 82 23 82 23v90H35z" fill="#7d3d24"/><g fill="#2f160f"><circle cx="105" cy="132" r="20"/><circle cx="210" cy="112" r="18"/><circle cx="322" cy="147" r="22"/><circle cx="385" cy="105" r="15"/></g></g>','#ffe9e7'),
+      horizontal: svg(1100,390,Array.from({length:9},(_,i)=>{const x=65+i*108,colors=['#34d35c','#02b4e6','#8f53ff','#f0e22c','#e23637'][i%5];return `<g transform="translate(${x} 52)"><rect width="78" height="284" rx="20" fill="#131b20"/><path d="M18 62l20 36 18-37 9 103-22-25-20 35z" fill="${colors}"/><text x="39" y="224" text-anchor="middle" font-size="18" font-weight="800" fill="#fff" transform="rotate(-90 39 224)">MONSTER</text></g>`}).join(''),'#f1f5f7'),
+      centered: svg(900,560,'<ellipse cx="450" cy="410" rx="150" ry="40" fill="#c7d6d1" opacity=".55"/><g transform="translate(350 150)"><path d="M15 15h170l-24 235H39z" fill="#f5d9b3"/><path d="M30 24h140l-30 57H60z" fill="#6f321c"/><circle cx="71" cy="45" r="17" fill="#29120b"/><circle cx="117" cy="38" r="15" fill="#32160d"/></g>','#e9f8f3')
+    };
+    const products = [
+      {nome:'Monster tradicional',categoria:'Energéticos · horizontal',preco:'R$ 13,00',image:{thumbnailUrl:images.horizontal,presentation:{fit:'contain',positionX:50,positionY:50,zoom:1}}},
+      {nome:'Brownie recheado',categoria:'Doces · quadrada',preco:'R$ 12,00',image:{thumbnailUrl:images.square,presentation:{fit:'cover',positionX:50,positionY:48,zoom:1.08}}},
+      {nome:'Monster lata',categoria:'Bebidas · vertical',preco:'R$ 13,00',image:{thumbnailUrl:images.vertical,presentation:{fit:'cover',positionX:50,positionY:52,zoom:1}}},
+      {nome:'Cone central',categoria:'Doces · objeto pequeno',preco:'R$ 9,00',image:{thumbnailUrl:images.centered,presentation:{fit:'cover',positionX:50,positionY:55,zoom:1.65}}}
+    ];
+    document.querySelector('#demo-grid').innerHTML = products.map(product => `<article class="demo-product"><div class="demo-media">${ProductImages.markup(product,{className:'demo-photo'})}<button class="demo-favorite" aria-label="Favorito">★</button></div><h2>${product.nome}</h2><p>${product.categoria}</p><div class="demo-meta"><span>${product.image.presentation.fit === 'contain' ? 'Encaixar' : 'Preencher'}</span><b>${product.preco}</b></div></article>`).join('');
+    const open = () => ProductImages.openPresentationEditor({src:images.horizontal,presentation:{fit:'contain',positionX:50,positionY:50,zoom:1},title:'Ajustar foto dos Monsters'});
+    document.querySelector('#open-editor').addEventListener('click',open);
+    if(new URLSearchParams(location.search).has('editor')) setTimeout(open,120);
+    lucide?.createIcons?.();
+  </script>
+</body>
+</html>

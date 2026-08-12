@@ -6,7 +6,15 @@
     MAIN_MAX_DIMENSION = 1200,
     THUMB_MAX_DIMENSION = 420,
     MAIN_QUALITY = 0.82,
-    THUMB_QUALITY = 0.78;
+    THUMB_QUALITY = 0.78,
+    MIN_ZOOM = 1,
+    MAX_ZOOM = 3,
+    DEFAULT_PRESENTATION = Object.freeze({
+      fit: "cover",
+      positionX: 50,
+      positionY: 50,
+      zoom: 1,
+    });
   const $ = (selector, root = document) => root.querySelector(selector),
     esc = (value) =>
       String(value ?? "").replace(
@@ -44,6 +52,27 @@
       return url;
     }
   }
+  const clamp = (value, minimum, maximum, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed)
+      ? Math.min(maximum, Math.max(minimum, parsed))
+      : fallback;
+  };
+  function normalizePresentation(value) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      fit: source.fit === "contain" ? "contain" : "cover",
+      positionX: clamp(source.positionX, 0, 100, 50),
+      positionY: clamp(source.positionY, 0, 100, 50),
+      zoom: clamp(source.zoom, MIN_ZOOM, MAX_ZOOM, 1),
+    };
+  }
+  const presentationFrom = (subject) =>
+    normalizePresentation(subject?.image?.presentation || subject?.imagePresentation);
+  function presentationStyle(value) {
+    const presentation = normalizePresentation(value);
+    return `--product-image-fit:${presentation.fit};--product-image-position-x:${presentation.positionX}%;--product-image-position-y:${presentation.positionY}%;--product-image-zoom:${presentation.zoom}`;
+  }
   function ownImage(subject, preferMain = false) {
     const image = subject?.image && typeof subject.image === "object" ? subject.image : {};
     const url = preferMain
@@ -65,6 +94,7 @@
           subject?.imageStoragePath ||
           null,
       hasOwnImage: Boolean(url),
+      presentation: presentationFrom(subject),
     };
   }
   function getProductDisplayImage(product, variant = null, options = {}) {
@@ -84,6 +114,7 @@
       updatedAt: chosen.updatedAt || null,
       inherited: Boolean(variant && !variantImage.url && productImage.url),
       own: Boolean(variant ? variantImage.url : productImage.url),
+      presentation: normalizePresentation(chosen.presentation),
       initials: initials(variant?.displayName || name),
       alt: name,
     };
@@ -93,7 +124,7 @@
   function markup(product, options = {}) {
     const display = getProductDisplayImage(product, options.variant || null, options),
       className = options.className || "product-photo";
-    return `<span class="${esc(className)} product-photo-shell ${display.url ? "is-loading" : "is-fallback"}">${
+    return `<span class="${esc(className)} product-photo-shell ${display.url ? "is-loading" : "is-fallback"}" data-image-fit="${display.presentation.fit}" style="${presentationStyle(display.presentation)}">${
       display.url
         ? `<img src="${esc(display.url)}" alt="${esc(display.alt)}" loading="lazy" decoding="async" onload="this.parentElement.classList.remove('is-loading')" onerror="this.hidden=true;this.parentElement.classList.remove('is-loading');this.parentElement.classList.add('is-fallback');this.nextElementSibling.hidden=false">`
         : ""
@@ -208,6 +239,8 @@
       remove: false,
       status: "idle",
       error: "",
+      presentation: presentationFrom(subject),
+      presentationDirty: false,
     };
   }
   function previewForDraft(draft) {
@@ -232,7 +265,7 @@
           ? `<div class="variation-image-mode" role="radiogroup" aria-label="Origem da foto"><label><input type="radio" name="image-mode-${draft.id}" value="inherit" ${inherited ? "checked" : ""}> Usar foto do produto</label><label><input type="radio" name="image-mode-${draft.id}" value="own" ${!inherited ? "checked" : ""}> Usar foto própria</label></div>`
           : ""
       }
-      <div class="product-image-preview ${preview ? "has-image" : ""}">${
+      <div class="product-image-preview product-photo-shell ${preview ? "has-image" : "is-fallback"}" data-image-fit="${draft.presentation.fit}" style="${presentationStyle(draft.presentation)}">${
         preview
           ? `<img src="${esc(versionedUrl(preview, draft.subject?.imageUpdatedAt))}" alt="Prévia da foto" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="product-image-empty" hidden><i data-lucide="image-off"></i><b>Imagem indisponível</b></div>`
           : `<div class="product-image-empty"><i data-lucide="image-plus"></i><b>Sem foto</b><small>O app usará as iniciais como placeholder.</small></div>`
@@ -241,6 +274,7 @@
         <button type="button" data-image-camera><i data-lucide="camera"></i> Tirar foto</button>
         <button type="button" data-image-gallery><i data-lucide="images"></i><span class="mobile-image-label">Galeria</span><span class="desktop-image-label">Escolher arquivo</span></button>
         ${preview ? `<button type="button" class="danger" data-image-remove><i data-lucide="trash-2"></i> Remover</button>` : ""}
+        ${preview ? `<button type="button" data-image-adjust><i data-lucide="scan"></i> Ajustar enquadramento</button>` : ""}
       </div>
       <p>JPG, PNG ou WebP · até 10 MB · redimensionada automaticamente.</p>
       <div class="product-image-state ${draft.status}" role="status">${
@@ -268,6 +302,148 @@
     if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
     draft.previewUrl = "";
   }
+  function openPresentationEditor({ src, presentation, title = "Ajustar foto" } = {}) {
+    if (!src) return Promise.resolve(null);
+    const current = normalizePresentation(presentation),
+      overlay = document.createElement("div");
+    overlay.className = "product-image-adjust-overlay";
+    overlay.innerHTML = `<section class="product-image-adjust-modal" role="dialog" aria-modal="true" aria-labelledby="product-image-adjust-title">
+      <header><div><small>Foto do produto</small><h3 id="product-image-adjust-title">${esc(title)}</h3></div><button type="button" data-adjust-cancel aria-label="Cancelar ajuste"><i data-lucide="x"></i></button></header>
+      <div class="product-image-adjust-body">
+        <p class="product-image-adjust-intro">Arraste para escolher a parte mais importante da foto. O quadro tem a mesma proporção usada nos cards.</p>
+        <div class="product-image-adjust-stage" data-adjust-stage><img src="${esc(src)}" alt="Prévia do enquadramento"></div>
+        <div class="product-image-fit-options" role="radiogroup" aria-label="Modo de exibição">
+          <button type="button" data-adjust-fit="cover"><i data-lucide="maximize-2"></i><span><b>Preencher</b><small>Ocupa todo o espaço da foto.</small></span></button>
+          <button type="button" data-adjust-fit="contain"><i data-lucide="minimize-2"></i><span><b>Encaixar</b><small>Mostra a imagem inteira.</small></span></button>
+        </div>
+        <section class="product-image-zoom-control" aria-label="Zoom da foto"><div><b>Zoom</b><output data-adjust-zoom-output>100%</output></div><div><button type="button" data-adjust-zoom-out aria-label="Diminuir zoom"><i data-lucide="minus"></i></button><input data-adjust-zoom type="range" min="${MIN_ZOOM}" max="${MAX_ZOOM}" step="0.05" value="${current.zoom}" aria-label="Zoom"><button type="button" data-adjust-zoom-in aria-label="Aumentar zoom"><i data-lucide="plus"></i></button></div></section>
+        <div class="product-image-adjust-secondary"><button type="button" data-adjust-center><i data-lucide="focus"></i> Centralizar</button><button type="button" data-adjust-reset><i data-lucide="rotate-ccw"></i> Redefinir</button></div>
+      </div>
+      <footer><button type="button" class="btn btn-light" data-adjust-cancel>Cancelar</button><button type="button" class="btn btn-primary" data-adjust-use>Usar foto</button></footer>
+    </section>`;
+    document.body.append(overlay);
+    document.body.classList.add("product-image-adjust-open");
+    window.lucide?.createIcons();
+    const stage = $("[data-adjust-stage]", overlay),
+      image = $("img", stage),
+      slider = $("[data-adjust-zoom]", overlay),
+      output = $("[data-adjust-zoom-output]", overlay),
+      pointers = new Map();
+    let dragStart = null,
+      pinchStart = null;
+    const paint = () => {
+      Object.assign(current, normalizePresentation(current));
+      stage.dataset.imageFit = current.fit;
+      stage.style.cssText = presentationStyle(current);
+      slider.value = String(current.zoom);
+      output.value = `${Math.round(current.zoom * 100)}%`;
+      output.textContent = output.value;
+      overlay.querySelectorAll("[data-adjust-fit]").forEach((button) => {
+        const active = button.dataset.adjustFit === current.fit;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    };
+    const setZoom = (value) => {
+      current.zoom = clamp(value, MIN_ZOOM, MAX_ZOOM, 1);
+      paint();
+    };
+    const endPointer = (event) => {
+      pointers.delete(event.pointerId);
+      if (pointers.size < 2) pinchStart = null;
+      if (!pointers.size) dragStart = null;
+    };
+    stage.addEventListener("pointerdown", (event) => {
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      stage.setPointerCapture?.(event.pointerId);
+      if (pointers.size === 1)
+        dragStart = {
+          x: event.clientX,
+          y: event.clientY,
+          positionX: current.positionX,
+          positionY: current.positionY,
+        };
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchStart = {
+          distance: Math.hypot(a.x - b.x, a.y - b.y),
+          zoom: current.zoom,
+        };
+      }
+    });
+    stage.addEventListener("pointermove", (event) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointers.size >= 2 && pinchStart) {
+        const [a, b] = [...pointers.values()],
+          distance = Math.hypot(a.x - b.x, a.y - b.y);
+        setZoom(pinchStart.zoom * (distance / Math.max(1, pinchStart.distance)));
+        return;
+      }
+      if (!dragStart) return;
+      const bounds = stage.getBoundingClientRect();
+      current.positionX = clamp(
+        dragStart.positionX - ((event.clientX - dragStart.x) / Math.max(1, bounds.width)) * 100,
+        0,
+        100,
+        50,
+      );
+      current.positionY = clamp(
+        dragStart.positionY - ((event.clientY - dragStart.y) / Math.max(1, bounds.height)) * 100,
+        0,
+        100,
+        50,
+      );
+      paint();
+    });
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach((name) =>
+      stage.addEventListener(name, endPointer),
+    );
+    slider.addEventListener("input", () => setZoom(slider.value));
+    $("[data-adjust-zoom-out]", overlay).onclick = () => setZoom(current.zoom - 0.1);
+    $("[data-adjust-zoom-in]", overlay).onclick = () => setZoom(current.zoom + 0.1);
+    overlay.querySelectorAll("[data-adjust-fit]").forEach(
+      (button) =>
+        (button.onclick = () => {
+          current.fit = button.dataset.adjustFit;
+          paint();
+        }),
+    );
+    $("[data-adjust-center]", overlay).onclick = () => {
+      current.positionX = 50;
+      current.positionY = 50;
+      paint();
+    };
+    $("[data-adjust-reset]", overlay).onclick = () => {
+      Object.assign(current, DEFAULT_PRESENTATION);
+      paint();
+    };
+    paint();
+    return new Promise((resolve) => {
+      let finished = false;
+      const onKeydown = (event) => {
+          if (event.key === "Escape") finish(null);
+        },
+        finish = (value) => {
+          if (finished) return;
+          finished = true;
+          document.removeEventListener("keydown", onKeydown);
+          document.body.classList.remove("product-image-adjust-open");
+          overlay.remove();
+          resolve(value);
+        };
+      overlay.querySelectorAll("[data-adjust-cancel]").forEach(
+        (button) => (button.onclick = () => finish(null)),
+      );
+      $("[data-adjust-use]", overlay).onclick = () =>
+        finish(normalizePresentation(current));
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish(null);
+      });
+      document.addEventListener("keydown", onKeydown);
+      image.addEventListener("error", () => finish(null), { once: true });
+    });
+  }
   function bindEditor(root, draft, options = {}) {
     const section = root.querySelector(`[data-image-editor="${draft.id}"]`);
     if (!section || section.dataset.bound === "true") return;
@@ -281,12 +457,25 @@
       refreshEditor(root, draft, options);
       try {
         const processed = await processImage(file);
+        const previewUrl = URL.createObjectURL(processed.mainBlob),
+          adjusted = await openPresentationEditor({
+            src: previewUrl,
+            presentation: DEFAULT_PRESENTATION,
+          });
+        if (!adjusted) {
+          URL.revokeObjectURL(previewUrl);
+          draft.status = draft.processed ? "ready" : "idle";
+          refreshEditor(root, draft, options);
+          return;
+        }
         cleanupDraft(draft);
         draft.processed = processed;
-        draft.previewUrl = URL.createObjectURL(processed.mainBlob);
+        draft.previewUrl = previewUrl;
         draft.remove = false;
         draft.mode = "own";
         draft.status = "ready";
+        draft.presentation = adjusted;
+        draft.presentationDirty = true;
         options.onChange?.(draft);
       } catch (error) {
         draft.status = "error";
@@ -299,12 +488,25 @@
     $("[data-image-gallery]", section)?.addEventListener("click", () => gallery.click());
     camera.onchange = () => choose(camera.files?.[0]);
     gallery.onchange = () => choose(gallery.files?.[0]);
+    $("[data-image-adjust]", section)?.addEventListener("click", async () => {
+      const adjusted = await openPresentationEditor({
+        src: previewForDraft(draft),
+        presentation: draft.presentation,
+      });
+      if (!adjusted) return;
+      draft.presentation = adjusted;
+      draft.presentationDirty = true;
+      options.onChange?.(draft);
+      refreshEditor(root, draft, options);
+    });
     $("[data-image-remove]", section)?.addEventListener("click", () => {
       cleanupDraft(draft);
       draft.processed = null;
       draft.remove = true;
       draft.status = "idle";
       draft.mode = draft.allowInherit ? "inherit" : "own";
+      draft.presentation = { ...DEFAULT_PRESENTATION };
+      draft.presentationDirty = false;
       options.onChange?.(draft);
       refreshEditor(root, draft, options);
     });
@@ -313,6 +515,7 @@
         draft.mode = input.value;
         if (draft.mode === "inherit") draft.remove = true;
         else draft.remove = false;
+        if (draft.mode === "own") draft.presentation = presentationFrom(draft.subject);
         options.onChange?.(draft);
         refreshEditor(root, draft, options);
       }),
@@ -331,6 +534,16 @@
     imageUploadStatus: "none",
     imageOperationId: window.Utils?.uuid?.() || null,
   });
+  function withPresentation(imageData, presentation) {
+    if (!imageData?.image || typeof imageData.image !== "object") return imageData;
+    return {
+      ...imageData,
+      image: {
+        ...imageData.image,
+        presentation: normalizePresentation(presentation),
+      },
+    };
+  }
   async function commit(draft, options = {}) {
     const oldSubject = options.oldSubject || draft.subject || {},
       hasOldImage = ownImage(oldSubject).hasOwnImage;
@@ -347,7 +560,7 @@
         throw Error("Sem internet. Conecte-se para enviar a foto e salvar.");
       if (!window.ProductImageStorage)
         throw Error("O serviço de imagens ainda está carregando. Tente novamente.");
-      return window.ProductImageStorage.upload(
+      const uploaded = await window.ProductImageStorage.upload(
         options.productId,
         draft.processed,
         {
@@ -357,12 +570,32 @@
           onProgress: options.onProgress,
         },
       );
+      return withPresentation(uploaded, draft.presentation);
     }
     if (draft.remove && hasOldImage) {
       if (!navigator.onLine)
         throw Error("Conecte-se à internet para remover esta foto.");
       await window.ProductImageStorage?.remove?.(oldSubject, options);
       return emptyImageFields(draft.allowInherit ? draft.mode : "own");
+    }
+    if (draft.presentationDirty && hasOldImage) {
+      const previousImage =
+        oldSubject.image && typeof oldSubject.image === "object"
+          ? oldSubject.image
+          : {
+              url: oldSubject.imageUrl || oldSubject.imagem || "",
+              storagePath: oldSubject.imageStoragePath || null,
+              thumbnailUrl: oldSubject.imageThumbUrl || "",
+              thumbnailStoragePath: oldSubject.imageThumbStoragePath || null,
+              updatedAt: oldSubject.imageUpdatedAt || null,
+            };
+      return {
+        ...(draft.allowInherit ? { imageMode: draft.mode } : {}),
+        image: {
+          ...previousImage,
+          presentation: normalizePresentation(draft.presentation),
+        },
+      };
     }
     return draft.allowInherit ? { imageMode: draft.mode } : {};
   }
@@ -532,6 +765,12 @@
     THUMB_MAX_DIMENSION,
     MAIN_QUALITY,
     THUMB_QUALITY,
+    MIN_ZOOM,
+    MAX_ZOOM,
+    DEFAULT_PRESENTATION,
+    normalizePresentation,
+    presentationFrom,
+    presentationStyle,
     validate,
     processImage,
     getProductDisplayImage,
@@ -542,6 +781,7 @@
     editorMarkup,
     bindEditor,
     cleanupDraft,
+    openPresentationEditor,
     commit,
     openForm,
     enhance,
