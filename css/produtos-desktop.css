@@ -109,7 +109,7 @@
     border-radius: 14px;
   }
   .desktop-product-card-photo img {
-    object-fit: cover;
+    object-fit: var(--product-image-fit, cover);
   }
   .desktop-product-favorite {
     position: absolute;

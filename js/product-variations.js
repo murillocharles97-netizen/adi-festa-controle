@@ -162,7 +162,7 @@
         raw.imageOperationId ?? existing?.imageOperationId ?? null,
       createdAt: existing?.createdAt || raw.createdAt || timestamp,
       updatedAt: timestamp,
-      schemaVersion: 10,
+      schemaVersion: 11,
     };
   };
   function save(raw) {
