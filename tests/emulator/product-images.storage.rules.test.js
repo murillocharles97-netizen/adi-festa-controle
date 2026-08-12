@@ -1,4 +1,5 @@
 const test = require("node:test");
+const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const {
   initializeTestEnvironment,
@@ -6,7 +7,12 @@ const {
   assertFails,
 } = require("@firebase/rules-unit-testing");
 const { doc, setDoc } = require("firebase/firestore");
-const { ref, uploadBytes, getMetadata } = require("firebase/storage");
+const {
+  deleteObject,
+  ref,
+  uploadBytes,
+  getMetadata,
+} = require("firebase/storage");
 
 let env;
 const projectId = "adi-festa-variations-test",
@@ -64,7 +70,29 @@ test("owner grava e lê imagem versionada do próprio produto", async () => {
   await assertSucceeds(
     uploadBytes(imageRef, new Uint8Array([1, 2, 3]), metadata("product-1")),
   );
-  await assertSucceeds(getMetadata(imageRef));
+  const savedMetadata = await assertSucceeds(getMetadata(imageRef));
+  assert.equal(savedMetadata.customMetadata.entityType, "product");
+});
+
+test("substitui a imagem por nova versão e remove o arquivo anterior", async () => {
+  const storage = env.authenticatedContext("owner-a").storage(),
+    oldImage = ref(
+      storage,
+      `businesses/${businessA}/products/product-replace/main-operation-old.webp`,
+    ),
+    newImage = ref(
+      storage,
+      `businesses/${businessA}/products/product-replace/main-operation-new.webp`,
+    );
+  await assertSucceeds(
+    uploadBytes(oldImage, new Uint8Array([1]), metadata("product-replace")),
+  );
+  await assertSucceeds(
+    uploadBytes(newImage, new Uint8Array([2]), metadata("product-replace")),
+  );
+  await assertSucceeds(deleteObject(oldImage));
+  await assert.rejects(getMetadata(oldImage), /object-not-found/);
+  await assertSucceeds(getMetadata(newImage));
 });
 
 test("variação exige metadados e path correspondentes", async () => {
@@ -84,6 +112,10 @@ test("variação exige metadados e path correspondentes", async () => {
       metadata("product-1", "productVariant", "variant-1"),
     ),
   );
+  const savedMetadata = await assertSucceeds(getMetadata(valid));
+  assert.equal(savedMetadata.customMetadata.entityType, "productVariant");
+  await assertSucceeds(deleteObject(valid));
+  await assert.rejects(getMetadata(valid), /object-not-found/);
   await assertFails(
     uploadBytes(
       invalid,

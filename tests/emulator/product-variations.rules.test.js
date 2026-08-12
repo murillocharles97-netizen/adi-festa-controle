@@ -55,6 +55,13 @@ test('proprietário cria e lê variação da própria empresa',async()=>{
   await assertSucceeds(getDoc(ref));
 });
 
+test('proprietário salva e remove os campos de imagem da variação',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),ref=doc(db,'businesses',businessA,'productVariants','variant-image'),base=variant(businessA,'parent-1','variant-image'),operationId='variant-image-operation';
+  await assertSucceeds(setDoc(ref,{...base,image:{storagePath:`businesses/${businessA}/products/parent-1/variants/variant-image/main-${operationId}.webp`,url:'https://example.test/main.webp',thumbnailStoragePath:`businesses/${businessA}/products/parent-1/variants/variant-image/thumb-${operationId}.webp`,thumbnailUrl:'https://example.test/thumb.webp'},imageMode:'own',imageUrl:'https://example.test/main.webp',imageStoragePath:`businesses/${businessA}/products/parent-1/variants/variant-image/main-${operationId}.webp`,imageThumbUrl:'https://example.test/thumb.webp',imageThumbStoragePath:`businesses/${businessA}/products/parent-1/variants/variant-image/thumb-${operationId}.webp`,imageUpdatedAt:new Date(),imageUploadStatus:'uploaded',imageOperationId:operationId}));
+  await assertSucceeds(updateDoc(ref,{image:null,imageMode:'inherit',imageUrl:null,imageStoragePath:null,imageThumbUrl:null,imageThumbStoragePath:null,imageUpdatedAt:new Date(),imageUploadStatus:'none',imageOperationId:null,updatedAt:new Date()}));
+  assert.equal((await getDoc(ref)).data().imageMode,'inherit');
+});
+
 test('fila cria produto pai, variação e marcador na mesma transação',async()=>{
   const db=env.authenticatedContext('owner-a').firestore(),productId='queued-parent',variantId='queued-variant',operationId='queued-product-op',
     productRef=doc(db,'businesses',businessA,'products',productId),
