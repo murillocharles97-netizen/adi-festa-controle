@@ -254,11 +254,24 @@
       shown = list.slice(0, state.limit);
     return `<section class="products-mobile-page"><div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto" aria-label="Buscar produto por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar produtos">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Em estoque", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
   }
-  function refresh(reset = false) {
+  function refresh(reset = false, motion = "") {
     dataCache = null;
     if (reset) state.limit = 50;
     const app = $("#app");
     if (!app) return;
+    const oldList = $("#mobile-products", app),
+      oldStock = new Map(
+        (oldList ? $$("[data-product-shell]", oldList) : []).map((shell) => [
+          shell.dataset.productShell,
+          {
+            width: $(".product-stock-track i", shell)?.style.width || "",
+            status: shell.className,
+          },
+        ]),
+      ),
+      previous = motion && window.MobileMotion
+        ? window.MobileMotion.capture(oldList, "[data-product-shell]", "data-product-shell")
+        : null;
     const scroll = scrollY;
     app.innerHTML = render();
     const page = $(".products-mobile-page", app);
@@ -266,6 +279,28 @@
     bind();
     scrollTo({ top: scroll });
     window.lucide?.createIcons();
+    $$("[data-product-shell]", app).forEach((shell) => {
+      const before = oldStock.get(shell.dataset.productShell),
+        bar = $(".product-stock-track i", shell),
+        badge = $(".mobile-product-stock em", shell);
+      if (!before || !bar || before.width === bar.style.width) return;
+      const target = bar.style.width;
+      bar.style.width = before.width;
+      requestAnimationFrame(() => {
+        bar.style.width = target;
+        window.MobileMotion?.animate(badge, [{ opacity: 0.35, transform: "translateY(3px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180 });
+      });
+    });
+    if (previous)
+      requestAnimationFrame(() =>
+        window.MobileMotion.flip(
+          $("#mobile-products", app),
+          previous,
+          "[data-product-shell]",
+          "data-product-shell",
+          { name: motion, duration: motion === "layout" ? 235 : 185 },
+        ),
+      );
   }
   function modal(title, body, onSave, label = "Salvar") {
     const root = $("#modal");
@@ -751,8 +786,7 @@
       .closest("[data-product-shell]")
       ?.querySelector(".favorite-dot")
       ?.classList.toggle("show", next);
-    button.classList.add("bounce");
-    setTimeout(() => button.classList.remove("bounce"), 260);
+    window.MobileMotion?.pop(button);
     const count = $('[data-product-filter="favoritos"] b');
     if (count) count.textContent = counts().favorites;
     window.lucide?.createIcons();
@@ -849,12 +883,12 @@
     search.oninput = (event) => {
       clearTimeout(timer);
       state.query = event.target.value;
-      timer = setTimeout(() => refresh(true), 140);
+      timer = setTimeout(() => refresh(true, "search"), 140);
     };
     sort.onchange = (event) => {
       state.sort = event.target.value;
       saveState();
-      refresh(true);
+      refresh(true, "filter");
     };
     $$("[data-product-filter]").forEach(
       (button) =>
@@ -862,7 +896,7 @@
           state.filter = button.dataset.productFilter;
           if (state.filter === "favoritos" && state.sort === "favoritos")
             state.sort = "nomeAsc";
-          refresh(true);
+          refresh(true, "filter");
         }),
     );
     $$("[data-product-view]").forEach(
@@ -870,7 +904,7 @@
         (button.onclick = () => {
           state.view = button.dataset.productView;
           saveState();
-          refresh();
+          refresh(false, "layout");
         }),
     );
     $("#mobile-product-open-filters").onclick = () => {
@@ -882,7 +916,7 @@
         (button.onclick = () => {
           state.category = button.dataset.productCategory;
           state.filtersOpen = false;
-          refresh(true);
+          refresh(true, "filter");
         }),
     );
     $$("[data-product-sheet-close]").forEach(
@@ -917,6 +951,10 @@
       }
       if (card) details(card.dataset.productCard);
     };
+    $("#mobile-products").addEventListener("pointerdown", (event) => {
+      const card = event.target.closest("[data-product-card]");
+      if (card && !event.target.closest("button")) window.MobileMotion?.press(card);
+    });
     $("#mobile-products").onkeydown = (event) => {
       if (
         (event.key === "Enter" || event.key === " ") &&
