@@ -9,6 +9,19 @@ window.Checkout = (() => {
       .trim();
   const products = () => Repositories.productRepository(),
     clients = () => Repositories.clientRepository();
+  let soldByProduct = new Map();
+  function rebuildSoldIndex() {
+    const next = new Map();
+    Repositories.saleRepository().list().forEach((sale) =>
+      (sale.itens || []).forEach((item) =>
+        next.set(
+          item.produtoId,
+          (next.get(item.produtoId) || 0) + Number(item.quantidade || 0),
+        ),
+      ),
+    );
+    soldByProduct = next;
+  }
   const initials = (n) =>
     String(n || "?")
       .split(/\s+/)
@@ -59,9 +72,11 @@ window.Checkout = (() => {
           ].join(" "),
         )
         .join(" ") || (p.variationSearchTokens || []).join(" ");
-    return `<button class="pos-product ${p.productType === "variable" ? "is-variable" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${p.imagem ? `<img src="${escapar(p.imagem)}" alt="">` : `<span class="pos-placeholder">${initials(p.nome)}</span>`}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${p.productType === "variable" ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.nome)}</small><b>${priceLabel(p)}</b>${stock(p)}</button>`;
+    const photo = window.ProductImages?.markup?.(p, { className: "sale-product-photo" }) || `<span class="pos-placeholder">${initials(p.nome)}</span>`;
+    return `<button class="pos-product ${p.productType === "variable" ? "is-variable" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${photo}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${p.productType === "variable" ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome)}</small><b>${priceLabel(p)}</b>${stock(p)}</button>`;
   };
   function view() {
+    rebuildSoldIndex();
     const ps = products()
         .list()
         .filter((p) => p.ativo !== false),
@@ -91,8 +106,11 @@ window.Checkout = (() => {
       const q = cart
         .filter((item) => item.produtoId === e.dataset.posQty)
         .reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
+      const previous = Number(e.dataset.quantity || 0);
       e.hidden = !q;
-      e.textContent = q;
+      e.dataset.quantity = String(q);
+      if (previous !== q && window.MobileMotion) window.MobileMotion.counter(e, previous, q);
+      else e.textContent = q;
       e.closest(".pos-product").classList.toggle("selected", !!q);
     });
     document.querySelector("#pos-bag-label").textContent = items
@@ -122,8 +140,7 @@ window.Checkout = (() => {
     const q = norm(document.querySelector("#product-search").value),
       cat = document.querySelector("#pos-category").value,
       f = document.querySelector("#pos-filter").value,
-      sort = document.querySelector("#pos-sort").value,
-      sales = Repositories.saleRepository().list();
+      sort = document.querySelector("#pos-sort").value;
     let cards = [...document.querySelectorAll(".pos-product")];
     cards.forEach((el) => {
       const p = products().getById(el.dataset.add),
@@ -140,15 +157,6 @@ window.Checkout = (() => {
             n <= Number(p.estoqueMinimo || 0)))
       );
     });
-    const sold = (id) =>
-      sales.reduce(
-        (n, v) =>
-          n +
-          (v.itens || [])
-            .filter((i) => i.produtoId === id)
-            .reduce((s, i) => s + Number(i.quantidade || 0), 0),
-        0,
-      );
     cards
       .sort((a, b) => {
         const x = products().getById(a.dataset.add),
@@ -156,12 +164,13 @@ window.Checkout = (() => {
         if (sort === "preco") return x.preco - y.preco;
         if (sort === "categoria")
           return String(x.categoria).localeCompare(String(y.categoria));
-        if (sort === "vendidos") return sold(y.id) - sold(x.id);
+        if (sort === "vendidos") return (soldByProduct.get(y.id) || 0) - (soldByProduct.get(x.id) || 0);
         if (sort === "favoritos" && x.favorito !== y.favorito)
           return Number(y.favorito) - Number(x.favorito);
         return x.nome.localeCompare(y.nome);
       })
       .forEach((el) => document.querySelector("#pos-grid").append(el));
+    dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: cards.filter((card) => !card.hidden).length } }));
   }
   const row = (c) =>
     `<button class="client-choice" data-choose-client="${c.id}"><div><b>${escapar(c.nome)}</b><small>${escapar(c.telefone) || "Sem telefone"}${c.ultimaCompra ? ` · Última compra: ${new Date(c.ultimaCompra).toLocaleDateString("pt-BR")}` : ""}</small></div>${balance(c)}</button>`;
@@ -388,14 +397,16 @@ window.Checkout = (() => {
         (i.precoFinalUnitario = Number((i.precoOriginal * factor).toFixed(4))),
     );
   };
-  function addSaleItem(item) {
+  function addSaleItem(item, options = {}) {
     const key = cartKey(item),
-      current = cart.find((entry) => cartKey(entry) === key);
+      current = cart.find((entry) => cartKey(entry) === key),
+      before = current ? Number(current.quantidade || 0) : 0;
     if (current) current.quantidade += Number(item.quantidade || 1);
     else cart.push(item);
     drawCart();
+    dispatchEvent(new CustomEvent("sale-item-added", { detail: { item, before, after: before + Number(item.quantidade || 1), first: before === 0, source: options.source || null, variable: Boolean(item.variantId) } }));
   }
-  async function variablePicker(product, preselectedVariantId = null) {
+  async function variablePicker(product, preselectedVariantId = null, source = null) {
     const variants = await ProductVariations.ensure(product.id),
       modal = document.querySelector("#modal");
     if (!variants.length)
@@ -415,7 +426,7 @@ window.Checkout = (() => {
         .map((variant) => {
           const out = !variant.allowNegativeStock && Number(variant.stock) <= 0,
             q = quantities[variant.id] || 0;
-          return `<article class="variation-picker-row ${out ? "out" : ""}"><div><b>${escapar(ProductVariations.displayName(variant))}</b><small>${Object.entries(
+          return `<article class="variation-picker-row ${out ? "out" : ""}">${window.ProductImages?.markup?.(product,{variant,className:"variation-picker-photo"}) || ""}<div><b>${escapar(ProductVariations.displayName(variant))}</b><small>${Object.entries(
             variant.attributeValues || {},
           )
             .map(([, value]) => escapar(value))
@@ -429,6 +440,9 @@ window.Checkout = (() => {
       modal
         .querySelectorAll(".close")
         .forEach((button) => (button.onclick = () => (modal.innerHTML = "")));
+      modal.querySelector(".variation-picker-bg")?.addEventListener("click", (event) => {
+        if (event.target === event.currentTarget) modal.innerHTML = "";
+      });
       modal.querySelectorAll("[data-variant-inc]").forEach(
         (button) =>
           (button.onclick = () => {
@@ -452,9 +466,7 @@ window.Checkout = (() => {
           variants.forEach((variant) => {
             const quantity = Number(quantities[variant.id] || 0);
             if (quantity)
-              addSaleItem(
-                ProductVariations.saleItem(product, variant, quantity),
-              );
+              addSaleItem(ProductVariations.saleItem(product, variant, quantity), { source });
           });
           modal.innerHTML = "";
           toast(
@@ -497,10 +509,17 @@ window.Checkout = (() => {
       if (!b) return;
       const p = products().getById(b.dataset.add);
       if (ProductVariations.isVariable(p)) {
-        variablePicker(p);
+        variablePicker(p, null, b);
         return;
       }
-      addSaleItem(ProductVariations.saleItem(p, null, 1));
+      const out = getProductStockStatus(p) === "esgotado" && !p.semControleEstoque && !p.allowNegativeStock;
+      if (out) {
+        window.MobileMotion?.feedback(b, "error");
+        toast("Produto sem estoque.", true);
+        dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: p.id, reason: "out-of-stock", source: b } }));
+        return;
+      }
+      addSaleItem(ProductVariations.saleItem(p, null, 1), { source: b });
     };
     document.querySelector("#open-sale-summary").onclick = () => {
       document.querySelector("#pos-summary").hidden = false;
