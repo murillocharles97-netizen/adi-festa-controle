@@ -30,9 +30,11 @@ window.Checkout = (() => {
       .join("")
       .toUpperCase();
   const cartKey = (item) =>
-    window.ProductVariations?.itemKey(item) || String(item?.produtoId || "");
+    item?.productType === "recurring"
+      ? `${item.produtoId}::${item.variantId || "base"}::${item.recurringActivation?.subscriptionId || item.recurringActivation?.draftId || "new"}`
+      : window.ProductVariations?.itemKey(item) || String(item?.produtoId || "");
   const priceLabel = (p) =>
-    p.productType === "variable"
+    window.ProductVariations?.isVariable?.(p)
       ? Number(p.minPrice) === Number(p.maxPrice)
         ? dinheiro(p.minPrice)
         : `${dinheiro(p.minPrice)} – ${dinheiro(p.maxPrice)}`
@@ -47,7 +49,7 @@ window.Checkout = (() => {
   };
   const stock = (p) => {
     const current = Number(
-      p.productType === "variable" ? p.totalStock : p.estoqueAtual,
+      window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual,
     );
     return getProductStockStatus(p) === "sem-controle"
       ? '<small class="pos-stock-neutral">Sem controle de estoque</small>'
@@ -59,7 +61,7 @@ window.Checkout = (() => {
   };
   const card = (p) => {
     const variants =
-        p.productType === "variable"
+        window.ProductVariations?.isVariable?.(p)
           ? window.ProductVariations?.list(p.id) || []
           : [],
       variantSearch = variants
@@ -73,8 +75,10 @@ window.Checkout = (() => {
         )
         .join(" ") || (p.variationSearchTokens || []).join(" ");
     const photo = window.ProductImages?.markup?.(p, { className: "sale-product-photo" }) || `<span class="pos-placeholder">${initials(p.nome)}</span>`;
-    return `<button class="pos-product ${p.productType === "variable" ? "is-variable" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${photo}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${p.productType === "variable" ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome)}</small><b>${priceLabel(p)}</b>${stock(p)}</button>`;
+    const recurring = p.productType === "recurring", detail = window.ProductVariations?.isVariable?.(p) ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome), renewal = recurring ? `<small class="pos-renewal-badge"><i data-lucide="calendar-clock"></i>${Number(p.durationValue || 30)} ${durationUnitLabel(p.durationUnit, Number(p.durationValue || 30))}</small>` : stock(p);
+    return `<button class="pos-product ${window.ProductVariations?.isVariable?.(p) ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${photo}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${detail}</small><b>${priceLabel(p)}</b>${renewal}</button>`;
   };
+  const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
   function view() {
     rebuildSoldIndex();
     const ps = products()
@@ -106,11 +110,9 @@ window.Checkout = (() => {
       const q = cart
         .filter((item) => item.produtoId === e.dataset.posQty)
         .reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
-      const previous = Number(e.dataset.quantity || 0);
       e.hidden = !q;
       e.dataset.quantity = String(q);
-      if (previous !== q && window.MobileMotion) window.MobileMotion.counter(e, previous, q);
-      else e.textContent = q;
+      e.textContent = q;
       e.closest(".pos-product").classList.toggle("selected", !!q);
     });
     document.querySelector("#pos-bag-label").textContent = items
@@ -174,7 +176,7 @@ window.Checkout = (() => {
   }
   const row = (c) =>
     `<button class="client-choice" data-choose-client="${c.id}"><div><b>${escapar(c.nome)}</b><small>${escapar(c.telefone) || "Sem telefone"}${c.ultimaCompra ? ` · Última compra: ${new Date(c.ultimaCompra).toLocaleDateString("pt-BR")}` : ""}</small></div>${balance(c)}</button>`;
-  function picker() {
+  function picker(onSelected = null, options = {}) {
     const all = clients()
         .list()
         .filter((c) => c.ativo !== false)
@@ -183,7 +185,7 @@ window.Checkout = (() => {
         .map((id) => all.find((c) => c.id === id))
         .filter(Boolean);
     document.querySelector("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>Selecionar cliente</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body"><button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button><button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button><div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
+      `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>${options.title || "Selecionar cliente"}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button><div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
     const close = () => (document.querySelector("#modal").innerHTML = "");
     document
       .querySelectorAll("#modal .close")
@@ -229,10 +231,56 @@ window.Checkout = (() => {
           );
         close();
         refresh();
+        if (onSelected && sel.value) onSelected(clients().getById(sel.value));
       }
       if (e.target.closest("#quick-new-client")) quickClient();
     };
     window.lucide?.createIcons();
+  }
+  const dateLabel = (value) => value ? new Date(value).toLocaleDateString("pt-BR") : "—";
+  async function recurringConfiguration(product, variant = null, source = null) {
+    const clientId = document.querySelector("#sale-client")?.value;
+    if (!clientId) {
+      picker(() => recurringConfiguration(product, variant, source), { requireClient: true, title: "Selecione o cliente da renovação" });
+      return;
+    }
+    await window.CustomerSubscriptions?.loadForClient?.(clientId);
+    const existing = window.CustomerSubscriptions?.matchingProduct?.(clientId, product.id) || window.CustomerSubscriptions?.matching?.(clientId, product.id, variant?.id || null) || [], modal = document.querySelector("#modal"), defaultDuration = Number(variant?.durationValue || product.durationValue || 30), defaultUnit = variant?.durationUnit || product.durationUnit || "days";
+    const render = () => {
+      const selectedId = modal.querySelector?.('[name="subscriptionChoice"]:checked')?.value || existing[0]?.id || "new", selected = existing.find((item) => item.id === selectedId) || null, durationValue = Number(modal.querySelector?.('[name="durationValue"]')?.value || defaultDuration), durationUnit = modal.querySelector?.('[name="durationUnit"]')?.value || defaultUnit, price = Number(modal.querySelector?.('[name="contractedPrice"]')?.value || selected?.contractedPrice || variant?.price || product.preco || 0), label = modal.querySelector?.('[name="renewalLabel"]')?.value || selected?.label || product.renewalLabel || product.nome, payment = modal.querySelector?.('[name="renewalPayment"]')?.value || window.CheckoutPaymentMethod || "pix", dates = CustomerSubscriptions.preview({ subscription: selected, durationValue, durationUnit });
+      modal.innerHTML = `<div class="modal-bg recurring-sale-bg"><section class="modal-box recurring-sale-sheet" role="dialog" aria-modal="true" aria-labelledby="recurring-sale-title"><header class="modal-head"><div><small>Venda com renovação</small><h3 id="recurring-sale-title">${escapar(product.nome)}${variant ? ` — ${escapar(ProductVariations.displayName(variant))}` : ""}</h3></div><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="modal-body">${existing.length ? `<section class="recurring-existing"><h4>Este cliente já possui esta renovação</h4>${existing.map((item) => { const currentVariant = item.variantId ? ProductVariations.get(item.variantId) : null; return `<label><input type="radio" name="subscriptionChoice" value="${item.id}" ${item.id === selectedId ? "checked" : ""}><span><b>${escapar(item.label)}</b><small>${CustomerSubscriptions.effectiveStatus(item) === "active" ? "Ativa" : "Vencida"}${currentVariant ? ` · ${escapar(ProductVariations.displayName(currentVariant))}` : ""} · até ${dateLabel(item.expiresAt)}</small></span></label>`; }).join("")}<label><input type="radio" name="subscriptionChoice" value="new" ${selectedId === "new" ? "checked" : ""}><span><b>Criar outra</b><small>Nova vigência separada</small></span></label></section>` : ""}<div class="field"><label>Nome para identificação</label><input name="renewalLabel" value="${escapar(label)}" placeholder="Ex.: Casa, Escritório"></div><div class="recurring-form-grid"><div class="field"><label>Período</label><input name="durationValue" type="number" inputmode="numeric" min="1" value="${durationValue}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${durationUnit === "days" ? "selected" : ""}>dias</option><option value="weeks" ${durationUnit === "weeks" ? "selected" : ""}>semanas</option><option value="months" ${durationUnit === "months" ? "selected" : ""}>meses</option><option value="years" ${durationUnit === "years" ? "selected" : ""}>anos</option></select></div><div class="field"><label>Valor</label><input name="contractedPrice" type="number" inputmode="decimal" min="0" step=".01" value="${price.toFixed(2)}"></div><div class="field"><label>Pagamento</label><select name="renewalPayment"><option value="pix" ${payment === "pix" ? "selected" : ""}>Pix / pago</option><option value="dinheiro" ${payment === "dinheiro" ? "selected" : ""}>Dinheiro / pago</option><option value="cartao" ${payment === "cartao" ? "selected" : ""}>Cartão / pago</option><option value="fiado" ${payment === "fiado" ? "selected" : ""}>Fiado</option></select></div></div><section class="recurring-preview"><span><small>${selected ? "Vencimento atual" : "Início"}</small><b>${selected ? dateLabel(selected.expiresAt) : dateLabel(dates.startsAt)}</b></span><i data-lucide="arrow-right"></i><span><small>${selected ? "Renovado até" : "Ativo até"}</small><b>${dateLabel(dates.expiresAt)}</b></span></section></div><footer class="modal-foot"><button class="btn btn-light close">Cancelar</button><button class="btn btn-primary" data-confirm-recurring>${selected ? "Adicionar renovação" : "Adicionar ativação"}</button></footer></section></div>`;
+      modal.querySelectorAll(".close").forEach((button) => button.onclick = () => modal.innerHTML = "");
+      modal.querySelectorAll('input[name="subscriptionChoice"]').forEach((input) => input.onchange = render);
+      ["durationValue", "durationUnit"].forEach((name) => modal.querySelector(`[name="${name}"]`).onchange = render);
+      modal.querySelector("[data-confirm-recurring]").onclick = () => {
+        const choiceId = modal.querySelector('input[name="subscriptionChoice"]:checked')?.value || selectedId,
+          chosen = existing.find((entry) => entry.id === choiceId) || null,
+          finalDurationValue = Math.max(1, Number(modal.querySelector('[name="durationValue"]')?.value || defaultDuration)),
+          finalDurationUnit = modal.querySelector('[name="durationUnit"]')?.value || defaultUnit,
+          finalPrice = Math.max(0, Number(modal.querySelector('[name="contractedPrice"]')?.value || 0)),
+          finalLabel = String(modal.querySelector('[name="renewalLabel"]')?.value || product.renewalLabel || product.nome).trim(),
+          finalPayment = modal.querySelector('[name="renewalPayment"]')?.value || "pix",
+          item = ProductVariations.saleItem(product, variant, 1), draftId = Utils.uuid();
+        Object.assign(item, { productType: "recurring", precoOriginal: finalPrice, precoFinalUnitario: finalPrice, precoUnitario: finalPrice, recurringActivation: { draftId, subscriptionId: chosen?.id || null, label: finalLabel, durationValue: finalDurationValue, durationUnit: finalDurationUnit, contractedPrice: finalPrice, renewalMessage: product.renewalMessage || "", reminders: product.renewalReminders || [], clientIdSnapshot: clientId } });
+        const status = finalPayment === "fiado" ? "fiado" : "pago", statusSelect = document.querySelector("#sale-status");
+        statusSelect.value = status; window.CheckoutPaymentMethod = finalPayment; statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        addSaleItem(item, { source }); modal.innerHTML = ""; toast(chosen ? "Renovação adicionada à sacola" : "Ativação adicionada à sacola");
+      };
+      window.lucide?.createIcons();
+    };
+    render();
+  }
+  async function openRecurringProduct(product, source = null) {
+    if (ProductVariations.isVariable(product)) {
+      const variants = await ProductVariations.ensure(product.id);
+      if (!variants.length) return toast("Cadastre ao menos uma variação ativa.", true);
+      const modal = document.querySelector("#modal");
+      modal.innerHTML = `<div class="modal-bg variation-picker-bg"><section class="variation-picker recurring-variant-picker"><header><div><h3>${escapar(product.nome)}</h3><p>Escolha o plano ou variação</p></div><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="variation-picker-list">${variants.map((item) => `<button type="button" class="recurring-variant-choice" data-recurring-variant="${item.id}">${window.ProductImages?.markup?.(product, { variant: item, className: "variation-picker-photo" }) || ""}<span><b>${escapar(ProductVariations.displayName(item))}</b><small>${dinheiro(item.price)} · ${Number(item.durationValue || product.durationValue || 30)} ${durationUnitLabel(item.durationUnit || product.durationUnit, Number(item.durationValue || product.durationValue || 30))}</small></span><i data-lucide="chevron-right"></i></button>`).join("")}</div></section></div>`;
+      modal.querySelector(".close").onclick = () => modal.innerHTML = "";
+      modal.querySelectorAll("[data-recurring-variant]").forEach((button) => button.onclick = () => { const variant = variants.find((item) => item.id === button.dataset.recurringVariant); modal.innerHTML = ""; recurringConfiguration(product, variant, source); });
+      window.lucide?.createIcons(); return;
+    }
+    return recurringConfiguration(product, null, source);
   }
   function quickClient() {
     document.querySelector("#modal").innerHTML =
@@ -316,6 +364,7 @@ window.Checkout = (() => {
     manual = false,
     finishing = false,
     pendingClient = null,
+    pendingRenewal = null,
     selectedCampaignIds = new Set();
   const totals = (items = cart) => {
     const original = items.reduce(
@@ -508,13 +557,16 @@ window.Checkout = (() => {
       const b = e.target.closest("[data-add]");
       if (!b) return;
       const p = products().getById(b.dataset.add);
+      if (p.productType === "recurring") {
+        openRecurringProduct(p, b);
+        return;
+      }
       if (ProductVariations.isVariable(p)) {
         variablePicker(p, null, b);
         return;
       }
       const out = getProductStockStatus(p) === "esgotado" && !p.semControleEstoque && !p.allowNegativeStock;
       if (out) {
-        window.MobileMotion?.feedback(b, "error");
         toast("Produto sem estoque.", true);
         dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: p.id, reason: "out-of-stock", source: b } }));
         return;
@@ -602,6 +654,10 @@ window.Checkout = (() => {
         status = document.querySelector("#sale-status").value;
       if (status === "fiado" && !clienteId)
         return toast("Selecione um cliente para vender fiado", true);
+      if (cart.some((item) => item.productType === "recurring") && !clienteId)
+        return toast("Venda com renovação exige um cliente", true);
+      if (cart.some((item) => item.productType === "recurring" && item.recurringActivation?.clientIdSnapshot !== clienteId))
+        return toast("Revise as renovações: o cliente da sacola foi alterado.", true);
       const client = clienteId ? clients().getById(clienteId) : null,
         operationId = crypto.randomUUID(),
         proceed = () => {
@@ -641,6 +697,11 @@ window.Checkout = (() => {
       }
       pendingClient = null;
     }
+    if (pendingRenewal) {
+      const subscription = CustomerSubscriptions.get(pendingRenewal), product = subscription && products().getById(subscription.productId), variant = subscription?.variantId ? ProductVariations.get(subscription.variantId) : null;
+      pendingRenewal = null;
+      if (subscription && product) setTimeout(() => recurringConfiguration(product, variant), 0);
+    }
     window.lucide?.createIcons();
   }
   function prepareClientSale(clientId, source = "client_swipe") {
@@ -669,7 +730,20 @@ window.Checkout = (() => {
     manual = false;
     finishing = false;
     pendingClient = null;
+    pendingRenewal = null;
     selectedCampaignIds.clear();
+  }
+  function prepareRenewal(subscriptionId) {
+    const subscription = CustomerSubscriptions.get(subscriptionId);
+    if (!subscription) return (toast("Renovação não encontrada", true), false);
+    pendingRenewal = subscription.id;
+    prepareClientSale(subscription.clientId, "customer_profile_renewal");
+    if (Router.atual() === "vender" && document.querySelector("#sale-client")) {
+      const product = products().getById(subscription.productId), variant = subscription.variantId ? ProductVariations.get(subscription.variantId) : null;
+      pendingRenewal = null;
+      if (product) recurringConfiguration(product, variant);
+    }
+    return true;
   }
   function mount() {
     const paint = () => {
@@ -691,8 +765,10 @@ window.Checkout = (() => {
     enhance,
     mount,
     prepareClientSale,
+    prepareRenewal,
     resetSession,
     openVariantPicker: variablePicker,
+    openRecurringProduct,
     addSaleItem,
     cartCount: () =>
       cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),

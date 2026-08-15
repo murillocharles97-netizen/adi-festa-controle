@@ -27,6 +27,9 @@
     reward: ["gift", "Resgate de recompensa"],
     note: ["sticky-note", "Observação criada"],
     contact: ["phone-call", "Contato registrado"],
+    subscription_activation: ["calendar-check", "Renovação ativada"],
+    subscription_renewal: ["refresh-cw", "Vigência renovada"],
+    subscription_status: ["calendar-clock", "Status da renovação alterado"],
   };
   const byDate = (a, b) => stamp(b.date) - stamp(a.date);
   function signature(data, clientId) {
@@ -39,6 +42,8 @@
       "progressosCampanha",
       "recompensas",
       "contatosCliente",
+      "customerSubscriptions",
+      "customerSubscriptionEvents",
     ];
     const related = groups.map((key) => {
       const list = (data[key] || []).filter(
@@ -287,6 +292,23 @@
             meta: { contactType: contact.tipo },
           }),
         );
+    for (const subscriptionEvent of data.customerSubscriptionEvents || [])
+      if (subscriptionEvent.clientId === id) {
+        const product = (data.produtos || []).find((item) => item.id === subscriptionEvent.productId),
+          transition = subscriptionEvent.transition,
+          type = transition === "activation" ? "subscription_activation" : transition === "renewal" ? "subscription_renewal" : "subscription_status",
+          labels = { paused: "Renovação pausada", reactivated: "Renovação reativada", expired: "Renovação vencida", cancelled: "Renovação cancelada", sale_reversed: "Vigência revertida com a venda", price_changed: "Valor contratado alterado", plan_changed: "Plano da renovação alterado" },
+          next = subscriptionEvent.next || {};
+        items.push(event(type, {
+          id: `subscription:${subscriptionEvent.id}`,
+          sourceId: subscriptionEvent.id,
+          title: labels[transition] || undefined,
+          value: ["activation", "renewal"].includes(transition) ? num(next.contractedPrice) : null,
+          description: `${next.label || product?.renewalLabel || product?.nome || "Renovação"}${next.expiresAt ? ` · até ${new Date(next.expiresAt).toLocaleDateString("pt-BR")}` : ""}`,
+          date: subscriptionEvent.createdAt,
+          meta: { subscriptionId: subscriptionEvent.subscriptionId, transition },
+        }));
+      }
     if (client.observacoes)
       items.push(
         event("note", {

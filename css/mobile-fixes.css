@@ -56,7 +56,6 @@
   .mobile-sale-page .pos-bag>svg:first-of-type{width:25px;height:25px;color:#fff}
   .mobile-sale-page .pos-bag>:not(svg:first-of-type){display:none!important}
   .mobile-sale-page .pos-bag:focus-visible{outline:3px solid rgba(49,208,173,.38);outline-offset:4px}
-  .mobile-sale-page .pos-bag.bag-bump{animation:mobileBagBump .22s ease-out}
   .mobile-sale-page .pos-summary{max-width:100vw;overscroll-behavior:contain}
   .mobile-sale-page .editable-cart>*{min-width:0}
   .mobile-sale-page .total-row b{max-width:58%;font-size:clamp(19px,6vw,25px);overflow-wrap:anywhere;text-align:right;font-variant-numeric:tabular-nums}
@@ -74,6 +73,3 @@
   #app :is(.home-main-metrics,.home-attention-grid,.product-detail-grid){grid-template-columns:minmax(0,1fr)}
   .mobile-sale-page .pos-bag{right:14px;width:56px;height:56px;min-height:56px}
 }
-
-@keyframes mobileBagBump{0%{transform:scale(.84)}70%{transform:scale(1.1)}100%{transform:scale(1)}}
-@media(prefers-reduced-motion:reduce){.mobile-sale-page .pos-bag.bag-bump{animation:none!important}}

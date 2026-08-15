@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Vender mobile — v91</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/visual.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/mobile-navigation.css">
+  <link rel="stylesheet" href="../css/mobile-fixes.css">
+  <link rel="stylesheet" href="../css/checkout-mobile.css">
+  <style>
+    body{margin:0;background:#f7f9fb}.visual-shell{max-width:767px;min-height:100vh;margin:auto;background:#f7f9fb}.visual-topbar{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:44px 1fr 44px 42px;gap:8px;align-items:center;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:#fff;border-bottom:1px solid #e4e8ee}.visual-topbar button{border:0;background:#fff}.visual-topbar h1,.visual-topbar p{margin:0}.visual-topbar h1{font-size:24px}.visual-topbar p{color:#738096;font-size:13px}.visual-cloud,.visual-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#e8f8f4;color:#067f65}.visual-avatar{border-radius:50%;background:#1b2a42;color:#fff;font-weight:900}.visual-content{padding:14px 14px 0}.visual-search{position:relative}.visual-search input{width:100%;height:54px;border:1px solid #dfe5ec;border-radius:17px;padding:0 48px 0 44px;background:#fff;font-size:16px}.visual-search span{position:absolute;left:16px;top:16px;font-size:20px}.visual-search button{position:absolute;right:8px;top:7px;width:40px;height:40px;border:0;background:transparent;font-size:20px}.sale-product-photo{display:grid;place-items:center;background:linear-gradient(135deg,#e1f7f1,#f4fbf9);color:#0b9474;font-size:35px;font-weight:900}.sale-product-photo.is-dark{background:linear-gradient(145deg,#151a21,#26323a);color:#69f09c}.sale-product-photo.is-food{background:linear-gradient(145deg,#fff2e6,#e8c5a5);color:#814521}.sale-product-photo.is-drink{background:linear-gradient(145deg,#e9f4ff,#b9d5ec);color:#1e68a5}.visual-recents-photo{font-size:22px!important}.bottom-nav{z-index:46}.bottom-nav button,.bottom-nav a{border:0;background:transparent}.bottom-nav .active{color:#079b78}.bottom-nav .mobile-primary-action{background:#0bb88c;color:#fff}.recurring-sale-bg[hidden]{display:none}.visual-note{margin:8px 2px 0;color:#748198;font-size:10px}
+  </style>
+</head>
+<body>
+  <div class="visual-shell" data-visual-ready="true">
+    <header class="visual-topbar">
+      <button aria-label="Abrir menu">☰</button>
+      <div><h1>Vender</h1><p>sexta-feira, 14 de agosto</p></div>
+      <span class="visual-cloud">☁</span><span class="visual-avatar">M</span>
+    </header>
+    <section class="visual-content pos-page mobile-sale-page">
+      <div class="pos-tools"><label class="visual-search pos-search-wrap"><span>⌕</span><input id="product-search" value="" placeholder="Buscar produto ou código"><button aria-label="Limpar">×</button></label><select id="pos-category"><option>Todos</option></select><select id="pos-filter"><option>Todos</option></select><select id="pos-sort"><option>Favoritos</option></select></div>
+      <div class="mobile-sale-filters"><button class="active">⚡ Rápidos</button><button>☆ Favoritos</button><button>♨ Mais vendidos</button><button>☷ Categorias</button></div>
+      <section class="mobile-recent-products"><header><b>Últimos vendidos</b><button>Ver todos</button></header><div>
+        <button><span class="sale-recent-photo sale-product-photo is-food visual-recents-photo">BR</span><b>Brownie</b><small>R$ 10,00</small></button>
+        <button><span class="sale-recent-photo sale-product-photo visual-recents-photo">CR</span><b>Cone recheado</b><small>R$ 12,00</small></button>
+        <button><span class="sale-recent-photo sale-product-photo is-dark visual-recents-photo">M</span><b>Monsters</b><small>R$ 13,00</small></button>
+      </div></section>
+      <div class="mobile-products-title"><b>Produtos</b><small>Toque para adicionar · segure para opções</small></div>
+      <div class="pos-grid" id="pos-grid">
+        <button class="pos-product mobile-sale-product is-variable stock-baixo" data-open-renewal><span class="sale-product-photo">⌁</span><strong>IPTV</strong><small class="pos-full-name">TV · Venda com renovação</small><b>R$ 25,90</b><small class="pos-renewal-badge pos-stock-neutral">▣ 30 dias</small><span class="mobile-sale-favorite">☆</span></button>
+        <button class="pos-product mobile-sale-product is-variable stock-baixo"><span class="sale-product-photo">CR</span><strong>Cone recheado</strong><small class="pos-full-name">5 opções</small><b>A partir de R$ 12,00</b><small class="pos-stock-low">Estoque baixo</small><span class="mobile-sale-favorite">☆</span></button>
+        <button class="pos-product mobile-sale-product is-variable stock-disponivel"><span class="sale-product-photo is-food">BR</span><strong>Brownie</strong><small class="pos-full-name">Doces · 4 variações</small><b>R$ 10,00 – R$ 12,00</b><small class="pos-stock-ok">Disponível</small><span class="mobile-sale-favorite active">★</span></button>
+        <button class="pos-product mobile-sale-product is-variable stock-baixo"><span class="sale-product-photo is-dark">M</span><strong>Monsters</strong><small class="pos-full-name">Bebidas · 4 variações</small><b>R$ 13,00</b><small class="pos-stock-low">Estoque baixo</small><span class="mobile-sale-favorite">☆</span></button>
+        <button class="pos-product mobile-sale-product stock-disponivel"><span class="sale-product-photo is-drink">CZ</span><strong>Coca zero 220ml</strong><small class="pos-full-name">Bebidas</small><b>R$ 3,50</b><small class="pos-stock-ok">Estoque 11</small><span class="mobile-sale-favorite">☆</span></button>
+        <button class="pos-product mobile-sale-product out-of-stock stock-esgotado"><span class="sale-product-photo">IP</span><strong>Produto esgotado com nome longo</strong><small class="pos-full-name">Serviços</small><b>R$ 19,90</b><small class="pos-stock-out">Esgotado</small><span class="mobile-sale-favorite">☆</span></button>
+      </div>
+      <p class="visual-note">Fixture visual local: usa os mesmos seletores e estilos finais do checkout mobile.</p>
+      <button class="pos-bag has-items" id="open-sale-summary" data-count="2" aria-label="Abrir sacola com 2 itens">▱<span>2 itens</span><b>R$ 29,40</b></button>
+    </section>
+    <nav class="bottom-nav"><a>⌂<span>Início</span></a><a class="active">▱<span>Vender</span></a><button class="mobile-primary-action">⌗<span>Escanear</span></button><a>♙<span>Clientes</span></a><a>◇<span>Produtos</span></a></nav>
+  </div>
+  <div class="modal-bg recurring-sale-bg" id="renewal-modal" hidden><section class="modal-box recurring-sale-sheet"><header class="modal-head"><div><small>Venda com renovação</small><h3>IPTV — Premium</h3></div><button class="icon-btn" data-close-renewal>×</button></header><div class="modal-body"><section class="recurring-existing"><h4>Cliente: João · IPTV Casa</h4><label><input type="radio" checked><span><b>Renovar existente</b><small>Ativa · até 10/09/2026</small></span></label><label><input type="radio"><span><b>Criar outra</b><small>Nova vigência separada</small></span></label></section><div class="field"><label>Nome para identificação</label><input value="IPTV Casa"></div><div class="recurring-form-grid"><div class="field"><label>Período</label><input value="30"></div><div class="field"><label>Unidade</label><select><option>dias</option></select></div><div class="field"><label>Valor</label><input value="25,90"></div><div class="field"><label>Pagamento</label><select><option>Pix / pago</option><option>Fiado</option></select></div></div><section class="recurring-preview"><span><small>Vencimento atual</small><b>10/09/2026</b></span><b>→</b><span><small>Renovado até</small><b>10/10/2026</b></span></section></div><footer class="modal-foot"><button class="btn btn-light" data-close-renewal>Cancelar</button><button class="btn btn-primary">Adicionar renovação</button></footer></section></div>
+  <script>
+    document.querySelector('[data-open-renewal]').onclick=()=>document.querySelector('#renewal-modal').hidden=false;
+    document.querySelectorAll('[data-close-renewal]').forEach(button=>button.onclick=()=>document.querySelector('#renewal-modal').hidden=true);
+    if(location.hash==='#renewal')document.querySelector('#renewal-modal').hidden=false;
+    function reportLayout(){
+      const cards=[...document.querySelectorAll('.pos-product')],grid=getComputedStyle(document.querySelector('.pos-grid')),
+        bag=document.querySelector('.pos-bag').getBoundingClientRect(),nav=document.querySelector('.bottom-nav').getBoundingClientRect(),shell=document.querySelector('.visual-shell').getBoundingClientRect(),top=document.querySelector('.visual-topbar').getBoundingClientRect();
+      document.title='V91:'+JSON.stringify({width:innerWidth,body:document.body.scrollWidth,scrollX,scrollY,shell:[shell.left,shell.right,shell.width],top:[top.left,top.right,top.width],modal:!document.querySelector('#renewal-modal').hidden,columns:grid.gridTemplateColumns.split(' ').length,cardOverflow:cards.some(card=>card.scrollWidth>card.clientWidth+1),nestedButtons:cards.some(card=>card.querySelector('button')),bagInside:bag.right<=innerWidth&&bag.left>=0,bagAboveNav:bag.bottom<=nav.top+1});
+    }
+    addEventListener('resize',reportLayout);requestAnimationFrame(reportLayout);
+  </script>
+</body>
+</html>

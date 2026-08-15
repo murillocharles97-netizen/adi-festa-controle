@@ -66,16 +66,16 @@
     })[status(product)];
   const productStock = (product) =>
     Number(
-      product.productType === "variable"
+      window.ProductVariations?.isVariable(product)
         ? product.totalStock
         : (product.estoqueAtual ?? product.estoque ?? 0),
     );
   const productPrice = (product) =>
     Number(
-      product.productType === "variable" ? product.minPrice : product.preco,
+      window.ProductVariations?.isVariable(product) ? product.minPrice : product.preco,
     );
   const priceLabel = (product) =>
-    product.productType === "variable" &&
+    window.ProductVariations?.isVariable(product) &&
     Number(product.minPrice) !== Number(product.maxPrice)
       ? `${money(product.minPrice)} – ${money(product.maxPrice)}`
       : money(productPrice(product));
@@ -152,8 +152,8 @@
               status(product) === "sem-controle")) ||
           (state.filter === "baixo" && status(product) === "baixo") ||
           (state.filter === "esgotado" && status(product) === "esgotado") ||
-          (state.filter === "simples" && product.productType !== "variable") ||
-          (state.filter === "variacoes" && product.productType === "variable"),
+          (state.filter === "simples" && !window.ProductVariations?.isVariable(product)) ||
+          (state.filter === "variacoes" && window.ProductVariations?.isVariable(product)),
       );
     list.sort((a, b) =>
       state.sort === "favoritos"
@@ -190,8 +190,8 @@
       ).length,
       low: list.filter((p) => status(p) === "baixo").length,
       out: list.filter((p) => status(p) === "esgotado").length,
-      simple: list.filter((p) => p.productType !== "variable").length,
-      variable: list.filter((p) => p.productType === "variable").length,
+      simple: list.filter((p) => !window.ProductVariations?.isVariable(p)).length,
+      variable: list.filter((p) => window.ProductVariations?.isVariable(p)).length,
     };
   }
   function chip(key, label, count, iconName = "") {
@@ -212,7 +212,7 @@
             0,
           ),
         ) % 6,
-      variable = product.productType === "variable",
+      variable = window.ProductVariations?.isVariable(product),
       controlsStock = !product.semControleEstoque && product.controlaEstoque !== false;
     return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${statusInfo(product).label}"><div class="mobile-product-avatar color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show ${product.favorito ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${product.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(product.favorito)}">${icon("star")}</button></div><div class="mobile-product-copy"><h3 title="${esc(product.nome)}">${esc(product.nome)}</h3>${variable ? `<span class="product-variation-badge">${Number(product.activeVariationCount || 0)} variações</span>` : `<p>${esc(product.categoria) || "Sem categoria"}${product.codigo ? ` <b>·</b> ${esc(product.codigo)}` : ""}</p>`}${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong>${priceLabel(product)}</strong></div>${stock(product)}<button class="mobile-product-more" type="button" data-product-menu="${product.id}" aria-label="Mais ações de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button></article></div>`;
   }
@@ -254,24 +254,11 @@
       shown = list.slice(0, state.limit);
     return `<section class="products-mobile-page"><div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto" aria-label="Buscar produto por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar produtos">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Em estoque", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
   }
-  function refresh(reset = false, motion = "") {
+  function refresh(reset = false) {
     dataCache = null;
     if (reset) state.limit = 50;
     const app = $("#app");
     if (!app) return;
-    const oldList = $("#mobile-products", app),
-      oldStock = new Map(
-        (oldList ? $$("[data-product-shell]", oldList) : []).map((shell) => [
-          shell.dataset.productShell,
-          {
-            width: $(".product-stock-track i", shell)?.style.width || "",
-            status: shell.className,
-          },
-        ]),
-      ),
-      previous = motion && window.MobileMotion
-        ? window.MobileMotion.capture(oldList, "[data-product-shell]", "data-product-shell")
-        : null;
     const scroll = scrollY;
     app.innerHTML = render();
     const page = $(".products-mobile-page", app);
@@ -279,28 +266,6 @@
     bind();
     scrollTo({ top: scroll });
     window.lucide?.createIcons();
-    $$("[data-product-shell]", app).forEach((shell) => {
-      const before = oldStock.get(shell.dataset.productShell),
-        bar = $(".product-stock-track i", shell),
-        badge = $(".mobile-product-stock em", shell);
-      if (!before || !bar || before.width === bar.style.width) return;
-      const target = bar.style.width;
-      bar.style.width = before.width;
-      requestAnimationFrame(() => {
-        bar.style.width = target;
-        window.MobileMotion?.animate(badge, [{ opacity: 0.35, transform: "translateY(3px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180 });
-      });
-    });
-    if (previous)
-      requestAnimationFrame(() =>
-        window.MobileMotion.flip(
-          $("#mobile-products", app),
-          previous,
-          "[data-product-shell]",
-          "data-product-shell",
-          { name: motion, duration: motion === "layout" ? 235 : 185 },
-        ),
-      );
   }
   function modal(title, body, onSave, label = "Salvar") {
     const root = $("#modal");
@@ -327,11 +292,12 @@
   }
   function chooseProductType() {
     const root = $("#modal");
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-type-picker"><header class="modal-head"><h3>Que tipo de produto deseja criar?</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body product-type-options"><button data-product-type="simple">${icon("package")}<b>Produto simples</b><small>Um preço e um estoque.</small></button><button data-product-type="variable">${icon("boxes")}<b>Produto com variações</b><small>Sabores, cores, tamanhos ou combinações.</small></button></div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-type-picker"><header class="modal-head"><h3>Que tipo de produto deseja criar?</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body product-type-options"><button data-product-type="simple">${icon("package")}<b>Produto simples</b><small>Um preço e um estoque.</small></button><button data-product-type="variable">${icon("boxes")}<b>Produto com variações</b><small>Sabores, cores, tamanhos ou combinações.</small></button><button data-product-type="recurring">${icon("calendar-sync")}<b>Venda com renovação</b><small>Produtos ou serviços que vencem após um período e precisam ser renovados.</small></button></div></section></div>`;
     $(".close", root).onclick = Modais.fechar;
     $('[data-product-type="simple"]', root).onclick = () =>
       ProductImages.openForm(null);
     $('[data-product-type="variable"]', root).onclick = () => variableWizard();
+    $('[data-product-type="recurring"]', root).onclick = () => ProductImages.openForm(null, { productType: "recurring" });
     window.lucide?.createIcons();
   }
   function variableWizard() {
@@ -552,7 +518,7 @@
       });
     modal(
       variant ? "Editar variação" : "Nova variação",
-      `<p><b>${esc(product.nome)}</b></p>${ProductImages.editorMarkup(imageDraft,{label:"Foto da variação",description:"Por padrão, a variação usa a foto principal do produto."})}<div class="field"><label>Nome da variação *</label><input name="displayName" value="${esc(variant?.displayName || "")}" required></div><div class="field"><label>Preço *</label><input name="price" inputmode="decimal" value="${variant?.price ?? ""}" required></div><div class="field"><label>Custo</label><input name="cost" inputmode="decimal" value="${variant?.cost ?? ""}"></div><div class="field"><label>Estoque</label><input name="stock" inputmode="numeric" value="${variant?.stock ?? 0}"></div><div class="field"><label>Estoque mínimo</label><input name="minStock" inputmode="numeric" value="${variant?.minStock ?? 0}"></div><div class="field"><label>SKU</label><input name="sku" value="${esc(variant?.sku || "")}"></div><div class="field"><label>Código de barras</label><input name="barcode" inputmode="numeric" value="${esc(variant?.barcode || "")}"></div><label class="check"><input name="catalogVisible" type="checkbox" ${variant?.catalogVisible !== false ? "checked" : ""}> Visível no catálogo</label>`,
+      `<p><b>${esc(product.nome)}</b></p>${ProductImages.editorMarkup(imageDraft,{label:"Foto da variação",description:"Por padrão, a variação usa a foto principal do produto."})}<div class="field"><label>Nome da variação *</label><input name="displayName" value="${esc(variant?.displayName || "")}" required></div><div class="field"><label>Preço *</label><input name="price" inputmode="decimal" value="${variant?.price ?? ""}" required></div><div class="field"><label>Custo</label><input name="cost" inputmode="decimal" value="${variant?.cost ?? ""}"></div>${product.productType === "recurring" ? `<div class="field"><label>Período desta variação</label><input name="durationValue" type="number" inputmode="numeric" min="1" value="${variant?.durationValue ?? product.durationValue ?? 30}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${(variant?.durationUnit || product.durationUnit) === "days" ? "selected" : ""}>Dias</option><option value="weeks" ${(variant?.durationUnit || product.durationUnit) === "weeks" ? "selected" : ""}>Semanas</option><option value="months" ${(variant?.durationUnit || product.durationUnit) === "months" ? "selected" : ""}>Meses</option><option value="years" ${(variant?.durationUnit || product.durationUnit) === "years" ? "selected" : ""}>Anos</option></select></div>` : ""}<div class="field"><label>Estoque</label><input name="stock" inputmode="numeric" value="${variant?.stock ?? 0}"></div><div class="field"><label>Estoque mínimo</label><input name="minStock" inputmode="numeric" value="${variant?.minStock ?? 0}"></div><div class="field"><label>SKU</label><input name="sku" value="${esc(variant?.sku || "")}"></div><div class="field"><label>Código de barras</label><input name="barcode" inputmode="numeric" value="${esc(variant?.barcode || "")}"></div><label class="check"><input name="catalogVisible" type="checkbox" ${variant?.catalogVisible !== false ? "checked" : ""}> Visível no catálogo</label>`,
       async (form) => {
         const imageData = await ProductImages.commit(imageDraft, {
           productId: parentId,
@@ -572,6 +538,8 @@
           minStock: form.get("minStock"),
           sku: form.get("sku"),
           barcode: form.get("barcode"),
+          durationValue: product.productType === "recurring" ? Number(form.get("durationValue") || product.durationValue || 30) : null,
+          durationUnit: product.productType === "recurring" ? (form.get("durationUnit") || product.durationUnit || "days") : null,
           active: true,
           catalogVisible: form.has("catalogVisible"),
           ...imageData,
@@ -644,8 +612,8 @@
     state.filtersOpen = false;
     const product = id ? Produtos.obter(id) : null;
     if (!id) return chooseProductType();
-    if (product?.productType === "variable") return variableDetails(id);
-    ProductImages.openForm(id);
+    if (window.ProductVariations?.isVariable(product)) return variableDetails(id);
+    ProductImages.openForm(id, { productType: product?.productType });
   }
   function variantStockEntry(parentId, variantId) {
     const product = Produtos.obter(parentId),
@@ -667,7 +635,7 @@
   }
   function stockEntry(id) {
     const product = Produtos.obter(id);
-    if (product?.productType === "variable") {
+    if (window.ProductVariations?.isVariable(product)) {
       const variants = ProductVariations.active(id);
       $("#modal").innerHTML =
         `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Escolher variação</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body product-select-list">${variants.map((variant) => `<button data-entry-variant="${variant.id}"><span>${esc(initials(variant.displayName))}</span><b>${esc(variant.displayName)}</b><small>${Number(variant.stock)} un.</small></button>`).join("") || '<p class="empty">Nenhuma variação ativa.</p>'}</div></section></div>`;
@@ -695,7 +663,7 @@
   }
   function stockAdjust(id) {
     const product = Produtos.obter(id);
-    if (product?.productType === "variable") return variableDetails(id);
+    if (window.ProductVariations?.isVariable(product)) return variableDetails(id);
     modal(
       "Ajustar estoque",
       `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p><div class="field"><label>Novo estoque *</label><input name="estoque" type="number" inputmode="decimal" step="1" value="${Number(product.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
@@ -786,7 +754,6 @@
       .closest("[data-product-shell]")
       ?.querySelector(".favorite-dot")
       ?.classList.toggle("show", next);
-    window.MobileMotion?.pop(button);
     const count = $('[data-product-filter="favoritos"] b');
     if (count) count.textContent = counts().favorites;
     window.lucide?.createIcons();
@@ -883,12 +850,12 @@
     search.oninput = (event) => {
       clearTimeout(timer);
       state.query = event.target.value;
-      timer = setTimeout(() => refresh(true, "search"), 140);
+      timer = setTimeout(() => refresh(true), 140);
     };
     sort.onchange = (event) => {
       state.sort = event.target.value;
       saveState();
-      refresh(true, "filter");
+      refresh(true);
     };
     $$("[data-product-filter]").forEach(
       (button) =>
@@ -896,7 +863,7 @@
           state.filter = button.dataset.productFilter;
           if (state.filter === "favoritos" && state.sort === "favoritos")
             state.sort = "nomeAsc";
-          refresh(true, "filter");
+          refresh(true);
         }),
     );
     $$("[data-product-view]").forEach(
@@ -904,7 +871,7 @@
         (button.onclick = () => {
           state.view = button.dataset.productView;
           saveState();
-          refresh(false, "layout");
+          refresh(false);
         }),
     );
     $("#mobile-product-open-filters").onclick = () => {
@@ -916,7 +883,7 @@
         (button.onclick = () => {
           state.category = button.dataset.productCategory;
           state.filtersOpen = false;
-          refresh(true, "filter");
+          refresh(true);
         }),
     );
     $$("[data-product-sheet-close]").forEach(
@@ -951,10 +918,6 @@
       }
       if (card) details(card.dataset.productCard);
     };
-    $("#mobile-products").addEventListener("pointerdown", (event) => {
-      const card = event.target.closest("[data-product-card]");
-      if (card && !event.target.closest("button")) window.MobileMotion?.press(card);
-    });
     $("#mobile-products").onkeydown = (event) => {
       if (
         (event.key === "Enter" || event.key === " ") &&
@@ -1094,6 +1057,7 @@
     applyFilter,
     search,
     productForm,
+    variableDetails,
     stockEntry,
     stockAdjust,
     history,
