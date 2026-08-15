@@ -46,10 +46,10 @@ test("sincronização completa permanece disponível apenas em ações explícit
 
 test("diagnóstico é carregado antes do app e cache PWA publica a correção", () => {
   assert.ok(
-    index.indexOf("runtime-diagnostics.js") < index.indexOf("app.js?v=92"),
+    index.indexOf("runtime-diagnostics.js") < index.indexOf("app.js?v=93"),
   );
   assert.match(index, /lifecycle-manager\.js\?v=83/);
-  assert.match(worker, /adi-festa-v92-mobile-products-selling-fixes/);
+  assert.match(worker, /adi-festa-v93-mobile-home-clients-polish/);
   assert.match(worker, /runtime-diagnostics\.js/);
   assert.match(worker, /lifecycle-manager\.js/);
 });
