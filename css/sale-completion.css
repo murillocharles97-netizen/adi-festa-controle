@@ -6,6 +6,7 @@
 .sale-receipt-paper .receipt-line>span{min-width:0;overflow-wrap:anywhere}
 .sale-receipt-paper .receipt-line>strong{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
 .sale-receipt-item span{display:grid;gap:3px}.sale-receipt-item small{color:var(--muted)}
+.sale-receipt-item .receipt-renewal-validity{margin-top:3px;color:#087d64;line-height:1.35}.sale-receipt-item .receipt-renewal-validity b{font-weight:800}
 .sale-payment-confirmed{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding:10px;border-radius:12px;background:#e6faf5;color:#087d64}
 .sale-payment-confirmed svg{width:19px}.sale-payment-confirmed span{display:grid}.sale-payment-confirmed small{font-size:10px}
 .sale-receipt-note{display:grid;gap:4px;margin-top:10px;padding:10px;border-radius:10px;background:#f5f6f8;overflow-wrap:anywhere}

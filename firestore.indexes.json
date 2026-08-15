@@ -64,6 +64,31 @@
         { "fieldPath": "campaignId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "customerSubscriptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerSubscriptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "productId", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerSubscriptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

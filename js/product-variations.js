@@ -10,7 +10,7 @@
       .toLowerCase();
   const now = () => new Date().toISOString();
   const uuid = () => window.Utils?.uuid?.() || crypto.randomUUID();
-  const isVariable = (product) => product?.productType === "variable";
+  const isVariable = (product) => product?.productType === "variable" || (product?.productType === "recurring" && product?.hasVariations === true);
   const itemKey = (item) =>
     item?.variantId
       ? `${item.produtoId}::${item.variantId}`
@@ -139,6 +139,8 @@
       allowNegativeStock: Boolean(
         raw.allowNegativeStock ?? existing?.allowNegativeStock,
       ),
+      durationValue: product?.productType === "recurring" ? Math.max(1, num(raw.durationValue ?? existing?.durationValue ?? product.durationValue ?? 30)) : null,
+      durationUnit: product?.productType === "recurring" && ["days", "weeks", "months", "years"].includes(raw.durationUnit ?? existing?.durationUnit ?? product.durationUnit) ? (raw.durationUnit ?? existing?.durationUnit ?? product.durationUnit) : (product?.productType === "recurring" ? "days" : null),
       image:
         raw.image !== undefined
           ? raw.image
@@ -162,7 +164,7 @@
         raw.imageOperationId ?? existing?.imageOperationId ?? null,
       createdAt: existing?.createdAt || raw.createdAt || timestamp,
       updatedAt: timestamp,
-      schemaVersion: 11,
+      schemaVersion: 13,
     };
   };
   function save(raw) {
@@ -228,7 +230,8 @@
         ...product,
         id,
         nome: text(product.nome),
-        productType: "variable",
+        productType: product.productType === "recurring" ? "recurring" : "variable",
+        hasVariations: true,
         attributes: attributes.map((attribute, index) => ({
           id: text(attribute.id) || `attr_${index + 1}`,
           name: text(attribute.name) || `Atributo ${index + 1}`,
@@ -248,7 +251,7 @@
         favorito: Boolean(product.favorito),
         criadoEm: timestamp,
         atualizadoEm: timestamp,
-        schemaVersion: 10,
+        schemaVersion: 13,
       };
       data.produtos.push(created);
       data.variacoesProdutos ??= [];

@@ -18,6 +18,8 @@ window.Modais=(()=>{
   const debt=balance=>Math.abs(Math.min(0,Number(balance||0)));
   const isMobile=()=>matchMedia('(max-width:767px)').matches;
   const paymentLabels={pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão',credito:'Cartão de crédito',debito:'Cartão de débito',entrega:'Pago na entrega',pago:'Pago',fiado:'Fiado'};
+  const durationLabel=item=>`${Number(item.durationValue||30)} ${{days:Number(item.durationValue)===1?'dia':'dias',weeks:Number(item.durationValue)===1?'semana':'semanas',months:Number(item.durationValue)===1?'mês':'meses',years:Number(item.durationValue)===1?'ano':'anos'}[item.durationUnit]||'dias'}`;
+  const recurringItems=sale=>(sale?.itens||[]).filter(item=>item.productType==='recurring'&&item.subscriptionExpiresAt);
   let active=null;
 
   function currentBusiness(){
@@ -58,6 +60,8 @@ window.Modais=(()=>{
     }
     const campaignLines=(sale.campaignReceiptSummary||[]).map(item=>`🎁 ${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`);
     if(campaignLines.length)lines.push('','Benefícios da compra:',...campaignLines);
+    const renewalLines=recurringItems(sale).map(item=>`📅 ${item.renewalLabel||item.nome}: ${item.subscriptionAction==='renewal'?'renovado':'ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}.`);
+    if(renewalLines.length)lines.push('','Vigência da renovação:',...renewalLines);
     return lines.join('\n');
   }
   function wrapText(context,text,maxWidth){
@@ -70,7 +74,8 @@ window.Modais=(()=>{
     const itemLines=(sale.itens||[]).map(item=>wrapText(probe,item.nome,285));
     const extraLines=itemLines.reduce((sum,lines)=>sum+Math.max(0,lines.length-1),0);
     const campaignLines=(sale.campaignReceiptSummary||[]).length;
-    const height=520+(sale.itens||[]).length*70+extraLines*20+(sale.status==='fiado'?125:0)+(sale.observacao?70:0)+campaignLines*48;
+    const renewalLines=recurringItems(sale).length;
+    const height=520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.observacao?70:0)+campaignLines*48;
     const canvas=document.createElement('canvas');canvas.width=width*scale;canvas.height=height*scale;
     const context=canvas.getContext('2d');context.scale(scale,scale);context.fillStyle='#fff';context.fillRect(0,0,width,height);context.textBaseline='alphabetic';
     context.fillStyle='#344052';context.textAlign='center';context.font='bold 27px Arial';context.fillText(business.receiptName||business.name,width/2,43);
@@ -84,6 +89,7 @@ window.Modais=(()=>{
       itemLines[index].forEach(line=>{context.fillText(line,25,y);y+=19});
       context.font='13px Arial';context.fillStyle='#697586';context.fillText(`${item.quantidade} × ${dinheiro(unitPrice(item))}`,25,y);
       context.textAlign='right';context.fillStyle='#344052';context.fillText(dinheiro(Number(item.quantidade||0)*unitPrice(item)),width-25,y);y+=34;
+      if(item.productType==='recurring'&&item.subscriptionExpiresAt){context.textAlign='left';context.font='12px Arial';context.fillStyle='#087d64';context.fillText(`${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')} · ${durationLabel(item)}`,25,y);y+=26}
     });
     context.setLineDash([]);context.textAlign='left';context.font='14px Arial';context.fillStyle='#344052';context.fillText(`Subtotal: ${dinheiro(sale.subtotalOriginal??value(sale))}`,25,y);
     if(Number(sale.descontoTotal)>0){y+=25;context.fillStyle='#bd303b';context.fillText(`Desconto: -${dinheiro(sale.descontoTotal)}`,25,y)}
@@ -109,7 +115,7 @@ window.Modais=(()=>{
     return`<section class="sale-operation-status">${checks.map(([icon,label])=>`<span><i data-lucide="${icon}"></i>${label}</span>`).join('')}${pending?'<p><i data-lucide="cloud-off"></i> Venda salva neste aparelho e aguardando sincronização.</p>':''}</section>`;
   }
   function itemsMarkup(sale){
-    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${dinheiro(unitPrice(item))}</small></span><strong>${dinheiro(Number(item.quantidade||0)*unitPrice(item))}</strong></div>`).join('');
+    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${dinheiro(unitPrice(item))}</small>${item.productType==='recurring'&&item.subscriptionExpiresAt?`<small class="receipt-renewal-validity"><b>${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}</b> · ${durationLabel(item)}</small>`:''}</span><strong>${dinheiro(Number(item.quantidade||0)*unitPrice(item))}</strong></div>`).join('');
   }
   function receiptMarkup(sale,customer,business){
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';

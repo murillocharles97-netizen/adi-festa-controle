@@ -19,6 +19,10 @@ window.Vendas = (() => {
         (v) => v.operationId === operationId,
       );
     if (existente) return existente;
+    const currentData = DB.carregar(),
+      hasRecurringItem = (d.itens || []).some((item) => item.productType === "recurring" || item.recurringActivation || currentData.produtos.some((product) => product.id === item.produtoId && product.productType === "recurring"));
+    if (hasRecurringItem && !d.clienteId)
+      throw Error("Venda com renovação exige um cliente selecionado.");
     if (window.PlanLimitService)
       PlanLimitService.assert(
         PlanLimitService.canCreateSale(),
@@ -105,6 +109,8 @@ window.Vendas = (() => {
           unitPriceSnapshot: precoFinalUnitario,
           costSnapshot: custoUnitario,
           campaignDiscounts: i.campaignDiscounts || [],
+          productType: i.productType || produto?.productType || "simple",
+          recurringActivation: i.recurringActivation ? structuredClone(i.recurringActivation) : null,
         };
       });
       const subtotalOriginal = itens.reduce(
@@ -255,6 +261,8 @@ window.Vendas = (() => {
           valorFinal,
           data: criada.data,
         });
+      criada.subscriptionUpdates =
+        window.CustomerSubscriptions?.applySaleInData?.(db, criada) || [];
       criada.campaignUpdates =
         window.Campanhas?.aplicarVendaNoBanco(db, criada) || [];
     });
@@ -371,6 +379,7 @@ window.Vendas = (() => {
         data: agora,
       });
       const campaignReversal = window.Campanhas?.reverterVendaNoBanco(db, venda, options);
+      window.CustomerSubscriptions?.reverseSaleInData?.(db, venda);
       if (campaignReversal?.administrativeResolution) {
         db.movimentacoes.push({
           id: `${operationId}:campaign-resolution`,

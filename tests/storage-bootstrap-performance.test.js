@@ -10,7 +10,7 @@ const source = fs.readFileSync("js/storage.js", "utf8");
 function fixture(clientCount = 2000, saleCount = 5000) {
   const now = "2026-08-08T12:00:00.000Z";
   return {
-    versao: 12,
+    versao: 13,
     config: { nome: "Empresa de teste", appSchemaVersion: 2 },
     clientes: Array.from({ length: clientCount }, (_, index) => ({
       id: `c${index}`,

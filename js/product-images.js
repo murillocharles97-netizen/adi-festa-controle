@@ -602,6 +602,8 @@
   function openForm(id, defaults = {}) {
     const existing = id ? window.Produtos?.obter?.(id) : null,
       product = existing || {},
+      productType = defaults.productType || product.productType || "simple",
+      recurring = productType === "recurring",
       productId = id || window.Utils.uuid(),
       imageDraft = createDraft(product),
       root = $("#modal"),
@@ -609,7 +611,8 @@
     root.innerHTML = `<div class="modal-bg"><section class="modal-box product-form-modal"><header class="modal-head"><div><small>Produtos</small><h3>${id ? "Editar produto" : "Novo produto"}</h3></div><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><form><div class="modal-body product-form-sections">
       <section class="product-form-section"><header><i data-lucide="package"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
       <section class="product-form-section image-section">${editorMarkup(imageDraft)}</section>
-      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>Defina se este item precisa de movimentação.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${product.semControleEstoque ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>Desative para serviços e itens sem quantidade física.</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
+      ${recurring ? `<section class="product-form-section recurring-product-fields"><header><i data-lucide="calendar-clock"></i><div><b>Renovação</b><small>Defina a vigência sugerida. Ela poderá ser alterada na venda.</small></div></header><div class="form-grid"><div class="field"><label>Período padrão *</label><input name="durationValue" type="number" inputmode="numeric" min="1" required value="${esc(product.durationValue ?? 30)}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${product.durationUnit === "days" || !product.durationUnit ? "selected" : ""}>Dias</option><option value="weeks" ${product.durationUnit === "weeks" ? "selected" : ""}>Semanas</option><option value="months" ${product.durationUnit === "months" ? "selected" : ""}>Meses</option><option value="years" ${product.durationUnit === "years" ? "selected" : ""}>Anos</option></select></div><div class="field full"><label>Nome para renovação</label><input name="renewalLabel" value="${esc(product.renewalLabel || product.nome || "")}" placeholder="Ex.: Plano IPTV Premium"></div><div class="field full"><label>Mensagem sugerida</label><textarea name="renewalMessage" placeholder="Mensagem opcional para o WhatsApp">${esc(product.renewalMessage || "")}</textarea></div></div><label class="product-stock-control"><input type="checkbox" name="hasVariations" ${product.hasVariations ? "checked" : ""}><span><b>Este produto possui variações</b><small>Ex.: 1 tela, 2 telas e Premium.</small></span></label></section>` : ""}
+      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>Defina se este item precisa de movimentação.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${product.semControleEstoque || (recurring && !id && product.controlaEstoque !== true) ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>${recurring ? "Desativado por padrão para serviços com renovação." : "Desative para serviços e itens sem quantidade física."}</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
       </div><div class="product-upload-progress" hidden><span><i></i></span><small>Enviando imagem... <b>0%</b></small></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary" data-save-product>Salvar produto</button></footer></form></section></div>`;
     const form = $("form", root),
       controlsStock = $("[name='controlaEstoque']", form),
@@ -617,6 +620,14 @@
       barcodeInput = $("[name='barcode']", form),
       barcodeType = $("[name='barcodeType']", form),
       barcodeStatus = $(".barcode-field-status", form);
+    if (recurring) {
+      const selectedReminders = new Set((product.renewalReminders || []).map(Number)),
+        reminderMarkup = [30, 7, 3, 1, 0, -1]
+          .map((days) => `<label><input type="checkbox" name="renewalReminders" value="${days}" ${selectedReminders.has(days) ? "checked" : ""}><span>${days > 0 ? `${days} dia${days === 1 ? "" : "s"} antes` : days === 0 ? "No dia" : "1 dia depois"}</span></label>`)
+          .join(""),
+        variationControl = $(".recurring-product-fields .product-stock-control", form);
+      variationControl?.insertAdjacentHTML("beforebegin", `<fieldset class="renewal-reminders"><legend>Lembretes sugeridos</legend><p>Escolha quando esta renovação deve aparecer nos próximos avisos.</p><div>${reminderMarkup}</div></fieldset>`);
+    }
     const updateStockFields = () => {
       stockFields.hidden = !controlsStock.checked;
       stockFields.querySelectorAll("input").forEach((input) => {
@@ -685,6 +696,9 @@
         const saved = window.Produtos.salvar({
           id: productId,
           ...data,
+          productType,
+          hasVariations: recurring && formData.has("hasVariations"),
+          renewalReminders: recurring ? formData.getAll("renewalReminders").map(Number) : [],
           semControleEstoque: !formData.has("controlaEstoque"),
           favorito: product.favorito,
           ativo: true,
@@ -694,6 +708,8 @@
         window.Modais.fechar();
         window.Utils.toast("Produto salvo");
         defaults.onSaved?.(saved);
+        if (saved.productType === "recurring" && saved.hasVariations && matchMedia("(max-width:767px)").matches)
+          setTimeout(() => window.ProdutosMobile?.variableDetails?.(saved.id), 0);
         if (matchMedia("(max-width:767px)").matches && window.Router?.atual?.() === "produtos")
           window.ProdutosMobile?.refresh?.(true);
         else

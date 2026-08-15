@@ -39,6 +39,8 @@ const SOURCES = {
   campaignEvents: { key: "eventosCampanha" },
   campaignRedemptions: { key: "resgatesCampanha" },
   paymentAllocations: { key: "alocacoesPagamento" },
+  customerSubscriptions: { key: "customerSubscriptions" },
+  customerSubscriptionEvents: { key: "customerSubscriptionEvents" },
   charges: { key: "cobrancas" },
   messageHistory: { key: "messageHistory" },
   messageTemplates: { key: "messageTemplates" },
@@ -60,6 +62,8 @@ const QUEUE_ENTITY_ALIASES = {
   eventosCampanha: "campaignEvents",
   resgatesCampanha: "campaignRedemptions",
   alocacoesPagamento: "paymentAllocations",
+  renovacoesCliente: "customerSubscriptions",
+  eventosRenovacao: "customerSubscriptionEvents",
   cobrancas: "charges",
   contatosCliente: "clientContacts",
   pedidos: "catalogOrders",
@@ -78,6 +82,7 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
   "campaignEvents",
   "campaignRedemptions",
   "paymentAllocations",
+  "customerSubscriptionEvents",
   "messageHistory",
   "messageSequences",
   "clientContacts",
@@ -2386,6 +2391,33 @@ async function queryClientsPage(options = {}) {
   });
   return result;
 }
+async function queryCustomerSubscriptions(options = {}) {
+  await validateUser();
+  const clientId = String(options.clientId || "").trim(),
+    productId = String(options.productId || "").trim(),
+    status = String(options.status || "").trim(),
+    lastRenewedFrom = options.lastRenewedFrom
+      ? new Date(options.lastRenewedFrom).toISOString()
+      : "",
+    max = Math.min(50, Math.max(1, Number(options.limit || 20))),
+    filters = [];
+  if (!clientId && !status && !lastRenewedFrom)
+    throw Error("Informe um cliente, status ou período de renovação.");
+  if (clientId) filters.push({ field: "clientId", operator: "==", value: clientId });
+  if (productId) filters.push({ field: "productId", operator: "==", value: productId });
+  if (status) filters.push({ field: "status", operator: "==", value: status });
+  if (lastRenewedFrom) filters.push({ field: "lastRenewedAt", operator: ">=", value: lastRenewedFrom });
+  if (options.from) filters.push({ field: "expiresAt", operator: ">=", value: new Date(options.from).toISOString() });
+  if (options.to) filters.push({ field: "expiresAt", operator: "<=", value: new Date(options.to).toISOString() });
+  const result = await repositories.customerSubscriptions.listQueryPage({
+    filters,
+    orders: [{ field: lastRenewedFrom ? "lastRenewedAt" : "expiresAt", direction: options.direction === "asc" ? "asc" : "desc" }],
+    max,
+    includeInactive: true,
+  });
+  applyCloudCollection("customerSubscriptions", result.items, { authoritative: false });
+  return result.items;
+}
 async function queryAllClientsForAction(options = {}) {
   const items = [];
   let cursor = null,
@@ -3672,6 +3704,7 @@ window.SyncFirebase = {
   queryClientsPage,
   queryAllClientsForAction,
   queryClientsByInactivity,
+  queryCustomerSubscriptions,
   loadProductVariants,
   findProductVariantByBarcode,
   compare: compareLocalAndCloud,
