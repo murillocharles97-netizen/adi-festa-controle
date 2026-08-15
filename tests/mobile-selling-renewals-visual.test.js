@@ -7,6 +7,7 @@ test("fixture de Vender mantém grade em duas colunas, imagens no topo e sacola 
   const css = fs.readFileSync("css/checkout-mobile.css", "utf8");
   assert.match(html, /data-visual-ready="true"/);
   assert.match(html, /mobile-recent-products/);
+  assert.doesNotMatch(html, /Ver todos/);
   assert.match(html, /data-open-renewal/);
   assert.match(css, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(css, /aspect-ratio:1\.55\/1/);

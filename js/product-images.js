@@ -612,9 +612,10 @@
       <section class="product-form-section"><header><i data-lucide="package"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
       <section class="product-form-section image-section">${editorMarkup(imageDraft)}</section>
       ${recurring ? `<section class="product-form-section recurring-product-fields"><header><i data-lucide="calendar-clock"></i><div><b>Renovação</b><small>Defina a vigência sugerida. Ela poderá ser alterada na venda.</small></div></header><div class="form-grid"><div class="field"><label>Período padrão *</label><input name="durationValue" type="number" inputmode="numeric" min="1" required value="${esc(product.durationValue ?? 30)}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${product.durationUnit === "days" || !product.durationUnit ? "selected" : ""}>Dias</option><option value="weeks" ${product.durationUnit === "weeks" ? "selected" : ""}>Semanas</option><option value="months" ${product.durationUnit === "months" ? "selected" : ""}>Meses</option><option value="years" ${product.durationUnit === "years" ? "selected" : ""}>Anos</option></select></div><div class="field full"><label>Nome para renovação</label><input name="renewalLabel" value="${esc(product.renewalLabel || product.nome || "")}" placeholder="Ex.: Plano IPTV Premium"></div><div class="field full"><label>Mensagem sugerida</label><textarea name="renewalMessage" placeholder="Mensagem opcional para o WhatsApp">${esc(product.renewalMessage || "")}</textarea></div></div><label class="product-stock-control"><input type="checkbox" name="hasVariations" ${product.hasVariations ? "checked" : ""}><span><b>Este produto possui variações</b><small>Ex.: 1 tela, 2 telas e Premium.</small></span></label></section>` : ""}
-      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>Defina se este item precisa de movimentação.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${product.semControleEstoque || (recurring && !id && product.controlaEstoque !== true) ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>${recurring ? "Desativado por padrão para serviços com renovação." : "Desative para serviços e itens sem quantidade física."}</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
+      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>Defina se este item precisa de movimentação.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${product.semControleEstoque || (recurring && !id && product.controlaEstoque !== true) ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>${recurring ? "Ative apenas se esta venda também consumir um item físico do seu estoque." : "Desative para serviços e itens sem quantidade física."}</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
       </div><div class="product-upload-progress" hidden><span><i></i></span><small>Enviando imagem... <b>0%</b></small></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary" data-save-product>Salvar produto</button></footer></form></section></div>`;
     const form = $("form", root),
+      modal = $(".product-form-modal", root),
       controlsStock = $("[name='controlaEstoque']", form),
       stockFields = $("[data-stock-fields]", form),
       barcodeInput = $("[name='barcode']", form),
@@ -655,10 +656,23 @@
       barcodeStatus.classList.add("available");
       return true;
     };
-    const close = () => {
-      cleanupDraft(imageDraft);
-      window.Modais.fechar();
-    };
+    const visualViewport = window.visualViewport,
+      syncViewportHeight = () => {
+        const visibleHeight = Math.max(260, Math.round(visualViewport?.height || window.innerHeight)),
+          visibleBottom = Math.round((visualViewport?.offsetTop || 0) + visibleHeight),
+          keyboardOffset = Math.max(0, window.innerHeight - visibleBottom);
+        modal?.style.setProperty("--product-form-viewport-height", `${visibleHeight}px`);
+        modal?.style.setProperty("--product-form-keyboard-offset", `${keyboardOffset}px`);
+      },
+      cleanupViewport = () =>
+        visualViewport?.removeEventListener("resize", syncViewportHeight),
+      close = () => {
+        cleanupViewport();
+        cleanupDraft(imageDraft);
+        window.Modais.fechar();
+      };
+    syncViewportHeight();
+    visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
     root.querySelectorAll(".close,.cancel").forEach((button) => (button.onclick = close));
     controlsStock.onchange = updateStockFields;
     barcodeInput.addEventListener("input", validateBarcode);
@@ -704,6 +718,7 @@
           ativo: true,
           ...imageData,
         });
+        cleanupViewport();
         cleanupDraft(imageDraft);
         window.Modais.fechar();
         window.Utils.toast("Produto salvo");
