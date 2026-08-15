@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>QA shell desktop</title>
   <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
   <link rel="stylesheet" href="../css/finance.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/visual.css">
@@ -28,6 +29,9 @@
   <link rel="stylesheet" href="../css/campanhas-mobile.css">
   <link rel="stylesheet" href="../css/configuracoes-mobile.css">
   <link rel="stylesheet" href="../css/plans.css">
+  <link rel="stylesheet" href="../css/visitas.css">
+  <link rel="stylesheet" href="../css/catalogo-admin.css">
+  <link rel="stylesheet" href="../css/design-system/desktop.css">
   <script>
     window.__desktopAuditErrors = [];
     window.__fixtureLoadCount = Number(sessionStorage.getItem("desktopFixtureLoads") || 0) + 1;
@@ -37,7 +41,7 @@
   </script>
 </head>
 <body>
-  <aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-logo">AF</span><div><strong>Empresa fixture</strong><small>Controle de vendas</small></div></div><nav class="desktop-sidebar-nav"><a href="#/inicio" data-route="inicio">Inicio</a><a href="#/clientes" data-route="clientes">Clientes</a><a href="#/produtos" data-route="produtos">Produtos</a><a href="#/crm" data-route="crm">CRM</a><a href="#/configuracoes" data-route="configuracoes">Configuracoes</a><a href="#/relatorios" data-route="relatorios">Relatorios</a></nav><footer class="desktop-sidebar-footer">Dados locais</footer></aside>
+  <aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-logo">AF</span><div><strong>Empresa fixture</strong><small>Controle de vendas</small></div></div><nav class="desktop-sidebar-nav"><span class="desktop-nav-section">Gestão</span><a href="#/inicio" data-route="inicio">Inicio</a><a href="#/clientes" data-route="clientes">Clientes</a><a href="#/produtos" data-route="produtos">Produtos</a><a href="#/crm" data-route="crm">CRM</a><span class="desktop-nav-section">Vendas online</span><a href="#/catalogo" data-route="catalogo">Catálogo</a><a href="#/pedidos" data-route="pedidos">Pedidos</a><span class="desktop-nav-section">Sistema</span><a href="#/configuracoes" data-route="configuracoes">Configuracoes</a><a href="#/relatorios" data-route="relatorios">Relatorios</a></nav><footer class="desktop-sidebar-footer">Dados locais</footer></aside>
   <div class="overlay" id="overlay"></div>
   <div class="shell"><header class="topbar"><button class="icon-btn menu-btn" id="menu">Menu</button><div><h1 id="title">Inicio</h1><small id="date"></small></div><span class="local-badge">Local</span><span class="avatar">A</span></header><main id="app"></main></div>
   <nav class="bottom-nav" id="bottom-nav"><a href="#/inicio" data-mobile-route="inicio">Inicio</a><a href="#/vender" data-mobile-route="vender">Vender</a><a href="#/clientes" data-mobile-route="clientes">Clientes</a><a href="#/produtos" data-mobile-route="produtos">Produtos</a></nav>
@@ -82,6 +86,7 @@
   <script src="../js/campanhas-mobile.js"></script>
   <script src="../js/configuracoes-mobile.js"></script>
   <script src="../js/catalogo-admin.js"></script>
+  <script src="../js/visitas.js"></script>
   <script src="../js/desktop-dashboard.js"></script>
   <script src="../js/desktop-sales.js"></script>
   <script src="../js/desktop-settings.js"></script>

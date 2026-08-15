@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Adi Festa Desktop UI System V1</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
+  <link rel="stylesheet" href="../css/design-system/desktop.css">
+  <style>
+    body{margin:0}.gallery-shell{min-height:100vh;padding:32px}.gallery{max-width:1180px;margin:auto;display:grid;gap:24px}.gallery-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.gallery-modal{position:relative;inset:auto;padding:24px;border-radius:20px}.gallery-modal .af-modal{margin:auto;height:420px}.gallery-wizard{height:330px!important}.gallery-wizard .af-wizard__content{display:grid;place-items:center;color:var(--af-color-text-secondary)}
+  </style>
+</head>
+<body>
+  <main id="app" class="gallery-shell">
+    <section class="gallery af-page" data-design-system-gallery>
+      <header class="af-page-header"><div><h2>Desktop UI System V1</h2><p>Galeria de desenvolvimento e regressão visual.</p></div><span class="af-badge af-badge--success">Oficial</span></header>
+
+      <section class="af-card"><div class="af-card__header"><h3>Botões e badges</h3></div><div class="af-card__body gallery-row"><button class="af-button af-button--primary">Primário</button><button class="af-button af-button--secondary">Secundário</button><button class="af-button af-button--ghost">Ghost</button><button class="af-button af-button--danger">Excluir</button><button class="af-button af-button--primary af-button--sm">Pequeno</button><button class="af-button af-button--primary af-button--lg">Grande</button><button class="af-icon-button" data-tooltip="Mais ações" aria-label="Mais ações">⋯</button><span class="af-badge af-badge--success">Ativa</span><span class="af-badge af-badge--warning">Pausada</span><span class="af-badge af-badge--danger">Esgotado</span><span class="af-badge af-badge--info">Programada</span><span class="af-badge af-badge--neutral">Neutro</span></div></section>
+
+      <section class="af-form-section"><header><h4>Formulário oficial</h4><p>Controles compartilham altura, foco, raio e espaçamento.</p></header><div class="af-form-grid"><label class="af-field">Nome da campanha<input value="Compre 5 e ganhe 1"><small class="af-field__help">Use um nome fácil de identificar.</small></label><label class="af-field">Tipo<select><option>Compre e ganhe</option></select></label><label class="af-field">Quantidade<input type="number" value="5"></label><label class="af-field">Data de início<input type="date" value="2026-08-15"></label><label class="af-field af-field--full">Descrição<textarea>Ganhe uma recompensa ao concluir a meta.</textarea></label></div><div class="gallery-row"><label class="af-check"><input type="checkbox" checked> Checkbox</label><label class="af-radio"><input type="radio" checked> Radio</label><label class="af-switch gallery-row"><span>Acumular campanha</span><input type="checkbox" checked></label></div></section>
+
+      <section class="af-grid af-grid-3"><article class="af-card af-card--interactive"><h3>Card interativo</h3><p>Elevação discreta no hover.</p></article><article class="af-card af-card--attention"><h3>Atenção</h3><p>Estado de estoque baixo.</p></article><article class="af-card af-card--danger"><h3>Risco</h3><p>Ação ou estado destrutivo.</p></article></section>
+
+      <section class="af-card"><div class="af-card__header"><h3>Navegação e filtros</h3></div><div class="af-card__body af-stack"><label class="af-search"><span aria-hidden="true">⌕</span><input placeholder="Buscar cliente ou produto"></label><div class="af-chips"><button class="af-chip active">Todos</button><button class="af-chip">Ativos</button><button class="af-chip">Encerrados</button></div><nav class="af-tabs"><button class="active">Visão geral</button><button>Produtos</button><button>Disponibilidade</button></nav></div></section>
+
+      <section class="af-empty"><h3>Nenhum registro encontrado</h3><p>Ajuste os filtros ou crie o primeiro item.</p><button class="af-button af-button--primary">Criar item</button></section>
+
+      <div class="modal-bg gallery-modal"><section class="af-modal af-modal--lg"><header class="af-modal__header af-card__header"><div><h3>Modal oficial</h3><small>Header e footer permanecem visíveis.</small></div><button class="af-icon-button" aria-label="Fechar">×</button></header><div class="af-modal__body"><div class="af-skeleton" style="height:36px"></div><p>O conteúdo desta área possui rolagem independente.</p></div><footer class="af-modal__footer af-card__footer"><button class="af-button af-button--secondary">Cancelar</button><button class="af-button af-button--primary">Salvar</button></footer></section></div>
+
+      <div class="modal-bg gallery-modal"><section class="af-modal af-modal--xl af-wizard gallery-wizard"><header class="af-modal__header af-wizard__header"><h3>Wizard oficial</h3></header><div class="af-wizard__steps"><span class="completed"><b>1</b>Objetivo</span><span class="active"><b>2</b>Regra</span><span class="future"><b>3</b>Prêmio</span><span class="future"><b>4</b>Público</span><span class="future"><b>5</b>Revisão</span></div><form class="af-wizard__form"><div class="af-wizard__content">Conteúdo da etapa</div><footer class="af-modal__footer af-wizard__footer"><button class="af-button af-button--secondary">Voltar</button><button class="af-button af-button--primary">Próximo</button></footer></form></section></div>
+    </section>
+  </main>
+</body>
+</html>
