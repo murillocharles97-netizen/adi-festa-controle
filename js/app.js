@@ -414,7 +414,7 @@
   }
   const inicioCompleto = () =>
     window.MobileHome?.isMobile()
-      ? `${MobileHome.render()}${window.CampanhasUI?.dashboard?.() || ""}`
+      ? MobileHome.render()
       : window.DesktopDashboard?.render?.() || inicio();
   const views = {
       inicio: inicioCompleto,

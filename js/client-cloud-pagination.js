@@ -112,7 +112,7 @@
   }
   async function load(context, reset = true, options = {}) {
     if (!navigator.onLine || !window.SyncFirebase?.queryClientsPage) return;
-    if (context.advanced || ["nunca", "pagamento"].includes(context.params.filter)) { context.page.dataset.clientCloudMode = "local-filter"; return; }
+    if (context.advanced || ["nunca", "pagamento", "renovacao"].includes(context.params.filter)) { context.page.dataset.clientCloudMode = "local-filter"; return; }
     const key = keyOf(context);
     let controller = controllers.get(key);
     if (!controller) controller = { id: ++controllerSequence, items: [], cursor: null, hasMore: true, loading: false, at: 0 };

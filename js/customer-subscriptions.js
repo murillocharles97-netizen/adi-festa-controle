@@ -152,7 +152,7 @@ window.CustomerSubscriptions = (() => {
     return remote || list().filter((item) => effectiveStatus(item) === status);
   }
   async function loadExpiring(days = 7, reference = now(), limit = 50) {
-    const end = new Date(reference); end.setDate(end.getDate() + Math.max(0, number(days)));
+    const end = new Date(reference); end.setDate(end.getDate() + Math.max(0, number(days))); end.setHours(23, 59, 59, 999);
     return loadUpcoming({ from: reference, to: end.toISOString(), status: "active", limit });
   }
   async function loadExpired(reference = now(), limit = 50) {
@@ -181,5 +181,15 @@ window.CustomerSubscriptions = (() => {
       forecastValue: due7.reduce((sum, item) => sum + number(item.contractedPrice), 0),
     };
   }
-  return { duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics };
+  async function loadHomeMetrics(reference = now()) {
+    const due = await loadExpiring(7, reference, 50), endToday = new Date(reference);
+    endToday.setHours(23, 59, 59, 999);
+    return {
+      dueToday: due.filter((item) => new Date(item.expiresAt) <= endToday).length,
+      due7: due.filter((item) => new Date(item.expiresAt) > endToday).length,
+      forecastValue: due.reduce((sum, item) => sum + number(item.contractedPrice), 0),
+      clientIds: [...new Set(due.map((item) => item.clientId).filter(Boolean))],
+    };
+  }
+  return { duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
 })();

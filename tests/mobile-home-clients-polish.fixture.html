@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Início e Clientes mobile</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/visual.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/mobile-navigation.css">
+  <link rel="stylesheet" href="../css/mobile-fixes.css">
+  <link rel="stylesheet" href="../css/home-mobile.css">
+  <link rel="stylesheet" href="../css/clientes-mobile.css">
+  <style>
+    body{margin:0;background:#f6f8fb}.audit-shell{width:100%;max-width:767px;min-height:100vh;margin:auto;background:#f6f8fb}.audit-header{position:sticky;top:0;z-index:12;display:grid;grid-template-columns:44px minmax(0,1fr) 42px 42px;gap:7px;align-items:center;padding:calc(9px + env(safe-area-inset-top)) 13px 9px;background:#fff;border-bottom:1px solid #e5e9ef}.audit-header button{width:44px;height:44px;border:0;background:transparent;font-size:23px}.audit-header h1,.audit-header p{margin:0}.audit-header h1{font-size:22px}.audit-header p{margin-top:2px;color:#738097;font-size:11px}.audit-cloud,.audit-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#e5f8f3;color:#07866a}.audit-avatar{border-radius:50%;background:#172844;color:#fff;font-weight:900}#app{padding:13px 14px 105px}.audit-nav{position:fixed;z-index:11;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);height:calc(72px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);border-top:1px solid #e1e6ed;background:#fff}.audit-nav span{display:grid;place-items:center;color:#65738a;font-size:10px}.audit-nav .active{color:#009d78;font-weight:900}.audit-nav .primary{align-self:start;width:54px;height:54px;margin:-14px auto 0;border-radius:50%;background:#08ad83;color:#fff;font-size:25px}.local-badge{display:none!important}
+  </style>
+</head>
+<body>
+  <div class="audit-shell">
+    <header class="audit-header"><button aria-label="Abrir menu">☰</button><div><h1 id="audit-title">Início</h1><p>sábado, 15 de agosto</p></div><span class="audit-cloud">☁</span><span class="audit-avatar">M</span></header>
+    <main id="app"></main>
+    <nav class="audit-nav"><span class="active">Início</span><span>Vender</span><span class="primary">+</span><span>Clientes</span><span>Produtos</span></nav>
+  </div>
+  <div id="modal"></div>
+  <script src="../assets/lucide.min.js"></script>
+  <script>
+    const atDay=(offset,hour=12)=>{const date=new Date();date.setHours(hour,0,0,0);date.setDate(date.getDate()+offset);return date.toISOString()};
+    const today=atDay(0),yesterday=atDay(-1);
+    window.__auditData={
+      config:{nome:'Adi Festa',responsavel:'Murillo',dashboard:{dailySalesGoal:450}},
+      vendas:[
+        {id:'v1',clienteId:'c1',data:today,status:'pago',valorFinal:125,custoTotal:55,itens:[{produtoId:'p1',quantidade:5,custoTotal:25}]},
+        {id:'v2',clienteId:'c2',data:today,status:'fiado',valorFinal:100,custoTotal:45,itens:[{produtoId:'p2',quantidade:2,custoTotal:45}]},
+        {id:'v0',clienteId:'c1',data:yesterday,status:'pago',valorFinal:180,custoTotal:80,itens:[{produtoId:'p1',quantidade:4,custoTotal:40}]},
+      ],
+      clientes:[
+        {id:'c1',nome:'João Adidas',telefone:'5517981616778',saldo:-476.5,ativo:true,ultimaCompra:today,totalComprado:980,quantidadeVendas:18,promessaPagamento:{status:'pendente',data:atDay(2).slice(0,10)}},
+        {id:'c2',nome:'Jessica Arezzo',telefone:'5517996556677',saldo:0,ativo:true,ultimaCompra:atDay(-8),totalComprado:843,quantidadeVendas:12},
+        {id:'c3',nome:'Amanda Paris',telefone:'',saldo:75,ativo:true,ultimaCompra:atDay(-22),totalComprado:420,quantidadeVendas:6},
+        {id:'c4',nome:'Gu Oficina',telefone:'5517997532859',saldo:-501.5,ativo:true,ultimaCompra:atDay(-12),totalComprado:1254.8,quantidadeVendas:32},
+        {id:'c5',nome:'Maria Doces',telefone:'5517991122334',saldo:0,ativo:true,ultimaCompra:null,totalComprado:0,quantidadeVendas:0},
+      ],
+      produtos:[
+        {id:'p1',nome:'Brownie',ativo:true,estoqueAtual:0,estoqueMinimo:4},
+        {id:'p2',nome:'Monster',ativo:true,estoqueAtual:2,estoqueMinimo:5},
+        {id:'p3',nome:'Água',ativo:true,estoqueAtual:20,estoqueMinimo:5},
+      ],
+      catalogOrders:[{id:'o1',status:'pendente'},{id:'o2',orderStatus:'recebido'}],
+      pagamentos:[],cobrancas:[],messageHistory:[],
+      customerSubscriptions:[
+        {id:'s1',clientId:'c1',label:'IPTV Casa',status:'active',expiresAt:atDay(0,23),contractedPrice:25.9},
+        {id:'s2',clientId:'c4',label:'IPTV Escritório',status:'active',expiresAt:atDay(3,23),contractedPrice:29.9},
+        {id:'s3',clientId:'c4',label:'IPTV Casa',status:'active',expiresAt:atDay(6,23),contractedPrice:25.9},
+        {id:'s4',clientId:'c2',label:'Renovação distante',status:'active',expiresAt:atDay(21,23),contractedPrice:40},
+      ],customerSubscriptionEvents:[],
+    };
+    window.DB={carregar:()=>window.__auditData,alterar(mutator){mutator(window.__auditData);return window.__auditData},getBusinessId:()=> 'adi-festa'};
+    window.Utils={uuid:()=>crypto.randomUUID(),toast(){}};
+    window.FirebaseSession={profile:{name:'Murillo'},user:{uid:'owner'}};
+    window.getProductStockStatus=product=>Number(product.estoqueAtual)<=0?'esgotado':Number(product.estoqueAtual)<=Number(product.estoqueMinimo||0)?'baixo':'disponivel';
+    let currentRoute='inicio';
+    window.Router={atual:()=>currentRoute,ir(route){currentRoute=route;window.__renderAudit(route)}};
+    window.Clientes={listar:()=>window.__auditData.clientes,obter:id=>window.__auditData.clientes.find(client=>client.id===id)};
+    window.Mensagens={latestCharge(client){return client.id==='c1'?{date:atDay(-2)}:null},formatLastChargeDate(value){if(!value)return'Nunca cobrado';const days=Math.round((new Date().setHours(0,0,0,0)-new Date(value).setHours(0,0,0,0))/86400000);return days===0?'Hoje':days===1?'Ontem':`há ${days} dias`},chargeBand:()=> 'charge-never',wasChargedToday:()=>false};
+    window.ClientesPage={render:()=>'',bind(){},profile(id){window.__lastProfile=id},receive(id){window.__lastReceive=id},clientForm(){},adjust(){},refresh(){}};
+    window.ClientActions={openSheet(id){window.__lastSheet=id}};
+    window.MobileMessages={openCenter(){},openComposer(){}};
+    window.Checkout={prepareClientSale(){}};
+    window.Modais={confirmar(){}};
+    window.OperationMode={enabled:()=>true};
+    window.ProdutosMobile={applyFilter(){},productForm(){}};
+    window.AppLifecycle={onBackground(callback){window.__backgroundCallback=callback;return()=>{}}};
+    localStorage.setItem('adiFestaClientSwipeHint_v1','1');
+  </script>
+  <script src="../js/client-filter-rules.js"></script>
+  <script src="../js/customer-subscriptions.js"></script>
+  <script src="../js/clientes-mobile.js"></script>
+  <script src="../js/home-mobile.js"></script>
+  <script>
+    window.__renderAudit=(route=new URLSearchParams(location.search).get('view')||'inicio')=>{
+      currentRoute=route==='renewal'?'clientes':route;
+      document.querySelector('#audit-title').textContent=currentRoute==='clientes'?'Clientes':'Início';
+      document.querySelectorAll('.audit-nav span').forEach(item=>item.classList.toggle('active',item.textContent===document.querySelector('#audit-title').textContent));
+      if(currentRoute==='clientes'){
+        ClientesMobile.applyFilter('todos','maiorDebito');
+        document.querySelector('#app').innerHTML=ClientesPage.render();
+        ClientesPage.bind();
+        if(route==='renewal') document.querySelector('[data-mobile-card="c4"]')?.scrollIntoView({block:'center'});
+      }else{
+        document.querySelector('#app').innerHTML=MobileHome.render();
+        MobileHome.bind();
+      }
+      lucide.createIcons();
+      requestAnimationFrame(()=>window.__collectAudit());
+    };
+    window.__collectAudit=()=>{
+      const goal=document.querySelector('.home-goal-card'),goalValue=document.querySelector('.goal-values'),goalPercent=document.querySelector('.home-goal-card header>strong'),kpis=[...document.querySelectorAll('.mobile-client-kpis article')],renewal=document.querySelector('.mobile-client-context.renewal');
+      const overlap=(a,b)=>{if(!a||!b)return false;const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return x.left<y.right&&x.right>y.left&&x.top<y.bottom&&x.bottom>y.top};
+      window.__mobileHomeClientsAudit={route:currentRoute,width:innerWidth,horizontalOverflow:document.documentElement.scrollWidth>innerWidth+1,goalOverlap:overlap(goalValue,goalPercent),goalWidth:goal?.scrollWidth||0,goalClientWidth:goal?.clientWidth||0,attentionCount:document.querySelectorAll('.home-attention button').length,kpiHeights:kpis.map(item=>Math.round(item.getBoundingClientRect().height)),clientCards:document.querySelectorAll('.mobile-client-card').length,hasRenewal:Boolean(renewal),renewalText:renewal?.textContent.trim()||'',searchClear:Boolean(document.querySelector('.mobile-search-clear'))};
+      return window.__mobileHomeClientsAudit;
+    };
+    window.__setGoal=value=>{window.__auditData.config.dashboard.dailySalesGoal=value;window.__renderAudit('inicio')};
+    window.__renderAudit();
+  </script>
+</body>
+</html>
