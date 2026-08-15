@@ -14,6 +14,7 @@
   <link rel="icon" href="./assets/icon.svg">
   <link rel="apple-touch-icon" href="./assets/icon-192.png">
   <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/design-system/tokens.css?v=94">
   <link rel="stylesheet" href="./css/finance.css">
   <link rel="stylesheet" href="./css/mobile.css">
   <link rel="stylesheet" href="./css/import.css">
@@ -42,12 +43,13 @@
   <link rel="stylesheet" href="./css/mensagens-mobile.css">
   <link rel="stylesheet" href="./css/visitas.css?v=39">
   <link rel="stylesheet" href="./css/catalogo-admin.css?v=55">
-  <link rel="stylesheet" href="./css/campanhas.css?v=87">
+  <link rel="stylesheet" href="./css/campanhas.css?v=94">
   <link rel="stylesheet" href="./css/campanhas-mobile.css?v=87">
   <link rel="stylesheet" href="./css/configuracoes-mobile.css?v=45">
   <link rel="stylesheet" href="./css/coupons.css?v=1">
   <link rel="stylesheet" href="./css/barcode.css?v=51">
   <link rel="stylesheet" href="./css/plans.css?v=49">
+  <link rel="stylesheet" href="./css/design-system/desktop.css?v=94">
   <script>document.documentElement.classList.add('auth-pending');</script>
   <script src="./js/campaign-engine-v2.js?v=86"></script>
   <script src="./assets/lucide.min.js" defer></script>
@@ -56,18 +58,23 @@
   <aside class="sidebar" id="sidebar" aria-label="Menu principal">
     <div class="brand"><span class="brand-logo" data-mobile-business-initials>AF</span><div class="brand-copy"><strong data-mobile-business-name>Adi Festa</strong><small>Controle de vendas</small><span class="mobile-plan-pill" data-mobile-plan>Plano atual</span></div><button class="mobile-drawer-close" id="mobile-drawer-close" type="button" aria-label="Fechar menu"><i data-lucide="x"></i></button></div>
     <nav id="nav" class="desktop-sidebar-nav" aria-label="Navegação principal no desktop">
+      <span class="desktop-nav-section">Gestão</span>
       <a href="#/inicio" data-route="inicio"><i data-lucide="house"></i>Início</a>
       <a href="#/vender" data-route="vender"><i data-lucide="shopping-bag"></i>Vender</a>
       <a href="#/clientes" data-route="clientes"><i data-lucide="users"></i>Clientes</a>
       <a href="#/crm" data-route="crm"><i data-lucide="contact-round"></i>CRM e Relacionamento</a>
       <a href="#/produtos" data-route="produtos"><i data-lucide="candy"></i>Produtos</a>
       <a href="#/campanhas" data-route="campanhas" data-plan-feature="campaigns"><i data-lucide="megaphone"></i>Campanhas</a>
+      <span class="desktop-nav-section">Vendas online</span>
       <a href="#/catalogo" data-route="catalogo" data-plan-feature="onlineCatalog"><i data-lucide="shopping-basket"></i>Catálogo online</a>
       <a href="#/pedidos" data-route="pedidos" data-plan-feature="onlineOrders"><i data-lucide="clipboard-list"></i>Pedidos online</a>
+      <span class="desktop-nav-section">Análises</span>
       <a href="#/historico" data-route="historico"><i data-lucide="history"></i>Histórico</a>
       <a href="#/relatorios" data-route="relatorios"><i data-lucide="chart-no-axes-combined"></i>Desempenho</a>
+      <span class="desktop-nav-section">Sistema</span>
       <a href="#/configuracoes" data-route="configuracoes"><i data-lucide="settings"></i>Configurações</a>
       <a href="#/planos" data-route="planos"><i data-lucide="gem"></i><span data-plan-link-label>Planos</span></a>
+      <span class="desktop-nav-section" data-desktop-developer data-mobile-developer hidden>Desenvolvedor</span>
       <a href="#/cupons" data-route="cupons" hidden><i data-lucide="ticket-percent"></i>Cupons de desconto</a>
     </nav>
     <div class="mobile-sidebar-scroll">
@@ -119,7 +126,7 @@
   <script src="./js/lifecycle-manager.js?v=83"></script>
   <script src="./js/page-runtime.js?v=83"></script>
   <script src="./js/client-filter-rules.js?v=84"></script>
-  <script src="./js/runtime-diagnostics.js?v=81"></script><script src="./js/build-info.js?v=93"></script><script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/phone.js"></script><script src="./js/storage.js?v=92"></script><script src="./js/operation-mode.js?v=57"></script><script src="./js/backup.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/clientes.js"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/barcode.js?v=87"></script><script src="./js/plans.js?v=49"></script><script src="./js/produtos.js?v=92"></script><script src="./js/product-images.js?v=92"></script><script src="./js/campanhas.js"></script><script src="./js/vendas.js?v=92"></script><script src="./js/fiados.js"></script><script src="./js/cobrancas.js"></script><script src="./js/mensagens.js"></script><script src="./js/customer-metrics.js?v=80"></script><script src="./js/crm.js?v=92"></script><script src="./js/crm-dashboard.js?v=80"></script><script src="./js/crm-mobile.js?v=80"></script><script src="./js/router.js?v=57"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js?v=92"></script><script src="./js/repositories.js"></script><script src="./js/checkout.js?v=92"></script><script src="./js/clientes-page.js?v=84"></script><script src="./js/crm-ui.js?v=92"></script><script src="./js/mensagens-mobile.js"></script><script src="./js/client-actions.js?v=85"></script><script src="./js/clientes-mobile.js?v=93"></script><script src="./js/produtos-mobile.js?v=92"></script><script src="./js/campanhas-ui.js?v=87"></script><script src="./js/campanhas-mobile.js"></script><script src="./js/configuracoes-mobile.js?v=50"></script><script src="./assets/qrcode.min.js"></script><script src="./js/catalogo-admin.js?v=55"></script><script src="./js/desktop-dashboard.js?v=81"></script><script src="./js/desktop-sales.js?v=61"></script><script src="./js/desktop-settings.js?v=61"></script><script src="./js/app.js?v=93"></script>
+  <script src="./js/runtime-diagnostics.js?v=81"></script><script src="./js/build-info.js?v=94"></script><script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/phone.js"></script><script src="./js/storage.js?v=92"></script><script src="./js/operation-mode.js?v=57"></script><script src="./js/backup.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/clientes.js"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/barcode.js?v=87"></script><script src="./js/plans.js?v=49"></script><script src="./js/produtos.js?v=92"></script><script src="./js/product-images.js?v=92"></script><script src="./js/campanhas.js"></script><script src="./js/vendas.js?v=92"></script><script src="./js/fiados.js"></script><script src="./js/cobrancas.js"></script><script src="./js/mensagens.js"></script><script src="./js/customer-metrics.js?v=80"></script><script src="./js/crm.js?v=92"></script><script src="./js/crm-dashboard.js?v=80"></script><script src="./js/crm-mobile.js?v=80"></script><script src="./js/router.js?v=57"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js?v=92"></script><script src="./js/repositories.js"></script><script src="./js/checkout.js?v=92"></script><script src="./js/clientes-page.js?v=84"></script><script src="./js/crm-ui.js?v=92"></script><script src="./js/mensagens-mobile.js"></script><script src="./js/client-actions.js?v=85"></script><script src="./js/clientes-mobile.js?v=93"></script><script src="./js/produtos-mobile.js?v=92"></script><script src="./js/campanhas-ui.js?v=94"></script><script src="./js/campanhas-mobile.js"></script><script src="./js/configuracoes-mobile.js?v=50"></script><script src="./assets/qrcode.min.js"></script><script src="./js/catalogo-admin.js?v=55"></script><script src="./js/desktop-dashboard.js?v=81"></script><script src="./js/desktop-sales.js?v=61"></script><script src="./js/desktop-settings.js?v=61"></script><script src="./js/app.js?v=93"></script>
   <script src="./js/client-cloud-pagination.js?v=93"></script>
   <script src="./js/product-variations.js?v=89"></script>
   <script src="./js/customer-subscriptions.js?v=93"></script>
