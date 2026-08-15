@@ -1,3 +1,9 @@
+window.productControlsStock=product=>Boolean(product)&&!product.semControleEstoque&&product.controlaEstoque!==false;
+window.getProductRenewalPeriod=product=>{
+  if(product?.productType!=='recurring')return'';
+  const value=Math.max(1,Number(product.durationValue||30)),unit={days:value===1?'dia':'dias',weeks:value===1?'semana':'semanas',months:value===1?'mês':'meses',years:value===1?'ano':'anos'}[product.durationUnit]||(value===1?'dia':'dias');
+  return`${value} ${unit}`;
+};
 window.getProductStockMinimum=product=>{
   if(window.ProductVariations?.isVariable?.(product)&&window.ProductVariations?.list){
     const variants=ProductVariations.list(product.id).filter(item=>item.active!==false);
@@ -6,12 +12,12 @@ window.getProductStockMinimum=product=>{
   return Number(product?.estoqueMinimo||0);
 };
 window.getProductStockStatus=product=>{
-  if(product?.semControleEstoque||product?.controlaEstoque===false)return'sem-controle';
+  if(!productControlsStock(product))return'sem-controle';
   const current=Number(window.ProductVariations?.isVariable?.(product)?product?.totalStock:(product?.estoqueAtual??product?.estoque??0)),minimum=getProductStockMinimum(product);
   return current<=0?'esgotado':current<=minimum?'baixo':'disponivel';
 };
 window.getProductStockTone=product=>{
-  if(product?.semControleEstoque||product?.controlaEstoque===false)return'neutral';
+  if(!productControlsStock(product))return'neutral';
   const current=Number(window.ProductVariations?.isVariable?.(product)?product?.totalStock:(product?.estoqueAtual??product?.estoque??0)),minimum=getProductStockMinimum(product);
   return current<=0?'danger':current<minimum?'danger':current===minimum?'warning':'good';
 };

@@ -75,7 +75,12 @@ window.Checkout = (() => {
         )
         .join(" ") || (p.variationSearchTokens || []).join(" ");
     const photo = window.ProductImages?.markup?.(p, { className: "sale-product-photo" }) || `<span class="pos-placeholder">${initials(p.nome)}</span>`;
-    const recurring = p.productType === "recurring", detail = window.ProductVariations?.isVariable?.(p) ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome), renewal = recurring ? `<small class="pos-renewal-badge"><i data-lucide="calendar-clock"></i>${Number(p.durationValue || 30)} ${durationUnitLabel(p.durationUnit, Number(p.durationValue || 30))}</small>` : stock(p);
+    const recurring = p.productType === "recurring",
+      controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false),
+      detail = window.ProductVariations?.isVariable?.(p) ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome),
+      renewal = recurring && !controlsStock
+        ? `<small class="pos-renewal-badge"><i data-lucide="calendar-clock"></i>${escapar(window.getProductRenewalPeriod?.(p) || `${Number(p.durationValue || 30)} ${durationUnitLabel(p.durationUnit, Number(p.durationValue || 30))}`)}</small>`
+        : stock(p);
     return `<button class="pos-product ${window.ProductVariations?.isVariable?.(p) ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${photo}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${detail}</small><b>${priceLabel(p)}</b>${renewal}</button>`;
   };
   const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
@@ -146,15 +151,16 @@ window.Checkout = (() => {
     let cards = [...document.querySelectorAll(".pos-product")];
     cards.forEach((el) => {
       const p = products().getById(el.dataset.add),
-        n = Number(p.estoqueAtual);
+        n = Number(window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual),
+        controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false);
       el.hidden = !(
         (!q || el.dataset.search.includes(q)) &&
         (!cat || el.dataset.category === cat) &&
         (f === "todos" ||
           (f === "favoritos" && p.favorito) ||
-          (f === "estoque" && (p.semControleEstoque || n > 0)) ||
+          (f === "estoque" && controlsStock && n > 0) ||
           (f === "baixo" &&
-            !p.semControleEstoque &&
+            controlsStock &&
             n > 0 &&
             n <= Number(p.estoqueMinimo || 0)))
       );
@@ -271,13 +277,22 @@ window.Checkout = (() => {
     render();
   }
   async function openRecurringProduct(product, source = null) {
+    const controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false);
+    if (controlsStock && getProductStockStatus(product) === "esgotado" && !product.allowNegativeStock)
+      return toast("Produto sem estoque.", true);
     if (ProductVariations.isVariable(product)) {
       const variants = await ProductVariations.ensure(product.id);
       if (!variants.length) return toast("Cadastre ao menos uma variação ativa.", true);
       const modal = document.querySelector("#modal");
       modal.innerHTML = `<div class="modal-bg variation-picker-bg"><section class="variation-picker recurring-variant-picker"><header><div><h3>${escapar(product.nome)}</h3><p>Escolha o plano ou variação</p></div><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="variation-picker-list">${variants.map((item) => `<button type="button" class="recurring-variant-choice" data-recurring-variant="${item.id}">${window.ProductImages?.markup?.(product, { variant: item, className: "variation-picker-photo" }) || ""}<span><b>${escapar(ProductVariations.displayName(item))}</b><small>${dinheiro(item.price)} · ${Number(item.durationValue || product.durationValue || 30)} ${durationUnitLabel(item.durationUnit || product.durationUnit, Number(item.durationValue || product.durationValue || 30))}</small></span><i data-lucide="chevron-right"></i></button>`).join("")}</div></section></div>`;
       modal.querySelector(".close").onclick = () => modal.innerHTML = "";
-      modal.querySelectorAll("[data-recurring-variant]").forEach((button) => button.onclick = () => { const variant = variants.find((item) => item.id === button.dataset.recurringVariant); modal.innerHTML = ""; recurringConfiguration(product, variant, source); });
+      modal.querySelectorAll("[data-recurring-variant]").forEach((button) => button.onclick = () => {
+        const variant = variants.find((item) => item.id === button.dataset.recurringVariant);
+        if (controlsStock && Number(variant?.stock || 0) <= 0 && !variant?.allowNegativeStock)
+          return toast("Variação sem estoque.", true);
+        modal.innerHTML = "";
+        recurringConfiguration(product, variant, source);
+      });
       window.lucide?.createIcons(); return;
     }
     return recurringConfiguration(product, null, source);
@@ -565,7 +580,7 @@ window.Checkout = (() => {
         variablePicker(p, null, b);
         return;
       }
-      const out = getProductStockStatus(p) === "esgotado" && !p.semControleEstoque && !p.allowNegativeStock;
+      const out = getProductStockStatus(p) === "esgotado" && (window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false)) && !p.allowNegativeStock;
       if (out) {
         toast("Produto sem estoque.", true);
         dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: p.id, reason: "out-of-stock", source: b } }));
