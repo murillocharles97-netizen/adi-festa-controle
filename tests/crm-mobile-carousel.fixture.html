@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>CRM mobile QA</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/engagement-operations.css">
+  <link rel="stylesheet" href="../css/crm-mobile.css">
+  <style>
+    *{box-sizing:border-box}html{background:#eef2f5}body{margin:0;background:#f7f9fb;color:#17233a;font-family:Inter,system-ui,sans-serif}.qa-shell{width:100%;max-width:767px;min-height:100vh;margin:auto;background:#f7f9fb}.qa-header{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:44px minmax(0,1fr) 42px 42px;align-items:center;gap:8px;min-height:82px;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;border-bottom:1px solid #e4e9ef;background:#fff}.qa-header button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;background:transparent;color:#17233a;font-size:1.35rem}.qa-header h1,.qa-header p{margin:0}.qa-header h1{font-size:1.25rem}.qa-header p{margin-top:2px;color:#718096;font-size:.72rem}.qa-cloud,.qa-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#e7f8f3;color:#07866a}.qa-avatar{border-radius:50%;background:#172844;color:#fff;font-weight:900}#app{padding:16px 14px calc(96px + env(safe-area-inset-bottom))}.qa-nav{position:fixed;z-index:18;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);height:calc(72px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);border-top:1px solid #e1e6ed;background:#fff}.qa-nav span{display:grid;place-items:center;color:#65738a;font-size:.67rem}.qa-nav .active{color:#009d78;font-weight:900}.qa-nav .primary{align-self:start;width:56px;height:56px;margin:-14px auto 0;border-radius:50%;background:#08ad83;color:#fff;font-size:1.6rem}.modal-bg{z-index:50}.modal-box{width:min(100%,560px)}
+  </style>
+</head>
+<body>
+  <main class="qa-shell">
+    <header class="qa-header"><button aria-label="Abrir menu">☰</button><div><h1>CRM</h1><p>Relacionamento que gera vendas</p></div><span class="qa-cloud">☁</span><span class="qa-avatar">M</span></header>
+    <section id="app"></section>
+    <nav class="qa-nav"><span>Início</span><span>Vender</span><span class="primary">+</span><span class="active">Clientes</span><span>Produtos</span></nav>
+  </main>
+  <div id="modal"></div>
+  <script>
+    const DAY=86400000,daysAgo=(days)=>new Date(Date.now()-days*DAY).toISOString();
+    const rows=[
+      {client:{id:'ana',nome:'Ana Clara',telefone:'17999990001',ativo:true,saldo:-120,criadoEm:daysAgo(180)},metric:{totalSpent:1254.8,purchaseCount:32,lastPurchaseAt:daysAgo(42),daysSinceLastPurchase:42,openBalance:120,averageTicket:39.21,lastContactAt:daysAgo(10)},period:{spent:280,purchases:4},classifications:['VIP']},
+      {client:{id:'jessica',nome:'Jessica Arezzo',telefone:'17999990002',ativo:true,saldo:0,criadoEm:daysAgo(12)},metric:{totalSpent:843,purchaseCount:12,lastPurchaseAt:daysAgo(4),daysSinceLastPurchase:4,openBalance:0,averageTicket:70.25,lastContactAt:daysAgo(3)},period:{spent:100,purchases:2},classifications:[]},
+      {client:{id:'bruno',nome:'Bruno Silva',telefone:'17999990003',ativo:true,saldo:-50,criadoEm:daysAgo(300)},metric:{totalSpent:700,purchaseCount:8,lastPurchaseAt:daysAgo(75),daysSinceLastPurchase:75,openBalance:50,averageTicket:87.5,lastContactAt:daysAgo(50)},period:{spent:0,purchases:0},classifications:[]},
+      {client:{id:'carla',nome:'Carla Nova',telefone:'17999990004',ativo:true,saldo:0,criadoEm:daysAgo(5)},metric:{totalSpent:100,purchaseCount:1,lastPurchaseAt:daysAgo(2),daysSinceLastPurchase:2,openBalance:0,averageTicket:100,lastContactAt:null},period:{spent:100,purchases:1},classifications:[]}
+    ];
+    const database={clientes:rows.map(row=>row.client),vendas:[],produtos:[],campanhas:[],progressosCampanha:[],customerSubscriptions:[],segmentosClientes:[{id:'saved-debt',name:'Clientes com saldo',matchMode:'all',conditions:[{field:'balance',operator:'gt',value:'0',valueTo:''}],active:true}]};
+    window.__crmAudit={reads:0,scrollCalls:[]};
+    const nativeScrollIntoView=Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView=function(options){window.__crmAudit.scrollCalls.push({id:this.id,behavior:options?.behavior||'auto'});if(nativeScrollIntoView)return nativeScrollIntoView.call(this,options);window.scrollTo(0,this.offsetTop)};
+    window.Utils={dinheiro:value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),escapar:value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),uuid:()=>`qa-${Date.now()}`,toast:()=>{}};
+    window.DB={carregar:()=>database,alterar:callback=>callback(database),getBusinessId:()=> 'qa-business'};
+    window.OperationMode={enabled:()=>true};window.ClientActions={openSheet:()=>{}};window.CRMClienteUI={open:()=>{}};window.confirm=()=>true;
+  </script>
+  <script src="../assets/lucide.min.js"></script>
+  <script src="../js/engagement-segments.js"></script>
+  <script>
+    const crmState={period:'30d',segment:'',query:'',sort:'spent',limit:20,resultsVisible:false,loadingSegment:false,resultLabel:'',customConditions:[],customMatchMode:'all',filters:{phone:false,email:false,marketing:false,debt:false},customStart:'',customEnd:''};
+    const overview=[
+      ['inactive30','Sumidos há 30 dias','clock-3',18],['renewal7','Renovações em até 7 dias','calendar-clock',8],['vip','Clientes VIP','star',12],['nearReward','Perto de ganhar recompensa','gift',6],['debt','Devendo','wallet-cards',2],['new30','Novos clientes','user-round-plus',9]
+    ].map(([id,label,icon,count])=>({id,label,icon,count}));
+    function filteredRows(){let list=rows.slice();if(crmState.segment==='inactive30')list=list.filter(row=>row.metric.lastPurchaseAt&&row.metric.daysSinceLastPurchase>=30);if(crmState.segment==='debt')list=list.filter(row=>row.metric.openBalance>0);if(crmState.segment==='vip')list=list.filter(row=>row.classifications.includes('VIP'));if(crmState.segment==='new30')list=list.filter(row=>Date.now()-new Date(row.client.criadoEm).getTime()<=30*DAY);if(crmState.customConditions.length)list=list.filter(row=>EngagementSegments.matchesConditions(row,crmState.customConditions,crmState.customMatchMode,database));const query=crmState.query.trim().toLowerCase();if(query)list=list.filter(row=>row.client.nome.toLowerCase().includes(query)||row.client.telefone.includes(query));return list}
+    window.CRMDashboard={state:crmState,snapshot:()=>({list:filteredRows(),summary:{active:4,revenue:480,ticket:68,newClients:1},sales:[]}),segmentOverview:()=>overview,allRows:()=>rows,invalidate:()=>{},selectSegment:id=>{crmState.segment=id||'';crmState.resultsVisible=true;crmState.limit=20;CRMDashboard.refresh();return Promise.resolve()},refresh:()=>{document.querySelector('#app').innerHTML=CRMMobile.render();CRMMobile.bind();window.lucide?.createIcons()},openActions:()=>{document.body.dataset.actionsOpened='true'}};
+  </script>
+  <script src="../js/crm-mobile.js"></script>
+  <script>CRMDashboard.refresh();</script>
+</body>
+</html>
