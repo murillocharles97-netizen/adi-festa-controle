@@ -47,6 +47,15 @@ test('segmento de inatividade consulta ultimaCompra sem atravessar empresas',asy
   await assertFails(getDocs(query(collection(db,'businesses',businessB,'clients'),where('ultimaCompra','<=',cutoff),orderBy('ultimaCompra','desc'))));
 });
 
+test('segmentos CRM salvos respeitam permissão e isolamento multiempresa',async()=>{
+  const payload={id:'segment-premium',businessId:businessA,name:'Premium sumidos',type:'dynamic',active:true,matchMode:'all',conditions:[{field:'totalSpent',operator:'gte',value:500,valueTo:''}],createdAt:new Date(),updatedAt:new Date(),operationId:'segment-operation'};
+  const manager=env.authenticatedContext('manager-crm').firestore(),cashier=env.authenticatedContext('cashier-no-crm').firestore(),ownerB=env.authenticatedContext('owner-b').firestore();
+  await assertSucceeds(setDoc(doc(manager,'businesses',businessA,'customerSegments',payload.id),payload));
+  await assertSucceeds(getDoc(doc(manager,'businesses',businessA,'customerSegments',payload.id)));
+  await assertFails(setDoc(doc(cashier,'businesses',businessA,'customerSegments','cashier-segment'),{...payload,id:'cashier-segment'}));
+  await assertFails(getDoc(doc(ownerB,'businesses',businessA,'customerSegments',payload.id)));
+});
+
 const variant=(businessId,parentProductId,id='variant-1')=>({id,businessId,ownerId:businessId===businessA?'owner-a':'owner-b',parentProductId,attributeValues:{sabor:'Ferrero'},displayName:'Ferrero',displayNameNormalized:'ferrero',searchTokens:['ferrero','789'],sku:'FER',barcode:'789',price:14,cost:6,stock:8,minStock:2,active:true,catalogVisible:true,allowNegativeStock:false,imageUrl:null,createdAt:new Date(),updatedAt:new Date(),schemaVersion:10,version:1});
 
 test('proprietário cria e lê variação da própria empresa',async()=>{

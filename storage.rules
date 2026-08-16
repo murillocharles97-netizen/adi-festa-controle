@@ -36,5 +36,38 @@ service firebase.storage {
         && request.resource.metadata.entityType == 'productVariant';
       allow delete: if canManageProducts(businessId);
     }
+    match /businesses/{businessId}/catalog/banners/{entityId}/{fileName} {
+      allow read: if canAccess(businessId);
+      allow create, update: if canManageProducts(businessId)
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(webp|jpeg)')
+        && request.resource.metadata.businessId == businessId
+        && request.resource.metadata.entityId == entityId
+        && request.resource.metadata.entityType == 'catalogBanner';
+      allow delete: if canManageProducts(businessId);
+    }
+    match /businesses/{businessId}/catalog/categories/{entityId}/{fileName} {
+      allow read: if canAccess(businessId);
+      allow create, update: if canManageProducts(businessId)
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(webp|jpeg)')
+        && request.resource.metadata.businessId == businessId
+        && request.resource.metadata.entityId == entityId
+        && request.resource.metadata.entityType == 'catalogCategory';
+      allow delete: if canManageProducts(businessId);
+    }
+    match /businesses/{businessId}/catalog/products/{entityId}/{fileName} {
+      allow read: if canAccess(businessId);
+      allow create, update: if canManageProducts(businessId)
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(webp|jpeg)')
+        && request.resource.metadata.businessId == businessId
+        && request.resource.metadata.entityId == entityId
+        && request.resource.metadata.entityType == 'catalogProduct';
+      allow delete: if canManageProducts(businessId);
+    }
   }
 }

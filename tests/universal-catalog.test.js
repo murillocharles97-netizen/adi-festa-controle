@@ -16,7 +16,7 @@ assert.match(admin,/acceptingOrders/);
 assert.match(admin,/operationMode/);
 assert.match(admin,/scheduled_visit/);
 assert.match(admin,/qrcode/);
-assert.match(bridge,/schemaVersion:4/);
+assert.match(bridge,/schemaVersion:5/);
 assert.match(bridge,/legacyRedirect:true/);
 assert.match(portal,/legacy-token-redirected/);
 assert.match(portal,/httpsCallable\(functions,'identifyCatalogCustomer'\)/);
