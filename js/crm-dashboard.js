@@ -1,7 +1,7 @@
 (function(){
   'use strict';
   const DAY=86400000,money=value=>Utils.dinheiro(Number(value||0)),esc=value=>Utils.escapar(String(value??'')),norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),icon=name=>`<i data-lucide="${name}"></i>`;
-  const state={period:'30d',segment:'',query:'',sort:'spent',limit:20,resultsVisible:false,loadingSegment:false,selected:new Set(),customConditions:[],customMatchMode:'all',filters:{phone:false,email:false,marketing:false,min:'',max:'',purchases:'',inactive:'',product:'',category:'',city:'',birthday:false,debt:false,reward:false,overdue:false,noCharge:false},customStart:'',customEnd:''};
+  const state={period:'30d',segment:'',query:'',sort:'spent',limit:20,resultsVisible:false,loadingSegment:false,resultLabel:'',selected:new Set(),customConditions:[],customMatchMode:'all',filters:{phone:false,email:false,marketing:false,min:'',max:'',purchases:'',inactive:'',product:'',category:'',city:'',birthday:false,debt:false,reward:false,overdue:false,noCharge:false},customStart:'',customEnd:''};
   let currentCRMResult={clientIds:[],count:0,complete:false,rows:[],source:'local-cache'};
   const inactivityHydrated=new Set();
   let inactivityRequest=null;

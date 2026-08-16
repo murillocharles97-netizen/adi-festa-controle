@@ -76,7 +76,7 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
   assert.match(index, /desktop-sales\.js\?v=61/);
   assert.match(index, /desktop-settings\.js\?v=61/);
   assert.match(index, /app\.js\?v=93/);
-  assert.match(index, /build-info\.js\?v=95/);
+  assert.match(index, /build-info\.js\?v=96/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /adi-festa-v\d+-/);

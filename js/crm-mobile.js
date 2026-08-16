@@ -44,6 +44,49 @@
     debt: "Maior dívida",
   };
 
+  let scrollRequestId = 0;
+  const nextFrame = (callback) => typeof requestAnimationFrame === "function"
+    ? requestAnimationFrame(callback)
+    : setTimeout(callback, 0);
+
+  function scrollToAnchor(selector) {
+    const requestId = ++scrollRequestId;
+    nextFrame(() => nextFrame(() => {
+      if (requestId !== scrollRequestId) return;
+      const target = $(selector);
+      if (!target) return;
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    }));
+  }
+
+  const scrollToResults = () => scrollToAnchor("#crm-results-anchor");
+  const scrollToSegments = () => scrollToAnchor("#crm-segments-anchor");
+
+  function applyAutomaticSegment(id, label = "") {
+    const current = state();
+    current.customConditions = [];
+    current.customMatchMode = "all";
+    current.resultLabel = label;
+    window.CRMDashboard.selectSegment(id);
+    scrollToResults();
+  }
+
+  function applySavedSegment(saved) {
+    if (!saved) return;
+    const current = state();
+    current.segment = "";
+    current.customConditions = (saved.conditions || []).map((condition) => ({ ...condition }));
+    current.customMatchMode = saved.matchMode === "any" ? "any" : "all";
+    current.resultLabel = saved.name || "Segmento salvo";
+    current.resultsVisible = true;
+    current.limit = 20;
+    closeSheet();
+    window.CRMDashboard.invalidate();
+    window.CRMDashboard.refresh();
+    scrollToResults();
+  }
+
   function status(row) {
     if (row.client.ativo === false || row.metric.daysSinceLastPurchase >= 60)
       return ["Inativo", "inactive"];
@@ -109,11 +152,11 @@
     const overview = window.CRMDashboard.segmentOverview?.() || [];
     const showingResults = Boolean(current.resultsVisible || current.segment || current.query || current.customConditions?.length);
     return `<section class="crm-dashboard-page crm-mobile-page">
-      <header class="crm-action-head"><h2>Quem você quer alcançar?</h2><p>Segmentos prontos para você agir agora.</p></header>
-      <section class="crm-opportunity-grid">${overview.map((item) => `<button type="button" data-crm-segment="${item.id}"><span class="crm-opportunity-icon">${icon(item.icon)}</span><span><b>${esc(item.label)}</b><small>${esc(item.copy)}</small></span><strong>${item.count}</strong>${icon("chevron-right")}</button>`).join("")}</section>
+      <header class="crm-action-head" id="crm-segments-anchor"><h2>Quem você quer alcançar?</h2><p>Segmentos prontos para você agir agora.</p></header>
+      <section class="crm-opportunity-grid" aria-label="Segmentos automáticos">${overview.map((item) => `<button type="button" class="crm-opportunity-card ${current.segment === item.id && !current.customConditions?.length ? "active" : ""}" data-crm-segment="${item.id}" data-crm-segment-label="${esc(item.label)}" aria-pressed="${current.segment === item.id && !current.customConditions?.length}"><span class="crm-opportunity-icon">${icon(item.icon)}</span><span class="crm-opportunity-label">${esc(item.label)}</span><span class="crm-opportunity-count"><strong>${item.count}</strong><small>${item.count === 1 ? "cliente" : "clientes"}</small></span></button>`).join("")}</section>
       <section class="crm-mobile-quick-actions" aria-label="Ações rápidas"><h3>Ações rápidas</h3><div><button type="button" data-crm-message>${icon("message-circle")}<span>Enviar mensagem</span></button><button type="button" data-crm-campaign>${icon("wand-sparkles")}<span>Criar campanha</span></button><button type="button" data-crm-export>${icon("file-down")}<span>Exportar lista</span></button></div></section>
-      <section class="crm-mobile-filter-entry"><button type="button" data-crm-custom-filter>${icon("list-filter")}<span><b>Criar filtro personalizado</b><small>Combine compra, valor, saldo, renovação e campanha.</small></span>${icon("chevron-right")}</button><button type="button" data-crm-saved>${icon("bookmark")} Meus segmentos</button></section>
-      ${showingResults ? `<section class="crm-mobile-result-area"><header><button type="button" data-crm-back-overview aria-label="Voltar">${icon("arrow-left")}</button><div><h3>${esc(overview.find((item) => item.id === current.segment)?.label || "Resultado do segmento")}</h3><p>${snapshot.list.length} cliente(s) encontrado(s)</p></div><button type="button" data-crm-actions aria-label="Ações do segmento">${icon("ellipsis")}</button></header><section class="crm-mobile-tools"><label class="crm-mobile-search">${icon("search")}<input id="crm-mobile-query" value="${esc(current.query)}" placeholder="Buscar cliente..." autocomplete="off"></label><button type="button" data-crm-more-filters aria-label="Ordenar e filtrar">${icon("sliders-horizontal")}</button></section><section class="crm-mobile-list" id="crm-mobile-list">${rows.map((row, index) => card(row, index, credit)).join("") || (current.loadingSegment ? `<div class="crm-mobile-empty" aria-live="polite">${icon("loader-circle")}<b>Atualizando segmento…</b></div>` : `<div class="crm-mobile-empty">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Ajuste os critérios para ampliar o resultado.</p></div>`)}</section>${rows.length < snapshot.list.length ? `<button type="button" class="crm-mobile-load" id="crm-more">Carregar mais 20 clientes</button>` : ""}</section>` : ""}
+      <section class="crm-mobile-filter-entry" aria-label="Filtros e segmentos"><button type="button" class="crm-mobile-entry-card" data-crm-custom-filter>${icon("list-filter")}<span><b>Criar filtro</b><small>Personalize seu público.</small></span>${icon("chevron-right")}</button><button type="button" class="crm-mobile-entry-card" data-crm-saved>${icon("bookmark")}<span><b>Meus segmentos</b><small>Filtros que você salvou.</small></span>${icon("chevron-right")}</button></section>
+      ${showingResults ? `<section class="crm-mobile-result-area" id="crm-results-anchor"><header class="crm-mobile-result-header"><button type="button" class="crm-mobile-result-icon" data-crm-back-overview aria-label="Voltar aos segmentos">${icon("arrow-left")}</button><div><h3>${esc(current.resultLabel || overview.find((item) => item.id === current.segment)?.label || "Filtro personalizado")}</h3><p>${snapshot.list.length} ${snapshot.list.length === 1 ? "cliente encontrado" : "clientes encontrados"}</p></div><button type="button" class="crm-mobile-result-icon" data-crm-actions aria-label="Ações do segmento">${icon("ellipsis-vertical")}</button></header><section class="crm-mobile-tools"><label class="crm-mobile-search">${icon("search")}<input id="crm-mobile-query" value="${esc(current.query)}" placeholder="Buscar cliente..." autocomplete="off"></label><button type="button" class="crm-mobile-filter-button" data-crm-more-filters aria-label="Ordenar e filtrar">${icon("sliders-horizontal")}</button></section><section class="crm-mobile-list" id="crm-mobile-list">${rows.map((row, index) => card(row, index, credit)).join("") || (current.loadingSegment ? `<div class="crm-mobile-empty" aria-live="polite">${icon("loader-circle")}<b>Buscando clientes…</b></div>` : `<div class="crm-mobile-empty">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Ajuste os critérios para ampliar o resultado.</p></div>`)}</section>${rows.length < snapshot.list.length ? `<button type="button" class="crm-mobile-load" id="crm-more">Carregar mais 20 clientes</button>` : ""}</section>` : ""}
     </section>`;
   }
 
@@ -142,15 +185,16 @@
     $("[data-add-condition]").onclick = () => { $("#crm-condition-list").insertAdjacentHTML("beforeend", conditionRow()); rebindRows(); window.lucide?.createIcons(); };
     $("[data-crm-close]").onclick = closeSheet;
     $("[data-crm-preview]").onclick = () => { const count = window.CRMDashboard.allRows().filter((row) => service.matchesConditions(row, read(), $("#crm-condition-mode").value)).length; $("[data-filter-preview]").textContent = `${count} cliente(s) encontrados com os dados sincronizados.`; };
-    $("[data-crm-apply-custom]").onclick = () => { current.customConditions = read(); current.customMatchMode = $("#crm-condition-mode").value; current.segment = ""; current.resultsVisible = true; const name = $("#crm-segment-name").value.trim(); if (name) service.save({ id: saved?.id, name, conditions: current.customConditions, matchMode: current.customMatchMode }); closeSheet(); window.CRMDashboard.invalidate(); window.CRMDashboard.refresh(); };
+    $("[data-crm-apply-custom]").onclick = () => { current.customConditions = read(); current.customMatchMode = $("#crm-condition-mode").value; current.segment = ""; current.resultsVisible = true; current.limit = 20; const name = $("#crm-segment-name").value.trim(); current.resultLabel = name || saved?.name || "Filtro personalizado"; if (name) service.save({ id: saved?.id, name, conditions: current.customConditions, matchMode: current.customMatchMode }); closeSheet(); window.CRMDashboard.invalidate(); window.CRMDashboard.refresh(); scrollToResults(); };
     window.lucide?.createIcons();
   }
 
   function savedSegmentsSheet() {
     const saved = (DB.carregar().segmentosClientes || []).filter((item) => !item.deletedAt && item.active !== false);
-    $("#modal").innerHTML = `<div class="modal-bg crm-sheet-bg"><section class="modal-box crm-mobile-sheet crm-saved-sheet"><header class="modal-head"><div><h3>Meus segmentos</h3><p>Filtros salvos somente para esta empresa.</p></div><button class="icon-btn" data-crm-close>${icon("x")}</button></header><div class="modal-body">${saved.map((item) => `<article><button data-open-saved="${item.id}"><b>${esc(item.name)}</b><small>${item.conditions?.length || 0} condição(ões)</small></button><button data-duplicate-saved="${item.id}" aria-label="Duplicar">${icon("copy")}</button><button data-delete-saved="${item.id}" aria-label="Excluir">${icon("trash-2")}</button></article>`).join("") || "<p>Nenhum segmento salvo.</p>"}</div></section></div>`;
+    $("#modal").innerHTML = `<div class="modal-bg crm-sheet-bg"><section class="modal-box crm-mobile-sheet crm-saved-sheet"><header class="modal-head"><div><h3>Meus segmentos</h3><p>Filtros salvos somente para esta empresa.</p></div><button class="icon-btn" data-crm-close>${icon("x")}</button></header><div class="modal-body">${saved.map((item) => `<article><button data-apply-saved="${item.id}"><b>${esc(item.name)}</b><small>${item.conditions?.length || 0} condição(ões)</small></button><button data-edit-saved="${item.id}" aria-label="Editar ${esc(item.name)}">${icon("pencil")}</button><button data-duplicate-saved="${item.id}" aria-label="Duplicar ${esc(item.name)}">${icon("copy")}</button><button data-delete-saved="${item.id}" aria-label="Excluir ${esc(item.name)}">${icon("trash-2")}</button></article>`).join("") || "<p>Nenhum segmento salvo.</p>"}</div></section></div>`;
     $("[data-crm-close]").onclick = closeSheet;
-    $$('[data-open-saved]').forEach((button) => button.onclick = () => customFilterSheet(saved.find((item) => item.id === button.dataset.openSaved)));
+    $$('[data-apply-saved]').forEach((button) => button.onclick = () => applySavedSegment(saved.find((item) => item.id === button.dataset.applySaved)));
+    $$('[data-edit-saved]').forEach((button) => button.onclick = () => customFilterSheet(saved.find((item) => item.id === button.dataset.editSaved)));
     $$('[data-duplicate-saved]').forEach((button) => button.onclick = () => { window.EngagementSegments.duplicate(button.dataset.duplicateSaved); savedSegmentsSheet(); });
     $$('[data-delete-saved]').forEach((button) => button.onclick = () => { if (confirm("Excluir este segmento salvo?")) { window.EngagementSegments.remove(button.dataset.deleteSaved); savedSegmentsSheet(); } });
     window.lucide?.createIcons();
@@ -233,7 +277,7 @@
       current.filters.debt = Boolean($("#crm-debt")?.checked);
       current.limit = 20;
       closeSheet();
-      window.CRMDashboard.selectSegment(segment);
+      applyAutomaticSegment(segment, segmentOptions(credit).find(([id]) => id === segment)?.[1] || "Todos os clientes");
     };
     window.lucide?.createIcons();
   }
@@ -276,9 +320,7 @@
         });
       }, 300);
     });
-    $$('[data-crm-segment]').forEach((button) => button.onclick = () => {
-      window.CRMDashboard.selectSegment(button.dataset.crmSegment);
-    });
+    $$('[data-crm-segment]').forEach((button) => button.onclick = () => applyAutomaticSegment(button.dataset.crmSegment, button.dataset.crmSegmentLabel));
     $$('[data-crm-more-filters]').forEach((button) => button.onclick = filtersSheet);
     $(`[data-crm-actions]`)?.addEventListener("click", () => window.CRMDashboard.openActions());
     $(`[data-crm-message]`)?.addEventListener("click", () => { current.resultsVisible = true; current.segment = ""; window.CRMDashboard.refresh(); setTimeout(() => window.CRMDashboard.openActions(), 0); });
@@ -286,7 +328,7 @@
     $(`[data-crm-export]`)?.addEventListener("click", () => { current.resultsVisible = true; current.segment = ""; window.CRMDashboard.refresh(); setTimeout(() => window.CRMDashboard.openActions(), 0); });
     $(`[data-crm-custom-filter]`)?.addEventListener("click", () => customFilterSheet());
     $(`[data-crm-saved]`)?.addEventListener("click", savedSegmentsSheet);
-    $(`[data-crm-back-overview]`)?.addEventListener("click", () => { current.segment = ""; current.query = ""; current.customConditions = []; current.resultsVisible = false; window.CRMDashboard.refresh(); });
+    $(`[data-crm-back-overview]`)?.addEventListener("click", () => { current.segment = ""; current.query = ""; current.customConditions = []; current.resultLabel = ""; current.resultsVisible = false; window.CRMDashboard.refresh(); scrollToSegments(); });
     $("[data-crm-full-summary]")?.addEventListener("click", fullSummary);
     $("[data-crm-reset]")?.addEventListener("click", () => {
       current.segment = "";
@@ -320,5 +362,5 @@
     return true;
   }
 
-  window.CRMMobile = { isMobile: mobile, render, bind, filtersSheet, fullSummary };
+  window.CRMMobile = { isMobile: mobile, render, bind, filtersSheet, fullSummary, scrollToResults, scrollToSegments, applyAutomaticSegment, applySavedSegment };
 })();
