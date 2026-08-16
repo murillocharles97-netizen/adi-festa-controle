@@ -144,7 +144,7 @@ window.CatalogoUniversal = (() => {
                 window.getProductDisplayImage?.(p, v)?.url || v.imageUrl || "",
             }))
         : [];
-    return {
+    const result = {
       id: `catalog-${p.id}`,
       productId: p.id,
       productType: variable ? "variable" : "simple",
@@ -175,6 +175,7 @@ window.CatalogoUniversal = (() => {
       controlaEstoque: !p.semControleEstoque,
       displayOrder: Number(p.catalogSortOrder ?? index),
     };
+    return window.CatalogPresentation?.decorate?.(p, result) || result;
   };
   function entity() {
     const data = DB.carregar(),
@@ -304,6 +305,15 @@ window.CatalogoUI = (() => {
         : "Nenhum pedido",
     };
   }
+  function bannerCards() {
+    return (CatalogPresentation.settings().banners || []).filter((item) => !item.deletedAt).sort((a, b) => Number(a.order) - Number(b.order)).map((item) => `<article class="catalog-banner-row">${item.imageThumbUrl || item.imageUrl ? `<img src="${esc(item.imageThumbUrl || item.imageUrl)}" alt="">` : `<span>${ico("image")}</span>`}<div><b>${esc(item.title || "Banner sem título")}</b><small>${item.active === false ? "Inativo" : "Ativo"}${item.startsAt || item.endsAt ? ` · ${esc(item.startsAt || "agora")} a ${esc(item.endsAt || "sem limite")}` : ""}</small></div><button type="button" data-banner-move="-1" data-banner-id="${item.id}" aria-label="Mover para cima">${ico("arrow-up")}</button><button type="button" data-banner-move="1" data-banner-id="${item.id}" aria-label="Mover para baixo">${ico("arrow-down")}</button><button type="button" data-banner-edit="${item.id}">${ico("pencil")}</button><button type="button" data-banner-delete="${item.id}">${ico("trash-2")}</button></article>`).join("") || '<p class="catalog-note">Nenhum banner configurado. O catálogo continuará funcionando sem banner.</p>';
+  }
+  function categoryCards() {
+    return CatalogPresentation.categories().map((item) => `<article class="catalog-category-row">${item.imageThumbUrl || item.imageUrl ? `<img src="${esc(item.imageThumbUrl || item.imageUrl)}" alt="">` : `<span>${ico("shapes")}</span>`}<div><b>${esc(item.publicName)}</b><small>Interno: ${esc(item.internalName)} · ${item.active === false ? "Oculta" : "Publicada"}</small></div><button type="button" data-category-move="-1" data-category-id="${esc(item.internalName)}">${ico("arrow-up")}</button><button type="button" data-category-move="1" data-category-id="${esc(item.internalName)}">${ico("arrow-down")}</button><button type="button" data-category-edit="${esc(item.internalName)}">${ico("pencil")}</button></article>`).join("");
+  }
+  function presentationProducts(products) {
+    return products.map((product) => { const value = CatalogPresentation.product(product), image = value.imageMode === "catalog" ? value.imageThumbUrl || value.imageUrl : window.getProductDisplayImage?.(product)?.url || product.imageThumbUrl || product.imageUrl; return `<article class="catalog-product-row" data-catalog-product="${product.id}">${image ? `<img src="${esc(image)}" alt="">` : `<span>${esc(product.nome.slice(0, 2).toUpperCase())}</span>`}<div><b>${esc(value.publicName)}</b><small>${esc(value.category)} · ${money(value.price)} · ${value.imageMode === "catalog" ? "Foto exclusiva" : "Foto do produto"}</small></div><label class="catalog-inline-switch"><input type="checkbox" data-product-published="${product.id}" ${value.published !== false ? "checked" : ""}><span></span></label><button type="button" data-product-presentation="${product.id}">${ico("sliders-horizontal")}</button></article>`; }).join("") || '<p class="catalog-note">Nenhum produto cadastrado.</p>';
+  }
   function render() {
     const s = CatalogoUniversal.settings(),
       p = DB.carregar().produtos.filter((x) => x.ativo !== false),
@@ -313,9 +323,11 @@ window.CatalogoUI = (() => {
       visit = ["scheduled_visit", "itinerant"].includes(s.operationMode);
     return `<section class="catalog-admin">
     <header class="page-head catalog-admin-head"><div><span class="eyebrow">Link permanente</span><h2>Catálogo Online</h2><p>Produtos, pedidos e benefícios em um único link para seus clientes.</p></div><button class="btn btn-primary" data-catalog-preview>${ico("external-link")} Visualizar como cliente</button></header>
-    <section class="catalog-status-card status-${esc(s.status)}"><div class="catalog-status-copy"><span class="catalog-live-dot"></span><div><small>Status atual</small><h3>${esc(statusLabel[s.status] || statusLabel.paused)}</h3><p>${CatalogoUniversal.products().length} produtos públicos · ${summary.count} pedidos hoje</p></div></div><label class="catalog-main-switch"><input id="catalog-accepting" type="checkbox" ${s.acceptingOrders ? "checked" : ""}><span></span><b>Aceitar pedidos agora</b></label><div class="catalog-link-row"><input value="${esc(url)}" readonly><button data-catalog-copy>${ico("copy")} Copiar</button><button data-catalog-preview>${ico("eye")} Abrir</button></div><small>Último pedido: ${esc(summary.last)}</small></section>
+    <section class="catalog-status-card status-${esc(s.status)}"><div class="catalog-status-copy"><span class="catalog-live-dot"></span><div><small>Catálogo ${s.visible === false ? "oculto" : "ativo"}</small><h3>${esc(statusLabel[s.status] || statusLabel.paused)}</h3><p>${CatalogoUniversal.products().length} produtos publicados · ${CatalogPresentation.categories().filter((item) => item.active !== false).length} categorias</p></div></div><label class="catalog-main-switch"><input id="catalog-accepting" type="checkbox" ${s.acceptingOrders ? "checked" : ""}><span></span><b>Aceitar pedidos</b></label><div class="catalog-link-row"><input value="${esc(url)}" readonly><button data-catalog-copy>${ico("copy")} Copiar link</button><button data-catalog-preview>${ico("external-link")} Abrir catálogo</button></div><div class="catalog-status-actions"><button type="button" data-catalog-copy>${ico("copy")} Copiar link</button><button type="button" data-catalog-preview>${ico("external-link")} Abrir catálogo</button></div><small>Último pedido: ${esc(summary.last)}</small></section>
     <nav class="catalog-admin-tabs" aria-label="Seções do catálogo">${[
       ["overview", "Visão geral"],
+      ["banners", "Banners"],
+      ["categories", "Categorias"],
       ["products", "Produtos"],
       ["availability", "Disponibilidade"],
       ["service", "Atendimento"],
@@ -329,6 +341,9 @@ window.CatalogoUI = (() => {
       )
       .join("")}</nav>
     <form id="catalog-settings-form"><section class="catalog-admin-grid">
+      <article class="catalog-panel catalog-banner-panel" data-catalog-section="banners"><header>${ico("gallery-horizontal-end")}<div><h3>Banner do catálogo</h3><p>Destaques com imagem, período e ação opcional.</p></div><button type="button" class="btn btn-light" data-banner-new>${ico("plus")} Adicionar</button></header><div class="catalog-editor-list">${bannerCards()}</div></article>
+      <article class="catalog-panel catalog-category-panel" data-catalog-section="categories"><header>${ico("shapes")}<div><h3>Categorias públicas</h3><p>Nome, imagem, ordem e visibilidade sem alterar o cadastro interno.</p></div></header><div class="catalog-editor-list">${categoryCards()}</div></article>
+      <article class="catalog-panel catalog-presentation-products" data-catalog-section="products"><header>${ico("package-search")}<div><h3>Produtos publicados</h3><p>Apresentação própria do catálogo sem duplicar o produto.</p></div></header><label class="catalog-product-search">${ico("search")}<input id="catalog-product-search" placeholder="Buscar produto"></label><div class="catalog-editor-list" id="catalog-presentation-product-list">${presentationProducts(p)}</div></article>
       <article class="catalog-panel" data-catalog-section="overview"><header>${ico("store")}<div><h3>Visão geral</h3><p>Como o catálogo aparece para seus clientes.</p></div></header><label>Nome público<input name="publicName" value="${esc(s.publicName || DB.carregar().config.nome || "")}"></label><label>Mensagem principal<textarea name="welcomeText">${esc(s.welcomeText || "")}</textarea></label><label class="toggle-row"><span>Catálogo visível<small>O link continua fixo mesmo quando estiver oculto.</small></span><input name="visible" type="checkbox" ${s.visible ? "checked" : ""}></label></article>
       <article class="catalog-panel" data-catalog-section="products"><header>${ico("package-check")}<div><h3>Produtos disponíveis</h3><p>Escolha o que será publicado.</p></div></header><label>Seleção<select name="productSelectionMode"><option value="all_active">Todos os produtos ativos</option><option value="in_stock">Todos os produtos em estoque</option><option value="selected">Selecionar manualmente</option></select></label><div class="catalog-product-picker">${p.map((product) => `<label><input type="checkbox" name="selectedProducts" value="${esc(product.id)}" ${selected.has(product.id) ? "checked" : ""}><span>${esc(product.nome)}</span><b>${money(product.preco)} · ${Number(product.estoqueAtual || 0)} un.</b></label>`).join("") || "<p>Nenhum produto cadastrado.</p>"}</div><label>Quando acabar o estoque<select name="stockBehavior"><option value="show_sold_out">Mostrar como esgotado</option><option value="hide">Ocultar automaticamente</option><option value="preorder">Aceitar encomenda</option><option value="allow_negative">Permitir pedido</option></select></label></article>
       <article class="catalog-panel" data-catalog-section="availability"><header>${ico("clock-3")}<div><h3>Disponibilidade</h3><p>Controle abertura e comportamento fora do horário.</p></div></header><label>Estado do catálogo<select name="status"><option value="active">Ativo</option><option value="paused">Pausado</option><option value="scheduled">Programado</option><option value="closed">Fechado</option><option value="maintenance">Manutenção</option></select></label><label>Funcionamento<select name="scheduleMode"><option value="always_open">Sempre aberto</option><option value="manual">Abrir e fechar manualmente</option><option value="weekly">Usar horários semanais</option><option value="period">Período específico</option></select></label><label>Quando pedidos estiverem pausados<select name="closedBehavior"><option value="view_only">Mostrar produtos sem finalizar</option><option value="unavailable">Mostrar somente aviso</option><option value="accept_for_later">Aceitar para processar depois</option></select></label><label class="toggle-row"><span>Aceitar fora do horário</span><input name="acceptOutsideHours" type="checkbox" ${s.acceptOutsideHours ? "checked" : ""}></label><label>Fuso horário<input name="timezone" value="${esc(s.timezone)}" readonly></label></article>
@@ -378,6 +393,38 @@ window.CatalogoUI = (() => {
       a.download = "qr-code-catalogo.png";
       a.click();
     };
+    window.lucide?.createIcons();
+  }
+  async function uploadCatalogImage(scope, id, file, old) {
+    if (!file) return {};
+    if (!window.ProductImages?.processImage || !window.CatalogImageStorage) throw Error("O serviço de imagens ainda está carregando.");
+    const processed = await ProductImages.processImage(file);
+    return window.CatalogImageStorage.upload(scope, id, processed, old);
+  }
+  async function removeCatalogImage(scope, id, old) {
+    if (!window.CatalogImageStorage?.remove) throw Error("O serviço de imagens ainda está carregando.");
+    return window.CatalogImageStorage.remove(scope, id, old);
+  }
+  function bannerEditor(id = "") {
+    const old = (CatalogPresentation.settings().banners || []).find((item) => item.id === id) || { id: id || Utils.uuid(), active: true }, modal = document.querySelector("#modal");
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box catalog-editor-modal"><header class="modal-head"><div><h3>${id ? "Editar" : "Novo"} banner</h3><small>A imagem fica separada dos produtos.</small></div><button class="icon-btn close">${ico("x")}</button></header><form id="catalog-banner-form"><div class="modal-body"><label>Título<input name="title" value="${esc(old.title || "")}" required></label><label>Texto curto<input name="subtitle" value="${esc(old.subtitle || "")}"></label><label>Ação ou link opcional<input name="actionUrl" value="${esc(old.actionUrl || "")}" placeholder="https://..."></label><div class="form-grid"><label>Início<input type="date" name="startsAt" value="${esc(old.startsAt || "")}"></label><label>Fim<input type="date" name="endsAt" value="${esc(old.endsAt || "")}"></label></div><label class="check-row"><input type="checkbox" name="active" ${old.active !== false ? "checked" : ""}> Banner ativo</label>${old.imageUrl ? `<img class="catalog-editor-preview" src="${esc(old.imageUrl)}" alt="">` : ""}<label>Imagem<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">Salvar banner</button></footer></form></section></div>`;
+    modal.querySelectorAll(".close").forEach((button) => button.onclick = () => modal.innerHTML = "");
+    modal.querySelector("form").onsubmit = async (event) => { event.preventDefault(); const button = event.submitter, fd = new FormData(event.currentTarget); button.disabled = true; try { const image = await uploadCatalogImage("banner", old.id, fd.get("image")?.size ? fd.get("image") : null, old), saved = CatalogPresentation.saveBanner({ ...old, ...image, title: fd.get("title").trim(), subtitle: fd.get("subtitle").trim(), actionUrl: fd.get("actionUrl").trim(), startsAt: fd.get("startsAt") || null, endsAt: fd.get("endsAt") || null, active: fd.has("active") }); modal.innerHTML = ""; Utils.toast("Banner salvo e publicado."); location.hash = "#/catalogo"; dispatchEvent(new HashChangeEvent("hashchange")); return saved; } catch (error) { Utils.toast(error.message, true); button.disabled = false; } };
+    window.lucide?.createIcons();
+  }
+  function categoryEditor(key) {
+    const old = CatalogPresentation.categories().find((item) => item.internalName === key), modal = document.querySelector("#modal"); if (!old) return;
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box catalog-editor-modal"><header class="modal-head"><div><h3>${esc(old.internalName)}</h3><small>Personalização pública da categoria.</small></div><button class="icon-btn close">${ico("x")}</button></header><form><div class="modal-body"><label>Nome no catálogo<input name="publicName" value="${esc(old.publicName)}" required></label><label class="check-row"><input type="checkbox" name="active" ${old.active !== false ? "checked" : ""}> Mostrar no catálogo</label>${old.imageUrl ? `<img class="catalog-editor-preview" src="${esc(old.imageUrl)}" alt=""><label class="check-row"><input type="checkbox" name="removeImage"> Remover imagem própria</label>` : ""}<label>Imagem própria<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">Salvar categoria</button></footer></form></section></div>`;
+    modal.querySelectorAll(".close").forEach((button) => button.onclick = () => modal.innerHTML = "");
+    modal.querySelector("form").onsubmit = async (event) => { event.preventDefault(); const button = event.submitter, fd = new FormData(event.currentTarget); button.disabled = true; try { let image = {}; const entityId = encodeURIComponent(key), file = fd.get("image"); if (file?.size) image = await uploadCatalogImage("category", entityId, file, old); else if (fd.has("removeImage")) { await removeCatalogImage("category", entityId, old); image = { imageUrl: "", imageThumbUrl: "", imageStoragePath: "", imageThumbStoragePath: "", imageUpdatedAt: new Date().toISOString() }; } CatalogPresentation.saveCategory(key, { ...image, publicName: fd.get("publicName").trim(), active: fd.has("active") }); modal.innerHTML = ""; Utils.toast("Categoria atualizada."); dispatchEvent(new HashChangeEvent("hashchange")); } catch (error) { Utils.toast(error.message, true); button.disabled = false; } };
+    window.lucide?.createIcons();
+  }
+  function productEditor(id) {
+    const product = DB.carregar().produtos.find((item) => item.id === id); if (!product) return; const old = CatalogPresentation.product(product), modal = document.querySelector("#modal"), categories = CatalogPresentation.categories();
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box catalog-editor-modal"><header class="modal-head"><div><h3>${esc(product.nome)}</h3><small>Apresentação exclusiva do catálogo.</small></div><button class="icon-btn close">${ico("x")}</button></header><form><div class="modal-body"><label class="check-row"><input type="checkbox" name="published" ${old.published !== false ? "checked" : ""}> Produto publicado</label><label>Nome público<input name="publicName" value="${esc(old.publicName)}" required></label><label>Descrição pública<textarea name="description">${esc(old.description)}</textarea></label><div class="form-grid"><label>Preço exibido<input name="price" inputmode="decimal" value="${String(old.price).replace(".", ",")}"></label><label>Categoria pública<select name="category">${categories.map((item) => `<option value="${esc(item.internalName)}" ${item.internalName === old.category ? "selected" : ""}>${esc(item.publicName)}</option>`).join("")}</select></label></div><label>Imagem<select name="imageMode"><option value="product">Usar imagem do produto</option><option value="catalog">Usar imagem exclusiva do catálogo</option></select></label>${old.imageUrl ? `<img class="catalog-editor-preview" src="${esc(old.imageUrl)}" alt="">` : ""}<label>Nova imagem exclusiva<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label><label class="check-row"><input type="checkbox" name="featured" ${old.featured ? "checked" : ""}> Produto em destaque</label></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">Salvar apresentação</button></footer></form></section></div>`;
+    modal.querySelector('[name="imageMode"]').value = old.imageMode;
+    modal.querySelectorAll(".close").forEach((button) => button.onclick = () => modal.innerHTML = "");
+    modal.querySelector("form").onsubmit = async (event) => { event.preventDefault(); const button = event.submitter, fd = new FormData(event.currentTarget); button.disabled = true; try { const file = fd.get("image"), requestedMode = file?.size ? "catalog" : fd.get("imageMode"); let image = {}; if (file?.size) image = await uploadCatalogImage("product", id, file, old); else if (requestedMode === "product" && (old.imageStoragePath || old.imageThumbStoragePath)) { await removeCatalogImage("product", id, old); image = { imageUrl: "", imageThumbUrl: "", imageStoragePath: "", imageThumbStoragePath: "", imageUpdatedAt: new Date().toISOString() }; } const rawPrice = String(fd.get("price") || "").trim(), price = rawPrice.includes(",") ? Number(rawPrice.replace(/\./g, "").replace(",", ".")) : Number(rawPrice); CatalogPresentation.saveProduct(id, { ...image, published: fd.has("published"), publicName: fd.get("publicName").trim(), description: fd.get("description").trim(), price: Number.isFinite(price) ? price : Number(product.preco || 0), category: fd.get("category"), imageMode: requestedMode, featured: fd.has("featured") }); modal.innerHTML = ""; Utils.toast("Produto atualizado no catálogo."); dispatchEvent(new HashChangeEvent("hashchange")); } catch (error) { Utils.toast(error.message, true); button.disabled = false; } };
     window.lucide?.createIcons();
   }
   function bind() {
@@ -439,6 +486,15 @@ window.CatalogoUI = (() => {
       CatalogoUniversal.publish();
       Utils.toast("Publicação enviada para a nuvem.");
     };
+    root.querySelector("[data-banner-new]")?.addEventListener("click", () => bannerEditor());
+    root.querySelectorAll("[data-banner-edit]").forEach((button) => button.onclick = () => bannerEditor(button.dataset.bannerEdit));
+    root.querySelectorAll("[data-banner-move]").forEach((button) => button.onclick = () => { CatalogPresentation.moveBanner(button.dataset.bannerId, Number(button.dataset.bannerMove)); dispatchEvent(new HashChangeEvent("hashchange")); });
+    root.querySelectorAll("[data-banner-delete]").forEach((button) => button.onclick = async () => { if (!confirm("Excluir este banner?")) return; const item = CatalogPresentation.settings().banners.find((entry) => entry.id === button.dataset.bannerDelete); try { await window.CatalogImageStorage?.remove?.("banner", item.id, item); CatalogPresentation.removeBanner(item.id); dispatchEvent(new HashChangeEvent("hashchange")); } catch (error) { Utils.toast(error.message, true); } });
+    root.querySelectorAll("[data-category-edit]").forEach((button) => button.onclick = () => categoryEditor(button.dataset.categoryEdit));
+    root.querySelectorAll("[data-category-move]").forEach((button) => button.onclick = () => { CatalogPresentation.moveCategory(button.dataset.categoryId, Number(button.dataset.categoryMove)); dispatchEvent(new HashChangeEvent("hashchange")); });
+    root.querySelectorAll("[data-product-presentation]").forEach((button) => button.onclick = () => productEditor(button.dataset.productPresentation));
+    root.querySelectorAll("[data-product-published]").forEach((input) => input.onchange = () => CatalogPresentation.saveProduct(input.dataset.productPublished, { published: input.checked }));
+    root.querySelector("#catalog-product-search")?.addEventListener("input", (event) => { const query = event.target.value.trim().toLocaleLowerCase("pt-BR"); root.querySelectorAll("[data-catalog-product]").forEach((row) => row.hidden = query && !row.textContent.toLocaleLowerCase("pt-BR").includes(query)); });
     root
       .querySelectorAll("[data-catalog-tab]")
       .forEach(

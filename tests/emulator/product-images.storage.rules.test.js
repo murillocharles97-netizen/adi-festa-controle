@@ -61,6 +61,16 @@ const metadata = (productId, entityType = "product", variantId = "") => ({
   },
 });
 
+const catalogMetadata = (entityId, entityType, businessId = businessA) => ({
+  contentType: "image/webp",
+  customMetadata: {
+    businessId,
+    entityId,
+    entityType,
+    operationId: "catalog-operation-1",
+  },
+});
+
 test("owner grava e lê imagem versionada do próprio produto", async () => {
   const storage = env.authenticatedContext("owner-a").storage(),
     imageRef = ref(
@@ -147,4 +157,33 @@ test("outra empresa, caixa, anônimo e arquivo fora do padrão são bloqueados",
       { ...metadata("product-2"), contentType: "image/png" },
     ),
   );
+});
+
+test("catálogo aceita banner, categoria e produto com path e metadata versionados", async () => {
+  const storage = env.authenticatedContext("owner-a").storage();
+  for (const [folder, entityId, entityType] of [
+    ["banners", "banner-home", "catalogBanner"],
+    ["categories", "bebidas", "catalogCategory"],
+    ["products", "product-1", "catalogProduct"],
+  ]) {
+    const main = ref(storage, `businesses/${businessA}/catalog/${folder}/${entityId}/main-catalog-operation-1.webp`),
+      thumb = ref(storage, `businesses/${businessA}/catalog/${folder}/${entityId}/thumb-catalog-operation-1.webp`);
+    await assertSucceeds(uploadBytes(main, new Uint8Array([1]), catalogMetadata(entityId, entityType)));
+    await assertSucceeds(uploadBytes(thumb, new Uint8Array([2]), catalogMetadata(entityId, entityType)));
+    assert.equal((await getMetadata(main)).customMetadata.entityType, entityType);
+    await assertSucceeds(deleteObject(main));
+    await assertSucceeds(deleteObject(thumb));
+  }
+});
+
+test("catálogo bloqueia metadata divergente, outra empresa, caixa e acesso anônimo", async () => {
+  const owner = env.authenticatedContext("owner-a").storage(),
+    other = env.authenticatedContext("owner-b").storage(),
+    cashier = env.authenticatedContext("cashier-a").storage(),
+    anonymous = env.unauthenticatedContext().storage(),
+    path = `businesses/${businessA}/catalog/banners/banner-protected/main-catalog-operation-1.webp`;
+  await assertFails(uploadBytes(ref(owner, path), new Uint8Array([1]), catalogMetadata("wrong-id", "catalogBanner")));
+  await assertFails(uploadBytes(ref(other, path), new Uint8Array([1]), catalogMetadata("banner-protected", "catalogBanner", businessB)));
+  await assertFails(uploadBytes(ref(cashier, path), new Uint8Array([1]), catalogMetadata("banner-protected", "catalogBanner")));
+  await assertFails(getMetadata(ref(anonymous, path)));
 });

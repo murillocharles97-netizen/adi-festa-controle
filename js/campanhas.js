@@ -310,7 +310,7 @@
       distributed: redemptions.filter((item) => item.rewardSnapshot?.type === "product").reduce((sum, item) => sum + number(item.rewardSnapshot?.quantity || 1), 0),
       conversion: participants ? (redemptions.length / participants) * 100 : 0,
       eligible: new Set(activeCampaigns.flatMap((campaign) => eligibleClients(campaign, db).map((client) => client.id))).size,
-      nearReward: campaignStats.reduce((sum, item) => sum + number(item?.nearReward), 0),
+      nearReward: activeCampaigns.reduce((sum, campaign) => sum + progress.filter((item) => item.campaignId === campaign.id && window.EngagementSegments?.isNearReward?.(campaign, item)).length, 0),
       redeemable: campaignStats.reduce((sum, item) => sum + number(item?.redeemable), 0),
       rewardsAvailable: campaignStats.reduce((sum, item) => sum + number(item?.rewardsAvailable), 0),
     };
