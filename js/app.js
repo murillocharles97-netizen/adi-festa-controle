@@ -1165,18 +1165,23 @@
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
     root.innerHTML = views[route]();
-    $("#title").textContent = titles[route];
+    const mobileTitle = matchMedia("(max-width:767px)").matches
+      ? { crm: "CRM", catalogo: "Catálogo", pedidos: "Pedidos" }[route]
+      : "";
+    $("#title").textContent = mobileTitle || titles[route];
     $("#date").textContent =
-      route === "clientes"
+      route === "crm" && matchMedia("(max-width:767px)").matches
+        ? "Relacionamento que gera vendas."
+        : route === "clientes"
         ? "Contas, compras e contato em um só lugar."
         : route === "produtos" && matchMedia("(max-width:767px)").matches
           ? "Preços, custos e estoque dos seus doces."
           : route === "campanhas"
             ? "Fidelização, pontos e recompensas."
             : route === "catalogo"
-              ? "Link permanente, produtos e disponibilidade."
+              ? (matchMedia("(max-width:767px)").matches ? "Seu catálogo online." : "Link permanente, produtos e disponibilidade.")
               : route === "pedidos"
-                ? "Gestão dos pedidos recebidos pelo catálogo."
+                ? (matchMedia("(max-width:767px)").matches ? "Gerencie os pedidos online." : "Gestão dos pedidos recebidos pelo catálogo.")
                 : route === "relatorios"
                   ? "Análises detalhadas do seu negócio."
                   : route === "configuracoes" &&
