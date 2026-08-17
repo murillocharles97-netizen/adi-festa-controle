@@ -11,6 +11,7 @@
     "test:home-clients-browser": "node scripts/audit-mobile-home-clients.cjs",
     "test:engagement-browser": "node scripts/audit-mobile-engagement-operations.cjs",
     "test:crm-mobile-browser": "node scripts/audit-crm-mobile-carousel.cjs",
+    "test:mobile-structural": "node scripts/audit-mobile-structural.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth,storage --project adi-festa-variations-test \"node --test --test-concurrency=1 tests/emulator/*.rules.test.js\"",
     "test:functions-emulator": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/onboarding-functions-smoke.js && node tests/emulator/functions-smoke.js\"",
     "build": "node scripts/check-project.js --build"

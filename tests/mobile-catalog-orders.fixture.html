@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Catálogo e Pedidos · QA mobile</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/mobile-fixes.css">
+  <link rel="stylesheet" href="../css/visitas.css">
+  <link rel="stylesheet" href="../css/catalogo-admin.css">
+  <link rel="stylesheet" href="../css/engagement-operations.css">
+  <link rel="stylesheet" href="../css/mobile-components.css">
+  <style>
+    *{box-sizing:border-box}html{background:#edf1f4}body{margin:0;background:#f5f7f9;color:#17233a;font-family:Inter,system-ui,sans-serif}.qa-shell{width:100%;max-width:767px;min-height:100vh;margin:auto;background:#f7f9fb}.qa-header{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:44px minmax(0,1fr) 42px 42px;align-items:center;gap:8px;min-height:82px;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;border-bottom:1px solid #e4e9ef;background:#fff}.qa-header button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;background:transparent;color:#17233a}.qa-header h1,.qa-header p{margin:0}.qa-header h1{font-size:1.25rem}.qa-header p{margin-top:2px;color:#718096;font-size:.72rem}.qa-cloud,.qa-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#e7f8f3;color:#07866a}.qa-avatar{border-radius:50%;background:#172844;color:#fff;font-weight:900}#app{padding:14px 14px calc(96px + env(safe-area-inset-bottom))}.qa-nav{position:fixed;z-index:18;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);height:calc(72px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);border-top:1px solid #e1e6ed;background:#fff}.qa-nav span{display:grid;place-items:center;color:#65738a;font-size:.67rem}.qa-nav .active{color:#009d78;font-weight:900}.qa-nav .primary{align-self:start;width:56px;height:56px;margin:-14px auto 0;border-radius:50%;background:#08ad83;color:#fff;font-size:1.6rem}.catalog-admin-tabs{display:none}.catalog-save-bar{display:none}.catalog-admin-grid>[data-catalog-section="overview"],.catalog-admin-grid>[data-catalog-section="availability"],.catalog-admin-grid>[data-catalog-section="service"],.catalog-admin-grid>[data-catalog-section="payment"],.catalog-admin-grid>[data-catalog-section="share"],.catalog-admin-grid>[data-catalog-section="technical"],.catalog-admin-grid>.catalog-panel:not(.catalog-banner-panel):not(.catalog-category-panel):not(.catalog-presentation-products){display:none}
+  </style>
+</head>
+<body>
+  <main class="qa-shell">
+    <header class="qa-header"><button aria-label="Abrir menu"><i data-lucide="menu"></i></button><div><h1 id="qa-title">Catálogo</h1><p id="qa-subtitle">Seu catálogo online.</p></div><span class="qa-cloud"><i data-lucide="cloud"></i></span><span class="qa-avatar">M</span></header>
+    <section id="app"></section>
+    <nav class="qa-nav"><span>Início</span><span>Vender</span><span class="primary">+</span><span>Clientes</span><span class="active">Produtos</span></nav>
+  </main>
+  <div id="modal"></div>
+  <div id="toasts"></div>
+  <script>
+    const svg=(label,color)=>`data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280"><rect width="100%" height="100%" rx="28" fill="${color}"/><circle cx="540" cy="60" r="110" fill="#ffffff25"/><text x="42" y="122" font-family="Arial" font-size="42" font-weight="700" fill="white">${label}</text><text x="42" y="170" font-family="Arial" font-size="22" fill="white">Peça pelo catálogo online</text></svg>`)}`;
+    const now=new Date();
+    const data={
+      config:{nome:'Adi Festa',catalogSettings:{enabled:true,visible:true,acceptingOrders:true,status:'active',closedBehavior:'view_only',operationMode:'store',scheduleMode:'always_open',timezone:'America/Sao_Paulo',acceptOutsideHours:false,hideProductsWhenClosed:false,stockBehavior:'show_sold_out',productSelectionMode:'all_active',selectedProductIds:[],selectedCategories:[],serviceModes:[{id:'pickup',type:'pickup',label:'Retirada',active:true,fee:0,instructions:''}],weeklyHours:{},scheduledVisit:{local:'',date:'',arrivalTime:'',orderDeadline:'',instructions:'',meetingPoint:'',publicNote:''},paymentMethods:['pix','dinheiro','cartao'],allowCredit:false,primaryColor:'#31d0ad',welcomeText:'Veja os produtos disponíveis e faça seu pedido.',shareMessage:'Confira nosso catálogo: {catalogUrl}',publicToken:'qa-catalog-token',presentation:{version:1,banners:[{id:'banner-1',title:'Peça sem sair de casa!',subtitle:'Rápido, fácil e seguro.',active:true,order:0,imageUrl:svg('Adi Festa','#008f72'),imageThumbUrl:svg('Adi Festa','#008f72')}],categories:{Bebidas:{publicName:'Bebidas geladas',active:true,order:0},Doces:{publicName:'Doces',active:true,order:1},Combos:{publicName:'Combos',active:true,order:2}},products:{}}}},
+      produtos:[
+        {id:'coca',nome:'Coca Cola 350ml',categoria:'Bebidas',preco:4,estoqueAtual:18,ativo:true},
+        {id:'monster',nome:'Monster Energy',categoria:'Bebidas',preco:12,estoqueAtual:8,ativo:true},
+        {id:'brigadeiro',nome:'Brigadeiro gourmet',categoria:'Doces',preco:3.5,estoqueAtual:30,ativo:true},
+        {id:'brownie',nome:'Brownie recheado',categoria:'Doces',preco:8,estoqueAtual:12,ativo:true},
+        {id:'combo',nome:'Combo festa',categoria:'Combos',preco:28.9,estoqueAtual:6,ativo:true}
+      ],
+      clientes:[{id:'jessica',nome:'Jessica Kings',telefone:'17991234567',ativo:true}],
+      visitas:[],vendas:[],
+      catalogOrders:[
+        {id:'order-1024',publicOrderNumber:'1024',customerName:'Jessica Kings',customerPhone:'(17) 99123-4567',customerLocation:'Shopping Iguatemi',paymentPreference:'PIX',total:62,orderStatus:'recebido',createdAt:new Date(now-4*60000).toISOString(),items:[{name:'Brownie recheado',quantity:2,subtotal:16},{name:'Monster Energy',quantity:2,subtotal:24},{name:'Brigadeiro gourmet',quantity:6,subtotal:22}],note:'Entregar na loja 22'},
+        {id:'order-1023',publicOrderNumber:'1023',customerName:'Marcos Paulo',customerPhone:'(17) 98876-5432',customerLocation:'Retirada',paymentPreference:'Dinheiro',total:35.5,orderStatus:'confirmado',createdAt:new Date(now-23*60000).toISOString(),items:[{name:'Combo festa',quantity:1,subtotal:28.9},{name:'Coca Cola 350ml',quantity:1,subtotal:4}]},
+        {id:'order-1022',publicOrderNumber:'1022',customerName:'Ana Clara',customerPhone:'(17) 99765-4321',customerLocation:'Shopping Iguatemi',paymentPreference:'Cartão',total:47.8,orderStatus:'separando',createdAt:new Date(now-38*60000).toISOString(),items:[{name:'Brownie recheado',quantity:3,subtotal:24},{name:'Monster Energy',quantity:2,subtotal:23.8}]},
+        {id:'order-1021',publicOrderNumber:'1021',customerName:'Lucas Oficina',customerPhone:'(17) 99999-9999',customerLocation:'Retirada',paymentPreference:'PIX',total:28,orderStatus:'entregue',createdAt:new Date(now-2*3600000).toISOString(),deliveredAt:new Date(now-75*60000).toISOString(),items:[{name:'Combo festa',quantity:1,subtotal:28}]}
+      ]
+    };
+    window.Utils={uuid:()=>`qa-${Date.now()}`,escapar:value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),dinheiro:value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),toast:()=>{}};
+    window.DB={carregar:()=>data,alterar:callback=>{callback(data);return data},getBusinessId:()=> 'qa-business'};
+    window.Clientes={normalizePhone:value=>String(value||'').replace(/\D/g,''),obter:id=>data.clientes.find(item=>item.id===id),salvar:value=>value};
+    window.Vendas={salvar:value=>value};window.ProductVariations={saleItem:()=>null};window.getProductDisplayImage=()=>({url:''});window.open=()=>{};window.confirm=()=>true;
+  </script>
+  <script src="../assets/lucide.min.js"></script>
+  <script src="../js/catalog-presentation.js"></script>
+  <script src="../js/catalogo-admin.js"></script>
+  <script src="../js/visitas.js"></script>
+  <script>
+    const state=new URLSearchParams(location.search).get('state')||'catalog';
+    const orders=state.startsWith('orders');
+    document.querySelector('#qa-title').textContent=orders?'Pedidos':'Catálogo';
+    document.querySelector('#qa-subtitle').textContent=orders?'Gerencie os pedidos online.':'Seu catálogo online.';
+    document.querySelector('#app').innerHTML=orders?VisitasUI.renderOrdersPage():CatalogoUI.render();
+    orders?VisitasUI.bindOrdersPage():CatalogoUI.bind();
+    if(state==='catalog-banner')document.querySelector('[data-banner-new]')?.click();
+    if(state==='catalog-category')document.querySelector('[data-category-edit]')?.click();
+    if(state==='catalog-product')document.querySelector('[data-product-presentation]')?.click();
+    if(state==='orders-detail')document.querySelector('[data-order-menu="order-1024"]')?.click();
+    if(state==='orders-cancel'){document.querySelector('[data-order-menu="order-1024"]')?.click();document.querySelector('[data-cancel-order]')?.click()}
+    if(state==='orders-status'){document.querySelector('[data-order-menu="order-1022"]')?.click();document.querySelector('[data-online-deliver]')?.click()}
+    window.lucide?.createIcons();
+    window.__mobileCatalogOrdersReady=true;
+  </script>
+</body>
+</html>
