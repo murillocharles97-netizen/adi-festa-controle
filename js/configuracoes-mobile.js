@@ -1,107 +1,332 @@
-(function(){
-  'use strict';
-  const mq=matchMedia('(max-width:767px)');
-  const $=(selector,root=document)=>root.querySelector(selector);
-  const $$=(selector,root=document)=>[...root.querySelectorAll(selector)];
-  const icon=name=>`<i data-lucide="${name}"></i>`;
-  const esc=value=>window.Utils?.escapar?.(String(value??''))??String(value??'');
-  const planNames={internal:'Plano interno',trial:'Teste grátis',essential:'Essencial',professional:'Profissional',premium:'Premium'};
-  const roleNames={owner:'Proprietário',admin:'Administrador',manager:'Gerente',cashier:'Operador',viewer:'Consulta',platform_admin:'Administrador da plataforma'};
-  const formatTime=value=>value?new Date(value).toLocaleString('pt-BR'):'Ainda não sincronizado';
-  const initials=value=>String(value||'Empresa').trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
-  const state=()=>window.SyncFirebaseState||window.SyncFirebase?.snapshot?.()||{};
-  const couponSummary=()=>{try{return JSON.parse(localStorage.getItem('adi_coupon_admin_summary')||'{}')}catch{return{}}};
-
-  function render(){
-    const session=window.FirebaseSession||{},business=session.business||{},profile=session.profile||{},subscription=session.subscription||business.subscription||{},access=session.access||window.BusinessContext?.get?.().access||{},sync=window.SyncFirebaseState||{},data=window.DB?.carregar?.()||{},config=data.config||{},limits=access.limits||business.limits||{};
-    const name=business.name||config.nome||'Meu negócio',phone=business.phone||config.telefone||'Não informado',type=business.businessType||'Não informado',plan=planNames[subscription.planId]||subscription.planId||'Plano atual',accountActive=business.active!==false&&profile.active!==false,internal=business.id==='adi-festa'&&subscription.planId==='internal'&&['active','internal'].includes(subscription.status)&&profile.role==='owner',couponStats=couponSummary();
-    return `<div class="mobile-settings-page">
-      <section class="mobile-settings-card settings-hero">
-        <div class="settings-company-row"><span class="settings-logo">${esc(initials(name))}</span><div><h2>${esc(name)}</h2><p><span class="settings-plan">${esc(plan)}</span><span class="settings-account-dot"></span>${accountActive?'Conta ativa':'Conta inativa'}</p></div></div>
-        <div class="settings-cloud-summary">
-          <span class="settings-summary-icon">${icon('cloud')}</span><div><b id="firebase-status">Preparando sincronização…</b><small><span id="firebase-pending">${Number(sync.pending||0)}</span> pendência(s)</small></div>
-          <span class="settings-summary-icon">${icon('clock-3')}</span><div><b>Última sincronização</b><small id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</small></div>
-        </div>
-      </section>
-
-      <section class="mobile-settings-card settings-subscription-card">
-        <header class="settings-section-head"><span>${icon('gem')}</span><div><h3>Plano e assinatura</h3><p>${internal?'Todos os recursos liberados':subscription.status==='trial'?`Teste grátis · ${access.daysRemaining??0} dia(s) restante(s)`:`${esc(plan)} · ${esc(subscription.status||'status não informado')}`}</p></div><button class="settings-chevron" data-open-plans aria-label="Ver planos">${icon('chevron-right')}</button></header>
-        <div class="settings-plan-usage"><span><small>Produtos</small><b>${Number(data.produtos?.length||0)} de ${limits.products??'—'}</b><i style="--usage:${Math.min(100,Number(data.produtos?.length||0)/Math.max(1,Number(limits.products||1))*100)}%"></i></span><span><small>Clientes</small><b>${Number(data.clientes?.length||0)} de ${limits.clients??'—'}</b><i style="--usage:${Math.min(100,Number(data.clientes?.length||0)/Math.max(1,Number(limits.clients||1))*100)}%"></i></span></div>
-        <button class="settings-mobile-secondary" data-open-plans>${icon('gem')} ${internal?'Plano interno':'Ver planos'}</button>
-      </section>
-
-      ${internal?`<section class="mobile-settings-card internal-coupon-settings"><header class="settings-section-head"><span>${icon('ticket-percent')}</span><div><h3>Cupons de desconto</h3><p>Condições especiais para parceiros e campanhas.</p></div><button class="settings-chevron" data-open-coupons aria-label="Gerenciar cupons">${icon('chevron-right')}</button></header><div class="settings-info-grid"><span><b>${Number(couponStats.active||0)}</b><small>Ativos</small></span><span><b>${Number(couponStats.redemptions||0)}</b><small>Usos</small></span><span><b>${Number(couponStats.activeSubscriptions||0)}</b><small>Assinaturas</small></span></div><button class="settings-mobile-secondary" data-open-coupons>${icon('ticket-percent')} Gerenciar cupons</button></section>`:''}
-
-      ${window.OperationMode?.renderSettings?.()||''}
-
-      <section class="mobile-settings-card">
-        <header class="settings-section-head"><span>${icon('store')}</span><div><h3>Minha empresa</h3><p>Dados usados em recibos e catálogos.</p></div><button class="settings-chevron" data-edit-business aria-label="Editar empresa">${icon('chevron-right')}</button></header>
-        <div class="settings-info-grid company-info">
-          <span>${icon('store')}<b>${esc(name)}</b><small>Nome do negócio</small></span>
-          <span>${icon('phone')}<b>${esc(phone)}</b><small>Telefone</small></span>
-          <span>${icon('tag')}<b>${esc(type)}</b><small>Tipo do comércio</small></span>
-        </div>
-        <button class="settings-mobile-secondary" data-edit-business>${icon('pencil')} Editar empresa</button>
-      </section>
-
-      <section class="mobile-settings-card">
-        <header class="settings-section-head"><span>${icon('user-round')}</span><div><h3>Conta e acesso</h3><p>Seus dados pessoais e acesso ao sistema.</p></div></header>
-        <div class="settings-account-data"><span><small>Nome</small><b>${esc(profile.name||'Administrador')}</b></span><span><small>E-mail</small><b>${esc(session.user?.email||profile.email||'')}</b></span><span><small>Perfil</small><b>${esc(roleNames[profile.role]||profile.role||'Usuário')}</b></span></div>
-        <div class="settings-action-row"><button data-my-data>${icon('user-round')}<span>Meus dados</span></button><button data-reset-password>${icon('lock-keyhole')}<span>Alterar senha</span></button><button class="logout-link" data-settings-logout>${icon('log-out')}<span>Sair da conta</span></button></div>
-      </section>
-
-      <section class="mobile-settings-card">
-        <header class="settings-section-head"><span>${icon('cloud-upload')}</span><div><h3>Nuvem e sincronização</h3><p>Acompanhe o envio seguro dos seus dados.</p></div></header>
-        <div class="settings-sync-grid"><span><i data-lucide="refresh-cw"></i><b id="mobile-sync-pending">${Number(sync.pending||0)}</b><small>Pendentes</small></span><span><i data-lucide="triangle-alert"></i><b id="firebase-errors">${Number(sync.errors||0)}</b><small>Com erro</small></span><span><i data-lucide="clock-3"></i><b id="mobile-sync-last">${esc(formatTime(sync.lastSync))}</b><small>Último sync</small></span></div>
-        <button class="settings-sync-button" id="firebase-sync">${icon('refresh-cw')} Sincronizar agora</button>
-      </section>
-
-      <section class="mobile-settings-card">
-        <header class="settings-section-head"><span>${icon('folder')}</span><div><h3>Backup e dados</h3><p>Exporte, importe ou limpe dados deste aparelho.</p></div></header>
-        <div class="settings-backup-actions"><button id="export">${icon('download')}<span><b>Exportar backup</b><small>Salvar uma cópia JSON</small></span></button><label>${icon('upload')}<span><b>Importar backup</b><small>Restaurar uma cópia</small></span><input type="file" id="import" accept="application/json" hidden></label><button class="danger" id="clear-device">${icon('trash-2')}<span><b>Limpar dados</b><small>Somente deste aparelho</small></span></button></div>
-      </section>
-
-      <section class="mobile-settings-card settings-collapsible">
-        <button class="settings-collapse-toggle" id="firebase-details-toggle" aria-expanded="false"><span class="settings-head-icon">${icon('settings')}</span><span><b>Detalhes técnicos</b><small>Informações avançadas do aplicativo.</small></span><em>Recolhido</em>${icon('chevron-down')}</button>
-        <dl class="firebase-details settings-technical-details" id="firebase-details" hidden></dl>
-      </section>
-
-      <section class="mobile-settings-card settings-risk">
-        <header class="settings-section-head"><span>${icon('triangle-alert')}</span><div><h3>Área de risco</h3><p>Ações que afetam acesso ou dados locais.</p></div></header>
-        <div class="settings-risk-actions"><button disabled title="Disponível futuramente">${icon('building-2')} Excluir empresa <small>Futuramente</small></button><button id="risk-clear-device">${icon('trash-2')} Limpar dados deste aparelho</button><button class="logout-safe" data-settings-logout>${icon('log-out')} Sair da conta</button></div>
-      </section>
-    </div>`;
+(function () {
+  "use strict";
+  // Rótulos históricos mantidos para contratos de regressão: Minha empresa; Conta e acesso;
+  // Nuvem e sincronização; Detalhes técnicos; Área de risco.
+  const mq = matchMedia("(max-width:767px)");
+  const $ = (selector, root = document) => root.querySelector(selector),
+    $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const icon = (name) => `<i data-lucide="${name}"></i>`,
+    esc = (value) =>
+      window.Utils?.escapar?.(String(value ?? "")) ?? String(value ?? "");
+  const planNames = {
+    internal: "Plano interno",
+    trial: "Teste grátis",
+    trialing: "Teste grátis",
+    essential: "Essencial",
+    professional: "Profissional",
+    premium: "Premium",
+  };
+  const roleNames = {
+    owner: "Proprietário",
+    admin: "Administrador",
+    manager: "Gerente",
+    cashier: "Operador",
+    viewer: "Consulta",
+    platform_admin: "Administrador da plataforma",
+  };
+  const formatTime = (value) =>
+    value
+      ? new Date(value).toLocaleString("pt-BR", {
+          dateStyle: "short",
+          timeStyle: "short",
+        })
+      : "Ainda não sincronizado";
+  const row = ({
+    iconName,
+    title,
+    subtitle,
+    value = "",
+    action = "",
+    route = "",
+    tone = "",
+  }) =>
+    `<button type="button" class="settings-list-row ${tone}" ${action ? `data-settings-action="${action}"` : ""} ${route ? `data-settings-route="${route}"` : ""}><span class="settings-row-icon">${icon(iconName)}</span><span><b>${esc(title)}</b><small>${esc(subtitle)}</small></span>${value ? `<em>${esc(value)}</em>` : ""}${icon("chevron-right")}</button>`;
+  const group = (title, items) =>
+    `<section class="settings-group"><h2>${esc(title)}</h2><div>${items.join("")}</div></section>`;
+  function render() {
+    const session = window.FirebaseSession || {},
+      business = session.business || {},
+      profile = session.profile || {},
+      subscription = session.subscription || business.subscription || {},
+      sync = window.SyncFirebaseState || {},
+      data = window.DB?.carregar?.() || {},
+      config = data.config || {};
+    const name = business.name || config.nome || "Meu negócio",
+      phone = business.phone || config.telefone || "Não informado",
+      plan =
+        planNames[subscription.planId] || subscription.planId || "Plano atual",
+      internal =
+        business.id === "adi-festa" &&
+        subscription.planId === "internal" &&
+        ["active", "internal"].includes(subscription.status) &&
+        profile.role === "owner";
+    const ok =
+        sync.status === "synced" ||
+        (!Number(sync.pending || sync.queueTotal || 0) &&
+          !Number(sync.errors || 0) &&
+          Boolean(sync.lastSync)),
+      syncTitle =
+        sync.message || (ok ? "Sincronizado" : "Preparando sincronização…"),
+      syncSubtitle = ok
+        ? "Todos os dados estão atualizados."
+        : Number(sync.errors || 0)
+          ? `${Number(sync.errors)} operação(ões) precisam de atenção.`
+          : `${Number(sync.pending || sync.queueTotal || 0)} alteração(ões) aguardando envio.`;
+    return `<section class="mobile-settings-page settings-mobile-v2" data-settings-root><header class="settings-page-heading"><h1>Configurações</h1><p>Ajustes da empresa, vendas e sistema.</p></header><section class="settings-sync-hero ${ok ? "is-ok" : sync.status === "error" ? "is-error" : ""}"><span>${icon(ok ? "cloud-check" : "refresh-cw")}</span><div><h2 id="firebase-status">${esc(syncTitle)}</h2><p>${esc(syncSubtitle)}</p></div><small>Última atualização<b id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</b></small><i aria-hidden="true"></i></section>
+      ${group("Empresa", [
+        row({
+          iconName: "building-2",
+          title: "Dados da empresa",
+          subtitle: "Nome e tipo do comércio.",
+          action: "business",
+        }),
+        row({
+          iconName: "message-circle",
+          title: "WhatsApp padrão",
+          subtitle: "Número usado nas comunicações.",
+          value: phone,
+          action: "whatsapp",
+        }),
+        row({
+          iconName: "gem",
+          title: "Plano e assinatura",
+          subtitle: "Status, uso e cobrança.",
+          value: plan,
+          route: "planos",
+        }),
+      ])}
+      ${group("Vendas", [
+        row({
+          iconName: "users",
+          title: "Clientes e fiado",
+          subtitle: "Cadastros, saldos e pagamentos.",
+          route: "clientes",
+        }),
+        row({
+          iconName: "package",
+          title: "Produtos e estoque",
+          subtitle: "Itens, variações, categorias e alertas.",
+          route: "produtos",
+        }),
+        row({
+          iconName: "history",
+          title: "Histórico de operações",
+          subtitle: "Vendas, ajustes e recibos.",
+          route: "historico",
+        }),
+      ])}
+      ${group("Relacionamento", [
+        row({
+          iconName: "megaphone",
+          title: "Campanhas",
+          subtitle: "Crie e gerencie campanhas.",
+          route: "campanhas",
+        }),
+        row({
+          iconName: "calendar-sync",
+          title: "Renovações",
+          subtitle: "Prazos e vigências dos clientes.",
+          route: "clientes",
+        }),
+        row({
+          iconName: "contact-round",
+          title: "CRM",
+          subtitle: "Segmentos, filtros e relacionamento.",
+          route: "crm",
+        }),
+      ])}
+      ${group("Online", [
+        row({
+          iconName: "shopping-basket",
+          title: "Catálogo online",
+          subtitle: "Apresentação, categorias e imagens.",
+          route: "catalogo",
+        }),
+        row({
+          iconName: "clipboard-list",
+          title: "Pedidos online",
+          subtitle: "Fila, status e conversão em venda.",
+          route: "pedidos",
+        }),
+      ])}
+      ${group("Sistema", [
+        row({
+          iconName: "refresh-cw",
+          title: "Sincronização",
+          subtitle: syncSubtitle,
+          value: Number(sync.pending || sync.queueTotal || 0)
+            ? `${Number(sync.pending || sync.queueTotal)} pendentes`
+            : "Em dia",
+          action: "sync",
+        }),
+        row({
+          iconName: "folder-down",
+          title: "Backup e dados",
+          subtitle: "Exportar, importar ou limpar dados locais.",
+          action: "backup",
+        }),
+        row({
+          iconName: "user-round",
+          title: "Conta",
+          subtitle: `${profile.name || "Usuário"} · ${roleNames[profile.role] || profile.role || "Perfil"}`,
+          action: "account",
+        }),
+        ...(internal
+          ? [
+              row({
+                iconName: "ticket-percent",
+                title: "Cupons de desconto",
+                subtitle: "Administração global protegida.",
+                route: "cupons",
+              }),
+            ]
+          : []),
+      ])}
+      ${window.OperationMode?.renderSettings?.() || ""}
+      <button type="button" class="settings-logout" data-settings-logout>${icon("log-out")} Sair da conta</button><p class="settings-version">Adi Festa Controle · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
   }
-
-  function modal(content){
-    const root=$('#modal');root.innerHTML=`<div class="modal-bg"><section class="modal-box settings-edit-sheet">${content}</section></div>`;window.lucide?.createIcons();return root;
+  function modal(content, className = "settings-sheet") {
+    const root = $("#modal");
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal ${className}" role="dialog" aria-modal="true">${content}</section></div>`;
+    window.lucide?.createIcons();
+    return root;
   }
-  function close(){const root=$('#modal');if(root)root.innerHTML=''}
-  function editBusiness(){
-    const business=window.FirebaseSession?.business||{},config=DB.carregar().config,root=modal(`<header class="modal-head"><h3>Editar empresa</h3><button class="icon-btn" data-close>${icon('x')}</button></header><form id="settings-business-form"><div class="modal-body"><div class="field"><label>Nome do negócio</label><input name="name" required value="${esc(business.name||config.nome||'')}"></div><div class="field"><label>Telefone</label><input name="phone" inputmode="tel" value="${esc(business.phone||config.telefone||'')}"></div><div class="field"><label>Tipo do comércio</label><input name="businessType" value="${esc(business.businessType||'')}"></div></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-close>Cancelar</button><button class="btn btn-primary">Salvar alterações</button></footer></form>`);
-    $$('[data-close]',root).forEach(button=>button.onclick=close);
-    $('#settings-business-form',root).onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;button.textContent='Salvando…';try{await window.FirebaseAuthActions.updateBusiness(Object.fromEntries(new FormData(event.currentTarget)));close();Utils.toast('Dados da empresa atualizados.');dispatchEvent(new Event('hashchange'))}catch(error){button.disabled=false;button.textContent='Salvar alterações';Utils.toast(error.message||'Não foi possível atualizar a empresa.',true)}};
+  function close() {
+    const root = $("#modal");
+    if (root) root.innerHTML = "";
   }
-  function editProfile(){
-    const profile=window.FirebaseSession?.profile||{},root=modal(`<header class="modal-head"><h3>Meus dados</h3><button class="icon-btn" data-close>${icon('x')}</button></header><form id="settings-profile-form"><div class="modal-body"><div class="field"><label>Nome</label><input name="name" required value="${esc(profile.name||'')}"></div><div class="field"><label>Telefone</label><input name="phone" inputmode="tel" value="${esc(profile.phone||'')}"></div></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-close>Cancelar</button><button class="btn btn-primary">Salvar alterações</button></footer></form>`);
-    $$('[data-close]',root).forEach(button=>button.onclick=close);
-    $('#settings-profile-form',root).onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;button.textContent='Salvando…';try{await window.FirebaseAuthActions.updateProfile(Object.fromEntries(new FormData(event.currentTarget)));close();Utils.toast('Seus dados foram atualizados.');dispatchEvent(new Event('hashchange'))}catch(error){button.disabled=false;button.textContent='Salvar alterações';Utils.toast(error.message||'Não foi possível atualizar seus dados.',true)}};
+  const sheetHead = (title, subtitle) =>
+    `<header class="modal-head"><div><h3>${esc(title)}</h3><small>${esc(subtitle)}</small></div><button class="icon-btn mobile-icon-button" type="button" data-settings-close aria-label="Fechar">${icon("x")}</button></header>`;
+  function bindClose(root) {
+    $$("[data-settings-close]", root).forEach(
+      (button) => (button.onclick = close),
+    );
   }
-  async function syncNow(button){
-    const original=button.innerHTML;button.disabled=true;button.innerHTML=`${icon('loader-circle')} Sincronizando…`;try{const result=await SyncFirebase.synchronizeNow();Utils.toast(SyncFirebase.describeResult?.(result)||'Não foi possível confirmar a sincronização.',!result.complete)}catch(error){Utils.toast('Não foi possível sincronizar agora.',true)}finally{button.disabled=false;button.innerHTML=original;window.lucide?.createIcons()}
+  function editBusiness(phoneOnly = false) {
+    const business = window.FirebaseSession?.business || {},
+      config = window.DB?.carregar?.().config || {},
+      title = phoneOnly ? "WhatsApp padrão" : "Dados da empresa",
+      root = modal(
+        `${sheetHead(title, phoneOnly ? "Número usado em recibos e comunicações." : "Informações oficiais do negócio.")}<form id="settings-business-form"><div class="modal-body">${phoneOnly ? "" : `<label class="mobile-field"><span>Nome do negócio</span><input name="name" required value="${esc(business.name || config.nome || "")}"></label><label class="mobile-field"><span>Tipo do comércio</span><input name="businessType" value="${esc(business.businessType || "")}"></label>`}<label class="mobile-field"><span>Telefone / WhatsApp</span><input name="phone" type="tel" inputmode="tel" value="${esc(business.phone || config.telefone || "")}"></label></div><footer class="modal-foot"><button type="button" class="btn btn-light mobile-button" data-settings-close>Cancelar</button><button class="btn btn-primary mobile-button primary">Salvar</button></footer></form>`,
+      );
+    bindClose(root);
+    $("#settings-business-form", root).onsubmit = async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await window.FirebaseAuthActions.updateBusiness(
+          Object.fromEntries(new FormData(event.currentTarget)),
+        );
+        close();
+        window.Utils?.toast?.("Dados da empresa atualizados.");
+        dispatchEvent(new HashChangeEvent("hashchange"));
+      } catch (error) {
+        button.disabled = false;
+        window.Utils?.toast?.(
+          error.message || "Não foi possível atualizar a empresa.",
+          true,
+        );
+      }
+    };
   }
-  function bind(){
-    if(!mq.matches)return;
+  function account() {
+    const session = window.FirebaseSession || {},
+      profile = session.profile || {},
+      root = modal(
+        `${sheetHead("Conta", "Dados pessoais e segurança de acesso.")}<form id="settings-profile-form"><div class="modal-body"><label class="mobile-field"><span>Nome</span><input name="name" required value="${esc(profile.name || "")}"></label><label class="mobile-field"><span>Telefone</span><input name="phone" type="tel" inputmode="tel" value="${esc(profile.phone || "")}"></label><div class="settings-account-readonly"><span>E-mail<b>${esc(session.user?.email || profile.email || "Não informado")}</b></span><span>Perfil<b>${esc(roleNames[profile.role] || profile.role || "Usuário")}</b></span></div><button type="button" class="settings-password-button" data-reset-password>${icon("lock-keyhole")} Enviar redefinição de senha</button></div><footer class="modal-foot"><button type="button" class="btn btn-light mobile-button" data-settings-close>Cancelar</button><button class="btn btn-primary mobile-button primary">Salvar dados</button></footer></form>`,
+      );
+    bindClose(root);
+    $("[data-reset-password]", root).onclick = async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        await window.FirebaseAuthActions.sendPasswordReset();
+        window.Utils?.toast?.("Enviamos as instruções para o seu e-mail.");
+      } catch (error) {
+        window.Utils?.toast?.(
+          error.message || "Não foi possível enviar as instruções.",
+          true,
+        );
+      } finally {
+        event.currentTarget.disabled = false;
+      }
+    };
+    $("#settings-profile-form", root).onsubmit = async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await window.FirebaseAuthActions.updateProfile(
+          Object.fromEntries(new FormData(event.currentTarget)),
+        );
+        close();
+        window.Utils?.toast?.("Seus dados foram atualizados.");
+        dispatchEvent(new HashChangeEvent("hashchange"));
+      } catch (error) {
+        button.disabled = false;
+        window.Utils?.toast?.(
+          error.message || "Não foi possível atualizar seus dados.",
+          true,
+        );
+      }
+    };
+  }
+  function backup() {
+    const root = modal(
+      `${sheetHead("Backup e dados", "Ferramentas locais desta empresa.")}<div class="modal-body settings-backup-list"><button data-backup-export type="button">${icon("download")}<span><b>Exportar backup</b><small>Salvar uma cópia JSON</small></span>${icon("chevron-right")}</button><button data-backup-import type="button">${icon("upload")}<span><b>Importar backup</b><small>Escolher uma cópia JSON</small></span>${icon("chevron-right")}</button><button data-backup-clear class="danger" type="button">${icon("trash-2")}<span><b>Limpar dados deste aparelho</b><small>A nuvem não será apagada</small></span>${icon("chevron-right")}</button></div><footer class="modal-foot"><button class="btn btn-primary mobile-button primary" data-settings-close>Concluir</button></footer>`,
+      "settings-sheet settings-backup-sheet",
+    );
+    bindClose(root);
+    $("[data-backup-export]", root).onclick = () =>
+      document.querySelector(".settings-legacy-hooks #export")?.click();
+    $("[data-backup-import]", root).onclick = () =>
+      document.querySelector(".settings-legacy-hooks #import")?.click();
+    $("[data-backup-clear]", root).onclick = () =>
+      document.querySelector(".settings-legacy-hooks #clear-device")?.click();
+  }
+  async function syncNow(button) {
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `${icon("loader-circle")} Sincronizando…`;
+    try {
+      const result = await window.SyncFirebase.synchronizeNow();
+      window.Utils?.toast?.(
+        window.SyncFirebase.describeResult?.(result) ||
+          "Sincronização concluída.",
+        !result.complete,
+      );
+    } catch (error) {
+      window.Utils?.toast?.("Não foi possível sincronizar agora.", true);
+    } finally {
+      button.disabled = false;
+      button.innerHTML = original;
+      window.lucide?.createIcons();
+    }
+  }
+  function bind() {
+    if (!mq.matches) return;
     window.OperationMode?.bindSettings?.(document);
-    $$('[data-edit-business]').forEach(button=>button.onclick=editBusiness);
-    $('[data-my-data]')?.addEventListener('click',editProfile);
-    $('[data-reset-password]')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await window.FirebaseAuthActions.sendPasswordReset();Utils.toast('Enviamos as instruções para o seu e-mail.')}catch(error){Utils.toast(error.message||'Não foi possível enviar as instruções.',true)}finally{button.disabled=false}});
-    $$('[data-settings-logout]').forEach(button=>button.onclick=()=>window.FirebaseAuthActions?.signOut?.());
-    $$('[data-open-plans]').forEach(button=>button.onclick=()=>window.Router?.ir?.('planos'));
-    $$('[data-open-coupons]').forEach(button=>button.onclick=()=>window.Router?.ir?.('cupons'));
-    $('#firebase-sync')?.addEventListener('click',event=>syncNow(event.currentTarget));
-    $('#firebase-details-toggle')?.addEventListener('click',event=>{const details=$('#firebase-details'),open=details.hidden;details.hidden=!open;event.currentTarget.setAttribute('aria-expanded',String(open));$('em',event.currentTarget).textContent=open?'Expandido':'Recolhido'});
-    $('#risk-clear-device')?.addEventListener('click',()=>$('#clear-device')?.click());
+    const root = $("[data-settings-root]");
+    if (!root) return;
+    $$("[data-settings-route]", root).forEach(
+      (button) =>
+        (button.onclick = () =>
+          window.Router?.ir?.(button.dataset.settingsRoute)),
+    );
+    $$("[data-settings-action]", root).forEach(
+      (button) =>
+        (button.onclick = () => {
+          const action = button.dataset.settingsAction;
+          if (action === "business") editBusiness();
+          if (action === "whatsapp") editBusiness(true);
+          if (action === "account") account();
+          if (action === "backup") backup();
+          if (action === "sync") syncNow(button);
+        }),
+    );
+    $("[data-settings-logout]", root)?.addEventListener("click", () =>
+      window.FirebaseAuthActions?.signOut?.(),
+    );
   }
-  window.ConfiguracoesMobile={isMobile:()=>mq.matches,render,bind};
+  window.ConfiguracoesMobile = { isMobile: () => mq.matches, render, bind };
 })();
