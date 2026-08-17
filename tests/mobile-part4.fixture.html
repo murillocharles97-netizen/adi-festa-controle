@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>Parte 4 mobile fixture</title>
+    <link rel="stylesheet" href="../css/style.css" />
+    <link rel="stylesheet" href="../css/design-system/tokens.css" />
+    <link rel="stylesheet" href="../css/mobile.css" />
+    <link rel="stylesheet" href="../css/mobile-navigation.css" />
+    <link rel="stylesheet" href="../css/activity-center.css" />
+    <link rel="stylesheet" href="../css/mobile-components.css" />
+    <link rel="stylesheet" href="../css/configuracoes-mobile.css" />
+    <link rel="stylesheet" href="../css/plans.css" />
+    <link rel="stylesheet" href="../css/coupons.css" />
+    <style>
+      body {
+        background: #fbfcfe;
+      }
+      .fixture-shell {
+        min-height: 100dvh;
+      }
+      .fixture-topbar {
+        height: 82px;
+        padding: env(safe-area-inset-top) 16px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fff;
+        border-bottom: 1px solid #e6e9ef;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .fixture-topbar button {
+        border: 0;
+        background: none;
+        color: #0b1538;
+      }
+      .fixture-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #0b1538;
+      }
+      .fixture-brand i {
+        width: 34px;
+        height: 34px;
+        border-radius: 11px;
+        background: #e8faf3;
+        color: #0aa875;
+        display: grid;
+        place-items: center;
+      }
+      .fixture-brand b {
+        font-size: 18px;
+      }
+      .fixture-brand small {
+        display: block;
+        color: #0aa875;
+        letter-spacing: 4px;
+        font-size: 8px;
+      }
+      .fixture-main {
+        padding: 18px 14px 95px;
+        max-width: 1120px;
+        margin: auto;
+      }
+      .fixture-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 72px;
+        padding-bottom: env(safe-area-inset-bottom);
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        background: #fff;
+        border-top: 1px solid #e2e6ed;
+        z-index: 12;
+      }
+      .fixture-nav span {
+        display: grid;
+        justify-items: center;
+        gap: 3px;
+        font-size: 9px;
+        color: #657088;
+      }
+      .fixture-nav span:first-child {
+        color: #09a471;
+      }
+      .fixture-nav svg {
+        width: 20px;
+      }
+      .coupon-editor .modal-head h3 {
+        margin: 0;
+      }
+      .coupon-editor .modal-head small {
+        color: #697386;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="fixture-shell">
+      <header class="fixture-topbar">
+        <button aria-label="Menu"><i data-lucide="menu"></i></button>
+        <div class="fixture-brand">
+          <i><span>AF</span></i
+          ><span><b>Adi Festa</b><small>CONTROLE</small></span>
+        </div>
+        <button aria-label="Notificações"><i data-lucide="bell"></i></button>
+      </header>
+      <main class="fixture-main" id="app"></main>
+      <nav class="fixture-nav">
+        <span><i data-lucide="house"></i>Início</span
+        ><span><i data-lucide="shopping-bag"></i>Vender</span
+        ><span><i data-lucide="users"></i>Clientes</span
+        ><span><i data-lucide="package"></i>Produtos</span
+        ><span><i data-lucide="settings"></i>Ajustes</span>
+      </nav>
+    </div>
+    <div id="modal"></div>
+    <div id="toasts"></div>
+    <script src="../assets/lucide.min.js"></script>
+    <script>
+      const now = Date.now(),
+        iso = (offset) => new Date(now + offset).toISOString(),
+        sale = {
+          id: "sale-1247",
+          clienteId: "c1",
+          clientId: "c1",
+          clienteNome: "Maria Silva",
+          status: "pago",
+          formaPagamento: "Pix",
+          data: iso(-12 * 60000),
+          createdAt: iso(-12 * 60000),
+          subtotalOriginal: 1299.9,
+          descontoTotal: 41,
+          valorFinal: 1258.9,
+          valorTotal: 1258.9,
+          observacao: "Entregar no sábado.",
+          itens: [
+            {
+              produtoId: "p1",
+              nome: "Painel Redondo Branco",
+              quantidade: 1,
+              precoUnitario: 899.9,
+            },
+            {
+              produtoId: "p2",
+              nome: "Kit Festa Verde",
+              quantidade: 3,
+              precoUnitario: 133,
+            },
+          ],
+        };
+      const db = {
+        config: { nome: "Adi Festa", telefone: "17997654321" },
+        clientes: [
+          { id: "c1", nome: "Maria Silva", ativo: true },
+          { id: "c2", nome: "Juliana Costa", ativo: true },
+        ],
+        produtos: [
+          { id: "p1", nome: "Painel Redondo Branco", ativo: true },
+          { id: "p2", nome: "Kit Festa Verde", ativo: true },
+        ],
+        vendas: [sale],
+        movimentacoes: [
+          {
+            id: "m1",
+            tipo: "venda",
+            vendaId: sale.id,
+            clienteId: "c1",
+            clienteNome: "Maria Silva",
+            valor: 1258.9,
+            status: "pago",
+            data: sale.data,
+          },
+          {
+            id: "m2",
+            tipo: "pagamento",
+            clienteId: "c2",
+            clienteNome: "Juliana Costa",
+            valor: 350,
+            data: iso(-75 * 60000),
+            observacao: "Pagamento via Pix",
+          },
+          {
+            id: "m3",
+            tipo: "ajuste_saldo",
+            clienteId: "c2",
+            clienteNome: "Juliana Costa",
+            saldoAnterior: 0,
+            saldoNovo: -350,
+            motivo: "Fornecedor Decora Festas",
+            data: iso(-86400000),
+          },
+        ],
+        movimentacoesEstoque: [
+          {
+            id: "s1",
+            tipo: "entrada",
+            produtoId: "p1",
+            produtoNome: "Painel Redondo Branco",
+            quantidade: 4,
+            data: iso(-2 * 86400000),
+          },
+        ],
+        campanhas: [{ id: "cp1", nome: "Festa Premiada" }],
+        eventosCampanha: [
+          {
+            id: "ce1",
+            campaignId: "cp1",
+            clientId: "c1",
+            transition: "redeemed",
+            status: "confirmed",
+            createdAt: iso(-3 * 86400000),
+          },
+        ],
+        customerSubscriptionEvents: [
+          {
+            id: "r1",
+            clientId: "c2",
+            productId: "p2",
+            transition: "renewal",
+            createdAt: iso(-4 * 86400000),
+            next: { label: "Kit Festa Verde" },
+          },
+        ],
+        catalogOrders: [
+          {
+            id: "o1",
+            publicOrderNumber: "2048",
+            customerName: "Ana Paula Rocha",
+            customerPhone: "17999998888",
+            orderStatus: "confirmado",
+            total: 499.9,
+            createdAt: iso(-5 * 86400000),
+            updatedAt: iso(-5 * 86400000),
+          },
+        ],
+      };
+      window.DB = { carregar: () => db, getBusinessId: () => "adi-festa" };
+      window.Utils = {
+        escapar: (v) =>
+          String(v ?? "").replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          ),
+        toast: () => {},
+      };
+      window.Vendas = { ultima: () => sale, podeDesfazer: () => true };
+      window.Recibos = { mostrar: () => {} };
+      window.Router = { ir: () => {} };
+      window.OperationMode = {
+        renderSettings: () => "",
+        bindSettings: () => {},
+      };
+      window.SyncFirebaseState = {
+        status: "synced",
+        message: "Sincronizado",
+        pending: 0,
+        queueTotal: 0,
+        errors: 0,
+        lastSync: iso(-60000),
+      };
+      window.SyncFirebase = {
+        synchronizeNow: async () => ({ complete: true }),
+        describeResult: () => "Sincronização concluída",
+      };
+      window.FirebaseAuthActions = {
+        updateBusiness: async () => {},
+        updateProfile: async () => {},
+        sendPasswordReset: async () => {},
+        signOut: () => {},
+      };
+      const basePlans = [
+        {
+          id: "essential",
+          name: "Essencial",
+          summary: "Organize o básico do seu negócio.",
+          monthlyPrice: 29.9,
+          yearlyPrice: 299,
+          features: {
+            products: true,
+            stock: true,
+            sales: true,
+            clients: true,
+            creditAccounts: true,
+            payments: true,
+            barcode: true,
+          },
+          limits: { users: 1, products: 300, clients: 500, monthlySales: 1500 },
+        },
+        {
+          id: "professional",
+          name: "Profissional",
+          summary: "Mais recursos para vender e crescer.",
+          monthlyPrice: 49.9,
+          yearlyPrice: 499,
+          recommended: true,
+          features: {
+            products: true,
+            stock: true,
+            sales: true,
+            clients: true,
+            campaigns: true,
+            crm: true,
+            onlineCatalog: true,
+            onlineOrders: true,
+            multipleUsers: true,
+            advancedReports: true,
+          },
+          limits: {
+            users: 3,
+            products: 2000,
+            clients: 5000,
+            monthlySales: 10000,
+          },
+        },
+        {
+          id: "premium",
+          name: "Premium",
+          summary: "Para negócios que querem o máximo.",
+          monthlyPrice: 79.9,
+          yearlyPrice: 799,
+          features: {
+            products: true,
+            stock: true,
+            sales: true,
+            clients: true,
+            campaigns: true,
+            crm: true,
+            onlineCatalog: true,
+            onlineOrders: true,
+            multipleUsers: true,
+            advancedReports: true,
+            rolesPermissions: true,
+            automations: true,
+          },
+          limits: {
+            users: 10,
+            products: 10000,
+            clients: 25000,
+            monthlySales: 50000,
+          },
+        },
+      ];
+      let fixtureContext = {
+        subscription: {
+          planId: "trial",
+          status: "trialing",
+          trialStartedAt: iso(-3 * 86400000),
+          trialEndsAt: iso(4 * 86400000),
+        },
+        access: {
+          status: "trialing",
+          daysRemaining: 4,
+          readOnly: false,
+          limits: basePlans[1].limits,
+          effectivePlan: { name: "Profissional" },
+        },
+        business: {
+          id: "demo",
+          name: "Adi Festa",
+          limits: basePlans[1].limits,
+        },
+        profile: { uid: "u1", name: "Murillo", role: "owner" },
+      };
+      window.BusinessContext = { get: () => fixtureContext };
+      window.PlanLimitService = {
+        canUseFeature: () => ({ ok: true }),
+        canUseAction: () => ({ ok: true }),
+      };
+      window.SubscriptionService = {
+        getPlans: () => basePlans,
+        requestUpgrade: async () => ({ message: "Fluxo preservado" }),
+        validateCoupon: async () => ({
+          code: "PARCEIRO20",
+          planId: "professional",
+          billingCycle: "monthly",
+          originalPrice: 49.9,
+          discountedPrice: 39.92,
+          durationLabel: "Primeiro pagamento",
+        }),
+        syncSubscriptionStatus: async () => ({}),
+        requestCancellation: async () => ({}),
+      };
+      const coupons = [
+        {
+          id: "cup1",
+          code: "PARCEIRO20",
+          name: "Parceiros de agosto",
+          campaign: "Parcerias",
+          category: "private",
+          discountType: "percentage",
+          discountValue: 20,
+          durationType: "first_payment",
+          allowedPlanIds: ["professional", "premium"],
+          allowedBillingCycles: ["monthly"],
+          validFrom: iso(-86400000),
+          validUntil: iso(20 * 86400000),
+          redemptionCount: 8,
+          maxRedemptions: 50,
+          activeSubscriptions: 6,
+          status: "active",
+          authorizedEmails: [],
+          authorizedUids: [],
+          authorizedBusinessIds: [],
+          authorizedEmailDomains: [],
+          allowUpgrade: true,
+        },
+        {
+          id: "cup2",
+          code: "ANUAL100",
+          name: "Incentivo anual",
+          campaign: "Plano anual",
+          category: "promotional",
+          discountType: "fixed_amount",
+          discountValue: 100,
+          durationType: "first_payment",
+          allowedPlanIds: ["premium"],
+          allowedBillingCycles: ["yearly"],
+          validFrom: iso(86400000),
+          validUntil: iso(30 * 86400000),
+          redemptionCount: 0,
+          maxRedemptions: 20,
+          activeSubscriptions: 0,
+          status: "scheduled",
+        },
+      ];
+      window.FirebaseCallable = async (name, data) => ({
+        data:
+          name === "listAdminCoupons"
+            ? { items: coupons, nextCursor: null }
+            : name === "getAdminCoupon"
+              ? {
+                  coupon:
+                    coupons.find((x) => x.id === data.couponId) || coupons[0],
+                  uses: [
+                    {
+                      businessId: "empresa-demo",
+                      planId: "professional",
+                      discountedPrice: 39.92,
+                      status: "active",
+                    },
+                  ],
+                }
+              : { coupon: coupons[0] },
+      });
+      window.FirebaseSession = {
+        businessId: "adi-festa",
+        business: {
+          id: "adi-festa",
+          name: "Adi Festa",
+          phone: "(17) 99765-4321",
+          businessType: "Decoração",
+          subscription: { planId: "internal", status: "internal" },
+        },
+        profile: { uid: "u1", name: "Murillo", role: "owner", active: true },
+        subscription: { planId: "internal", status: "internal" },
+        access: {
+          internal: true,
+          limits: { products: null, clients: null, monthlySales: null },
+        },
+        user: { email: "contato@adifesta.com.br" },
+      };
+    </script>
+    <script src="../js/activity-center.js"></script>
+    <script src="../js/configuracoes-mobile.js"></script>
+    <script src="../js/plans.js"></script>
+    <script src="../js/coupons-admin.js"></script>
+    <script>
+      window.__mobilePart4Ready = "starting";
+      window.__mobilePart4Audit = () => ({ phase: "starting" });
+      (async () => {
+        const state =
+            new URLSearchParams(location.search).get("state") || "history",
+          app = document.querySelector("#app");
+        if (state.startsWith("history")) {
+          app.innerHTML = ActivityCenter.render();
+          ActivityCenter.bind();
+          if (state === "history-filter")
+            document.querySelector("[data-history-filters]").click();
+          if (state === "history-sale")
+            document.querySelector('[data-activity-id="movement:m1"]').click();
+        } else if (state === "settings") {
+          app.innerHTML = ConfiguracoesMobile.render();
+          ConfiguracoesMobile.bind();
+        } else if (state.startsWith("plan-")) {
+          window.FirebaseSession = {};
+          if (state === "plan-trial") fixtureContext = { ...fixtureContext };
+          if (state === "plan-paid")
+            fixtureContext = {
+              ...fixtureContext,
+              subscription: {
+                planId: "professional",
+                status: "active",
+                currentPeriodEnd: iso(20 * 86400000),
+              },
+              access: {
+                status: "active",
+                readOnly: false,
+                limits: basePlans[1].limits,
+              },
+              business: { id: "demo", limits: basePlans[1].limits },
+            };
+          if (state === "plan-expired")
+            fixtureContext = {
+              ...fixtureContext,
+              subscription: {
+                planId: "trial",
+                status: "expired",
+                trialStartedAt: iso(-10 * 86400000),
+                trialEndsAt: iso(-3 * 86400000),
+              },
+              access: {
+                status: "expired",
+                readOnly: true,
+                limits: basePlans[0].limits,
+              },
+              business: { id: "demo", limits: basePlans[0].limits },
+            };
+          app.innerHTML = PlansUI.render();
+          PlansUI.bind(app);
+        } else {
+          app.innerHTML = CouponsAdmin.render();
+          CouponsAdmin.bind();
+          await new Promise((r) => setTimeout(r, 30));
+          if (state === "coupon-new")
+            document.querySelector("[data-new-coupon]").click();
+          if (state === "coupon-edit")
+            document.querySelector("[data-coupon-edit]").click();
+          await new Promise((r) => setTimeout(r, 30));
+        }
+        window.__mobilePart4Ready = true;
+        window.__mobilePart4Audit = () => {
+          const visible = (e) => {
+              const s = getComputedStyle(e),
+                r = e.getBoundingClientRect();
+              return (
+                s.display !== "none" &&
+                s.visibility !== "hidden" &&
+                r.width > 1 &&
+                r.height > 1
+              );
+            },
+            rails =
+              ".activity-chips,.plan-offers,.coupon-kpis,.coupon-filters,.coupon-card footer";
+          const offenders = [...document.body.querySelectorAll("*")]
+              .filter((e) => {
+                if (!visible(e) || e.closest(rails)) return false;
+                const r = e.getBoundingClientRect();
+                return r.left < -1 || r.right > innerWidth + 1;
+              })
+              .slice(0, 20)
+              .map((e) => {
+                const r = e.getBoundingClientRect();
+                return {
+                  tag: e.tagName.toLowerCase(),
+                  class: String(e.className || "").slice(0, 90),
+                  left: Math.round(r.left * 10) / 10,
+                  right: Math.round(r.right * 10) / 10,
+                  width: Math.round(r.width * 10) / 10,
+                };
+              }),
+            modal = document.querySelector("#modal .modal-box"),
+            mr = modal?.getBoundingClientRect();
+          return {
+            state,
+            width: innerWidth,
+            height: innerHeight,
+            clientWidth: document.documentElement.clientWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            overflow:
+              document.documentElement.scrollWidth >
+              document.documentElement.clientWidth + 1,
+            offenders,
+            modal: mr
+              ? {
+                  left: mr.left,
+                  right: mr.right,
+                  top: mr.top,
+                  bottom: mr.bottom,
+                  width: mr.width,
+                  height: mr.height,
+                }
+              : null,
+            rawFileInputs: [
+              ...document.querySelectorAll("input[type=file]"),
+            ].filter(visible).length,
+            rawCheckboxes: [
+              ...document.querySelectorAll("input[type=checkbox]"),
+            ].filter(
+              (e) => visible(e) && getComputedStyle(e).appearance !== "none",
+            ).length,
+          };
+        };
+        window.lucide?.createIcons();
+      })();
+    </script>
+    <script>
+      addEventListener(
+        "unhandledrejection",
+        (event) =>
+          (window.__mobilePart4Error =
+            event.reason?.stack ||
+            event.reason?.message ||
+            String(event.reason)),
+      );
+      addEventListener(
+        "error",
+        (event) =>
+          (window.__mobilePart4Error = event.error?.stack || event.message),
+      );
+      addEventListener("load", () => setTimeout(() => scrollTo(0, 0), 160));
+    </script>
+  </body>
+</html>

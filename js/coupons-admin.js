@@ -88,7 +88,7 @@
   function render() {
     if (!context().internal)
       return `<section class="panel empty-state"><h2>Acesso restrito</h2><p>Somente a conta interna autorizada pode administrar cupons.</p></section>`;
-    return `<section class="coupons-admin" data-coupons-admin><header class="coupons-heading"><div><h1>Cupons de desconto</h1><p>Crie, acompanhe e encerre promoções dos seus planos.</p></div><button class="btn btn-primary" data-new-coupon>${icon("plus")} Criar cupom</button></header><section class="coupon-kpis" data-coupon-kpis>${kpis([])}</section><div class="coupon-toolbar"><label>${icon("search")}<input data-coupon-search placeholder="Buscar código, nome ou campanha…"></label><button class="btn btn-light" data-refresh-coupons>${icon("refresh-cw")} Atualizar</button></div><nav class="coupon-filters" aria-label="Filtros">${[
+    return `<section class="coupons-admin" data-coupons-admin><header class="coupons-heading"><div><span>Administração global protegida</span><h1>Cupons de desconto</h1><p>Crie e acompanhe condições comerciais dos planos.</p></div><button class="btn btn-primary" data-new-coupon>${icon("plus")} Novo cupom</button></header><section class="coupon-kpis" data-coupon-kpis>${kpis([])}</section><div class="coupon-toolbar"><label>${icon("search")}<input data-coupon-search value="${esc(state.search)}" placeholder="Buscar código, nome ou campanha…"></label><button class="btn btn-light" data-refresh-coupons aria-label="Atualizar">${icon("refresh-cw")} <span>Atualizar</span></button></div><nav class="coupon-filters" aria-label="Filtros">${[
       ["all", "Todos"],
       ["active", "Ativos"],
       ["scheduled", "Agendados"],
@@ -129,7 +129,7 @@
       .join("");
   }
   function card(item) {
-    return `<article class="coupon-card" data-coupon-id="${item.id}"><header><div><code>${esc(item.code)}</code><h3>${esc(item.name)}</h3><small>${esc(item.campaign || (item.category === "private" ? "Privado" : "Promocional"))}</small></div><span class="coupon-status ${item.status}">${statusLabel[item.status] || item.status}</span></header><dl><div><dt>Desconto</dt><dd>${esc(discount(item))}</dd></div><div><dt>Planos</dt><dd>${item.allowedPlanIds.map(esc).join(", ")}</dd></div><div><dt>Validade</dt><dd>${esc(dates(item))}</dd></div><div><dt>Usos</dt><dd>${Number(item.redemptionCount || 0)} de ${item.maxRedemptions ?? "∞"}</dd></div></dl><footer><button data-coupon-details>Ver detalhes</button><button data-coupon-edit>Editar</button>${item.status === "paused" ? '<button data-coupon-action="reactivate">Reativar</button>' : item.status === "active" ? '<button data-coupon-action="pause">Pausar</button>' : ""}<button data-coupon-duplicate>Duplicar</button>${!["ended", "expired"].includes(item.status) ? '<button class="danger" data-coupon-action="end">Encerrar</button>' : ""}</footer></article>`;
+    return `<article class="coupon-card" data-coupon-id="${item.id}"><header><div><code>${esc(item.code)}</code><h3>${esc(item.name)}</h3><small>${esc(item.campaign || (item.category === "private" ? "Privado" : "Promocional"))}</small></div><span class="coupon-status ${item.status}">${statusLabel[item.status] || item.status}</span></header><div class="coupon-discount-callout"><span>${esc(typeLabel[item.discountType] || item.discountType)}</span><b>${esc(discount(item))}</b></div><dl><div><dt>Planos</dt><dd>${(item.allowedPlanIds || []).map(esc).join(", ")}</dd></div><div><dt>Validade</dt><dd>${esc(dates(item))}</dd></div><div><dt>Usos</dt><dd>${Number(item.redemptionCount || 0)} de ${item.maxRedemptions ?? "∞"}</dd></div></dl><footer><button class="primary" data-coupon-details>Detalhes</button><button data-coupon-edit>Editar</button>${item.status === "paused" ? '<button data-coupon-action="reactivate">Reativar</button>' : item.status === "active" ? '<button data-coupon-action="pause">Pausar</button>' : ""}<button data-coupon-duplicate>Duplicar</button>${!["ended", "expired"].includes(item.status) ? '<button class="danger" data-coupon-action="end">Encerrar</button>' : ""}</footer></article>`;
   }
   function paint() {
     const list = $("[data-coupon-list]"),
@@ -211,7 +211,7 @@
   }
   function openForm(coupon = {}) {
     const modal = $("#modal");
-    modal.innerHTML = `<div class="modal-bg"><section class="modal-box coupon-editor">${formTemplate(coupon)}</section></div>`;
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal coupon-editor">${formTemplate(coupon)}</section></div>`;
     const categoryField = $('select[name="category"]', modal)?.closest(
       ".field",
     );
@@ -237,6 +237,13 @@
     $$("[data-close-coupon]", modal).forEach(
       (button) => (button.onclick = () => (modal.innerHTML = "")),
     );
+    const codeInput = $('[name="code"]', modal);
+    if (codeInput)
+      codeInput.addEventListener("input", () => {
+        codeInput.value = codeInput.value
+          .toUpperCase()
+          .replace(/[^A-Z0-9_-]/g, "");
+      });
     $("[data-coupon-form]", modal).onsubmit = async (event) => {
       event.preventDefault();
       const form = event.currentTarget,
@@ -270,6 +277,31 @@
         data[key] = data[key] === "" ? null : Number(data[key]);
       data.discountValue = Number(data.discountValue);
       data.status = data.status || coupon.status || "draft";
+      if (!data.allowedPlanIds.length)
+        return Utils.toast("Selecione pelo menos um plano.", true);
+      if (!data.allowedBillingCycles.length)
+        return Utils.toast("Selecione pelo menos uma periodicidade.", true);
+      if (
+        data.discountType === "percentage" &&
+        (data.discountValue <= 0 || data.discountValue > 100)
+      )
+        return Utils.toast(
+          "O desconto percentual deve ficar entre 0,01% e 100%.",
+          true,
+        );
+      if (data.discountType !== "percentage" && data.discountValue <= 0)
+        return Utils.toast("Informe um valor maior que zero.", true);
+      if (data.durationType === "billing_cycles" && !data.billingCycles)
+        return Utils.toast("Informe a quantidade de cobranças.", true);
+      if (
+        data.validFrom &&
+        data.validUntil &&
+        new Date(data.validFrom) >= new Date(data.validUntil)
+      )
+        return Utils.toast(
+          "A data final deve ser posterior à data inicial.",
+          true,
+        );
       button.disabled = true;
       try {
         await call("saveAdminCoupon", {
@@ -289,7 +321,7 @@
   async function details(id) {
     const modal = $("#modal");
     modal.innerHTML =
-      '<div class="modal-bg"><section class="modal-box coupon-details"><div class="coupon-loading">Carregando detalhes…</div></section></div>';
+      '<div class="modal-bg"><section class="modal-box mobile-modal coupon-details"><div class="coupon-loading">Carregando detalhes…</div></section></div>';
     try {
       const result = await call("getAdminCoupon", { couponId: id }),
         coupon = result.coupon,
@@ -325,6 +357,76 @@
     }
     window.lucide?.createIcons();
   }
+  function duplicateDialog(id) {
+    const modal = $("#modal");
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal coupon-action-dialog"><header class="modal-head"><div><h3>Duplicar cupom</h3><small>A cópia começa como um novo registro.</small></div><button class="icon-btn mobile-icon-button" data-close-coupon>${icon("x")}</button></header><form><div class="modal-body"><div class="field"><label>Novo código</label><input name="code" required maxlength="40" pattern="[A-Za-z0-9_-]+" autocomplete="off" autocapitalize="characters" placeholder="NOVO_CODIGO"></div></div><footer class="modal-foot"><button type="button" class="btn btn-light mobile-button" data-close-coupon>Cancelar</button><button class="btn btn-primary mobile-button primary">Duplicar</button></footer></form></section></div>`;
+    $$("[data-close-coupon]", modal).forEach(
+      (button) => (button.onclick = () => (modal.innerHTML = "")),
+    );
+    const input = $("input", modal);
+    input.oninput = () =>
+      (input.value = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""));
+    $("form", modal).onsubmit = async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await call("duplicateAdminCoupon", {
+          couponId: id,
+          code: input.value,
+        });
+        modal.innerHTML = "";
+        Utils.toast("Cupom duplicado.");
+        await load();
+      } catch (error) {
+        button.disabled = false;
+        Utils.toast(error.message || "Não foi possível duplicar.", true);
+      }
+    };
+    window.lucide?.createIcons();
+  }
+  function actionDialog(id, action) {
+    const modal = $("#modal"),
+      labels = {
+        pause: [
+          "Pausar cupom?",
+          "Novas utilizações serão bloqueadas até a reativação.",
+          "Pausar",
+        ],
+        reactivate: [
+          "Reativar cupom?",
+          "As regras e a validade voltarão a ser aplicadas.",
+          "Reativar",
+        ],
+        end: [
+          "Encerrar cupom?",
+          "Esta ação encerra permanentemente novas utilizações e não apaga o histórico.",
+          "Encerrar",
+        ],
+      },
+      copy = labels[action] || [
+        "Atualizar cupom?",
+        "Confirme a alteração de status.",
+        "Confirmar",
+      ];
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal coupon-action-dialog"><header class="modal-head"><div><h3>${copy[0]}</h3><small>Administração global protegida</small></div><button class="icon-btn mobile-icon-button" data-close-coupon>${icon("x")}</button></header><div class="modal-body"><p>${copy[1]}</p></div><footer class="modal-foot"><button type="button" class="btn btn-light mobile-button" data-close-coupon>Voltar</button><button type="button" class="btn ${action === "end" ? "btn-danger" : "btn-primary"} mobile-button ${action === "end" ? "" : "primary"}" data-confirm-coupon-action>${copy[2]}</button></footer></section></div>`;
+    $$("[data-close-coupon]", modal).forEach(
+      (button) => (button.onclick = () => (modal.innerHTML = "")),
+    );
+    $("[data-confirm-coupon-action]", modal).onclick = async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        await call("actionAdminCoupon", { couponId: id, action });
+        modal.innerHTML = "";
+        Utils.toast("Cupom atualizado.");
+        await load();
+      } catch (error) {
+        event.currentTarget.disabled = false;
+        Utils.toast(error.message || "Não foi possível atualizar.", true);
+      }
+    };
+    window.lucide?.createIcons();
+  }
   function bindCards() {
     $$("[data-coupon-id]").forEach((card) => {
       const id = card.dataset.couponId;
@@ -337,35 +439,11 @@
           Utils.toast(error.message, true);
         }
       };
-      $("[data-coupon-duplicate]", card).onclick = () => {
-        const code = prompt("Novo código para a cópia:");
-        if (!code) return;
-        call("duplicateAdminCoupon", { couponId: id, code })
-          .then(() => {
-            Utils.toast("Cupom duplicado.");
-            load();
-          })
-          .catch((error) => Utils.toast(error.message, true));
-      };
+      $("[data-coupon-duplicate]", card).onclick = () => duplicateDialog(id);
       $$("[data-coupon-action]", card).forEach(
         (button) =>
-          (button.onclick = () => {
-            const action = button.dataset.couponAction;
-            if (
-              !confirm(
-                action === "end"
-                  ? "Encerrar este cupom permanentemente?"
-                  : "Confirmar esta alteração?",
-              )
-            )
-              return;
-            call("actionAdminCoupon", { couponId: id, action })
-              .then(() => {
-                Utils.toast("Cupom atualizado.");
-                load();
-              })
-              .catch((error) => Utils.toast(error.message, true));
-          }),
+          (button.onclick = () =>
+            actionDialog(id, button.dataset.couponAction)),
       );
     });
   }
@@ -392,8 +470,12 @@
     load();
   }
   function syncAccess() {
-    $$('[data-route="cupons"]').forEach((link) => (link.hidden = !context().internal));
-    $$('[data-mobile-developer]').forEach((section) => (section.hidden = !context().internal));
+    $$('[data-route="cupons"]').forEach(
+      (link) => (link.hidden = !context().internal),
+    );
+    $$("[data-mobile-developer]").forEach(
+      (section) => (section.hidden = !context().internal),
+    );
   }
   addEventListener("business-context-changed", syncAccess);
   addEventListener("firebase-auth-ready", syncAccess);

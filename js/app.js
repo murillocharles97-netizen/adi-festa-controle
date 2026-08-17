@@ -3,8 +3,7 @@
   const $ = (s, e = document) => e.querySelector(s),
     $$ = (s, e = document) => [...e.querySelectorAll(s)],
     { dinheiro, dataHora, escapar, telefoneWhatsApp, toast } = Utils;
-  let carrinho = [],
-    historicoLimite = 100;
+  let carrinho = [];
   const desktopProductState = { query: "", filter: "todos", limit: 40 };
   const icon = (n) => `<i data-lucide="${n}"></i>`,
     cartKey = (item) =>
@@ -64,6 +63,28 @@
       "Cancelar e registrar ajuste",
     );
   }
+  function requestSafeSaleUndo(saleId = "") {
+    const latest = Vendas.ultima?.();
+    if (!latest || (saleId && String(latest.id) !== String(saleId))) {
+      toast("Somente a venda mais recente pode ser desfeita com segurança", true);
+      return;
+    }
+    abrirFormulario(
+      "Desfazer última venda",
+      "<p>O estoque, o saldo do cliente, as campanhas e as renovações vinculadas serão restaurados pelo fluxo seguro.</p>",
+      () => {
+        try {
+          Vendas.desfazerUltima();
+          toast("Venda desfeita com sucesso");
+        } catch (error) {
+          if (error?.code !== "campaign-redemption-conflict") throw error;
+          setTimeout(() => abrirResolucaoCancelamento(error), 0);
+        }
+      },
+      "Desfazer venda",
+    );
+  }
+  window.requestSafeSaleUndo = requestSafeSaleUndo;
   function resumoFechamento() {
     const d = DB.carregar(),
       vendas = d.vendas.filter((v) => Utils.hoje(v.data)),
@@ -326,15 +347,7 @@
     return `<section class="panel"><div class="panel-head"><h3>${titulo}</h3></div>${lista.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Status</th><th>Valor</th></tr></thead><tbody>${lista.map((v) => `<tr><td>${dataHora(v.data)}</td><td>${escapar(v.clienteNome || "Venda avulsa")}</td><td><span class="badge ${v.status === "pago" ? "badge-paid" : "badge-debt"}">${v.status}</span></td><td><b>${dinheiro(v.valorTotal)}</b></td></tr>`).join("")}</tbody></table></div>` : vazio("Nenhuma venda registrada")}</section>`;
   }
   function historico() {
-    const d = DB.carregar(),
-      todos = [...d.movimentacoes].sort(
-        (a, b) => new Date(b.data) - new Date(a.data),
-      ),
-      eventos = todos.slice(0, historicoLimite);
-    return (
-      cabecalho("Histórico", "Vendas, pagamentos, descontos e ajustes.") +
-      `<section class="panel"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Detalhe</th></tr></thead><tbody>${eventos.map((e) => `<tr><td>${dataHora(e.data)}</td><td>${escapar(e.clienteNome || "Venda avulsa")}</td><td><span class="badge badge-paid">${escapar(e.tipo.replaceAll("_", " "))}</span></td><td>${e.tipo === "ajuste_saldo" ? `${dinheiro(e.saldoAnterior)} → ${dinheiro(e.saldoNovo)} · ${escapar(e.motivo)}` : e.valor !== undefined ? dinheiro(e.valor) : e.valorFinal !== undefined ? dinheiro(e.valorFinal) : "—"}</td></tr>`).join("")}</tbody></table></div>${todos.length > eventos.length ? `<div class="modal-foot"><button class="btn btn-light" data-load-history>Carregar mais</button></div>` : ""}</section>`
-    );
+    return window.ActivityCenter?.render?.() || vazio("Histórico indisponível");
   }
   function relatorios() {
     if (matchMedia("(max-width:767px)").matches)
@@ -1208,6 +1221,7 @@
     if (route === "catalogo") CatalogoUI.bind();
     if (route === "pedidos") VisitasUI.bindOrdersPage();
     if (route === "campanhas") CampanhasUI.bind();
+    if (route === "historico") window.ActivityCenter?.bind?.();
     if (route === "planos") window.PlansUI.bind($("#app"));
     if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
@@ -1284,25 +1298,8 @@
         `https://wa.me/?text=${encodeURIComponent(resumoFechamento().texto)}`,
         "_blank",
       );
-    if (b.hasAttribute("data-load-history")) {
-      historicoLimite += 100;
-      mountRoute("historico");
-    }
     if (b.hasAttribute("data-undo-sale"))
-      abrirFormulario(
-        "Desfazer última venda",
-        "<p>Tem certeza que deseja desfazer a última venda? O saldo e o estoque serão restaurados.</p>",
-        () => {
-          try {
-            Vendas.desfazerUltima();
-            toast("Venda desfeita com sucesso");
-          } catch (error) {
-            if (error?.code !== "campaign-redemption-conflict") throw error;
-            setTimeout(() => abrirResolucaoCancelamento(error), 0);
-          }
-        },
-        "Desfazer venda",
-      );
+      requestSafeSaleUndo();
   });
   addEventListener("load", () => window.lucide?.createIcons());
   let cloudRenderTimer = null,
@@ -1448,7 +1445,6 @@
   });
   addEventListener("firebase-session-cleared", () => {
     carrinho = [];
-    historicoLimite = 100;
     $("#modal").innerHTML = "";
     document.body.classList.remove("sale-sheet-open");
   });
