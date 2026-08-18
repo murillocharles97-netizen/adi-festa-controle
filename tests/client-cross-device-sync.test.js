@@ -191,18 +191,19 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
   assert.doesNotMatch(syncSource, /setInterval\([^)]*ensureClientProjection/);
 });
 
-test("toda a cadeia de módulos da sincronização invalida o cache na release 99", () => {
-  assert.match(authSource, /import ['"]\.\/sync\.js\?v=99['"]/);
-  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=99['"]/);
+test("toda a cadeia de módulos da sincronização invalida o cache na release 100", () => {
+  assert.match(authSource, /import ['"]\.\/sync\.js\?v=100['"]/);
+  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=100['"]/);
   assert.match(
     syncSource,
-    /from ['"]\.\/firestore-repository\.js\?v=99['"]/,
+    /from ['"]\.\/firestore-repository\.js\?v=100['"]/,
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=99[\s\S]*js\/firebase\/firebase-ui\.js\?v=99/,
+    /js\/firebase\/auth\.js\?v=100[\s\S]*js\/firebase\/firebase-ui\.js\?v=100/,
   );
-  assert.match(serviceWorkerSource, /adi-festa-v99-client-sync-imports/);
+  assert.match(indexSource, /financial-concurrency\.js\?v=100/);
+  assert.match(serviceWorkerSource, /adi-festa-v100-financial-concurrency/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

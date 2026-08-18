@@ -146,6 +146,10 @@ async function main() {
           if (filenames[state]) await screenshot(cdp, filenames[state]);
         }
       }
+      const conflictUrl = `http://127.0.0.1:${port}/tests/payment-conflict.fixture.html`;
+      await navigate(cdp, conflictUrl, `window.__paymentConflictFixtureReady&&document.querySelector('.financial-conflict-modal')`);
+      await collect(cdp, report, viewport, "financial-payment-conflict");
+      if (width === 390) await screenshot(cdp, "11-financial-payment-conflict-390x844.png");
     }
 
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true, screenWidth: 390, screenHeight: 844 });

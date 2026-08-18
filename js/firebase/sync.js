@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=99";
+import { createFirestoreRepository } from "./firestore-repository.js?v=100";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -280,6 +280,10 @@ const roundedMoney = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? Number(number.toFixed(2)) : Number.NaN;
 };
+const financialVersionOf = (client = {}) =>
+  Math.max(0, Number(client.financialVersion || 0));
+const sameFinancialMoney = (left, right) =>
+  Math.abs(roundedMoney(left) - roundedMoney(right)) < 0.005;
 const balanceEffectId = (type, sourceId) =>
   `${type}:${String(sourceId || "").replaceAll("/", "_")}`;
 function financialEffectFromWrites(
@@ -1416,6 +1420,13 @@ async function commitQueueItem(item) {
       operationId,
       eventKind,
     ),
+    paymentWrite = writes.find(
+      (write) =>
+        write.entityType === "payments" && write.operation === "create",
+    ),
+    confirmedConflictId = String(
+      paymentWrite?.data?.confirmedConflictId || "",
+    ),
     financialEffectReference = financialEffect
       ? doc(
           db,
@@ -1425,6 +1436,7 @@ async function commitQueueItem(item) {
           financialEffect.id,
         )
       : null;
+  let transactionOutcome = null;
   if (
     financialEffect &&
     !writes.some(
@@ -1472,6 +1484,18 @@ async function commitQueueItem(item) {
     const financialEffectSnapshot = financialEffectReference
       ? await transaction.get(financialEffectReference)
       : null;
+    const confirmedConflictReference = confirmedConflictId
+        ? doc(
+            db,
+            "businesses",
+            businessId,
+            "payments",
+            confirmedConflictId,
+          )
+        : null,
+      confirmedConflictSnapshot = confirmedConflictReference
+        ? await transaction.get(confirmedConflictReference)
+        : null;
     const alreadyApplied = writes.some((write) => {
       if (!IDEMPOTENT_EVENT_NAMES.has(write.entityType)) return false;
       const snapshot = snapshots.get(`${write.entityType}:${write.entityId}`);
@@ -1480,6 +1504,139 @@ async function commitQueueItem(item) {
         String(snapshot.data()?.operationId || "") === operationId
       );
     });
+    if (financialEffect?.type === "payment_received" && paymentWrite) {
+      const paymentSnapshot = snapshots.get(
+          `payments:${paymentWrite.entityId}`,
+        ),
+        existingPayment = paymentSnapshot?.exists()
+          ? paymentSnapshot.data() || {}
+          : null,
+        clientSnapshot = snapshots.get(
+          `clients:${financialEffect.customerId}`,
+        ),
+        remoteClient = clientSnapshot?.exists()
+          ? clientSnapshot.data() || {}
+          : {},
+        expectedBalance = roundedMoney(
+          paymentWrite.data?.expectedBalance ??
+            paymentWrite.data?.saldoAnterior,
+        ),
+        expectedFinancialVersion = Math.max(
+          0,
+          Number(paymentWrite.data?.expectedFinancialVersion || 0),
+        ),
+        actualBalance = roundedMoney(remoteClient.saldo || 0),
+        actualFinancialVersion = financialVersionOf(remoteClient),
+        stateDependent =
+          paymentWrite.data?.financialStateDependent === true,
+        staleBalance =
+          stateDependent && !sameFinancialMoney(expectedBalance, actualBalance),
+        staleVersion =
+          stateDependent &&
+          expectedFinancialVersion !== actualFinancialVersion;
+      if (
+        existingPayment?.status === "conflict" &&
+        String(existingPayment.operationId || "") === operationId
+      ) {
+        transactionOutcome = {
+          status: "financial_conflict",
+          paymentId: String(paymentWrite.entityId),
+          clientId: financialEffect.customerId,
+          clientName:
+            paymentWrite.data?.clienteNome || remoteClient.nome || "",
+          amount: financialEffect.amount,
+          expectedBalance: roundedMoney(
+            existingPayment.expectedBalance ?? expectedBalance,
+          ),
+          actualBalance: roundedMoney(
+            existingPayment.conflictActualBalance ?? actualBalance,
+          ),
+          expectedFinancialVersion: Number(
+            existingPayment.expectedFinancialVersion ??
+              expectedFinancialVersion,
+          ),
+          actualFinancialVersion: Number(
+            existingPayment.conflictActualFinancialVersion ??
+              actualFinancialVersion,
+          ),
+          reason: "stale_financial_state",
+        };
+        return;
+      }
+      if (confirmedConflictId) {
+        const conflict = confirmedConflictSnapshot?.exists()
+          ? confirmedConflictSnapshot.data() || {}
+          : null;
+        if (
+          !conflict ||
+          conflict.status !== "conflict" ||
+          String(conflict.clienteId || conflict.clientId || "") !==
+            financialEffect.customerId ||
+          !sameFinancialMoney(
+            conflict.valor ?? conflict.amount,
+            financialEffect.amount,
+          )
+        )
+          throw Object.assign(
+            new Error("O conflito de pagamento não está mais disponível."),
+            { code: "payment-conflict-resolution-stale" },
+          );
+      }
+      if (staleBalance || staleVersion) {
+        currentPath = `businesses/${businessId}/payments/${paymentWrite.entityId}`;
+        transaction.set(
+          doc(
+            db,
+            "businesses",
+            businessId,
+            "payments",
+            String(paymentWrite.entityId),
+          ),
+          sanitizeForFirestore({
+            ...paymentWrite.data,
+            id: String(paymentWrite.entityId),
+            operationId,
+            idempotencyKey: operationId,
+            businessId,
+            ownerId: currentUser.uid,
+            status: "conflict",
+            applicationStatus: "not_applied",
+            conflictReason: "stale_financial_state",
+            conflictDetectedAt: serverTimestamp(),
+            conflictActualBalance: actualBalance,
+            conflictActualFinancialVersion: actualFinancialVersion,
+            allocations: [],
+            campaignConfirmations: [],
+            allocatedAmount: 0,
+            legacyAmount: 0,
+            financialAppliedAt: null,
+            financialOperationId: null,
+            updatedAt: serverTimestamp(),
+            createdAt:
+              paymentWrite.data?.createdAt ||
+              paymentWrite.data?.data ||
+              serverTimestamp(),
+            schemaVersion: 3,
+            version: 1,
+          }),
+          { merge: true },
+        );
+        transactionOutcome = {
+          status: "financial_conflict",
+          paymentId: String(paymentWrite.entityId),
+          clientId: financialEffect.customerId,
+          clientName:
+            paymentWrite.data?.clienteNome || remoteClient.nome || "",
+          amount: financialEffect.amount,
+          expectedBalance,
+          actualBalance,
+          expectedFinancialVersion,
+          actualFinancialVersion,
+          reason: "stale_financial_state",
+        };
+        return;
+      }
+    }
     if (eventKind === "campaign_redemption" && !alreadyApplied) {
       const progressWrite = writes.find((write) => write.entityType === "campaignProgress");
       if (!progressWrite?.before) {
@@ -1592,6 +1749,12 @@ async function commitQueueItem(item) {
             merged[field] =
               Number(base[field] ?? write.before?.[field] ?? 0) +
               (Number(data[field]) - Number(write.before?.[field] ?? 0));
+        if (
+          write.entityType === "clients" &&
+          financialEffect &&
+          String(write.entityId) === String(financialEffect.customerId)
+        )
+          merged.financialVersion = financialVersionOf(base) + 1;
         if (write.entityType === "campaignProgress") {
           const campaignId = String(data.campaignId || write.before?.campaignId || ""),
             campaign = snapshots.get(`campaigns:${campaignId}`)?.data() || {},
@@ -1644,10 +1807,25 @@ async function commitQueueItem(item) {
         {
           financialAppliedAt: serverTimestamp(),
           financialOperationId: financialEffect.id,
+          status: "applied",
+          applicationStatus: "applied",
           updatedAt: serverTimestamp(),
         },
         { merge: true },
       );
+      if (confirmedConflictReference)
+        transaction.set(
+          confirmedConflictReference,
+          {
+            status: "confirmed",
+            applicationStatus: "superseded_by_confirmation",
+            resolvedAt: serverTimestamp(),
+            resolutionOperationId: operationId,
+            confirmedPaymentId: financialEffect.sourceDocumentId,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
     }
     currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
     transaction.set(
@@ -1665,6 +1843,83 @@ async function commitQueueItem(item) {
       }),
     );
   });
+  return transactionOutcome;
+}
+function rollbackPaymentConflict(item, conflict) {
+  if (!originalAlter || !conflict?.paymentId) return;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      for (const write of [...(item.payload?.writes || [])].reverse()) {
+        const source = SOURCES[write.entityType];
+        if (!source || write.entityType === "settings") continue;
+        const list = Array.isArray(data[source.key]) ? data[source.key] : [],
+          index = list.findIndex(
+            (entry) => String(entry.id) === String(write.entityId),
+          );
+        if (
+          write.entityType === "payments" &&
+          write.operation === "create"
+        )
+          continue;
+        if (write.operation === "create") {
+          if (index >= 0) list.splice(index, 1);
+          continue;
+        }
+        if (write.before) {
+          if (index >= 0) list[index] = structuredClone(write.before);
+          else list.push(structuredClone(write.before));
+        }
+      }
+      const client = (data.clientes || []).find(
+        (entry) => String(entry.id) === String(conflict.clientId),
+      );
+      if (client) {
+        client.saldo = roundedMoney(conflict.actualBalance);
+        client.financialVersion = Math.max(
+          0,
+          Number(conflict.actualFinancialVersion || 0),
+        );
+      }
+      const payment = (data.pagamentos || []).find(
+        (entry) => String(entry.id) === String(conflict.paymentId),
+      );
+      if (payment)
+        Object.assign(payment, {
+          status: "conflict",
+          applicationStatus: "not_applied",
+          conflictReason: conflict.reason,
+          conflictDetectedAt: now(),
+          conflictActualBalance: roundedMoney(conflict.actualBalance),
+          conflictActualFinancialVersion: Number(
+            conflict.actualFinancialVersion || 0,
+          ),
+          allocations: [],
+          campaignConfirmations: [],
+          allocatedAmount: 0,
+          legacyAmount: 0,
+        });
+      const movement = (data.movimentacoes || []).find(
+        (entry) => String(entry.id) === String(conflict.paymentId),
+      );
+      if (movement)
+        Object.assign(movement, {
+          status: "conflict",
+          applicationStatus: "not_applied",
+          conflictReason: conflict.reason,
+          conflictActualBalance: roundedMoney(conflict.actualBalance),
+          conflictActualFinancialVersion: Number(
+            conflict.actualFinancialVersion || 0,
+          ),
+          allocations: [],
+          campaignConfirmations: [],
+          allocatedAmount: 0,
+          legacyAmount: 0,
+        });
+    });
+  } finally {
+    applyingCloud = false;
+  }
 }
 async function processSyncQueue(options = {}) {
   if (processingPromise) return processingPromise;
@@ -1698,6 +1953,7 @@ async function processSyncQueue(options = {}) {
       };
     await validateUser();
     let sent = 0,
+      financialConflicts = 0,
       index = 0,
       queue = readQueue(),
       changedCollections = new Set();
@@ -1756,11 +2012,27 @@ async function processSyncQueue(options = {}) {
         progress: Math.round(((index + 1) / Math.max(1, queue.length)) * 100),
       });
       try {
-        await commitQueueItem(live[position]);
+        const outcome = await commitQueueItem(live[position]);
         const after = readQueue().filter(
           (item) => item.queueId !== queued.queueId,
         );
         saveQueue(after);
+        if (outcome?.status === "financial_conflict") {
+          rollbackPaymentConflict(live[position], outcome);
+          financialConflicts++;
+          changedCollections.add("payments");
+          dispatchEvent(
+            new CustomEvent("financial-payment-conflict", {
+              detail: { ...outcome },
+            }),
+          );
+          emit({
+            status: "error",
+            message:
+              "Um pagamento precisa de confirmação porque o saldo mudou em outro dispositivo.",
+          });
+          break;
+        }
         for (const write of live[position].payload?.writes || [])
           if (CLOUD_NAMES.includes(write.entityType))
             changedCollections.add(write.entityType);
@@ -1811,6 +2083,7 @@ async function processSyncQueue(options = {}) {
     const counts = queueCounts();
     return {
       sent,
+      financialConflicts,
       pending: counts.total,
       errors: counts.errors,
       errorBreakdown: queueErrorBreakdown(),
@@ -3716,6 +3989,429 @@ async function restoreBackupData(prepared, mode = "merge") {
     );
   return report;
 }
+async function auditSuspiciousPayments(options = {}) {
+  await validateUser();
+  const businessId = activeBusinessId(),
+    [payments, effects, clients] = await Promise.all([
+      repositories.payments.listAllPaged(200),
+      financialEffectsRepository.listAllPaged(200),
+      repositories.clients.listAllPaged(200),
+    ]),
+    suspects =
+      window.FinancialConcurrency?.suspiciousPayments?.(
+        payments,
+        effects,
+        clients,
+        { hours: options.hours || 48 },
+      ) || [],
+    signedBalance = roundedMoney(
+      clients.reduce((sum, client) => sum + Number(client.saldo || 0), 0),
+    ),
+    openDebt = roundedMoney(
+      clients.reduce(
+        (sum, client) =>
+          sum + Math.abs(Math.min(0, Number(client.saldo || 0))),
+        0,
+      ),
+    );
+  return {
+    generatedAt: now(),
+    businessId,
+    windowHours: Math.max(1, Number(options.hours || 48)),
+    paymentsChecked: payments.length,
+    effectsChecked: effects.length,
+    clientsChecked: clients.length,
+    firestoreReads: payments.length + effects.length + clients.length,
+    signedBalance,
+    openDebt,
+    suspects: suspects.filter((item) => !item.resolved),
+    resolved: suspects.filter((item) => item.resolved),
+  };
+}
+async function reverseDuplicatePayment(options = {}) {
+  const session = await validateUser();
+  if (!["owner", "admin"].includes(String(session.profile?.role || "")))
+    throw Object.assign(
+      new Error("Somente proprietário ou administrador pode executar a reversão."),
+      { code: "permission-denied" },
+    );
+  const businessId = activeBusinessId(),
+    clientId = String(options.clientId || ""),
+    legitimatePaymentId = String(options.legitimatePaymentId || ""),
+    duplicatePaymentId = String(options.duplicatePaymentId || ""),
+    expectedBalance = roundedMoney(options.expectedBalance),
+    targetBalance = roundedMoney(options.targetBalance),
+    reason =
+      String(options.reason || "").trim() ||
+      "duplicate_payment_from_stale_projection",
+    operationId = String(
+      options.operationId ||
+        `duplicate-payment-reversal:${duplicatePaymentId}`,
+    ),
+    effectId = `payment_received:${duplicatePaymentId}`,
+    reversalEffectId = `payment_reversal:${duplicatePaymentId}`,
+    requestedAt = now();
+  if (!clientId || !legitimatePaymentId || !duplicatePaymentId)
+    throw Object.assign(
+      new Error("Informe cliente, pagamento legítimo e pagamento duplicado."),
+      { code: "invalid-argument" },
+    );
+  const markerReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "processedOperations",
+      operationId,
+    ),
+    clientReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "clients",
+      clientId,
+    ),
+    legitimateReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "payments",
+      legitimatePaymentId,
+    ),
+    duplicateReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "payments",
+      duplicatePaymentId,
+    ),
+    effectReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "balanceEvents",
+      effectId,
+    ),
+    reversalEffectReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "balanceEvents",
+      reversalEffectId,
+    ),
+    adjustmentReference = doc(
+      db,
+      "businesses",
+      businessId,
+      "balanceAdjustments",
+      operationId,
+    );
+  let outcome = null;
+  await runTransaction(db, async (transaction) => {
+    const markerSnapshot = await transaction.get(markerReference);
+    if (markerSnapshot.exists()) {
+      outcome = {
+        idempotent: true,
+        operationId,
+        clientId,
+        duplicatePaymentId,
+        legitimatePaymentId,
+        balanceBefore: expectedBalance,
+        balanceAfter: targetBalance,
+        amount: roundedMoney(expectedBalance - targetBalance),
+        reversalEffectId,
+      };
+      return;
+    }
+    const [
+        clientSnapshot,
+        legitimateSnapshot,
+        duplicateSnapshot,
+        effectSnapshot,
+        reversalEffectSnapshot,
+        adjustmentSnapshot,
+      ] = await Promise.all([
+        transaction.get(clientReference),
+        transaction.get(legitimateReference),
+        transaction.get(duplicateReference),
+        transaction.get(effectReference),
+        transaction.get(reversalEffectReference),
+        transaction.get(adjustmentReference),
+      ]),
+      client = clientSnapshot.exists() ? clientSnapshot.data() || {} : null,
+      legitimate = legitimateSnapshot.exists()
+        ? legitimateSnapshot.data() || {}
+        : null,
+      duplicate = duplicateSnapshot.exists()
+        ? duplicateSnapshot.data() || {}
+        : null,
+      effect = effectSnapshot.exists() ? effectSnapshot.data() || {} : null;
+    if (!client || !legitimate || !duplicate || !effect)
+      throw Object.assign(
+        new Error("Os documentos financeiros necessários não foram encontrados."),
+        { code: "not-found" },
+      );
+    const amount = roundedMoney(duplicate.valor ?? duplicate.amount),
+      currentBalance = roundedMoney(client.saldo || 0),
+      correctedBalance = roundedMoney(currentBalance - amount),
+      financialVersionBefore = financialVersionOf(client);
+    if (
+      amount <= 0 ||
+      effect.type !== "payment_received" ||
+      String(effect.sourceDocumentId || "") !== duplicatePaymentId ||
+      effect.status !== "applied" ||
+      !sameFinancialMoney(effect.amount, amount) ||
+      String(effect.customerId || effect.clientId || "") !== clientId
+    )
+      throw Object.assign(
+        new Error("O efeito aplicado não corresponde ao pagamento duplicado."),
+        { code: "financial-effect-mismatch" },
+      );
+    if (
+      String(legitimate.clienteId || legitimate.clientId || "") !== clientId ||
+      String(duplicate.clienteId || duplicate.clientId || "") !== clientId ||
+      !sameFinancialMoney(
+        legitimate.valor ?? legitimate.amount,
+        amount,
+      )
+    )
+      throw Object.assign(
+        new Error("Os pagamentos não correspondem ao cliente e valor auditados."),
+        { code: "failed-precondition" },
+      );
+    if (
+      !sameFinancialMoney(currentBalance, expectedBalance) ||
+      !sameFinancialMoney(correctedBalance, targetBalance)
+    )
+      throw Object.assign(
+        new Error("O saldo mudou depois da prévia da reversão."),
+        {
+          code: "financial-preview-stale",
+          currentBalance,
+          expectedBalance,
+        },
+      );
+    if (
+      duplicate.status === "reversed" ||
+      reversalEffectSnapshot.exists() ||
+      adjustmentSnapshot.exists()
+    )
+      throw Object.assign(
+        new Error("A reversão já existe sem o marcador idempotente esperado."),
+        { code: "financial-reversal-state-conflict" },
+      );
+    if (
+      (duplicate.allocations || []).length ||
+      (duplicate.campaignConfirmations || []).length
+    )
+      throw Object.assign(
+        new Error("O pagamento possui efeitos de campanha e exige revisão manual."),
+        { code: "payment-campaign-reversal-required" },
+      );
+    const adjustment = sanitizeForFirestore({
+        id: operationId,
+        operationId,
+        idempotencyKey: operationId,
+        businessId,
+        ownerId: currentUser.uid,
+        clienteId: clientId,
+        clientId,
+        clienteNome: client.nome || duplicate.clienteNome || "",
+        tipo: "ajuste_saldo",
+        subtipo: "pagamento_duplicado_revertido",
+        valor: -amount,
+        saldoAnterior: currentBalance,
+        saldoNovo: correctedBalance,
+        motivo: "Pagamento registrado duas vezes em dispositivos diferentes.",
+        reversalReason: reason,
+        duplicatePaymentId,
+        duplicateOf: legitimatePaymentId,
+        reversesEffectId: effectId,
+        data: requestedAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        schemaVersion: 3,
+        version: 1,
+      }),
+      reversalEffect = sanitizeForFirestore({
+        id: reversalEffectId,
+        operationId,
+        idempotencyKey: reversalEffectId,
+        businessId,
+        ownerId: currentUser.uid,
+        customerId: clientId,
+        clientId,
+        sourceCollection: "payments",
+        sourceDocumentId: duplicatePaymentId,
+        type: "payment_reversal",
+        direction: "debit",
+        amount,
+        balanceDelta: -amount,
+        eventKind: "duplicate_payment_reversal",
+        reversesEffectId: effectId,
+        duplicateOf: legitimatePaymentId,
+        status: "applied",
+        sourceCreatedAt: requestedAt,
+        appliedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        schemaVersion: 3,
+      });
+    transaction.set(
+      clientReference,
+      {
+        businessId,
+        ownerId: currentUser.uid,
+        saldo: correctedBalance,
+        openBalance: Math.abs(Math.min(0, correctedBalance)),
+        financialVersion: financialVersionBefore + 1,
+        financialRevision: operationId,
+        financialReconciledAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        version: increment(1),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      duplicateReference,
+      {
+        businessId,
+        ownerId: currentUser.uid,
+        status: "reversed",
+        applicationStatus: "reversed",
+        reversalReason: reason,
+        reversedAt: serverTimestamp(),
+        reversedByOperationId: operationId,
+        duplicateOf: legitimatePaymentId,
+        reversalEffectId,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      effectReference,
+      {
+        businessId,
+        ownerId: currentUser.uid,
+        status: "reversed",
+        reversalReason: reason,
+        reversedAt: serverTimestamp(),
+        reversedByOperationId: operationId,
+        reversalEffectId,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(reversalEffectReference, reversalEffect);
+    transaction.set(adjustmentReference, adjustment);
+    transaction.set(
+      markerReference,
+      sanitizeForFirestore({
+        id: operationId,
+        idempotencyKey: operationId,
+        businessId,
+        ownerId: currentUser.uid,
+        status: "processed",
+        eventKind: "duplicate_payment_reversal",
+        processedAt: serverTimestamp(),
+        createdAtLocal: requestedAt,
+        schemaVersion: 3,
+      }),
+    );
+    outcome = {
+      idempotent: false,
+      operationId,
+      clientId,
+      clientName: client.nome || duplicate.clienteNome || "",
+      duplicatePaymentId,
+      legitimatePaymentId,
+      balanceBefore: currentBalance,
+      balanceAfter: correctedBalance,
+      amount,
+      financialVersionBefore,
+      financialVersionAfter: financialVersionBefore + 1,
+      reversalEffectId,
+      adjustmentId: operationId,
+      totalComprado: Number(client.totalComprado || 0),
+      quantidadeVendas: Number(client.quantidadeVendas || 0),
+      ultimaCompra: client.ultimaCompra || null,
+    };
+  });
+  if (outcome && originalAlter) {
+    applyingCloud = true;
+    try {
+      originalAlter((data) => {
+        const client = (data.clientes || []).find(
+            (entry) => String(entry.id) === clientId,
+          ),
+          duplicate = (data.pagamentos || []).find(
+            (entry) => String(entry.id) === duplicatePaymentId,
+          );
+        if (client) {
+          client.saldo = outcome.balanceAfter;
+          if (Number.isFinite(Number(outcome.financialVersionAfter)))
+            client.financialVersion = Number(outcome.financialVersionAfter);
+          client.openBalance = Math.abs(
+            Math.min(0, Number(outcome.balanceAfter || 0)),
+          );
+          client.financialRevision = operationId;
+        }
+        if (duplicate)
+          Object.assign(duplicate, {
+            status: "reversed",
+            applicationStatus: "reversed",
+            reversalReason: reason,
+            reversedAt: requestedAt,
+            reversedByOperationId: operationId,
+            duplicateOf: legitimatePaymentId,
+            reversalEffectId,
+          });
+        const duplicateMovement = (data.movimentacoes || []).find(
+          (entry) => String(entry.id) === duplicatePaymentId,
+        );
+        if (duplicateMovement)
+          Object.assign(duplicateMovement, {
+            status: "reversed",
+            applicationStatus: "reversed",
+            reversalReason: reason,
+            reversedAt: requestedAt,
+            reversedByOperationId: operationId,
+            duplicateOf: legitimatePaymentId,
+          });
+        if (
+          !outcome.idempotent &&
+          !(data.movimentacoes || []).some(
+            (entry) => String(entry.id) === operationId,
+          )
+        )
+          data.movimentacoes.push({
+            id: operationId,
+            operationId,
+            businessId,
+            clienteId: clientId,
+            clientId,
+            clienteNome: outcome.clientName,
+            tipo: "ajuste_saldo",
+            subtipo: "pagamento_duplicado_revertido",
+            valor: -outcome.amount,
+            saldoAnterior: outcome.balanceBefore,
+            saldoNovo: outcome.balanceAfter,
+            motivo: "Pagamento registrado duas vezes em dispositivos diferentes.",
+            reversalReason: reason,
+            duplicatePaymentId,
+            duplicateOf: legitimatePaymentId,
+            data: requestedAt,
+            schemaVersion: 3,
+          });
+      });
+    } finally {
+      applyingCloud = false;
+    }
+    notifyCloudCollectionChange("clients", 1);
+    notifyCloudCollectionChange("payments", 1);
+    notifyCloudCollectionChange("balanceAdjustments", 1);
+  }
+  return outcome;
+}
 async function safeRestoreBackupData(prepared, mode = "merge") {
   try {
     return await restoreBackupData(prepared, mode);
@@ -3878,6 +4574,9 @@ window.SyncFirebase = {
   notifyRemoteChange: (collections) => publishSyncSignal(collections),
   captureExternalChange,
   restoreBackupData: safeRestoreBackupData,
+  auditSuspiciousPayments,
+  reverseDuplicatePayment,
+  deviceId,
   clearLocalDevice,
   archiveQueue,
   snapshot: localSummary,

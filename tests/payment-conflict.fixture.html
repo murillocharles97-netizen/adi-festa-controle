@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Conflito financeiro — fixture</title>
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/mobile-components.css">
+  <link rel="stylesheet" href="../css/clientes-page.css">
+</head>
+<body>
+  <main id="app" aria-hidden="true"></main>
+  <div id="modal"></div>
+  <script>
+    window.Utils = { toast() {} };
+  </script>
+  <script src="../js/financial-concurrency.js"></script>
+  <script src="../js/fiados.js"></script>
+  <script>
+    window.Fiados.showConflict({
+      paymentId: "payment-device-b",
+      clientId: "kaike",
+      clientName: "Kaike Kings",
+      amount: 82.5,
+      expectedBalance: -82.5,
+      actualBalance: 0,
+      expectedFinancialVersion: 10,
+      actualFinancialVersion: 11,
+      reason: "stale_financial_state"
+    });
+    window.__paymentConflictFixtureReady = true;
+  </script>
+</body>
+</html>

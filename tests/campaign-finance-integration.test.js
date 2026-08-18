@@ -25,7 +25,7 @@ function environment(data) {
   };
   context.window = context;
   vm.createContext(context);
-  for (const file of ["campaign-engine-v2.js", "campanhas.js", "fiados.js", "vendas.js"]) {
+  for (const file of ["financial-concurrency.js", "campaign-engine-v2.js", "campanhas.js", "fiados.js", "vendas.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../js/${file}`), "utf8"), context);
   }
   return context;

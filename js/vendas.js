@@ -122,6 +122,9 @@ window.Vendas = (() => {
         custoTotal = itens.reduce((s, i) => s + i.custoTotal, 0),
         lucro = valorFinal - custoTotal,
         saldoAnterior = cliente ? Number(cliente.saldo || 0) : 0,
+        financialVersionAnterior = cliente
+          ? Math.max(0, Number(cliente.financialVersion || 0))
+          : 0,
         saldoAtual =
           d.status === "fiado" ? saldoAnterior - valorFinal : saldoAnterior;
       if (cliente && d.status === "fiado" && cliente.legacyBalance === undefined) {
@@ -154,6 +157,7 @@ window.Vendas = (() => {
         observacao: d.observacao || "",
         saldoAnterior,
         saldoAtual,
+        financialVersionAnterior,
         ajusteManual: Boolean(d.ajusteManual),
         descontoTipo: d.descontoTipo || null,
         campaignEngineVersion: 2,
@@ -228,7 +232,10 @@ window.Vendas = (() => {
         cliente.totalComprado = Number(cliente.totalComprado || 0) + valorFinal;
         cliente.quantidadeVendas = Number(cliente.quantidadeVendas || 0) + 1;
         cliente.ultimaCompra = criada.data;
-        if (d.status === "fiado") cliente.saldo = saldoAtual;
+        if (d.status === "fiado") {
+          cliente.saldo = saldoAtual;
+          cliente.financialVersion = financialVersionAnterior + 1;
+        }
         cliente.atualizadoEm = criada.data;
       }
       db.movimentacoes.push({
@@ -345,8 +352,11 @@ window.Vendas = (() => {
       });
       const cliente = db.clientes.find((c) => c.id === venda.clienteId);
       if (cliente) {
-        if (venda.status === "fiado")
+        if (venda.status === "fiado") {
           cliente.saldo = Number(venda.saldoAnterior || 0);
+          cliente.financialVersion =
+            Math.max(0, Number(cliente.financialVersion || 0)) + 1;
+        }
         cliente.totalComprado = Math.max(
           0,
           Number(cliente.totalComprado || 0) -
