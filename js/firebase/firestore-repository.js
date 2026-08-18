@@ -4,8 +4,10 @@ import {
   doc,
   documentId,
   endAt,
+  getCountFromServer,
   getDoc,
   getDocs,
+  getDocsFromServer,
   limit,
   onSnapshot,
   orderBy,
@@ -98,8 +100,21 @@ export function getBusinessDocumentRef(collectionName, id) {
 }
 
 export function createFirestoreRepository(collectionName) {
+  let lastReadMetadata = null;
   const collectionRef = () => getBusinessCollectionRef(collectionName);
   const documentRef = (id) => getBusinessDocumentRef(collectionName, id);
+  const snapshotMetadata = (snapshot, source = "default") => ({
+    collection: collectionName,
+    source,
+    fromCache: Boolean(snapshot?.metadata?.fromCache),
+    hasPendingWrites: Boolean(snapshot?.metadata?.hasPendingWrites),
+    documents: Number(snapshot?.size ?? (snapshot?.exists?.() ? 1 : 0)),
+    readAt: new Date().toISOString(),
+  });
+  const rememberMetadata = (snapshot, source) => {
+    lastReadMetadata = snapshotMetadata(snapshot, source);
+    return snapshot;
+  };
   const convert = (snapshot) =>
     snapshot.exists()
       ? normalizeFirestoreData({ id: snapshot.id, ...snapshot.data() })
@@ -121,6 +136,24 @@ export function createFirestoreRepository(collectionName) {
   return {
     get path() {
       return `businesses/${requireBusinessId()}/${collectionName}`;
+    },
+    getLastReadMetadata() {
+      return lastReadMetadata ? structuredClone(lastReadMetadata) : null;
+    },
+    async countFromServer() {
+      const snapshot = await timed("read", `${collectionName}:count`, async () => {
+        const aggregate = await getCountFromServer(collectionRef());
+        return { size: 1, data: () => aggregate.data() };
+      });
+      lastReadMetadata = {
+        collection: collectionName,
+        source: "server-count",
+        fromCache: false,
+        hasPendingWrites: false,
+        documents: 1,
+        readAt: new Date().toISOString(),
+      };
+      return Number(snapshot.data().count || 0);
     },
     async list(options = {}) {
       const key = cacheKey(requireBusinessId(), collectionName, "all"),
@@ -200,11 +233,11 @@ export function createFirestoreRepository(collectionName) {
         ),
         hit = !options.force && cached(key);
       if (hit) return hit;
-      const snapshot = await timed("read", collectionName, () =>
-        getDocs(
+      const snapshot = rememberMetadata(await timed("read", collectionName, () =>
+        getDocsFromServer(
           query(collectionRef(), orderBy("createdAt", "desc"), limit(max)),
         ),
-      );
+      ), "server");
       return cachePut(
         key,
         snapshot.docs
@@ -214,8 +247,8 @@ export function createFirestoreRepository(collectionName) {
     },
     async listChangedSince(since, max = 200) {
       if (!since) return this.list({ force: true });
-      const snapshot = await timed("read", collectionName, () =>
-        getDocs(
+      const snapshot = rememberMetadata(await timed("read", collectionName, () =>
+        getDocsFromServer(
           query(
             collectionRef(),
             where("updatedAt", ">", Timestamp.fromDate(new Date(since))),
@@ -223,15 +256,18 @@ export function createFirestoreRepository(collectionName) {
             limit(max),
           ),
         ),
-      );
+      ), "server");
       return snapshot.docs.map((item) => convert(item));
     },
     async listPage(cursor = null, max = 50) {
       const constraints = [orderBy("createdAt", "desc")];
       if (cursor) constraints.push(startAfter(cursor));
       constraints.push(limit(max));
-      const snapshot = await timed("read", collectionName, () =>
-        getDocs(query(collectionRef(), ...constraints)),
+      const snapshot = rememberMetadata(
+        await timed("read", collectionName, () =>
+          getDocsFromServer(query(collectionRef(), ...constraints)),
+        ),
+        "server",
       );
       return {
         items: snapshot.docs
@@ -262,8 +298,11 @@ export function createFirestoreRepository(collectionName) {
         constraints.push(endAt(`${prefix}\uf8ff`));
       } else if (options.cursor) constraints.push(startAfter(options.cursor));
       constraints.push(limit(max));
-      const snapshot = await timed("read", collectionName, () =>
-        getDocs(query(collectionRef(), ...constraints)),
+      const snapshot = rememberMetadata(
+        await timed("read", collectionName, () =>
+          getDocsFromServer(query(collectionRef(), ...constraints)),
+        ),
+        "server",
       );
       return {
         items: snapshot.docs
@@ -275,6 +314,7 @@ export function createFirestoreRepository(collectionName) {
         cursor: snapshot.docs.at(-1) || null,
         hasMore: snapshot.docs.length === max,
         documentsRead: snapshot.size,
+        metadata: snapshotMetadata(snapshot, "server"),
       };
     },
     async listAllPaged(max = 200) {
@@ -285,8 +325,11 @@ export function createFirestoreRepository(collectionName) {
         const constraints = [orderBy(documentId())];
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(max));
-        const snapshot = await timed("read", collectionName, () =>
-          getDocs(query(collectionRef(), ...constraints)),
+        const snapshot = rememberMetadata(
+          await timed("read", collectionName, () =>
+            getDocsFromServer(query(collectionRef(), ...constraints)),
+          ),
+          "server",
         );
         items.push(...snapshot.docs.map((item) => convert(item)));
         cursor = snapshot.docs.at(-1) || null;
@@ -307,7 +350,8 @@ export function createFirestoreRepository(collectionName) {
             source: first ? "initial" : "realtime",
           });
           first = false;
-          callback(snapshot.docs.map((item) => convert(item)));
+          lastReadMetadata = snapshotMetadata(snapshot, "listener");
+          callback(snapshot.docs.map((item) => convert(item)), lastReadMetadata);
         },
         (error) => {
           recordFirestoreOperation("listen", {
@@ -344,7 +388,8 @@ export function createFirestoreRepository(collectionName) {
             source: first ? "initial" : "realtime",
           });
           first = false;
-          callback(convert(snapshot));
+          lastReadMetadata = snapshotMetadata(snapshot, "listener");
+          callback(convert(snapshot), lastReadMetadata);
         },
         (error) => {
           recordFirestoreOperation("listen", {
@@ -380,7 +425,8 @@ export function createFirestoreRepository(collectionName) {
             source: first ? "initial" : "realtime",
           });
           first = false;
-          callback(snapshot.docs.map((item) => convert(item)));
+          lastReadMetadata = snapshotMetadata(snapshot, "listener");
+          callback(snapshot.docs.map((item) => convert(item)), lastReadMetadata);
         },
         (error) => {
           recordFirestoreOperation("listen", {

@@ -19,6 +19,8 @@ import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 const LEGACY_QUEUE_KEY = "adiFestaFirestoreQueue_v1",
   PULL_TTL_MS = 300000,
   PROFILE_TTL_MS = 300000,
+  CLIENT_PROJECTION_EPOCH = 2,
+  CLIENT_PROJECTION_CHECK_TTL_MS = 24 * 60 * 60 * 1000,
   MAX_WRITES = 350,
   PAYLOAD_VERSION = 4,
   DEVICE_ID_KEY = "adiFestaDeviceId";
@@ -186,6 +188,8 @@ const state = {
   listenerConnected: false,
   cloudNewest: {},
   cloudFinancial: {},
+  snapshotMetadata: {},
+  clientProjection: null,
   dataAudit: null,
 };
 
@@ -495,6 +499,28 @@ const readPullState = () => {
 };
 const writePullState = (value) =>
   localStorage.setItem(pullStateKey(), JSON.stringify(value));
+const clientProjectionKeys = (businessId = activeBusinessId()) => ({
+  epoch: `${businessId}:clients:projectionEpoch`,
+  checkedAt: `${businessId}:clients:projectionCheckedAt`,
+  remoteCount: `${businessId}:clients:projectionRemoteCount`,
+  projectedCount: `${businessId}:clients:projectionExpectedLocalCount`,
+});
+const projectionCheckDue = (value) => {
+  const timestamp = new Date(value || 0).getTime(),
+    elapsed = Date.now() - timestamp;
+  return !timestamp || elapsed < 0 || elapsed >= CLIENT_PROJECTION_CHECK_TTL_MS;
+};
+const rememberSnapshotMetadata = (name, metadata) => {
+  if (!metadata) return;
+  state.snapshotMetadata[name] = {
+    collection: metadata.collection || name,
+    source: metadata.source || "unknown",
+    fromCache: Boolean(metadata.fromCache),
+    hasPendingWrites: Boolean(metadata.hasPendingWrites),
+    documents: Number(metadata.documents || 0),
+    readAt: metadata.readAt || now(),
+  };
+};
 const newestTimestamp = (documents) =>
   documents.reduce((latest, item) => {
     const value =
@@ -803,6 +829,10 @@ const diagnostic = () => {
     localFiado: local.fiado,
     comparison: state.comparison,
     dataAudit: state.dataAudit || null,
+    snapshotMetadata: structuredClone(state.snapshotMetadata || {}),
+    clientProjection: state.clientProjection
+      ? structuredClone(state.clientProjection)
+      : null,
   };
 };
 const emit = (patch) => {
@@ -1808,26 +1838,6 @@ function cleanCloudItem(item) {
   clean.atualizadoEm ??= clean.updatedAt || clean.data;
   return clean;
 }
-const completenessScore = (item = {}) =>
-  Object.entries(item).reduce((score, [key, value]) => {
-    if (
-      [
-        "ownerId",
-        "businessId",
-        "updatedAt",
-        "atualizadoEm",
-        "version",
-        "revision",
-        "schemaVersion",
-        "source",
-      ].includes(key)
-    )
-      return score;
-    if (value === null || value === undefined || value === "") return score;
-    if (Array.isArray(value)) return score + Math.max(1, value.length);
-    if (typeof value === "object") return score + completenessScore(value);
-    return score + 1;
-  }, 0);
 function reconcileLocalAndCloud(
   entityType,
   local,
@@ -1894,11 +1904,10 @@ function reconcileLocalAndCloud(
       localTime = new Date(
         existing.updatedAt || existing.atualizadoEm || 0,
       ).getTime();
-    if (
-      !localTime ||
-      (remoteTime >= localTime &&
-        completenessScore(item) >= completenessScore(existing))
-    )
+    // Clientes só chegam aqui por leitura explícita do servidor. Sem write
+    // pendente para o mesmo ID, o cache local nunca pode vetar o documento
+    // oficial por causa de Date.now() ou relógio de aparelho adiantado.
+    if (entityType === "clients" || !localTime || remoteTime >= localTime)
       byId.set(id, { ...existing, ...item });
   }
   // Ausência na nuvem não é tombstone. Registros locais sem fila precisam
@@ -1995,7 +2004,7 @@ function applyCloudCollectionBatch(entries) {
 function registerRealtimeCollection(name, mode = "all") {
   const key = `${activeBusinessId()}:${name}:${mode}`;
   if (listenerRegistry.has(key)) return listenerRegistry.get(key);
-  const onDocuments = (documents) => {
+  const onDocuments = (documents, metadata) => {
       const list = Array.isArray(documents)
         ? documents
         : documents
@@ -2003,6 +2012,7 @@ function registerRealtimeCollection(name, mode = "all") {
           : [];
       state.cloudCounts[name] = list.filter((item) => !item?.deletedAt).length;
       state.cloudNewest[name] = newestTimestamp(list);
+      rememberSnapshotMetadata(name, metadata);
       if (name === "clients")
         state.cloudFinancial.fiado = list.reduce(
           (total, item) =>
@@ -2037,7 +2047,8 @@ function startCloudSubscriptions() {
   registerRealtimeCollection("settings", "document");
   const unsubscribe = syncSignalRepository.subscribeById(
     "last-sync",
-    (signal) => {
+    (signal, metadata) => {
+      rememberSnapshotMetadata("syncMetadata", metadata);
       const revision = String(
         signal?.revision || signal?.updatedAt || signal?.syncedAt || "",
       ),
@@ -2273,6 +2284,7 @@ async function pullCloudCollections(options = {}) {
               INITIAL_RECENT_LIMITS[name] || 100,
               { force: true },
             );
+    rememberSnapshotMetadata(name, repositories[name].getLastReadMetadata?.());
     if (!since) initialCollections++;
     documentsRead += documents.length;
     if (!since)
@@ -2304,6 +2316,30 @@ async function pullCloudCollections(options = {}) {
     pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
   received = applyCloudCollectionBatch(pendingApplications);
+  if (full && names.includes("clients")) {
+    const clientDocuments =
+        pendingApplications.find((entry) => entry.name === "clients")
+          ?.documents || [],
+      keys = clientProjectionKeys(businessId);
+    pullState[keys.epoch] = CLIENT_PROJECTION_EPOCH;
+    pullState[keys.checkedAt] = now();
+    pullState[keys.remoteCount] = clientDocuments.length;
+    pullState[keys.projectedCount] = clientDocuments.filter(
+      (item) => !item.deletedAt && item.active !== false,
+    ).length;
+    state.clientProjection = {
+      checked: true,
+      repaired: true,
+      reason: "manual-full-sync",
+      epoch: CLIENT_PROJECTION_EPOCH,
+      remoteCount: clientDocuments.length,
+      projectedCount: clientDocuments.filter(
+        (item) => !item.deletedAt && item.active !== false,
+      ).length,
+      documentsRead: clientDocuments.length,
+      pendingClientIds: pendingIds("clients").size,
+    };
+  }
   if (initialCollections)
     window.AppBootDiagnostics?.count?.("hydrateCount", {
       collections: initialCollections,
@@ -2326,6 +2362,105 @@ async function pullCloudCollections(options = {}) {
     full,
   });
   return received;
+}
+async function ensureClientProjection(options = {}) {
+  await validateUser();
+  if (!navigator.onLine)
+    return {
+      checked: false,
+      repaired: false,
+      reason: "offline",
+      documentsRead: 0,
+    };
+  const businessId = activeBusinessId(),
+    pullState = readPullState(),
+    keys = clientProjectionKeys(businessId),
+    localClients = sourceItems(DB.carregar(), "clients").filter(
+      (item) => !item.deletedAt && item.active !== false,
+    ),
+    epochCurrent = Number(pullState[keys.epoch] || 0),
+    previousRemoteCount = Number(pullState[keys.remoteCount] ?? -1),
+    expectedLocalCount = Number(pullState[keys.projectedCount] ?? -1),
+    epochRequired = epochCurrent !== CLIENT_PROJECTION_EPOCH,
+    checkDue = projectionCheckDue(pullState[keys.checkedAt]),
+    force = Boolean(options.force);
+  if (!force && !epochRequired && !checkDue) {
+    const result = {
+      checked: false,
+      repaired: false,
+      reason: "ttl",
+      epoch: CLIENT_PROJECTION_EPOCH,
+      localCount: localClients.length,
+      documentsRead: 0,
+    };
+    state.clientProjection = result;
+    return result;
+  }
+  let remoteCount = null;
+  if (!epochRequired || force)
+    remoteCount = await repositories.clients.countFromServer();
+  rememberSnapshotMetadata(
+    "clients:count",
+    repositories.clients.getLastReadMetadata?.(),
+  );
+  const needsRepair =
+    force ||
+    epochRequired ||
+    Number(remoteCount) !== previousRemoteCount ||
+    localClients.length < expectedLocalCount;
+  let documents = [],
+    changed = 0,
+    projectedCount = expectedLocalCount;
+  if (needsRepair) {
+    documents = await repositories.clients.listAllPaged(200);
+    rememberSnapshotMetadata(
+      "clients",
+      repositories.clients.getLastReadMetadata?.(),
+    );
+    changed = applyCloudCollection("clients", documents, {
+      authoritative: true,
+    });
+    remoteCount = documents.length;
+    projectedCount = documents.filter(
+      (item) => !item.deletedAt && item.active !== false,
+    ).length;
+    pullState[`${businessId}:clients`] = newestTimestamp(documents) || "";
+  }
+  pullState[keys.epoch] = CLIENT_PROJECTION_EPOCH;
+  pullState[keys.checkedAt] = now();
+  pullState[keys.remoteCount] = Number(remoteCount ?? localClients.length);
+  pullState[keys.projectedCount] = Number(
+    projectedCount >= 0 ? projectedCount : localClients.length,
+  );
+  writePullState(pullState);
+  state.cloudCounts.clients = Number(
+    projectedCount >= 0 ? projectedCount : localClients.length,
+  );
+  const result = {
+    checked: true,
+    repaired: needsRepair,
+    reason: epochRequired
+      ? "projection-epoch"
+      : needsRepair
+        ? "count-mismatch"
+        : "count-match",
+    epoch: CLIENT_PROJECTION_EPOCH,
+    localCountBefore: localClients.length,
+    remoteCount: Number(remoteCount ?? localClients.length),
+    projectedCount: Number(
+      projectedCount >= 0 ? projectedCount : localClients.length,
+    ),
+    changed,
+    documentsRead: documents.length + (epochRequired && !force ? 0 : 1),
+    pendingClientIds: pendingIds("clients").size,
+  };
+  state.clientProjection = result;
+  emit({
+    clientProjection: result,
+    cloudCounts: { ...state.cloudCounts },
+    snapshotMetadata: { ...state.snapshotMetadata },
+  });
+  return result;
 }
 async function queryClientsPage(options = {}) {
   await validateUser();
@@ -2357,10 +2492,15 @@ async function queryClientsPage(options = {}) {
       max,
     });
     applyCloudCollection("clients", result.items, {
-      authoritative: false,
+      authoritative: true,
       notify: false,
     });
-    return { ...result, queryField: field };
+    rememberSnapshotMetadata("clients", result.metadata);
+    return {
+      ...result,
+      queryField: field,
+      pendingClientIds: [...pendingIds("clients")],
+    };
   }
   const sortMap = {
     maiorDebito: [{ field: "saldo", direction: "asc" }],
@@ -2386,10 +2526,11 @@ async function queryClientsPage(options = {}) {
     max,
   });
   applyCloudCollection("clients", result.items, {
-    authoritative: false,
+    authoritative: true,
     notify: false,
   });
-  return result;
+  rememberSnapshotMetadata("clients", result.metadata);
+  return { ...result, pendingClientIds: [...pendingIds("clients")] };
 }
 async function queryCustomerSubscriptions(options = {}) {
   await validateUser();
@@ -3352,13 +3493,21 @@ async function runAutomaticSync() {
   try {
     if (!state.testPassed) await testFirestoreConnection();
     const push = await processSyncQueue(),
+      projection =
+        document.visibilityState === "visible"
+          ? await ensureClientProjection()
+          : null,
       received =
         document.visibilityState === "visible"
-          ? await pullCloudCollections()
+          ? await pullCloudCollections({
+              names: projection?.repaired
+                ? DEFAULT_PULL_NAMES.filter((name) => name !== "clients")
+                : undefined,
+            })
           : 0;
     if (push.sent || push.errors)
       await safePublishSyncSignal(push.collections, push.errors ? "error" : "ok");
-    if (push.sent || received) {
+    if (push.sent || received || projection?.repaired) {
       const time = now(),
         counts = queueCounts(),
         complete = counts.total === 0 && counts.errors === 0;
@@ -3382,6 +3531,7 @@ async function runAutomaticSync() {
         lastAttempt: time,
         sent: push.sent,
         received,
+        clientProjection: projection,
       });
     } else updateQueueState();
   } catch (error) {
@@ -3627,6 +3777,8 @@ function setUser(user, profile = null, business = null) {
     ownerMatches: Boolean(user && business?.ownerId === user.uid),
     testPassed: trustedBootstrap,
     dataAudit: null,
+    snapshotMetadata: {},
+    clientProjection: null,
     lastSync: profile?.businessId
       ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) || ""
       : "",
@@ -3701,6 +3853,7 @@ window.SyncFirebase = {
   syncAll: synchronizeNow,
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
+  ensureClientProjection,
   queryClientsPage,
   queryAllClientsForAction,
   queryClientsByInactivity,

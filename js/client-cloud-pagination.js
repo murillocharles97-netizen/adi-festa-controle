@@ -137,15 +137,22 @@
         return;
       }
       // A busca cloud por prefixo exige campos normalizados. Clientes legados
-      // que ainda não possuem esses campos continuam disponíveis no cache
-      // local; eles não podem desaparecer do filtro Todos. O dado local fica
-      // por último para refletir imediatamente pagamentos ainda em sync.
-      const local = localMatches(live);
-      const combined = reset
-        ? [...result.items, ...local]
-        : [...controller.items, ...result.items, ...local];
+      // continuam disponíveis no cache local, mas o servidor vence para o
+      // mesmo ID. Somente operações ainda presentes na fila mantêm a versão
+      // local até a confirmação do write.
+      const local = localMatches(live),
+        pending = new Set((result.pendingClientIds || []).map(String)),
+        combined = new Map(
+          (reset ? result.items : [...controller.items, ...result.items]).map(
+            (item) => [String(item.id), item],
+          ),
+        );
+      for (const item of local) {
+        const id = String(item.id);
+        if (!combined.has(id) || pending.has(id)) combined.set(id, item);
+      }
       controller.items = sortItems(
-        [...new Map(combined.map((item) => [item.id, item])).values()],
+        [...combined.values()],
         live.params.sort,
       );
       controller.cursor = result.cursor; controller.hasMore = result.hasMore; controller.at = Date.now();
