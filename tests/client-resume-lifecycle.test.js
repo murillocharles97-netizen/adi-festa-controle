@@ -107,6 +107,50 @@ test("Todos preserva cliente local zerado ausente do índice cloud legado", asyn
   assert.match(env.active().list.innerHTML, /Jessica Arezzo:0/);
 });
 
+test("resultado do servidor vence cache local obsoleto para o mesmo cliente", async () => {
+  const env = environment();
+  env.setLocalClients([{
+    id: "vitor",
+    nome: "Vitor skechers",
+    saldo: 0,
+    observacoes: "campo local extra",
+    ativo: true,
+  }]);
+  env.state.query = "Vitor";
+  await tick();
+  env.pending[0].resolve({
+    items: [{ id: "vitor", nome: "Vitor skechers", saldo: -84 }],
+    pendingClientIds: [],
+    cursor: null,
+    hasMore: false,
+    documentsRead: 1,
+  });
+  await tick();
+  assert.match(env.active().list.innerHTML, /Vitor skechers:-84/);
+  assert.doesNotMatch(env.active().list.innerHTML, /Vitor skechers:0/);
+});
+
+test("resultado local vence somente quando o mesmo cliente ainda está na fila", async () => {
+  const env = environment();
+  env.setLocalClients([{
+    id: "vitor",
+    nome: "Vitor editado offline",
+    saldo: -30,
+    ativo: true,
+  }]);
+  env.state.query = "Vitor";
+  await tick();
+  env.pending[0].resolve({
+    items: [{ id: "vitor", nome: "Vitor servidor", saldo: -84 }],
+    pendingClientIds: ["vitor"],
+    cursor: null,
+    hasMore: false,
+    documentsRead: 1,
+  });
+  await tick();
+  assert.match(env.active().list.innerHTML, /Vitor editado offline:-30/);
+});
+
 test("retomada preserva busca e refaz somente a query ativa", async () => {
   const env = environment();
   await tick();

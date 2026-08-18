@@ -14,6 +14,7 @@ window.Fiados = (() => {
       const previousBalance = Number(client.saldo || 0);
       client.saldo = Number((previousBalance + received).toFixed(2));
       const at = new Date().toISOString();
+      client.atualizadoEm = at;
       pagamento = {
         id: operationId,
         operationId,

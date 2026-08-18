@@ -229,6 +229,7 @@ window.Vendas = (() => {
         cliente.quantidadeVendas = Number(cliente.quantidadeVendas || 0) + 1;
         cliente.ultimaCompra = criada.data;
         if (d.status === "fiado") cliente.saldo = saldoAtual;
+        cliente.atualizadoEm = criada.data;
       }
       db.movimentacoes.push({
         id: Utils.uuid(),
@@ -366,6 +367,7 @@ window.Vendas = (() => {
         cliente.ultimaCompra = anteriores.length
           ? anteriores[anteriores.length - 1].data
           : null;
+        cliente.atualizadoEm = agora;
       }
       db.movimentacoes = db.movimentacoes.filter((m) => m.vendaId !== venda.id);
       db.movimentacoes.push({

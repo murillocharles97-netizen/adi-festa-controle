@@ -60,7 +60,14 @@
     window.getProductStockStatus=product=>Number(product.estoqueAtual)<=0?'esgotado':Number(product.estoqueAtual)<=Number(product.estoqueMinimo||0)?'baixo':'disponivel';
     let currentRoute='inicio';
     window.Router={atual:()=>currentRoute,ir(route){currentRoute=route;window.__renderAudit(route)}};
-    window.Clientes={listar:()=>window.__auditData.clientes,obter:id=>window.__auditData.clientes.find(client=>client.id===id)};
+    window.Clientes={
+      listar:()=>window.__auditData.clientes,
+      obter:id=>window.__auditData.clientes.find(client=>client.id===id),
+      financialStatus(client){
+        const saldo=Math.round((Number(client?.saldo)||0)*100)/100;
+        return{saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
+      },
+    };
     window.Mensagens={latestCharge(client){return client.id==='c1'?{date:atDay(-2)}:null},formatLastChargeDate(value){if(!value)return'Nunca cobrado';const days=Math.round((new Date().setHours(0,0,0,0)-new Date(value).setHours(0,0,0,0))/86400000);return days===0?'Hoje':days===1?'Ontem':`há ${days} dias`},chargeBand:()=> 'charge-never',wasChargedToday:()=>false};
     window.ClientesPage={render:()=>'',bind(){},profile(id){window.__lastProfile=id},receive(id){window.__lastReceive=id},clientForm(){},adjust(){},refresh(){}};
     window.ClientActions={openSheet(id){window.__lastSheet=id}};

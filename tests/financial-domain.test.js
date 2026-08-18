@@ -56,10 +56,14 @@ function runtime() {
     },
     dispatchEvent() {},
     CustomEvent: function () {},
+    PhoneUtils: {
+      normalizeBrazilianPhone: (value) => String(value || "").replace(/\D/g, ""),
+    },
   };
   context.window = context;
   vm.createContext(context);
   for (const file of [
+    "js/clientes.js",
     "js/produtos.js",
     "js/product-variations.js",
     "js/vendas.js",
@@ -108,6 +112,7 @@ test("venda fiado aumenta a dívida e retry não duplica", () => {
   assert.equal(data.vendas.length, 1);
   assert.equal(data.clientes[0].saldo, -25);
   assert.equal(data.clientes[0].quantidadeVendas, 1);
+  assert.equal(data.clientes[0].atualizadoEm, first.data);
 });
 
 test("pagamento parcial reduz dívida e pagamento total zera", () => {
@@ -118,11 +123,25 @@ test("pagamento parcial reduz dívida e pagamento total zera", () => {
     status: "fiado",
     itens: [item],
   });
-  context.Fiados.receber("client-1", 10, "Parcial");
+  const partial = context.Fiados.receber("client-1", 10, "Parcial");
   assert.equal(data.clientes[0].saldo, -15);
+  assert.equal(data.clientes[0].atualizadoEm, partial.data);
   context.Fiados.receber("client-1", 15, "Total");
   assert.equal(data.clientes[0].saldo, 0);
   assert.equal(data.pagamentos.length, 2);
+});
+
+test("status financeiro compartilhado preserva o sinal oficial", () => {
+  const { context } = runtime();
+  assert.deepEqual(
+    structuredClone(context.Clientes.financialStatus({ saldo: -84 })),
+    { saldo: -84, status: "debt", debt: 84, credit: 0 },
+  );
+  assert.deepEqual(
+    structuredClone(context.Clientes.financialStatus({ saldo: 17 })),
+    { saldo: 17, status: "credit", debt: 0, credit: 17 },
+  );
+  assert.equal(context.Clientes.financialStatus({ saldo: 0 }).status, "zero");
 });
 
 test("desfazer venda fiado restaura saldo uma única vez", () => {

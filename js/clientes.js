@@ -1,5 +1,6 @@
 window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
+  const financialStatus=client=>{const saldo=Math.round((Number(client?.saldo)||0)*100)/100;return{saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)}};
   const listar=()=>DB.carregar().clientes;
   const obter=id=>listar().find(c=>c.id===id);
   const salvar=d=>{if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateClient(),'criar novos clientes');let salvo;DB.alterar(db=>{
@@ -15,5 +16,5 @@ window.Clientes=(()=>{
     else db.clientes.push({...registro,id:registro.id||Utils.uuid(),portalRefToken:registro.portalRefToken||Utils.uuid(),normalizedPhone,saldo:Number(registro.saldo||0),atualizadoEm:registro.atualizadoEm||agora});
   }));
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0);cliente.saldo=Number(saldoNovo);cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,motivo:motivo||'',data:cliente.atualizadoEm};db.movimentacoes.push(movimento)});return movimento};
-  return{listar,obter,salvar,excluir,importar,ajustarSaldo,normalizePhone};
+  return{listar,obter,salvar,excluir,importar,ajustarSaldo,normalizePhone,financialStatus};
 })();
