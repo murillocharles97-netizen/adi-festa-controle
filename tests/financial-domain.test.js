@@ -63,6 +63,7 @@ function runtime() {
   context.window = context;
   vm.createContext(context);
   for (const file of [
+    "js/financial-concurrency.js",
     "js/clientes.js",
     "js/produtos.js",
     "js/product-variations.js",
