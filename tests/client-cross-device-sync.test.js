@@ -8,6 +8,10 @@ const repositorySource = fs.readFileSync(
   "js/firebase/firestore-repository.js",
   "utf8",
 );
+const authSource = fs.readFileSync("js/firebase/auth.js", "utf8");
+const firebaseUiSource = fs.readFileSync("js/firebase/firebase-ui.js", "utf8");
+const indexSource = fs.readFileSync("index.html", "utf8");
+const serviceWorkerSource = fs.readFileSync("service-worker.js", "utf8");
 
 function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -185,4 +189,22 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
   assert.match(syncSource, /localClients\.length < expectedLocalCount/);
   assert.match(syncSource, /document\.visibilityState === "visible"[\s\S]*ensureClientProjection/);
   assert.doesNotMatch(syncSource, /setInterval\([^)]*ensureClientProjection/);
+});
+
+test("toda a cadeia de módulos da sincronização invalida o cache na release 99", () => {
+  assert.match(authSource, /import ['"]\.\/sync\.js\?v=99['"]/);
+  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=99['"]/);
+  assert.match(
+    syncSource,
+    /from ['"]\.\/firestore-repository\.js\?v=99['"]/,
+  );
+  assert.match(
+    indexSource,
+    /js\/firebase\/auth\.js\?v=99[\s\S]*js\/firebase\/firebase-ui\.js\?v=99/,
+  );
+  assert.match(serviceWorkerSource, /adi-festa-v99-client-sync-imports/);
+  assert.doesNotMatch(
+    `${authSource}\n${firebaseUiSource}\n${syncSource}`,
+    /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,
+  );
 });

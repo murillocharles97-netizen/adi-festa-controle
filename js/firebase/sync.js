@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=62";
+import { createFirestoreRepository } from "./firestore-repository.js?v=99";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
