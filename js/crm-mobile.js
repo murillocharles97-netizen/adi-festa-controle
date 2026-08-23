@@ -74,16 +74,8 @@
 
   function applySavedSegment(saved) {
     if (!saved) return;
-    const current = state();
-    current.segment = "";
-    current.customConditions = (saved.conditions || []).map((condition) => ({ ...condition }));
-    current.customMatchMode = saved.matchMode === "any" ? "any" : "all";
-    current.resultLabel = saved.name || "Segmento salvo";
-    current.resultsVisible = true;
-    current.limit = 20;
     closeSheet();
-    window.CRMDashboard.invalidate();
-    window.CRMDashboard.refresh();
+    window.CRMDashboard.applySavedSegment(saved);
     scrollToResults();
   }
 
@@ -158,46 +150,6 @@
       <section class="crm-mobile-filter-entry" aria-label="Filtros e segmentos"><button type="button" class="crm-mobile-entry-card" data-crm-custom-filter>${icon("list-filter")}<span><b>Criar filtro</b><small>Personalize seu público.</small></span>${icon("chevron-right")}</button><button type="button" class="crm-mobile-entry-card" data-crm-saved>${icon("bookmark")}<span><b>Meus segmentos</b><small>Filtros que você salvou.</small></span>${icon("chevron-right")}</button></section>
       ${showingResults ? `<section class="crm-mobile-result-area" id="crm-results-anchor"><header class="crm-mobile-result-header"><button type="button" class="crm-mobile-result-icon mobile-icon-button" data-crm-back-overview aria-label="Voltar aos segmentos">${icon("arrow-left")}</button><div><h3>${esc(current.resultLabel || overview.find((item) => item.id === current.segment)?.label || "Filtro personalizado")}</h3><p>${snapshot.list.length} ${snapshot.list.length === 1 ? "cliente encontrado" : "clientes encontrados"}</p></div><button type="button" class="crm-mobile-result-icon mobile-icon-button" data-crm-actions aria-label="Ações do segmento">${icon("ellipsis-vertical")}</button></header><section class="crm-mobile-tools"><label class="crm-mobile-search mobile-search">${icon("search")}<input id="crm-mobile-query" value="${esc(current.query)}" placeholder="Buscar cliente..." autocomplete="off"></label><button type="button" class="crm-mobile-filter-button mobile-icon-button" data-crm-more-filters aria-label="Ordenar e filtrar">${icon("sliders-horizontal")}</button></section><section class="crm-mobile-list" id="crm-mobile-list">${rows.map((row, index) => card(row, index, credit)).join("") || (current.loadingSegment ? `<div class="crm-mobile-empty mobile-empty-state" aria-live="polite">${icon("loader-circle")}<b>Buscando clientes…</b></div>` : `<div class="crm-mobile-empty mobile-empty-state">${icon("users-round")}<b>Nenhum cliente neste segmento</b><p>Ajuste os critérios para ampliar o resultado.</p></div>`)}</section>${rows.length < snapshot.list.length ? `<button type="button" class="crm-mobile-load mobile-button" id="crm-more">Carregar mais 20 clientes</button>` : ""}</section>` : ""}
     </section>`;
-  }
-
-  function conditionRow(condition = {}) {
-    const service = window.EngagementSegments, field = condition.field || "lastPurchaseDays", meta = service.fields[field];
-    const operator = meta.operators.includes(condition.operator) ? condition.operator : meta.operators[0];
-    const valueControl = meta.type === "boolean"
-      ? `<select data-condition-value><option value="true" ${String(condition.value ?? "true") === "true" ? "selected" : ""}>Sim</option><option value="false" ${String(condition.value) === "false" ? "selected" : ""}>Não</option></select>`
-      : meta.type === "enum"
-        ? `<select data-condition-value>${meta.options.map((value) => `<option value="${value}" ${String(condition.value) === value ? "selected" : ""}>${esc({ debt: "Com dívida", credit: "Com crédito", zero: "Sem saldo" }[value] || value)}</option>`).join("")}</select>`
-        : `<input data-condition-value value="${esc(condition.value ?? "")}" ${["money", "number", "days"].includes(meta.type) ? 'inputmode="decimal"' : ""} placeholder="Valor">`;
-    return `<div class="crm-condition-row" data-condition-type="${meta.type}"><select data-condition-field>${Object.entries(service.fields).map(([key, item]) => `<option value="${key}" ${key === field ? "selected" : ""}>${esc(item.label)}</option>`).join("")}</select><select data-condition-operator>${meta.operators.map((key) => `<option value="${key}" ${key === operator ? "selected" : ""}>${esc(service.operators[key])}</option>`).join("")}</select>${valueControl}<input data-condition-value-to value="${esc(condition.valueTo ?? "")}" inputmode="decimal" placeholder="Até" ${operator === "between" ? "" : "hidden"}><button type="button" class="mobile-icon-button" data-remove-condition aria-label="Remover condição">${icon("x")}</button></div>`;
-  }
-
-  function customFilterSheet(saved = null) {
-    const current = state(), service = window.EngagementSegments;
-    $("#modal").innerHTML = `<div class="modal-bg crm-sheet-bg"><section class="modal-box mobile-modal crm-mobile-sheet crm-custom-filter-sheet" role="dialog" aria-modal="true"><header class="modal-head"><div><h3>Filtrar clientes que…</h3><p>Use somente os critérios necessários.</p></div><button class="icon-btn mobile-icon-button" data-crm-close>${icon("x")}</button></header><div class="modal-body"><label>Combinação<select id="crm-condition-mode"><option value="all">Atendem a todas as condições</option><option value="any">Atendem a qualquer condição</option></select></label><div id="crm-condition-list">${(saved?.conditions?.length ? saved.conditions : current.customConditions?.length ? current.customConditions : [{}]).map(conditionRow).join("")}</div><button type="button" class="btn btn-light mobile-button" data-add-condition>${icon("plus")} Adicionar condição</button><label>Nome para salvar (opcional)<input id="crm-segment-name" value="${esc(saved?.name || "")}" placeholder="Ex.: Clientes premium sumidos"></label><p class="crm-filter-preview" data-filter-preview>Prévia calculada com os dados já sincronizados deste aparelho.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-crm-preview>Atualizar prévia</button><button class="btn btn-primary mobile-button primary" data-crm-apply-custom>Aplicar filtro</button></footer></section></div>`;
-    $("#crm-condition-mode").value = saved?.matchMode || current.customMatchMode || "all";
-    const read = () => $$(".crm-condition-row").map((row) => ({ field: $("[data-condition-field]", row).value, operator: $("[data-condition-operator]", row).value, value: $("[data-condition-value]", row).value, valueTo: $("[data-condition-value-to]", row).value })).filter((item) => item.value !== "" || service.fields[item.field].type === "boolean");
-    const rebindRows = () => {
-      $$('[data-remove-condition]').forEach((button) => button.onclick = () => { if ($$(".crm-condition-row").length > 1) button.closest(".crm-condition-row").remove(); });
-      $$('[data-condition-field]').forEach((select) => select.onchange = () => { const row = select.closest(".crm-condition-row"), value = $("[data-condition-value]", row).value, valueTo = $("[data-condition-value-to]", row).value; row.outerHTML = conditionRow({ field: select.value, value, valueTo }); rebindRows(); window.lucide?.createIcons(); });
-      $$('[data-condition-operator]').forEach((select) => select.onchange = () => { const secondary = $("[data-condition-value-to]", select.closest(".crm-condition-row")); secondary.hidden = select.value !== "between"; });
-    };
-    rebindRows();
-    $("[data-add-condition]").onclick = () => { $("#crm-condition-list").insertAdjacentHTML("beforeend", conditionRow()); rebindRows(); window.lucide?.createIcons(); };
-    $("[data-crm-close]").onclick = closeSheet;
-    $("[data-crm-preview]").onclick = () => { const count = window.CRMDashboard.allRows().filter((row) => service.matchesConditions(row, read(), $("#crm-condition-mode").value)).length; $("[data-filter-preview]").textContent = `${count} cliente(s) encontrados com os dados sincronizados.`; };
-    $("[data-crm-apply-custom]").onclick = () => { current.customConditions = read(); current.customMatchMode = $("#crm-condition-mode").value; current.segment = ""; current.resultsVisible = true; current.limit = 20; const name = $("#crm-segment-name").value.trim(); current.resultLabel = name || saved?.name || "Filtro personalizado"; if (name) service.save({ id: saved?.id, name, conditions: current.customConditions, matchMode: current.customMatchMode }); closeSheet(); window.CRMDashboard.invalidate(); window.CRMDashboard.refresh(); scrollToResults(); };
-    window.lucide?.createIcons();
-  }
-
-  function savedSegmentsSheet() {
-    const saved = (DB.carregar().segmentosClientes || []).filter((item) => !item.deletedAt && item.active !== false);
-    $("#modal").innerHTML = `<div class="modal-bg crm-sheet-bg"><section class="modal-box mobile-modal crm-mobile-sheet crm-saved-sheet"><header class="modal-head"><div><h3>Meus segmentos</h3><p>Filtros salvos somente para esta empresa.</p></div><button class="icon-btn mobile-icon-button" data-crm-close>${icon("x")}</button></header><div class="modal-body">${saved.map((item) => `<article><button data-apply-saved="${item.id}"><b>${esc(item.name)}</b><small>${item.conditions?.length || 0} condição(ões)</small></button><button data-edit-saved="${item.id}" aria-label="Editar ${esc(item.name)}">${icon("pencil")}</button><button data-duplicate-saved="${item.id}" aria-label="Duplicar ${esc(item.name)}">${icon("copy")}</button><button data-delete-saved="${item.id}" aria-label="Excluir ${esc(item.name)}">${icon("trash-2")}</button></article>`).join("") || "<div class=\"mobile-empty-state\"><h3>Nenhum segmento salvo</h3><p>Salve um filtro personalizado para reutilizá-lo aqui.</p></div>"}</div></section></div>`;
-    $("[data-crm-close]").onclick = closeSheet;
-    $$('[data-apply-saved]').forEach((button) => button.onclick = () => applySavedSegment(saved.find((item) => item.id === button.dataset.applySaved)));
-    $$('[data-edit-saved]').forEach((button) => button.onclick = () => customFilterSheet(saved.find((item) => item.id === button.dataset.editSaved)));
-    $$('[data-duplicate-saved]').forEach((button) => button.onclick = () => { window.EngagementSegments.duplicate(button.dataset.duplicateSaved); savedSegmentsSheet(); });
-    $$('[data-delete-saved]').forEach((button) => button.onclick = () => { if (confirm("Excluir este segmento salvo?")) { window.EngagementSegments.remove(button.dataset.deleteSaved); savedSegmentsSheet(); } });
-    window.lucide?.createIcons();
   }
 
   function closeSheet() {
@@ -326,8 +278,8 @@
     $(`[data-crm-message]`)?.addEventListener("click", () => { current.resultsVisible = true; current.segment = ""; window.CRMDashboard.refresh(); setTimeout(() => window.CRMDashboard.openActions(), 0); });
     $(`[data-crm-campaign]`)?.addEventListener("click", () => { current.resultsVisible = true; current.segment = ""; window.CRMDashboard.refresh(); setTimeout(() => window.CRMDashboard.openActions(), 0); });
     $(`[data-crm-export]`)?.addEventListener("click", () => { current.resultsVisible = true; current.segment = ""; window.CRMDashboard.refresh(); setTimeout(() => window.CRMDashboard.openActions(), 0); });
-    $(`[data-crm-custom-filter]`)?.addEventListener("click", () => customFilterSheet());
-    $(`[data-crm-saved]`)?.addEventListener("click", savedSegmentsSheet);
+    $(`[data-crm-custom-filter]`)?.addEventListener("click", () => window.CRMSegmentBuilder?.open?.({ onApply: scrollToResults }));
+    $(`[data-crm-saved]`)?.addEventListener("click", () => window.CRMSegmentBuilder?.openSaved?.());
     $(`[data-crm-back-overview]`)?.addEventListener("click", () => { current.segment = ""; current.query = ""; current.customConditions = []; current.resultLabel = ""; current.resultsVisible = false; window.CRMDashboard.refresh(); scrollToSegments(); });
     $("[data-crm-full-summary]")?.addEventListener("click", fullSummary);
     $("[data-crm-reset]")?.addEventListener("click", () => {

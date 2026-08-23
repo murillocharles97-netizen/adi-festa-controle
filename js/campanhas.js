@@ -57,6 +57,40 @@
     ended: "encerrada",
   }[Engine.campaignStatus(campaign)] || "encerrada");
 
+  function buildSegmentContext(data) {
+    if (!window.EngagementSegments || !window.CustomerMetricsService) return null;
+    const businessId = DB.getBusinessId?.() || "";
+    const metrics = CustomerMetricsService.build(data, { businessId });
+    const rows = (data.clientes || []).filter((client) => client.ativo !== false).map((client) => {
+      const metric = metrics.byClient.get(client.id) || {};
+      return { client, metric, period: { spent: metric.totalSpent || 0, purchases: metric.purchaseCount || 0, products: new Set(), categories: new Set() }, classifications: [] };
+    });
+    return {
+      businessId,
+      rows,
+      projection: window.EngagementSegments.project(data, rows, { businessId }),
+    };
+  }
+
+  function dynamicSegmentAudience(data, segmentId, sharedContext = null) {
+    const businessId = DB.getBusinessId?.() || "";
+    const segment = (data.segmentosClientes || []).find((item) => String(item.id) === String(segmentId) && !item.deletedAt && item.active !== false && (!item.businessId || item.businessId === businessId));
+    const context = sharedContext || buildSegmentContext(data);
+    if (!segment || !context) return [];
+    if (!segment.conditions?.length) {
+      const validClients = new Set((data.clientes || []).filter((client) => !client.businessId || client.businessId === businessId).map((client) => String(client.id)));
+      return [...new Set((segment.clientIds || segment.clienteIds || []).map(String).filter((id) => validClients.has(id)))];
+    }
+    return window.EngagementSegments.evaluate(context.rows, segment.conditions, segment.matchMode, data, context).clientIds;
+  }
+  function buildSegmentAudienceMap(data) {
+    const businessId = DB.getBusinessId?.() || "";
+    const segments = (data.segmentosClientes || []).filter((segment) => !segment.deletedAt && segment.active !== false && (!segment.businessId || segment.businessId === businessId));
+    if (!segments.length) return {};
+    const context = buildSegmentContext(data);
+    return Object.fromEntries(segments.map((segment) => [String(segment.id), dynamicSegmentAudience(data, segment.id, context)]));
+  }
+
   function canonical(data) {
     const base = Engine.normalizeCampaign({
       ...data,
@@ -116,6 +150,14 @@
     let stored;
     DB.alterar((db) => {
       const campaign = canonical(data);
+      if (campaign.eligibility.audienceType === "segment" && campaign.eligibility.segmentId) {
+        const businessId = DB.getBusinessId?.() || "";
+        const segment = (db.segmentosClientes || []).find((item) => String(item.id) === String(campaign.eligibility.segmentId) && (!item.businessId || item.businessId === businessId));
+        const clientIds = dynamicSegmentAudience(db, campaign.eligibility.segmentId);
+        campaign.audienceSource = { type: "crmSegment", segmentId: segment?.id || campaign.eligibility.segmentId, segmentName: segment?.name || "Segmento do CRM", conditionsSnapshot: (segment?.conditions || []).map((item) => ({ ...item })), matchMode: segment?.matchMode === "any" ? "any" : "all" };
+        campaign.audienceSnapshot = { clientIds, count: clientIds.length, capturedAt: now(), summaries: (segment?.conditions || []).slice(0, 4).map((item) => window.EngagementSegments?.describeCondition?.(item, db) || "Condição do CRM") };
+        campaign.eligibility = { ...campaign.eligibility, audienceType: "clients", clientIds, segmentId: null };
+      }
       const index = (db.campanhas || []).findIndex((item) => item.id === campaign.id);
       const old = index >= 0 ? db.campanhas[index] : null;
       stored = {
@@ -169,10 +211,7 @@
     const db = DB.carregar();
     const client = (db.clientes || []).find((item) => item.id === clientId);
     if (!client) return { evaluations: [], progress: [], benefits: [], appliedBenefits: [], conflicts: [] };
-    const segmentClientIdsById = Object.fromEntries((db.segmentosClientes || []).map((segment) => [
-      String(segment.id),
-      (segment.clientIds || segment.clienteIds || []).map(String),
-    ]));
+    const segmentClientIdsById = buildSegmentAudienceMap(db);
     const sale = { itens: items || [], data: now(), status: options.status || "pago" };
     const evaluations = active().map((campaign) => Engine.evaluateOne(campaign, sale, {
       client,
@@ -320,10 +359,7 @@
     const db = DB.carregar();
     const campaign = get(id);
     if (!campaign) return null;
-    const segmentClientIdsById = Object.fromEntries((db.segmentosClientes || []).map((segment) => [
-      String(segment.id),
-      (segment.clientIds || segment.clienteIds || []).map(String),
-    ]));
+    const segmentClientIdsById = buildSegmentAudienceMap(db);
     return Engine.campaignMetrics(db, campaign, {
       businessId: DB.getBusinessId?.() || null,
       segmentClientIdsById,
@@ -332,10 +368,7 @@
 
   function eligibleClients(rawCampaign, data = DB.carregar()) {
     const campaign = canonical(rawCampaign);
-    const segmentClientIdsById = Object.fromEntries((data.segmentosClientes || []).map((segment) => [
-      String(segment.id),
-      (segment.clientIds || segment.clienteIds || []).map(String),
-    ]));
+    const segmentClientIdsById = buildSegmentAudienceMap(data);
     return (data.clientes || []).filter((client) => Engine.eligible(campaign, client, { segmentClientIdsById }));
   }
 

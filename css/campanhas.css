@@ -21,6 +21,7 @@
 
 /* Campaign Engine V2 — formulários guiados, detalhes e resgate */
 .campaign-wizard{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;max-height:min(880px,calc(100vh - 32px))}
+.campaign-audience-source{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px 22px;border-bottom:1px solid #dceee8;background:#f1fbf8;color:#126f5c}.campaign-audience-source>svg{width:22px;height:22px;padding:9px;box-sizing:content-box;border-radius:12px;background:#dcf6ee;color:#009b74}.campaign-audience-source span{display:grid}.campaign-audience-source small,.campaign-audience-source em{font-size:.7rem;font-style:normal;color:#67877f}.campaign-audience-source>div{display:flex;gap:6px;max-width:48vw;overflow:auto}.campaign-audience-source>div i{padding:6px 9px;border:1px solid #c7e9df;border-radius:99px;background:#fff;font-size:.67rem;font-style:normal;white-space:nowrap}
 .campaign-wizard-body{width:min(100%,760px);overflow:auto;overscroll-behavior:contain}
 .campaign-wizard-pane>h3{margin:0 0 6px;font-size:1.35rem}
 .campaign-wizard-pane>p{margin:0 0 20px;color:#6f7e92;line-height:1.5}
@@ -119,6 +120,7 @@
 .campaign-event-timeline small{color:#718095;margin-top:3px}
 
 @media(max-width:767px){
+  .campaign-audience-source{grid-template-columns:38px minmax(0,1fr);padding:10px 14px}.campaign-audience-source>div{grid-column:1/-1;max-width:none}.campaign-audience-source>svg{width:19px;height:19px;padding:8px}
   .campaign-wizard{max-height:none;min-height:calc(100dvh - 70px);grid-template-rows:auto auto 1fr auto}
   .campaign-wizard-body{overflow:visible}
   .campaign-reward-row{grid-template-columns:1fr;padding:16px}

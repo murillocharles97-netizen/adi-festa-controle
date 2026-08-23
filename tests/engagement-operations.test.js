@@ -30,6 +30,7 @@ function loadSegments(data) {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../js/crm-segment-engine-v2.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../js/engagement-segments.js"), "utf8"), context);
   return context.EngagementSegments;
 }
@@ -38,7 +39,7 @@ const baseData = () => ({
   campanhas: [{ id: "campaign-a", type: "buy_get", rule: { requiredQuantity: 10 }, rewards: [] }],
   progressosCampanha: [{ campaignId: "campaign-a", clientId: "client-a", confirmedProgress: 8, availableRewards: 0, lastQualifiedAt: "2026-08-10T12:00:00.000Z" }],
   customerSubscriptions: [{ id: "renewal-a", clientId: "client-a", status: "active", expiresAt: "2026-08-20T12:00:00.000Z" }],
-  vendas: [{ id: "sale-a", clienteId: "client-a", status: "pago", itens: [{ produtoId: "product-a", categoria: "Bebidas" }] }],
+  vendas: [{ id: "sale-a", clienteId: "client-a", status: "pago", data: "2026-08-10T12:00:00.000Z", valorFinal: 10, itens: [{ produtoId: "product-a", categoria: "Bebidas", quantidade: 1, subtotalFinal: 10 }] }],
   segmentosClientes: [],
 });
 
@@ -71,11 +72,14 @@ test("filtro personalizado aceita AND, OR, entre e relações", () => {
   assert.equal(service.matchesConditions(row, [{ field: "totalSpent", operator: "gt", value: 1000 }], "all", data), false);
 });
 
-test("segmento salvo fica vinculado à empresa e exclusão é lógica", () => {
+test("segmento salvo fica dinâmico, pode ser fixado e exclusão é lógica", () => {
   const data = baseData(), service = loadSegments(data);
   const saved = service.save({ name: "Premium sumidos", matchMode: "all", conditions: [{ field: "lastPurchaseDays", operator: "gte", value: 30 }] });
   assert.equal(saved.businessId, "business-a");
+  assert.equal(saved.type, "dynamic");
   assert.equal(data.segmentosClientes.length, 1);
+  assert.equal(service.togglePinned(saved.id).pinned, true);
+  assert.equal(service.list().filter((item) => item.pinned).length, 1);
   assert.equal(service.duplicate(saved.id).name, "Premium sumidos (cópia)");
   service.remove(saved.id);
   assert.ok(data.segmentosClientes[0].deletedAt);
@@ -89,9 +93,12 @@ test("camada visual expõe ações, filtros completos, pedidos e editor do catá
   const catalog = fs.readFileSync(path.join(__dirname, "../js/catalogo-admin.js"), "utf8");
   const orders = fs.readFileSync(path.join(__dirname, "../js/visitas.js"), "utf8");
   assert.match(crmMobile, /Quem você quer alcançar/);
-  assert.match(crmMobile, /data-condition-value-to/);
+  assert.match(fs.readFileSync(path.join(__dirname, "../js/crm-segment-builder.js"), "utf8"), /data-segment-value-to/);
+  assert.match(fs.readFileSync(path.join(__dirname, "../js/crm-segment-builder.js"), "utf8"), /Explorar segmentos/);
   assert.match(crmMobile, /Meus segmentos/);
   assert.match(crmDesktop, /data-segment-campaign/);
+  assert.match(crmDesktop, /Criar ação com este público/);
+  assert.equal(loadSegments(baseData()).templates.length >= 8, true);
   assert.match(campaign, /Progresso pendente \(fiado\)/);
   assert.match(campaign, /Clientes parados/);
   assert.match(catalog, /Banner do catálogo/);

@@ -31,7 +31,19 @@
       if(payload.businessId&&payload.businessId!==businessId) return null;
       const valid = new Set((DB.carregar().clientes || []).map((client) => client.id));
       const clientIds = [...new Set((payload.clientIds || []).filter((id) => valid.has(id)))];
-      return clientIds.length ? {type:'clients',clientIds,source:payload.source || "crm"} : null;
+      return clientIds.length ? {
+        type: "clients",
+        clientIds,
+        source: payload.source || "crm",
+        sourceType: payload.sourceType || "crmSegment",
+        sourceSegmentId: payload.sourceSegmentId || null,
+        sourceSegmentName: payload.sourceSegmentName || "Público filtrado do CRM",
+        sourceConditionsSnapshot: payload.sourceConditionsSnapshot || [],
+        sourceMatchMode: payload.sourceMatchMode || "all",
+        audienceCountAtCreation: clientIds.length,
+        capturedAt: payload.capturedAt || new Date().toISOString(),
+        summaries: payload.summaries || [],
+      } : null;
     } catch {
       sessionStorage.removeItem("adiFestaCampaignAudience");
       return null;
@@ -254,10 +266,15 @@
   }
 
   function stepAudience(data) {
-    const clients = DB.carregar().clientes.filter((client) => client.ativo !== false), segments = DB.carregar().segmentosClientes || [];
+    const database = DB.carregar(), businessId = DB.getBusinessId?.() || "";
+    const clients = database.clientes.filter((client) => client.ativo !== false && (!client.businessId || client.businessId === businessId)), segments = (database.segmentosClientes || []).filter((item) => !item.deletedAt && item.active !== false && (!item.businessId || item.businessId === businessId));
     const audience = data.eligibility?.audienceType || "all", selected = new Set(data.eligibility?.clientIds || []);
     const search = String(data._clientSearch || "").toLocaleLowerCase("pt-BR"), matching = clients.filter((client) => !search || `${client.nome} ${client.telefone || ""}`.toLocaleLowerCase("pt-BR").includes(search)).slice(0, 20);
-    const segment = segments.find((item) => item.id === data.eligibility?.segmentId), segmentCount = (segment?.clientIds || segment?.clienteIds || []).length;
+    const segment = segments.find((item) => item.id === data.eligibility?.segmentId), segmentCount = segment
+      ? (segment.conditions?.length
+          ? (window.CRMDashboard?.previewConditions?.(segment.conditions, segment.matchMode)?.count ?? 0)
+          : (segment.clientIds || []).length)
+      : 0;
     const publicConfig = { catalog: true, receipt: true, whatsapp: true, ...(data.publicity || {}) };
     const conditional = audience === "all"
       ? `<div class="campaign-audience-summary">${icon("users")}<span><b>Todos os clientes atuais e novos poderão participar.</b><small>Este público é atualizado dinamicamente.</small></span></div>`
@@ -350,9 +367,15 @@
     }
   }
 
-  function openWizard(id) {
+  function openWizard(id, options = {}) {
     const old = id ? Campanhas.obter(id) : null, pending = old ? null : takePendingAudience();
-    const fresh = CampaignEngineV2.normalizeCampaign({ id: Utils.uuid(), type: "buy_get", name: "", description: "", eligibility: pending ? { audienceType: "clients", clientIds: pending.clientIds } : { audienceType: "all" }, status: "active" });
+    const fresh = CampaignEngineV2.normalizeCampaign({
+      id: Utils.uuid(), type: Campanhas.TYPES[options.type] ? options.type : "buy_get", name: "", description: "",
+      eligibility: pending ? { audienceType: "clients", clientIds: pending.clientIds } : { audienceType: "all" },
+      audienceSource: pending ? { type: pending.sourceType, segmentId: pending.sourceSegmentId, segmentName: pending.sourceSegmentName, conditionsSnapshot: pending.sourceConditionsSnapshot, matchMode: pending.sourceMatchMode } : null,
+      audienceSnapshot: pending ? { clientIds: pending.clientIds, count: pending.audienceCountAtCreation, capturedAt: pending.capturedAt, summaries: pending.summaries } : null,
+      status: "active",
+    });
     fresh.rewards = [{ id: "reward-1", type: "external", name: "", description: "", quantity: 1, pointsCost: 100 }];
     state.wizard = { step: 1, editing: Boolean(old), data: old ? structuredClone(old) : fresh };
     renderWizard();
@@ -369,7 +392,8 @@
   function renderWizard() {
     const root = $("#modal"), wizard = state.wizard, data = wizard.data;
     const panes = [stepType, stepRule, stepReward, stepAudience, stepReview];
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal modal-wide af-modal af-modal--xl af-wizard campaign-wizard campaign-wizard-v2" role="dialog" aria-modal="true" aria-labelledby="campaign-wizard-title"><header class="modal-head af-modal__header af-wizard__header"><div><small>${wizard.editing ? "Editar" : "Nova"} campanha</small><h3 id="campaign-wizard-title">${["Resultado", "Participação", "Recompensa", "Público e divulgação", "Revisão"][wizard.step - 1]}</h3></div><button class="icon-btn af-icon-button mobile-icon-button" type="button" data-wizard-close aria-label="Fechar assistente">${icon("x")}</button></header><div class="campaign-wizard-steps af-wizard__steps">${["Objetivo", "Regra", "Prêmio", "Público", "Revisão"].map((label, index) => `<span class="${wizard.step === index + 1 ? "active" : wizard.step > index + 1 ? "completed" : "future"}" data-wizard-step="${index + 1}"><b>${index + 1}</b>${label}</span>`).join("")}</div><form id="campaign-wizard-form" class="af-wizard__form"><input type="hidden" name="type" value="${data.type}"><div class="modal-body af-modal__body af-wizard__content">${panes[wizard.step - 1](data)}</div><footer class="modal-foot af-modal__footer af-wizard__footer">${wizard.step > 1 ? '<button type="button" class="btn btn-light af-button af-button--secondary" data-wizard-back>Voltar</button>' : "<span></span>"}<button class="btn btn-primary af-button af-button--primary">${wizard.step === 5 ? (wizard.editing ? "Salvar alterações" : "Criar campanha") : "Próximo"}</button></footer></form></section></div>`;
+    const source = data.audienceSource, audienceBanner = source?.type === "crmSegment" ? `<aside class="campaign-audience-source">${icon("users-round")}<span><small>Público selecionado no CRM</small><b>${esc(source.segmentName || "Público filtrado")}</b><em>${Number(data.audienceSnapshot?.count || data.eligibility?.clientIds?.length || 0)} cliente(s) · snapshot ao criar</em></span><div>${(data.audienceSnapshot?.summaries || []).slice(0, 3).map((summary) => `<i>${esc(summary)}</i>`).join("")}</div></aside>` : "";
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal modal-wide af-modal af-modal--xl af-wizard campaign-wizard campaign-wizard-v2" role="dialog" aria-modal="true" aria-labelledby="campaign-wizard-title"><header class="modal-head af-modal__header af-wizard__header"><div><small>${wizard.editing ? "Editar" : "Nova"} campanha</small><h3 id="campaign-wizard-title">${["Resultado", "Participação", "Recompensa", "Público e divulgação", "Revisão"][wizard.step - 1]}</h3></div><button class="icon-btn af-icon-button mobile-icon-button" type="button" data-wizard-close aria-label="Fechar assistente">${icon("x")}</button></header>${audienceBanner}<div class="campaign-wizard-steps af-wizard__steps">${["Objetivo", "Regra", "Prêmio", "Público", "Revisão"].map((label, index) => `<span class="${wizard.step === index + 1 ? "active" : wizard.step > index + 1 ? "completed" : "future"}" data-wizard-step="${index + 1}"><b>${index + 1}</b>${label}</span>`).join("")}</div><form id="campaign-wizard-form" class="af-wizard__form"><input type="hidden" name="type" value="${data.type}"><div class="modal-body af-modal__body af-wizard__content">${panes[wizard.step - 1](data)}</div><footer class="modal-foot af-modal__footer af-wizard__footer">${wizard.step > 1 ? '<button type="button" class="btn btn-light af-button af-button--secondary" data-wizard-back>Voltar</button>' : "<span></span>"}<button class="btn btn-primary af-button af-button--primary">${wizard.step === 5 ? (wizard.editing ? "Salvar alterações" : "Criar campanha") : "Próximo"}</button></footer></form></section></div>`;
     $("[data-wizard-close]", root).onclick = Modais.fechar;
     $("[data-wizard-back]", root)?.addEventListener("click", () => { wizard.step--; renderWizard(); });
     $$('[data-wizard-type]', root).forEach((button) => button.onclick = () => { data.type = button.dataset.wizardType; data.description = Campanhas.TYPES[data.type].description; renderWizard(); });

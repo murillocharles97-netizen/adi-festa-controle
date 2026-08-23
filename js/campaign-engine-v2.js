@@ -111,6 +111,19 @@
         segmentId: raw.eligibility?.segmentId || raw.audience?.segmentId || null,
         tagIds: unique(raw.eligibility?.tagIds || raw.audience?.tags),
       },
+      audienceSource: raw.audienceSource ? {
+        type: raw.audienceSource.type || "crmSegment",
+        segmentId: raw.audienceSource.segmentId || null,
+        segmentName: raw.audienceSource.segmentName || "",
+        conditionsSnapshot: Array.isArray(raw.audienceSource.conditionsSnapshot) ? raw.audienceSource.conditionsSnapshot.map((item) => ({ ...item })) : [],
+        matchMode: raw.audienceSource.matchMode === "any" ? "any" : "all",
+      } : null,
+      audienceSnapshot: raw.audienceSnapshot ? {
+        clientIds: unique(raw.audienceSnapshot.clientIds),
+        count: Number(raw.audienceSnapshot.count ?? raw.audienceSnapshot.clientIds?.length ?? 0),
+        capturedAt: raw.audienceSnapshot.capturedAt || iso(),
+        summaries: Array.isArray(raw.audienceSnapshot.summaries) ? raw.audienceSnapshot.summaries.map(String) : [],
+      } : null,
       qualification: {
         productIds: unique(qualification.productIds || raw.productIds || (raw.produtoId ? [raw.produtoId] : [])),
         variantIds: unique(qualification.variantIds || raw.variantIds || raw.variationIds),
