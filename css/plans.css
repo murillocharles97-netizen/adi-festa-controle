@@ -78,6 +78,11 @@
   margin: 0;
   color: #667085;
 }
+.plan-payment-method {
+  display: block;
+  margin-top: 6px;
+  color: #4b5b73;
+}
 .trial-facts {
   display: flex;
   max-width: 620px;
@@ -491,10 +496,99 @@
 .plan-comparison-sheet,
 .pro-feature-modal,
 .plan-manage-sheet,
-.plan-confirm-cancel {
+.plan-confirm-cancel,
+.plan-payment-sheet {
   width: min(650px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   overflow: auto;
+}
+.plan-payment-sheet {
+  width: min(620px, calc(100vw - 24px));
+}
+.plan-payment-sheet .modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+.plan-payment-summary {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid #cfe9df;
+  border-radius: 14px;
+  background: #f2fbf8;
+}
+.plan-payment-summary span,
+.plan-payment-summary small {
+  color: #64748b;
+  font-size: 12px;
+}
+.plan-payment-summary b {
+  color: #087e5b;
+  font-size: 24px;
+}
+.plan-payment-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.plan-payment-options > button {
+  display: grid;
+  min-width: 0;
+  min-height: 132px;
+  padding: 16px;
+  grid-template-columns: 42px 1fr auto;
+  gap: 11px;
+  align-items: start;
+  border: 1px solid #dce3eb;
+  border-radius: 16px;
+  background: #fff;
+  color: #17213c;
+  text-align: left;
+}
+.plan-payment-options > button.active {
+  border-color: #0caf78;
+  background: #f1fbf7;
+  box-shadow: 0 0 0 2px #0caf7818;
+}
+.plan-payment-options > button > i {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #e5f8f1;
+  color: #079568;
+}
+.plan-payment-options > button > i svg,
+.plan-payment-options > button > em svg {
+  width: 21px;
+  height: 21px;
+}
+.plan-payment-options > button > span {
+  display: grid;
+  gap: 6px;
+}
+.plan-payment-options > button small {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.plan-payment-options > button em {
+  color: #0caf78;
+}
+.plan-payment-disclaimer {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  color: #536177;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.plan-payment-disclaimer svg {
+  width: 17px;
+  flex: none;
+  color: #0caf78;
 }
 .plan-comparison-table {
   min-width: 520px;
@@ -678,12 +772,28 @@
   .plan-comparison-sheet,
   .pro-feature-modal,
   .plan-manage-sheet,
-  .plan-confirm-cancel {
+  .plan-confirm-cancel,
+  .plan-payment-sheet {
     width: 100%;
     max-width: none;
     max-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
     margin-top: auto;
     border-radius: 22px 22px 0 0;
+  }
+  .plan-payment-sheet .modal-body {
+    padding: 14px;
+    overflow-y: auto;
+  }
+  .plan-payment-options {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .plan-payment-options > button {
+    min-height: 102px;
+    padding: 13px;
+  }
+  .plan-payment-sheet .modal-foot {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
   }
   .plan-comparison-sheet .modal-body {
     overflow: auto;

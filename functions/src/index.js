@@ -17,6 +17,7 @@ const {verifyWebhookSignature,eventId,eventData}=require('./services/webhook-ser
 const {CouponError}=require('./services/coupon-service');
 const {couponFirestoreService}=require('./services/coupon-firestore-service');
 const {onboardingService}=require('./services/onboarding-service');
+const {requirePaymentMethod,providerPaymentResult}=require('./services/billing-payment-method-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -58,12 +59,28 @@ const operationId=(raw,businessId,planId,uid)=>{
   const minute=Math.floor(Date.now()/60000);
   return crypto.createHash('sha256').update(`${businessId}:${planId}:${uid}:${minute}`).digest('hex');
 };
+const CHECKOUT_LEASE_MS=60000;
+async function acquireCheckoutAttempt({businessId,operationId,requestHash,context,planId,billingCycle,paymentMethodType,quoteId}){
+  const ref=db.doc(`businesses/${businessId}/billingCheckoutAttempts/${operationId}`),now=Date.now();
+  const result=await db.runTransaction(async transaction=>{
+    const snapshot=await transaction.get(ref),data=snapshot.data()||{};
+    if(snapshot.exists&&data.requestHash!==requestHash)throw new HttpsError('failed-precondition','Esta tentativa de checkout não corresponde à solicitação atual.');
+    if(snapshot.exists&&data.status==='completed'&&data.checkoutUrl)return{reused:true,checkoutUrl:String(data.checkoutUrl)};
+    if(snapshot.exists&&data.status==='processing'&&data.leaseUntil?.toMillis?.()>now)throw new HttpsError('already-exists','O checkout já está sendo preparado. Aguarde alguns instantes.');
+    transaction.set(ref,{businessId,requestedBy:context.uid,operationId,requestHash,planId,billingCycle,paymentMethodType,quoteId:quoteId||null,status:'processing',leaseUntil:Timestamp.fromMillis(now+CHECKOUT_LEASE_MS),attemptCount:FieldValue.increment(1),createdAt:data.createdAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    return{reused:false,ref};
+  });
+  return{...result,ref};
+}
+async function finishCheckoutAttempt(ref,patch){await ref.set({...patch,status:'completed',leaseUntil:FieldValue.delete(),completedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true})}
+async function failCheckoutAttempt(ref,error){if(!ref)return;await ref.set({status:'failed',errorCode:String(error?.code||'unknown').slice(0,80),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()},{merge:true}).catch(()=>{})}
 function callableError(error){
   if(error instanceof HttpsError)return error;
   if(error instanceof CouponError){const code=error.code==='permission_denied'?'permission-denied':error.code==='duplicate_code'?'already-exists':'failed-precondition';return new HttpsError(code,error.message,{couponCode:error.publicCode})}
   logger.error('[Subscriptions]',{code:error?.code||'unknown',status:error?.status||null,message:String(error?.message||error).slice(0,240)});
   if(error?.code==='invalid-plan')return new HttpsError('invalid-argument','Plano inválido.');
   if(error?.code==='invalid-billing-cycle')return new HttpsError('invalid-argument','Periodicidade inválida.');
+  if(error?.code==='invalid-payment-method')return new HttpsError('invalid-argument','Forma de pagamento inválida.');
   if(error?.code==='mercado-pago-error')return new HttpsError('unavailable','O Mercado Pago não respondeu como esperado. Tente novamente em instantes.');
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
@@ -96,23 +113,57 @@ exports.actionAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const cont
 exports.duplicateAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request),coupon=await coupons().duplicateCoupon({context,couponId:String(request.data?.couponId||''),code:request.data?.code});return{coupon}}catch(error){throw callableError(error)}});
 
 exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
+  let attemptRef=null,redemption=null,providerPlan=null,checkoutPersisted=false;
   try{
-    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),context=await permissions().authenticatedContext(request,businessId);
+    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),paymentMethod=requirePaymentMethod(request.data?.paymentMethodType),context=await permissions().authenticatedContext(request,businessId);
     if(request.data?.userId&&request.data.userId!==context.uid)throw new HttpsError('permission-denied','Usuário divergente.');
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
-    const quoteId=String(request.data?.quoteId||''),currentId=context.business.subscription?.mercadoPago?.subscriptionId;
-    if(currentId&&context.business.subscription?.pendingPlanId===plan.id){const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${currentId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;if(checkoutUrl)return{checkoutUrl}}
-    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),redemption=quoteId?await coupons().reserveQuote({quoteId,context,planId:plan.id,billingCycle}):null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount};
-    let provider;try{provider=await mp().createSubscription({businessId,userId:context.uid,email:context.email,plan,billing,backUrl:`${APP_URL.value()}#/planos`,operationId:opId,coupon:redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId}:null})}catch(error){if(redemption&&!redemption.idempotent)await coupons().releaseReservation(redemption.id,'provider_checkout_failed');throw error}
+    const quoteId=String(request.data?.quoteId||''),pendingProviderId=context.business.subscription?.mercadoPago?.subscriptionId||context.business.subscription?.mercadoPago?.providerPlanId;
+    if(pendingProviderId&&context.business.subscription?.pendingPlanId===plan.id){
+      const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${pendingProviderId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId&&String(intentData.paymentMethodType||'card')===paymentMethod.id,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;
+      if(checkoutUrl)return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
+    }
+    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,paymentMethodType:paymentMethod.id}));
+    logger.info('[Billing] checkout_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
+    logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
+    const attempt=await acquireCheckoutAttempt({businessId,operationId:opId,requestHash,context,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,quoteId});
+    attemptRef=attempt.ref;
+    if(attempt.reused)return{checkoutUrl:attempt.checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
+    redemption=quoteId?await coupons().reserveQuote({quoteId,context,planId:plan.id,billingCycle}):null;
+    if(redemption)logger.info('[Billing] coupon_applied',{businessId,planId:plan.id,couponId:redemption.couponId,redemptionId:redemption.id});
+    const billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId}:null,backUrl=`${APP_URL.value()}#/planos`;
+    let provider,providerPlanId=null;
+    if(paymentMethod.id==='pix_monthly'){
+      logger.info('[Billing] pix_authorization_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
+      providerPlan=await mp().createSubscriptionPlan({businessId,plan,billing,backUrl,operationId:`${opId}-plan`});
+      if(!providerPlan?.id||!providerPlan?.init_point)throw new HttpsError('unavailable','O checkout via Pix não foi criado pelo Mercado Pago.');
+      providerPlanId=String(providerPlan.id);
+      provider={id:providerPlanId,status:'pending',init_point:providerPlan.init_point,payer_id:null};
+      await attemptRef.set({providerPlanId,checkoutUrl:String(providerPlan.init_point),stage:'provider_plan_created',updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    }else{
+      provider=await mp().createSubscription({businessId,userId:context.uid,email:context.email,plan,billing,backUrl,operationId:opId,coupon,paymentMethodType:paymentMethod.id});
+    }
     if(!provider?.id||!provider?.init_point)throw new HttpsError('unavailable','O checkout não foi criado pelo Mercado Pago.');
-    const now=iso(),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),indexRef=db.doc(`subscriptionIndex/${provider.id}`);
+    const expectedExternalReference=providerPlanId?`${businessId}:${opId}-plan`:businessId,now=iso(),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null,paymentMethodType:paymentMethod.id,providerPlanId}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),baseIndex={businessId,ownerId:context.uid,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,status:'pending',createdAt:now,updatedAt:now};
     batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
-    batch.set(intentRef,{businessId,requestedBy:context.uid,operationId:opId,planId:plan.id,billingCycle,officialPrice:officialBilling.amount,chargedPrice:billing.amount,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,status:'pending',providerStatus:String(provider.status||'pending'),subscriptionId:String(provider.id),customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point),createdAt:now,updatedAt:now});
-    batch.set(indexRef,{businessId,ownerId:context.uid,planId:plan.id,billingCycle,officialPrice:officialBilling.amount,chargedPrice:billing.amount,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,subscriptionId:String(provider.id),status:'pending',createdAt:now,updatedAt:now});
-    await batch.commit();if(redemption)await coupons().markCheckout({redemptionId:redemption.id,subscriptionId:String(provider.id),internalSubscriptionId:opId});logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,billingCycle,coupon:Boolean(redemption),environment:MP_ENV.value()});
-    return{checkoutUrl:String(provider.init_point)};
-  }catch(error){throw callableError(error)}
+    batch.set(intentRef,{...baseIndex,requestedBy:context.uid,operationId:opId,providerStatus:String(provider.status||'pending'),subscriptionId:providerPlanId?null:String(provider.id),providerPlanId,customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point)});
+    if(providerPlanId)batch.set(db.doc(`subscriptionPlanIndex/${providerPlanId}`),{...baseIndex,providerPlanId,checkoutUrl:String(provider.init_point)});
+    else batch.set(db.doc(`subscriptionIndex/${provider.id}`),{...baseIndex,subscriptionId:String(provider.id)});
+    await batch.commit();
+    checkoutPersisted=true;
+    if(redemption)await coupons().markCheckout({redemptionId:redemption.id,subscriptionId:providerPlanId?null:String(provider.id),internalSubscriptionId:opId,providerPlanId});
+    await finishCheckoutAttempt(attemptRef,{checkoutUrl:String(provider.init_point),providerPlanId,subscriptionId:providerPlanId?null:String(provider.id),paymentMethodType:paymentMethod.id});
+    logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,coupon:Boolean(redemption),environment:MP_ENV.value()});
+    logger.info('[Billing] subscription_created',{businessId,planId:plan.id,paymentMethodType:paymentMethod.id,providerPlanId:providerPlanId||null,subscriptionId:providerPlanId?null:String(provider.id)});
+    return{checkoutUrl:String(provider.init_point),paymentMethodType:paymentMethod.id,reused:false};
+  }catch(error){
+    logger.error('[Billing] billing_error',{stage:'create_subscription',code:error?.code||'unknown',status:error?.status||null});
+    if(!checkoutPersisted&&redemption&&!redemption.idempotent)await coupons().releaseReservation(redemption.id,'provider_checkout_failed').catch(()=>{});
+    if(!checkoutPersisted&&providerPlan?.id)await mp().cancelSubscriptionPlan(providerPlan.id).catch(cancelError=>logger.warn('[Subscriptions] provider plan cleanup failed',{providerPlanId:String(providerPlan.id),code:cancelError?.code||'unknown'}));
+    await failCheckoutAttempt(attemptRef,error);
+    throw callableError(error);
+  }
 });
 
 exports.cancelSubscription=onCall(FUNCTION_OPTIONS,async request=>{
@@ -149,13 +200,21 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
   });
   if(!acquired){res.status(200).send('already-processing-or-processed');return}
   try{
-    let subscriptionId=event.dataId;
-    if(event.type==='subscription_authorized_payment'){const payment=await mp().getAuthorizedPayment(event.dataId);subscriptionId=String(payment.preapproval_id||payment.subscription_id||'')}
-    if(event.type==='payment'){const payment=await mp().getPayment(event.dataId);subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'')}
+    if(event.type==='subscription_preapproval_plan'){await eventRef.update({status:'ignored',reason:'provider-plan-event',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
+    let subscriptionId=event.dataId,paymentResult=null;
+    if(event.type==='subscription_authorized_payment'){const payment=await mp().getAuthorizedPayment(event.dataId);subscriptionId=String(payment.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment)}
+    if(event.type==='payment'){const payment=await mp().getPayment(event.dataId);subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment)}
     if(!subscriptionId){await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
-    const provider=await mp().getSubscription(subscriptionId),store=providerStore(),result=await store.applyProviderSubscription(provider,{source:'webhook',eventId:id});if(event.type==='subscription_authorized_payment'||event.type==='payment'){const cycle=await store.recordDiscountPayment(subscriptionId,id);if(cycle.restoreAmount){await mp().updateSubscriptionAmount(subscriptionId,cycle.restoreAmount);await store.completeDiscountRestoration(subscriptionId,id)}}await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription.status,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
+    const provider=await mp().getSubscription(subscriptionId),store=providerStore(),result=await store.applyProviderSubscription(provider,{source:'webhook',eventId:id});
+    if(paymentResult){
+      await store.recordPaymentEvent(subscriptionId,id,paymentResult);
+      if(paymentResult.successful){logger.info('[Billing] payment_approved',{businessId:result.businessId,subscriptionId,paymentId:paymentResult.paymentId||null});const cycle=await store.recordDiscountPayment(subscriptionId,id);if(cycle.restoreAmount){await mp().updateSubscriptionAmount(subscriptionId,cycle.restoreAmount);await store.completeDiscountRestoration(subscriptionId,id)}}
+    }
+    if(result.subscription.status==='active')logger.info('[Billing] subscription_activated',{businessId:result.businessId,subscriptionId,paymentMethodType:result.subscription.paymentMethodType||'card'});
+    if(['cancelled','canceled','expired'].includes(result.subscription.status))logger.info('[Billing] checkout_cancelled',{businessId:result.businessId,subscriptionId,status:result.subscription.status});
+    await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription.status,paymentStatus:paymentResult?.status||null,paymentSuccessful:paymentResult?.successful??null,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
     logger.info('[Webhook] processed',{type:event.type,businessId:result.businessId,status:result.subscription.status});res.status(200).send('ok');
-  }catch(error){logger.error('[Webhook] failed',{eventId:id,type:event.type,code:error?.code||'unknown',message:String(error?.message||error).slice(0,240)});await eventRef.set({status:'failed',errorCode:error?.code||'unknown',updatedAt:FieldValue.serverTimestamp()},{merge:true});res.status(500).send('retry')}
+  }catch(error){logger.error('[Webhook] failed',{eventId:id,type:event.type,code:error?.code||'unknown',message:String(error?.message||error).slice(0,240)});logger.error('[Billing] billing_error',{stage:'webhook',eventId:id,type:event.type,code:error?.code||'unknown'});await eventRef.set({status:'failed',errorCode:error?.code||'unknown',updatedAt:FieldValue.serverTimestamp()},{merge:true});res.status(500).send('retry')}
 });
 
 exports.expireSubscriptionsDaily=onSchedule({region:REGION,schedule:'15 3 * * *',timeZone:'America/Sao_Paulo',memory:'256MiB',timeoutSeconds:300,maxInstances:1},async()=>{
