@@ -7,6 +7,8 @@ const {normalizePlanId,requirePlan}=require('../src/services/plan-service');
 const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,computeAccess}=require('../src/services/subscription-service');
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
 const {mercadoPagoService}=require('../src/services/mercado-pago-service');
+const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
+const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
 
 test('normaliza aliases sem permitir plano arbitrário',()=>{
   assert.equal(normalizePlanId('starter'),'essential');assert.equal(normalizePlanId('pro'),'professional');assert.equal(normalizePlanId('premium'),'premium');assert.throws(()=>requirePlan('internal'));
@@ -58,4 +60,42 @@ test('cliente Mercado Pago cancela assinatura com o estado aceito pelo provedor'
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:200,text:async()=>JSON.stringify({id:'sub_1',status:'cancelled'})}};
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.cancelSubscription('sub_1');
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{status:'cancelled'});
+});
+
+test('Pix mensal usa plano oficial limitado a bank_transfer/pix',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'plan_pix_1',init_point:'https://checkout.example/pix'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('professional');
+  await service.createSubscriptionPlan({businessId:'biz_1',plan,billing:{billingCycle:'monthly',amount:39.9,frequency:1,frequencyType:'months'},backUrl:'https://app.example',operationId:'op_1-plan'});
+  assert.equal(captured.url,'https://api.mercadopago.com/preapproval_plan');
+  assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1-plan');
+  const body=JSON.parse(captured.options.body);
+  assert.equal(body.auto_recurring.transaction_amount,39.9);
+  assert.deepEqual(body.payment_methods_allowed,{payment_types:[{id:'bank_transfer'}],payment_methods:[{id:'pix'}]});
+  assert.equal(body.external_reference,'biz_1:op_1-plan');
+});
+
+test('formas de pagamento aceitas são enum fechado e cartão permanece padrão',()=>{
+  assert.equal(requirePaymentMethod().id,'card');
+  assert.equal(requirePaymentMethod('pix_monthly').providerMode,'dedicated_preapproval_plan');
+  assert.throws(()=>requirePaymentMethod('pix'));
+  assert.throws(()=>requirePaymentMethod('bank_transfer'));
+});
+
+test('webhook só considera cobrança aprovada como sucesso',()=>{
+  assert.equal(providerPaymentResult('payment',{id:1,status:'approved'}).successful,true);
+  assert.equal(providerPaymentResult('payment',{id:2,status:'pending'}).successful,false);
+  assert.equal(providerPaymentResult('subscription_authorized_payment',{payment:{id:3,status:'approved'}}).successful,true);
+  assert.equal(providerPaymentResult('subscription_authorized_payment',{status:'processed',payment:{id:4,status:'rejected'}}).successful,false);
+});
+
+test('webhook valida valor, empresa, referência, plano e pagador antes de ativar',()=>{
+  const index={businessId:'biz_1',chargedPrice:39.9,providerPlanId:'plan_1',expectedExternalReference:'biz_1:op_1-plan'};
+  const business={subscription:{mercadoPago:{customerId:'payer_1'}}};
+  const provider={id:'sub_1',status:'authorized',preapproval_plan_id:'plan_1',external_reference:'biz_1:op_1-plan',payer_id:'payer_1',metadata:{business_id:'biz_1'},auto_recurring:{transaction_amount:39.9}};
+  assert.equal(validateProviderSubscription(provider,index,business).active,true);
+  assert.throws(()=>validateProviderSubscription({...provider,auto_recurring:{transaction_amount:49.9}},index,business),error=>error.code==='provider-price-mismatch');
+  assert.throws(()=>validateProviderSubscription({...provider,external_reference:'biz_2:op_1-plan'},index,business),error=>error.code==='provider-reference-mismatch');
+  assert.throws(()=>validateProviderSubscription({...provider,preapproval_plan_id:'plan_2'},index,business),error=>error.code==='provider-plan-mismatch');
+  assert.throws(()=>validateProviderSubscription({...provider,payer_id:'payer_2'},index,business),error=>error.code==='provider-payer-mismatch');
+  assert.throws(()=>validateProviderSubscription({...provider,metadata:{business_id:'biz_2'}},index,business),error=>error.code==='provider-business-mismatch');
 });

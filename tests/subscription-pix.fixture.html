@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Assinaturas Mercado Pago — fixture</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/mobile-components.css">
+  <link rel="stylesheet" href="../css/plans.css">
+  <style>
+    body{margin:0;background:#f5f6f8;color:#17243d}.fixture-shell{max-width:1180px;margin:0 auto;padding:24px 20px 72px}#modal{position:relative;z-index:1000}
+    @media(max-width:767px){.fixture-shell{padding:18px 12px 92px}}
+  </style>
+</head>
+<body>
+  <main class="fixture-shell" id="app"></main>
+  <div id="modal"></div>
+  <script src="../assets/lucide.min.js"></script>
+  <script>
+    const iso=(days=0)=>new Date(Date.now()+days*86400000).toISOString();
+    const plans=[
+      {id:"essential",name:"Essencial",summary:"Organize o básico do seu negócio.",monthlyPrice:29.9,yearlyPrice:299,features:{products:true,stock:true,sales:true,clients:true,payments:true,barcode:true},limits:{users:1,products:300,clients:500,monthlySales:1500}},
+      {id:"professional",name:"Profissional",summary:"Mais recursos para vender e crescer.",monthlyPrice:49.9,yearlyPrice:499,recommended:true,features:{products:true,stock:true,sales:true,clients:true,campaigns:true,crm:true,onlineCatalog:true,onlineOrders:true,advancedReports:true},limits:{users:3,products:2000,clients:5000,monthlySales:10000}},
+      {id:"premium",name:"Premium",summary:"Para negócios que querem o máximo.",monthlyPrice:79.9,yearlyPrice:799,features:{products:true,stock:true,sales:true,clients:true,campaigns:true,crm:true,onlineCatalog:true,onlineOrders:true,multipleUsers:true,rolesPermissions:true,automations:true},limits:{users:10,products:10000,clients:25000,monthlySales:50000}}
+    ];
+    const params=new URLSearchParams(location.search),state=params.get("state")||"selected";
+    let fixtureContext={subscription:{planId:"trial",status:"trialing",trialStartedAt:iso(-3),trialEndsAt:iso(4)},access:{status:"trialing",daysRemaining:4,readOnly:false,limits:plans[1].limits,effectivePlan:{name:"Profissional"}},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits},profile:{uid:"fixture-owner",role:"owner"}};
+    if(state==="pending")fixtureContext={...fixtureContext,subscription:{...fixtureContext.subscription,pendingPlanId:"professional",pendingPaymentMethodType:"pix_monthly",mercadoPago:{providerPlanId:"fixture-plan"}}};
+    if(state==="active")fixtureContext={...fixtureContext,subscription:{planId:"professional",status:"active",paymentMethodType:"pix_monthly",currentPeriodEnd:iso(30)},access:{status:"active",readOnly:false,limits:plans[1].limits},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits}};
+    window.Utils={escapar:(value)=>String(value).replace(/[&<>"']/g,(character)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]),toast:()=>{}};
+    window.DB={carregar:()=>({produtos:[],clientes:[],vendas:[]})};
+    window.BusinessContext={get:()=>fixtureContext};
+    window.FirebaseSession={};
+    window.PlanLimitService={canUseFeature:()=>({ok:true}),canUseAction:()=>({ok:true})};
+    window.Router={ir:()=>{},render:()=>{}};
+    window.SubscriptionService={
+      getPlans:()=>plans,
+      validateCoupon:async()=>({quoteId:"fixture-quote",code:"PARCEIRO20",planId:"professional",billingCycle:"monthly",originalPrice:49.9,discountedPrice:39.92,durationLabel:"Primeiro pagamento"}),
+      requestUpgrade:async()=>({checkoutUrl:"https://example.invalid/checkout"}),
+      syncSubscriptionStatus:async()=>({}),
+      requestCancellation:async()=>({})
+    };
+  </script>
+  <script src="../js/plans.js"></script>
+  <script>
+    (async()=>{
+      const app=document.querySelector("#app");
+      app.innerHTML=PlansUI.render();PlansUI.bind(app);
+      await new Promise(resolve=>setTimeout(resolve,80));
+      if(["coupon","payment","card","pix"].includes(state)){
+        const details=document.querySelector(".plan-coupon");details.open=true;
+        document.querySelector("[data-coupon-code]").value="PARCEIRO20";
+        document.querySelector("[data-coupon-plan]").value="professional";
+        document.querySelector("[data-apply-coupon]").click();
+        await new Promise(resolve=>setTimeout(resolve,30));
+      }
+      if(["payment","card","pix"].includes(state)){
+        document.querySelector('[data-plan-cta="professional"]').click();
+        await new Promise(resolve=>setTimeout(resolve,30));
+      }
+      if(state==="pix")document.querySelector('[data-payment-option="pix_monthly"]').click();
+      window.__subscriptionPixFixture={state,ready:true,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,selectedPayment:document.querySelector('[data-payment-option].active')?.dataset.paymentOption||null};
+    })();
+  </script>
+</body>
+</html>

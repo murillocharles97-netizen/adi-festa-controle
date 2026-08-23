@@ -5,15 +5,95 @@ const { providerPatch } = require("./subscription-service");
 const { getPlan } = require("./plan-service");
 const { counterId } = require("./coupon-firestore-service");
 
+function validateProviderSubscription(provider, index, business = {}) {
+  const active = String(provider?.status || "").toLowerCase() === "authorized";
+  const providerAmount = Number(provider?.auto_recurring?.transaction_amount);
+  const expectedAmountRaw = index?.chargedPrice ?? index?.officialPrice;
+  const expectedAmount = Number(expectedAmountRaw);
+  const providerPlanId = String(provider?.preapproval_plan_id || "");
+  const expectedPlanId = String(index?.providerPlanId || "");
+  const externalReference = String(provider?.external_reference || "");
+  const expectedExternalReference = String(index?.expectedExternalReference || "");
+  const metadataBusinessId = String(provider?.metadata?.business_id || "");
+  const expectedBusinessId = String(index?.businessId || "");
+  const currentPayerId = String(
+    business?.subscription?.mercadoPago?.customerId || "",
+  );
+  const providerPayerId = provider?.payer_id == null
+    ? ""
+    : String(provider.payer_id);
+
+  if (providerPlanId && expectedPlanId && providerPlanId !== expectedPlanId)
+    throw Object.assign(Error("Plano do provedor diverge do checkout seguro."), {
+      code: "provider-plan-mismatch",
+    });
+  if (
+    externalReference &&
+    expectedExternalReference &&
+    externalReference !== expectedExternalReference
+  )
+    throw Object.assign(
+      Error("Referência externa do provedor diverge do checkout seguro."),
+      { code: "provider-reference-mismatch" },
+    );
+  if (
+    metadataBusinessId &&
+    expectedBusinessId &&
+    metadataBusinessId !== expectedBusinessId
+  )
+    throw Object.assign(Error("Empresa do provedor diverge do checkout seguro."), {
+      code: "provider-business-mismatch",
+    });
+  if (currentPayerId && providerPayerId && currentPayerId !== providerPayerId)
+    throw Object.assign(Error("Pagador diverge da assinatura existente."), {
+      code: "provider-payer-mismatch",
+    });
+  if (
+    active &&
+    expectedAmountRaw != null &&
+    (!Number.isFinite(providerAmount) ||
+      !Number.isFinite(expectedAmount) ||
+      Math.abs(providerAmount - expectedAmount) > 0.009)
+  )
+    throw Object.assign(
+      Error("Valor do provedor diverge da cotação segura."),
+      { code: "provider-price-mismatch" },
+    );
+  return { active, providerAmount, providerPayerId };
+}
+
 function firestoreSubscriptionService(db) {
   const nowIso = () => new Date().toISOString();
   async function resolveIndex(subscriptionId) {
     const snapshot = await db.doc(`subscriptionIndex/${subscriptionId}`).get();
     return snapshot.exists ? snapshot.data() : null;
   }
+  async function bindSubscriptionFromPlan(provider) {
+    const subscriptionId=String(provider?.id||''),providerPlanId=String(provider?.preapproval_plan_id||'');
+    if(!subscriptionId)return null;
+    const indexRef=db.doc(`subscriptionIndex/${subscriptionId}`),current=await indexRef.get();
+    if(current.exists)return current.data();
+    if(!providerPlanId)return null;
+    const planIndexRef=db.doc(`subscriptionPlanIndex/${providerPlanId}`),planIndexSnapshot=await planIndexRef.get();
+    if(!planIndexSnapshot.exists)return null;
+    const planIndex=planIndexSnapshot.data()||{},now=nowIso();
+    await db.runTransaction(async transaction=>{
+      const existing=await transaction.get(indexRef);
+      if(existing.exists)return;
+      const freshPlanIndex=await transaction.get(planIndexRef),source=freshPlanIndex.data()||{};
+      if(!freshPlanIndex.exists||!source.businessId)throw Object.assign(Error('Plano de cobrança sem empresa vinculada.'),{code:'subscription-plan-index-not-found'});
+      const index={...source,subscriptionId,providerPlanId,status:'pending',providerStatus:String(provider.status||'pending'),boundAt:now,updatedAt:now};
+      transaction.create(indexRef,index);
+      transaction.set(db.doc(`businesses/${source.businessId}/subscriptionIntents/${subscriptionId}`),{...index,checkoutUrl:source.checkoutUrl||null,createdAt:source.createdAt||now},{merge:true});
+      transaction.set(planIndexRef,{subscriptionId,status:'bound',boundAt:now,updatedAt:now},{merge:true});
+      if(source.couponRedemptionId)transaction.set(db.doc(`couponRedemptions/${source.couponRedemptionId}`),{mercadoPagoSubscriptionId:subscriptionId,updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    });
+    return{...planIndex,subscriptionId,providerPlanId};
+  }
   async function applyProviderSubscription(provider, { source, eventId } = {}) {
     const subscriptionId = String(provider?.id || "");
     if (!subscriptionId) throw Error("Assinatura sem identificador.");
+    await bindSubscriptionFromPlan(provider);
     const indexRef = db.doc(`subscriptionIndex/${subscriptionId}`),
       now = nowIso();
     return db.runTransaction(async (transaction) => {
@@ -34,28 +114,20 @@ function firestoreSubscriptionService(db) {
           ? await transaction.get(redemptionRef)
           : null,
         redemption = redemptionSnapshot?.data() || null,
-        providerAmount = Number(provider.auto_recurring?.transaction_amount),
-        active = String(provider.status) === "authorized",
+        business = businessSnapshot.data(),
+        validation = validateProviderSubscription(provider, index, business),
+        active = validation.active,
         terminal = ["cancelled", "canceled", "expired"].includes(
           String(provider.status),
         );
-      if (
-        active &&
-        redemption &&
-        (!Number.isFinite(providerAmount) ||
-          Math.abs(providerAmount - Number(redemption.discountedPrice)) > 0.009)
-      )
-        throw Object.assign(
-          Error("Valor do provedor diverge da cotação segura."),
-          { code: "coupon-price-mismatch" },
-        );
       const discount =
           redemption?.discountSnapshot || index.discountSnapshot || null,
-        business = businessSnapshot.data(),
         subscription = providerPatch(provider, {
           planId: index.planId,
           billingCycle: index.billingCycle,
           discount: active ? discount : null,
+          paymentMethodType:index.paymentMethodType,
+          providerPlanId:index.providerPlanId,
           now,
           existing: business.subscription || {},
         }),
@@ -169,6 +241,8 @@ function firestoreSubscriptionService(db) {
         {
           status: subscription.status,
           providerStatus: String(provider.status || ""),
+          paymentMethodType:index.paymentMethodType||"card",
+          providerPlanId:index.providerPlanId||null,
           updatedAt: now,
           lastSource: source || "provider",
         },
@@ -246,6 +320,22 @@ function firestoreSubscriptionService(db) {
       };
     });
   }
+  async function recordPaymentEvent(subscriptionId,eventId,result={}){
+    const markerRef=db.doc(`subscriptionPaymentEvents/${eventId}`),indexRef=db.doc(`subscriptionIndex/${subscriptionId}`);
+    return db.runTransaction(async transaction=>{
+      const marker=await transaction.get(markerRef);
+      if(marker.exists)return marker.data();
+      const indexSnapshot=await transaction.get(indexRef),index=indexSnapshot.data()||{};
+      if(!indexSnapshot.exists||!index.businessId)return{processed:false};
+      const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
+      if(successful)patch['subscription.lastPaymentDate']=nowIso();
+      else if(paymentMethodType==='pix_monthly'&&subscription.status==='active')patch['subscription.status']='payment_pending';
+      transaction.update(businessRef,patch);
+      const row={eventId,subscriptionId,businessId:index.businessId,paymentMethodType,successful,status:String(result.status||'unknown'),paymentId:result.paymentId||null,createdAt:FieldValue.serverTimestamp()};
+      transaction.create(markerRef,row);
+      return{processed:true,...row};
+    });
+  }
   async function completeDiscountRestoration(subscriptionId, eventId) {
     const markerRef = db.doc(`couponBillingEvents/${eventId}`),
       index = await resolveIndex(subscriptionId);
@@ -289,10 +379,12 @@ function firestoreSubscriptionService(db) {
   }
   return {
     resolveIndex,
+    bindSubscriptionFromPlan,
     applyProviderSubscription,
+    recordPaymentEvent,
     recordDiscountPayment,
     completeDiscountRestoration,
   };
 }
 
-module.exports = { firestoreSubscriptionService };
+module.exports = { firestoreSubscriptionService, validateProviderSubscription };

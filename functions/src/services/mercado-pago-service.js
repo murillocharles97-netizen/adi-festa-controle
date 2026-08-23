@@ -14,10 +14,19 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     return payload;
   }
   return{
-    createSubscription({businessId,userId,email,plan,billing,backUrl,operationId,coupon=null}){
+    createSubscription({businessId,userId,email,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card'}){
       const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
-      return request('/preapproval',{method:'POST',idempotencyKey:operationId,body:{reason:`Adi Festa Controle - ${plan.name}`,external_reference:businessId,payer_email:email,back_url:backUrl,status:'pending',auto_recurring:{frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency},metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}}});
+      const body={reason:`Adi Festa Controle - ${plan.name}`,external_reference:businessId,payer_email:email,back_url:backUrl,status:'pending',metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,payment_method_type:paymentMethodType,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}};
+      if(preapprovalPlanId)body.preapproval_plan_id=String(preapprovalPlanId);
+      else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
+      return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
+    createSubscriptionPlan({businessId,plan,billing,backUrl,operationId}){
+      const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
+      return request('/preapproval_plan',{method:'POST',idempotencyKey:operationId,body:{reason:`Adi Festa Controle - ${plan.name} - Pix mensal`,external_reference:`${businessId}:${operationId}`,back_url:backUrl,auto_recurring:{frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency},payment_methods_allowed:{payment_types:[{id:'bank_transfer'}],payment_methods:[{id:'pix'}]}}});
+    },
+    cancelSubscriptionPlan(planId){return request(`/preapproval_plan/${encodeURIComponent(planId)}`,{method:'PUT',body:{status:'cancelled'}})},
+    getSubscriptionPlan(planId){return request(`/preapproval_plan/${encodeURIComponent(planId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'cancelled'}})},
     updateSubscriptionAmount(subscriptionId,amount,currency='BRL'){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount),currency_id:String(currency||'BRL')}}})},

@@ -13,13 +13,17 @@ function computeAccess(subscription={},now=new Date()){
   const status=normalizedStatus(subscription),plan=getPlan(subscription.planId),trial=isTrialActive(subscription,now),internal=subscription.planId==='internal'&&(subscription.isInternal===true||['active','internal'].includes(status)),active=internal||status==='active'||status==='grace_period'||trial;
   return{status,planId:subscription.planId||'',active,canAccessApp:true,canMutate:active,readOnly:!active,trial,features:internal?null:plan?.features||{},limits:internal?null:plan?.limits||{},unlimited:internal};
 }
-function providerPatch(provider,{planId,now,existing={},billingCycle,discount}={}){
+function providerPatch(provider,{planId,now,existing={},billingCycle,discount,paymentMethodType,providerPlanId}={}){
   const status=mapProviderStatus(provider.status),plan=getPlan(planId||existing.planId),lastPaymentDate=provider.summarized?.last_charged_date||existing.lastPaymentDate||null;
   return{
     ...existing,
     status,
     planId:plan?.id||planId||existing.planId||'',
+    pendingPlanId:null,
+    pendingBillingCycle:null,
+    pendingPaymentMethodType:null,
     billingCycle:billingCycle||existing.billingCycle||'monthly',
+    paymentMethodType:paymentMethodType||existing.paymentMethodType||existing.pendingPaymentMethodType||'card',
     provider:'mercado_pago',
     startedAt:provider.date_created||existing.startedAt||now,
     expiresAt:provider.auto_recurring?.end_date||existing.expiresAt||null,
@@ -33,13 +37,14 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount}={
       ...(existing.mercadoPago||{}),
       subscriptionId:String(provider.id||existing.mercadoPago?.subscriptionId||''),
       preapprovalId:String(provider.id||existing.mercadoPago?.preapprovalId||''),
+      providerPlanId:String(provider.preapproval_plan_id||providerPlanId||existing.mercadoPago?.providerPlanId||''),
       customerId:provider.payer_id==null?(existing.mercadoPago?.customerId||null):String(provider.payer_id),
       providerStatus:String(provider.status||''),
       lastWebhook:now
     }
   };
 }
-function pendingSubscription({existing={},plan,provider,now,billingCycle='monthly',discount=null}){
+function pendingSubscription({existing={},plan,provider,now,billingCycle='monthly',discount=null,paymentMethodType='card',providerPlanId=null}){
   const preserveTrial=isTrialActive(existing,new Date(now));
   return{
     ...existing,
@@ -47,10 +52,11 @@ function pendingSubscription({existing={},plan,provider,now,billingCycle='monthl
     planId:preserveTrial?(existing.planId||'trial'):plan.id,
     pendingPlanId:plan.id,
     pendingBillingCycle:billingCycle,
+    pendingPaymentMethodType:paymentMethodType,
     ...(discount?{pendingDiscount:{...discount}}:{}),
     provider:'mercado_pago',
     updatedAt:now,
-    mercadoPago:{...(existing.mercadoPago||{}),subscriptionId:String(provider.id),preapprovalId:String(provider.id),customerId:provider.payer_id==null?null:String(provider.payer_id),providerStatus:String(provider.status||'pending'),checkoutCreatedAt:now,lastWebhook:existing.mercadoPago?.lastWebhook||null}
+    mercadoPago:{...(existing.mercadoPago||{}),subscriptionId:providerPlanId?null:String(provider.id),preapprovalId:providerPlanId?null:String(provider.id),providerPlanId:providerPlanId?String(providerPlanId):String(existing.mercadoPago?.providerPlanId||''),customerId:provider.payer_id==null?null:String(provider.payer_id),providerStatus:String(provider.status||'pending'),checkoutCreatedAt:now,lastWebhook:existing.mercadoPago?.lastWebhook||null}
   };
 }
 function sanitize(subscription={}){
