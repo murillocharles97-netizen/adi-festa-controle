@@ -31,6 +31,14 @@ function setup({ reduced = false } = {}) {
     CRMDashboard: {
       state,
       selectSegment: (id) => selected.push(id),
+      applySavedSegment: (saved) => {
+        state.resultLabel = saved.name;
+        state.resultsVisible = true;
+        state.customMatchMode = saved.matchMode;
+        state.customConditions = saved.conditions.map((item) => ({ ...item }));
+        invalidations++;
+        refreshes++;
+      },
       invalidate: () => invalidations++,
       refresh: () => refreshes++,
     },
@@ -79,10 +87,12 @@ test("layout mobile define carrossel compacto, cards oficiais e filtro de 50px",
 });
 
 test("auto-scroll fica restrito às ações explícitas e não ao lifecycle", () => {
+  const builder = fs.readFileSync("js/crm-segment-builder.js", "utf8");
   assert.doesNotMatch(source, /addEventListener\(["'](?:visibilitychange|pageshow|pagehide|focus)["']/);
   assert.match(source, /applyAutomaticSegment[\s\S]*scrollToResults\(\)/);
-  assert.match(source, /data-crm-apply-custom[\s\S]*scrollToResults\(\)/);
-  assert.match(source, /data-apply-saved/);
+  assert.match(source, /CRMSegmentBuilder\?\.open\?\.\(\{ onApply: scrollToResults \}\)/);
+  assert.match(builder, /data-builder-apply/);
+  assert.match(builder, /options\.onApply\?\.\(stored\)/);
   assert.match(source, /data-crm-back-overview[\s\S]*scrollToSegments\(\)/);
 });
 

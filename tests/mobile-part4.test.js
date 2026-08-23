@@ -198,13 +198,14 @@ function plansSandbox(context) {
 
 test("Planos renderiza trial, pago, expirado e interno a partir do status real", () => {
   const base = { business: { id: "demo" }, subscription: {}, access: {} };
+  const now = Date.now(), day = 86400000;
   const trial = plansSandbox({
     ...base,
     subscription: {
       planId: "trial",
       status: "trialing",
-      trialStartedAt: "2026-08-10",
-      trialEndsAt: "2026-08-20",
+      trialStartedAt: new Date(now - 4 * day).toISOString(),
+      trialEndsAt: new Date(now + 3 * day).toISOString(),
     },
     access: { daysRemaining: 3, limits: {} },
   }).PlansUI.render();
