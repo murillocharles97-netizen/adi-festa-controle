@@ -93,6 +93,29 @@ window.Checkout = (() => {
         .list()
         .filter((c) => c.ativo !== false),
       cats = [...new Set(ps.map((p) => p.categoria).filter(Boolean))].sort();
+    if (window.DesktopSales?.isDesktop?.()) {
+      const productById = new Map(ps.map((product) => [product.id, product])),
+        seen = new Set(),
+        recentProducts = [];
+      [...Repositories.saleRepository().list()]
+        .reverse()
+        .some((sale) =>
+          [...(sale.itens || [])].reverse().some((item) => {
+            const product = productById.get(item.produtoId);
+            if (!product || seen.has(product.id)) return false;
+            seen.add(product.id);
+            recentProducts.push(product);
+            return recentProducts.length >= 5;
+          }),
+        );
+      return window.DesktopSales.render({
+        products: ps,
+        clients: cs,
+        cart,
+        totals: totals(cart),
+        recentProducts,
+      });
+    }
     return `<div class="pos-page"><div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Cadastre um produto primeiro</div>'}</section><section class="pos-summary" id="pos-summary" hidden><div class="pos-summary-head"><div><h3>Resumo da venda</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select></div><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
   }
   const state = () =>
@@ -118,36 +141,53 @@ window.Checkout = (() => {
       e.hidden = !q;
       e.dataset.quantity = String(q);
       e.textContent = q;
-      e.closest(".pos-product").classList.toggle("selected", !!q);
+      e.closest(".pos-product")?.classList.toggle("selected", !!q);
     });
-    document.querySelector("#pos-bag-label").textContent = items
-      ? `${items} ${items === 1 ? "item" : "itens"} · ${dinheiro(total)}`
-      : "Nenhum item selecionado";
-    document.querySelector("#pos-bag-total").textContent = dinheiro(total);
+    const bagLabel = document.querySelector("#pos-bag-label"),
+      bagTotal = document.querySelector("#pos-bag-total"),
+      cartCount = document.querySelector("#desktop-cart-count"),
+      ctaTotal = document.querySelector("#desktop-cta-total"),
+      finishTotal = document.querySelector("#desktop-finish-total"),
+      discountPreview = document.querySelector("#desktop-discount-preview"),
+      currentTotals = totals();
+    if (bagLabel)
+      bagLabel.textContent = items
+        ? `${items} ${items === 1 ? "item" : "itens"} · ${dinheiro(total)}`
+        : "Nenhum item selecionado";
+    if (bagTotal) bagTotal.textContent = dinheiro(total);
+    if (cartCount)
+      cartCount.textContent = `${items} ${items === 1 ? "item" : "itens"}`;
+    if (ctaTotal) ctaTotal.textContent = `• ${dinheiro(currentTotals.final)}`;
+    if (finishTotal)
+      finishTotal.textContent = `• ${dinheiro(currentTotals.final)}`;
+    if (discountPreview)
+      discountPreview.textContent = dinheiro(currentTotals.discount);
     selectedClient();
   }
   function selectedClient() {
     const sel = document.querySelector("#sale-client"),
       box = document.querySelector("#selected-client-card"),
       label = document.querySelector(".pos-client-select span"),
-      c = sel.value ? clients().getById(sel.value) : null;
+      c = sel?.value ? clients().getById(sel.value) : null;
+    if (!sel || !box || !label) return;
     if (!c) {
       label.textContent = "Selecionar cliente ou venda avulsa";
       box.innerHTML = '<span class="muted">Venda avulsa selecionada</span>';
       return;
     }
-    const total = Number(document.querySelector("#manual-total").value || 0),
-      fiado = document.querySelector("#sale-status").value === "fiado",
+    const total = Number(document.querySelector("#manual-total")?.value || 0),
+      fiado = document.querySelector("#sale-status")?.value === "fiado",
       deve = Math.abs(Math.min(0, Number(c.saldo || 0)));
     label.textContent = c.nome;
     box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b><p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">Após esta venda: <b>${dinheiro(deve + total)} em aberto</b></p>` : ""}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
     window.lucide?.createIcons();
   }
   function filter() {
-    const q = norm(document.querySelector("#product-search").value),
-      cat = document.querySelector("#pos-category").value,
-      f = document.querySelector("#pos-filter").value,
-      sort = document.querySelector("#pos-sort").value;
+    const q = norm(document.querySelector("#product-search")?.value),
+      cat = document.querySelector("#pos-category")?.value || "",
+      brand = document.querySelector("#desktop-sale-brand")?.value || "",
+      f = document.querySelector("#pos-filter")?.value || "todos",
+      sort = document.querySelector("#pos-sort")?.value || "nome";
     let cards = [...document.querySelectorAll(".pos-product")];
     cards.forEach((el) => {
       const p = products().getById(el.dataset.add),
@@ -156,6 +196,7 @@ window.Checkout = (() => {
       el.hidden = !(
         (!q || el.dataset.search.includes(q)) &&
         (!cat || el.dataset.category === cat) &&
+        (!brand || el.dataset.brand === brand) &&
         (f === "todos" ||
           (f === "favoritos" && p.favorito) ||
           (f === "estoque" && controlsStock && n > 0) ||
@@ -177,7 +218,10 @@ window.Checkout = (() => {
           return Number(y.favorito) - Number(x.favorito);
         return x.nome.localeCompare(y.nome);
       })
-      .forEach((el) => document.querySelector("#pos-grid").append(el));
+      .forEach((el) =>
+        (document.querySelector("#desktop-sale-products") ||
+          document.querySelector("#pos-grid"))?.append(el),
+      );
     dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: cards.filter((card) => !card.hidden).length } }));
   }
   const row = (c) =>
@@ -300,7 +344,7 @@ window.Checkout = (() => {
   function quickClient() {
     document.querySelector("#modal").innerHTML =
       `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
-    document.querySelector(".cancel").onclick = picker;
+    document.querySelector(".cancel").onclick = () => picker();
     document.querySelector("#quick-client-form").onsubmit = (e) => {
       e.preventDefault();
       clients().create(Object.fromEntries(new FormData(e.currentTarget)));
@@ -354,7 +398,7 @@ window.Checkout = (() => {
       document.querySelector("#pos-summary").hidden = true;
       scrollTo({ top: 0, behavior: "smooth" });
     };
-    document.querySelector("#open-client-picker").onclick = picker;
+    document.querySelector("#open-client-picker").onclick = () => picker();
     document.querySelector("#sale-client").onchange = refresh;
     document.querySelector("#sale-status").addEventListener("change", refresh);
     document
@@ -407,14 +451,16 @@ window.Checkout = (() => {
         }) || cart)
       : cart;
     const t = totals(displayItems);
-    host.innerHTML = cart.length
-      ? cart
+    host.innerHTML = window.DesktopSales?.isDesktop?.()
+      ? window.DesktopSales.cartHTML(cart)
+      : cart.length
+        ? cart
           .map((i) => {
             const key = cartKey(i);
             return `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(key)}"><i data-lucide="trash-2"></i></button></div>`;
           })
           .join("")
-      : '<div class="empty">Adicione produtos</div>';
+        : '<div class="empty">Adicione produtos</div>';
     document.querySelector("#sale-totals").innerHTML =
       `<div class="summary-row"><span>Subtotal original</span><b>${dinheiro(t.original)}</b></div><div class="summary-row discount"><span>Desconto total</span><b>${dinheiro(t.discount)}</b></div><div class="summary-row total-row"><span>Valor final</span><b>${dinheiro(t.final)}</b></div><div class="summary-row private-value"><span>Custo total</span><b>${dinheiro(t.cost)}</b></div><div class="summary-row private-value"><span>Lucro estimado</span><b>${dinheiro(t.profit)}</b></div>`;
     document.querySelector("#manual-total").value = t.final.toFixed(2);
@@ -543,6 +589,7 @@ window.Checkout = (() => {
   }
   function standalone() {
     const search = document.querySelector("#product-search");
+    if (!search) return;
     let timer;
     search.oninput = () => {
       clearTimeout(timer);
@@ -564,9 +611,18 @@ window.Checkout = (() => {
           const p = db.produtos.find((x) => x.id === fav.dataset.fav);
           p.favorito = !p.favorito;
         });
-        fav.textContent = products().getById(fav.dataset.fav).favorito
-          ? "★"
-          : "☆";
+        const active = products().getById(fav.dataset.fav).favorito;
+        if (window.DesktopSales?.isDesktop?.()) {
+          fav.classList.toggle("active", active);
+          fav.setAttribute("aria-pressed", String(active));
+          fav.setAttribute(
+            "aria-label",
+            `${active ? "Remover dos" : "Adicionar aos"} favoritos`,
+          );
+          fav.innerHTML = '<i data-lucide="star"></i>';
+          window.lucide?.createIcons();
+          filter();
+        } else fav.textContent = active ? "★" : "☆";
         return;
       }
       const b = e.target.closest("[data-add]");
@@ -588,17 +644,19 @@ window.Checkout = (() => {
       }
       addSaleItem(ProductVariations.saleItem(p, null, 1), { source: b });
     };
-    document.querySelector("#open-sale-summary").onclick = () => {
+    const openSummary = document.querySelector("#open-sale-summary"),
+      closeSummary = document.querySelector("#close-sale-summary");
+    if (openSummary && !openSummary.hidden) openSummary.onclick = () => {
       document.querySelector("#pos-summary").hidden = false;
       document
         .querySelector("#pos-summary")
         .scrollIntoView({ behavior: "smooth" });
     };
-    document.querySelector("#close-sale-summary").onclick = () => {
+    if (closeSummary && !closeSummary.hidden) closeSummary.onclick = () => {
       document.querySelector("#pos-summary").hidden = true;
       scrollTo({ top: 0, behavior: "smooth" });
     };
-    document.querySelector("#open-client-picker").onclick = picker;
+    document.querySelector("#open-client-picker").onclick = () => picker();
     document.querySelector("#sale-client").onchange = () => {
       selectedCampaignIds.clear();
       drawCart();
@@ -632,7 +690,20 @@ window.Checkout = (() => {
       drawCart();
     };
     document.querySelector("#cart").onclick = (e) => {
-      const b = e.target.closest("[data-remove]");
+      const step = e.target.closest("[data-cart-step]"),
+        b = e.target.closest("[data-remove]");
+      if (step) {
+        const item = cart.find(
+          (entry) => cartKey(entry) === step.dataset.cartKey,
+        );
+        if (item) {
+          item.quantidade += Number(step.dataset.cartStep || 0);
+          if (item.quantidade <= 0)
+            cart = cart.filter((entry) => entry !== item);
+          drawCart();
+        }
+        return;
+      }
       if (b) {
         cart = cart.filter((i) => cartKey(i) !== b.dataset.remove);
         drawCart();
@@ -702,6 +773,16 @@ window.Checkout = (() => {
         return;
       proceed();
     };
+    document.querySelector("#desktop-clear-cart")?.addEventListener(
+      "click",
+      () => {
+        if (!cart.length) return;
+        if (!confirm("Limpar todos os itens do carrinho?")) return;
+        cart = [];
+        selectedCampaignIds.clear();
+        drawCart();
+      },
+    );
     drawCart();
     if (pendingClient) {
       const select = document.querySelector("#sale-client");
@@ -785,6 +866,8 @@ window.Checkout = (() => {
     openVariantPicker: variablePicker,
     openRecurringProduct,
     addSaleItem,
+    bindDesktop: standalone,
+    filterProducts: filter,
     cartCount: () =>
       cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),
   };

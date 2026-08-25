@@ -6,6 +6,7 @@
     "lint": "node scripts/check-project.js",
     "test": "node --test tests/*.test.js",
     "test:desktop-browser": "node scripts/audit-desktop-browser.cjs",
+    "test:desktop-selling": "node scripts/audit-desktop-selling-v2.cjs",
     "test:desktop-design-system": "node scripts/audit-desktop-design-system.cjs",
     "test:mobile-browser": "node scripts/audit-mobile-products-selling.cjs",
     "test:home-clients-browser": "node scripts/audit-mobile-home-clients.cjs",
