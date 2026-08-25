@@ -313,16 +313,11 @@
               .join("")
           : vazio("Adicione produtos");
   function vender() {
+    if (window.DesktopSales?.isDesktop?.())
+      return window.Checkout?.view?.() || "";
     const ps = Produtos.listar().filter((p) => p.ativo),
       cs = Clientes.listar().filter((c) => c.ativo),
       t = totaisCarrinho();
-    if (window.DesktopSales?.isDesktop?.())
-      return window.DesktopSales.render({
-        products: ps,
-        clients: cs,
-        cart: carrinho,
-        totals: t,
-      });
     return (
       cabecalho(
         "Nova venda",
@@ -733,8 +728,10 @@
     }
     if (route === "cobrancas") bindCobrancas();
     if (route === "vender") {
-      bindVenda();
-      window.DesktopSales?.bind?.();
+      if (window.DesktopSales?.isDesktop?.()) {
+        window.Checkout?.bindDesktop?.();
+        window.DesktopSales?.bind?.();
+      } else bindVenda();
     }
     if (route === "fiados")
       $$("[data-receive]").forEach(

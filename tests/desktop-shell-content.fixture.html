@@ -77,6 +77,8 @@
   <script src="../js/csvImport.js"></script>
   <script src="../js/recibos.js"></script>
   <script src="../js/repositories.js"></script>
+  <script src="../js/customer-subscriptions.js"></script>
+  <script src="../js/checkout.js"></script>
   <script src="../js/clientes-page.js"></script>
   <script src="../js/crm-ui.js"></script>
   <script src="../js/client-actions.js"></script>
@@ -99,8 +101,8 @@
       data.produtos = [
         { id: "p1", nome: "Cone recheado", categoria: "Doces", preco: 12, estoqueAtual: 18, estoqueMinimo: 5, favorito: true, ativo: true, image:{url:"../tests/fixtures/sample-product.svg",thumbnailUrl:"../tests/fixtures/sample-product.svg",updatedAt:"2026-08-11T12:00:00.000Z"} },
         { id: "p2", nome: "Brownie", categoria: "Doces", productType:"variable", preco: 10, minPrice:10, maxPrice:12, estoqueAtual:5, totalStock:5, estoqueMinimo:5, activeVariationCount:2, ativo:true },
-        { id: "p3", nome: "Monster", categoria: "Bebidas", preco:13, estoqueAtual:24, estoqueMinimo:6, favorito:true, ativo:true },
-        { id: "p4", nome: "IPTV", categoria: "Serviços", preco:25.9, estoqueAtual:0, estoqueMinimo:0, semControleEstoque:true, controlaEstoque:false, ativo:true },
+        { id: "p3", nome: "Monster", categoria: "Bebidas", marca:"Monster", preco:13, estoqueAtual:24, estoqueMinimo:6, favorito:true, ativo:true, image:{url:"../tests/fixtures/sample-product.svg",thumbnailUrl:"../tests/fixtures/sample-product.svg",updatedAt:"2026-08-11T12:00:00.000Z"} },
+        { id: "p4", nome: "IPTV", categoria: "Serviços", marca:"Digital", productType:"recurring", durationValue:30, durationUnit:"days", renewalLabel:"IPTV 30 dias", preco:25.9, estoqueAtual:0, estoqueMinimo:0, semControleEstoque:true, controlaEstoque:false, ativo:true },
         { id: "p5", nome: "Poty 220ml", categoria: "Bebidas", preco:2.5, estoqueAtual:0, estoqueMinimo:3, ativo:true },
         { id: "p6", nome: "Coca zero 220ml", categoria: "Bebidas", preco:2.8, estoqueAtual:2, estoqueMinimo:3, ativo:true }
       ];
@@ -130,12 +132,17 @@
       return { route, actualRoute: app.dataset.route || null, width: innerWidth, dataCounts: { clients: db.clientes?.length || 0, products: db.produtos?.length || 0, sales: db.vendas?.length || 0 }, appChildren: app.children.length, appHtmlLength: app.innerHTML.length, appDisplay: style.display, appVisibility: style.visibility, appOpacity: style.opacity, appPointerEvents: style.pointerEvents, appRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, dashboard: Boolean(dashboard), dashboardDisplay: dashboard ? getComputedStyle(dashboard).display : null, recovery: Boolean(app.querySelector('.boot-recovery')), centerElement: center ? `${center.tagName.toLowerCase()}${center.id ? `#${center.id}` : ""}.${[...center.classList].join(".")}` : null, pageInstance: app.dataset.pageInstance || null };
     }
     async function runAudit() {
+      window.Checkout?.mount?.();
       dispatchEvent(new CustomEvent("firebase-auth-ready", { detail: { uid: "fixture-owner", businessId: "desktop-shell-fixture" } }));
       await delay(120);
       const visualRoute = new URLSearchParams(location.search).get("visual");
       if (visualRoute) {
         Router.ir(visualRoute);
         await delay(160);
+        if (visualRoute === "vender" && innerWidth < 768 && !document.querySelector(".pos-page")) {
+          document.querySelector("#app").innerHTML = Checkout.view();
+          Checkout.bindDesktop();
+        }
         document.body.dataset.visualReady = visualRoute;
         return;
       }
