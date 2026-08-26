@@ -9,6 +9,7 @@ const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/service
 const {mercadoPagoService}=require('../src/services/mercado-pago-service');
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
+const {pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
 
 test('normaliza aliases sem permitir plano arbitrário',()=>{
   assert.equal(normalizePlanId('starter'),'essential');assert.equal(normalizePlanId('pro'),'professional');assert.equal(normalizePlanId('premium'),'premium');assert.throws(()=>requirePlan('internal'));
@@ -62,23 +63,39 @@ test('cliente Mercado Pago cancela assinatura com o estado aceito pelo provedor'
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{status:'cancelled'});
 });
 
-test('Pix mensal usa plano oficial limitado a bank_transfer/pix',async()=>{
-  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'plan_pix_1',init_point:'https://checkout.example/pix'})}};
+test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'order_pix_1',status:'action_required'})}};
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('professional');
-  await service.createSubscriptionPlan({businessId:'biz_1',plan,billing:{billingCycle:'monthly',amount:39.9,frequency:1,frequencyType:'months'},backUrl:'https://app.example',operationId:'op_1-plan'});
-  assert.equal(captured.url,'https://api.mercadopago.com/preapproval_plan');
-  assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1-plan');
+  await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan,billing:{billingCycle:'monthly',amount:39.9},operationId:'op_1234567890123456'});
+  assert.equal(captured.url,'https://api.mercadopago.com/v1/orders');
+  assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1234567890123456');
   const body=JSON.parse(captured.options.body);
-  assert.equal(body.auto_recurring.transaction_amount,39.9);
-  assert.deepEqual(body.payment_methods_allowed,{payment_types:[{id:'bank_transfer'}],payment_methods:[{id:'pix'}]});
-  assert.equal(body.external_reference,'biz_1:op_1-plan');
+  assert.equal(body.total_amount,'39.90');assert.equal(body.transactions.payments[0].amount,'39.90');
+  assert.deepEqual(body.transactions.payments[0].payment_method,{id:'pix',type:'bank_transfer'});
+  assert.equal(body.external_reference,'billing:biz_1:op_1234567890123456');assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
 });
 
 test('formas de pagamento aceitas são enum fechado e cartão permanece padrão',()=>{
   assert.equal(requirePaymentMethod().id,'card');
-  assert.equal(requirePaymentMethod('pix_monthly').providerMode,'dedicated_preapproval_plan');
+  assert.equal(requirePaymentMethod('pix_monthly').providerMode,'guest_pix_order');
   assert.throws(()=>requirePaymentMethod('pix'));
   assert.throws(()=>requirePaymentMethod('bank_transfer'));
+});
+
+test('order Pix é validada por valor, referência, moeda e método antes de ativar',()=>{
+  const order={id:'order_1',status:'processed',status_detail:'accredited',external_reference:'billing:biz_1:op_1',total_amount:'39.90',transactions:{payments:[{id:'pay_1',amount:'39.90',currency_id:'BRL',payment_method:{id:'pix',type:'bank_transfer',qr_code:'code'}}]}};
+  const index={providerOrderId:'order_1',chargedPrice:39.9,expectedExternalReference:'billing:biz_1:op_1'};
+  assert.equal(validatePixOrder(order,index).status,'approved');
+  assert.throws(()=>validatePixOrder({...order,external_reference:'billing:biz_2:op_1'},index),error=>error.code==='provider-reference-mismatch');
+  assert.throws(()=>validatePixOrder({...order,total_amount:'40.90',transactions:{payments:[{...order.transactions.payments[0],amount:'40.90'}]}},index),error=>error.code==='provider-price-mismatch');
+  assert.throws(()=>validatePixOrder({...order,transactions:{payments:[{...order.transactions.payments[0],payment_method:{id:'visa',type:'credit_card'}}]}},index),error=>error.code==='provider-payment-method-mismatch');
+});
+
+test('QR pendente é transitório e período mensal respeita fim de mês',()=>{
+  const order={id:'order_1',status:'action_required',status_detail:'waiting_transfer',transactions:{payments:[{id:'pay_1',amount:'29.90',expiration_time:'2026-08-26T12:00:00Z',payment_method:{id:'pix',type:'bank_transfer',qr_code:'copy-paste',qr_code_base64:'base64',ticket_url:'https://ticket'}}]}};
+  const details=pixDetails(order);assert.equal(details.status,'pending');assert.equal(details.qrCode,'copy-paste');assert.equal(details.qrCodeBase64,'base64');
+  assert.equal(addBillingPeriod('2026-01-31T12:00:00.000Z','monthly'),'2026-02-28T12:00:00.000Z');
+  const pending=pendingPixSubscription({status:'trialing',planId:'trial',trialEndsAt:'2026-09-01T00:00:00Z'},{planId:'professional',billingCycle:'monthly',operationId:'op',providerOrderId:'order_1'},'2026-08-25T00:00:00Z');assert.equal(pending.status,'trialing');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.billingStrategy,'guest_pix_manual');
 });
 
 test('webhook só considera cobrança aprovada como sucesso',()=>{

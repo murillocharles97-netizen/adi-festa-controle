@@ -246,6 +246,12 @@ service cloud.firestore {
         );
       allow delete: if false;
 
+      match /billingCheckoutAttempts/{attemptId} {
+        allow read: if isOwner(businessId)
+          && resource.data.businessId == businessId
+          && resource.data.requestedBy == request.auth.uid;
+        allow create, update, delete: if false;
+      }
       match /subscriptionIntents/{intentId} {
         allow read: if isOwner(businessId);
         allow create, update, delete: if false;
@@ -369,10 +375,10 @@ service cloud.firestore {
         allow update, delete: if false;
       }
       match /{collectionName}/{documentId} {
-        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
@@ -381,7 +387,7 @@ service cloud.firestore {
             || documentId != 'operation'
             || hasPermission(businessId, 'manageOperationSettings')
           );
-        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId
@@ -395,6 +401,12 @@ service cloud.firestore {
     }
 
     match /subscriptionIndex/{subscriptionId} {
+      allow read, write: if false;
+    }
+    match /billingOrderIndex/{orderId} {
+      allow read, write: if false;
+    }
+    match /billingPaymentEvents/{eventId} {
       allow read, write: if false;
     }
 

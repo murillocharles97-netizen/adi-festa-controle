@@ -520,6 +520,8 @@ function couponFirestoreService(db) {
     subscriptionId,
     internalSubscriptionId,
     providerPlanId,
+    providerOrderId,
+    providerPaymentId,
   }) {
     if (!redemptionId) return;
     await db.doc(`couponRedemptions/${redemptionId}`).set(
@@ -527,6 +529,8 @@ function couponFirestoreService(db) {
         status: "pending_payment",
         mercadoPagoSubscriptionId: subscriptionId,
         mercadoPagoPlanId: providerPlanId || null,
+        mercadoPagoOrderId: providerOrderId || null,
+        mercadoPagoPaymentId: providerPaymentId || null,
         internalSubscriptionId,
         updatedAt: FieldValue.serverTimestamp(),
       },

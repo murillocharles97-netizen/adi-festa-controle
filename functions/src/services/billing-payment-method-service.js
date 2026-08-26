@@ -2,7 +2,7 @@
 
 const PAYMENT_METHODS=Object.freeze({
   card:{id:'card',label:'Cartão de crédito',providerMode:'pending_preapproval'},
-  pix_monthly:{id:'pix_monthly',label:'Pix mensal',providerMode:'dedicated_preapproval_plan'}
+  pix_monthly:{id:'pix_monthly',label:'Pix mensal',providerMode:'guest_pix_order'}
 });
 
 function requirePaymentMethod(value){
