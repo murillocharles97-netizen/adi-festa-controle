@@ -8,6 +8,7 @@ test('seletor oferece cartão e Pix mensal sem prometer Pix Automático',()=>{
   assert.match(plans,/Como deseja pagar\?/);
   assert.match(plans,/Cartão de crédito/);
   assert.match(plans,/Pix mensal/);
+  assert.match(plans,/Pagamento manual a cada renovação/);
   assert.match(plans,/Uma nova cobrança pode exigir confirmação a cada mês/);
   assert.doesNotMatch(plans,/Autorize uma vez no seu banco/);
   assert.match(plans,/data-payment-option="pix_monthly"/);
@@ -23,14 +24,15 @@ test('frontend envia somente identificadores e backend calcula o valor',()=>{
   assert.doesNotMatch(backend,/request\.data\?\.(?:amount|price|transaction_amount)/);
 });
 
-test('Pix mensal usa índice de plano e webhook continua como fonte da verdade',()=>{
-  const backend=read('functions/src/index.js'),provider=read('functions/src/services/mercado-pago-service.js'),store=read('functions/src/services/firestore-subscription-service.js');
-  assert.match(provider,/payment_methods_allowed/);
-  assert.match(provider,/payment_types:\[\{id:'bank_transfer'\}\]/);
-  assert.match(provider,/payment_methods:\[\{id:'pix'\}\]/);
-  assert.match(backend,/subscriptionPlanIndex/);
-  assert.match(store,/bindSubscriptionFromPlan/);
-  assert.match(backend,/paymentResult\.successful/);
+test('Pix mensal usa Orders API guest e webhook continua como fonte da verdade',()=>{
+  const backend=read('functions/src/index.js'),provider=read('functions/src/services/mercado-pago-service.js'),pix=read('functions/src/services/pix-billing-service.js');
+  assert.match(provider,/request\('\/v1\/orders'/);
+  assert.match(provider,/payment_method:\{id:'pix',type:'bank_transfer'\}/);
+  assert.match(provider,/X-Idempotency-Key/);
+  assert.match(backend,/billingOrderIndex/);
+  assert.match(backend,/event\.type==='order'/);
+  assert.match(pix,/validatePixOrder/);
+  assert.match(pix,/payment_approved/);
   assert.doesNotMatch(backend,/success=true.*status:'active'/s);
 });
 
@@ -40,4 +42,11 @@ test('clique repetido possui lease e tentativa lógica idempotente',()=>{
   assert.match(backend,/CHECKOUT_LEASE_MS/);
   assert.match(backend,/requestHash/);
   assert.match(backend,/status==='completed'/);
+  assert.match(backend,/status==='payment_pending'/);
+});
+
+test('interface exibe QR, copia e cola e estados sem exigir conta Mercado Pago',()=>{
+  const plans=read('js/plans.js'),styles=read('css/plans.css');
+  assert.match(plans,/Pagar com Pix/);assert.match(plans,/Copiar código Pix/);assert.match(plans,/Você não precisa ter uma conta Mercado Pago/);assert.match(plans,/Pagamento confirmado/);assert.match(plans,/Pix expirado/);
+  assert.match(plans,/watchPixCheckout/);assert.match(styles,/plan-pix-qr/);
 });

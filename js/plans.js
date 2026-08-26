@@ -17,6 +17,7 @@
       catalogo: "onlineCatalog",
       pedidos: "onlineOrders",
     };
+  let pixUnsubscribe=null;
   const featureLabels = {
     products: "Produtos e estoque",
     stock: "Controle de estoque",
@@ -349,9 +350,12 @@
   }
   function manageSubscription() {
     const ctx = context(),
+      subscription=ctx.subscription||{},
+      pixActive=subscription.paymentMethodType==="pix_monthly"&&ctx.status==="active",
+      pendingPixId=subscription.pendingPaymentMethodType==="pix_monthly"?subscription.pendingCheckoutAttemptId:null,
       root = $("#modal");
     if (!root) return;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body"><button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body">${pendingPixId?`<button type="button" data-view-pending-pix>${icon("qr-code")} Ver Pix aguardando pagamento</button>`:""}${pixActive?`<button type="button" data-renew-pix>${icon("refresh-cw")} Renovar agora por Pix</button>`:""}<button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active"&&subscription.paymentMethodType!=="pix_monthly" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
     $$("[data-close-billing]", root).forEach(
       (button) => (button.onclick = () => (root.innerHTML = "")),
     );
@@ -375,6 +379,8 @@
     $("[data-cancel-subscription]", root)?.addEventListener("click", () =>
       confirmCancellation(root),
     );
+    $('[data-renew-pix]',root)?.addEventListener('click',()=>{root.innerHTML="";openPaymentMethodModal({planId:subscription.planId,billingCycle:subscription.billingCycle||'monthly',quote:null,initialPaymentMethod:'pix_monthly'})});
+    $('[data-view-pending-pix]',root)?.addEventListener('click',async event=>{event.currentTarget.disabled=true;try{const result=await window.SubscriptionService.checkPixCheckout(pendingPixId),plan=plans().find(item=>item.id===(subscription.pendingPlanId||subscription.planId));if(!plan)throw Error('Plano da cobrança não encontrado.');openPixModal({pix:result.pix,plan,billingCycle:subscription.pendingBillingCycle||'monthly',quote:null})}catch(error){window.Utils?.toast?.(error.message||'Não foi possível abrir o Pix.',true);event.currentTarget.disabled=false}});
     window.lucide?.createIcons();
   }
   async function runSubscriptionAction(button, action, message, root) {
@@ -490,14 +496,35 @@
       quote=couponQuote?.planId===planId&&couponQuote?.billingCycle===billingCycle?couponQuote:null;
     openPaymentMethodModal({planId,billingCycle,quote});
   }
-  function openPaymentMethodModal({planId,billingCycle,quote}) {
+  function closePixWatcher(){pixUnsubscribe?.();pixUnsubscribe=null}
+  function pixImage(value){if(!value)return"";return value.startsWith("data:")?value:`data:image/png;base64,${value}`}
+  function pixStatusView(pix,plan,billingCycle,quote){
+    const status=String(pix?.status||"payment_pending"),approved=status==="payment_approved",terminal=["expired","canceled","failed"].includes(status),expires=pix?.expiresAt?new Date(pix.expiresAt):null,expiresLabel=expires&&!Number.isNaN(expires.getTime())?expires.toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"";
+    if(approved)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-pix-sheet plan-pix-result success"><header>${icon("circle-check-big")}<h3>Pagamento confirmado</h3><p>Seu plano ${esc(plan.name)} está ativo.</p></header><button class="btn btn-primary mobile-button primary" data-pix-finish>Começar a usar</button></section></div>`;
+    if(terminal)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-pix-sheet plan-pix-result expired"><header>${icon("clock-alert")}<h3>Pix expirado</h3><p>Esta cobrança não pode mais ser paga. Gere um novo Pix seguro.</p></header><button class="btn btn-primary mobile-button primary" data-pix-regenerate>Gerar novo Pix</button><button class="btn btn-light mobile-button" data-pix-close>Agora não</button></section></div>`;
+    return `<div class="modal-bg"><section class="modal-box mobile-modal plan-pix-sheet" aria-labelledby="pix-title"><header class="modal-head"><div><h3 id="pix-title">Pagar com Pix</h3><small>${esc(plan.name)} · ${billingCycle==="yearly"?"renovação anual":"pagamento mensal"}</small></div><button class="icon-btn mobile-icon-button" data-pix-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Total desta cobrança</span><b>${money(pix.finalAmount)}</b>${quote?`<small>Cupom ${esc(quote.code)} aplicado.</small>`:""}</section><div class="plan-pix-qr"><img src="${esc(pixImage(pix.qrCodeBase64))}" alt="QR Code Pix gerado pelo Mercado Pago"><p>Escaneie pelo aplicativo do seu banco</p></div><button class="btn btn-primary mobile-button primary plan-pix-copy" data-copy-pix>${icon("copy")} Copiar código Pix</button>${pix.ticketUrl?`<a class="plan-pix-ticket" href="${esc(pix.ticketUrl)}" target="_blank" rel="noopener noreferrer">Abrir página de pagamento ${icon("external-link")}</a>`:""}<div class="plan-pix-waiting"><i></i><span><b>Aguardando pagamento…</b><small>O plano será ativado após a confirmação oficial.</small></span></div>${expiresLabel?`<p class="plan-pix-expiration">Válido até ${esc(expiresLabel)}</p>`:""}<p class="plan-payment-disclaimer">${icon("shield-check")} Você não precisa ter uma conta Mercado Pago. Pague pelo app de qualquer banco compatível com Pix.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-check-pix>Já paguei · verificar</button></footer></section></div>`;
+  }
+  function openPixModal({pix,plan,billingCycle,quote}){
+    const root=$("#modal");if(!root)return;closePixWatcher();
+    const render=current=>{
+      root.innerHTML=pixStatusView(current,plan,billingCycle,quote);window.lucide?.createIcons();
+      $$('[data-pix-close]',root).forEach(button=>button.onclick=()=>{closePixWatcher();root.innerHTML=""});
+      $('[data-copy-pix]',root)?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(current.qrCode);window.Utils?.toast?.('Código Pix copiado.')}catch{window.Utils?.toast?.('Não foi possível copiar o código Pix.',true)}});
+      $('[data-check-pix]',root)?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await window.SubscriptionService.checkPixCheckout(current.id,{reconcileProvider:true});render(result.pix)}catch(error){window.Utils?.toast?.(error.message||'Não foi possível conferir agora.',true)}finally{if(button.isConnected)button.disabled=false}});
+      $('[data-pix-finish]',root)?.addEventListener('click',async()=>{closePixWatcher();await window.SubscriptionService.syncSubscriptionStatus().catch(()=>{});root.innerHTML="";window.Router?.render?.()});
+      $('[data-pix-regenerate]',root)?.addEventListener('click',()=>{closePixWatcher();root.innerHTML="";openPaymentMethodModal({planId:plan.id,billingCycle,quote,initialPaymentMethod:'pix_monthly'})});
+    };
+    render(pix);
+    pixUnsubscribe=window.SubscriptionService.watchPixCheckout(pix.id,data=>{if(data?.status&&data.status!==pix.status){pix={...pix,...data};render(pix)}},error=>console.warn('[Billing Pix listener]',{code:error?.code||'unknown'}));
+  }
+  function openPaymentMethodModal({planId,billingCycle,quote,initialPaymentMethod="card"}) {
     const plan=plans().find(item=>item.id===planId),root=$("#modal");
     if(!root||!plan)return;
     const operationId=globalThis.crypto?.randomUUID?.()||`${Date.now()}_${Math.random().toString(36).slice(2)}`,
       finalPrice=quote?.discountedPrice??(billingCycle==="yearly"?plan.yearlyPrice:plan.monthlyPrice),
       cycleLabel=billingCycle==="yearly"?"anual":"mensal";
-    let selected="card";
-    root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote?`<small>Cupom ${esc(quote.code)} aplicado e será validado novamente no servidor.</small>`:""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" class="active" data-payment-option="card" role="radio" aria-checked="true"><i>${icon("credit-card")}</i><span><b>Cartão de crédito</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle==="yearly"?"Pix por período":"Pix mensal"}</b><small>Sem cartão. ${billingCycle==="yearly"?"Uma nova cobrança será necessária na renovação anual.":"Uma nova cobrança pode exigir confirmação a cada mês."}</small></span><em>${icon("circle")}</em></button></div><p class="plan-payment-disclaimer">${icon("shield-check")} O pagamento acontece no ambiente seguro do Mercado Pago. O plano só é ativado após confirmação oficial por webhook.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
+    let selected=initialPaymentMethod;
+    root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote?`<small>Cupom ${esc(quote.code)} aplicado e será validado novamente no servidor.</small>`:""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" class="active" data-payment-option="card" role="radio" aria-checked="true"><i>${icon("credit-card")}</i><span><b>Cartão de crédito</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle==="yearly"?"Pix por período":"Pix mensal"}</b><small>Sem cartão nem conta Mercado Pago. Pagamento manual a cada renovação; uma nova cobrança pode exigir confirmação a cada mês.</small></span><em>${icon("circle")}</em></button></div><p class="plan-payment-disclaimer">${icon("shield-check")} O pagamento acontece no ambiente seguro do Mercado Pago. O plano só é ativado após confirmação oficial por webhook.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
     const syncSelection=()=>{
       $$('[data-payment-option]',root).forEach(option=>{
         const active=option.dataset.paymentOption===selected;
@@ -508,12 +535,14 @@
       if(submit)submit.textContent=selected==='pix_monthly'?'Continuar com Pix':'Continuar com cartão';
       window.lucide?.createIcons();
     };
+    syncSelection();
     $$('[data-payment-option]',root).forEach(option=>option.addEventListener('click',()=>{selected=option.dataset.paymentOption;syncSelection()}));
     $$('[data-close-payment]',root).forEach(button=>button.addEventListener('click',()=>{root.innerHTML=''}));
     $('[data-start-checkout]',root)?.addEventListener('click',async event=>{
       const submit=event.currentTarget;submit.disabled=true;submit.textContent='Abrindo checkout…';
       try{
         const result=await window.SubscriptionService.requestUpgrade(planId,{billingCycle,quoteId:quote?.quoteId||null,paymentMethodType:selected,operationId});
+        if(result?.pix)return openPixModal({pix:result.pix,plan,billingCycle,quote});
         if(result?.checkoutUrl)return location.assign(result.checkoutUrl);
         throw Error('Não foi possível abrir o checkout.');
       }catch(error){

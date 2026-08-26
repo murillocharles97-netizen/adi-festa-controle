@@ -1,5 +1,5 @@
 const fs=require("node:fs"),http=require("node:http"),os=require("node:os"),path=require("node:path"),{spawn}=require("node:child_process");
-const ROOT=process.cwd(),OUT=path.join(ROOT,"artifacts","mercadopago-pix-v102"),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const ROOT=process.cwd(),OUT=path.join(ROOT,"artifacts","mercadopago-guest-pix-v104"),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const mime={".html":"text/html",".js":"text/javascript",".css":"text/css",".png":"image/png",".svg":"image/svg+xml"};
 function chromePath(){return [process.env.CHROME_PATH,"C:/Program Files/Google/Chrome/Application/chrome.exe","C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"].filter(Boolean).find(fs.existsSync)||(()=>{throw Error("Chrome não encontrado")})();}
 function server(){return http.createServer((request,response)=>{const pathname=decodeURIComponent(new URL(request.url,"http://localhost").pathname),target=path.resolve(ROOT,`.${pathname==="/"?"/index.html":pathname}`);if(!target.startsWith(ROOT)||!fs.existsSync(target)||fs.statSync(target).isDirectory())return response.writeHead(404).end("Not found");response.setHeader("Content-Type",`${mime[path.extname(target)]||"application/octet-stream"}; charset=utf-8`);fs.createReadStream(target).pipe(response);});}
@@ -12,11 +12,12 @@ async function main(){fs.mkdirSync(OUT,{recursive:true});const staticServer=serv
   {state:"selected",width:390,height:844,file:"01-mobile-plano-selecionado.png"},
   {state:"coupon",width:390,height:844,file:"02-mobile-cupom-aplicado.png",focus:"document.querySelector('.plan-coupon').scrollIntoView({block:'center'})"},
   {state:"payment",width:390,height:844,file:"03-mobile-como-deseja-pagar.png"},
-  {state:"card",width:390,height:844,file:"04-mobile-cartao-selecionado.png"},
-  {state:"pix",width:390,height:844,file:"05-mobile-pix-selecionado.png"},
-  {state:"pending",width:390,height:844,file:"06-mobile-aguardando-confirmacao.png"},
-  {state:"active",width:390,height:844,file:"07-mobile-plano-ativo.png"},
-  {state:"pix",width:1366,height:768,file:"08-desktop-seletor-pagamento.png"},
-  {state:"active",width:1366,height:768,file:"09-desktop-status-plano.png"}
-];for(const shot of shots){await cdp.send("Emulation.setDeviceMetricsOverride",{width:shot.width,height:shot.height,deviceScaleFactor:1,mobile:shot.width<768,screenWidth:shot.width,screenHeight:shot.height});await navigate(cdp,`http://127.0.0.1:${port}/tests/subscription-pix.fixture.html?state=${shot.state}`);if(shot.focus)await evaluate(cdp,shot.focus);await sleep(100);const audit=await evaluate(cdp,"window.__subscriptionPixFixture");if(audit.overflow)throw Error(`${shot.file}: overflow horizontal`);if(shot.state==="pix"&&audit.selectedPayment!=="pix_monthly")throw Error(`${shot.file}: Pix não selecionado`);await capture(cdp,shot.file)}console.log(`Assinaturas Pix: ${shots.length} screenshots, sem overflow.`)}finally{cdp?.close();chrome.kill();staticServer.close();await sleep(250);try{fs.rmSync(profile,{recursive:true,force:true})}catch{}}}
+  {state:"pix",width:390,height:844,file:"04-mobile-pix-selecionado.png"},
+  {state:"qr",width:390,height:844,file:"05-mobile-qr-copia-cola.png"},
+  {state:"pending",width:390,height:844,file:"06-mobile-aguardando-pagamento.png"},
+  {state:"approved",width:390,height:844,file:"07-mobile-pagamento-aprovado.png"},
+  {state:"expired",width:390,height:844,file:"08-mobile-pix-expirado.png"},
+  {state:"qr",width:1366,height:768,file:"09-desktop-qr-code.png"},
+  {state:"approved",width:1366,height:768,file:"10-desktop-pagamento-aprovado.png"}
+];for(const shot of shots){await cdp.send("Emulation.setDeviceMetricsOverride",{width:shot.width,height:shot.height,deviceScaleFactor:1,mobile:shot.width<768,screenWidth:shot.width,screenHeight:shot.height});await navigate(cdp,`http://127.0.0.1:${port}/tests/subscription-pix.fixture.html?state=${shot.state}`);if(shot.focus)await evaluate(cdp,shot.focus);await sleep(100);const audit=await evaluate(cdp,"window.__subscriptionPixFixture");if(audit.overflow)throw Error(`${shot.file}: overflow horizontal`);if(shot.state==="pix"&&audit.selectedPayment!=="pix_monthly")throw Error(`${shot.file}: Pix não selecionado`);if(["qr","pending"].includes(shot.state)&&(!audit.hasQr||!audit.hasCopy))throw Error(`${shot.file}: QR/Copia e Cola ausente`);if(shot.state==="approved"&&!audit.approved)throw Error(`${shot.file}: estado aprovado ausente`);if(shot.state==="expired"&&!audit.expired)throw Error(`${shot.file}: estado expirado ausente`);await capture(cdp,shot.file)}console.log(`Assinaturas Pix convidado: ${shots.length} screenshots, sem overflow.`)}finally{cdp?.close();chrome.kill();staticServer.close();await sleep(250);try{fs.rmSync(profile,{recursive:true,force:true})}catch{}}}
 main().catch(error=>{console.error(error);process.exitCode=1});

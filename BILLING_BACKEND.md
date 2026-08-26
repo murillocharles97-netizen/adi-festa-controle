@@ -5,10 +5,12 @@ O backend de assinaturas usa Cloud Functions e mantém o Firestore como a única
 ## Fluxo de produção
 
 1. O proprietário escolhe um plano.
-2. `createSubscription` valida usuário, empresa, plano e preço no servidor e retorna somente a URL oficial do checkout.
-3. O Mercado Pago envia uma notificação assinada para `receiveWebhook`.
-4. A função valida o HMAC, elimina eventos duplicados e atualiza `businesses/{businessId}.subscription`.
-5. O aplicativo lê o novo estado diretamente do Firestore.
+2. `createSubscription` valida usuário, empresa, plano, ciclo e cupom no servidor.
+3. Para cartão, retorna a URL oficial da assinatura recorrente (`POST /preapproval`).
+4. Para Pix, cria uma Order guest (`POST /v1/orders`) e retorna somente QR Code, Pix Copia e Cola, URL de pagamento e expiração.
+5. O Mercado Pago envia uma notificação assinada para `receiveWebhook`.
+6. A função valida o HMAC, consulta o objeto oficial no provedor, elimina eventos duplicados e atualiza `businesses/{businessId}.subscription`.
+7. O aplicativo lê o novo estado diretamente do Firestore.
 
 `syncSubscription` lê somente o Firestore por padrão. A consulta direta ao Mercado Pago exige `reconcileProvider: true`, permissão de proprietário e respeita intervalo mínimo de 15 minutos. Ela existe apenas para reconciliação excepcional.
 
@@ -36,11 +38,12 @@ No painel da aplicação do Mercado Pago, configure a URL:
 https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook
 ```
 
-Habilite notificações de assinaturas/preapproval e pagamentos de assinaturas. A URL é configurada no painel, não enviada na criação da assinatura, evitando depender de um campo não pertencente ao contrato de `preapproval`.
+Habilite notificações de Orders, assinaturas/preapproval e pagamentos de assinaturas. A URL é configurada no painel. Orders Pix são sempre consultadas novamente pelo backend antes de qualquer ativação.
 
 ## Funções
 
-- `createSubscription`: cria o checkout recorrente com preço obtido do catálogo de planos do backend.
+- `createSubscription`: cria assinatura recorrente por cartão ou Order Pix guest com preço recalculado pelo backend.
+- `getPixCheckoutStatus`: lê uma tentativa exata e permite reconciliação manual limitada.
 - `cancelSubscription`: cancela no provedor e atualiza o Firestore.
 - `receiveWebhook`: valida assinatura, processa cada evento uma vez e atualiza a empresa pelo índice exato da assinatura.
 - `syncSubscription`: leitura do Firestore ou reconciliação manual limitada.
@@ -55,9 +58,12 @@ Documentos auxiliares privados:
 
 - `subscriptionIndex/{subscriptionId}`: resolve a empresa por leitura direta, sem varrer coleções.
 - `businesses/{businessId}/subscriptionIntents/{subscriptionId}`: registra a intenção de checkout.
+- `businesses/{businessId}/billingCheckoutAttempts/{operationId}`: tentativa Pix visível somente ao proprietário que a criou.
+- `billingOrderIndex/{orderId}`: resolve uma Order Pix por leitura direta e é inacessível pelo cliente.
+- `billingPaymentEvents/pix_{orderId}`: marcador idempotente que impede adicionar dois períodos para a mesma Order.
 - `webhookEvents/{eventId}`: idempotência, lease de processamento e auditoria técnica.
 
-As regras negam leitura e escrita desses índices pelo cliente. Somente o proprietário pode ler as próprias intenções de assinatura.
+As regras negam leitura e escrita desses índices pelo cliente. Somente o proprietário pode ler sua tentativa Pix por ID exato; toda gravação financeira é exclusiva do Admin SDK.
 
 ## Testes e deploy
 

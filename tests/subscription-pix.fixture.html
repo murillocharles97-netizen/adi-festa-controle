@@ -25,6 +25,9 @@
       {id:"premium",name:"Premium",summary:"Para negócios que querem o máximo.",monthlyPrice:79.9,yearlyPrice:799,features:{products:true,stock:true,sales:true,clients:true,campaigns:true,crm:true,onlineCatalog:true,onlineOrders:true,multipleUsers:true,rolesPermissions:true,automations:true},limits:{users:10,products:10000,clients:25000,monthlySales:50000}}
     ];
     const params=new URLSearchParams(location.search),state=params.get("state")||"selected";
+    const qrSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240"><rect width="240" height="240" fill="white"/><g fill="#17243d"><path d="M15 15h70v70H15zm14 14v42h42V29zM155 15h70v70h-70zm14 14v42h42V29zM15 155h70v70H15zm14 14v42h42v-42z"/><path d="M105 15h20v20h-20zm20 20h20v20h-20zm-20 20h20v20h-20zm0 50h20v20h-20zm25 0h20v20h-20zm25 0h20v20h-20zm25 0h20v20h-20zm-75 25h20v20h-20zm50 0h20v20h-20zm50 0h20v20h-20zm-100 25h20v20h-20zm25 0h20v20h-20zm50 0h20v20h-20zm25 0h20v20h-20zm-75 25h20v20h-20zm50 0h20v20h-20zm25 0h20v20h-20zm-75 25h20v20h-20zm25 0h20v20h-20zm50 0h20v20h-20zm-75 25h20v20h-20zm50 0h20v20h-20zm25 0h20v20h-20z"/></g></svg>`;
+    const fixturePixStatus=state==="approved"?"payment_approved":state==="expired"?"expired":"payment_pending";
+    const fixturePix={id:"fixture-pix-attempt",status:fixturePixStatus,providerStatus:fixturePixStatus==="payment_approved"?"processed":"action_required",providerStatusDetail:fixturePixStatus==="payment_approved"?"accredited":"waiting_transfer",finalAmount:39.92,qrCode:"00020126580014br.gov.bcb.pix0136fixture-guest-pix-code-adi-festa",qrCodeBase64:`data:image/svg+xml;base64,${btoa(qrSvg)}`,ticketUrl:"https://www.mercadopago.com.br/",expiresAt:iso(1)};
     let fixtureContext={subscription:{planId:"trial",status:"trialing",trialStartedAt:iso(-3),trialEndsAt:iso(4)},access:{status:"trialing",daysRemaining:4,readOnly:false,limits:plans[1].limits,effectivePlan:{name:"Profissional"}},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits},profile:{uid:"fixture-owner",role:"owner"}};
     if(state==="pending")fixtureContext={...fixtureContext,subscription:{...fixtureContext.subscription,pendingPlanId:"professional",pendingPaymentMethodType:"pix_monthly",mercadoPago:{providerPlanId:"fixture-plan"}}};
     if(state==="active")fixtureContext={...fixtureContext,subscription:{planId:"professional",status:"active",paymentMethodType:"pix_monthly",currentPeriodEnd:iso(30)},access:{status:"active",readOnly:false,limits:plans[1].limits},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits}};
@@ -37,7 +40,9 @@
     window.SubscriptionService={
       getPlans:()=>plans,
       validateCoupon:async()=>({quoteId:"fixture-quote",code:"PARCEIRO20",planId:"professional",billingCycle:"monthly",originalPrice:49.9,discountedPrice:39.92,durationLabel:"Primeiro pagamento"}),
-      requestUpgrade:async()=>({checkoutUrl:"https://example.invalid/checkout"}),
+      requestUpgrade:async(_planId,{paymentMethodType}={})=>paymentMethodType==="pix_monthly"?({paymentMethodType,pix:fixturePix,operationId:fixturePix.id}):({checkoutUrl:"https://example.invalid/checkout"}),
+      watchPixCheckout:()=>()=>{},
+      checkPixCheckout:async()=>({pix:fixturePix}),
       syncSubscriptionStatus:async()=>({}),
       requestCancellation:async()=>({})
     };
@@ -48,19 +53,23 @@
       const app=document.querySelector("#app");
       app.innerHTML=PlansUI.render();PlansUI.bind(app);
       await new Promise(resolve=>setTimeout(resolve,80));
-      if(["coupon","payment","card","pix"].includes(state)){
+      if(["coupon","payment","card","pix","qr","pending","approved","expired"].includes(state)){
         const details=document.querySelector(".plan-coupon");details.open=true;
         document.querySelector("[data-coupon-code]").value="PARCEIRO20";
         document.querySelector("[data-coupon-plan]").value="professional";
         document.querySelector("[data-apply-coupon]").click();
         await new Promise(resolve=>setTimeout(resolve,30));
       }
-      if(["payment","card","pix"].includes(state)){
+      if(["payment","card","pix","qr","pending","approved","expired"].includes(state)){
         document.querySelector('[data-plan-cta="professional"]').click();
         await new Promise(resolve=>setTimeout(resolve,30));
       }
-      if(state==="pix")document.querySelector('[data-payment-option="pix_monthly"]').click();
-      window.__subscriptionPixFixture={state,ready:true,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,selectedPayment:document.querySelector('[data-payment-option].active')?.dataset.paymentOption||null};
+      if(["pix","qr","pending","approved","expired"].includes(state))document.querySelector('[data-payment-option="pix_monthly"]').click();
+      if(["qr","pending","approved","expired"].includes(state)){
+        document.querySelector('[data-start-checkout]').click();
+        await new Promise(resolve=>setTimeout(resolve,40));
+      }
+      window.__subscriptionPixFixture={state,ready:true,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,selectedPayment:document.querySelector('[data-payment-option].active')?.dataset.paymentOption||null,pixModal:Boolean(document.querySelector('.plan-pix-sheet')),approved:Boolean(document.querySelector('.plan-pix-result.success')),expired:Boolean(document.querySelector('.plan-pix-result.expired')),hasCopy:Boolean(document.querySelector('[data-copy-pix]')),hasQr:Boolean(document.querySelector('.plan-pix-qr img'))};
     })();
   </script>
 </body>

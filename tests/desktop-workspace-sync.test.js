@@ -85,8 +85,8 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /adi-festa-v\d+-/);
-  assert.match(worker, /release:'103'/);
-  assert.match(build, /release: "103"/);
+  assert.match(worker, /release:'104'/);
+  assert.match(build, /release: "104"/);
   assert.match(index, /firebase-ui\.js\?v=100/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[Adi Festa\] Build/);

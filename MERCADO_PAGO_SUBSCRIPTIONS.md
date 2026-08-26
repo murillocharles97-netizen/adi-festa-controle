@@ -1,75 +1,55 @@
 # Assinaturas Mercado Pago
 
-## Decisão de produto
+## Decisão de arquitetura
 
-O Adi Festa usa a API de Assinaturas do Mercado Pago. O backend calcula o plano, a periodicidade e o cupom; o navegador envia somente identificadores. O retorno do checkout nunca libera acesso. A fonte de verdade financeira é o objeto consultado no Mercado Pago após um webhook válido.
+O Adi Festa separa entitlement de estratégia de cobrança. O plano, o período de acesso e o cupom pertencem ao Adi Festa; o Mercado Pago processa, confirma e concilia o pagamento.
 
-Não existe, na documentação pública atual usada nesta integração, um identificador oficial de API para **Pix Automático** em `preapproval`. Por isso a interface não promete autorização bancária automática. A opção sem cartão é apresentada como **Pix mensal** (ou Pix por período no plano anual).
+- **Cartão:** assinatura recorrente gerenciada pelo provedor com `POST /preapproval`.
+- **Pix mensal/anual:** pagamento manual guest pelo Checkout Transparente / Orders API com `POST /v1/orders`.
 
-## Fluxo de cartão preservado
+O fluxo anterior de Pix criava `preapproval_plan` e abria seu `init_point`. Na experiência real, esse checkout solicitava login ou criação de conta Mercado Pago. Não havia `purpose=wallet_purchase` no código; a restrição vinha do produto de assinatura hospedado escolhido. A Orders API foi adotada porque devolve diretamente `qr_code`, `qr_code_base64` e `ticket_url`, permitindo pagar pelo aplicativo de qualquer banco sem autenticar o pagador na carteira Mercado Pago.
 
-1. O backend valida empresa, usuário, plano, ciclo e cupom.
-2. Cria uma assinatura pendente com `POST /preapproval`, sem plano associado.
-3. O cliente escolhe e conclui o meio de pagamento no checkout hospedado.
-4. `subscription_preapproval`, `subscription_authorized_payment` e `payment` são validados pelo webhook.
-5. Somente o status confirmado pelo provedor atualiza o acesso no Firestore.
+Referências oficiais:
 
-Assinantes existentes por cartão não são migrados nem alterados.
+- https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/overview
+- https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/pix
+- https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/notifications
+- https://www.mercadopago.com.br/developers/pt/docs/subscriptions/overview
 
-## Fluxo de Pix mensal
+## Pix guest
 
-1. O backend valida os mesmos dados e recalcula o valor final.
-2. Cria um `preapproval_plan` dedicado à tentativa, com `payment_methods_allowed` limitado a `bank_transfer`/`pix`.
-3. O checkout usado é o `init_point` oficial desse plano.
-4. `subscriptionPlanIndex/{providerPlanId}` relaciona o plano dedicado com empresa, usuário, plano Adi Festa, periodicidade e snapshot do cupom.
-5. Quando o Mercado Pago cria a assinatura, o webhook usa `preapproval_plan_id` para criar `subscriptionIndex/{subscriptionId}` e aplicar o status oficial.
-6. Pagamentos pendentes ou rejeitados não ativam o plano e não avançam ciclos de desconto.
+1. O navegador envia somente `businessId`, `planId`, `billingCycle`, `quoteId`, `paymentMethodType` e `operationId`.
+2. `createSubscription` autentica o proprietário e recalcula plano, preço e cupom.
+3. O backend cria `POST https://api.mercadopago.com/v1/orders` com `type=online`, moeda BRL, `payment_method.id=pix`, `payment_method.type=bank_transfer` e `X-Idempotency-Key=operationId`.
+4. A UI mostra QR Code e Pix Copia e Cola dentro do Adi Festa. Criar o QR mantém a assinatura atual/trial e nunca libera plano.
+5. O webhook assinado recebe `type=order`, consulta `GET /v1/orders/{orderId}` e valida ID, referência externa, valor, moeda e meio de pagamento.
+6. Somente `processed/accredited` ativa ou renova o plano.
+7. O marcador determinístico `billingPaymentEvents/pix_{orderId}` impede que a mesma Order adicione dois períodos.
+8. Status terminal remove QR/Copia e Cola, libera reserva de cupom e permite gerar uma nova tentativa.
 
-O identificador interno é `pix_monthly`. Ele não representa uma chave Pix e não é enviado como `payment_method_id` arbitrário. Os identificadores oficiais usados no plano do provedor são `bank_transfer` e `pix`.
+Não é chamado de Pix Automático: a próxima renovação exige uma nova cobrança e pagamento manual. Uma renovação antecipada parte do fim do período vigente; uma renovação após vencimento parte da data do novo pagamento.
 
-## Cupons
+## Cupom
 
-- A cotação é criada e reservada no backend.
-- Abrir o checkout não confirma o uso.
-- O valor original e o valor descontado ficam no snapshot da intenção.
-- O resgate só é confirmado quando o provedor confirma a assinatura/pagamento.
-- Cupons de primeira cobrança ou quantidade de ciclos continuam usando a restauração de valor já existente.
+- O backend revalida cotação, vigência, plano, ciclo e elegibilidade.
+- A Order usa o valor final calculado no servidor.
+- A tentativa guarda snapshot de preço original, desconto, total e cupom.
+- Gerar QR apenas reserva o cupom.
+- Aprovação confirma o uso; expiração/cancelamento libera a reserva.
 
-## Idempotência
+## Dados e segurança
 
-Cada checkout possui `operationId` e um documento em `businesses/{businessId}/billingCheckoutAttempts/{operationId}`. A primeira execução adquire um lease curto; uma repetição simultânea não cria outra tentativa. Uma repetição de uma tentativa concluída reutiliza o mesmo checkout.
+- `businesses/{businessId}/billingCheckoutAttempts/{operationId}`: tentativa e QR transitórios.
+- `billingOrderIndex/{orderId}`: índice backend-only para localizar a empresa sem consulta ampla.
+- `billingPaymentEvents/pix_{orderId}`: idempotência financeira backend-only.
+- `webhookEvents/{eventId}`: lease e idempotência da entrega.
 
-Webhooks usam `webhookEvents/{eventId}` e lease transacional. Eventos de pagamento também possuem marcador próprio, impedindo atualização duplicada de cupom ou status.
+O proprietário lê somente a tentativa exata criada por seu UID. O navegador não grava tentativas, índices ou eventos. QR, base64 e ticket são apagados após aprovação ou estado terminal; nenhum arquivo é criado no Storage. Access Tokens e segredo HMAC ficam exclusivamente no Secret Manager.
 
-## Estados internos relevantes
+## Interface e custo
 
-- `trialing`: teste ainda válido, mesmo que exista checkout pendente.
-- `pending`: checkout criado, aguardando confirmação.
-- `active`: provedor confirmou assinatura autorizada.
-- `payment_pending`: cobrança Pix de uma assinatura já ativa ainda não foi aprovada; acesso fica em modo leitura.
-- `past_due`, `paused`, `canceled`, `expired`: mantêm os dados e seguem as regras de leitura existentes.
-- `internal`: conta interna, fora do billing.
-
-## Webhooks
-
-Eventos aceitos:
-
-- `subscription_preapproval`: consulta `/preapproval/{id}`.
-- `subscription_authorized_payment`: consulta `/authorized_payments/{id}` e considera sucesso somente quando `payment.status === "approved"`.
-- `payment`: consulta `/v1/payments/{id}` e considera sucesso somente quando `status === "approved"`.
-- `subscription_preapproval_plan`: é informativo e não ativa assinatura.
-
-O HMAC é obrigatório e nenhum token, segredo ou dado bancário é persistido no frontend.
-
-## Segredos e ambientes
-
-- `MERCADO_PAGO_ACCESS_TOKEN`: credencial de produção.
-- `MERCADO_PAGO_ACCESS_TOKEN_TEST`: credencial de teste enquanto não houver padronização neutra de nomes.
-- `MERCADO_PAGO_WEBHOOK_SECRET`: validação HMAC.
-- `MERCADO_PAGO_ENV`: seleciona o ambiente server-side.
-
-Nunca registrar valores desses secrets em logs, documentação ou respostas da Function.
+A tela observa somente `businesses/{businessId}/billingCheckoutAttempts/{operationId}` enquanto o modal estiver aberto. Não existe listener global nem polling por segundo. A conferência manual ao provedor é limitada a uma vez por minuto; a reconciliação geral, a cada 15 minutos.
 
 ## Validação
 
-Testar primeiro com credenciais/test users e mocks. O ambiente de teste auditado não expôs Pix em `/v1/payment_methods`, embora tenha aceitado a configuração `pix`/`bank_transfer` em `preapproval_plan`. A conta brasileira de produção informou Pix ativo, mas pagamentos reais não devem ser automatizados como teste.
+Os testes usam mocks e Firebase Emulator Suite: payload Orders, valor com cupom, QR pendente sem ativação, aprovação, webhook duplicado, expiração, isolamento multiempresa, trial, plano interno e regressão do cartão. Nenhum pagamento real é disparado automaticamente durante QA.

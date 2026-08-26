@@ -21,12 +21,11 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
       return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
-    createSubscriptionPlan({businessId,plan,billing,backUrl,operationId}){
-      const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
-      return request('/preapproval_plan',{method:'POST',idempotencyKey:operationId,body:{reason:`Adi Festa Controle - ${plan.name} - Pix mensal`,external_reference:`${businessId}:${operationId}`,back_url:backUrl,auto_recurring:{frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency},payment_methods_allowed:{payment_types:[{id:'bank_transfer'}],payment_methods:[{id:'pix'}]}}});
+    createPixOrder({businessId,email,plan,billing,operationId,expirationTime='PT24H'}){
+      const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=`billing:${businessId}:${operationId}`;
+      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body:{type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'},expiration_time:expirationTime}]},payer:{email}}});
     },
-    cancelSubscriptionPlan(planId){return request(`/preapproval_plan/${encodeURIComponent(planId)}`,{method:'PUT',body:{status:'cancelled'}})},
-    getSubscriptionPlan(planId){return request(`/preapproval_plan/${encodeURIComponent(planId)}`)},
+    getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'cancelled'}})},
     updateSubscriptionAmount(subscriptionId,amount,currency='BRL'){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount),currency_id:String(currency||'BRL')}}})},
