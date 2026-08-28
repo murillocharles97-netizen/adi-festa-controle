@@ -2,11 +2,38 @@
 
 const crypto=require('node:crypto');
 const API='https://api.mercadopago.com';
+const RETRYABLE_HTTP_STATUSES=new Set([408,425,429,500,502,503,504]);
 
 function pixExternalReference(businessId,operationId){
   const digest=crypto.createHash('sha256').update(`${String(businessId||'')}:${String(operationId||'')}`).digest('hex').slice(0,56);
   return `billing_${digest}`;
 }
+
+function safeProviderPayload(text){
+  if(!text)return{payload:{},format:'empty'};
+  try{return{payload:JSON.parse(text),format:'json'}}catch{return{payload:{},format:'non_json'}}
+}
+
+function providerErrorDiagnostics(error={}){
+  const details=error?.details&&typeof error.details==='object'?error.details:{},payload=details.payload&&typeof details.payload==='object'?details.payload:details,rawCauses=Array.isArray(payload?.cause)?payload.cause:Array.isArray(payload?.errors)?payload.errors:[];
+  return{
+    provider:'mercado_pago',
+    endpoint:String(details.endpoint||error?.endpoint||''),
+    httpStatus:error?.status!=null&&Number.isFinite(Number(error.status))?Number(error.status):null,
+    providerErrorCode:String(payload?.code??payload?.error??'').slice(0,120)||null,
+    providerMessage:String(payload?.message||payload?.error_description||error?.message||'').slice(0,300)||null,
+    providerCauses:rawCauses.slice(0,8).map(item=>({code:String(item?.code??item?.type??'').slice(0,120)||null,message:String(item?.description||item?.message||item?.detail||'').slice(0,240)||null})),
+    providerStatusDetail:String(payload?.status_detail||'').slice(0,160)||null,
+    responseFormat:String(details.responseFormat||'unknown'),
+    requestId:String(details.requestId||'').slice(0,160)||null
+  };
+}
+
+function providerRequestError({code,status=null,message,endpoint,payload={},responseFormat='unknown',requestId=null,cause=null}){
+  return Object.assign(new Error(message),{code,status,endpoint,details:{endpoint,payload,responseFormat,requestId},cause});
+}
+
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   if(!accessToken)throw Error('Token do Mercado Pago indisponível no Secret Manager.');
@@ -14,10 +41,31 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   async function request(path,{method='GET',body,idempotencyKey}={}){
     const headers={Authorization:`Bearer ${accessToken}`,'Content-Type':'application/json'};
     if(idempotencyKey)headers['X-Idempotency-Key']=idempotencyKey;
-    const response=await fetchImpl(`${API}${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
-    const text=await response.text(),payload=text?JSON.parse(text):{};
-    if(!response.ok){const error=Object.assign(new Error(payload?.message||`Mercado Pago respondeu ${response.status}.`),{code:'mercado-pago-error',status:response.status,details:payload});throw error}
-    return payload;
+    const options={method,headers,body:body===undefined?undefined:JSON.stringify(body)},mayRetry=method==='GET'||Boolean(idempotencyKey);
+    for(let attempt=0;attempt<2;attempt+=1){
+      let response;
+      try{response=await fetchImpl(`${API}${path}`,options)}catch(cause){
+        const error=providerRequestError({code:'mercado-pago-network-error',message:'Falha de rede ao consultar o Mercado Pago.',endpoint:path,cause});
+        if(mayRetry&&attempt===0){await wait(120);continue}throw error;
+      }
+      const requestId=response.headers?.get?.('x-request-id')||null;
+      let text;
+      try{text=await response.text()}catch(cause){
+        const error=providerRequestError({code:'mercado-pago-invalid-response',status:response.status,message:'Não foi possível ler a resposta do Mercado Pago.',endpoint:path,responseFormat:'unreadable',requestId,cause});
+        if(mayRetry&&attempt===0){await wait(120);continue}throw error;
+      }
+      const parsed=safeProviderPayload(text),payload=parsed.payload;
+      if(!response.ok){
+        const error=providerRequestError({code:'mercado-pago-error',status:response.status,message:payload?.message||`Mercado Pago respondeu ${response.status}.`,endpoint:path,payload,responseFormat:parsed.format,requestId});
+        if(mayRetry&&attempt===0&&RETRYABLE_HTTP_STATUSES.has(response.status)){await wait(120);continue}throw error;
+      }
+      if(parsed.format!=='json'){
+        const error=providerRequestError({code:'mercado-pago-invalid-response',status:response.status,message:'O Mercado Pago respondeu sem um JSON válido.',endpoint:path,responseFormat:parsed.format,requestId});
+        if(mayRetry&&attempt===0){await wait(120);continue}throw error;
+      }
+      return payload;
+    }
+    throw providerRequestError({code:'mercado-pago-invalid-response',message:'O Mercado Pago não devolveu uma resposta válida.',endpoint:path});
   }
   return{
     createSubscription({businessId,userId,email,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card'}){
@@ -40,4 +88,4 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   };
 }
 
-module.exports={API,pixExternalReference,mercadoPagoService};
+module.exports={API,pixExternalReference,safeProviderPayload,providerErrorDiagnostics,mercadoPagoService};

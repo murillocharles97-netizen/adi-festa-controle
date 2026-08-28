@@ -6,7 +6,7 @@ const crypto=require('node:crypto');
 const {normalizePlanId,requirePlan}=require('../src/services/plan-service');
 const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,computeAccess}=require('../src/services/subscription-service');
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
-const {mercadoPagoService,pixExternalReference}=require('../src/services/mercado-pago-service');
+const {mercadoPagoService,pixExternalReference,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
 const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
@@ -74,6 +74,27 @@ test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()
   assert.deepEqual(body.transactions.payments[0].payment_method,{id:'pix',type:'bank_transfer'});
   assert.equal(body.external_reference,pixExternalReference('biz_1','op_1234567890123456'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.equal(body.external_reference.length,64);assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
   assert.equal('expiration_time' in body.transactions.payments[0],false,'Orders API deve aplicar a validade padrão de 24 horas');
+});
+
+test('cliente Mercado Pago preserva erro HTTP sanitizado sem expor token',async()=>{
+  const fetchImpl=async()=>({ok:false,status:400,headers:{get:name=>name==='x-request-id'?'request-safe-1':null},text:async()=>JSON.stringify({code:'invalid_request',message:'payer.email is invalid',cause:[{code:'bad_field',description:'Invalid payer email'}]})});
+  const service=mercadoPagoService({accessToken:'never-log-this-token',fetchImpl});
+  await assert.rejects(()=>service.createPixOrder({businessId:'biz_1',email:'bad',plan:requirePlan('professional'),billing:{amount:19.96},operationId:'op_1234567890123456'}),error=>{
+    const diagnostic=providerErrorDiagnostics(error);
+    assert.equal(error.code,'mercado-pago-error');assert.equal(diagnostic.httpStatus,400);assert.equal(diagnostic.providerErrorCode,'invalid_request');assert.equal(diagnostic.providerCauses[0].code,'bad_field');assert.equal(diagnostic.requestId,'request-safe-1');assert.doesNotMatch(JSON.stringify(diagnostic),/never-log-this-token/);return true;
+  });
+});
+
+test('resposta não JSON do Orders API é recuperada por retry idempotente',async()=>{
+  let calls=0;const fetchImpl=async()=>{calls+=1;return calls===1?{ok:true,status:201,headers:{get:()=>null},text:async()=>'<html>upstream reset</html>'}:{ok:true,status:201,headers:{get:()=>null},text:async()=>JSON.stringify({id:'order_retry',status:'action_required'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),order=await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan:requirePlan('professional'),billing:{amount:19.96},operationId:'op_1234567890123456'});
+  assert.equal(calls,2);assert.equal(order.id,'order_retry');
+});
+
+test('erro 503 é repetido com a mesma chave de idempotência',async()=>{
+  const seen=[];let calls=0;const fetchImpl=async(url,options)=>{seen.push(options.headers['X-Idempotency-Key']);calls+=1;return calls===1?{ok:false,status:503,headers:{get:()=>null},text:async()=>JSON.stringify({message:'temporary unavailable'})}:{ok:true,status:201,headers:{get:()=>null},text:async()=>JSON.stringify({id:'order_after_retry'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),order=await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan:requirePlan('professional'),billing:{amount:19.96},operationId:'op_1234567890123456'});
+  assert.equal(order.id,'order_after_retry');assert.deepEqual(seen,['op_1234567890123456','op_1234567890123456']);
 });
 
 test('formas de pagamento aceitas são enum fechado e cartão permanece padrão',()=>{

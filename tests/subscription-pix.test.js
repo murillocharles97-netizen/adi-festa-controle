@@ -69,3 +69,10 @@ test('pending não vira expirado pelo relógio local e falha de criação tem me
   assert.match(pix,/absoluteExpiration/);
   assert.doesNotMatch(plans,/Date\.now\(\)\s*[<>]=?\s*[^;]*expiresAt|expiresAt\s*[<>]=?\s*Date\.now\(\)/);
 });
+
+test('falha Pix registra somente diagnóstico público no navegador',()=>{
+  const plans=read('js/plans.js'),provider=read('functions/src/services/mercado-pago-service.js'),backend=read('functions/src/index.js');
+  assert.match(plans,/\[BILLING_PIX_ERROR\]/);assert.match(plans,/billingCode/);
+  assert.match(provider,/providerErrorDiagnostics/);assert.match(provider,/mercado-pago-invalid-response/);assert.match(provider,/RETRYABLE_HTTP_STATUSES/);
+  assert.match(backend,/\[BILLING_PIX_ERROR\]/);assert.doesNotMatch(backend,/accessToken.*logger|logger.*accessToken/i);
+});
