@@ -563,20 +563,24 @@ function couponFirestoreService(db) {
     providerPlanId,
     providerOrderId,
     providerPaymentId,
+    writer,
   }) {
     if (!redemptionId) return;
-    await db.doc(`couponRedemptions/${redemptionId}`).set(
-      {
+    const ref = db.doc(`couponRedemptions/${redemptionId}`),
+      data = {
         status: "pending_payment",
-        mercadoPagoSubscriptionId: subscriptionId,
+        mercadoPagoSubscriptionId: subscriptionId || null,
         mercadoPagoPlanId: providerPlanId || null,
         mercadoPagoOrderId: providerOrderId || null,
         mercadoPagoPaymentId: providerPaymentId || null,
-        internalSubscriptionId,
+        internalSubscriptionId: internalSubscriptionId || null,
         updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+      };
+    if (writer) {
+      writer.set(ref, data, { merge: true });
+      return;
+    }
+    await ref.set(data, { merge: true });
   }
   async function releaseReservation(redemptionId, reason = "checkout_failed") {
     if (!redemptionId) return;
