@@ -8,7 +8,7 @@ const {onSchedule}=require('firebase-functions/v2/scheduler');
 const {onDocumentCreated,onDocumentWritten}=require('firebase-functions/v2/firestore');
 const {defineSecret,defineString}=require('firebase-functions/params');
 const {logger}=require('firebase-functions');
-const {mercadoPagoService,pixExternalReference}=require('./services/mercado-pago-service');
+const {mercadoPagoService,pixExternalReference,providerErrorDiagnostics}=require('./services/mercado-pago-service');
 const {permissionService}=require('./services/permission-service');
 const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
 const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
@@ -84,7 +84,13 @@ function callableError(error){
   if(error?.code==='invalid-plan')return new HttpsError('invalid-argument','Plano inválido.');
   if(error?.code==='invalid-billing-cycle')return new HttpsError('invalid-argument','Periodicidade inválida.');
   if(error?.code==='invalid-payment-method')return new HttpsError('invalid-argument','Forma de pagamento inválida.');
-  if(error?.code==='mercado-pago-error')return new HttpsError('unavailable','O Mercado Pago não respondeu como esperado. Tente novamente em instantes.');
+  if(['mercado-pago-error','mercado-pago-network-error','mercado-pago-invalid-response'].includes(error?.code)){
+    const diagnostic=providerErrorDiagnostics(error),text=`${diagnostic.providerErrorCode||''} ${diagnostic.providerMessage||''} ${diagnostic.providerCauses.map(item=>item.message||'').join(' ')}`.toLowerCase();
+    if(/(?:payer|email).*(?:invalid|inválid)|(?:invalid|inválid).*(?:payer|email)/.test(text))return new HttpsError('failed-precondition','O e-mail da conta não foi aceito pelo Mercado Pago. Confira o cadastro e tente novamente.',{billingCode:'invalid_payer_email'});
+    if(/pix/.test(text)&&/(?:not available|not enabled|not configured|chave|indispon)/.test(text))return new HttpsError('failed-precondition','O recebimento por Pix ainda não está disponível na conta Mercado Pago vinculada.',{billingCode:'pix_not_available'});
+    if(error?.code!=='mercado-pago-error'||diagnostic.httpStatus>=500||[408,425,429].includes(diagnostic.httpStatus))return new HttpsError('unavailable','O Mercado Pago está temporariamente indisponível. Tente novamente em instantes.',{billingCode:'provider_unavailable'});
+    return new HttpsError('failed-precondition','O Mercado Pago recusou a criação deste Pix. Tente novamente ou confira os dados da conta.',{billingCode:'provider_rejected'});
+  }
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
 function requestedBusinessId(request){return String(request.data?.companyId||request.data?.businessId||'').trim()}
@@ -116,9 +122,9 @@ exports.actionAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const cont
 exports.duplicateAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const context=await internalCouponContext(request),coupon=await coupons().duplicateCoupon({context,couponId:String(request.data?.couponId||''),code:request.data?.code});return{coupon}}catch(error){throw callableError(error)}});
 
 exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
-  let attemptRef=null,redemption=null,checkoutPersisted=false;
+  let attemptRef=null,redemption=null,checkoutPersisted=false,billingLog={paymentMethodType:null,businessId:null,operationIdHash:null};
   try{
-    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),paymentMethod=requirePaymentMethod(request.data?.paymentMethodType),context=await permissions().authenticatedContext(request,businessId);
+    const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),paymentMethod=requirePaymentMethod(request.data?.paymentMethodType),context=await permissions().authenticatedContext(request,businessId);billingLog={...billingLog,paymentMethodType:paymentMethod.id,businessId};
     if(request.data?.userId&&request.data.userId!==context.uid)throw new HttpsError('permission-denied','Usuário divergente.');
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
@@ -127,7 +133,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${pendingProviderId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId&&String(intentData.paymentMethodType||'card')===paymentMethod.id,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;
       if(checkoutUrl)return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
     }
-    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id}));
+    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id}));billingLog.operationIdHash=sha(opId).slice(0,12);
     logger.info('[Billing] checkout_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
     logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
     const attempt=await acquireCheckoutAttempt({businessId,operationId:opId,requestHash,context,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,quoteId});
@@ -175,6 +181,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     return{checkoutUrl:String(provider.init_point),paymentMethodType:paymentMethod.id,reused:false};
   }catch(error){
     logger.error('[Billing] billing_error',{stage:'create_subscription',code:error?.code||'unknown',status:error?.status||null});
+    if(billingLog.paymentMethodType==='pix_monthly')logger.error('[BILLING_PIX_ERROR]',{...billingLog,...providerErrorDiagnostics(error)});
     if(!checkoutPersisted&&redemption&&!redemption.idempotent)await coupons().releaseReservation(redemption.id,'provider_checkout_failed').catch(()=>{});
     await failCheckoutAttempt(attemptRef,error);
     throw callableError(error);

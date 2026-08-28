@@ -547,6 +547,7 @@
         if(result?.checkoutUrl)return location.assign(result.checkoutUrl);
         throw Error('Não foi possível abrir o checkout.');
       }catch(error){
+        if(selected==='pix_monthly')console.warn('[BILLING_PIX_ERROR]',{code:error?.code||'unknown',billingCode:error?.details?.billingCode||null});
         window.Utils?.toast?.(error.message||`Não foi possível iniciar o pagamento ${selected==='pix_monthly'?'via Pix':''}.`,true);
         submit.disabled=false;syncSelection();
       }

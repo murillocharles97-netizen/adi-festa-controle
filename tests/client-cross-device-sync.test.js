@@ -203,7 +203,7 @@ test("toda a cadeia de módulos da sincronização invalida o cache na release 1
     /js\/firebase\/auth\.js\?v=105[\s\S]*js\/firebase\/firebase-ui\.js\?v=100/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=100/);
-  assert.match(serviceWorkerSource, /adi-festa-v105-manual-pix-fix/);
+  assert.match(serviceWorkerSource, /adi-festa-v106-pix-orders-resilience/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

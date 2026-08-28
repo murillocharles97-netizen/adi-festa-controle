@@ -1,5 +1,5 @@
 const fs=require("node:fs"),http=require("node:http"),os=require("node:os"),path=require("node:path"),{spawn}=require("node:child_process");
-const ROOT=process.cwd(),OUT=path.join(ROOT,"artifacts","mercadopago-manual-pix-v105"),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const ROOT=process.cwd(),OUT=path.join(ROOT,"artifacts","mercadopago-manual-pix-v106"),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const mime={".html":"text/html",".js":"text/javascript",".css":"text/css",".png":"image/png",".svg":"image/svg+xml"};
 function chromePath(){return [process.env.CHROME_PATH,"C:/Program Files/Google/Chrome/Application/chrome.exe","C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"].filter(Boolean).find(fs.existsSync)||(()=>{throw Error("Chrome não encontrado")})();}
 function server(){return http.createServer((request,response)=>{const pathname=decodeURIComponent(new URL(request.url,"http://localhost").pathname),target=path.resolve(ROOT,`.${pathname==="/"?"/index.html":pathname}`);if(!target.startsWith(ROOT)||!fs.existsSync(target)||fs.statSync(target).isDirectory())return response.writeHead(404).end("Not found");response.setHeader("Content-Type",`${mime[path.extname(target)]||"application/octet-stream"}; charset=utf-8`);fs.createReadStream(target).pipe(response);});}
