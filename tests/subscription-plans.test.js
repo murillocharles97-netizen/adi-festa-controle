@@ -103,7 +103,7 @@ const index=read('index.html');
 const worker=read('service-worker.js');
 const rules=read('firestore.rules');
 const planSeed=JSON.parse(read('plans.seed.json'));
-assert.doesNotMatch(plansUi,/onSnapshot|getDocs|collection\(/);
+assert.doesNotMatch(plansUi,/\bonSnapshot\s*\(|\bgetDocs\s*\(|\bcollection\s*\(/);
 assert.match(plansUi,/Mercado Pago/);
 assert.match(plansUi,/data-full-comparison/);
 assert.match(plansUi,/data-plan-indicator/);

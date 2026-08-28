@@ -14,6 +14,11 @@ function orderState(order={}){
   if(TERMINAL_STATUSES.has(status))return status==='cancelled'?'canceled':status;
   return'pending';
 }
+function absoluteExpiration(value){
+  if(!value)return null;
+  const date=new Date(String(value));
+  return Number.isNaN(date.getTime())?null:date.toISOString();
+}
 function pixDetails(order={}){
   const payment=firstPixPayment(order),method=payment.payment_method||{},state=orderState(order);
   return{
@@ -26,7 +31,7 @@ function pixDetails(order={}){
     qrCode:state==='pending'?String(method.qr_code||''):null,
     qrCodeBase64:state==='pending'?String(method.qr_code_base64||''):null,
     ticketUrl:state==='pending'?String(method.ticket_url||''):null,
-    expiresAt:String(payment.expiration_time||order.expiration_time||'')||null
+    expiresAt:absoluteExpiration(payment.expiration_time||order.expiration_time)
   };
 }
 function validatePixOrder(order,index={}){
@@ -65,7 +70,7 @@ function pendingPixSubscription(existing={},data={},now=new Date().toISOString()
 function publicAttempt(data={}){
   const text=value=>typeof value==='string'&&value?value:null;
   return{
-    id:String(data.operationId||data.id||''),planId:String(data.planId||''),billingCycle:String(data.billingCycle||'monthly'),paymentMethodType:'pix_monthly',status:String(data.status||'payment_pending'),providerStatus:String(data.providerStatus||''),statusDetail:String(data.statusDetail||''),orderId:String(data.providerOrderId||''),paymentId:data.providerPaymentId==null?null:String(data.providerPaymentId),originalAmount:asNumber(data.originalAmount??data.officialPrice),discountAmount:asNumber(data.discountAmount)??0,finalAmount:asNumber(data.finalAmount??data.chargedPrice),couponSnapshot:data.couponSnapshot||null,qrCode:text(data.qrCode),qrCodeBase64:text(data.qrCodeBase64),ticketUrl:text(data.ticketUrl),expiresAt:text(data.expiresAt),approvedAt:text(data.approvedAt)
+    id:String(data.operationId||data.id||''),planId:String(data.planId||''),billingCycle:String(data.billingCycle||'monthly'),paymentMethodType:'pix_monthly',status:String(data.status||'payment_pending'),providerStatus:String(data.providerStatus||''),statusDetail:String(data.statusDetail||''),orderId:String(data.providerOrderId||''),paymentId:data.providerPaymentId==null?null:String(data.providerPaymentId),originalAmount:asNumber(data.originalAmount??data.officialPrice),discountAmount:asNumber(data.discountAmount)??0,finalAmount:asNumber(data.finalAmount??data.chargedPrice),couponSnapshot:data.couponSnapshot||null,qrCode:text(data.qrCode),qrCodeBase64:text(data.qrCodeBase64),ticketUrl:text(data.ticketUrl),expiresAt:text(data.expiresAt),approvedAt:text(data.approvedAt),replacesOperationId:text(data.replacesOperationId),replacementOperationId:text(data.replacementOperationId),reviewReason:text(data.reviewReason)
   };
 }
 
@@ -92,6 +97,11 @@ function pixBillingService(db){
         return{businessId:index.businessId,status:details.status,subscription,attempt:publicAttempt({...attempt,...attemptPatch})};
       }
       if(markerSnapshot.exists){attemptPatch.status='payment_approved';attemptPatch.approvedAt=attempt.approvedAt||markerSnapshot.data()?.approvedAt||now;transaction.set(attemptRef,attemptPatch,{merge:true});return{businessId:index.businessId,status:'payment_approved',subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch}),idempotent:true}}
+      if(index.supersededByOperationId){
+        attemptPatch.status='payment_review_required';attemptPatch.reviewReason='superseded_order_approved';attemptPatch.approvedAt=order.date_last_updated||order.date_created||now;
+        transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:'payment_review_required',providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId,reviewReason:'superseded_order_approved',updatedAt:now},{merge:true});
+        return{businessId:index.businessId,status:'payment_review_required',subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch}),requiresReview:true};
+      }
       const existing=business.subscription||{},currentEnd=new Date(existing.currentPeriodEnd||existing.expiresAt||0),paidAt=new Date(order.date_last_updated||order.date_created||now),periodStart=currentEnd>paidAt?currentEnd:paidAt,periodStartIso=periodStart.toISOString(),periodEnd=addBillingPeriod(periodStartIso,index.billingCycle),plan=getPlan(index.planId);
       const subscription={...existing,status:'active',planId:index.planId,billingCycle:index.billingCycle,paymentMethodType:'pix_monthly',billingStrategy:'guest_pix_manual',provider:'mercado_pago',pendingPlanId:null,pendingBillingCycle:null,pendingPaymentMethodType:null,pendingCheckoutAttemptId:null,hasPaidSubscription:true,startedAt:existing.startedAt||periodStartIso,currentPeriodStart:periodStartIso,currentPeriodEnd:periodEnd,expiresAt:periodEnd,nextBillingDate:periodEnd,lastPaymentDate:periodStartIso,lastPaymentStatus:'approved',lastPaymentProviderId:details.paymentId,lastPaymentEventId:eventId||`order:${orderId}`,cancelAtPeriodEnd:false,updatedAt:now,mercadoPago:{...(existing.mercadoPago||{}),pendingOrderId:null,pendingPaymentId:null,lastOrderId:orderId,lastPaymentId:details.paymentId,providerStatus:details.providerStatus,lastWebhook:eventId?now:existing.mercadoPago?.lastWebhook||null},latestPayment:{provider:'mercado_pago',paymentMethod:'pix',orderId,paymentId:details.paymentId,amount:details.amount,currency:'BRL',paidAt:periodStartIso,couponSnapshot:index.discountSnapshot||null}};
       if(redemption&&redemption.status!=='active'){changeCouponReservation(transaction,redemptionRef,redemption,'confirm');subscription.discount={...(redemption.discountSnapshot||index.discountSnapshot||{})};delete subscription.pendingDiscount}else if(index.discountSnapshot){subscription.discount={...index.discountSnapshot};delete subscription.pendingDiscount}
@@ -110,4 +120,4 @@ function pixBillingService(db){
   return{resolveIndex,applyOrder};
 }
 
-module.exports={TERMINAL_STATUSES,firstPixPayment,orderState,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription,publicAttempt,pixBillingService};
+module.exports={TERMINAL_STATUSES,firstPixPayment,orderState,absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription,publicAttempt,pixBillingService};

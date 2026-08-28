@@ -1,6 +1,12 @@
 'use strict';
 
+const crypto=require('node:crypto');
 const API='https://api.mercadopago.com';
+
+function pixExternalReference(businessId,operationId){
+  const digest=crypto.createHash('sha256').update(`${String(businessId||'')}:${String(operationId||'')}`).digest('hex').slice(0,56);
+  return `billing_${digest}`;
+}
 
 function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   if(!accessToken)throw Error('Token do Mercado Pago indisponível no Secret Manager.');
@@ -21,9 +27,9 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
       return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
-    createPixOrder({businessId,email,plan,billing,operationId,expirationTime='PT24H'}){
-      const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=`billing:${businessId}:${operationId}`;
-      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body:{type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'},expiration_time:expirationTime}]},payer:{email}}});
+    createPixOrder({businessId,email,plan,billing,operationId}){
+      const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=pixExternalReference(businessId,operationId);
+      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body:{type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}}});
     },
     getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
@@ -34,4 +40,4 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   };
 }
 
-module.exports={API,mercadoPagoService};
+module.exports={API,pixExternalReference,mercadoPagoService};

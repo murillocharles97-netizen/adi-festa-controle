@@ -7,7 +7,7 @@ O backend de assinaturas usa Cloud Functions e mantém o Firestore como a única
 1. O proprietário escolhe um plano.
 2. `createSubscription` valida usuário, empresa, plano, ciclo e cupom no servidor.
 3. Para cartão, retorna a URL oficial da assinatura recorrente (`POST /preapproval`).
-4. Para Pix, cria uma Order guest (`POST /v1/orders`) e retorna somente QR Code, Pix Copia e Cola, URL de pagamento e expiração.
+4. Para Pix, cria uma Order guest (`POST /v1/orders`) e retorna somente QR Code, Pix Copia e Cola e URL de pagamento. A validade padrão de 24 horas é controlada pelo Mercado Pago, sem `expiration_time` customizado.
 5. O Mercado Pago envia uma notificação assinada para `receiveWebhook`.
 6. A função valida o HMAC, consulta o objeto oficial no provedor, elimina eventos duplicados e atualiza `businesses/{businessId}.subscription`.
 7. O aplicativo lê o novo estado diretamente do Firestore.
@@ -75,3 +75,5 @@ firebase deploy --only functions,firestore:rules,firestore:indexes
 ```
 
 Antes do primeiro pagamento real, confirme no painel do Mercado Pago que o webhook foi validado e faça uma assinatura de teste usando credenciais de teste. Não ative checkout de produção sem o webhook operacional.
+
+Cartão permanece uma assinatura recorrente de provedor. Pix é uma cobrança pontual manual: aprovação adiciona exatamente um período ao entitlement existente; pagamento antecipado parte do fim do período atual e pagamento após vencimento parte da aprovação.

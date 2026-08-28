@@ -20,12 +20,14 @@ Referências oficiais:
 
 1. O navegador envia somente `businessId`, `planId`, `billingCycle`, `quoteId`, `paymentMethodType` e `operationId`.
 2. `createSubscription` autentica o proprietário e recalcula plano, preço e cupom.
-3. O backend cria `POST https://api.mercadopago.com/v1/orders` com `type=online`, moeda BRL, `payment_method.id=pix`, `payment_method.type=bank_transfer` e `X-Idempotency-Key=operationId`.
+3. O backend cria `POST https://api.mercadopago.com/v1/orders` com `type=online`, moeda BRL, `payment_method.id=pix`, `payment_method.type=bank_transfer` e `X-Idempotency-Key=operationId`. A `external_reference` é um identificador opaco de 64 caracteres (`billing_` + hash), compatível com o padrão do provedor.
 4. A UI mostra QR Code e Pix Copia e Cola dentro do Adi Festa. Criar o QR mantém a assinatura atual/trial e nunca libera plano.
 5. O webhook assinado recebe `type=order`, consulta `GET /v1/orders/{orderId}` e valida ID, referência externa, valor, moeda e meio de pagamento.
 6. Somente `processed/accredited` ativa ou renova o plano.
 7. O marcador determinístico `billingPaymentEvents/pix_{orderId}` impede que a mesma Order adicione dois períodos.
 8. Status terminal remove QR/Copia e Cola, libera reserva de cupom e permite gerar uma nova tentativa.
+
+`expiration_time` não é enviado: a Orders API aplica a validade padrão de 24 horas. O Adi Festa só mostra expiração quando o status oficial da Order é `expired`; o relógio ou timezone do dispositivo nunca expira uma cobrança localmente.
 
 Não é chamado de Pix Automático: a próxima renovação exige uma nova cobrança e pagamento manual. Uma renovação antecipada parte do fim do período vigente; uma renovação após vencimento parte da data do novo pagamento.
 
@@ -36,6 +38,7 @@ Não é chamado de Pix Automático: a próxima renovação exige uma nova cobran
 - A tentativa guarda snapshot de preço original, desconto, total e cupom.
 - Gerar QR apenas reserva o cupom.
 - Aprovação confirma o uso; expiração/cancelamento libera a reserva.
+- Ao substituir um Pix expirado, o backend revalida o código e cria nova cotação/reserva. A cotação da tentativa anterior não é reutilizada nem tratada como uso confirmado.
 
 ## Dados e segurança
 

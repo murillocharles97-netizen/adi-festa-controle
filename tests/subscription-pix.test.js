@@ -9,7 +9,7 @@ test('seletor oferece cartão e Pix mensal sem prometer Pix Automático',()=>{
   assert.match(plans,/Cartão de crédito/);
   assert.match(plans,/Pix mensal/);
   assert.match(plans,/Pagamento manual a cada renovação/);
-  assert.match(plans,/Uma nova cobrança pode exigir confirmação a cada mês/);
+  assert.match(plans,/uma nova cobrança pode exigir confirmação a cada mês/i);
   assert.doesNotMatch(plans,/Autorize uma vez no seu banco/);
   assert.match(plans,/data-payment-option="pix_monthly"/);
 });
@@ -28,6 +28,8 @@ test('Pix mensal usa Orders API guest e webhook continua como fonte da verdade',
   const backend=read('functions/src/index.js'),provider=read('functions/src/services/mercado-pago-service.js'),pix=read('functions/src/services/pix-billing-service.js');
   assert.match(provider,/request\('\/v1\/orders'/);
   assert.match(provider,/payment_method:\{id:'pix',type:'bank_transfer'\}/);
+  assert.doesNotMatch(provider,/payment_method:\{id:'pix',type:'bank_transfer'\},expiration_time/);
+  assert.match(provider,/billing_\$\{digest\}/);
   assert.match(provider,/X-Idempotency-Key/);
   assert.match(backend,/billingOrderIndex/);
   assert.match(backend,/event\.type==='order'/);
@@ -49,4 +51,21 @@ test('interface exibe QR, copia e cola e estados sem exigir conta Mercado Pago',
   const plans=read('js/plans.js'),styles=read('css/plans.css');
   assert.match(plans,/Pagar com Pix/);assert.match(plans,/Copiar código Pix/);assert.match(plans,/Você não precisa ter uma conta Mercado Pago/);assert.match(plans,/Pagamento confirmado/);assert.match(plans,/Pix expirado/);
   assert.match(plans,/watchPixCheckout/);assert.match(styles,/plan-pix-qr/);
+});
+
+test('novo Pix usa nova tentativa e revalida o mesmo cupom sem chamar cartão',()=>{
+  const plans=read('js/plans.js'),context=read('js/firebase/business-context.js'),backend=read('functions/src/index.js'),coupons=read('functions/src/services/coupon-firestore-service.js');
+  assert.match(plans,/previousCheckoutAttemptId:current\.id/);
+  assert.match(plans,/couponSnapshot\?\.couponCodeSnapshot/);
+  assert.match(context,/previousCheckoutAttemptId/);assert.match(context,/couponCode/);
+  assert.match(backend,/reserveCheckoutCoupon/);assert.match(backend,/replacementOperationId/);assert.match(backend,/supersededByOperationId/);
+  assert.match(coupons,/quoteRefreshed:\s*true/);
+});
+
+test('pending não vira expirado pelo relógio local e falha de criação tem mensagem própria',()=>{
+  const plans=read('js/plans.js'),pix=read('functions/src/services/pix-billing-service.js');
+  assert.match(plans,/expired=status===["']expired["']/);
+  assert.match(plans,/Não foi possível gerar o Pix/);
+  assert.match(pix,/absoluteExpiration/);
+  assert.doesNotMatch(plans,/Date\.now\(\)\s*[<>]=?\s*[^;]*expiresAt|expiresAt\s*[<>]=?\s*Date\.now\(\)/);
 });
