@@ -76,3 +76,10 @@ test('falha Pix registra somente diagnóstico público no navegador',()=>{
   assert.match(provider,/providerErrorDiagnostics/);assert.match(provider,/mercado-pago-invalid-response/);assert.match(provider,/RETRYABLE_HTTP_STATUSES/);
   assert.match(backend,/\[BILLING_PIX_ERROR\]/);assert.doesNotMatch(backend,/accessToken.*logger|logger.*accessToken/i);
 });
+
+test('Pix com cupom grava resgate no mesmo batch e nunca exige subscriptionId',()=>{
+  const backend=read('functions/src/index.js'),coupons=read('functions/src/services/coupon-firestore-service.js');
+  assert.match(backend,/markCheckout\(\{redemptionId:redemption\.id,internalSubscriptionId:opId,providerOrderId:details\.orderId,providerPaymentId:details\.paymentId,writer:batch\}\);\s*await batch\.commit\(\)/);
+  assert.match(coupons,/mercadoPagoSubscriptionId:\s*subscriptionId\s*\|\|\s*null/);
+  assert.match(coupons,/internalSubscriptionId:\s*internalSubscriptionId\s*\|\|\s*null/);
+});

@@ -161,8 +161,8 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
         batch.set(replacement.ref,{replacementOperationId:opId,replacedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
         if(replacement.data.providerOrderId)batch.set(db.doc(`billingOrderIndex/${replacement.data.providerOrderId}`),{supersededByOperationId:opId,supersededAt:now,updatedAt:now},{merge:true});
       }
+      if(redemption)await coupons().markCheckout({redemptionId:redemption.id,internalSubscriptionId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId,writer:batch});
       await batch.commit();checkoutPersisted=true;
-      if(redemption)await coupons().markCheckout({redemptionId:redemption.id,internalSubscriptionId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId});
       logger.info('[Billing] pix_waiting_payment',{businessId,planId:plan.id,orderId:details.orderId,hasCoupon:Boolean(redemption),couponQuoteRefreshed:redemption?.quoteRefreshed===true,replacesOperationId:replacement?previousAttemptId:null,environment:MP_ENV.value()});
       return{paymentMethodType:'pix_monthly',pix:publicAttempt(attemptData),reused:false};
     }
@@ -172,9 +172,9 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
     batch.set(intentRef,{...baseIndex,requestedBy:context.uid,operationId:opId,providerStatus:String(provider.status||'pending'),subscriptionId:String(provider.id),providerPlanId:null,customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point)});
     batch.set(db.doc(`subscriptionIndex/${provider.id}`),{...baseIndex,subscriptionId:String(provider.id)});
+    if(redemption)await coupons().markCheckout({redemptionId:redemption.id,subscriptionId:String(provider.id),internalSubscriptionId:opId,writer:batch});
     await batch.commit();
     checkoutPersisted=true;
-    if(redemption)await coupons().markCheckout({redemptionId:redemption.id,subscriptionId:String(provider.id),internalSubscriptionId:opId});
     await finishCheckoutAttempt(attemptRef,{checkoutUrl:String(provider.init_point),providerPlanId:null,subscriptionId:String(provider.id),paymentMethodType:paymentMethod.id});
     logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,coupon:Boolean(redemption),environment:MP_ENV.value()});
     logger.info('[Billing] subscription_created',{businessId,planId:plan.id,paymentMethodType:paymentMethod.id,subscriptionId:String(provider.id)});

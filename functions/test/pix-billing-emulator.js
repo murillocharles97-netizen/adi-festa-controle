@@ -70,6 +70,11 @@ async function main(){
   await couponService.releaseReservation(firstReservation.id,'pix_expired');
   const replacement=await couponService.reserveCheckoutCoupon({quoteId:firstQuote.quoteId,couponCode,context,planId:'professional',billingCycle:'monthly'});
   assert.equal(replacement.quoteRefreshed,true);assert.notEqual(replacement.quoteId,firstQuote.quoteId);assert.equal(replacement.discountedPrice,39.92);assert.equal((await db.doc(`couponRedemptions/${replacement.id}`).get()).data().status,'reserved');
+  const checkoutBatch=db.batch();
+  await couponService.markCheckout({redemptionId:replacement.id,internalSubscriptionId:'operation-pix-coupon-005',providerOrderId:'order-pix-coupon-005',writer:checkoutBatch});
+  await checkoutBatch.commit();
+  const replacementCheckout=(await db.doc(`couponRedemptions/${replacement.id}`).get()).data();
+  assert.equal(replacementCheckout.status,'pending_payment');assert.equal(replacementCheckout.mercadoPagoSubscriptionId,null);assert.equal(replacementCheckout.mercadoPagoPaymentId,null);assert.equal(replacementCheckout.mercadoPagoOrderId,'order-pix-coupon-005');
   console.log('Pix billing emulator: pending, coupon refresh, approved, duplicate, expired and tenant validation OK');
 }
 
