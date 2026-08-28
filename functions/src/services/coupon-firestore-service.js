@@ -515,6 +515,47 @@ function couponFirestoreService(db) {
       return redemption;
     });
   }
+  async function reserveCheckoutCoupon({
+    quoteId,
+    couponCode,
+    context,
+    planId,
+    billingCycle,
+  }) {
+    const normalizedCode = normalizeCouponCode(couponCode);
+    if (!quoteId && !normalizedCode) return null;
+    if (quoteId) {
+      try {
+        const redemption = await reserveQuote({
+          quoteId,
+          context,
+          planId,
+          billingCycle,
+        });
+        return { ...redemption, quoteId, quoteRefreshed: false };
+      } catch (error) {
+        if (!(error instanceof CouponError) || error.code !== "quote_expired" || !normalizedCode)
+          throw error;
+      }
+    }
+    const freshQuote = await validateAndQuote({
+      context,
+      code: normalizedCode,
+      planId,
+      billingCycle,
+    });
+    const redemption = await reserveQuote({
+      quoteId: freshQuote.quoteId,
+      context,
+      planId,
+      billingCycle,
+    });
+    return {
+      ...redemption,
+      quoteId: freshQuote.quoteId,
+      quoteRefreshed: true,
+    };
+  }
   async function markCheckout({
     redemptionId,
     subscriptionId,
@@ -591,6 +632,7 @@ function couponFirestoreService(db) {
     loadCouponByCode,
     validateAndQuote,
     reserveQuote,
+    reserveCheckoutCoupon,
     markCheckout,
     releaseReservation,
     refs,

@@ -22,7 +22,7 @@ test("tela de planos valida apenas ao aplicar e envia somente quote segura", () 
   assert.match(plans, /validateCoupon/);
   assert.match(context, /quoteId/);
   assert.doesNotMatch(context, /discountValue|discountedPrice|originalPrice/);
-  assert.doesNotMatch(plans, /onSnapshot|setInterval/);
+  assert.doesNotMatch(plans, /\bonSnapshot\s*\(|\bsetInterval\s*\(/);
 });
 
 test("admin usa Functions protegidas e não acessa Firestore diretamente", () => {

@@ -8,7 +8,7 @@ const {onSchedule}=require('firebase-functions/v2/scheduler');
 const {onDocumentCreated,onDocumentWritten}=require('firebase-functions/v2/firestore');
 const {defineSecret,defineString}=require('firebase-functions/params');
 const {logger}=require('firebase-functions');
-const {mercadoPagoService}=require('./services/mercado-pago-service');
+const {mercadoPagoService,pixExternalReference}=require('./services/mercado-pago-service');
 const {permissionService}=require('./services/permission-service');
 const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
 const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
@@ -122,31 +122,42 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     if(request.data?.userId&&request.data.userId!==context.uid)throw new HttpsError('permission-denied','Usuário divergente.');
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
-    const quoteId=String(request.data?.quoteId||''),pendingProviderId=paymentMethod.id==='card'?context.business.subscription?.mercadoPago?.subscriptionId:null;
+    const quoteId=String(request.data?.quoteId||''),couponCode=String(request.data?.couponCode||'').trim().toUpperCase(),previousAttemptId=String(request.data?.previousCheckoutAttemptId||'').trim(),pendingProviderId=paymentMethod.id==='card'?context.business.subscription?.mercadoPago?.subscriptionId:null;
     if(pendingProviderId&&context.business.subscription?.pendingPlanId===plan.id){
       const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${pendingProviderId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId&&String(intentData.paymentMethodType||'card')===paymentMethod.id,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;
       if(checkoutUrl)return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
     }
-    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,paymentMethodType:paymentMethod.id}));
+    const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id}));
     logger.info('[Billing] checkout_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
     logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
     const attempt=await acquireCheckoutAttempt({businessId,operationId:opId,requestHash,context,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,quoteId});
     attemptRef=attempt.ref;
     if(attempt.reused)return attempt.pix?{paymentMethodType:'pix_monthly',pix:attempt.pix,reused:true}:{checkoutUrl:attempt.checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
-    redemption=quoteId?await coupons().reserveQuote({quoteId,context,planId:plan.id,billingCycle}):null;
+    let replacement=null;
+    if(paymentMethod.id==='pix_monthly'&&previousAttemptId){
+      if(!/^[a-zA-Z0-9_-]{16,100}$/.test(previousAttemptId)||previousAttemptId===opId)throw new HttpsError('invalid-argument','Tentativa Pix anterior inválida.');
+      const previousRef=context.businessRef.collection('billingCheckoutAttempts').doc(previousAttemptId),previousSnapshot=await previousRef.get(),previous=previousSnapshot.data()||{};
+      if(!previousSnapshot.exists||previous.requestedBy!==context.uid||previous.paymentMethodType!=='pix_monthly'||!['expired','canceled','failed'].includes(String(previous.status||'')))throw new HttpsError('failed-precondition','O Pix anterior ainda não pode ser substituído.');
+      replacement={ref:previousRef,data:previous};
+    }
+    redemption=paymentMethod.id==='pix_monthly'&&(quoteId||couponCode)?await coupons().reserveCheckoutCoupon({quoteId,couponCode,context,planId:plan.id,billingCycle}):quoteId?await coupons().reserveQuote({quoteId,context,planId:plan.id,billingCycle}):null;
     if(redemption)logger.info('[Billing] coupon_applied',{businessId,planId:plan.id,couponId:redemption.couponId,redemptionId:redemption.id});
-    const billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId}:null,backUrl=`${APP_URL.value()}#/planos`,now=iso();
+    const effectiveQuoteId=redemption?.quoteId||quoteId||null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId:effectiveQuoteId}:null,backUrl=`${APP_URL.value()}#/planos`,now=iso();
     if(paymentMethod.id==='pix_monthly'){
       logger.info('[Billing] pix_order_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
-      const order=await mp().createPixOrder({businessId,email:context.email,plan,billing,operationId:opId}),details=pixDetails(order),expectedExternalReference=`billing:${businessId}:${opId}`;
+      const order=await mp().createPixOrder({businessId,email:context.email,plan,billing,operationId:opId}),details=pixDetails(order),expectedExternalReference=pixExternalReference(businessId,opId);
       if(!details.orderId||!details.qrCode||!details.qrCodeBase64)throw new HttpsError('unavailable','O Mercado Pago não devolveu o QR Code do Pix.');
-      const discountSnapshot=redemption?.discountSnapshot||null,attemptData={businessId,requestedBy:context.uid,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',provider:'mercado_pago',providerOrderId:details.orderId,providerPaymentId:details.paymentId,status:'payment_pending',providerStatus:details.providerStatus,statusDetail:details.statusDetail,officialPrice:officialBilling.amount,originalAmount:officialBilling.amount,discountAmount:Number((officialBilling.amount-billing.amount).toFixed(2)),chargedPrice:billing.amount,finalAmount:billing.amount,expectedExternalReference,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,couponSnapshot:discountSnapshot,qrCode:details.qrCode,qrCodeBase64:details.qrCodeBase64,ticketUrl:details.ticketUrl,expiresAt:details.expiresAt,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete()},index={businessId,ownerId:context.uid,operationId:opId,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',providerOrderId:details.orderId,providerPaymentId:details.paymentId,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:quoteId||null,couponRedemptionId:redemption?.id||null,discountSnapshot,internalSubscriptionId:opId,status:'payment_pending',createdAt:now,updatedAt:now},subscription=pendingPixSubscription(context.business.subscription||{},{planId:plan.id,billingCycle,operationId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId,providerStatus:details.providerStatus,discount:discountSnapshot},now),batch=db.batch();
+      const discountSnapshot=redemption?.discountSnapshot||null,attemptData={businessId,requestedBy:context.uid,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',provider:'mercado_pago',providerOrderId:details.orderId,providerPaymentId:details.paymentId,status:'payment_pending',providerStatus:details.providerStatus,statusDetail:details.statusDetail,officialPrice:officialBilling.amount,originalAmount:officialBilling.amount,discountAmount:Number((officialBilling.amount-billing.amount).toFixed(2)),chargedPrice:billing.amount,finalAmount:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,couponSnapshot:discountSnapshot,qrCode:details.qrCode,qrCodeBase64:details.qrCodeBase64,ticketUrl:details.ticketUrl,expiresAt:details.expiresAt,replacesOperationId:replacement?previousAttemptId:null,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete()},index={businessId,ownerId:context.uid,operationId:opId,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',providerOrderId:details.orderId,providerPaymentId:details.paymentId,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot,internalSubscriptionId:opId,replacesOperationId:replacement?previousAttemptId:null,status:'payment_pending',createdAt:now,updatedAt:now},subscription=pendingPixSubscription(context.business.subscription||{},{planId:plan.id,billingCycle,operationId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId,providerStatus:details.providerStatus,discount:discountSnapshot},now),batch=db.batch();
       batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
       batch.set(attemptRef,attemptData,{merge:true});
       batch.set(db.doc(`billingOrderIndex/${details.orderId}`),index);
+      if(replacement){
+        batch.set(replacement.ref,{replacementOperationId:opId,replacedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
+        if(replacement.data.providerOrderId)batch.set(db.doc(`billingOrderIndex/${replacement.data.providerOrderId}`),{supersededByOperationId:opId,supersededAt:now,updatedAt:now},{merge:true});
+      }
       await batch.commit();checkoutPersisted=true;
       if(redemption)await coupons().markCheckout({redemptionId:redemption.id,internalSubscriptionId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId});
-      logger.info('[Billing] pix_waiting_payment',{businessId,planId:plan.id,orderId:details.orderId,hasCoupon:Boolean(redemption),environment:MP_ENV.value()});
+      logger.info('[Billing] pix_waiting_payment',{businessId,planId:plan.id,orderId:details.orderId,hasCoupon:Boolean(redemption),couponQuoteRefreshed:redemption?.quoteRefreshed===true,replacesOperationId:replacement?previousAttemptId:null,environment:MP_ENV.value()});
       return{paymentMethodType:'pix_monthly',pix:publicAttempt(attemptData),reused:false};
     }
     const provider=await mp().createSubscription({businessId,userId:context.uid,email:context.email,plan,billing,backUrl,operationId:opId,coupon,paymentMethodType:paymentMethod.id});

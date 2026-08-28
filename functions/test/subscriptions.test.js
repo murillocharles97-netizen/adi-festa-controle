@@ -6,10 +6,10 @@ const crypto=require('node:crypto');
 const {normalizePlanId,requirePlan}=require('../src/services/plan-service');
 const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,computeAccess}=require('../src/services/subscription-service');
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
-const {mercadoPagoService}=require('../src/services/mercado-pago-service');
+const {mercadoPagoService,pixExternalReference}=require('../src/services/mercado-pago-service');
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
-const {pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
+const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
 
 test('normaliza aliases sem permitir plano arbitrário',()=>{
   assert.equal(normalizePlanId('starter'),'essential');assert.equal(normalizePlanId('pro'),'professional');assert.equal(normalizePlanId('premium'),'premium');assert.throws(()=>requirePlan('internal'));
@@ -72,7 +72,8 @@ test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()
   const body=JSON.parse(captured.options.body);
   assert.equal(body.total_amount,'39.90');assert.equal(body.transactions.payments[0].amount,'39.90');
   assert.deepEqual(body.transactions.payments[0].payment_method,{id:'pix',type:'bank_transfer'});
-  assert.equal(body.external_reference,'billing:biz_1:op_1234567890123456');assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
+  assert.equal(body.external_reference,pixExternalReference('biz_1','op_1234567890123456'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.equal(body.external_reference.length,64);assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
+  assert.equal('expiration_time' in body.transactions.payments[0],false,'Orders API deve aplicar a validade padrão de 24 horas');
 });
 
 test('formas de pagamento aceitas são enum fechado e cartão permanece padrão',()=>{
@@ -96,6 +97,13 @@ test('QR pendente é transitório e período mensal respeita fim de mês',()=>{
   const details=pixDetails(order);assert.equal(details.status,'pending');assert.equal(details.qrCode,'copy-paste');assert.equal(details.qrCodeBase64,'base64');
   assert.equal(addBillingPeriod('2026-01-31T12:00:00.000Z','monthly'),'2026-02-28T12:00:00.000Z');
   const pending=pendingPixSubscription({status:'trialing',planId:'trial',trialEndsAt:'2026-09-01T00:00:00Z'},{planId:'professional',billingCycle:'monthly',operationId:'op',providerOrderId:'order_1'},'2026-08-25T00:00:00Z');assert.equal(pending.status,'trialing');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.billingStrategy,'guest_pix_manual');
+});
+
+test('duração ISO do provedor nunca é tratada como data absoluta no navegador',()=>{
+  assert.equal(absoluteExpiration('PT24H'),null);
+  assert.equal(absoluteExpiration('2026-08-29T18:00:00.000Z'),'2026-08-29T18:00:00.000Z');
+  const details=pixDetails({id:'order_1',status:'action_required',transactions:{payments:[{expiration_time:'PT24H',payment_method:{id:'pix',type:'bank_transfer',qr_code:'copy'}}]}});
+  assert.equal(details.status,'pending');assert.equal(details.expiresAt,null);
 });
 
 test('webhook só considera cobrança aprovada como sucesso',()=>{
