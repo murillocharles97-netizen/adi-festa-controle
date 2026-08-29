@@ -107,8 +107,8 @@
       access = state.access || session.access || {},
       business = state.business || session.business || {},
       status = String(
-        subscription.subscriptionStatus ||
-          subscription.status ||
+        subscription.status ||
+          subscription.subscriptionStatus ||
           access.status ||
           "inactive",
       )
@@ -152,6 +152,10 @@
       month: "short",
       year: "numeric",
     }) || "";
+  function verifyPaymentButton(subscription={}) {
+    const attemptId=subscription.pendingPaymentMethodType==="pix_monthly"?subscription.pendingCheckoutAttemptId:null;
+    return attemptId?`<button type="button" class="plan-manage-button plan-verify-payment" data-verify-pix-payment data-pix-attempt-id="${esc(attemptId)}">${icon("refresh-cw")} Verificar pagamento</button>`:"";
+  }
   function usage(ctx) {
     const db = window.DB?.carregar?.() || {},
       month = new Date().toISOString().slice(0, 7),
@@ -213,7 +217,7 @@
       used = Math.max(0, total - remaining),
       percent = Math.min(100, (used / Math.max(1, total)) * 100);
     if (trial && remaining > 0)
-      return `<section class="plan-state-hero state-trial"><span class="plan-state-badge">${icon("star")} Teste grátis ativo</span><div class="plan-state-main"><i>${icon("party-popper")}</i><div><h2>${remaining === 1 ? "Último dia do seu teste" : "Você está no período de teste"}</h2><p>Recursos do plano ${esc(ctx.access.effectivePlan?.name || "Profissional")} liberados até ${dateLabel(end) || "o fim do período"}.</p></div></div><div class="trial-facts"><span>${icon("gift")}<b>${total} dias grátis</b></span><span>${icon("clock-3")}<b>Faltam ${remaining} ${remaining === 1 ? "dia" : "dias"}</b></span></div><div class="trial-progress"><i><u style="--usage:${percent}%"></u></i><small>${used} de ${total} dias utilizados</small></div>${s.pendingPaymentMethodType?`<div class="plan-state-note warning">${icon("clock-3")} ${s.pendingPaymentMethodType==="pix_monthly"?"Aguardando confirmação do pagamento via Pix.":"Aguardando conclusão do checkout no Mercado Pago."}</div>`:`<div class="plan-state-note">${icon("info")} Após o teste, o app continua em <b>modo leitura</b> até você escolher um plano.</div>`}</section>`;
+      return `<section class="plan-state-hero state-trial"><span class="plan-state-badge">${icon("star")} Teste grátis ativo</span><div class="plan-state-main"><i>${icon("party-popper")}</i><div><h2>${remaining === 1 ? "Último dia do seu teste" : "Você está no período de teste"}</h2><p>Recursos do plano ${esc(ctx.access.effectivePlan?.name || "Profissional")} liberados até ${dateLabel(end) || "o fim do período"}.</p></div></div><div class="trial-facts"><span>${icon("gift")}<b>${total} dias grátis</b></span><span>${icon("clock-3")}<b>Faltam ${remaining} ${remaining === 1 ? "dia" : "dias"}</b></span></div><div class="trial-progress"><i><u style="--usage:${percent}%"></u></i><small>${used} de ${total} dias utilizados</small></div>${s.pendingPaymentMethodType?`<div class="plan-state-note warning">${icon("clock-3")} ${s.pendingPaymentMethodType==="pix_monthly"?"Aguardando confirmação do pagamento via Pix.":"Aguardando conclusão do checkout no Mercado Pago."}</div>${verifyPaymentButton(s)}`:`<div class="plan-state-note">${icon("info")} Após o teste, o app continua em <b>modo leitura</b> até você escolher um plano.</div>`}</section>`;
     const current = plans().find((plan) => plan.id === s.planId),
       period = dateLabel(
         s.currentPeriodEnd || s.nextBillingDate || s.nextPaymentDate,
@@ -248,7 +252,7 @@
             : "state-pending";
     const paymentMethod=s.paymentMethodType||s.pendingPaymentMethodType,
       paymentLabel=paymentMethod==="pix_monthly"?"Pix mensal":paymentMethod==="card"?"Cartão de crédito":"Mercado Pago";
-    return `<section class="plan-state-hero ${tone}"><span class="plan-state-badge">${icon(ctx.status === "active" ? "badge-check" : danger ? "circle-alert" : "clock-3")} ${esc(statusLabel)}</span><div class="plan-state-main"><i>${icon(ctx.status === "active" ? "gem" : danger ? "lock-keyhole" : "credit-card")}</i><div><h2>${ctx.status === "active" ? `${esc(current?.name || s.planId || "Plano")} está ativo` : esc(statusLabel)}</h2><p>${ctx.status === "active" ? (period ? `Próximo período em ${period}.` : "O acesso está liberado conforme o status confirmado no Firebase.") : paymentMethod==="pix_monthly"?"Estamos aguardando a confirmação oficial do Mercado Pago.":"Seus dados permanecem preservados e disponíveis para consulta."}</p>${paymentMethod?`<small class="plan-payment-method">Pagamento: <b>${esc(paymentLabel)}</b></small>`:""}</div></div>${s.cancelAtPeriodEnd && period ? `<div class="plan-state-note warning">${icon("calendar-x")} Cancelamento agendado para ${period}.</div>` : ctx.access.readOnly ? `<div class="plan-state-note warning">${icon("eye")} O app está em modo leitura. Regularize ou escolha um plano para voltar a criar dados.</div>` : `<div class="plan-state-note">${icon("circle-check")} Status confirmado pela assinatura da empresa.</div>`}<button type="button" class="plan-manage-button" data-manage-plan>${icon("settings-2")} Gerenciar assinatura</button></section>`;
+    return `<section class="plan-state-hero ${tone}"><span class="plan-state-badge">${icon(ctx.status === "active" ? "badge-check" : danger ? "circle-alert" : "clock-3")} ${esc(statusLabel)}</span><div class="plan-state-main"><i>${icon(ctx.status === "active" ? "gem" : danger ? "lock-keyhole" : "credit-card")}</i><div><h2>${ctx.status === "active" ? `${esc(current?.name || s.planId || "Plano")} está ativo` : esc(statusLabel)}</h2><p>${ctx.status === "active" ? (period ? `Próximo período em ${period}.` : "O acesso está liberado conforme o status confirmado no Firebase.") : paymentMethod==="pix_monthly"?"Estamos aguardando a confirmação oficial do Mercado Pago.":"Seus dados permanecem preservados e disponíveis para consulta."}</p>${paymentMethod?`<small class="plan-payment-method">Pagamento: <b>${esc(paymentLabel)}</b></small>`:""}</div></div>${s.cancelAtPeriodEnd && period ? `<div class="plan-state-note warning">${icon("calendar-x")} Cancelamento agendado para ${period}.</div>` : ctx.access.readOnly ? `<div class="plan-state-note warning">${icon("eye")} O app está em modo leitura. Regularize ou escolha um plano para voltar a criar dados.</div>` : `<div class="plan-state-note">${icon("circle-check")} Status confirmado pela assinatura da empresa.</div>`}${verifyPaymentButton(s)}<button type="button" class="plan-manage-button" data-manage-plan>${icon("settings-2")} Gerenciar assinatura</button></section>`;
   }
   function planFeatures(plan) {
     return Object.entries(plan.features || {})
@@ -400,6 +404,17 @@
       button.disabled = false;
     }
   }
+  async function verifyPendingPix(button) {
+    const operationId=String(button?.dataset?.pixAttemptId||"");
+    if(!operationId)return;
+    button.disabled=true;
+    try{
+      const result=await window.SubscriptionService.checkPixCheckout(operationId,{reconcileProvider:true}),approved=result?.pix?.status==="payment_approved";
+      window.Utils?.toast?.(approved?"Pagamento confirmado. Plano atualizado.":"O Mercado Pago ainda não confirmou este Pix.");
+      window.Router?.render?.();
+      dispatchEvent(new HashChangeEvent("hashchange"));
+    }catch(error){window.Utils?.toast?.(error.message||"Não foi possível verificar o pagamento agora.",true)}finally{if(button.isConnected)button.disabled=false}
+  }
   function confirmCancellation(root) {
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-confirm-cancel"><header class="modal-head"><h3>Solicitar cancelamento?</h3></header><div class="modal-body"><p>O acesso seguirá o status devolvido pelo Mercado Pago. Seus dados não serão apagados.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-cancel-no>Voltar</button><button class="btn btn-danger mobile-button" data-cancel-yes>Confirmar</button></footer></section></div>`;
     $("[data-cancel-no]", root).onclick = manageSubscription;
@@ -474,6 +489,7 @@
     $$("[data-manage-plan]", scope).forEach(
       (button) => (button.onclick = manageSubscription),
     );
+    $("[data-verify-pix-payment]",scope)?.addEventListener("click",event=>verifyPendingPix(event.currentTarget));
     $("[data-apply-coupon]", scope)?.addEventListener("click", (event) =>
       applyCoupon(event.currentTarget, scope),
     );
@@ -507,6 +523,7 @@
   }
   function openPixModal({pix,plan,billingCycle,quote}){
     const root=$("#modal");if(!root)return;closePixWatcher();
+    let entitlementRefresh=null;
     const render=current=>{
       root.innerHTML=pixStatusView(current,plan,billingCycle,quote);window.lucide?.createIcons();
       $$('[data-pix-close]',root).forEach(button=>button.onclick=()=>{closePixWatcher();root.innerHTML=""});
@@ -514,6 +531,7 @@
       $('[data-check-pix]',root)?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await window.SubscriptionService.checkPixCheckout(current.id,{reconcileProvider:true});render(result.pix)}catch(error){window.Utils?.toast?.(error.message||'Não foi possível conferir agora.',true)}finally{if(button.isConnected)button.disabled=false}});
       $('[data-pix-finish]',root)?.addEventListener('click',async()=>{closePixWatcher();await window.SubscriptionService.syncSubscriptionStatus().catch(()=>{});root.innerHTML="";window.Router?.render?.()});
       $('[data-pix-regenerate]',root)?.addEventListener('click',()=>{const couponCode=quote?.code||current?.couponSnapshot?.couponCodeSnapshot||null;closePixWatcher();root.innerHTML="";openPaymentMethodModal({planId:plan.id,billingCycle,quote,couponCode,previousCheckoutAttemptId:current.id,initialPaymentMethod:'pix_monthly'})});
+      if(current?.status==='payment_approved'&&!entitlementRefresh)entitlementRefresh=window.SubscriptionService.syncSubscriptionStatus().then(()=>window.Router?.render?.()).catch(error=>console.warn('[Billing Pix entitlement refresh]',{code:error?.code||'unknown'}));
     };
     render(pix);
     pixUnsubscribe=window.SubscriptionService.watchPixCheckout(pix.id,data=>{if(data?.status&&data.status!==pix.status){pix={...pix,...data};render(pix)}},error=>console.warn('[Billing Pix listener]',{code:error?.code||'unknown'}));

@@ -19,6 +19,11 @@ test('mapeia estados oficiais do provedor',()=>{
   assert.equal(mapProviderStatus('authorized'),'active');assert.equal(mapProviderStatus('pending'),'pending');assert.equal(mapProviderStatus('paused'),'paused');assert.equal(mapProviderStatus('canceled'),'cancelled');assert.equal(mapProviderStatus('expired'),'expired');
 });
 
+test('status canônico ativo prevalece sobre alias legado divergente',()=>{
+  assert.equal(computeAccess({planId:'professional',status:'active',subscriptionStatus:'trialing'}).status,'active');
+  assert.equal(computeAccess({planId:'professional',status:'active',subscriptionStatus:'trialing'}).canMutate,true);
+});
+
 test('preserva trial enquanto checkout aguarda pagamento',()=>{
   const now='2026-07-25T12:00:00.000Z',existing={status:'trial',planId:'trial',trialEndsAt:'2026-07-30T12:00:00.000Z'},plan=requirePlan('professional'),provider={id:'sub_1',status:'pending'};
   assert.equal(isTrialActive(existing,new Date(now)),true);const pending=pendingSubscription({existing,plan,provider,now});assert.equal(pending.status,'trialing');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.mercadoPago.subscriptionId,'sub_1');
@@ -66,14 +71,22 @@ test('cliente Mercado Pago cancela assinatura com o estado aceito pelo provedor'
 test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()=>{
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'order_pix_1',status:'action_required'})}};
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('professional');
-  await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan,billing:{billingCycle:'monthly',amount:39.9},operationId:'op_1234567890123456'});
+  await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan,billing:{billingCycle:'monthly',amount:39.9},operationId:'op_1234567890123456',notificationUrl:'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
   assert.equal(captured.url,'https://api.mercadopago.com/v1/orders');
   assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1234567890123456');
   const body=JSON.parse(captured.options.body);
   assert.equal(body.total_amount,'39.90');assert.equal(body.transactions.payments[0].amount,'39.90');
   assert.deepEqual(body.transactions.payments[0].payment_method,{id:'pix',type:'bank_transfer'});
   assert.equal(body.external_reference,pixExternalReference('biz_1','op_1234567890123456'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.equal(body.external_reference.length,64);assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
+  assert.equal(body.notification_url,'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks');
   assert.equal('expiration_time' in body.transactions.payments[0],false,'Orders API deve aplicar a validade padrão de 24 horas');
+});
+
+test('Orders API ignora notification_url insegura em vez de enviar callback HTTP',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'order_pix_2'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});
+  await service.createPixOrder({businessId:'biz_1',email:'buyer@example.com',plan:requirePlan('professional'),billing:{amount:19.96},operationId:'op_1234567890123457',notificationUrl:'http://localhost/webhook'});
+  assert.equal('notification_url' in JSON.parse(captured.options.body),false);
 });
 
 test('cliente Mercado Pago preserva erro HTTP sanitizado sem expor token',async()=>{
