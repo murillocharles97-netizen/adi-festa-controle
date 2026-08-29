@@ -18,34 +18,128 @@ function concurrency() {
   return context.FinancialConcurrency;
 }
 
-test("dois dispositivos partindo da mesma dívida aplicam apenas o primeiro pagamento", () => {
-  const finance = concurrency(),
-    viewed = { saldo: -82.5, financialVersion: 10 },
-    expectedA = finance.context(viewed),
-    expectedB = finance.context(viewed),
-    afterA = { saldo: 0, financialVersion: finance.nextVersion(viewed) };
-
-  assert.equal(finance.compare(expectedA, viewed).ok, true);
-  assert.deepEqual(structuredClone(finance.compare(expectedB, afterA)), {
-    ok: false,
-    balanceChanged: true,
-    versionChanged: true,
-    expectedBalance: -82.5,
-    actualBalance: 0,
-    expectedFinancialVersion: 10,
-    actualFinancialVersion: 11,
+test("Gustavo: versão divergente com o mesmo saldo aplica R$ 4 sem falso conflito", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -413.5,
+    currentBalance: -413.5,
+    requestedAmount: 4,
+    paymentMode: "partial",
+    expectedFinancialVersion: 21,
+    currentFinancialVersion: 22,
   });
+  assert.equal(result.decision, "apply");
+  assert.equal(result.reason, "SAME_BALANCE_NEW_VERSION");
+  assert.equal(result.effectiveAmount, 4);
+  assert.equal(result.resultingBalance, -409.5);
+  assert.equal(result.creditCreated, 0);
 });
 
-test("pagamentos parciais concorrentes preservam o saldo confirmado pelo servidor", () => {
-  const finance = concurrency(),
-    expectedB = finance.context({ saldo: -100, financialVersion: 20 }),
-    afterPartialA = { saldo: -40, financialVersion: 21 },
-    conflict = finance.compare(expectedB, afterPartialA);
+test("pagamento parcial aplica sobre o saldo atual quando continua seguro", () => {
+  const finance = concurrency();
+  for (const scenario of [
+    { currentBalance: -420, expected: -416 },
+    { currentBalance: -400, expected: -396 },
+    { currentBalance: -150, requestedAmount: 100, expected: -50 },
+    { currentBalance: -20, requestedAmount: 10, expected: -10 },
+  ]) {
+    const result = finance.evaluatePaymentConcurrency({
+      expectedBalance: -413.5,
+      currentBalance: scenario.currentBalance,
+      requestedAmount: scenario.requestedAmount ?? 4,
+      paymentMode: "partial",
+      expectedFinancialVersion: 10,
+      currentFinancialVersion: 11,
+    });
+    assert.equal(result.decision, "apply");
+    assert.equal(result.reason, "BALANCE_CHANGED_SAFE");
+    assert.equal(result.resultingBalance, scenario.expected);
+  }
+});
 
-  assert.equal(conflict.ok, false);
-  assert.equal(conflict.actualBalance, -40);
-  assert.equal(conflict.actualFinancialVersion, 21);
+test("pagamento parcial que ultrapassa a dívida atual continua bloqueado", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -100,
+    currentBalance: -40,
+    requestedAmount: 100,
+    paymentMode: "partial",
+    expectedFinancialVersion: 20,
+    currentFinancialVersion: 21,
+  });
+  assert.equal(result.decision, "conflict");
+  assert.equal(result.reason, "PAYMENT_EXCEEDS_CURRENT_DEBT");
+  assert.equal(result.resultingBalance, 60);
+  assert.equal(result.creditCreated, 60);
+});
+
+test("pagamento total usa a dívida atual e não perde centavos", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -100,
+    currentBalance: -40,
+    requestedAmount: 100,
+    paymentMode: "total",
+    expectedFinancialVersion: 20,
+    currentFinancialVersion: 21,
+  });
+  assert.equal(result.decision, "apply_adjusted");
+  assert.equal(result.reason, "TOTAL_UPDATED_TO_CURRENT_DEBT");
+  assert.equal(result.effectiveAmount, 40);
+  assert.equal(result.resultingBalance, 0);
+});
+
+test("Kaike: pagamento antigo contra saldo quitado continua bloqueado", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -82.5,
+    currentBalance: 0,
+    requestedAmount: 82.5,
+    paymentMode: "partial",
+    expectedFinancialVersion: 10,
+    currentFinancialVersion: 11,
+  });
+  assert.equal(result.decision, "conflict");
+  assert.equal(result.reason, "BALANCE_ALREADY_SETTLED");
+  assert.equal(result.creditCreated, 82.5);
+});
+
+test("cliente que agora tem crédito nunca recebe pagamento antigo automaticamente", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -82.5,
+    currentBalance: 10,
+    requestedAmount: 82.5,
+    paymentMode: "partial",
+    expectedFinancialVersion: 10,
+    currentFinancialVersion: 12,
+  });
+  assert.equal(result.decision, "conflict");
+  assert.equal(result.reason, "CLIENT_HAS_CREDIT");
+});
+
+test("mudança apenas de nome ou telefone é revalidada sem bloquear dinheiro", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -100,
+    currentBalance: -100,
+    requestedAmount: 10,
+    paymentMode: "partial",
+    expectedFinancialVersion: 10,
+    currentFinancialVersion: 11,
+  });
+  assert.equal(result.decision, "apply");
+  assert.equal(result.reason, "SAME_BALANCE_NEW_VERSION");
+  assert.equal(result.resultingBalance, -90);
+});
+
+test("dinheiro é comparado em centavos, sem conflito por ruído de float", () => {
+  const result = concurrency().evaluatePaymentConcurrency({
+    expectedBalance: -413.5,
+    currentBalance: -413.50000000001,
+    requestedAmount: 0.1 + 0.2,
+    paymentMode: "partial",
+    expectedFinancialVersion: 1,
+    currentFinancialVersion: 2,
+  });
+  assert.equal(result.balanceChanged, false);
+  assert.equal(result.requestedAmountCents, 30);
+  assert.equal(result.resultingBalanceCents, -41320);
+  assert.equal(result.decision, "apply");
 });
 
 test("confirmação explícita usa o estado atual e pode gerar crédito real", () => {
@@ -66,10 +160,23 @@ test("cancelar conflito não tem efeito financeiro e venda permanece aditiva", (
 });
 
 test("operação offline obsoleta também conflita quando reconecta", () => {
-  const finance = concurrency(),
-    offlineProjection = finance.context({ saldo: -30, financialVersion: 4 }),
-    serverAtReconnect = { saldo: 0, financialVersion: 5 };
-  assert.equal(finance.compare(offlineProjection, serverAtReconnect).ok, false);
+  const finance = concurrency();
+  assert.equal(finance.evaluatePaymentConcurrency({
+    expectedBalance: -30,
+    currentBalance: 0,
+    requestedAmount: 30,
+    paymentMode: "partial",
+    expectedFinancialVersion: 4,
+    currentFinancialVersion: 5,
+  }).decision, "conflict");
+  assert.equal(finance.evaluatePaymentConcurrency({
+    expectedBalance: -30,
+    currentBalance: -50,
+    requestedAmount: 10,
+    paymentMode: "partial",
+    expectedFinancialVersion: 4,
+    currentFinancialVersion: 5,
+  }).decision, "apply");
 });
 
 test("prévia de reversão é determinística e detector respeita empresa", () => {
@@ -104,14 +211,18 @@ test("detector classifica o padrão Kaike como suspeita alta", () => {
   assert.equal(suspects[0].score, 100);
 });
 
-test("sync valida saldo e versão antes de campanhas e preserva resolução auditável", () => {
+test("sync revalida o efeito antes de campanhas e preserva resolução auditável", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../js/firebase/sync.js"),
     "utf8",
   );
-  const staleCheck = source.indexOf("if (staleBalance || staleVersion)");
+  const evaluator = source.indexOf("evaluatePaymentConcurrency({");
   const campaignWrite = source.indexOf('if (eventKind === "campaign_redemption"');
-  assert.ok(staleCheck > 0 && staleCheck < campaignWrite);
+  assert.ok(evaluator > 0 && evaluator < campaignWrite);
+  assert.doesNotMatch(source, /if \(staleBalance \|\| staleVersion\)/);
+  assert.match(source, /\[PAYMENT_CONCURRENCY_CHECK\]/);
+  assert.match(source, /financial_payment_adjustment_required/);
+  assert.match(source, /financial-payment-adjusted/);
   assert.match(source, /applicationStatus:\s*"not_applied"/);
   assert.match(source, /allocations:\s*\[\]/);
   assert.match(source, /duplicate-payment-reversal:/);
@@ -131,4 +242,7 @@ test("modal explica o conflito e oferece somente cancelar ou confirmar", () => {
   assert.match(source, /Crédito que seria criado/);
   assert.match(source, /Cancelar operação/);
   assert.match(source, /Registrar mesmo assim/);
+  assert.match(source, /Confirme o novo valor da quitação/);
+  assert.match(source, /Confirmar \$\{money\(effectiveAmount\)\}/);
+  assert.match(source, /financial-payment-adjustment-required/);
 });
