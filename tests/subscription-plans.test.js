@@ -46,6 +46,10 @@ assert.equal(professional.features.campaigns,true);
 assert.equal(professional.features.onlineOrders,true);
 assert.equal(professional.features.rolesPermissions,false);
 
+const canonicalActive=resolveSubscriptionAccess({planId:'professional',status:'active',subscriptionStatus:'trialing'},{},now);
+assert.equal(canonicalActive.status,'active');
+assert.equal(canonicalActive.accessMode,'full');
+
 const featureTrial=resolveSubscriptionAccess({planId:'essential',status:'active',featureTrial:{planId:'professional',used:true,status:'active',endsAt:'2026-07-30T12:00:00Z'}},{},now);
 assert.equal(featureTrial.featureTrialActive,true);
 assert.equal(featureTrial.effectivePlanId,'professional');

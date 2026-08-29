@@ -32,10 +32,22 @@ test('Pix mensal usa Orders API guest e webhook continua como fonte da verdade',
   assert.match(provider,/billing_\$\{digest\}/);
   assert.match(provider,/X-Idempotency-Key/);
   assert.match(backend,/billingOrderIndex/);
-  assert.match(backend,/event\.type==='order'/);
+  assert.match(backend,/\['order','orders'\]\.includes\(event\.type\)/);
+  assert.match(backend,/resolvePaymentOrder\(payment\)/);
+  assert.match(provider,/notification_url/);
   assert.match(pix,/validatePixOrder/);
   assert.match(pix,/payment_approved/);
   assert.doesNotMatch(backend,/success=true.*status:'active'/s);
+});
+
+test('fallback verifica o provider e atualiza o contexto sem logout ou reload',()=>{
+  const plans=read('js/plans.js'),context=read('js/firebase/business-context.js'),pix=read('functions/src/services/pix-billing-service.js');
+  assert.match(plans,/data-verify-pix-payment/);
+  assert.match(plans,/verifyPendingPix/);
+  assert.match(context,/response\.data\?\.pix\?\.status==='payment_approved'/);
+  assert.match(context,/await refreshBusinessContext\(\)/);
+  assert.match(pix,/subscriptionStatus:'active'/);
+  assert.match(pix,/markerSnapshot\.exists/);
 });
 
 test('clique repetido possui lease e tentativa lógica idempotente',()=>{

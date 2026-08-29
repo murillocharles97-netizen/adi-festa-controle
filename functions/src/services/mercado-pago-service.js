@@ -9,6 +9,11 @@ function pixExternalReference(businessId,operationId){
   return `billing_${digest}`;
 }
 
+function validNotificationUrl(value){
+  if(!value)return null;
+  try{const url=new URL(String(value));return url.protocol==='https:'?url.toString():null}catch{return null}
+}
+
 function safeProviderPayload(text){
   if(!text)return{payload:{},format:'empty'};
   try{return{payload:JSON.parse(text),format:'json'}}catch{return{payload:{},format:'non_json'}}
@@ -75,9 +80,11 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
       return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
-    createPixOrder({businessId,email,plan,billing,operationId}){
+    createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null}){
       const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=pixExternalReference(businessId,operationId);
-      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body:{type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}}});
+      const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}},webhookUrl=validNotificationUrl(notificationUrl);
+      if(webhookUrl)body.notification_url=webhookUrl;
+      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body});
     },
     getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
@@ -88,4 +95,4 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   };
 }
 
-module.exports={API,pixExternalReference,safeProviderPayload,providerErrorDiagnostics,mercadoPagoService};
+module.exports={API,pixExternalReference,validNotificationUrl,safeProviderPayload,providerErrorDiagnostics,mercadoPagoService};

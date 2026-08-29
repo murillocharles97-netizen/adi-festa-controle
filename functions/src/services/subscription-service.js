@@ -7,7 +7,7 @@ const ACTIVE_STATUSES=new Set(['trial','active','grace_period']);
 
 function parseDate(value){if(!value)return null;const date=new Date(value);return Number.isNaN(date.getTime())?null:date}
 function mapProviderStatus(value){return MP_STATUS[String(value||'').toLowerCase()]||'pending'}
-function normalizedStatus(subscription={}){const raw=String(subscription.subscriptionStatus||subscription.status||'inactive').toLowerCase();return raw==='trial'?'trialing':raw==='cancelled'?'canceled':raw}
+function normalizedStatus(subscription={}){const raw=String(subscription.status||subscription.subscriptionStatus||'inactive').toLowerCase();return raw==='trial'?'trialing':raw==='cancelled'?'canceled':raw}
 function isTrialActive(subscription,now=new Date()){const end=parseDate(subscription?.trialEndsAt);return normalizedStatus(subscription)==='trialing'&&Boolean(end)&&end>now}
 function computeAccess(subscription={},now=new Date()){
   const status=normalizedStatus(subscription),plan=getPlan(subscription.planId),trial=isTrialActive(subscription,now),internal=subscription.planId==='internal'&&(subscription.isInternal===true||['active','internal'].includes(status)),active=internal||status==='active'||status==='grace_period'||trial;
@@ -18,6 +18,7 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount,pa
   return{
     ...existing,
     status,
+    subscriptionStatus:status,
     planId:plan?.id||planId||existing.planId||'',
     pendingPlanId:null,
     pendingBillingCycle:null,
@@ -49,6 +50,7 @@ function pendingSubscription({existing={},plan,provider,now,billingCycle='monthl
   return{
     ...existing,
     status:preserveTrial?'trialing':'pending',
+    subscriptionStatus:preserveTrial?'trialing':'pending',
     planId:preserveTrial?(existing.planId||'trial'):plan.id,
     pendingPlanId:plan.id,
     pendingBillingCycle:billingCycle,

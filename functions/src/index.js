@@ -27,6 +27,7 @@ const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');
 const MP_WEBHOOK_SECRET=defineSecret('MERCADO_PAGO_WEBHOOK_SECRET');
 const MP_ENV=defineString('MERCADO_PAGO_ENV',{default:'production'});
 const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles97-netizen.github.io/adi-festa-controle/'});
+const MP_WEBHOOK_URL=defineString('MERCADO_PAGO_WEBHOOK_URL',{default:'https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
 const ONBOARDING_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20};
@@ -151,7 +152,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     const effectiveQuoteId=redemption?.quoteId||quoteId||null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId:effectiveQuoteId}:null,backUrl=`${APP_URL.value()}#/planos`,now=iso();
     if(paymentMethod.id==='pix_monthly'){
       logger.info('[Billing] pix_order_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
-      const order=await mp().createPixOrder({businessId,email:context.email,plan,billing,operationId:opId}),details=pixDetails(order),expectedExternalReference=pixExternalReference(businessId,opId);
+      const order=await mp().createPixOrder({businessId,email:context.email,plan,billing,operationId:opId,notificationUrl:MP_WEBHOOK_URL.value()}),details=pixDetails(order),expectedExternalReference=pixExternalReference(businessId,opId);
       if(!details.orderId||!details.qrCode||!details.qrCodeBase64)throw new HttpsError('unavailable','O Mercado Pago não devolveu o QR Code do Pix.');
       const discountSnapshot=redemption?.discountSnapshot||null,attemptData={businessId,requestedBy:context.uid,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',provider:'mercado_pago',providerOrderId:details.orderId,providerPaymentId:details.paymentId,status:'payment_pending',providerStatus:details.providerStatus,statusDetail:details.statusDetail,officialPrice:officialBilling.amount,originalAmount:officialBilling.amount,discountAmount:Number((officialBilling.amount-billing.amount).toFixed(2)),chargedPrice:billing.amount,finalAmount:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,couponSnapshot:discountSnapshot,qrCode:details.qrCode,qrCodeBase64:details.qrCodeBase64,ticketUrl:details.ticketUrl,expiresAt:details.expiresAt,replacesOperationId:replacement?previousAttemptId:null,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete()},index={businessId,ownerId:context.uid,operationId:opId,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',providerOrderId:details.orderId,providerPaymentId:details.paymentId,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot,internalSubscriptionId:opId,replacesOperationId:replacement?previousAttemptId:null,status:'payment_pending',createdAt:now,updatedAt:now},subscription=pendingPixSubscription(context.business.subscription||{},{planId:plan.id,billingCycle,operationId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId,providerStatus:details.providerStatus,discount:discountSnapshot},now),batch=db.batch();
       batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
@@ -233,6 +234,7 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
   if(req.method!=='POST'){res.status(405).send('method-not-allowed');return}
   const event=eventData(req);
   if(!verifyWebhookSignature({secret:MP_WEBHOOK_SECRET.value(),xSignature:event.xSignature,xRequestId:event.requestId,dataId:event.dataId})){logger.warn('[Webhook] invalid signature',{type:event.type,hasDataId:Boolean(event.dataId)});res.status(401).send('invalid-signature');return}
+  logger.info('[BILLING_WEBHOOK_RECEIVED]',{eventType:event.type,action:event.action,providerResourceId:event.dataId||null});
   const id=eventId(event),eventRef=db.doc(`webhookEvents/${id}`);
   const acquired=await db.runTransaction(async transaction=>{
     const existing=await transaction.get(eventRef),data=existing.data()||{};
@@ -243,17 +245,27 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
   });
   if(!acquired){res.status(200).send('already-processing-or-processed');return}
   try{
-    if(event.type==='subscription_preapproval_plan'){await eventRef.update({status:'ignored',reason:'provider-plan-event',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
-    if(event.type==='order'){
-      const order=await mp().getOrder(event.dataId),result=await pixBilling().applyOrder(order,{source:'webhook',eventId:id});
-      if(result.status==='payment_approved')logger.info('[Billing] subscription_activated',{businessId:result.businessId,providerOrderId:event.dataId,paymentMethodType:'pix_monthly'});
-      await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription?.status||null,paymentStatus:result.status,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
+    const applyPixOrder=async(order,{providerPaymentId=null}={})=>{
+      const details=pixDetails(order);
+      logger.info('[BILLING_PROVIDER_VERIFIED]',{eventType:event.type,orderId:details.orderId,paymentId:providerPaymentId||details.paymentId||null,externalReference:String(order.external_reference||'').slice(0,80)||null,status:details.providerStatus,statusDetail:details.statusDetail,amount:details.amount});
+      const result=await pixBilling().applyOrder(order,{source:'webhook',eventId:id});
+      if(result.status==='payment_approved')logger.info('[BILLING_ENTITLEMENT_ACTIVATED]',{businessId:result.businessId,planId:result.subscription?.planId||null,periodEnd:result.subscription?.currentPeriodEnd||null,idempotent:result.idempotent===true});
+      await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription?.status||null,paymentStatus:result.status,providerOrderId:details.orderId,providerPaymentId:providerPaymentId||details.paymentId||null,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
+      return result;
+    };
+    if(event.type==='subscription_preapproval_plan'){logger.info('[BILLING_WEBHOOK_SKIPPED]',{eventType:event.type,reason:'provider-plan-event'});await eventRef.update({status:'ignored',reason:'provider-plan-event',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
+    if(['order','orders'].includes(event.type)){
+      const order=await mp().getOrder(event.dataId),result=await applyPixOrder(order);
       logger.info('[Webhook] Pix order processed',{businessId:result.businessId,status:result.status});res.status(200).send('ok');return;
     }
     let subscriptionId=event.dataId,paymentResult=null;
     if(event.type==='subscription_authorized_payment'){const payment=await mp().getAuthorizedPayment(event.dataId);subscriptionId=String(payment.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment)}
-    if(event.type==='payment'){const payment=await mp().getPayment(event.dataId);subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment)}
-    if(!subscriptionId){await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
+    if(event.type==='payment'){
+      const payment=await mp().getPayment(event.dataId),pixOrder=await pixBilling().resolvePaymentOrder(payment);
+      if(pixOrder){const order=await mp().getOrder(pixOrder.orderId),result=await applyPixOrder(order,{providerPaymentId:String(payment.id||event.dataId)});logger.info('[Webhook] Pix payment normalized to order',{businessId:result.businessId,status:result.status});res.status(200).send('ok');return}
+      subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment);
+    }
+    if(!subscriptionId){logger.info('[BILLING_WEBHOOK_SKIPPED]',{eventType:event.type,reason:'subscription-id-missing'});await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
     const provider=await mp().getSubscription(subscriptionId),store=providerStore(),result=await store.applyProviderSubscription(provider,{source:'webhook',eventId:id});
     if(paymentResult){
       await store.recordPaymentEvent(subscriptionId,id,paymentResult);

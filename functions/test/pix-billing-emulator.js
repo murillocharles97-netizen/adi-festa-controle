@@ -39,6 +39,7 @@ async function main(){
   const approved=await service.applyOrder(approvedOrder,{source:'webhook',eventId:'event-approved-001'}),businessAfter=await first.businessRef.get(),attemptAfter=await first.attemptRef.get(),couponAfter=await db.doc(`adminCoupons/${first.couponId}`).get(),redemptionAfter=await db.doc(`couponRedemptions/${first.redemptionId}`).get();
   assert.equal(approved.status,'payment_approved');
   assert.equal(businessAfter.data().subscription.status,'active');
+  assert.equal(businessAfter.data().subscription.subscriptionStatus,'active');
   assert.equal(businessAfter.data().subscription.paymentMethodType,'pix_monthly');
   assert.equal(businessAfter.data().subscription.latestPayment.amount,39.92);
   assert.equal(businessAfter.data().subscription.discount.code,'PARCEIRO20');
@@ -46,9 +47,14 @@ async function main(){
   assert.equal(couponAfter.data().redemptionCount,1);
   assert.equal(redemptionAfter.data().status,'active');
 
+  const paymentLookup=await service.resolvePaymentOrder({external_reference:pixExternalReference('business-a','operation-pix-approved-001')});
+  assert.equal(paymentLookup.orderId,'order-approved-001','Payment webhook encontra a Order sem confundir IDs');
+  assert.equal(await service.resolvePaymentOrder({external_reference:'unrelated-payment'}),null);
+  await first.businessRef.update({'subscription.subscriptionStatus':'trialing'});
   const periodEnd=businessAfter.data().subscription.currentPeriodEnd,replay=await service.applyOrder(approvedOrder,{source:'webhook',eventId:'event-approved-retry'}),businessReplay=await first.businessRef.get();
   assert.equal(replay.idempotent,true);
   assert.equal(businessReplay.data().subscription.currentPeriodEnd,periodEnd,'webhook repetido não adiciona outro período');
+  assert.equal(businessReplay.data().subscription.subscriptionStatus,'active','replay idempotente repara alias legado sem renovar');
   assert.equal((await db.collection('billingPaymentEvents').get()).size,1);
 
   const expiredSeed=await seedAttempt({operationId:'operation-pix-expired-002',orderId:'order-expired-002',couponId:'coupon-expired',redemptionId:'redemption-expired'}),expiredOrder=order({id:'order-expired-002',operationId:'operation-pix-expired-002',status:'expired',detail:'expired'}),expired=await service.applyOrder(expiredOrder,{source:'webhook',eventId:'event-expired-002'}),expiredAttempt=await expiredSeed.attemptRef.get(),expiredRedemption=await db.doc('couponRedemptions/redemption-expired').get();

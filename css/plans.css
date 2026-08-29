@@ -167,6 +167,15 @@
   font: inherit;
   font-weight: 800;
 }
+.plan-verify-payment {
+  border-color: #0caf78;
+  background: #0caf78;
+  color: #fff;
+}
+.plan-verify-payment:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .plan-usage {
   margin-bottom: 18px;
   padding: 14px 17px;
