@@ -743,7 +743,13 @@
               `Receber de ${escapar(c.nome)}`,
               `<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Pix, dinheiro..."></div>`,
               (f) => {
-                Fiados.receber(c.id, f.get("valor"), f.get("observacao"));
+                const amount = Number(f.get("valor"));
+                Fiados.receber(c.id, amount, f.get("observacao"), {
+                  paymentMode:
+                    window.FinancialConcurrency?.sameMoney?.(amount, divida)
+                      ? "total"
+                      : "partial",
+                });
                 toast("Pagamento registrado");
               },
               "Confirmar recebimento",

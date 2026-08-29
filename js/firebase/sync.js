@@ -284,6 +284,15 @@ const financialVersionOf = (client = {}) =>
   Math.max(0, Number(client.financialVersion || 0));
 const sameFinancialMoney = (left, right) =>
   Math.abs(roundedMoney(left) - roundedMoney(right)) < 0.005;
+const evaluatePaymentConcurrency = (input) => {
+  const evaluator = window.FinancialConcurrency?.evaluatePaymentConcurrency;
+  if (typeof evaluator !== "function")
+    throw Object.assign(
+      new Error("A validação financeira desta versão não foi carregada."),
+      { code: "payment-concurrency-evaluator-unavailable" },
+    );
+  return evaluator(input);
+};
 const balanceEffectId = (type, sourceId) =>
   `${type}:${String(sourceId || "").replaceAll("/", "_")}`;
 function financialEffectFromWrites(
@@ -1529,14 +1538,43 @@ async function commitQueueItem(item) {
         actualFinancialVersion = financialVersionOf(remoteClient),
         stateDependent =
           paymentWrite.data?.financialStateDependent === true,
-        staleBalance =
-          stateDependent && !sameFinancialMoney(expectedBalance, actualBalance),
-        staleVersion =
-          stateDependent &&
-          expectedFinancialVersion !== actualFinancialVersion;
+        requestedAmount = Math.abs(
+          roundedMoney(
+            paymentWrite.data?.requestedAmount ?? financialEffect.amount,
+          ),
+        ),
+        paymentMode =
+          paymentWrite.data?.paymentMode === "total" ? "total" : "partial",
+        concurrency = stateDependent
+          ? evaluatePaymentConcurrency({
+              expectedBalance,
+              currentBalance: actualBalance,
+              requestedAmount,
+              paymentMode,
+              expectedFinancialVersion,
+              currentFinancialVersion: actualFinancialVersion,
+            })
+          : null,
+        confirmedOverride = Boolean(confirmedConflictId);
+      if (concurrency)
+        console.info("[PAYMENT_CONCURRENCY_CHECK]", {
+          clientId: financialEffect.customerId,
+          expectedBalanceCents: concurrency.expectedBalanceCents,
+          currentBalanceCents: concurrency.currentBalanceCents,
+          requestedAmountCents: concurrency.requestedAmountCents,
+          paymentMode,
+          expectedFinancialVersion,
+          currentFinancialVersion: actualFinancialVersion,
+          decision: confirmedOverride ? "confirmed_override" : concurrency.decision,
+          reason: confirmedOverride
+            ? "MERCHANT_CONFIRMED_SECOND_REAL_PAYMENT"
+            : concurrency.reason,
+        });
       if (
         existingPayment?.status === "conflict" &&
-        String(existingPayment.operationId || "") === operationId
+        String(existingPayment.operationId || "") === operationId &&
+        concurrency?.decision === "conflict" &&
+        !confirmedOverride
       ) {
         transactionOutcome = {
           status: "financial_conflict",
@@ -1559,7 +1597,13 @@ async function commitQueueItem(item) {
             existingPayment.conflictActualFinancialVersion ??
               actualFinancialVersion,
           ),
-          reason: "stale_financial_state",
+          reason:
+            existingPayment.conflictReason || concurrency?.reason || "conflict",
+          resultingBalance:
+            existingPayment.conflictResultingBalance ??
+            concurrency?.resultingBalance,
+          creditCreated:
+            existingPayment.conflictCreditCreated ?? concurrency?.creditCreated,
         };
         return;
       }
@@ -1582,7 +1626,7 @@ async function commitQueueItem(item) {
             { code: "payment-conflict-resolution-stale" },
           );
       }
-      if (staleBalance || staleVersion) {
+      if (concurrency?.decision === "conflict" && !confirmedOverride) {
         currentPath = `businesses/${businessId}/payments/${paymentWrite.entityId}`;
         transaction.set(
           doc(
@@ -1601,10 +1645,12 @@ async function commitQueueItem(item) {
             ownerId: currentUser.uid,
             status: "conflict",
             applicationStatus: "not_applied",
-            conflictReason: "stale_financial_state",
+            conflictReason: concurrency.reason,
             conflictDetectedAt: serverTimestamp(),
             conflictActualBalance: actualBalance,
             conflictActualFinancialVersion: actualFinancialVersion,
+            conflictResultingBalance: concurrency.resultingBalance,
+            conflictCreditCreated: concurrency.creditCreated,
             allocations: [],
             campaignConfirmations: [],
             allocatedAmount: 0,
@@ -1632,10 +1678,89 @@ async function commitQueueItem(item) {
           actualBalance,
           expectedFinancialVersion,
           actualFinancialVersion,
-          reason: "stale_financial_state",
+          reason: concurrency.reason,
+          resultingBalance: concurrency.resultingBalance,
+          creditCreated: concurrency.creditCreated,
+          paymentMode,
         };
         return;
       }
+      const campaignSensitiveWrites = writes.some((write) =>
+        [
+          "sales",
+          "campaignProgress",
+          "campaignEvents",
+          "paymentAllocations",
+        ].includes(write.entityType),
+      );
+      if (
+        concurrency?.decision === "apply_adjusted" &&
+        campaignSensitiveWrites &&
+        !confirmedOverride
+      ) {
+        transactionOutcome = {
+          status: "financial_payment_adjustment_required",
+          paymentId: String(paymentWrite.entityId),
+          clientId: financialEffect.customerId,
+          clientName:
+            paymentWrite.data?.clienteNome || remoteClient.nome || "",
+          requestedAmount: concurrency.requestedAmount,
+          effectiveAmount: concurrency.effectiveAmount,
+          expectedBalance,
+          actualBalance,
+          resultingBalance: concurrency.resultingBalance,
+          expectedFinancialVersion,
+          actualFinancialVersion,
+          paymentMode,
+          reason: concurrency.reason,
+        };
+        return;
+      }
+      const effectiveAmount = confirmedOverride
+          ? Math.abs(roundedMoney(financialEffect.amount))
+          : concurrency?.effectiveAmount ?? financialEffect.amount,
+        resultingBalance = roundedMoney(actualBalance + effectiveAmount),
+        clientWrite = writes.find(
+          (write) =>
+            write.entityType === "clients" &&
+            String(write.entityId) === String(financialEffect.customerId),
+        );
+      financialEffect.amount = effectiveAmount;
+      financialEffect.balanceDelta = effectiveAmount;
+      paymentWrite.data = {
+        ...paymentWrite.data,
+        valor: effectiveAmount,
+        requestedAmount,
+        effectiveAmount,
+        paymentMode,
+        saldoAnterior: actualBalance,
+        saldoNovo: resultingBalance,
+        financialVersionAfter: actualFinancialVersion + 1,
+        concurrencyDecision: confirmedOverride
+          ? "confirmed_override"
+          : concurrency?.decision || "apply",
+        concurrencyReason: confirmedOverride
+          ? "MERCHANT_CONFIRMED_SECOND_REAL_PAYMENT"
+          : concurrency?.reason || "CURRENT_STATE_MATCH",
+      };
+      if (clientWrite?.before && clientWrite?.data)
+        clientWrite.data = {
+          ...clientWrite.data,
+          saldo: roundedMoney(
+            Number(clientWrite.before.saldo ?? expectedBalance) +
+              effectiveAmount,
+          ),
+        };
+      if (concurrency?.decision === "apply_adjusted")
+        transactionOutcome = {
+          status: "financial_payment_applied_adjusted",
+          paymentId: String(paymentWrite.entityId),
+          clientId: financialEffect.customerId,
+          effectiveAmount,
+          requestedAmount,
+          resultingBalance,
+          reason: concurrency.reason,
+        };
     }
     if (eventKind === "campaign_redemption" && !alreadyApplied) {
       const progressWrite = writes.find((write) => write.entityType === "campaignProgress");
@@ -1845,8 +1970,10 @@ async function commitQueueItem(item) {
   });
   return transactionOutcome;
 }
-function rollbackPaymentConflict(item, conflict) {
+function rollbackPaymentConflict(item, conflict, options = {}) {
   if (!originalAlter || !conflict?.paymentId) return;
+  const paymentStatus = options.status || "conflict",
+    applicationStatus = options.applicationStatus || "not_applied";
   applyingCloud = true;
   try {
     originalAlter((data) => {
@@ -1886,8 +2013,8 @@ function rollbackPaymentConflict(item, conflict) {
       );
       if (payment)
         Object.assign(payment, {
-          status: "conflict",
-          applicationStatus: "not_applied",
+          status: paymentStatus,
+          applicationStatus,
           conflictReason: conflict.reason,
           conflictDetectedAt: now(),
           conflictActualBalance: roundedMoney(conflict.actualBalance),
@@ -1904,8 +2031,8 @@ function rollbackPaymentConflict(item, conflict) {
       );
       if (movement)
         Object.assign(movement, {
-          status: "conflict",
-          applicationStatus: "not_applied",
+          status: paymentStatus,
+          applicationStatus,
           conflictReason: conflict.reason,
           conflictActualBalance: roundedMoney(conflict.actualBalance),
           conflictActualFinancialVersion: Number(
@@ -1920,6 +2047,72 @@ function rollbackPaymentConflict(item, conflict) {
   } finally {
     applyingCloud = false;
   }
+}
+function applyAdjustedPaymentProjection(outcome) {
+  if (!originalAlter || !outcome?.paymentId) return;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      const client = (data.clientes || []).find(
+          (entry) => String(entry.id) === String(outcome.clientId),
+        ),
+        payment = (data.pagamentos || []).find(
+          (entry) => String(entry.id) === String(outcome.paymentId),
+        ),
+        movement = (data.movimentacoes || []).find(
+          (entry) => String(entry.id) === String(outcome.paymentId),
+        ),
+        patch = {
+          valor: roundedMoney(outcome.effectiveAmount),
+          effectiveAmount: roundedMoney(outcome.effectiveAmount),
+          saldoNovo: roundedMoney(outcome.resultingBalance),
+          concurrencyDecision: "apply_adjusted",
+          concurrencyReason: outcome.reason,
+          status: "applied",
+          applicationStatus: "applied",
+        };
+      if (client) client.saldo = roundedMoney(outcome.resultingBalance);
+      if (payment) Object.assign(payment, patch);
+      if (movement) Object.assign(movement, patch);
+    });
+  } finally {
+    applyingCloud = false;
+  }
+}
+function resolveLocalPaymentAdjustment(
+  paymentId,
+  status = "cancelled",
+  resolutionOperationId = null,
+) {
+  if (!originalAlter || !paymentId) return null;
+  let resolved = null;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      const resolvedAt = now(),
+        patch = {
+          status,
+          applicationStatus:
+            status === "superseded"
+              ? "superseded_by_adjusted_payment"
+              : "not_applied",
+          resolvedAt,
+          resolutionOperationId,
+        };
+      for (const key of ["pagamentos", "movimentacoes"]) {
+        const entry = (data[key] || []).find(
+          (item) => String(item.id) === String(paymentId),
+        );
+        if (entry) {
+          Object.assign(entry, patch);
+          if (key === "pagamentos") resolved = entry;
+        }
+      }
+    });
+  } finally {
+    applyingCloud = false;
+  }
+  return resolved;
 }
 async function processSyncQueue(options = {}) {
   if (processingPromise) return processingPromise;
@@ -1954,6 +2147,7 @@ async function processSyncQueue(options = {}) {
     await validateUser();
     let sent = 0,
       financialConflicts = 0,
+      financialAdjustments = 0,
       index = 0,
       queue = readQueue(),
       changedCollections = new Set();
@@ -2033,6 +2227,34 @@ async function processSyncQueue(options = {}) {
           });
           break;
         }
+        if (outcome?.status === "financial_payment_adjustment_required") {
+          rollbackPaymentConflict(live[position], outcome, {
+            status: "adjustment_required",
+            applicationStatus: "not_applied",
+          });
+          financialAdjustments++;
+          changedCollections.add("payments");
+          dispatchEvent(
+            new CustomEvent("financial-payment-adjustment-required", {
+              detail: { ...outcome },
+            }),
+          );
+          emit({
+            status: "idle",
+            message:
+              "O saldo mudou. Confirme o valor atualizado para concluir a quitação.",
+          });
+          break;
+        }
+        if (outcome?.status === "financial_payment_applied_adjusted") {
+          applyAdjustedPaymentProjection(outcome);
+          financialAdjustments++;
+          dispatchEvent(
+            new CustomEvent("financial-payment-adjusted", {
+              detail: { ...outcome },
+            }),
+          );
+        }
         for (const write of live[position].payload?.writes || [])
           if (CLOUD_NAMES.includes(write.entityType))
             changedCollections.add(write.entityType);
@@ -2084,6 +2306,7 @@ async function processSyncQueue(options = {}) {
     return {
       sent,
       financialConflicts,
+      financialAdjustments,
       pending: counts.total,
       errors: counts.errors,
       errorBreakdown: queueErrorBreakdown(),
@@ -4576,6 +4799,7 @@ window.SyncFirebase = {
   restoreBackupData: safeRestoreBackupData,
   auditSuspiciousPayments,
   reverseDuplicatePayment,
+  resolveLocalPaymentAdjustment,
   deviceId,
   clearLocalDevice,
   archiveQueue,

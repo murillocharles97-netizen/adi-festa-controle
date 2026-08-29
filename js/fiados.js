@@ -22,7 +22,8 @@ window.Fiados = (() => {
 
   function createPayment(clienteId, valor, observacao, options = {}) {
     let pagamento;
-    const operationId = String(options.operationId || Utils.uuid());
+    const operationId = String(options.operationId || Utils.uuid()),
+      paymentMode = options.paymentMode === "total" ? "total" : "partial";
     DB.alterar((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
@@ -30,7 +31,9 @@ window.Fiados = (() => {
       const requested = Number(valor);
       const received = options.allowCredit
         ? requested
-        : Math.min(requested, debt);
+        : paymentMode === "total"
+          ? debt
+          : Math.min(requested, debt);
       if (!received || received <= 0) throw new Error("Informe um valor válido");
 
       const previousBalance = Number(client.saldo || 0);
@@ -62,6 +65,9 @@ window.Fiados = (() => {
         clienteNome: client.nome,
         tipo: "pagamento",
         valor: received,
+        requestedAmount: requested,
+        effectiveAmount: received,
+        paymentMode,
         saldoAnterior: previousBalance,
         saldoNovo: client.saldo,
         expectedBalance: expected.expectedBalance,
@@ -76,6 +82,7 @@ window.Fiados = (() => {
         confirmationReason: options.confirmedConflictId
           ? "merchant_confirmed_second_real_payment"
           : null,
+        adjustedFromPaymentId: options.adjustedFromPaymentId || null,
         data: at,
         createdAt: at,
         observacao: observacao || "",
@@ -126,8 +133,8 @@ window.Fiados = (() => {
     return pagamento;
   }
 
-  function receber(clienteId, valor, observacao) {
-    return createPayment(clienteId, valor, observacao);
+  function receber(clienteId, valor, observacao, options = {}) {
+    return createPayment(clienteId, valor, observacao, options);
   }
 
   function confirmarConflito(conflictId) {
@@ -141,7 +148,11 @@ window.Fiados = (() => {
       conflict.clienteId || conflict.clientId,
       Number(conflict.valor || conflict.amount),
       `${conflict.observacao || "Pagamento"} · confirmado após mudança de saldo`,
-      { allowCredit: true, confirmedConflictId: conflict.id },
+      {
+        allowCredit: true,
+        confirmedConflictId: conflict.id,
+        paymentMode: "partial",
+      },
     );
   }
 
@@ -180,7 +191,13 @@ window.Fiados = (() => {
   function showConflict(detail = {}) {
     const root = document.querySelector("#modal");
     if (!root || !detail.paymentId) return;
-    root.innerHTML = `<div class="modal-bg financial-conflict-bg"><section class="modal-box financial-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="financial-conflict-title"><header class="modal-head"><div><small>Pagamento não aplicado</small><h3 id="financial-conflict-title">O saldo mudou em outro dispositivo</h3></div></header><div class="modal-body"><p>Você tentou registrar <b>${money(detail.amount)}</b> para <b>${esc(detail.clientName || "este cliente")}</b>, mas a dívida já havia mudado.</p><div class="financial-conflict-comparison"><span><small>Saldo que você visualizou</small><b>${money(detail.expectedBalance)}</b></span><span><small>Saldo atual</small><b>${money(detail.actualBalance)}</b></span><span><small>Crédito que seria criado</small><b>${money(Math.max(0, Number(detail.actualBalance || 0) + Number(detail.amount || 0)))}</b></span></div><p class="financial-conflict-note">O pagamento foi preservado como conflito e não alterou saldo, vendas ou campanhas.</p></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-cancel-payment-conflict>Cancelar operação</button><button type="button" class="btn btn-primary" data-confirm-payment-conflict>Registrar mesmo assim</button></footer></section></div>`;
+    const resultingBalance = Number.isFinite(Number(detail.resultingBalance))
+        ? Number(detail.resultingBalance)
+        : Number(detail.actualBalance || 0) + Number(detail.amount || 0),
+      creditCreated = Number.isFinite(Number(detail.creditCreated))
+        ? Number(detail.creditCreated)
+        : Math.max(0, resultingBalance);
+    root.innerHTML = `<div class="modal-bg financial-conflict-bg"><section class="modal-box financial-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="financial-conflict-title"><header class="modal-head"><div><small>Pagamento não aplicado</small><h3 id="financial-conflict-title">O saldo mudou em outro dispositivo</h3></div></header><div class="modal-body"><p>Você tentou registrar <b>${money(detail.amount)}</b> para <b>${esc(detail.clientName || "este cliente")}</b>, mas o resultado criaria crédito ou repetiria uma quitação.</p><div class="financial-conflict-comparison"><span><small>Saldo que você visualizou</small><b>${money(detail.expectedBalance)}</b></span><span><small>Saldo atual</small><b>${money(detail.actualBalance)}</b></span><span><small>Pagamento solicitado</small><b>${money(detail.amount)}</b></span><span><small>Saldo que ficaria</small><b>${money(resultingBalance)}</b></span><span><small>Crédito que seria criado</small><b>${money(creditCreated)}</b></span></div><p class="financial-conflict-note">Esse saldo mudou em outro dispositivo. Confirme somente se o cliente realmente fez outro pagamento. Vendas e campanhas não foram alteradas.</p></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-cancel-payment-conflict>Cancelar operação</button><button type="button" class="btn btn-primary" data-confirm-payment-conflict>Registrar mesmo assim</button></footer></section></div>`;
     const cancel = root.querySelector("[data-cancel-payment-conflict]"),
       confirm = root.querySelector("[data-confirm-payment-conflict]"),
       lock = () => {
@@ -216,8 +233,80 @@ window.Fiados = (() => {
     window.lucide?.createIcons();
   }
 
+  function showAdjustment(detail = {}) {
+    const root = document.querySelector("#modal");
+    if (!root || !detail.paymentId) return;
+    const client = DB.carregar().clientes.find(
+        (entry) => String(entry.id) === String(detail.clientId),
+      ),
+      currentDebt = Math.abs(Math.min(0, Number(client?.saldo || 0))),
+      effectiveAmount = currentDebt || Number(detail.effectiveAmount || 0);
+    root.innerHTML = `<div class="modal-bg financial-conflict-bg"><section class="modal-box financial-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="financial-adjustment-title"><header class="modal-head"><div><small>Saldo atualizado</small><h3 id="financial-adjustment-title">Confirme o novo valor da quitação</h3></div></header><div class="modal-body"><p>O saldo de <b>${esc(detail.clientName || client?.nome || "este cliente")}</b> mudou enquanto o pagamento era sincronizado.</p><div class="financial-conflict-comparison"><span><small>Saldo que você visualizou</small><b>${money(detail.expectedBalance)}</b></span><span><small>Saldo atual</small><b>${money(detail.actualBalance)}</b></span><span><small>Valor solicitado</small><b>${money(detail.requestedAmount)}</b></span><span><small>Novo valor para quitar</small><b>${money(effectiveAmount)}</b></span></div><p class="financial-conflict-note">Nenhum pagamento foi duplicado. Ao confirmar, a distribuição do fiado e as campanhas serão recalculadas sobre o saldo atual.</p></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-cancel-payment-adjustment>Cancelar</button><button type="button" class="btn btn-primary" data-confirm-payment-adjustment>Confirmar ${money(effectiveAmount)}</button></footer></section></div>`;
+    const cancel = root.querySelector("[data-cancel-payment-adjustment]"),
+      confirm = root.querySelector("[data-confirm-payment-adjustment]"),
+      lock = () => {
+        cancel.disabled = true;
+        confirm.disabled = true;
+      };
+    cancel.onclick = () => {
+      lock();
+      window.SyncFirebase?.resolveLocalPaymentAdjustment?.(
+        detail.paymentId,
+        "cancelled",
+      );
+      root.innerHTML = "";
+      Utils.toast("Quitação cancelada. O saldo não foi alterado.");
+      dispatchEvent(new HashChangeEvent("hashchange"));
+    };
+    confirm.onclick = async () => {
+      lock();
+      try {
+        const latestClient = DB.carregar().clientes.find(
+            (entry) => String(entry.id) === String(detail.clientId),
+          ),
+          latestDebt = Math.abs(
+            Math.min(0, Number(latestClient?.saldo || 0)),
+          );
+        if (!latestDebt)
+          throw new Error(
+            "O saldo já foi quitado. Atualize a tela antes de registrar outro pagamento.",
+          );
+        const adjusted = createPayment(
+          detail.clientId,
+          latestDebt,
+          "Quitação confirmada após atualização do saldo",
+          {
+            paymentMode: "total",
+            adjustedFromPaymentId: detail.paymentId,
+          },
+        );
+        window.SyncFirebase?.resolveLocalPaymentAdjustment?.(
+          detail.paymentId,
+          "superseded",
+          adjusted.id,
+        );
+        root.innerHTML = "";
+        await window.SyncFirebase?.processSyncQueue?.({ force: true });
+        Utils.toast(`Quitação de ${money(latestDebt)} enviada com o saldo atualizado.`);
+        dispatchEvent(new HashChangeEvent("hashchange"));
+      } catch (error) {
+        cancel.disabled = confirm.disabled = false;
+        Utils.toast(error.message, true);
+      }
+    };
+    window.lucide?.createIcons();
+  }
+
   window.addEventListener?.("financial-payment-conflict", (event) =>
     showConflict(event.detail),
+  );
+  window.addEventListener?.("financial-payment-adjustment-required", (event) =>
+    showAdjustment(event.detail),
+  );
+  window.addEventListener?.("financial-payment-adjusted", (event) =>
+    Utils.toast(
+      `Saldo atualizado: pagamento de ${money(event.detail?.effectiveAmount)} aplicado com segurança.`,
+    ),
   );
 
   return {
@@ -226,5 +315,6 @@ window.Fiados = (() => {
     confirmarConflito,
     cancelarConflito,
     showConflict,
+    showAdjustment,
   };
 })();

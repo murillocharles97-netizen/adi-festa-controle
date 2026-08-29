@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 const {
   initializeTestEnvironment,
   assertSucceeds,
@@ -16,6 +18,17 @@ let env;
 const projectId = "adi-festa-variations-test";
 const businessId = "financial-concurrency";
 const ownerId = "financial-owner";
+const financeContext = { console, Number, Math, Date, Map, Object, String };
+financeContext.window = financeContext;
+vm.createContext(financeContext);
+vm.runInContext(
+  fs.readFileSync(
+    path.join(__dirname, "../../js/financial-concurrency.js"),
+    "utf8",
+  ),
+  financeContext,
+);
+const finance = financeContext.FinancialConcurrency;
 
 test.before(async () => {
   env = await initializeTestEnvironment({
@@ -65,10 +78,15 @@ async function applyPayment(db, input) {
     if (marker.exists()) return { status: "idempotent" };
     const clientSnapshot = await transaction.get(clientRef);
     const client = clientSnapshot.data();
-    const stale =
-      Number(client.saldo) !== Number(input.expectedBalance) ||
-      Number(client.financialVersion || 0) !== Number(input.expectedVersion);
-    if (stale && !input.confirmed) {
+    const evaluation = finance.evaluatePaymentConcurrency({
+      expectedBalance: input.expectedBalance,
+      currentBalance: client.saldo,
+      requestedAmount: input.amount,
+      paymentMode: input.paymentMode || "partial",
+      expectedFinancialVersion: input.expectedVersion,
+      currentFinancialVersion: client.financialVersion,
+    });
+    if (evaluation.decision === "conflict" && !input.confirmed) {
       transaction.set(paymentRef, {
         id: input.id,
         operationId: input.id,
@@ -81,6 +99,9 @@ async function applyPayment(db, input) {
         expectedFinancialVersion: input.expectedVersion,
         conflictActualBalance: client.saldo,
         conflictActualFinancialVersion: client.financialVersion,
+        conflictReason: evaluation.reason,
+        conflictResultingBalance: evaluation.resultingBalance,
+        conflictCreditCreated: evaluation.creditCreated,
         status: "conflict",
         applicationStatus: "not_applied",
         allocations: [],
@@ -89,7 +110,12 @@ async function applyPayment(db, input) {
       });
       return { status: "conflict", balance: client.saldo };
     }
-    const nextBalance = Number((Number(client.saldo) + input.amount).toFixed(2));
+    const effectiveAmount = input.confirmed
+      ? input.amount
+      : evaluation.effectiveAmount;
+    const nextBalance = Number(
+      (Number(client.saldo) + effectiveAmount).toFixed(2),
+    );
     transaction.set(clientRef, {
       saldo: nextBalance,
       financialVersion: Number(client.financialVersion || 0) + 1,
@@ -103,7 +129,16 @@ async function applyPayment(db, input) {
       ownerId,
       clientId: input.clientId,
       clienteId: input.clientId,
-      valor: input.amount,
+      valor: effectiveAmount,
+      requestedAmount: input.amount,
+      effectiveAmount,
+      paymentMode: input.paymentMode || "partial",
+      concurrencyDecision: input.confirmed
+        ? "confirmed_override"
+        : evaluation.decision,
+      concurrencyReason: input.confirmed
+        ? "MERCHANT_CONFIRMED_SECOND_REAL_PAYMENT"
+        : evaluation.reason,
       expectedBalance: input.expectedBalance,
       expectedFinancialVersion: input.expectedVersion,
       status: "applied",
@@ -121,9 +156,83 @@ async function applyPayment(db, input) {
       createdAtLocal: "2026-08-18T12:00:00.000Z",
       schemaVersion: 3,
     });
-    return { status: "applied", balance: nextBalance };
+    return {
+      status:
+        evaluation.decision === "apply_adjusted"
+          ? "applied_adjusted"
+          : "applied",
+      balance: nextBalance,
+      effectiveAmount,
+      reason: evaluation.reason,
+    };
   });
 }
+
+test("Gustavo aplica pagamento seguro mesmo com financialVersion divergente", async () => {
+  const clientId = "gustavo-same-balance-new-version";
+  await seedClient(clientId, -413.5, 22);
+  const db = env.authenticatedContext(ownerId).firestore();
+  const result = await assertSucceeds(applyPayment(db, {
+    id: "gustavo-payment-4",
+    clientId,
+    amount: 4,
+    expectedBalance: -413.5,
+    expectedVersion: 21,
+    paymentMode: "partial",
+  }));
+  assert.equal(result.status, "applied");
+  assert.equal(result.balance, -409.5);
+  assert.equal(result.reason, "SAME_BALANCE_NEW_VERSION");
+});
+
+test("mudanças financeiras concorrentes seguras são aplicadas no saldo atual", async () => {
+  const db = env.authenticatedContext(ownerId).firestore();
+  for (const scenario of [
+    { id: "new-sale", current: -130, amount: 20, result: -110 },
+    { id: "safe-other-payment", current: -20, amount: 10, result: -10 },
+  ]) {
+    await seedClient(scenario.id, scenario.current, 11);
+    const outcome = await assertSucceeds(applyPayment(db, {
+      id: `payment-${scenario.id}`,
+      clientId: scenario.id,
+      amount: scenario.amount,
+      expectedBalance: -100,
+      expectedVersion: 10,
+      paymentMode: "partial",
+    }));
+    assert.equal(outcome.status, "applied");
+    assert.equal(outcome.balance, scenario.result);
+    assert.equal(outcome.reason, "BALANCE_CHANGED_SAFE");
+  }
+});
+
+test("pagamento parcial inseguro conflita e quitação usa a dívida atual", async () => {
+  const db = env.authenticatedContext(ownerId).firestore();
+  await seedClient("unsafe-partial", -40, 21);
+  const conflict = await assertSucceeds(applyPayment(db, {
+    id: "unsafe-partial-payment",
+    clientId: "unsafe-partial",
+    amount: 100,
+    expectedBalance: -100,
+    expectedVersion: 20,
+    paymentMode: "partial",
+  }));
+  assert.equal(conflict.status, "conflict");
+  assert.equal(conflict.balance, -40);
+
+  await seedClient("adjusted-total", -40, 21);
+  const adjusted = await assertSucceeds(applyPayment(db, {
+    id: "adjusted-total-payment",
+    clientId: "adjusted-total",
+    amount: 100,
+    expectedBalance: -100,
+    expectedVersion: 20,
+    paymentMode: "total",
+  }));
+  assert.equal(adjusted.status, "applied_adjusted");
+  assert.equal(adjusted.effectiveAmount, 40);
+  assert.equal(adjusted.balance, 0);
+});
 
 test("segundo pagamento com projeção velha vira conflito e não confirma campanha", async () => {
   const clientId = "same-debt-two-devices";

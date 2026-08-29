@@ -1,12 +1,13 @@
 (function (root) {
   "use strict";
 
-  const roundedMoney = (value) => {
+  const moneyCents = (value) => {
     const number = Number(value);
-    return Number.isFinite(number) ? Number(number.toFixed(2)) : 0;
+    return Number.isFinite(number) ? Math.round(number * 100) : 0;
   };
-  const sameMoney = (left, right) =>
-    Math.abs(roundedMoney(left) - roundedMoney(right)) < 0.005;
+  const centsMoney = (value) => Number((Number(value || 0) / 100).toFixed(2));
+  const roundedMoney = (value) => centsMoney(moneyCents(value));
+  const sameMoney = (left, right) => moneyCents(left) === moneyCents(right);
   const nearMoney = (left, right, tolerance = 0.05) =>
     Math.abs(roundedMoney(left) - roundedMoney(right)) <= Number(tolerance);
   const financialVersion = (client) =>
@@ -41,6 +42,113 @@
       actualFinancialVersion: actualVersion,
     };
   };
+  const PAYMENT_DECISIONS = Object.freeze({
+    APPLY: "apply",
+    APPLY_ADJUSTED: "apply_adjusted",
+    CONFLICT: "conflict",
+  });
+  const PAYMENT_REASONS = Object.freeze({
+    CURRENT_STATE_MATCH: "CURRENT_STATE_MATCH",
+    SAME_BALANCE_NEW_VERSION: "SAME_BALANCE_NEW_VERSION",
+    BALANCE_CHANGED_SAFE: "BALANCE_CHANGED_SAFE",
+    TOTAL_UPDATED_TO_CURRENT_DEBT: "TOTAL_UPDATED_TO_CURRENT_DEBT",
+    PAYMENT_EXCEEDS_CURRENT_DEBT: "PAYMENT_EXCEEDS_CURRENT_DEBT",
+    BALANCE_ALREADY_SETTLED: "BALANCE_ALREADY_SETTLED",
+    CLIENT_HAS_CREDIT: "CLIENT_HAS_CREDIT",
+    INVALID_PAYMENT_AMOUNT: "INVALID_PAYMENT_AMOUNT",
+  });
+  function evaluatePaymentConcurrency(input = {}) {
+    const expectedBalanceCents = moneyCents(input.expectedBalance),
+      currentBalanceCents = moneyCents(input.currentBalance),
+      requestedAmountCents = Math.abs(moneyCents(input.requestedAmount)),
+      expectedFinancialVersion = Math.max(
+        0,
+        Number(input.expectedFinancialVersion || 0),
+      ),
+      currentFinancialVersion = Math.max(
+        0,
+        Number(input.currentFinancialVersion || 0),
+      ),
+      paymentMode = input.paymentMode === "total" ? "total" : "partial",
+      balanceChanged = expectedBalanceCents !== currentBalanceCents,
+      versionChanged = expectedFinancialVersion !== currentFinancialVersion,
+      currentDebtCents = Math.abs(Math.min(0, currentBalanceCents)),
+      result = (decision, effectiveAmountCents, reason) => {
+        const resultingBalanceCents =
+            currentBalanceCents + effectiveAmountCents,
+          creditCreatedCents = Math.max(0, resultingBalanceCents);
+        return {
+          decision,
+          reason,
+          paymentMode,
+          balanceChanged,
+          versionChanged,
+          expectedBalanceCents,
+          currentBalanceCents,
+          requestedAmountCents,
+          effectiveAmountCents,
+          resultingBalanceCents,
+          creditCreatedCents,
+          expectedBalance: centsMoney(expectedBalanceCents),
+          currentBalance: centsMoney(currentBalanceCents),
+          requestedAmount: centsMoney(requestedAmountCents),
+          effectiveAmount: centsMoney(effectiveAmountCents),
+          resultingBalance: centsMoney(resultingBalanceCents),
+          creditCreated: centsMoney(creditCreatedCents),
+          expectedFinancialVersion,
+          currentFinancialVersion,
+        };
+      };
+    if (requestedAmountCents <= 0)
+      return result(
+        PAYMENT_DECISIONS.CONFLICT,
+        requestedAmountCents,
+        PAYMENT_REASONS.INVALID_PAYMENT_AMOUNT,
+      );
+    if (currentBalanceCents > 0)
+      return result(
+        PAYMENT_DECISIONS.CONFLICT,
+        requestedAmountCents,
+        PAYMENT_REASONS.CLIENT_HAS_CREDIT,
+      );
+    if (currentBalanceCents === 0)
+      return result(
+        PAYMENT_DECISIONS.CONFLICT,
+        requestedAmountCents,
+        PAYMENT_REASONS.BALANCE_ALREADY_SETTLED,
+      );
+    if (paymentMode === "total") {
+      const adjusted = requestedAmountCents !== currentDebtCents;
+      return result(
+        adjusted
+          ? PAYMENT_DECISIONS.APPLY_ADJUSTED
+          : PAYMENT_DECISIONS.APPLY,
+        currentDebtCents,
+        adjusted
+          ? PAYMENT_REASONS.TOTAL_UPDATED_TO_CURRENT_DEBT
+          : balanceChanged
+            ? PAYMENT_REASONS.BALANCE_CHANGED_SAFE
+            : versionChanged
+              ? PAYMENT_REASONS.SAME_BALANCE_NEW_VERSION
+              : PAYMENT_REASONS.CURRENT_STATE_MATCH,
+      );
+    }
+    if (requestedAmountCents > currentDebtCents)
+      return result(
+        PAYMENT_DECISIONS.CONFLICT,
+        requestedAmountCents,
+        PAYMENT_REASONS.PAYMENT_EXCEEDS_CURRENT_DEBT,
+      );
+    return result(
+      PAYMENT_DECISIONS.APPLY,
+      requestedAmountCents,
+      balanceChanged
+        ? PAYMENT_REASONS.BALANCE_CHANGED_SAFE
+        : versionChanged
+          ? PAYMENT_REASONS.SAME_BALANCE_NEW_VERSION
+          : PAYMENT_REASONS.CURRENT_STATE_MATCH,
+    );
+  }
   const classification = (type) =>
     ["payment", "payment_received", "settle_balance", "receive_open_balance"].includes(
       String(type || ""),
@@ -179,6 +287,8 @@
 
   root.FinancialConcurrency = Object.freeze({
     roundedMoney,
+    moneyCents,
+    centsMoney,
     sameMoney,
     nearMoney,
     financialVersion,
@@ -186,6 +296,9 @@
     nextVersion,
     applyDelta,
     compare,
+    evaluatePaymentConcurrency,
+    PAYMENT_DECISIONS,
+    PAYMENT_REASONS,
     classification,
     reversalPreview,
     suspiciousPayments,
