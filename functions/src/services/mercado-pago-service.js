@@ -4,10 +4,11 @@ const crypto=require('node:crypto');
 const API='https://api.mercadopago.com';
 const RETRYABLE_HTTP_STATUSES=new Set([408,425,429,500,502,503,504]);
 
-function pixExternalReference(businessId,operationId){
+function billingExternalReference(businessId,operationId){
   const digest=crypto.createHash('sha256').update(`${String(businessId||'')}:${String(operationId||'')}`).digest('hex').slice(0,56);
   return `billing_${digest}`;
 }
+const pixExternalReference=billingExternalReference;
 
 function validNotificationUrl(value){
   if(!value)return null;
@@ -73,15 +74,15 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     throw providerRequestError({code:'mercado-pago-invalid-response',message:'O Mercado Pago não devolveu uma resposta válida.',endpoint:path});
   }
   return{
-    createSubscription({businessId,userId,email,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card'}){
+    createSubscription({businessId,userId,billingPayerEmail,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card'}){
       const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
-      const body={reason:`Adi Festa Controle - ${plan.name}`,external_reference:businessId,payer_email:email,back_url:backUrl,status:'pending',metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,payment_method_type:paymentMethodType,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}};
+      const body={reason:`Adi Festa Controle - ${plan.name}`,external_reference:billingExternalReference(businessId,operationId),payer_email:billingPayerEmail,back_url:backUrl,status:'pending',metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,payment_method_type:paymentMethodType,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}};
       if(preapprovalPlanId)body.preapproval_plan_id=String(preapprovalPlanId);
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
       return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
     createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null}){
-      const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=pixExternalReference(businessId,operationId);
+      const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=billingExternalReference(businessId,operationId);
       const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}},webhookUrl=validNotificationUrl(notificationUrl);
       if(webhookUrl)body.notification_url=webhookUrl;
       return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body});
@@ -95,4 +96,4 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   };
 }
 
-module.exports={API,pixExternalReference,validNotificationUrl,safeProviderPayload,providerErrorDiagnostics,mercadoPagoService};
+module.exports={API,billingExternalReference,pixExternalReference,validNotificationUrl,safeProviderPayload,providerErrorDiagnostics,mercadoPagoService};

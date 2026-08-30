@@ -586,6 +586,68 @@
 .plan-payment-options > button em {
   color: #0caf78;
 }
+.plan-payer-email {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dce3eb;
+  border-radius: 15px;
+  background: #fff;
+}
+.plan-payer-email[hidden] {
+  display: none;
+}
+.plan-payer-email label {
+  display: grid;
+  gap: 3px;
+  color: #17213c;
+  font-size: 13px;
+}
+.plan-payer-email label span,
+.plan-payer-email > small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.plan-payer-email input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid #cfd8e4;
+  border-radius: 11px;
+  color: #17213c;
+  font: inherit;
+  box-sizing: border-box;
+}
+.plan-payer-email input:focus {
+  border-color: #0caf78;
+  outline: 3px solid #0caf7820;
+}
+.plan-payer-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: #fff2f2;
+  color: #a51f32;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.plan-payer-error[hidden] {
+  display: none;
+}
+.plan-payer-error button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #087e5b;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
 .plan-payment-disclaimer {
   display: flex;
   gap: 8px;

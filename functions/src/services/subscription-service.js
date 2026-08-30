@@ -23,6 +23,7 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount,pa
     pendingPlanId:null,
     pendingBillingCycle:null,
     pendingPaymentMethodType:null,
+    pendingBillingPayerEmail:null,
     billingCycle:billingCycle||existing.billingCycle||'monthly',
     paymentMethodType:paymentMethodType||existing.paymentMethodType||existing.pendingPaymentMethodType||'card',
     provider:'mercado_pago',
@@ -45,7 +46,7 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount,pa
     }
   };
 }
-function pendingSubscription({existing={},plan,provider,now,billingCycle='monthly',discount=null,paymentMethodType='card',providerPlanId=null}){
+function pendingSubscription({existing={},plan,provider,now,billingCycle='monthly',discount=null,paymentMethodType='card',providerPlanId=null,billingPayerEmail=null}){
   const preserveTrial=isTrialActive(existing,new Date(now));
   return{
     ...existing,
@@ -55,6 +56,7 @@ function pendingSubscription({existing={},plan,provider,now,billingCycle='monthl
     pendingPlanId:plan.id,
     pendingBillingCycle:billingCycle,
     pendingPaymentMethodType:paymentMethodType,
+    pendingBillingPayerEmail:billingPayerEmail||null,
     ...(discount?{pendingDiscount:{...discount}}:{}),
     provider:'mercado_pago',
     updatedAt:now,

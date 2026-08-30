@@ -14,6 +14,7 @@ const {
 } = require("firebase/functions");
 const {
   mercadoPagoService,
+  billingExternalReference,
 } = require("../../functions/src/services/mercado-pago-service");
 const {
   couponFirestoreService,
@@ -105,7 +106,7 @@ const BUYER_EMAIL = "test_user_9018643121922567141@testuser.com";
   await admin.doc(`users/${customer.user.uid}`).set({
     uid: customer.user.uid,
     businessId: BUSINESS_ID,
-    email: BUYER_EMAIL,
+    billingPayerEmail: BUYER_EMAIL,
     role: "owner",
     active: true,
   });
@@ -167,6 +168,7 @@ const BUYER_EMAIL = "test_user_9018643121922567141@testuser.com";
     now,
     billingCycle: "monthly",
     discount: redemption.discountSnapshot,
+    billingPayerEmail: BUYER_EMAIL,
   });
   const batch = admin.batch();
   batch.update(businessRef, {
@@ -183,6 +185,8 @@ const BUYER_EMAIL = "test_user_9018643121922567141@testuser.com";
       billingCycle: "monthly",
       officialPrice: officialBilling.amount,
       chargedPrice: billing.amount,
+      billingPayerEmail: BUYER_EMAIL,
+      expectedExternalReference: billingExternalReference(BUSINESS_ID, operationId),
       quoteId: quote.quoteId,
       couponRedemptionId: redemption.id,
       status: "pending",
@@ -200,6 +204,8 @@ const BUYER_EMAIL = "test_user_9018643121922567141@testuser.com";
     billingCycle: "monthly",
     officialPrice: officialBilling.amount,
     chargedPrice: billing.amount,
+    billingPayerEmail: BUYER_EMAIL,
+    expectedExternalReference: billingExternalReference(BUSINESS_ID, operationId),
     quoteId: quote.quoteId,
     couponRedemptionId: redemption.id,
     discountSnapshot: redemption.discountSnapshot,

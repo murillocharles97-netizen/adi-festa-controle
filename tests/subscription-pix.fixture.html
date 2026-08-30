@@ -32,12 +32,13 @@
     const replacementPix={...fixturePix,id:"fixture-pix-replacement",status:"payment_pending",providerStatus:"action_required",providerStatusDetail:"waiting_transfer",replacesOperationId:fixturePix.id};
     let lastCheckoutOptions=null;
     let fixtureContext={subscription:{planId:"trial",status:"trialing",trialStartedAt:iso(-3),trialEndsAt:iso(4)},access:{status:"trialing",daysRemaining:4,readOnly:false,limits:plans[1].limits,effectivePlan:{name:"Profissional"}},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits},profile:{uid:"fixture-owner",role:"owner"}};
+    if(state==="card-payer")fixtureContext={...fixtureContext,business:{...fixtureContext.business,billingProfile:{billingPayerEmail:"felipe.pessoal@gmail.com"}}};
     if(["pending","entitlement"].includes(state))fixtureContext={...fixtureContext,subscription:{...fixtureContext.subscription,pendingPlanId:"professional",pendingPaymentMethodType:"pix_monthly",pendingCheckoutAttemptId:"fixture-pix-attempt",mercadoPago:{pendingOrderId:"fixture-order"}}};
     if(state==="active")fixtureContext={...fixtureContext,subscription:{planId:"professional",status:"active",paymentMethodType:"pix_monthly",currentPeriodEnd:iso(30)},access:{status:"active",readOnly:false,limits:plans[1].limits},business:{id:"fixture-business",name:"Loja Exemplo",limits:plans[1].limits}};
     window.Utils={escapar:(value)=>String(value).replace(/[&<>"']/g,(character)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]),toast:()=>{}};
     window.DB={carregar:()=>({produtos:[],clientes:[],vendas:[]})};
     window.BusinessContext={get:()=>fixtureContext};
-    window.FirebaseSession={};
+    window.FirebaseSession={user:{uid:"fixture-owner",email:"contato@lojafelipe.com.br"},profile:{uid:"fixture-owner",email:"contato@lojafelipe.com.br"}};
     window.PlanLimitService={canUseFeature:()=>({ok:true}),canUseAction:()=>({ok:true})};
     window.Router={ir:()=>{},render:()=>{}};
     window.SubscriptionService={
@@ -56,14 +57,14 @@
       const app=document.querySelector("#app");
       app.innerHTML=PlansUI.render();PlansUI.bind(app);
       await new Promise(resolve=>setTimeout(resolve,80));
-      if(["coupon","payment","card","pix","qr","pending","approved","expired","failed","regenerated"].includes(state)){
+      if(["coupon","payment","card","card-payer","pix","qr","pending","approved","expired","failed","regenerated"].includes(state)){
         const details=document.querySelector(".plan-coupon");details.open=true;
         document.querySelector("[data-coupon-code]").value="PARCEIRO20";
         document.querySelector("[data-coupon-plan]").value="professional";
         document.querySelector("[data-apply-coupon]").click();
         await new Promise(resolve=>setTimeout(resolve,30));
       }
-      if(["payment","card","pix","qr","pending","approved","expired","failed","regenerated"].includes(state)){
+      if(["payment","card","card-payer","pix","qr","pending","approved","expired","failed","regenerated"].includes(state)){
         document.querySelector('[data-plan-cta="professional"]').click();
         await new Promise(resolve=>setTimeout(resolve,30));
       }
@@ -78,7 +79,7 @@
         document.querySelector('[data-start-checkout]').click();
         await new Promise(resolve=>setTimeout(resolve,40));
       }
-      window.__subscriptionPixFixture={state,ready:true,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,selectedPayment:document.querySelector('[data-payment-option].active')?.dataset.paymentOption||null,pixModal:Boolean(document.querySelector('.plan-pix-sheet')),approved:Boolean(document.querySelector('.plan-pix-result.success')),expired:Boolean(document.querySelector('.plan-pix-result.expired h3')?.textContent.includes('Pix expirado')),failed:Boolean(document.querySelector('.plan-pix-result.expired h3')?.textContent.includes('Não foi possível')),hasCopy:Boolean(document.querySelector('[data-copy-pix]')),hasQr:Boolean(document.querySelector('.plan-pix-qr img')),hasVerify:Boolean(document.querySelector('[data-verify-pix-payment]')),couponPreserved:document.querySelector('#modal')?.textContent.includes('PARCEIRO20')&&lastCheckoutOptions?.couponCode==="PARCEIRO20",previousAttemptId:lastCheckoutOptions?.previousCheckoutAttemptId||null};
+      window.__subscriptionPixFixture={state,ready:true,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,selectedPayment:document.querySelector('[data-payment-option].active')?.dataset.paymentOption||null,billingPayerEmail:document.querySelector('[data-billing-payer-email]')?.value||null,payerHelper:document.querySelector('[data-card-payer]')?.textContent.includes('pode ser diferente do e-mail da sua empresa')||false,pixModal:Boolean(document.querySelector('.plan-pix-sheet')),approved:Boolean(document.querySelector('.plan-pix-result.success')),expired:Boolean(document.querySelector('.plan-pix-result.expired h3')?.textContent.includes('Pix expirado')),failed:Boolean(document.querySelector('.plan-pix-result.expired h3')?.textContent.includes('Não foi possível')),hasCopy:Boolean(document.querySelector('[data-copy-pix]')),hasQr:Boolean(document.querySelector('.plan-pix-qr img')),hasVerify:Boolean(document.querySelector('[data-verify-pix-payment]')),couponPreserved:document.querySelector('#modal')?.textContent.includes('PARCEIRO20')&&lastCheckoutOptions?.couponCode==="PARCEIRO20",previousAttemptId:lastCheckoutOptions?.previousCheckoutAttemptId||null};
     })();
   </script>
 </body>
