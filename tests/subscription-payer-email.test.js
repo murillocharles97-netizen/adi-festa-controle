@@ -71,16 +71,17 @@ test("erro do provedor oferece alteração do e-mail sem expor erro técnico", (
 test("retorno do cartão reconcilia a cobrança e traduz a recusa real", () => {
   const backend = read("functions/src/index.js"),
     plans = read("js/plans.js"),
+    state = read("functions/src/services/billing-attempt-state-service.js"),
     diagnostic = read(
       "functions/src/services/card-payment-diagnostic-service.js",
     );
   assert.match(backend, /latestCardPaymentDiagnostic/);
   assert.match(backend, /searchAuthorizedPayments/);
-  assert.match(backend, /lastPaymentStatusDetail/);
+  assert.match(state, /lastPaymentStatusDetail/);
   assert.match(backend, /checkoutReturn/);
   assert.match(plans, /reconcileCardCheckoutReturn/);
   assert.match(plans, /Pagamento não aprovado/);
-  assert.match(plans, /Tentar outro cartão/);
+  assert.match(plans, /Usar outro cartão/);
   assert.match(plans, /Pagar por Pix/);
   assert.match(diagnostic, /cc_rejected_high_risk/);
   assert.match(diagnostic, /cc_rejected_insufficient_amount/);

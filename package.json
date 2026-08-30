@@ -15,7 +15,7 @@
     "test:subscription-browser": "node scripts/audit-subscription-pix.cjs",
     "test:mobile-structural": "node scripts/audit-mobile-structural.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth,storage --project adi-festa-variations-test \"node --test --test-concurrency=1 tests/emulator/*.rules.test.js\"",
-    "test:functions-emulator": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/onboarding-functions-smoke.js && node tests/emulator/functions-smoke.js && node functions/test/pix-billing-emulator.js\"",
+    "test:functions-emulator": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/onboarding-functions-smoke.js && node tests/emulator/functions-smoke.js && node functions/test/pix-billing-emulator.js && node functions/test/billing-state-machine-emulator.js\"",
     "build": "node scripts/check-project.js --build"
   },
   "devDependencies": {

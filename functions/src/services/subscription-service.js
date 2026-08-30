@@ -14,7 +14,7 @@ function computeAccess(subscription={},now=new Date()){
   return{status,planId:subscription.planId||'',active,canAccessApp:true,canMutate:active,readOnly:!active,trial,features:internal?null:plan?.features||{},limits:internal?null:plan?.limits||{},unlimited:internal};
 }
 function providerPatch(provider,{planId,now,existing={},billingCycle,discount,paymentMethodType,providerPlanId}={}){
-  const status=mapProviderStatus(provider.status),plan=getPlan(planId||existing.planId),lastPaymentDate=provider.summarized?.last_charged_date||existing.lastPaymentDate||null;
+  const status=mapProviderStatus(provider.status),active=status==='active',hadPaidSubscription=existing.hasPaidSubscription===true,plan=getPlan(planId||existing.planId),lastPaymentDate=active?(provider.summarized?.last_charged_date||existing.lastPaymentDate||null):(existing.lastPaymentDate||null);
   return{
     ...existing,
     status,
@@ -27,11 +27,11 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount,pa
     billingCycle:billingCycle||existing.billingCycle||'monthly',
     paymentMethodType:paymentMethodType||existing.paymentMethodType||existing.pendingPaymentMethodType||'card',
     provider:'mercado_pago',
-    startedAt:provider.date_created||existing.startedAt||now,
-    expiresAt:provider.auto_recurring?.end_date||existing.expiresAt||null,
-    nextBillingDate:provider.next_payment_date||existing.nextBillingDate||null,
+    startedAt:active?(provider.date_created||existing.startedAt||now):(existing.startedAt||null),
+    expiresAt:active?(provider.auto_recurring?.end_date||existing.expiresAt||null):(hadPaidSubscription?existing.expiresAt||null:null),
+    nextBillingDate:active?(provider.next_payment_date||existing.nextBillingDate||null):(hadPaidSubscription?existing.nextBillingDate||null:null),
     lastPaymentDate,
-    currentPeriodEnd:provider.next_payment_date||existing.currentPeriodEnd||null,
+    currentPeriodEnd:active?(provider.next_payment_date||existing.currentPeriodEnd||null):(hadPaidSubscription?existing.currentPeriodEnd||null:null),
     cancelAtPeriodEnd:false,
     updatedAt:now,
     ...(discount?{discount:{...discount}}:{}),

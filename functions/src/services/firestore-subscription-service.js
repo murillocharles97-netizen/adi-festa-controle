@@ -44,7 +44,7 @@ function validateProviderSubscription(provider, index, business = {}) {
     throw Object.assign(Error("Empresa do provedor diverge do checkout seguro."), {
       code: "provider-business-mismatch",
     });
-  if (currentPayerId && providerPayerId && currentPayerId !== providerPayerId)
+  if (active && currentPayerId && providerPayerId && currentPayerId !== providerPayerId)
     throw Object.assign(Error("Pagador diverge da assinatura existente."), {
       code: "provider-payer-mismatch",
     });
@@ -145,11 +145,15 @@ function firestoreSubscriptionService(db) {
           : null,
         redemption = redemptionSnapshot?.data() || null,
         business = businessSnapshot.data(),
+        currentProviderId=String(business?.subscription?.mercadoPago?.subscriptionId||''),
+        isCurrentProvider=!currentProviderId||currentProviderId===subscriptionId,
         validation = validateProviderSubscription(provider, index, business),
         active = validation.active,
         terminal = ["cancelled", "canceled", "expired"].includes(
           String(provider.status),
         );
+      if(active&&!isCurrentProvider)throw Object.assign(Error('Uma assinatura antiga foi autorizada enquanto outra tentativa está ativa.'),{code:'provider-subscription-conflict'});
+      let couponReleased=false;
       const discount =
           redemption?.discountSnapshot || index.discountSnapshot || null,
         subscription = providerPatch(provider, {
@@ -162,6 +166,7 @@ function firestoreSubscriptionService(db) {
           existing: business.subscription || {},
         }),
         plan = getPlan(subscription.planId);
+      if(terminal){delete subscription.pendingDiscount;if(business.subscription?.hasPaidSubscription!==true){subscription.mercadoPago.subscriptionId=null;subscription.mercadoPago.preapprovalId=null;subscription.mercadoPago.lastClosedSubscriptionId=subscriptionId}}
       if (eventId) subscription.mercadoPago.lastWebhookEventId = eventId;
       if (active) subscription.hasPaidSubscription = true;
       if (active && redemption && redemption.status !== "active") {
@@ -247,6 +252,7 @@ function firestoreSubscriptionService(db) {
           canceledAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
+        couponReleased=true;
       } else if (terminal && redemption?.status === "active") {
         if (redemption.discountStatus !== "completed")
           transaction.update(db.doc(`adminCoupons/${redemption.couponId}`), {
@@ -267,13 +273,14 @@ function firestoreSubscriptionService(db) {
       if (active && index.billingPayerEmail)
         businessPatch["billingProfile.billingPayerEmail"] =
           index.billingPayerEmail;
-      transaction.update(businessRef, businessPatch);
+      if(isCurrentProvider)transaction.update(businessRef, businessPatch);
+      const attemptStatus=active?'approved':terminal?subscription.status:'pending_payment';
       transaction.set(
         db.doc(
           `businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`,
         ),
         {
-          status: subscription.status,
+          status: attemptStatus,
           providerStatus: String(provider.status || ""),
           paymentMethodType:index.paymentMethodType||"card",
           providerPlanId:index.providerPlanId||null,
@@ -286,7 +293,7 @@ function firestoreSubscriptionService(db) {
         indexRef,
         {
           ...index,
-          status: subscription.status,
+          status: attemptStatus,
           providerStatus: String(provider.status || ""),
           updatedAt: now,
         },
@@ -294,8 +301,10 @@ function firestoreSubscriptionService(db) {
       );
       return {
         businessId: index.businessId,
-        subscription,
+        subscription:isCurrentProvider?subscription:(business.subscription||{}),
         redemptionId: redemptionRef?.id || null,
+        couponReleased,
+        ignoredBusinessUpdate:!isCurrentProvider,
       };
     });
   }

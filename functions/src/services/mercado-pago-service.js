@@ -74,11 +74,12 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     throw providerRequestError({code:'mercado-pago-invalid-response',message:'O Mercado Pago não devolveu uma resposta válida.',endpoint:path});
   }
   return{
-    createSubscription({businessId,userId,billingPayerEmail,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card'}){
+    createSubscription({businessId,userId,billingPayerEmail,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card',notificationUrl=null}){
       const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
       const body={reason:`Adi Festa Controle - ${plan.name}`,external_reference:billingExternalReference(businessId,operationId),payer_email:billingPayerEmail,back_url:backUrl,status:'pending',metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,payment_method_type:paymentMethodType,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}};
       if(preapprovalPlanId)body.preapproval_plan_id=String(preapprovalPlanId);
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
+      const webhookUrl=validNotificationUrl(notificationUrl);if(webhookUrl)body.notification_url=webhookUrl;
       return request('/preapproval',{method:'POST',idempotencyKey:operationId,body});
     },
     createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null}){
