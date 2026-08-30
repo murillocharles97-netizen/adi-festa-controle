@@ -41,6 +41,6 @@ test("admin usa Functions protegidas e não acessa Firestore diretamente", () =>
 test("backend ignora preço do navegador e usa catálogo oficial", () => {
   const backend = read("functions/src/index.js");
   assert.match(backend, /planBilling\(plan,billingCycle\)/);
-  assert.match(backend, /reserveQuote/);
+  assert.match(backend, /reserveCheckoutCoupon/);
   assert.doesNotMatch(backend, /request\.data\?\.(price|amount|discountValue)/);
 });

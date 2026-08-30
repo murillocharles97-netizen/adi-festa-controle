@@ -191,7 +191,7 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
   assert.doesNotMatch(syncSource, /setInterval\([^)]*ensureClientProjection/);
 });
 
-test("toda a cadeia de módulos da sincronização invalida o cache na release 108", () => {
+test("a cadeia de módulos mantém versões explícitas na release 109", () => {
   assert.match(authSource, /import ['"]\.\/sync\.js\?v=108['"]/);
   assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=108['"]/);
   assert.match(
@@ -200,10 +200,10 @@ test("toda a cadeia de módulos da sincronização invalida o cache na release 1
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=108[\s\S]*js\/firebase\/firebase-ui\.js\?v=108/,
+    /js\/firebase\/auth\.js\?v=109[\s\S]*js\/firebase\/firebase-ui\.js\?v=108/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /adi-festa-v108-payment-concurrency-financial-effect/);
+  assert.match(serviceWorkerSource, /adi-festa-v109-billing-payer-identity/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

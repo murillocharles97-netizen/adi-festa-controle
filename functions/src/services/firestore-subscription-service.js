@@ -107,6 +107,36 @@ function firestoreSubscriptionService(db) {
         businessSnapshot = await transaction.get(businessRef);
       if (!businessSnapshot.exists)
         throw Error("Empresa da assinatura não encontrada.");
+      if (index.status === "superseded") {
+        transaction.set(
+          indexRef,
+          {
+            providerStatus: String(provider.status || ""),
+            lastIgnoredSource: source || "provider",
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+        transaction.set(
+          db.doc(
+            `businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`,
+          ),
+          {
+            status: "superseded",
+            providerStatus: String(provider.status || ""),
+            lastSource: source || "provider",
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+        return {
+          businessId: index.businessId,
+          subscription: businessSnapshot.data().subscription || {},
+          redemptionId: null,
+          ignored: true,
+          reason: "superseded",
+        };
+      }
       const redemptionRef = index.couponRedemptionId
           ? db.doc(`couponRedemptions/${index.couponRedemptionId}`)
           : null,
@@ -229,11 +259,15 @@ function firestoreSubscriptionService(db) {
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
-      transaction.update(businessRef, {
+      const businessPatch = {
         subscription,
         limits: plan?.limits || business.limits || {},
         updatedAt: FieldValue.serverTimestamp(),
-      });
+      };
+      if (active && index.billingPayerEmail)
+        businessPatch["billingProfile.billingPayerEmail"] =
+          index.billingPayerEmail;
+      transaction.update(businessRef, businessPatch);
       transaction.set(
         db.doc(
           `businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`,

@@ -6,7 +6,8 @@ const crypto=require('node:crypto');
 const {normalizePlanId,requirePlan}=require('../src/services/plan-service');
 const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,computeAccess}=require('../src/services/subscription-service');
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
-const {mercadoPagoService,pixExternalReference,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
+const {mercadoPagoService,billingExternalReference,pixExternalReference,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
+const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('../src/services/billing-payer-service');
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
 const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
@@ -50,10 +51,22 @@ test('valida HMAC do Mercado Pago com proteção de replay',()=>{
   assert.equal(verifyWebhookSignature({secret,xSignature,xRequestId:requestId,dataId}),true);assert.equal(verifyWebhookSignature({secret,xSignature,xRequestId:'other',dataId}),false);assert.equal(verifyWebhookSignature({secret,xSignature,xRequestId:requestId,dataId,now:(ts+600)*1000}),false);assert.equal(eventId({type:'subscription_preapproval',action:'updated',dataId,requestId}),eventId({type:'subscription_preapproval',action:'updated',dataId,requestId}));
 });
 
-test('cliente Mercado Pago envia token somente no backend e chave idempotente',async()=>{
+test('e-mail de cobrança é validado e independente do login Adi Festa',()=>{
+  assert.equal(normalizeBillingPayerEmail('  PAGADOR.Pessoal@Gmail.com '),'pagador.pessoal@gmail.com');
+  assert.throws(()=>normalizeBillingPayerEmail('sem-arroba'),error=>error.code==='invalid-billing-payer-email');
+  assert.throws(()=>normalizeBillingPayerEmail(`a@${'x'.repeat(252)}.com`),error=>error.code==='invalid-billing-payer-email');
+});
+
+test('erro subscription-invalid-user oferece troca do e-mail do pagador',()=>{
+  assert.equal(providerIndicatesPayerEmailMismatch({providerErrorCode:'subscription-invalid-user'}),true);
+  assert.equal(providerIndicatesPayerEmailMismatch({providerMessage:'payer email is different'}),true);
+  assert.equal(providerIndicatesPayerEmailMismatch({providerMessage:'temporary unavailable'}),false);
+});
+
+test('cliente Mercado Pago envia pagador informado e referência interna opaca',async()=>{
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'sub_1',init_point:'https://checkout.example'})}};
-  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('essential');await service.createSubscription({businessId:'biz_1',userId:'uid_1',email:'owner@example.com',plan,backUrl:'https://app.example',operationId:'op_1'});
-  assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'op_1');const body=JSON.parse(captured.options.body);assert.equal(body.external_reference,'biz_1');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal('notification_url' in body,false);
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('essential');await service.createSubscription({businessId:'biz_1',userId:'uid_adi_festa',billingPayerEmail:'payer.personal@example.com',plan,backUrl:'https://app.example',operationId:'operation_123456789'});
+  assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'operation_123456789');const body=JSON.parse(captured.options.body);assert.equal(body.payer_email,'payer.personal@example.com');assert.equal(body.metadata.user_id,'uid_adi_festa');assert.equal(body.metadata.business_id,'biz_1');assert.equal(body.external_reference,billingExternalReference('biz_1','operation_123456789'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.notEqual(body.external_reference,'payer.personal@example.com');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal('notification_url' in body,false);
 });
 
 test('cliente Mercado Pago restaura valor com a moeda exigida pelo provedor',async()=>{
@@ -157,4 +170,12 @@ test('webhook valida valor, empresa, referência, plano e pagador antes de ativa
   assert.throws(()=>validateProviderSubscription({...provider,preapproval_plan_id:'plan_2'},index,business),error=>error.code==='provider-plan-mismatch');
   assert.throws(()=>validateProviderSubscription({...provider,payer_id:'payer_2'},index,business),error=>error.code==='provider-payer-mismatch');
   assert.throws(()=>validateProviderSubscription({...provider,metadata:{business_id:'biz_2'}},index,business),error=>error.code==='provider-business-mismatch');
+});
+
+test('webhook associa por índice da empresa e não pelo e-mail do pagador',()=>{
+  const reference=billingExternalReference('biz_empresa_a','operation_123456789'),index={businessId:'biz_empresa_a',chargedPrice:39.9,expectedExternalReference:reference,billingPayerEmail:'pagador-b@example.com'};
+  const provider={id:'sub_1',status:'authorized',external_reference:reference,payer_id:'payer_b',payer_email:'pagador-b@example.com',metadata:{business_id:'biz_empresa_a'},auto_recurring:{transaction_amount:39.9}};
+  const validation=validateProviderSubscription(provider,index,{subscription:{mercadoPago:{customerId:null}}});
+  assert.equal(validation.active,true);
+  assert.throws(()=>validateProviderSubscription({...provider,metadata:{business_id:'biz_empresa_b'}},index,{}),error=>error.code==='provider-business-mismatch');
 });
