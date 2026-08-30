@@ -21,6 +21,7 @@ const {onboardingService}=require('./services/onboarding-service');
 const {requirePaymentMethod,providerPaymentResult}=require('./services/billing-payment-method-service');
 const {pixBillingService,pixDetails,pendingPixSubscription,publicAttempt}=require('./services/pix-billing-service');
 const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-service');
+const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-state-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -70,6 +71,33 @@ function terminalCardCheckoutDiagnostic(provider){
   if(!['cancelled','canceled','expired'].includes(status))return null;
   return{paymentId:null,authorizedPaymentId:null,status:'not_created',statusDetail:null,paymentMethodId:null,paymentTypeId:null,issuerId:null,transactionAmount:Number(provider?.auto_recurring?.transaction_amount)||null,dateCreated:provider?.date_created||null,dateLastUpdated:provider?.last_modified||null,rejected:true,message:'O checkout foi encerrado antes da aprovação. Tente outro cartão ou pague por Pix.'};
 }
+async function reconcileCardBillingAttempt({subscriptionId,source='provider_reconciliation',expectedBusinessId=null,cancelIfAbandoned=false}){
+  const store=providerStore(),index=await store.resolveIndex(subscriptionId);
+  if(!index?.businessId)throw Object.assign(Error('Assinatura sem índice interno.'),{code:'subscription-index-not-found'});
+  if(expectedBusinessId&&index.businessId!==expectedBusinessId)throw Object.assign(Error('Empresa divergente na reconciliação.'),{code:'subscription-business-mismatch'});
+  let provider;
+  try{provider=await mp().getSubscription(subscriptionId)}catch(error){
+    if(error?.status!==404)throw error;
+    const now=iso(),attemptId=String(index.internalSubscriptionId||''),patch=attemptStatePatch({currentStatus:index.status,providerStatus:'not_found',paymentStatus:null,statusDetail:null,now,source});patch.status='provider_not_found';patch.closedAt=now;patch.closeReason='provider_not_found';
+    const batch=db.batch();batch.set(db.doc(`subscriptionIndex/${subscriptionId}`),patch,{merge:true});batch.set(db.doc(`businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`),patch,{merge:true});if(/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId))batch.set(db.doc(`businesses/${index.businessId}/billingCheckoutAttempts/${attemptId}`),patch,{merge:true});await batch.commit();
+    logger.warn('[BILLING_ATTEMPT_CLOSED]',{businessId:index.businessId,subscriptionId,attemptId,reason:'provider_not_found',source});return{index,provider:null,payment:null,attempt:patch,providerNotFound:true};
+  }
+  let payment=null;try{payment=await latestCardPaymentDiagnostic(subscriptionId)}catch(error){logger.warn('[BILLING_PROVIDER_STATUS]',{businessId:index.businessId,subscriptionId,source,status:String(provider?.status||''),diagnosticUnavailable:true,code:error?.code||'unknown'})}
+  payment=payment||terminalCardCheckoutDiagnostic(provider);
+  const providerStatus=String(provider?.status||'').toLowerCase();
+  if(cancelIfAbandoned&&providerStatus==='pending'&&!payment){provider=await mp().cancelSubscription(subscriptionId);}
+  const result=await store.applyProviderSubscription(provider,{source}),now=iso(),attemptId=String(index.internalSubscriptionId||''),attemptRef=/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId)?db.doc(`businesses/${index.businessId}/billingCheckoutAttempts/${attemptId}`):null,attemptSnapshot=attemptRef?await attemptRef.get():null,currentStatus=attemptSnapshot?.data()?.status||index.status,patch=attemptStatePatch({currentStatus,providerStatus:String(provider?.status||''),paymentStatus:payment?.status,statusDetail:payment?.statusDetail,now,source});
+  if(cancelIfAbandoned&&patch.status==='cancelled'){patch.status='abandoned';patch.closeReason='checkout_abandoned_after_24h';}
+  if(payment?.paymentId)await store.recordPaymentEvent(subscriptionId,`reconcile_${payment.paymentId}`,{...payment,successful:payment.status==='approved'});
+  const shared={...patch,lastPaymentProviderId:payment?.paymentId||null,lastAuthorizedPaymentId:payment?.authorizedPaymentId||null},batch=db.batch();batch.set(db.doc(`subscriptionIndex/${subscriptionId}`),shared,{merge:true});batch.set(db.doc(`businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`),shared,{merge:true});if(attemptRef)batch.set(attemptRef,shared,{merge:true});await batch.commit();
+  logger.info('[BILLING_PROVIDER_STATUS]',{businessId:index.businessId,subscriptionId,attemptId,source,status:String(provider?.status||''),paymentStatus:payment?.status||null,statusDetail:payment?.statusDetail||null});
+  logger.info('[BILLING_ATTEMPT_RECONCILED]',{businessId:index.businessId,subscriptionId,attemptId,source,status:patch.status});
+  if(payment?.rejected)logger.warn('[BILLING_PAYMENT_REJECTED]',{businessId:index.businessId,subscriptionId,attemptId,paymentId:payment.paymentId||null,statusDetail:payment.statusDetail||null});
+  if(result.couponReleased)logger.info('[BILLING_COUPON_RELEASED]',{businessId:index.businessId,subscriptionId,attemptId,redemptionId:result.redemptionId||null,reason:patch.closeReason||patch.status});
+  if(isTerminalAttempt(patch.status))logger.info('[BILLING_ATTEMPT_CLOSED]',{businessId:index.businessId,subscriptionId,attemptId,status:patch.status,reason:patch.closeReason||null,source});
+  if(patch.status==='approved')logger.info('[BILLING_ENTITLEMENT_ACTIVATED]',{businessId:index.businessId,subscriptionId,attemptId,planId:index.planId||null,source});
+  return{index,provider,payment,attempt:patch,result};
+}
 const operationId=(raw,businessId,planId,uid)=>{
   const supplied=String(raw||'').trim();
   if(/^[a-zA-Z0-9_-]{16,100}$/.test(supplied))return supplied;
@@ -82,7 +110,7 @@ async function acquireCheckoutAttempt({businessId,operationId,requestHash,contex
   const result=await db.runTransaction(async transaction=>{
     const snapshot=await transaction.get(ref),data=snapshot.data()||{};
     if(snapshot.exists&&data.requestHash!==requestHash)throw new HttpsError('failed-precondition','Esta tentativa de checkout não corresponde à solicitação atual.');
-    if(snapshot.exists&&data.status==='completed'&&data.checkoutUrl)return{reused:true,checkoutUrl:String(data.checkoutUrl)};
+    if(snapshot.exists&&data.status==='pending_payment'&&data.checkoutUrl)return{reused:true,checkoutUrl:String(data.checkoutUrl)};
     if(snapshot.exists&&data.paymentMethodType==='pix_monthly'&&['payment_pending','payment_approved','expired','canceled','failed'].includes(data.status))return{reused:true,pix:publicAttempt(data)};
     if(snapshot.exists&&data.status==='processing'&&data.leaseUntil?.toMillis?.()>now)throw new HttpsError('already-exists','O checkout já está sendo preparado. Aguarde alguns instantes.');
     transaction.set(ref,{businessId,requestedBy:context.uid,operationId,requestHash,planId,billingCycle,paymentMethodType,quoteId:quoteId||null,billingPayerEmail:billingPayerEmail||null,status:'processing',leaseUntil:Timestamp.fromMillis(now+CHECKOUT_LEASE_MS),attemptCount:FieldValue.increment(1),createdAt:data.createdAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
@@ -90,7 +118,7 @@ async function acquireCheckoutAttempt({businessId,operationId,requestHash,contex
   });
   return{...result,ref};
 }
-async function finishCheckoutAttempt(ref,patch){await ref.set({...patch,status:'completed',leaseUntil:FieldValue.delete(),completedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true})}
+async function finishCheckoutAttempt(ref,patch){await ref.set({...patch,status:'pending_payment',leaseUntil:FieldValue.delete(),providerRedirectedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true})}
 async function failCheckoutAttempt(ref,error){if(!ref)return;await ref.set({status:'failed',errorCode:String(error?.code||'unknown').slice(0,80),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()},{merge:true}).catch(()=>{})}
 async function supersedePendingCardCheckout({businessId,context,subscriptionId,newOperationId}){
   const intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${subscriptionId}`),indexRef=db.doc(`subscriptionIndex/${subscriptionId}`),intentSnapshot=await intentRef.get(),intent=intentSnapshot.data()||{};
@@ -164,7 +192,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       if(checkoutUrl){const provider=await mp().getSubscription(String(pendingProviderId)),providerStatus=String(provider?.status||'').toLowerCase();if(providerStatus==='pending')return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};if(providerStatus==='authorized'){await providerStore().applyProviderSubscription(provider,{source:'checkout_retry_guard'});throw new HttpsError('failed-precondition','Este pagamento já foi confirmado. Atualize a tela de planos.')}}
     }
     const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id,billingPayerEmail}));billingLog.operationIdHash=sha(opId).slice(0,12);
-    logger.info('[Billing] checkout_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
+    logger.info('[BILLING_ATTEMPT_CREATED]',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,attemptId:opId,operationIdHash:sha(opId).slice(0,12)});
     logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
     const attempt=await acquireCheckoutAttempt({businessId,operationId:opId,requestHash,context,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,quoteId,billingPayerEmail});
     attemptRef=attempt.ref;
@@ -197,9 +225,9 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       logger.info('[Billing] pix_waiting_payment',{businessId,planId:plan.id,orderId:details.orderId,hasCoupon:Boolean(redemption),couponQuoteRefreshed:redemption?.quoteRefreshed===true,replacesOperationId:replacement?previousAttemptId:null,environment:MP_ENV.value()});
       return{paymentMethodType:'pix_monthly',pix:publicAttempt(attemptData),reused:false};
     }
-    const provider=await mp().createSubscription({businessId,userId:context.uid,billingPayerEmail,plan,billing,backUrl,operationId:opId,coupon,paymentMethodType:paymentMethod.id});
+    const provider=await mp().createSubscription({businessId,userId:context.uid,billingPayerEmail,plan,billing,backUrl,operationId:opId,coupon,paymentMethodType:paymentMethod.id,notificationUrl:MP_WEBHOOK_URL.value()});
     if(!provider?.id||!provider?.init_point)throw new HttpsError('unavailable','O checkout não foi criado pelo Mercado Pago.');
-    const expectedExternalReference=billingExternalReference(businessId,opId),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null,paymentMethodType:paymentMethod.id,billingPayerEmail}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),baseIndex={businessId,ownerId:context.uid,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,billingPayerEmail,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,replacesSubscriptionId:cardReplacement?.subscriptionId||null,status:'pending',createdAt:now,updatedAt:now};
+    const expectedExternalReference=billingExternalReference(businessId,opId),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null,paymentMethodType:paymentMethod.id,billingPayerEmail}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),baseIndex={businessId,ownerId:context.uid,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,billingPayerEmail,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,replacesSubscriptionId:cardReplacement?.subscriptionId||null,reconciliationVersion:2,status:'pending_payment',createdAt:now,updatedAt:now};
     batch.update(context.businessRef,{subscription,updatedAt:FieldValue.serverTimestamp()});
     batch.set(intentRef,{...baseIndex,requestedBy:context.uid,operationId:opId,providerStatus:String(provider.status||'pending'),subscriptionId:String(provider.id),providerPlanId:null,customerId:provider.payer_id==null?null:String(provider.payer_id),checkoutUrl:String(provider.init_point)});
     batch.set(db.doc(`subscriptionIndex/${provider.id}`),{...baseIndex,subscriptionId:String(provider.id)});
@@ -207,6 +235,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     await batch.commit();
     checkoutPersisted=true;
     await finishCheckoutAttempt(attemptRef,{checkoutUrl:String(provider.init_point),providerPlanId:null,subscriptionId:String(provider.id),paymentMethodType:paymentMethod.id});
+    logger.info('[BILLING_PROVIDER_REDIRECT]',{businessId,planId:plan.id,subscriptionId:String(provider.id),attemptId:opId,providerStatus:String(provider.status||'pending')});
     logger.info('[Subscriptions] checkout created',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,coupon:Boolean(redemption),environment:MP_ENV.value()});
     logger.info('[Billing] subscription_created',{businessId,planId:plan.id,paymentMethodType:paymentMethod.id,subscriptionId:String(provider.id)});
     return{checkoutUrl:String(provider.init_point),paymentMethodType:paymentMethod.id,reused:false};
@@ -255,15 +284,9 @@ exports.syncSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       logger.info('[Subscriptions] Pix manual reconciliation',{businessId,status:result.status});return{subscription:sanitize(result.subscription),pix:result.attempt,source:'mercado_pago'};
     }
     const subscriptionId=subscription.mercadoPago?.subscriptionId;if(!subscriptionId)throw new HttpsError('failed-precondition','Cobrança do Mercado Pago não encontrada.');
-    const store=providerStore(),index=await store.resolveIndex(subscriptionId),provider=await mp().getSubscription(subscriptionId);let payment=null;
-    try{payment=await latestCardPaymentDiagnostic(subscriptionId)}catch(diagnosticError){logger.warn('[Subscriptions] card payment diagnostic unavailable',{businessId,subscriptionId,error:String(diagnosticError?.message||diagnosticError)})}
-    payment=payment||terminalCardCheckoutDiagnostic(provider);
-    const result=await store.applyProviderSubscription(provider,{source:checkoutReturn?'checkout_return':'manual_reconciliation'}),now=iso();
-    if(payment?.paymentId)await store.recordPaymentEvent(subscriptionId,`reconcile_${payment.paymentId}`,{...payment,successful:payment.status==='approved'});
-    const attemptId=String(index?.internalSubscriptionId||''),diagnosticPatch={providerStatus:String(provider.status||''),lastPaymentStatus:payment?.status||null,lastPaymentStatusDetail:payment?.statusDetail||null,lastPaymentProviderId:payment?.paymentId||null,updatedAt:now},batch=db.batch();
-    batch.set(db.doc(`subscriptionIndex/${subscriptionId}`),diagnosticPatch,{merge:true});batch.set(db.doc(`businesses/${businessId}/subscriptionIntents/${subscriptionId}`),diagnosticPatch,{merge:true});
-    if(/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId))batch.set(context.businessRef.collection('billingCheckoutAttempts').doc(attemptId),{...diagnosticPatch,status:payment?.rejected?'payment_rejected':String(provider.status||'').toLowerCase(),reconciledAt:FieldValue.serverTimestamp()},{merge:true});
-    batch.update(context.businessRef,{'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});await batch.commit();
+    logger.info('[BILLING_RETURN_RECEIVED]',{businessId,subscriptionId,checkoutReturn});
+    const reconciliation=await reconcileCardBillingAttempt({subscriptionId,source:checkoutReturn?'checkout_return':'manual_reconciliation',expectedBusinessId:businessId}),index=reconciliation.index,payment=reconciliation.payment,result=reconciliation.result,now=iso(),attemptId=String(index?.internalSubscriptionId||'');
+    await context.businessRef.update({'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});
     const retryContext={planId:index?.planId||subscription.pendingPlanId||subscription.planId||null,billingCycle:index?.billingCycle||subscription.pendingBillingCycle||subscription.billingCycle||'monthly',billingPayerEmail:index?.billingPayerEmail||subscription.pendingBillingPayerEmail||null,couponCode:index?.discountSnapshot?.couponCodeSnapshot||null,officialPrice:index?.officialPrice??null,chargedPrice:index?.chargedPrice??null,previousCheckoutAttemptId:attemptId||null};
     logger.info('[Subscriptions] card reconciliation',{businessId,status:result.subscription.status,paymentStatus:payment?.status||null,statusDetail:payment?.statusDetail||null});return{subscription:sanitize(result.subscription),payment,retryContext,source:'mercado_pago'};
   }catch(error){throw callableError(error)}
@@ -305,7 +328,7 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
       subscriptionId=String(payment.metadata?.preapproval_id||payment.subscription_id||'');paymentResult=providerPaymentResult(event.type,payment);
     }
     if(!subscriptionId){logger.info('[BILLING_WEBHOOK_SKIPPED]',{eventType:event.type,reason:'subscription-id-missing'});await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
-    const provider=await mp().getSubscription(subscriptionId),store=providerStore(),result=await store.applyProviderSubscription(provider,{source:'webhook',eventId:id});
+    const reconciliation=await reconcileCardBillingAttempt({subscriptionId,source:'webhook'}),store=providerStore(),result=reconciliation.result;
     if(paymentResult){
       await store.recordPaymentEvent(subscriptionId,id,paymentResult);
       if(paymentResult.successful){logger.info('[Billing] payment_approved',{businessId:result.businessId,subscriptionId,paymentId:paymentResult.paymentId||null});const cycle=await store.recordDiscountPayment(subscriptionId,id);if(cycle.restoreAmount){await mp().updateSubscriptionAmount(subscriptionId,cycle.restoreAmount);await store.completeDiscountRestoration(subscriptionId,id)}}
@@ -322,6 +345,24 @@ exports.expireSubscriptionsDaily=onSchedule({region:REGION,schedule:'15 3 * * *'
   let changed=0;for(const query of queries){const snapshot=await query.get();if(snapshot.empty)continue;const batch=db.batch();snapshot.docs.forEach(doc=>{batch.update(doc.ref,{'subscription.status':'expired','subscription.expiredAt':now,updatedAt:now});changed++});await batch.commit()}
   let discountsRestored=0;const discounts=await db.collection('businesses').where('subscription.discount.restoreDueAt','<=',now.toDate().toISOString()).limit(100).get();for(const business of discounts.docs){const subscription=business.data().subscription||{},subscriptionId=subscription.mercadoPago?.subscriptionId,discount=subscription.discount||{};if(subscription.status!=='active'||discount.durationType!=='until_date'||!subscriptionId)continue;try{await mp().updateSubscriptionAmount(subscriptionId,Number(discount.originalPrice));await providerStore().completeDiscountRestoration(subscriptionId,`coupon-expiry:${business.id}:${discount.endsAt}`);discountsRestored++}catch(error){logger.error('[Subscriptions] coupon restoration failed',{businessId:business.id,code:error?.code||'unknown'})}}
   logger.info('[Subscriptions] daily expiration completed',{changed,discountsRestored});
+});
+
+const billingTime=value=>typeof value?.toMillis==='function'?value.toMillis():new Date(value||0).getTime();
+exports.reconcileStaleBillingAttempts=onSchedule({region:REGION,schedule:'every 6 hours',timeZone:'America/Sao_Paulo',memory:'256MiB',timeoutSeconds:300,maxInstances:1},async()=>{
+  const snapshot=await db.collection('subscriptionIndex').where('status','==','pending_payment').limit(100).get(),now=Date.now(),reconcileAfter=30*60*1000,abandonAfter=24*60*60*1000;let checked=0,closed=0,failed=0;
+  for(const row of snapshot.docs){const index=row.data()||{};if(index.reconciliationVersion!==2)continue;const age=now-billingTime(index.createdAt||index.updatedAt);if(!Number.isFinite(age)||age<reconcileAfter)continue;try{const result=await reconcileCardBillingAttempt({subscriptionId:row.id,source:'stale_reconciliation',cancelIfAbandoned:age>=abandonAfter});checked++;if(isTerminalAttempt(result.attempt?.status))closed++}catch(error){failed++;logger.error('[BILLING_STALE_RECONCILIATION_FAILED]',{subscriptionId:row.id,businessId:index.businessId||null,code:error?.code||'unknown'})}}
+  logger.info('[BILLING_STALE_RECONCILIATION_FINISHED]',{candidates:snapshot.size,checked,closed,failed,reconcileAfterMinutes:30,abandonAfterHours:24});
+});
+
+exports.cancelPendingBillingAttempt=onCall(FUNCTION_OPTIONS,async request=>{
+  try{const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId,{ownerOnly:true}),subscription=context.business.subscription||{},subscriptionId=String(subscription.mercadoPago?.subscriptionId||'');if(!subscriptionId||subscription.pendingPaymentMethodType!=='card')throw new HttpsError('failed-precondition','Não há checkout de cartão pendente para cancelar.');const provider=await mp().getSubscription(subscriptionId),status=String(provider?.status||'').toLowerCase();if(status==='authorized')throw new HttpsError('failed-precondition','O pagamento já foi autorizado. Atualize o plano.');if(status==='pending')await mp().cancelSubscription(subscriptionId);const result=await reconcileCardBillingAttempt({subscriptionId,source:'owner_cancel_pending',expectedBusinessId:businessId});return{status:result.attempt.status,subscription:sanitize(result.result?.subscription||subscription)}}catch(error){throw callableError(error)}
+});
+
+exports.reconcileBillingRequest=onDocumentCreated({document:'billingReconciliationRequests/{requestId}',region:REGION,memory:'256MiB',timeoutSeconds:120,maxInstances:1,secrets:[MP_TOKEN,MP_TEST_TOKEN]},async event=>{
+  const snapshot=event.data;if(!snapshot)return;const request=snapshot.data()||{},businessId=String(request.businessId||''),subscriptionId=String(request.subscriptionId||''),action=String(request.action||'reconcile');
+  if(!/^biz_[A-Za-z0-9_-]{10,100}$/.test(businessId)||!/^[A-Za-z0-9_-]{16,100}$/.test(subscriptionId)||!['reconcile','cancel_abandoned'].includes(action)){await snapshot.ref.set({status:'failed',errorCode:'invalid_request',finishedAt:FieldValue.serverTimestamp()},{merge:true});return}
+  const acquired=await db.runTransaction(async transaction=>{const current=await transaction.get(snapshot.ref),data=current.data()||{};if(['processing','completed'].includes(data.status))return false;transaction.set(snapshot.ref,{status:'processing',startedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});return true});if(!acquired)return;
+  try{const result=await reconcileCardBillingAttempt({subscriptionId,source:'admin_reconciliation_request',expectedBusinessId:businessId,cancelIfAbandoned:action==='cancel_abandoned'});await snapshot.ref.set({status:'completed',resultStatus:result.attempt?.status||null,providerStatus:String(result.provider?.status||'')||null,paymentStatus:result.payment?.status||null,finishedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true})}catch(error){logger.error('[BILLING_ADMIN_RECONCILIATION_FAILED]',{requestId:event.params.requestId,businessId,subscriptionId,code:error?.code||'unknown'});await snapshot.ref.set({status:'failed',errorCode:String(error?.code||'unknown').slice(0,80),finishedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});throw error}
 });
 
 exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{businessId}',region:REGION},async event=>{

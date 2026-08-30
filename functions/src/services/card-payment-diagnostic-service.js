@@ -2,9 +2,9 @@
 
 const REASONS = Object.freeze({
   cc_rejected_high_risk:
-    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Tente outro cartão ou pague por Pix.",
+    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Use outro cartão ou pague por Pix.",
   high_risk:
-    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Tente outro cartão ou pague por Pix.",
+    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Use outro cartão ou pague por Pix.",
   cc_rejected_insufficient_amount:
     "O cartão não possui limite disponível suficiente para esta cobrança.",
   insufficient_amount:
@@ -25,6 +25,12 @@ const REASONS = Object.freeze({
     "Confira os dados do cartão e tente novamente.",
   cc_rejected_duplicated_payment:
     "O Mercado Pago identificou uma cobrança semelhante recente. Aguarde ou tente outro meio de pagamento.",
+  cc_rejected_blacklist:
+    "Este cartão não pôde ser usado nesta cobrança. Use outro cartão ou pague por Pix.",
+  cc_rejected_other_reason:
+    "O banco ou o Mercado Pago não aprovou esta cobrança. Use outro cartão ou pague por Pix.",
+  cc_rejected_max_attempts:
+    "Não foi possível tentar novamente com este cartão agora. Use outro cartão ou pague por Pix.",
 });
 
 function normalizeStatusDetail(value) {

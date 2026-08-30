@@ -55,7 +55,7 @@ test('clique repetido possui lease e tentativa lógica idempotente',()=>{
   assert.match(backend,/billingCheckoutAttempts/);
   assert.match(backend,/CHECKOUT_LEASE_MS/);
   assert.match(backend,/requestHash/);
-  assert.match(backend,/status==='completed'/);
+  assert.match(backend,/status==='pending_payment'/);
   assert.match(backend,/status==='payment_pending'/);
 });
 

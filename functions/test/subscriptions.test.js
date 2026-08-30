@@ -12,6 +12,7 @@ const {requirePaymentMethod,providerPaymentResult}=require('../src/services/bill
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
 const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
 const {paymentDeclineMessage,publicCardPaymentDiagnostic}=require('../src/services/card-payment-diagnostic-service');
+const {canonicalAttemptStatus,transitionAttempt,attemptStatePatch,isTerminalAttempt,getCurrentBillingAttempt}=require('../src/services/billing-attempt-state-service');
 
 test('normaliza aliases sem permitir plano arbitrário',()=>{
   assert.equal(normalizePlanId('starter'),'essential');assert.equal(normalizePlanId('pro'),'professional');assert.equal(normalizePlanId('premium'),'premium');assert.throws(()=>requirePlan('internal'));
@@ -64,10 +65,28 @@ test('erro subscription-invalid-user oferece troca do e-mail do pagador',()=>{
   assert.equal(providerIndicatesPayerEmailMismatch({providerMessage:'temporary unavailable'}),false);
 });
 
-test('cliente Mercado Pago envia pagador informado e referência interna opaca',async()=>{
+test('cliente Mercado Pago envia pagador, referência interna e webhook seguro',async()=>{
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'sub_1',init_point:'https://checkout.example'})}};
-  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('essential');await service.createSubscription({businessId:'biz_1',userId:'uid_adi_festa',billingPayerEmail:'payer.personal@example.com',plan,backUrl:'https://app.example',operationId:'operation_123456789'});
-  assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'operation_123456789');const body=JSON.parse(captured.options.body);assert.equal(body.payer_email,'payer.personal@example.com');assert.equal(body.metadata.user_id,'uid_adi_festa');assert.equal(body.metadata.business_id,'biz_1');assert.equal(body.external_reference,billingExternalReference('biz_1','operation_123456789'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.notEqual(body.external_reference,'payer.personal@example.com');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal('notification_url' in body,false);
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),plan=requirePlan('essential');await service.createSubscription({businessId:'biz_1',userId:'uid_adi_festa',billingPayerEmail:'payer.personal@example.com',plan,backUrl:'https://app.example',operationId:'operation_123456789',notificationUrl:'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
+  assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'operation_123456789');const body=JSON.parse(captured.options.body);assert.equal(body.payer_email,'payer.personal@example.com');assert.equal(body.metadata.user_id,'uid_adi_festa');assert.equal(body.metadata.business_id,'biz_1');assert.equal(body.external_reference,billingExternalReference('biz_1','operation_123456789'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.notEqual(body.external_reference,'payer.personal@example.com');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal(body.notification_url,'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks');
+});
+
+test('recusa não inventa período pago nem data de renovação',()=>{
+  const patch=providerPatch({id:'sub_rejected',status:'cancelled',date_created:'2026-08-29T22:00:00Z',next_payment_date:'2026-09-29T22:00:00Z'},{planId:'premium',now:'2026-08-30T02:00:00Z',existing:{status:'pending',hasPaidSubscription:false,currentPeriodEnd:null}});
+  assert.equal(patch.status,'cancelled');assert.equal(patch.currentPeriodEnd,null);assert.equal(patch.nextBillingDate,null);assert.equal(patch.hasPaidSubscription,false);
+});
+
+test('máquina de estados fecha recusa e impede regressão terminal',()=>{
+  assert.deepEqual(canonicalAttemptStatus({providerStatus:'cancelled',paymentStatus:'rejected',statusDetail:'cc_rejected_high_risk'}),{status:'rejected',reason:'cc_rejected_high_risk'});
+  assert.equal(attemptStatePatch({currentStatus:'pending_payment',providerStatus:'cancelled',paymentStatus:'rejected',statusDetail:'cc_rejected_high_risk',now:'2026-08-30T03:00:00.000Z'}).status,'rejected');
+  assert.equal(isTerminalAttempt('rejected'),true);
+  assert.deepEqual(transitionAttempt('rejected','pending_payment'),{allowed:false,status:'rejected',reason:'terminal_state_is_immutable'});
+  assert.equal(attemptStatePatch({currentStatus:'approved',providerStatus:'pending',now:'2026-08-30T04:00:00.000Z'}).status,'approved');
+});
+
+test('checkout atual ignora terminais e completed legado',()=>{
+  const current=getCurrentBillingAttempt([{id:'old',status:'completed',checkoutUrl:'https://old',updatedAt:'2026-08-29T10:00:00Z'},{id:'rejected',status:'rejected',checkoutUrl:'https://rejected',updatedAt:'2026-08-29T12:00:00Z'},{id:'valid',status:'pending_payment',checkoutUrl:'https://valid',updatedAt:'2026-08-29T11:00:00Z'}]);
+  assert.equal(current.id,'valid');assert.equal(getCurrentBillingAttempt([{status:'cancelled',checkoutUrl:'x'}]),null);
 });
 
 test('cliente Mercado Pago restaura valor com a moeda exigida pelo provedor',async()=>{
@@ -178,6 +197,7 @@ test('webhook valida valor, empresa, referência, plano e pagador antes de ativa
   const provider={id:'sub_1',status:'authorized',preapproval_plan_id:'plan_1',external_reference:'biz_1:op_1-plan',payer_id:'payer_1',metadata:{business_id:'biz_1'},auto_recurring:{transaction_amount:39.9}};
   assert.equal(validateProviderSubscription(provider,index,business).active,true);
   assert.throws(()=>validateProviderSubscription({...provider,auto_recurring:{transaction_amount:49.9}},index,business),error=>error.code==='provider-price-mismatch');
+  assert.doesNotThrow(()=>validateProviderSubscription({...provider,status:'cancelled',payer_id:'payer_antigo'},index,business),'checkout antigo terminal pode ser fechado sem assumir a identidade do pagador atual');
   assert.throws(()=>validateProviderSubscription({...provider,external_reference:'biz_2:op_1-plan'},index,business),error=>error.code==='provider-reference-mismatch');
   assert.throws(()=>validateProviderSubscription({...provider,preapproval_plan_id:'plan_2'},index,business),error=>error.code==='provider-plan-mismatch');
   assert.throws(()=>validateProviderSubscription({...provider,payer_id:'payer_2'},index,business),error=>error.code==='provider-payer-mismatch');
