@@ -89,6 +89,7 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     },
     getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
+    searchAuthorizedPayments(subscriptionId,{limit=10}={}){const safeLimit=Math.max(1,Math.min(10,Number(limit)||10)),query=new URLSearchParams({preapproval_id:String(subscriptionId),limit:String(safeLimit),offset:'0'});return request(`/authorized_payments/search?${query}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'cancelled'}})},
     updateSubscriptionAmount(subscriptionId,amount,currency='BRL'){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount),currency_id:String(currency||'BRL')}}})},
     getAuthorizedPayment(paymentId){return request(`/authorized_payments/${encodeURIComponent(paymentId)}`)},

@@ -20,6 +20,7 @@ const {couponFirestoreService}=require('./services/coupon-firestore-service');
 const {onboardingService}=require('./services/onboarding-service');
 const {requirePaymentMethod,providerPaymentResult}=require('./services/billing-payment-method-service');
 const {pixBillingService,pixDetails,pendingPixSubscription,publicAttempt}=require('./services/pix-billing-service');
+const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -57,6 +58,18 @@ const providerStore=()=>firestoreSubscriptionService(db);
 const coupons=()=>couponFirestoreService(db);
 const pixBilling=()=>pixBillingService(db);
 const iso=()=>new Date().toISOString();
+async function latestCardPaymentDiagnostic(subscriptionId){
+  const search=await mp().searchAuthorizedPayments(subscriptionId,{limit:10}),rows=Array.isArray(search?.results)?search.results:[];
+  if(!rows.length)return null;
+  const authorized=[...rows].sort((a,b)=>new Date(b.last_modified||b.date_created||0)-new Date(a.last_modified||a.date_created||0))[0],paymentId=String(authorized?.payment?.id||'').trim();
+  const payment=paymentId?await mp().getPayment(paymentId):{};
+  return publicCardPaymentDiagnostic(payment,authorized);
+}
+function terminalCardCheckoutDiagnostic(provider){
+  const status=String(provider?.status||'').trim().toLowerCase();
+  if(!['cancelled','canceled','expired'].includes(status))return null;
+  return{paymentId:null,authorizedPaymentId:null,status:'not_created',statusDetail:null,paymentMethodId:null,paymentTypeId:null,issuerId:null,transactionAmount:Number(provider?.auto_recurring?.transaction_amount)||null,dateCreated:provider?.date_created||null,dateLastUpdated:provider?.last_modified||null,rejected:true,message:'O checkout foi encerrado antes da aprovação. Tente outro cartão ou pague por Pix.'};
+}
 const operationId=(raw,businessId,planId,uid)=>{
   const supplied=String(raw||'').trim();
   if(/^[a-zA-Z0-9_-]{16,100}$/.test(supplied))return supplied;
@@ -145,10 +158,10 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     if(request.data?.userId&&request.data.userId!==context.uid)throw new HttpsError('permission-denied','Usuário divergente.');
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
-    const quoteId=String(request.data?.quoteId||''),couponCode=String(request.data?.couponCode||'').trim().toUpperCase(),previousAttemptId=String(request.data?.previousCheckoutAttemptId||'').trim(),billingPayerEmail=paymentMethod.id==='card'?normalizeBillingPayerEmail(request.data?.billingPayerEmail):null,pendingProviderId=paymentMethod.id==='card'&&context.business.subscription?.pendingPaymentMethodType==='card'&&context.business.subscription?.pendingPlanId?context.business.subscription?.mercadoPago?.subscriptionId:null;
-    if(pendingProviderId&&context.business.subscription?.pendingPlanId===plan.id){
+    const quoteId=String(request.data?.quoteId||''),couponCode=String(request.data?.couponCode||'').trim().toUpperCase(),previousAttemptId=String(request.data?.previousCheckoutAttemptId||'').trim(),billingPayerEmail=paymentMethod.id==='card'?normalizeBillingPayerEmail(request.data?.billingPayerEmail):null,pendingProviderId=context.business.subscription?.pendingPaymentMethodType==='card'&&context.business.subscription?.pendingPlanId?context.business.subscription?.mercadoPago?.subscriptionId:null;
+    if(paymentMethod.id==='card'&&pendingProviderId&&context.business.subscription?.pendingPlanId===plan.id){
       const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${pendingProviderId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.status||'pending')!=='superseded'&&String(intentData.billingCycle||'monthly')===billingCycle&&String(intentData.quoteId||'')===quoteId&&String(intentData.paymentMethodType||'card')===paymentMethod.id&&String(intentData.billingPayerEmail||'')===billingPayerEmail,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;
-      if(checkoutUrl)return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};
+      if(checkoutUrl){const provider=await mp().getSubscription(String(pendingProviderId)),providerStatus=String(provider?.status||'').toLowerCase();if(providerStatus==='pending')return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};if(providerStatus==='authorized'){await providerStore().applyProviderSubscription(provider,{source:'checkout_retry_guard'});throw new HttpsError('failed-precondition','Este pagamento já foi confirmado. Atualize a tela de planos.')}}
     }
     const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id,billingPayerEmail}));billingLog.operationIdHash=sha(opId).slice(0,12);
     logger.info('[Billing] checkout_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
@@ -235,15 +248,24 @@ exports.syncSubscription=onCall(FUNCTION_OPTIONS,async request=>{
   try{
     const businessId=requestedBusinessId(request),reconcileProvider=request.data?.reconcileProvider===true,context=await permissions().authenticatedContext(request,businessId,{ownerOnly:reconcileProvider});
     if(!reconcileProvider)return{subscription:sanitize(context.business.subscription||{}),source:'firestore'};
-    const subscription=context.business.subscription||{},pixOrderId=subscription.mercadoPago?.pendingOrderId;
-    const lastSync=new Date(context.business.subscription?.mercadoPago?.lastManualSyncAt||0).getTime();if(lastSync&&Date.now()-lastSync<15*60*1000)throw new HttpsError('resource-exhausted','A reconciliação manual pode ser feita a cada 15 minutos.');
+    const subscription=context.business.subscription||{},pixOrderId=subscription.mercadoPago?.pendingOrderId,checkoutReturn=request.data?.checkoutReturn===true;
+    const lastSync=new Date(context.business.subscription?.mercadoPago?.lastManualSyncAt||0).getTime(),minimumInterval=checkoutReturn?30000:15*60*1000;if(lastSync&&Date.now()-lastSync<minimumInterval)throw new HttpsError('resource-exhausted',checkoutReturn?'A cobrança acabou de ser conferida. Aguarde alguns segundos.':'A reconciliação manual pode ser feita a cada 15 minutos.');
     if(pixOrderId&&subscription.pendingPaymentMethodType==='pix_monthly'){
       const order=await mp().getOrder(pixOrderId),result=await pixBilling().applyOrder(order,{source:'manual_reconciliation'}),now=iso();await context.businessRef.update({'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});
       logger.info('[Subscriptions] Pix manual reconciliation',{businessId,status:result.status});return{subscription:sanitize(result.subscription),pix:result.attempt,source:'mercado_pago'};
     }
     const subscriptionId=subscription.mercadoPago?.subscriptionId;if(!subscriptionId)throw new HttpsError('failed-precondition','Cobrança do Mercado Pago não encontrada.');
-    const provider=await mp().getSubscription(subscriptionId),result=await providerStore().applyProviderSubscription(provider,{source:'manual_reconciliation'}),now=iso();await context.businessRef.update({'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});
-    logger.info('[Subscriptions] manual reconciliation',{businessId,status:result.subscription.status});return{subscription:sanitize(result.subscription),source:'mercado_pago'};
+    const store=providerStore(),index=await store.resolveIndex(subscriptionId),provider=await mp().getSubscription(subscriptionId);let payment=null;
+    try{payment=await latestCardPaymentDiagnostic(subscriptionId)}catch(diagnosticError){logger.warn('[Subscriptions] card payment diagnostic unavailable',{businessId,subscriptionId,error:String(diagnosticError?.message||diagnosticError)})}
+    payment=payment||terminalCardCheckoutDiagnostic(provider);
+    const result=await store.applyProviderSubscription(provider,{source:checkoutReturn?'checkout_return':'manual_reconciliation'}),now=iso();
+    if(payment?.paymentId)await store.recordPaymentEvent(subscriptionId,`reconcile_${payment.paymentId}`,{...payment,successful:payment.status==='approved'});
+    const attemptId=String(index?.internalSubscriptionId||''),diagnosticPatch={providerStatus:String(provider.status||''),lastPaymentStatus:payment?.status||null,lastPaymentStatusDetail:payment?.statusDetail||null,lastPaymentProviderId:payment?.paymentId||null,updatedAt:now},batch=db.batch();
+    batch.set(db.doc(`subscriptionIndex/${subscriptionId}`),diagnosticPatch,{merge:true});batch.set(db.doc(`businesses/${businessId}/subscriptionIntents/${subscriptionId}`),diagnosticPatch,{merge:true});
+    if(/^[a-zA-Z0-9_-]{16,100}$/.test(attemptId))batch.set(context.businessRef.collection('billingCheckoutAttempts').doc(attemptId),{...diagnosticPatch,status:payment?.rejected?'payment_rejected':String(provider.status||'').toLowerCase(),reconciledAt:FieldValue.serverTimestamp()},{merge:true});
+    batch.update(context.businessRef,{'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});await batch.commit();
+    const retryContext={planId:index?.planId||subscription.pendingPlanId||subscription.planId||null,billingCycle:index?.billingCycle||subscription.pendingBillingCycle||subscription.billingCycle||'monthly',billingPayerEmail:index?.billingPayerEmail||subscription.pendingBillingPayerEmail||null,couponCode:index?.discountSnapshot?.couponCodeSnapshot||null,officialPrice:index?.officialPrice??null,chargedPrice:index?.chargedPrice??null,previousCheckoutAttemptId:attemptId||null};
+    logger.info('[Subscriptions] card reconciliation',{businessId,status:result.subscription.status,paymentStatus:payment?.status||null,statusDetail:payment?.statusDetail||null});return{subscription:sanitize(result.subscription),payment,retryContext,source:'mercado_pago'};
   }catch(error){throw callableError(error)}
 });
 

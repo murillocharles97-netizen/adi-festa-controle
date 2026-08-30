@@ -11,6 +11,7 @@ const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
 const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
+const {paymentDeclineMessage,publicCardPaymentDiagnostic}=require('../src/services/card-payment-diagnostic-service');
 
 test('normaliza aliases sem permitir plano arbitrário',()=>{
   assert.equal(normalizePlanId('starter'),'essential');assert.equal(normalizePlanId('pro'),'professional');assert.equal(normalizePlanId('premium'),'premium');assert.throws(()=>requirePlan('internal'));
@@ -79,6 +80,17 @@ test('cliente Mercado Pago cancela assinatura com o estado aceito pelo provedor'
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:200,text:async()=>JSON.stringify({id:'sub_1',status:'cancelled'})}};
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.cancelSubscription('sub_1');
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval/sub_1');assert.equal(captured.options.method,'PUT');assert.deepEqual(JSON.parse(captured.options.body),{status:'cancelled'});
+});
+
+test('consulta faturas da preapproval sem expor credencial',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:200,text:async()=>JSON.stringify({paging:{total:1},results:[{id:10,payment:{id:20,status:'rejected',status_detail:'cc_rejected_high_risk'}}]})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),result=await service.searchAuthorizedPayments('sub_1',{limit:50});
+  assert.equal(captured.url,'https://api.mercadopago.com/authorized_payments/search?preapproval_id=sub_1&limit=10&offset=0');assert.equal(captured.options.method,'GET');assert.equal(result.results[0].payment.id,20);
+});
+
+test('recusa de cartão preserva status_detail e mensagem segura',()=>{
+  const diagnostic=publicCardPaymentDiagnostic({id:175359087983,status:'rejected',status_detail:'cc_rejected_high_risk',payment_method_id:'visa',payment_type_id:'credit_card',issuer_id:'25',transaction_amount:51.94,date_created:'2026-08-29T22:00:33-03:00'},{id:7031380329,preapproval_id:'sub_1'});
+  assert.equal(diagnostic.paymentId,'175359087983');assert.equal(diagnostic.authorizedPaymentId,'7031380329');assert.equal(diagnostic.statusDetail,'cc_rejected_high_risk');assert.equal(diagnostic.rejected,true);assert.match(diagnostic.message,/análise de segurança/i);assert.equal('card' in diagnostic,false);assert.match(paymentDeclineMessage('cc_rejected_insufficient_amount'),/limite disponível/i);assert.match(paymentDeclineMessage('cc_rejected_call_for_authorize'),/banco emissor/i);
 });
 
 test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()=>{
