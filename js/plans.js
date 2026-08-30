@@ -142,6 +142,56 @@
   const newCheckoutOperationId = () =>
     globalThis.crypto?.randomUUID?.() ||
     `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const CARD_CHECKOUT_RETURN_KEY = "adiFesta:billing:card-checkout-return";
+  let cardReturnReconciling = false;
+  function saveCardCheckoutReturn(value) {
+    try {
+      sessionStorage.setItem(
+        CARD_CHECKOUT_RETURN_KEY,
+        JSON.stringify({ ...value, startedAt: Date.now() }),
+      );
+    } catch {}
+  }
+  function readCardCheckoutReturn() {
+    try {
+      const value = JSON.parse(
+        sessionStorage.getItem(CARD_CHECKOUT_RETURN_KEY) || "null",
+      );
+      if (!value || Date.now() - Number(value.startedAt || 0) > 2 * 60 * 60 * 1000) {
+        sessionStorage.removeItem(CARD_CHECKOUT_RETURN_KEY);
+        return null;
+      }
+      return value;
+    } catch {
+      return null;
+    }
+  }
+  function clearCardCheckoutReturn() {
+    try {
+      sessionStorage.removeItem(CARD_CHECKOUT_RETURN_KEY);
+    } catch {}
+  }
+  function pendingCardCheckoutContext() {
+    const subscription = context().subscription || {},
+      startedAt = new Date(
+        subscription.mercadoPago?.checkoutCreatedAt || 0,
+      ).getTime();
+    if (
+      subscription.pendingPaymentMethodType !== "card" ||
+      !subscription.pendingPlanId ||
+      !subscription.mercadoPago?.subscriptionId ||
+      !startedAt ||
+      Date.now() - startedAt > 24 * 60 * 60 * 1000
+    )
+      return null;
+    return {
+      planId: subscription.pendingPlanId,
+      billingCycle: subscription.pendingBillingCycle || "monthly",
+      billingPayerEmail: subscription.pendingBillingPayerEmail || null,
+      couponCode: subscription.pendingDiscount?.couponCodeSnapshot || null,
+      startedAt,
+    };
+  }
   function consumePayerMismatchReturn() {
     let href;
     try {
@@ -161,6 +211,80 @@
       sessionStorage.setItem(key, new Date().toISOString());
     } catch {}
     return true;
+  }
+  function openCardDeclineModal(payment, retryContext = {}, local = {}) {
+    const root = $("#modal");
+    if (!root) return;
+    const planId = retryContext.planId || local.planId,
+      billingCycle = retryContext.billingCycle || local.billingCycle || "monthly",
+      couponCode = retryContext.couponCode || local.couponCode || null,
+      billingPayerEmail =
+        retryContext.billingPayerEmail || local.billingPayerEmail || null,
+      chargedPrice = Number(
+        retryContext.chargedPrice ?? local.quote?.discountedPrice,
+      ),
+      officialPrice = Number(
+        retryContext.officialPrice ?? local.quote?.originalPrice,
+      ),
+      quote =
+        couponCode && Number.isFinite(chargedPrice)
+          ? {
+              code: couponCode,
+              quoteId: null,
+              discountedPrice: chargedPrice,
+              originalPrice: Number.isFinite(officialPrice)
+                ? officialPrice
+                : chargedPrice,
+            }
+          : null;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-decline" aria-labelledby="card-decline-title"><header>${icon("circle-x")}<h3 id="card-decline-title">Pagamento não aprovado</h3><p>${esc(payment?.message || "Seu banco ou o Mercado Pago não aprovou esta cobrança. Tente outro cartão ou pague por Pix.")}</p></header>${couponCode ? `<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>` : ""}<div class="plan-card-decline-actions"><button type="button" class="btn btn-primary mobile-button primary" data-retry-card>Tentar outro cartão</button><button type="button" class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button type="button" class="btn btn-light mobile-button" data-close-card-decline>Agora não</button></div></section></div>`;
+    const openRetry = (initialPaymentMethod) => {
+      root.innerHTML = "";
+      openPaymentMethodModal({
+        planId,
+        billingCycle,
+        quote,
+        couponCode,
+        initialPaymentMethod,
+        initialBillingPayerEmail: billingPayerEmail,
+      });
+    };
+    $("[data-retry-card]", root)?.addEventListener("click", () =>
+      openRetry("card"),
+    );
+    $("[data-card-fallback-pix]", root)?.addEventListener("click", () =>
+      openRetry("pix_monthly"),
+    );
+    $("[data-close-card-decline]", root)?.addEventListener("click", () => {
+      root.innerHTML = "";
+    });
+    window.lucide?.createIcons();
+  }
+  async function reconcileCardCheckoutReturn() {
+    const local = readCardCheckoutReturn() || pendingCardCheckoutContext();
+    if (!local || cardReturnReconciling) return;
+    cardReturnReconciling = true;
+    try {
+      const result = await window.SubscriptionService.syncSubscriptionStatus({
+        reconcileProvider: true,
+        checkoutReturn: true,
+      });
+      if (result?.payment?.rejected) {
+        clearCardCheckoutReturn();
+        openCardDeclineModal(result.payment, result.retryContext, local);
+      } else if (["active", "authorized"].includes(String(result?.subscription?.status || ""))) {
+        clearCardCheckoutReturn();
+        window.Utils?.toast?.("Pagamento confirmado. Seu plano está ativo.");
+        window.Router?.render?.();
+      }
+    } catch (error) {
+      if (!String(error?.code || "").includes("resource-exhausted"))
+        console.warn("[Billing card return]", {
+          code: error?.code || "unknown",
+        });
+    } finally {
+      cardReturnReconciling = false;
+    }
   }
   function plans() {
     return (
@@ -557,12 +681,14 @@
       applyCoupon(event.currentTarget, scope),
     );
     bindCouponRemoval(scope);
-    if (consumePayerMismatchReturn())
+    const payerMismatchReturn = consumePayerMismatchReturn();
+    if (payerMismatchReturn)
       queueMicrotask(() =>
         changePendingPayerEmail(
           "O e-mail usado no Mercado Pago é diferente do e-mail informado para cobrança.",
         ),
       );
+    else queueMicrotask(() => void reconcileCardCheckoutReturn());
     $("[data-plans-back]", scope)?.addEventListener("click", () =>
       options.onBack?.(),
     );
@@ -731,7 +857,24 @@
           );
           if (result?.pix)
             return openPixModal({ pix: result.pix, plan, billingCycle, quote });
-          if (result?.checkoutUrl) return location.assign(result.checkoutUrl);
+          if (result?.checkoutUrl) {
+            if (selected === "card")
+              saveCardCheckoutReturn({
+                planId,
+                billingCycle,
+                quote: quote
+                  ? {
+                      code: quote.code || couponCode || null,
+                      originalPrice: quote.originalPrice,
+                      discountedPrice: quote.discountedPrice,
+                    }
+                  : null,
+                couponCode: couponCode || quote?.code || null,
+                billingPayerEmail,
+                operationId: result.operationId || checkoutOperationId,
+              });
+            return location.assign(result.checkoutUrl);
+          }
           throw Error("Não foi possível abrir o checkout.");
         } catch (error) {
           const billingCode = error?.details?.billingCode || null;

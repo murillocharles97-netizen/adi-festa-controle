@@ -361,11 +361,11 @@ function firestoreSubscriptionService(db) {
       if(marker.exists)return marker.data();
       const indexSnapshot=await transaction.get(indexRef),index=indexSnapshot.data()||{};
       if(!indexSnapshot.exists||!index.businessId)return{processed:false};
-      const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
+      const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentStatusDetail':String(result.statusDetail||'')||null,'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
       if(successful)patch['subscription.lastPaymentDate']=nowIso();
       else if(paymentMethodType==='pix_monthly'&&subscription.status==='active')patch['subscription.status']='payment_pending';
       transaction.update(businessRef,patch);
-      const row={eventId,subscriptionId,businessId:index.businessId,paymentMethodType,successful,status:String(result.status||'unknown'),paymentId:result.paymentId||null,createdAt:FieldValue.serverTimestamp()};
+      const row={eventId,subscriptionId,businessId:index.businessId,paymentMethodType,successful,status:String(result.status||'unknown'),statusDetail:String(result.statusDetail||'')||null,paymentId:result.paymentId||null,paymentMethodId:String(result.paymentMethodId||'')||null,paymentTypeId:String(result.paymentTypeId||'')||null,createdAt:FieldValue.serverTimestamp()};
       transaction.create(markerRef,row);
       return{processed:true,...row};
     });

@@ -673,6 +673,7 @@
 .plan-pix-waiting>i{width:12px;height:12px;border:3px solid #cbd6e1;border-top-color:#0caf78;border-radius:50%;animation:pixWaiting .9s linear infinite}
 .plan-pix-waiting span{display:grid;gap:2px}.plan-pix-waiting small{color:#64748b;font-size:11px}
 .plan-pix-result{display:grid;gap:18px;padding:26px;text-align:center}.plan-pix-result header{display:grid;justify-items:center;gap:8px}.plan-pix-result header>svg{width:72px;height:72px;color:#0caf78}.plan-pix-result.expired header>svg{color:#e78b1c}.plan-pix-result h3,.plan-pix-result p{margin:0}.plan-pix-result p{color:#64748b}
+.plan-card-decline{display:grid;gap:18px;max-width:470px;padding:26px;text-align:center}.plan-card-decline header{display:grid;justify-items:center;gap:9px}.plan-card-decline header>svg{width:68px;height:68px;color:#ef4444}.plan-card-decline h3,.plan-card-decline p{margin:0}.plan-card-decline p{max-width:390px;color:#64748b;line-height:1.5}.plan-card-decline>small{color:#047857}.plan-card-decline-actions{display:grid;gap:10px}
 @keyframes pixWaiting{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.plan-pix-waiting>i{animation:none}}
 .plan-comparison-table {
