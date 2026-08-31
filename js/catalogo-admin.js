@@ -128,7 +128,9 @@ window.CatalogoUniversal = (() => {
       variants = variable
         ? ProductVariations.active(p.id)
             .filter((v) => v.catalogVisible !== false)
-            .map((v) => ({
+            .map((v) => {
+              const displayImage = window.getProductDisplayImage?.(p, v);
+              return ({
               id: v.id,
               variantId: v.id,
               displayName: v.displayName,
@@ -140,27 +142,30 @@ window.CatalogoUniversal = (() => {
               active: v.active !== false,
               catalogVisible: v.catalogVisible !== false,
               allowNegativeStock: Boolean(v.allowNegativeStock),
-              imageUrl:
-                window.getProductDisplayImage?.(p, v)?.url || v.imageUrl || "",
-            }))
+              imageUrl: displayImage?.url || v.imageUrl || "",
+              imagePresentation: displayImage?.presentation || v.imagePresentation || null,
+            }); })
         : [];
+    const productDisplayImage = window.getProductDisplayImage?.(p);
+    const productMainDisplayImage = window.getProductDisplayImage?.(p, null, { preferMain: true });
     const result = {
       id: `catalog-${p.id}`,
       productId: p.id,
       productType: variable ? "variable" : "simple",
       productName: p.nome,
       productImage:
-        window.getProductDisplayImage?.(p)?.url ||
+        productDisplayImage?.url ||
         p.imageThumbUrl ||
         p.imageUrl ||
         p.imagem ||
         "",
       productMainImage:
-        window.getProductDisplayImage?.(p, null, { preferMain: true })?.url ||
+        productMainDisplayImage?.url ||
         p.imageUrl ||
         p.imagem ||
         "",
       imageUpdatedAt: p.imageUpdatedAt || null,
+      imagePresentation: productDisplayImage?.presentation || p.imagePresentation || null,
       category: p.catalogCategory || p.categoria || "Outros",
       description: p.catalogDescription || p.descricao || p.palavrasChave || "",
       originalPrice: Number(variable ? p.minPrice : p.preco || 0),

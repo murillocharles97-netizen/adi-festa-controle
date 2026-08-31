@@ -49,7 +49,7 @@ test("diagnóstico é carregado antes do app e cache PWA publica a correção", 
       index.indexOf("runtime-diagnostics.js") < index.indexOf("app.js?v=108"),
   );
   assert.match(index, /lifecycle-manager\.js\?v=83/);
-  assert.match(worker, /adi-festa-v111-billing-state-machine/);
+  assert.match(worker, /adi-festa-v112-public-catalog-desktop/);
   assert.match(worker, /runtime-diagnostics\.js/);
   assert.match(worker, /lifecycle-manager\.js/);
 });

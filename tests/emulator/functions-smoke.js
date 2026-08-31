@@ -138,6 +138,58 @@ const {
       role: "owner",
       active: true,
     });
+  const catalogToken = "catalogservicemodeemulator000000000000000000000001";
+  await admin.doc(`publicCatalogs/${catalogToken}`).set({
+    catalogToken,
+    active: true,
+    catalogVisible: true,
+    acceptingOrders: true,
+    closedBehavior: "view_only",
+    businessId: "adi-festa",
+    visitId: "catalog-universal",
+    serviceModes: [
+      { id: "pickup", type: "pickup", label: "Retirada", active: true },
+      { id: "delivery", type: "delivery", label: "Entrega", active: true },
+    ],
+    items: [
+      {
+        id: "catalog-product-1",
+        productId: "product-1",
+        productName: "Produto público",
+        salePrice: 12.5,
+        availableQuantity: 10,
+        controlaEstoque: true,
+        active: true,
+      },
+    ],
+  });
+  const submitPublicOrder = httpsCallable(functions, "submitCatalogOrder"),
+    publicOrderPayload = {
+      id: "catalog-order-mode-0001",
+      catalogToken,
+      businessId: "outra-empresa-nao-pode-sobrescrever",
+      customerName: "Cliente Teste",
+      customerPhone: "5517999999999",
+      customerLocation: "Loja 1",
+      items: [{ catalogItemId: "catalog-product-1", quantity: 1 }],
+      paymentPreference: "entrega",
+      serviceModeId: "delivery",
+    },
+    publicOrderResult = (await submitPublicOrder(publicOrderPayload)).data.order;
+  assert.equal(publicOrderResult.businessId, "adi-festa");
+  assert.equal(publicOrderResult.serviceModeId, "delivery");
+  assert.equal(publicOrderResult.serviceModeType, "delivery");
+  assert.equal(publicOrderResult.serviceModeLabel, "Entrega");
+  await assert.rejects(
+    () =>
+      submitPublicOrder({
+        ...publicOrderPayload,
+        id: "catalog-order-mode-0002",
+        serviceModeId: "mode-from-another-business",
+      }),
+    (error) => error.code === "functions/invalid-argument",
+  );
+  console.log("Modalidade pública e isolamento multiempresa validados no emulador.");
   const saveCoupon = httpsCallable(functions, "saveAdminCoupon"),
     listCoupons = httpsCallable(functions, "listAdminCoupons"),
     validateCoupon = httpsCallable(functions, "validateCoupon");

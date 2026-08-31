@@ -191,7 +191,7 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
   assert.doesNotMatch(syncSource, /setInterval\([^)]*ensureClientProjection/);
 });
 
-test("a cadeia de módulos mantém versões explícitas na release 111", () => {
+test("a cadeia de módulos mantém versões explícitas na release 112", () => {
   assert.match(authSource, /import ['"]\.\/sync\.js\?v=108['"]/);
   assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=108['"]/);
   assert.match(
@@ -203,7 +203,7 @@ test("a cadeia de módulos mantém versões explícitas na release 111", () => {
     /js\/firebase\/auth\.js\?v=111[\s\S]*js\/firebase\/firebase-ui\.js\?v=108/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /adi-festa-v111-billing-state-machine/);
+  assert.match(serviceWorkerSource, /adi-festa-v112-public-catalog-desktop/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,
