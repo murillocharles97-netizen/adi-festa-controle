@@ -14,15 +14,15 @@ test("checkout de cartão coleta e envia billingPayerEmail editável", () => {
   assert.match(plans, /type="email"/);
   assert.match(plans, /Ele pode ser diferente do e-mail da sua empresa/);
   assert.match(plans, /billingPayerEmail/);
-  assert.match(context, /billingPayerEmail:paymentMethodType==='card'\?billingPayerEmail:null/);
+  assert.match(context, /billingPayerEmail:\['card','card_monthly'\]\.includes\(paymentMethodType\)\?billingPayerEmail:null/);
 });
 
 test("Pix não recebe identidade de pagador do cartão", () => {
   const context = read("js/firebase/business-context.js"),
     backend = read("functions/src/index.js");
-  assert.match(context, /paymentMethodType==='card'\?billingPayerEmail:null/);
+  assert.match(context, /\['card','card_monthly'\]\.includes\(paymentMethodType\)\?billingPayerEmail:null/);
   assert.match(backend, /createPixOrder\(\{businessId,email:context\.email/);
-  assert.match(backend, /paymentMethod\.id==='card'\?normalizeBillingPayerEmail/);
+  assert.match(backend, /usesPayerEmail\?normalizeBillingPayerEmail/);
 });
 
 test("tentativa inclui pagador no hash e checkout antigo não é reutilizado", () => {
@@ -80,8 +80,9 @@ test("retorno do cartão reconcilia a cobrança e traduz a recusa real", () => {
   assert.match(state, /lastPaymentStatusDetail/);
   assert.match(backend, /checkoutReturn/);
   assert.match(plans, /reconcileCardCheckoutReturn/);
-  assert.match(plans, /Pagamento não aprovado/);
-  assert.match(plans, /Usar outro cartão/);
+  assert.match(plans, /Cobrança automática não aprovada/);
+  assert.match(plans, /Tentar cobrança automática novamente/);
+  assert.match(plans, /Pagar este mês com cartão/);
   assert.match(plans, /Pagar por Pix/);
   assert.match(diagnostic, /cc_rejected_high_risk/);
   assert.match(diagnostic, /cc_rejected_insufficient_amount/);

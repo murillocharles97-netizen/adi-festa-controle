@@ -674,6 +674,7 @@
 .plan-pix-waiting span{display:grid;gap:2px}.plan-pix-waiting small{color:#64748b;font-size:11px}
 .plan-pix-result{display:grid;gap:18px;padding:26px;text-align:center}.plan-pix-result header{display:grid;justify-items:center;gap:8px}.plan-pix-result header>svg{width:72px;height:72px;color:#0caf78}.plan-pix-result.expired header>svg{color:#e78b1c}.plan-pix-result h3,.plan-pix-result p{margin:0}.plan-pix-result p{color:#64748b}
 .plan-card-decline{display:grid;gap:18px;max-width:470px;padding:26px;text-align:center}.plan-card-decline header{display:grid;justify-items:center;gap:9px}.plan-card-decline header>svg{width:68px;height:68px;color:#ef4444}.plan-card-decline h3,.plan-card-decline p{margin:0}.plan-card-decline p{max-width:390px;color:#64748b;line-height:1.5}.plan-card-decline>small{color:#047857}.plan-card-decline-actions{display:grid;gap:10px}
+.plan-card-monthly-sheet{width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}.plan-card-monthly-sheet .modal-body{display:grid;gap:14px;padding:18px}.plan-card-monthly-explainer,.plan-card-challenge-help{margin:0;color:#536177;font-size:13px;line-height:1.5}.plan-card-brick-loading{display:grid;min-height:220px;place-items:center;border:1px dashed #cfd8e4;border-radius:14px;background:#f8fafc;color:#64748b;font-weight:700}.plan-card-challenge-frame{width:100%;min-height:460px;border:1px solid #d9dfe8;border-radius:14px;background:#fff}.plan-card-monthly-sheet #cardPaymentBrick_container:empty{display:none}
 @keyframes pixWaiting{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.plan-pix-waiting>i{animation:none}}
 .plan-comparison-table {
@@ -859,7 +860,8 @@
   .pro-feature-modal,
   .plan-manage-sheet,
   .plan-confirm-cancel,
-  .plan-payment-sheet {
+  .plan-payment-sheet,
+  .plan-card-monthly-sheet {
     width: 100%;
     max-width: none;
     max-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
@@ -867,6 +869,7 @@
     border-radius: 22px 22px 0 0;
   }
   .plan-pix-sheet{width:100%;max-width:none;max-height:calc(100dvh - max(10px,env(safe-area-inset-top)));margin-top:auto;border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom)}
+  .plan-card-monthly-sheet{padding-bottom:env(safe-area-inset-bottom)}.plan-card-monthly-sheet .modal-body{padding:14px}.plan-card-challenge-frame{min-height:56dvh}
   .plan-pix-sheet .modal-body{padding:14px;overflow-y:auto}.plan-pix-qr img{width:min(220px,62vw)}
   .plan-payment-sheet .modal-body {
     padding: 14px;

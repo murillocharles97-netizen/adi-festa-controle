@@ -3,15 +3,29 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const read=file=>fs.readFileSync(file,'utf8');
 
-test('seletor oferece cartão e Pix mensal sem prometer Pix Automático',()=>{
+test('seletor oferece cartão automático, cartão mensal e Pix sem prometer Pix Automático',()=>{
   const plans=read('js/plans.js');
   assert.match(plans,/Como deseja pagar\?/);
-  assert.match(plans,/Cartão de crédito/);
+  assert.match(plans,/Cartão automático/);
+  assert.match(plans,/Cartão mensal/);
+  assert.match(plans,/data-payment-option="card_monthly"/);
   assert.match(plans,/Pix mensal/);
   assert.match(plans,/Pagamento manual a cada renovação/);
   assert.match(plans,/uma nova cobrança pode exigir confirmação a cada mês/i);
   assert.doesNotMatch(plans,/Autorize uma vez no seu banco/);
   assert.match(plans,/data-payment-option="pix_monthly"/);
+});
+
+test('cartão mensal usa Brick oficial, Device ID e challenge 3DS sem enviar PAN ou CVV',()=>{
+  const plans=read('js/plans.js'),context=read('js/firebase/business-context.js'),backend=read('functions/src/index.js'),provider=read('functions/src/services/mercado-pago-service.js');
+  assert.match(plans,/https:\/\/sdk\.mercadopago\.com\/js\/v2/);assert.match(plans,/https:\/\/www\.mercadopago\.com\/v2\/security\.js/);assert.match(plans,/MP_DEVICE_SESSION_ID/);assert.match(plans,/cardPaymentBrick_container/);assert.match(plans,/data-card-challenge/);assert.match(plans,/event\.data\?\.status!==['"]COMPLETE['"]/);assert.match(plans,/checkCardCheckout/);
+  assert.match(context,/cardPayment:paymentMethodType==='card_monthly'\?cardPayment:null/);assert.match(context,/getCardCheckoutStatus/);assert.match(backend,/getBillingCheckoutConfig/);assert.match(backend,/createCardOrder/);assert.match(provider,/X-meli-session-id/);assert.match(provider,/validation:'on_fraud_risk'/);assert.match(provider,/liability_shift:'required'/);
+  assert.doesNotMatch(context,/card_number|security_code|cvv|expiration_date/i);assert.doesNotMatch(backend,/card_number|security_code|cvv|expiration_date/i);
+});
+
+test('high risk oferece o mesmo cartão no modo mensal e mantém Pix como alternativa',()=>{
+  const plans=read('js/plans.js'),diagnostic=read('functions/src/services/card-payment-diagnostic-service.js');
+  assert.match(plans,/Pagar este mês com cartão/);assert.match(plans,/data-card-fallback-monthly/);assert.match(plans,/openRetry\("card_monthly"\)/);assert.match(plans,/data-card-fallback-pix/);assert.match(diagnostic,/cobrança automática/);assert.doesNotMatch(diagnostic,/cartão é inválido/i);
 });
 
 test('frontend envia somente identificadores e backend calcula o valor',()=>{

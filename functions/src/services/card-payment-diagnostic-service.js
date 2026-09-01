@@ -2,9 +2,9 @@
 
 const REASONS = Object.freeze({
   cc_rejected_high_risk:
-    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Use outro cartão ou pague por Pix.",
+    "O Mercado Pago não aprovou a cobrança automática por uma análise de segurança. Você pode pagar este período com cartão e autenticação do banco, ou usar Pix.",
   high_risk:
-    "O Mercado Pago não aprovou este pagamento por uma análise de segurança. Use outro cartão ou pague por Pix.",
+    "O Mercado Pago não aprovou a cobrança automática por uma análise de segurança. Você pode pagar este período com cartão e autenticação do banco, ou usar Pix.",
   cc_rejected_insufficient_amount:
     "O cartão não possui limite disponível suficiente para esta cobrança.",
   insufficient_amount:
