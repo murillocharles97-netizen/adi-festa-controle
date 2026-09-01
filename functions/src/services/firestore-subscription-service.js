@@ -16,9 +16,6 @@ function validateProviderSubscription(provider, index, business = {}) {
   const expectedExternalReference = String(index?.expectedExternalReference || "");
   const metadataBusinessId = String(provider?.metadata?.business_id || "");
   const expectedBusinessId = String(index?.businessId || "");
-  const currentPayerId = String(
-    business?.subscription?.mercadoPago?.customerId || "",
-  );
   const providerPayerId = provider?.payer_id == null
     ? ""
     : String(provider.payer_id);
@@ -43,10 +40,6 @@ function validateProviderSubscription(provider, index, business = {}) {
   )
     throw Object.assign(Error("Empresa do provedor diverge do checkout seguro."), {
       code: "provider-business-mismatch",
-    });
-  if (active && currentPayerId && providerPayerId && currentPayerId !== providerPayerId)
-    throw Object.assign(Error("Pagador diverge da assinatura existente."), {
-      code: "provider-payer-mismatch",
     });
   if (
     active &&
@@ -90,7 +83,7 @@ function firestoreSubscriptionService(db) {
     });
     return{...planIndex,subscriptionId,providerPlanId};
   }
-  async function applyProviderSubscription(provider, { source, eventId } = {}) {
+  async function applyProviderSubscription(provider, { source, eventId, activation } = {}) {
     const subscriptionId = String(provider?.id || "");
     if (!subscriptionId) throw Error("Assinatura sem identificador.");
     await bindSubscriptionFromPlan(provider);
@@ -148,10 +141,14 @@ function firestoreSubscriptionService(db) {
         currentProviderId=String(business?.subscription?.mercadoPago?.subscriptionId||''),
         isCurrentProvider=!currentProviderId||currentProviderId===subscriptionId,
         validation = validateProviderSubscription(provider, index, business),
-        active = validation.active,
+        active = activation ? activation.active === true : validation.active,
         terminal = ["cancelled", "canceled", "expired"].includes(
-          String(provider.status),
-        );
+          String(provider.status || "").toLowerCase(),
+        ),
+        existingSubscription=business.subscription||{},
+        paidThrough=Date.parse(existingSubscription.currentPeriodEnd||existingSubscription.expiresAt||''),
+        preservePaidPeriod=active===false&&existingSubscription.hasPaidSubscription===true&&['active','grace_period'].includes(String(existingSubscription.status||''))&&Number.isFinite(paidThrough)&&paidThrough>Date.parse(now),
+        preserveTrial=active===false&&['trial','trialing'].includes(String(existingSubscription.status||''))&&Date.parse(existingSubscription.trialEndsAt||'')>Date.parse(now);
       if(active&&!isCurrentProvider)throw Object.assign(Error('Uma assinatura antiga foi autorizada enquanto outra tentativa está ativa.'),{code:'provider-subscription-conflict'});
       let couponReleased=false;
       const discount =
@@ -162,10 +159,13 @@ function firestoreSubscriptionService(db) {
           discount: active ? discount : null,
           paymentMethodType:index.paymentMethodType,
           providerPlanId:index.providerPlanId,
+          localStatus:active?'active':preservePaidPeriod?existingSubscription.status:preserveTrial?'trialing':terminal?undefined:'pending',
+          currentPeriodStart:activation?.currentPeriodStart||null,
           now,
           existing: business.subscription || {},
         }),
         plan = getPlan(subscription.planId);
+      if(terminal&&preservePaidPeriod){subscription.cancelAtPeriodEnd=true;subscription.nextBillingDate=null;subscription.currentPeriodEnd=existingSubscription.currentPeriodEnd||existingSubscription.expiresAt||subscription.currentPeriodEnd;}
       if(terminal){delete subscription.pendingDiscount;if(business.subscription?.hasPaidSubscription!==true){subscription.mercadoPago.subscriptionId=null;subscription.mercadoPago.preapprovalId=null;subscription.mercadoPago.lastClosedSubscriptionId=subscriptionId}}
       if (eventId) subscription.mercadoPago.lastWebhookEventId = eventId;
       if (active) subscription.hasPaidSubscription = true;
@@ -274,7 +274,7 @@ function firestoreSubscriptionService(db) {
         businessPatch["billingProfile.billingPayerEmail"] =
           index.billingPayerEmail;
       if(isCurrentProvider)transaction.update(businessRef, businessPatch);
-      const attemptStatus=active?'approved':terminal?subscription.status:'pending_payment';
+      const terminalAttemptStatus=String(provider.status||'').toLowerCase()==='expired'?'expired':'cancelled',attemptStatus=active?'approved':terminal?terminalAttemptStatus:'pending_payment';
       transaction.set(
         db.doc(
           `businesses/${index.businessId}/subscriptionIntents/${subscriptionId}`,
@@ -371,7 +371,7 @@ function firestoreSubscriptionService(db) {
       const indexSnapshot=await transaction.get(indexRef),index=indexSnapshot.data()||{};
       if(!indexSnapshot.exists||!index.businessId)return{processed:false};
       const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentStatusDetail':String(result.statusDetail||'')||null,'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
-      if(successful)patch['subscription.lastPaymentDate']=nowIso();
+      if(successful)patch['subscription.lastPaymentDate']=result.dateApproved||nowIso();
       else if(paymentMethodType==='pix_monthly'&&subscription.status==='active')patch['subscription.status']='payment_pending';
       transaction.update(businessRef,patch);
       const row={eventId,subscriptionId,businessId:index.businessId,paymentMethodType,successful,status:String(result.status||'unknown'),statusDetail:String(result.statusDetail||'')||null,paymentId:result.paymentId||null,paymentMethodId:String(result.paymentMethodId||'')||null,paymentTypeId:String(result.paymentTypeId||'')||null,createdAt:FieldValue.serverTimestamp()};

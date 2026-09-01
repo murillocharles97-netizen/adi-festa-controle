@@ -1,7 +1,7 @@
 import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';
 import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
 import {doc,getDoc,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=111';
+import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=114';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
@@ -208,6 +208,14 @@ function showSubscriptionBanner(access){
   const messages={trialing:access.readOnly?'Seu período de teste terminou. Você ainda pode visualizar todos os seus dados.':`Teste grátis — ${access.daysRemaining??0} dia(s) restante(s).`,expired:'Teste encerrado — visualização disponível.',past_due:'Pagamento pendente — revise sua assinatura.',pending:'Pagamento em processamento — seus dados seguem disponíveis.',canceled:'Plano cancelado — acesso de visualização mantido.',inactive:'Você está no modo de visualização. Escolha um plano para criar novos registros.'};
   const banner=document.createElement('aside');banner.id='subscription-access-banner';banner.className=`subscription-access-banner ${access.readOnly?'read-only':'warning'}`;banner.innerHTML=`<i data-lucide="${access.readOnly?'eye':'clock-3'}"></i><span><b>${esc(messages[access.status]||'Assinatura requer atenção.')}</b>${access.readOnly?'<small>Clientes, estoque, histórico e CRM continuam acessíveis.</small>':''}</span><button type="button">Ver planos</button>`;banner.querySelector('button').onclick=()=>Router.ir('planos');document.querySelector('.shell')?.prepend(banner);window.lucide?.createIcons();
 }
+function syncSubscriptionShell(context){
+  if(!context?.access||!context?.subscription)return;
+  window.FirebaseSession={...(window.FirebaseSession||{}),business:context.business,subscription:context.subscription,access:context.access};
+  const topbar=document.querySelector('.topbar'),oldPlan=topbar?.querySelector('.subscription-badge');oldPlan?.remove();
+  if(topbar){const plan=PLANS[context.subscription?.planId]||PLANS.trial,badge=document.createElement('span');badge.className='subscription-badge';badge.textContent=context.subscription?.status==='trial'?`Teste · ${context.access.daysRemaining} dia(s)`:plan.name;topbar.insertBefore(badge,document.querySelector('.local-badge'))}
+  showSubscriptionBanner(context.access);
+}
+addEventListener('business-context-changed',event=>syncSubscriptionShell(event.detail));
 function allowed(user,profile,business){
   bootstrapLog('preparing business context');
   const context=BusinessContext.set({business,userProfile:profile});
@@ -219,9 +227,7 @@ function allowed(user,profile,business){
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
-  const topbar=document.querySelector('.topbar'),oldPlan=topbar?.querySelector('.subscription-badge');oldPlan?.remove();
-  if(topbar){const plan=PLANS[context.subscription?.planId]||PLANS.trial,badge=document.createElement('span');badge.className='subscription-badge';badge.textContent=context.subscription?.status==='trial'?`Teste · ${context.access.daysRemaining} dia(s)`:plan.name;topbar.insertBefore(badge,document.querySelector('.local-badge'))}
-  showSubscriptionBanner(context.access);
+  syncSubscriptionShell(context);
   try{
     window.SyncFirebase.setUser(user,profile,business);
     badgeSubscription?.();badgeSubscription=window.SyncFirebase.subscribe(updateCloudBadge);

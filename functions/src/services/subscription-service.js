@@ -13,17 +13,17 @@ function computeAccess(subscription={},now=new Date()){
   const status=normalizedStatus(subscription),plan=getPlan(subscription.planId),trial=isTrialActive(subscription,now),internal=subscription.planId==='internal'&&(subscription.isInternal===true||['active','internal'].includes(status)),active=internal||status==='active'||status==='grace_period'||trial;
   return{status,planId:subscription.planId||'',active,canAccessApp:true,canMutate:active,readOnly:!active,trial,features:internal?null:plan?.features||{},limits:internal?null:plan?.limits||{},unlimited:internal};
 }
-function providerPatch(provider,{planId,now,existing={},billingCycle,discount,paymentMethodType,providerPlanId}={}){
-  const status=mapProviderStatus(provider.status),active=status==='active',hadPaidSubscription=existing.hasPaidSubscription===true,plan=getPlan(planId||existing.planId),lastPaymentDate=active?(provider.summarized?.last_charged_date||existing.lastPaymentDate||null):(existing.lastPaymentDate||null);
+function providerPatch(provider,{planId,now,existing={},billingCycle,discount,paymentMethodType,providerPlanId,localStatus,currentPeriodStart}={}){
+  const status=localStatus||mapProviderStatus(provider.status),active=status==='active',pending=['pending','trialing'].includes(status),hadPaidSubscription=existing.hasPaidSubscription===true,plan=getPlan(planId||existing.planId),lastPaymentDate=active?(provider.summarized?.last_charged_date||currentPeriodStart||existing.lastPaymentDate||null):(existing.lastPaymentDate||null);
   return{
     ...existing,
     status,
     subscriptionStatus:status,
     planId:plan?.id||planId||existing.planId||'',
-    pendingPlanId:null,
-    pendingBillingCycle:null,
-    pendingPaymentMethodType:null,
-    pendingBillingPayerEmail:null,
+    pendingPlanId:pending?(existing.pendingPlanId||plan?.id||planId||null):null,
+    pendingBillingCycle:pending?(existing.pendingBillingCycle||billingCycle||'monthly'):null,
+    pendingPaymentMethodType:pending?(existing.pendingPaymentMethodType||paymentMethodType||'card'):null,
+    pendingBillingPayerEmail:pending?(existing.pendingBillingPayerEmail||null):null,
     billingCycle:billingCycle||existing.billingCycle||'monthly',
     paymentMethodType:paymentMethodType||existing.paymentMethodType||existing.pendingPaymentMethodType||'card',
     provider:'mercado_pago',
@@ -31,6 +31,7 @@ function providerPatch(provider,{planId,now,existing={},billingCycle,discount,pa
     expiresAt:active?(provider.auto_recurring?.end_date||existing.expiresAt||null):(hadPaidSubscription?existing.expiresAt||null:null),
     nextBillingDate:active?(provider.next_payment_date||existing.nextBillingDate||null):(hadPaidSubscription?existing.nextBillingDate||null:null),
     lastPaymentDate,
+    currentPeriodStart:active?(currentPeriodStart||provider.summarized?.last_charged_date||existing.currentPeriodStart||provider.date_created||now):(hadPaidSubscription?existing.currentPeriodStart||null:null),
     currentPeriodEnd:active?(provider.next_payment_date||existing.currentPeriodEnd||null):(hadPaidSubscription?existing.currentPeriodEnd||null:null),
     cancelAtPeriodEnd:false,
     updatedAt:now,
@@ -60,7 +61,7 @@ function pendingSubscription({existing={},plan,provider,now,billingCycle='monthl
     ...(discount?{pendingDiscount:{...discount}}:{}),
     provider:'mercado_pago',
     updatedAt:now,
-    mercadoPago:{...(existing.mercadoPago||{}),subscriptionId:providerPlanId?null:String(provider.id),preapprovalId:providerPlanId?null:String(provider.id),providerPlanId:providerPlanId?String(providerPlanId):String(existing.mercadoPago?.providerPlanId||''),customerId:provider.payer_id==null?null:String(provider.payer_id),providerStatus:String(provider.status||'pending'),checkoutCreatedAt:now,lastWebhook:existing.mercadoPago?.lastWebhook||null}
+    mercadoPago:{...(existing.mercadoPago||{}),subscriptionId:providerPlanId?null:String(provider.id),preapprovalId:providerPlanId?null:String(provider.id),providerPlanId:providerPlanId?String(providerPlanId):String(existing.mercadoPago?.providerPlanId||''),customerId:existing.mercadoPago?.customerId||null,providerStatus:String(provider.status||'pending'),checkoutCreatedAt:now,lastWebhook:existing.mercadoPago?.lastWebhook||null}
   };
 }
 function sanitize(subscription={}){
