@@ -317,7 +317,7 @@
   function verifyPaymentButton(subscription={}) {
     const attemptId=["pix_monthly","card_monthly"].includes(subscription.pendingPaymentMethodType)?subscription.pendingCheckoutAttemptId:null;
     if(attemptId)return `<button type="button" class="plan-manage-button plan-verify-payment" ${subscription.pendingPaymentMethodType==="card_monthly"?'data-verify-monthly-card data-card-attempt-id':'data-verify-pix-payment data-pix-attempt-id'}="${esc(attemptId)}">${icon("refresh-cw")} Verificar pagamento</button>`;
-    return subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" class="plan-manage-button plan-verify-payment" data-verify-card-payment>${icon("refresh-cw")} Verificar pagamento</button><button type="button" class="plan-manage-button plan-cancel-pending" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa</button>`:"";
+    return subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" class="plan-manage-button plan-verify-payment" data-verify-card-payment>${icon("refresh-cw")} Verificar assinatura</button><button type="button" class="plan-manage-button plan-cancel-pending" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa</button>`:"";
   }
   function changePayerEmailButton(subscription = {}) {
     return subscription.pendingPaymentMethodType === "card" &&
@@ -1058,7 +1058,13 @@
     },
     true,
   );
-  addEventListener("business-context-changed", syncNavigation);
+  let renderedSubscriptionSignature='';
+  addEventListener("business-context-changed",event=>{
+    syncNavigation();
+    const subscription=event.detail?.subscription||{},signature=JSON.stringify([subscription.status,subscription.planId,subscription.currentPeriodEnd,subscription.nextBillingDate,subscription.mercadoPago?.providerStatus]);
+    if(window.Router?.atual?.()==='planos'&&renderedSubscriptionSignature&&signature!==renderedSubscriptionSignature)window.AppPageRuntime?.mount?.('planos');
+    renderedSubscriptionSignature=signature;
+  });
   addEventListener("firebase-auth-ready", syncNavigation);
   window.PlansUI = {
     render,

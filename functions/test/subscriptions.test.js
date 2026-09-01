@@ -8,8 +8,9 @@ const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,compute
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
 const {mercadoPagoService,billingExternalReference,pixExternalReference,normalizeDeviceSessionId,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
 const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('../src/services/billing-payer-service');
-const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
+const {requirePaymentMethod,providerPaymentResult,recurringEntitlementDecision}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
+const {resolveSubscriptionIdFromPayment}=require('../src/services/subscription-payment-link-service');
 const {absoluteExpiration,orderDetails,pixDetails,validateOrder,validatePixOrder,addBillingPeriod,pendingManualSubscription,pendingPixSubscription}=require('../src/services/pix-billing-service');
 const {normalizeManualCardPayment}=require('../src/services/manual-card-service');
 const {paymentDeclineMessage,publicCardPaymentDiagnostic}=require('../src/services/card-payment-diagnostic-service');
@@ -33,9 +34,27 @@ test('preserva trial enquanto checkout aguarda pagamento',()=>{
   assert.equal(isTrialActive(existing,new Date(now)),true);const pending=pendingSubscription({existing,plan,provider,now});assert.equal(pending.status,'trialing');assert.equal(pending.pendingPlanId,'professional');assert.equal(pending.mercadoPago.subscriptionId,'sub_1');
 });
 
+test('checkout pendente não fixa o payer_id provisório como identidade da empresa',()=>{
+  const pending=pendingSubscription({existing:{mercadoPago:{customerId:'payer_anterior'}},plan:requirePlan('premium'),provider:{id:'sub_1',status:'pending',payer_id:'payer_provisorio'},now:'2026-09-01T10:00:00Z'});
+  assert.equal(pending.mercadoPago.customerId,'payer_anterior');
+});
+
 test('webhook autorizado ativa plano e datas',()=>{
   const patch=providerPatch({id:'sub_1',status:'authorized',payer_id:123,date_created:'2026-07-25T10:00:00Z',next_payment_date:'2026-08-25T10:00:00Z',summarized:{last_charged_date:'2026-07-25T10:01:00Z'}},{planId:'professional',now:'2026-07-25T10:02:00Z',existing:{status:'pending'}});
-  assert.equal(patch.status,'active');assert.equal(patch.planId,'professional');assert.equal(patch.lastPaymentDate,'2026-07-25T10:01:00Z');assert.equal(patch.mercadoPago.customerId,'123');assert.equal(computeAccess(patch).canAccessApp,true);
+  assert.equal(patch.status,'active');assert.equal(patch.planId,'professional');assert.equal(patch.lastPaymentDate,'2026-07-25T10:01:00Z');assert.equal(patch.currentPeriodStart,'2026-07-25T10:01:00Z');assert.equal(patch.mercadoPago.customerId,'123');assert.equal(computeAccess(patch).canAccessApp,true);
+});
+
+test('reconciliação pendente preserva os dados necessários para verificar novamente',()=>{
+  const patch=providerPatch({id:'sub_pending',status:'authorized'},{planId:'premium',paymentMethodType:'card',localStatus:'pending',now:'2026-09-01T13:00:00Z',existing:{status:'pending',pendingPlanId:'premium',pendingBillingCycle:'monthly',pendingPaymentMethodType:'card',pendingBillingPayerEmail:'pagador@example.com'}});
+  assert.equal(patch.status,'pending');assert.equal(patch.pendingPlanId,'premium');assert.equal(patch.pendingPaymentMethodType,'card');assert.equal(patch.pendingBillingPayerEmail,'pagador@example.com');
+});
+
+test('regra recorrente exige assinatura autorizada e cobrança inicial aprovada',()=>{
+  assert.deepEqual(recurringEntitlementDecision({providerStatus:'authorized',paymentStatus:'approved',dateApproved:'2026-09-01T13:14:31Z'}),{active:true,status:'active',reason:'initial_payment_approved',currentPeriodStart:'2026-09-01T13:14:31Z'});
+  assert.deepEqual(recurringEntitlementDecision({providerStatus:'authorized',paymentStatus:null}),{active:false,status:'pending',reason:'awaiting_initial_payment'});
+  assert.equal(recurringEntitlementDecision({providerStatus:'authorized',paymentStatus:null,activationPolicy:'preapproval_authorized'}).active,true);
+  assert.equal(recurringEntitlementDecision({providerStatus:'authorized',paymentStatus:'rejected'}).status,'rejected');
+  assert.equal(recurringEntitlementDecision({providerStatus:'pending',paymentStatus:'approved'}).active,false);
 });
 
 test('assinatura vencida mantém acesso e bloqueia somente mutações',()=>{
@@ -85,7 +104,10 @@ test('recusa não inventa período pago nem data de renovação',()=>{
 
 test('máquina de estados fecha recusa e impede regressão terminal',()=>{
   assert.deepEqual(canonicalAttemptStatus({providerStatus:'cancelled',paymentStatus:'rejected',statusDetail:'cc_rejected_high_risk'}),{status:'rejected',reason:'cc_rejected_high_risk'});
+  assert.deepEqual(canonicalAttemptStatus({providerStatus:'authorized',paymentStatus:null,activationApproved:false}),{status:'pending_payment',reason:'awaiting_initial_payment'});
+  assert.deepEqual(canonicalAttemptStatus({providerStatus:'authorized',paymentStatus:'approved',activationApproved:true}),{status:'approved',reason:'payment_approved'});
   assert.equal(attemptStatePatch({currentStatus:'pending_payment',providerStatus:'cancelled',paymentStatus:'rejected',statusDetail:'cc_rejected_high_risk',now:'2026-08-30T03:00:00.000Z'}).status,'rejected');
+  assert.equal(attemptStatePatch({currentStatus:'rejected',providerStatus:'authorized',paymentStatus:'approved',activationApproved:true,now:'2026-09-01T13:14:31.000Z'}).status,'approved');
   assert.equal(isTerminalAttempt('rejected'),true);
   assert.deepEqual(transitionAttempt('rejected','pending_payment'),{allowed:false,status:'rejected',reason:'terminal_state_is_immutable'});
   assert.equal(attemptStatePatch({currentStatus:'approved',providerStatus:'pending',now:'2026-08-30T04:00:00.000Z'}).status,'approved');
@@ -210,7 +232,8 @@ test('duração ISO do provedor nunca é tratada como data absoluta no navegador
 });
 
 test('webhook só considera cobrança aprovada como sucesso',()=>{
-  assert.equal(providerPaymentResult('payment',{id:1,status:'approved'}).successful,true);
+  assert.equal(providerPaymentResult('payment',{id:1,status:'approved',status_detail:'accredited',date_approved:'2026-09-01T13:14:31Z'}).successful,true);
+  assert.equal(providerPaymentResult('payment',{id:1,status:'approved',status_detail:'accredited'}).statusDetail,'accredited');
   assert.equal(providerPaymentResult('payment',{id:2,status:'pending'}).successful,false);
   assert.equal(providerPaymentResult('subscription_authorized_payment',{payment:{id:3,status:'approved'}}).successful,true);
   assert.equal(providerPaymentResult('subscription_authorized_payment',{status:'processed',payment:{id:4,status:'rejected'}}).successful,false);
@@ -225,7 +248,7 @@ test('webhook valida valor, empresa, referência, plano e pagador antes de ativa
   assert.doesNotThrow(()=>validateProviderSubscription({...provider,status:'cancelled',payer_id:'payer_antigo'},index,business),'checkout antigo terminal pode ser fechado sem assumir a identidade do pagador atual');
   assert.throws(()=>validateProviderSubscription({...provider,external_reference:'biz_2:op_1-plan'},index,business),error=>error.code==='provider-reference-mismatch');
   assert.throws(()=>validateProviderSubscription({...provider,preapproval_plan_id:'plan_2'},index,business),error=>error.code==='provider-plan-mismatch');
-  assert.throws(()=>validateProviderSubscription({...provider,payer_id:'payer_2'},index,business),error=>error.code==='provider-payer-mismatch');
+  assert.equal(validateProviderSubscription({...provider,payer_id:'payer_2'},index,business).providerPayerId,'payer_2','pagador pode mudar sem transferir a empresa; vínculo permanece pelos IDs internos');
   assert.throws(()=>validateProviderSubscription({...provider,metadata:{business_id:'biz_2'}},index,business),error=>error.code==='provider-business-mismatch');
 });
 
@@ -235,4 +258,13 @@ test('webhook associa por índice da empresa e não pelo e-mail do pagador',()=>
   const validation=validateProviderSubscription(provider,index,{subscription:{mercadoPago:{customerId:null}}});
   assert.equal(validation.active,true);
   assert.throws(()=>validateProviderSubscription({...provider,metadata:{business_id:'biz_empresa_b'}},index,{}),error=>error.code==='provider-business-mismatch');
+});
+
+test('webhook payment resolve a assinatura pela external_reference segura',async()=>{
+  const reference=billingExternalReference('biz_empresa_a','operation_123456789'),query={collection:null,field:null,value:null,limit:null};
+  const db={collection(name){query.collection=name;return{where(field,op,value){query.field=field;query.value=value;return{limit(limit){query.limit=limit;return{get:async()=>({size:1,docs:[{id:'sub_resolvida'}]})}}}}}}};
+  assert.equal(await resolveSubscriptionIdFromPayment(db,{external_reference:reference}),'sub_resolvida');
+  assert.deepEqual(query,{collection:'subscriptionIndex',field:'expectedExternalReference',value:reference,limit:2});
+  assert.equal(await resolveSubscriptionIdFromPayment(db,{subscription_id:'sub_direta'}),'sub_direta');
+  assert.equal(await resolveSubscriptionIdFromPayment(db,{external_reference:'email@nao-e-referencia'}),null);
 });
