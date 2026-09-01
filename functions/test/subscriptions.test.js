@@ -6,11 +6,12 @@ const crypto=require('node:crypto');
 const {normalizePlanId,requirePlan}=require('../src/services/plan-service');
 const {mapProviderStatus,isTrialActive,providerPatch,pendingSubscription,computeAccess}=require('../src/services/subscription-service');
 const {signatureManifest,verifyWebhookSignature,eventId}=require('../src/services/webhook-service');
-const {mercadoPagoService,billingExternalReference,pixExternalReference,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
+const {mercadoPagoService,billingExternalReference,pixExternalReference,normalizeDeviceSessionId,providerErrorDiagnostics}=require('../src/services/mercado-pago-service');
 const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('../src/services/billing-payer-service');
 const {requirePaymentMethod,providerPaymentResult}=require('../src/services/billing-payment-method-service');
 const {validateProviderSubscription}=require('../src/services/firestore-subscription-service');
-const {absoluteExpiration,pixDetails,validatePixOrder,addBillingPeriod,pendingPixSubscription}=require('../src/services/pix-billing-service');
+const {absoluteExpiration,orderDetails,pixDetails,validateOrder,validatePixOrder,addBillingPeriod,pendingManualSubscription,pendingPixSubscription}=require('../src/services/pix-billing-service');
+const {normalizeManualCardPayment}=require('../src/services/manual-card-service');
 const {paymentDeclineMessage,publicCardPaymentDiagnostic}=require('../src/services/card-payment-diagnostic-service');
 const {canonicalAttemptStatus,transitionAttempt,attemptStatePatch,isTerminalAttempt,getCurrentBillingAttempt}=require('../src/services/billing-attempt-state-service');
 
@@ -71,6 +72,12 @@ test('cliente Mercado Pago envia pagador, referência interna e webhook seguro',
   assert.equal(captured.url,'https://api.mercadopago.com/preapproval');assert.equal(captured.options.headers.Authorization,'Bearer secret-token');assert.equal(captured.options.headers['X-Idempotency-Key'],'operation_123456789');const body=JSON.parse(captured.options.body);assert.equal(body.payer_email,'payer.personal@example.com');assert.equal(body.metadata.user_id,'uid_adi_festa');assert.equal(body.metadata.business_id,'biz_1');assert.equal(body.external_reference,billingExternalReference('biz_1','operation_123456789'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.notEqual(body.external_reference,'payer.personal@example.com');assert.equal(body.auto_recurring.transaction_amount,29.9);assert.equal(body.notification_url,'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks');
 });
 
+test('assinatura recorrente envia Device ID somente no header oficial',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'sub_device',init_point:'https://checkout.example'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});await service.createSubscription({businessId:'biz_1',userId:'uid_1',billingPayerEmail:'payer@example.com',plan:requirePlan('professional'),backUrl:'https://app.example',operationId:'operation_device_1234',deviceSessionId:'device-session_123456789'});
+  assert.equal(captured.options.headers['X-meli-session-id'],'device-session_123456789');assert.doesNotMatch(captured.options.body,/device-session_123456789/);assert.equal(normalizeDeviceSessionId(''),null);assert.throws(()=>normalizeDeviceSessionId('bad id'));
+});
+
 test('recusa não inventa período pago nem data de renovação',()=>{
   const patch=providerPatch({id:'sub_rejected',status:'cancelled',date_created:'2026-08-29T22:00:00Z',next_payment_date:'2026-09-29T22:00:00Z'},{planId:'premium',now:'2026-08-30T02:00:00Z',existing:{status:'pending',hasPaidSubscription:false,currentPeriodEnd:null}});
   assert.equal(patch.status,'cancelled');assert.equal(patch.currentPeriodEnd,null);assert.equal(patch.nextBillingDate,null);assert.equal(patch.hasPaidSubscription,false);
@@ -126,6 +133,23 @@ test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()
   assert.equal('expiration_time' in body.transactions.payments[0],false,'Orders API deve aplicar a validade padrão de 24 horas');
 });
 
+test('cartão mensal usa Orders API, tokenização, Device ID e 3DS on fraud risk',async()=>{
+  let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'order_card_1',status:'action_required',status_detail:'pending_challenge'})}};
+  const service=mercadoPagoService({accessToken:'secret-token',fetchImpl}),payment=normalizeManualCardPayment({token:'token_card_1234567890',payment_method_id:'visa',issuer_id:'25',installments:1,payer:{identification:{type:'CPF',number:'123.456.789-09'}}});
+  await service.createCardOrder({businessId:'biz_1',email:'payer@example.com',plan:requirePlan('premium'),billing:{amount:50.34},operationId:'op_card_123456789012',payment,notificationUrl:'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks',deviceSessionId:'device-session_123456789'});
+  const body=JSON.parse(captured.options.body),method=body.transactions.payments[0].payment_method;
+  assert.equal(captured.url,'https://api.mercadopago.com/v1/orders');assert.equal(captured.options.headers['X-meli-session-id'],'device-session_123456789');assert.equal(captured.options.headers['X-Idempotency-Key'],'op_card_123456789012');assert.equal(body.total_amount,'50.34');assert.equal(body.external_reference,billingExternalReference('biz_1','op_card_123456789012'));assert.deepEqual(body.config.online.transaction_security,{validation:'on_fraud_risk',liability_shift:'required'});assert.deepEqual(method,{id:'visa',type:'credit_card',token:'token_card_1234567890',installments:1,issuer_id:'25'});assert.deepEqual(body.payer,{email:'payer@example.com',identification:{type:'CPF',number:'12345678909'}});assert.equal('transaction_amount' in body,false);
+});
+
+test('cartão mensal valida challenge, aprovação e divergências sem confiar no frontend',()=>{
+  const base={id:'order_card_1',status:'action_required',status_detail:'pending_challenge',external_reference:'billing_ref',total_amount:'50.34',currency:'BRL',transactions:{payments:[{id:'pay_card_1',amount:'50.34',payment_method:{id:'visa',type:'credit_card',transaction_security:{url:'https://www.mercadopago.com/auth/challenge',status:'pending'}}}]}};
+  const index={providerOrderId:'order_card_1',paymentMethodType:'card_monthly',paymentMethodId:'visa',chargedPrice:50.34,expectedExternalReference:'billing_ref'};
+  const challenge=validateOrder(base,index);assert.equal(challenge.status,'challenge');assert.equal(challenge.challengeUrl,'https://www.mercadopago.com/auth/challenge');
+  const approved={...base,status:'processed',status_detail:'accredited'};assert.equal(validateOrder(approved,index).status,'approved');
+  assert.throws(()=>validateOrder({...base,external_reference:'other'},index),error=>error.code==='provider-reference-mismatch');assert.throws(()=>validateOrder({...base,transactions:{payments:[{...base.transactions.payments[0],payment_method:{id:'master',type:'credit_card'}}]}},index),error=>error.code==='provider-payment-method-mismatch');
+  const pending=pendingManualSubscription({status:'inactive',planId:'essential'},{planId:'premium',billingCycle:'monthly',paymentMethodType:'card_monthly',operationId:'op',providerOrderId:'order_card_1'},'2026-08-31T00:00:00Z');assert.equal(pending.pendingPaymentMethodType,'card_monthly');assert.equal(pending.billingStrategy,'manual_card');assert.equal(orderDetails(base,'card_monthly').transactionSecurityStatus,'pending');
+});
+
 test('Orders API ignora notification_url insegura em vez de enviar callback HTTP',async()=>{
   let captured;const fetchImpl=async(url,options)=>{captured={url,options};return{ok:true,status:201,text:async()=>JSON.stringify({id:'order_pix_2'})}};
   const service=mercadoPagoService({accessToken:'secret-token',fetchImpl});
@@ -156,6 +180,7 @@ test('erro 503 é repetido com a mesma chave de idempotência',async()=>{
 
 test('formas de pagamento aceitas são enum fechado e cartão permanece padrão',()=>{
   assert.equal(requirePaymentMethod().id,'card');
+  assert.equal(requirePaymentMethod('card_monthly').providerMode,'card_order_3ds');
   assert.equal(requirePaymentMethod('pix_monthly').providerMode,'guest_pix_order');
   assert.throws(()=>requirePaymentMethod('pix'));
   assert.throws(()=>requirePaymentMethod('bank_transfer'));

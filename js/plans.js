@@ -17,7 +17,7 @@
       catalogo: "onlineCatalog",
       pedidos: "onlineOrders",
     };
-  let pixUnsubscribe=null;
+  let pixUnsubscribe=null,cardBrickController=null,cardChallengeListener=null;
   const featureLabels = {
     products: "Produtos e estoque",
     stock: "Controle de estoque",
@@ -237,7 +237,7 @@
                 : chargedPrice,
             }
           : null;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-decline" aria-labelledby="card-decline-title"><header>${icon("circle-x")}<h3 id="card-decline-title">Pagamento não aprovado</h3><p>${esc(payment?.message || "Seu banco ou o Mercado Pago não aprovou esta cobrança. Use outro cartão ou pague por Pix.")}</p></header>${couponCode ? `<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>` : ""}<div class="plan-card-decline-actions"><button type="button" class="btn btn-primary mobile-button primary" data-retry-card>Usar outro cartão</button><button type="button" class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button type="button" class="btn btn-light mobile-button" data-close-card-decline>Agora não</button></div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-decline" aria-labelledby="card-decline-title"><header>${icon("circle-x")}<h3 id="card-decline-title">Cobrança automática não aprovada</h3><p>${esc(payment?.message || "O cartão não foi aprovado para a cobrança automática. Nenhum plano foi ativado.")}</p></header>${couponCode ? `<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>` : ""}<div class="plan-card-decline-actions"><button type="button" class="btn btn-primary mobile-button primary" data-card-fallback-monthly>Pagar este mês com cartão</button><button type="button" class="btn btn-light mobile-button" data-retry-card>Tentar cobrança automática novamente</button><button type="button" class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button type="button" class="btn btn-light mobile-button" data-close-card-decline>Agora não</button></div></section></div>`;
     const openRetry = (initialPaymentMethod) => {
       root.innerHTML = "";
       openPaymentMethodModal({
@@ -251,6 +251,9 @@
     };
     $("[data-retry-card]", root)?.addEventListener("click", () =>
       openRetry("card"),
+    );
+    $("[data-card-fallback-monthly]", root)?.addEventListener("click", () =>
+      openRetry("card_monthly"),
     );
     $("[data-card-fallback-pix]", root)?.addEventListener("click", () =>
       openRetry("pix_monthly"),
@@ -312,8 +315,8 @@
       year: "numeric",
     }) || "";
   function verifyPaymentButton(subscription={}) {
-    const attemptId=subscription.pendingPaymentMethodType==="pix_monthly"?subscription.pendingCheckoutAttemptId:null;
-    if(attemptId)return `<button type="button" class="plan-manage-button plan-verify-payment" data-verify-pix-payment data-pix-attempt-id="${esc(attemptId)}">${icon("refresh-cw")} Verificar pagamento</button>`;
+    const attemptId=["pix_monthly","card_monthly"].includes(subscription.pendingPaymentMethodType)?subscription.pendingCheckoutAttemptId:null;
+    if(attemptId)return `<button type="button" class="plan-manage-button plan-verify-payment" ${subscription.pendingPaymentMethodType==="card_monthly"?'data-verify-monthly-card data-card-attempt-id':'data-verify-pix-payment data-pix-attempt-id'}="${esc(attemptId)}">${icon("refresh-cw")} Verificar pagamento</button>`;
     return subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" class="plan-manage-button plan-verify-payment" data-verify-card-payment>${icon("refresh-cw")} Verificar pagamento</button><button type="button" class="plan-manage-button plan-cancel-pending" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa</button>`:"";
   }
   function changePayerEmailButton(subscription = {}) {
@@ -417,7 +420,7 @@
             ? "state-expired"
             : "state-pending";
     const paymentMethod=s.paymentMethodType||s.pendingPaymentMethodType,
-      paymentLabel=paymentMethod==="pix_monthly"?"Pix mensal":paymentMethod==="card"?"Cartão de crédito":"Mercado Pago";
+      paymentLabel=paymentMethod==="pix_monthly"?"Pix mensal":paymentMethod==="card_monthly"?"Cartão mensal":paymentMethod==="card"?"Cartão automático":"Mercado Pago";
     return `<section class="plan-state-hero ${tone}"><span class="plan-state-badge">${icon(ctx.status === "active" ? "badge-check" : danger ? "circle-alert" : "clock-3")} ${esc(statusLabel)}</span><div class="plan-state-main"><i>${icon(ctx.status === "active" ? "gem" : danger ? "lock-keyhole" : "credit-card")}</i><div><h2>${ctx.status === "active" ? `${esc(current?.name || s.planId || "Plano")} está ativo` : esc(statusLabel)}</h2><p>${ctx.status === "active" ? (period ? `Próximo período em ${period}.` : "O acesso está liberado conforme o status confirmado no Firebase.") : paymentMethod==="pix_monthly"?"Estamos aguardando a confirmação oficial do Mercado Pago.":"Seus dados permanecem preservados e disponíveis para consulta."}</p>${paymentMethod?`<small class="plan-payment-method">Pagamento: <b>${esc(paymentLabel)}</b></small>`:""}</div></div>${s.cancelAtPeriodEnd && period ? `<div class="plan-state-note warning">${icon("calendar-x")} Cancelamento agendado para ${period}.</div>` : ctx.access.readOnly ? `<div class="plan-state-note warning">${icon("eye")} O app está em modo leitura. Regularize ou escolha um plano para voltar a criar dados.</div>` : ctx.status==="pending" ? `<div class="plan-state-note warning">${icon("clock-3")} Confirme o pagamento ou cancele esta tentativa antes de iniciar outra.</div>` : `<div class="plan-state-note">${icon("circle-check")} Status confirmado pela assinatura da empresa.</div>`}${verifyPaymentButton(s)}${changePayerEmailButton(s)}<button type="button" class="plan-manage-button" data-manage-plan>${icon("settings-2")} Gerenciar assinatura</button></section>`;
   }
   function planFeatures(plan) {
@@ -525,7 +528,7 @@
       pendingPixId=subscription.pendingPaymentMethodType==="pix_monthly"?subscription.pendingCheckoutAttemptId:null,
       root = $("#modal");
     if (!root) return;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body">${pendingPixId?`<button type="button" data-view-pending-pix>${icon("qr-code")} Ver Pix aguardando pagamento</button>`:""}${subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" data-manage-change-payer>${icon("mail")} Alterar e-mail do pagador</button><button type="button" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa de cartão</button>`:""}${pixActive?`<button type="button" data-renew-pix>${icon("refresh-cw")} Renovar agora por Pix</button>`:""}<button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active"&&subscription.paymentMethodType!=="pix_monthly" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body">${pendingPixId?`<button type="button" data-view-pending-pix>${icon("qr-code")} Ver Pix aguardando pagamento</button>`:""}${subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" data-manage-change-payer>${icon("mail")} Alterar e-mail do pagador</button><button type="button" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa de cartão</button>`:""}${pixActive?`<button type="button" data-renew-pix>${icon("refresh-cw")} Renovar agora por Pix</button>`:""}<button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active"&&subscription.paymentMethodType==="card" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
     $$("[data-close-billing]", root).forEach(
       (button) => (button.onclick = () => (root.innerHTML = "")),
     );
@@ -600,6 +603,11 @@
       window.Router?.render?.();
       dispatchEvent(new HashChangeEvent("hashchange"));
     }catch(error){window.Utils?.toast?.(error.message||"Não foi possível verificar o pagamento agora.",true)}finally{if(button.isConnected)button.disabled=false}
+  }
+  async function verifyPendingMonthlyCard(button){
+    const operationId=String(button?.dataset?.cardAttemptId||'');if(!operationId)return;button.disabled=true;
+    try{const result=await window.SubscriptionService.checkCardCheckout(operationId,{reconcileProvider:true}),card=result?.card,approved=card?.status==='payment_approved';if(approved){window.Utils?.toast?.('Pagamento confirmado. Plano atualizado.');window.Router?.render?.();dispatchEvent(new HashChangeEvent('hashchange'))}else{const plan=plans().find(item=>item.id===card?.planId);if(plan)openCardStatusModal({card,plan,billingCycle:card.billingCycle||'monthly',quote:null,billingPayerEmail:null,couponCode:card.couponSnapshot?.couponCodeSnapshot||null})}}
+    catch(error){window.Utils?.toast?.(error.message||'Não foi possível verificar o pagamento agora.',true)}finally{if(button.isConnected)button.disabled=false}
   }
   function confirmCancellation(root) {
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-confirm-cancel"><header class="modal-head"><h3>Solicitar cancelamento?</h3></header><div class="modal-body"><p>O acesso seguirá o status devolvido pelo Mercado Pago. Seus dados não serão apagados.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-cancel-no>Voltar</button><button class="btn btn-danger mobile-button" data-cancel-yes>Confirmar</button></footer></section></div>`;
@@ -679,6 +687,7 @@
       (button) => (button.onclick = () => changePendingPayerEmail()),
     );
     $("[data-verify-pix-payment]",scope)?.addEventListener("click",event=>verifyPendingPix(event.currentTarget));
+    $("[data-verify-monthly-card]",scope)?.addEventListener("click",event=>verifyPendingMonthlyCard(event.currentTarget));
     $("[data-verify-card-payment]",scope)?.addEventListener("click",event=>runSubscriptionAction(event.currentTarget,()=>window.SubscriptionService.syncSubscriptionStatus({reconcileProvider:true}),'Conferência concluída.',$("#modal")||scope));
     $("[data-cancel-pending-card]",scope)?.addEventListener("click",event=>runSubscriptionAction(event.currentTarget,()=>window.SubscriptionService.cancelPendingBillingAttempt(),'Tentativa cancelada com segurança.',$("#modal")||scope));
     $("[data-apply-coupon]", scope)?.addEventListener("click", (event) =>
@@ -712,6 +721,22 @@
     openPaymentMethodModal({planId,billingCycle,quote});
   }
   function closePixWatcher(){pixUnsubscribe?.();pixUnsubscribe=null}
+  function removeCardChallengeListener(){if(cardChallengeListener)window.removeEventListener('message',cardChallengeListener);cardChallengeListener=null}
+  async function destroyCardBrick(){removeCardChallengeListener();const controller=cardBrickController;cardBrickController=null;if(controller?.unmount)await controller.unmount().catch(()=>{})}
+  function loadScript(id,src,attributes={}){
+    const existing=document.getElementById(id);if(existing)return existing.dataset.loaded==='true'?Promise.resolve(existing):new Promise((resolve,reject)=>{existing.addEventListener('load',()=>resolve(existing),{once:true});existing.addEventListener('error',reject,{once:true})});
+    return new Promise((resolve,reject)=>{const script=document.createElement('script');script.id=id;script.src=src;script.async=true;Object.entries(attributes).forEach(([key,value])=>script.setAttribute(key,value));script.onload=()=>{script.dataset.loaded='true';resolve(script)};script.onerror=()=>reject(Error('Não foi possível carregar o checkout seguro do Mercado Pago.'));document.head.appendChild(script)});
+  }
+  async function mercadoPagoDeviceId(){
+    if(!window.MP_DEVICE_SESSION_ID)await loadScript('mercado-pago-security','https://www.mercadopago.com/v2/security.js',{view:'checkout'}).catch(()=>null);
+    for(let attempt=0;attempt<10&&!window.MP_DEVICE_SESSION_ID;attempt+=1)await new Promise(resolve=>setTimeout(resolve,80));
+    return String(window.MP_DEVICE_SESSION_ID||'').trim()||null;
+  }
+  async function mercadoPagoBrick(publicKey){
+    if(!window.MercadoPago)await loadScript('mercado-pago-sdk','https://sdk.mercadopago.com/js/v2');
+    if(!window.MercadoPago)throw Error('O checkout seguro do Mercado Pago não foi carregado.');
+    return new window.MercadoPago(publicKey,{locale:'pt-BR'}).bricks();
+  }
   function pixImage(value){if(!value)return"";return value.startsWith("data:")?value:`data:image/png;base64,${value}`}
   function pixStatusView(pix,plan,billingCycle,quote){
     const status=String(pix?.status||"payment_pending"),approved=status==="payment_approved",expired=status==="expired",failed=["canceled","failed"].includes(status),review=status==="payment_review_required",expires=pix?.expiresAt?new Date(pix.expiresAt):null,expiresLabel=expires&&!Number.isNaN(expires.getTime())?expires.toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"",couponCode=quote?.code||pix?.couponSnapshot?.couponCodeSnapshot||"";
@@ -735,6 +760,43 @@
     render(pix);
     pixUnsubscribe=window.SubscriptionService.watchPixCheckout(pix.id,data=>{if(data?.status&&data.status!==pix.status){pix={...pix,...data};render(pix)}},error=>console.warn('[Billing Pix listener]',{code:error?.code||'unknown'}));
   }
+  function cardStatusCopy(card){
+    const detail=String(card?.statusDetail||'').toLowerCase();
+    if(detail==='cc_rejected_high_risk')return'O cartão não foi aprovado pela análise de segurança. Nenhum plano foi ativado e o cupom continua disponível para uma nova tentativa.';
+    if(detail==='cc_rejected_3ds_challenge')return'A autenticação do banco não foi concluída ou não foi aprovada. Nenhum plano foi ativado.';
+    return'O Mercado Pago ou o banco emissor não aprovou este pagamento. Nenhum plano foi ativado.';
+  }
+  function cardStatusView(card,plan,billingCycle,quote){
+    const status=String(card?.status||'payment_pending'),approved=status==='payment_approved',challenge=status==='payment_challenge',pending=status==='payment_pending',couponCode=quote?.code||card?.couponSnapshot?.couponCodeSnapshot||'';
+    if(approved)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result success"><header>${icon('circle-check-big')}<h3>Pagamento confirmado</h3><p>Seu plano ${esc(plan.name)} está ativo por ${billingCycle==='yearly'?'um ano':'um mês'}.</p></header><button class="btn btn-primary mobile-button primary" data-card-finish>Começar a usar</button></section></div>`;
+    if(challenge)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet" aria-labelledby="card-challenge-title"><header class="modal-head"><div><h3 id="card-challenge-title">Confirme com seu banco</h3><small>Autenticação segura 3DS</small></div><button class="icon-btn mobile-icon-button" data-card-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p class="plan-card-challenge-help">Conclua a verificação do banco abaixo. Esta etapa não significa que o pagamento já foi aprovado.</p><iframe class="plan-card-challenge-frame" data-card-challenge title="Autenticação do cartão" src="${esc(card.challengeUrl)}" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" referrerpolicy="strict-origin"></iframe><button class="btn btn-light mobile-button" data-check-card>Já concluí · verificar</button></div></section></div>`;
+    if(pending)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result"><header>${icon('clock-3')}<h3>Pagamento em processamento</h3><p>Estamos aguardando a confirmação oficial do Mercado Pago.</p></header><button class="btn btn-light mobile-button" data-check-card>Verificar agora</button><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;
+    return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result expired"><header>${icon('circle-alert')}<h3>Cartão não aprovado</h3><p>${esc(cardStatusCopy(card))}</p>${couponCode?`<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>`:''}</header><button class="btn btn-primary mobile-button primary" data-card-retry-monthly>Tentar cartão mensal novamente</button><button class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button class="btn btn-light mobile-button" data-card-close>Agora não</button></section></div>`;
+  }
+  function openCardStatusModal({card,plan,billingCycle,quote,billingPayerEmail,couponCode}){
+    const root=$('#modal');if(!root)return;removeCardChallengeListener();
+    const render=current=>{
+      card=current;root.innerHTML=cardStatusView(current,plan,billingCycle,quote);window.lucide?.createIcons();
+      $$('[data-card-close]',root).forEach(button=>button.onclick=async()=>{await destroyCardBrick();root.innerHTML=''});
+      $('[data-card-finish]',root)?.addEventListener('click',async()=>{await window.SubscriptionService.syncSubscriptionStatus().catch(()=>{});await destroyCardBrick();root.innerHTML='';window.Router?.render?.()});
+      const check=async button=>{button.disabled=true;try{const result=await window.SubscriptionService.checkCardCheckout(current.id,{reconcileProvider:true});render(result.card)}catch(error){if(!String(error?.code||'').includes('resource-exhausted'))window.Utils?.toast?.(error.message||'Não foi possível conferir agora.',true)}finally{if(button.isConnected)button.disabled=false}};
+      $('[data-check-card]',root)?.addEventListener('click',event=>check(event.currentTarget));
+      $('[data-card-retry-monthly]',root)?.addEventListener('click',()=>{root.innerHTML='';openPaymentMethodModal({planId:plan.id,billingCycle,quote,couponCode:couponCode||quote?.code||null,initialPaymentMethod:'card_monthly',initialBillingPayerEmail:billingPayerEmail,previousCheckoutAttemptId:current.id})});
+      $('[data-card-fallback-pix]',root)?.addEventListener('click',()=>{root.innerHTML='';openPaymentMethodModal({planId:plan.id,billingCycle,quote,couponCode:couponCode||quote?.code||null,initialPaymentMethod:'pix_monthly'})});
+      if(current.status==='payment_challenge'&&current.challengeUrl){const expectedOrigin=(()=>{try{return new URL(current.challengeUrl).origin}catch{return''}})();cardChallengeListener=event=>{if(event.origin!==expectedOrigin||event.data?.status!=='COMPLETE')return;removeCardChallengeListener();const button=$('[data-check-card]',root);if(button)check(button)};window.addEventListener('message',cardChallengeListener)}
+    };
+    render(card);
+  }
+  async function openMonthlyCardModal({plan,billingCycle,quote,couponCode,billingPayerEmail,previousCheckoutAttemptId=null}){
+    const root=$('#modal');if(!root)return;await destroyCardBrick();
+    const finalPrice=quote?.discountedPrice??(billingCycle==='yearly'?plan.yearlyPrice:plan.monthlyPrice),operationId=newCheckoutOperationId();
+    root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet" aria-labelledby="card-monthly-title"><header class="modal-head"><div><h3 id="card-monthly-title">Pagar este período com cartão</h3><small>${esc(plan.name)} · sem cobrança automática</small></div><button class="icon-btn mobile-icon-button" data-card-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Total</span><b>${money(finalPrice)}</b>${quote||couponCode?`<small>Cupom ${esc(quote?.code||couponCode)} será validado novamente no servidor.</small>`:''}</section><p class="plan-card-monthly-explainer">Os dados do cartão são tokenizados pelo Mercado Pago. Se o banco solicitar, a autenticação 3DS aparecerá nesta tela.</p><div class="plan-card-brick-loading" data-card-brick-loading>Carregando checkout seguro…</div><div id="cardPaymentBrick_container"></div><p class="plan-payment-disclaimer">${icon('shield-check')} Este pagamento ativa apenas ${billingCycle==='yearly'?'o período anual':'um mês'} e não cria cobrança recorrente.</p></div></section></div>`;
+    $('[data-card-close]',root)?.addEventListener('click',async()=>{await destroyCardBrick();root.innerHTML=''});window.lucide?.createIcons();
+    try{
+      const [config,deviceSessionId]=await Promise.all([window.SubscriptionService.getBillingCheckoutConfig(),mercadoPagoDeviceId()]),bricks=await mercadoPagoBrick(config.publicKey),settings={initialization:{amount:Number(finalPrice),payer:{email:billingPayerEmail}},customization:{visual:{style:{theme:'default'}},paymentMethods:{maxInstallments:1}},callbacks:{onReady:()=>{$('[data-card-brick-loading]',root)?.remove()},onError:error=>{console.warn('[BILLING_CARD_BRICK_ERROR]',{type:error?.type||'unknown'});window.Utils?.toast?.('Não foi possível carregar os dados do cartão.',true)},onSubmit:formData=>new Promise(async(resolve,reject)=>{try{const result=await window.SubscriptionService.requestUpgrade(plan.id,{billingCycle,quoteId:quote?.quoteId||null,couponCode:couponCode||quote?.code||null,paymentMethodType:'card_monthly',billingPayerEmail,operationId,previousCheckoutAttemptId,deviceSessionId:deviceSessionId||await mercadoPagoDeviceId(),cardPayment:formData});await destroyCardBrick();openCardStatusModal({card:result.card,plan,billingCycle,quote,billingPayerEmail,couponCode});resolve()}catch(error){console.warn('[BILLING_CARD_MONTHLY_ERROR]',{code:error?.code||'unknown'});window.Utils?.toast?.(error.message||'Não foi possível processar o cartão.',true);reject(error)}})}};
+      cardBrickController=await bricks.create('cardPayment','cardPaymentBrick_container',settings);
+    }catch(error){console.warn('[BILLING_CARD_BRICK_LOAD_ERROR]',{code:error?.code||'unknown'});root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result expired"><header>${icon('circle-alert')}<h3>Checkout indisponível</h3><p>${esc(error.message||'Não foi possível carregar o checkout seguro.')}</p></header><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;$('[data-card-close]',root)?.addEventListener('click',()=>{root.innerHTML=''});window.lucide?.createIcons()}
+  }
   function openPaymentMethodModal({
     planId,
     billingCycle,
@@ -757,7 +819,7 @@
     let selected = initialPaymentMethod,
       checkoutOperationId = newCheckoutOperationId(),
       submittedSignature = null;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote || couponCode ? `<small>Cupom ${esc(quote?.code || couponCode)} aplicado e será validado novamente no servidor.</small>` : ""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" class="active" data-payment-option="card" role="radio" aria-checked="true"><i>${icon("credit-card")}</i><span><b>Cartão de crédito</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle === "yearly" ? "Pix por período" : "Pix mensal"}</b><small>Sem cartão nem conta Mercado Pago. Pagamento manual a cada renovação; uma nova cobrança pode exigir confirmação a cada mês.</small></span><em>${icon("circle")}</em></button></div><section class="plan-payer-email" data-card-payer><label for="billing-payer-email"><b>E-mail do pagador</b><span>Use o e-mail da conta Mercado Pago que fará o pagamento.</span></label><input id="billing-payer-email" data-billing-payer-email type="email" inputmode="email" autocomplete="email" maxlength="254" required value="${esc(payerEmail)}" placeholder="email@exemplo.com"><small>Ele pode ser diferente do e-mail da sua empresa no Adi Festa. Informe o e-mail usado pela pessoa que fará o pagamento no Mercado Pago.</small><div class="plan-payer-error" data-payer-error hidden></div></section><p class="plan-payment-disclaimer">${icon("shield-check")} O pagamento acontece no ambiente seguro do Mercado Pago. O plano só é ativado após confirmação oficial por webhook.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote || couponCode ? `<small>Cupom ${esc(quote?.code || couponCode)} aplicado e será validado novamente no servidor.</small>` : ""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" class="active" data-payment-option="card" role="radio" aria-checked="true"><i>${icon("refresh-cw")}</i><span><b>Cartão automático</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button><button type="button" data-payment-option="card_monthly" role="radio" aria-checked="false"><i>${icon("credit-card")}</i><span><b>Cartão mensal</b><small>Pague apenas este período. Autenticação 3DS quando solicitada pelo banco.</small></span><em>${icon("circle")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle === "yearly" ? "Pix por período" : "Pix mensal"}</b><small>Sem cartão nem conta Mercado Pago. Pagamento manual a cada renovação; uma nova cobrança pode exigir confirmação a cada mês.</small></span><em>${icon("circle")}</em></button></div><section class="plan-payer-email" data-card-payer><label for="billing-payer-email"><b>E-mail do pagador</b><span>${selected === "card_monthly" ? "Informe o e-mail de quem fará o pagamento." : "Use o e-mail da conta Mercado Pago que fará o pagamento."}</span></label><input id="billing-payer-email" data-billing-payer-email type="email" inputmode="email" autocomplete="email" maxlength="254" required value="${esc(payerEmail)}" placeholder="email@exemplo.com"><small>Ele pode ser diferente do e-mail da sua empresa no Adi Festa e não altera o login nem o proprietário da empresa.</small><div class="plan-payer-error" data-payer-error hidden></div></section><p class="plan-payment-disclaimer">${icon("shield-check")} O plano só é ativado após confirmação oficial do Mercado Pago.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
     const emailInput = $("[data-billing-payer-email]", root),
       payerSection = $("[data-card-payer]", root),
       payerError = $("[data-payer-error]", root),
@@ -787,14 +849,11 @@
           if (marker)
             marker.innerHTML = icon(active ? "circle-check" : "circle");
         });
-        if (payerSection) payerSection.hidden = selected !== "card";
-        if (emailInput) emailInput.required = selected === "card";
+        if (payerSection) payerSection.hidden = !["card","card_monthly"].includes(selected);
+        if (emailInput) emailInput.required = ["card","card_monthly"].includes(selected);
         const submit = $("[data-start-checkout]", root);
         if (submit)
-          submit.textContent =
-            selected === "pix_monthly"
-              ? "Continuar com Pix"
-              : "Continuar com cartão";
+          submit.textContent = selected === "pix_monthly" ? "Continuar com Pix" : selected === "card_monthly" ? "Preencher cartão" : "Continuar com cartão automático";
         window.lucide?.createIcons();
       };
     syncSelection();
@@ -820,13 +879,13 @@
       async (event) => {
         const submit = event.currentTarget,
           billingPayerEmail =
-            selected === "card"
+            ["card","card_monthly"].includes(selected)
               ? String(emailInput?.value || "")
                   .trim()
                   .toLowerCase()
               : null;
         if (
-          selected === "card" &&
+          ["card","card_monthly"].includes(selected) &&
           (!billingPayerEmail || !emailInput?.checkValidity())
         ) {
           showPayerError(
@@ -841,9 +900,14 @@
           checkoutOperationId = newCheckoutOperationId();
         submittedSignature = signature;
         submit.disabled = true;
-        submit.textContent = "Abrindo checkout…";
+        submit.textContent = selected === "card_monthly" ? "Abrindo formulário seguro…" : "Abrindo checkout…";
         clearPayerError();
         try {
+          if(selected === "card_monthly"){
+            await openMonthlyCardModal({plan,billingCycle,quote,couponCode:couponCode||quote?.code||null,billingPayerEmail,previousCheckoutAttemptId});
+            return;
+          }
+          const deviceSessionId=selected === "card" ? await mercadoPagoDeviceId() : null;
           const result = await window.SubscriptionService.requestUpgrade(
             planId,
             {
@@ -852,6 +916,7 @@
               couponCode: couponCode || quote?.code || null,
               paymentMethodType: selected,
               billingPayerEmail,
+              deviceSessionId,
               operationId: checkoutOperationId,
               previousCheckoutAttemptId:
                 selected === "pix_monthly"
