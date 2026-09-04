@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=116") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=117") < html.indexOf("auth.js?v=115"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -56,9 +56,9 @@ test("comprovantes aceitam somente imagens/PDF e ficam no lançamento", () => {
   assert.match(service, /financialSpaces\/\$\{space\.id\}\/entries\/\$\{entryId\}/);
 });
 
-test("release 116 publica correção de permissões e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "116"/);
-  assert.match(sw, /adi-festa-v116-financial-permissions/);
+test("release 117 publica correção de permissões e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "117"/);
+  assert.match(sw, /adi-festa-v117-financial-permissions/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
