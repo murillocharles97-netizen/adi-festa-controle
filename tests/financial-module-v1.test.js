@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=115") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=116") < html.indexOf("auth.js?v=115"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -19,6 +19,14 @@ test("persistência usa espaços isolados, centavos e consultas mensais limitada
   assert.match(service, /MAX_MONTH_ENTRIES = 500/);
   assert.match(service, /amountCents/);
   assert.doesNotMatch(service, /onSnapshot/);
+});
+
+test("listagem inicial satisfaz as Rules sem depender de filtro implícito", () => {
+  assert.match(service, /where\("ownerUid", "==", currentUid\)[\s\S]*where\("type", "==", "personal"\)[\s\S]*where\("active", "==", true\)/);
+  assert.match(service, /where\("ownerUid", "==", currentUid\)[\s\S]*where\("type", "==", "other"\)[\s\S]*where\("active", "==", true\)/);
+  assert.match(service, /where\("linkedBusinessId", "==", currentBusinessId\)[\s\S]*where\("type", "==", "business"\)[\s\S]*where\("active", "==", true\)/);
+  assert.match(read("js/financial-ui.js"), /Não foi possível acessar este espaço financeiro\./);
+  assert.doesNotMatch(read("js/financial-ui.js"), /state\.error = error\.message/);
 });
 
 test("venda, fiado e cancelamento alimentam a projeção sem legado retroativo", () => {
@@ -48,9 +56,9 @@ test("comprovantes aceitam somente imagens/PDF e ficam no lançamento", () => {
   assert.match(service, /financialSpaces\/\$\{space\.id\}\/entries\/\$\{entryId\}/);
 });
 
-test("release 115 publica módulo e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "115"/);
-  assert.match(sw, /adi-festa-v115-financial-spaces/);
+test("release 116 publica correção de permissões e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "116"/);
+  assert.match(sw, /adi-festa-v116-financial-permissions/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

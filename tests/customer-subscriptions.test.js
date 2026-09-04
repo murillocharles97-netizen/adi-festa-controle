@@ -161,7 +161,7 @@ test("integração usa consulta limitada por cliente/vencimento e recibo não ex
   assert.match(receipt, /subscriptionExpiresAt/);
   assert.match(receipt, /Vigência da renovação/);
   assert.doesNotMatch(receipt, /custoUnitario|Custo total|Lucro/);
-  assert.match(worker, /adi-festa-v115-financial-spaces/);
+  assert.match(worker, /adi-festa-v116-financial-permissions/);
 });
 
 test("venda recorrente exige cliente; fiado ativa na hora, aumenta dívida e mantém campanha pendente", () => {
