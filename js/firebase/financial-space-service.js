@@ -110,16 +110,16 @@ async function listSpaces(options = {}) {
   if (options.cacheOnly || !navigator.onLine) return listCachedSpaces();
   state.loading = true;
   try {
-    const spaces = collection(db, "financialSpaces"), queries = [
+    const spacesCollection = collection(db, "financialSpaces"), queries = [
       getDocs(query(
-        spaces,
+        spacesCollection,
         where("ownerUid", "==", currentUid),
         where("type", "==", "personal"),
         where("active", "==", true),
         limit(100),
       )),
       getDocs(query(
-        spaces,
+        spacesCollection,
         where("ownerUid", "==", currentUid),
         where("type", "==", "other"),
         where("active", "==", true),
@@ -128,7 +128,7 @@ async function listSpaces(options = {}) {
     ];
     if (currentBusinessId)
       queries.push(getDocs(query(
-        spaces,
+        spacesCollection,
         where("linkedBusinessId", "==", currentBusinessId),
         where("type", "==", "business"),
         where("active", "==", true),
