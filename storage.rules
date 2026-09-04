@@ -13,6 +13,31 @@ service firebase.storage {
       return canAccess(businessId)
         && profile().role in ['owner', 'admin', 'manager'];
     }
+    function financialSpace(spaceId) {
+      return firestore.get(/databases/(default)/documents/financialSpaces/$(spaceId)).data;
+    }
+    function canAccessFinancialSpace(spaceId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/financialSpaces/$(spaceId))
+        && financialSpace(spaceId).active != false
+        && (
+          (
+            financialSpace(spaceId).type == 'business'
+            && canAccess(financialSpace(spaceId).linkedBusinessId)
+          )
+          || (
+            financialSpace(spaceId).type in ['personal', 'other']
+            && financialSpace(spaceId).ownerUid == request.auth.uid
+          )
+        );
+    }
+    function canManageFinancialSpace(spaceId) {
+      return canAccessFinancialSpace(spaceId)
+        && (
+          financialSpace(spaceId).type in ['personal', 'other']
+          || profile().role in ['owner', 'admin', 'manager']
+        );
+    }
     match /businesses/{businessId}/products/{productId}/{fileName} {
       allow read: if canAccess(businessId);
       allow create, update: if canManageProducts(businessId)
@@ -68,6 +93,20 @@ service firebase.storage {
         && request.resource.metadata.entityId == entityId
         && request.resource.metadata.entityType == 'catalogProduct';
       allow delete: if canManageProducts(businessId);
+    }
+    match /financialSpaces/{spaceId}/entries/{entryId}/{fileName} {
+      allow read: if canAccessFinancialSpace(spaceId)
+        && firestore.exists(/databases/(default)/documents/financialSpaces/$(spaceId)/entries/$(entryId));
+      allow create, update: if canManageFinancialSpace(spaceId)
+        && firestore.exists(/databases/(default)/documents/financialSpaces/$(spaceId)/entries/$(entryId))
+        && fileName.matches('^[A-Za-z0-9_-]{1,100}\\.(jpg|png|webp|pdf)$')
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('(image/(jpeg|png|webp)|application/pdf)')
+        && request.resource.metadata.financialSpaceId == spaceId
+        && request.resource.metadata.entryId == entryId
+        && request.resource.metadata.ownerUid == financialSpace(spaceId).ownerUid
+        && request.resource.metadata.entityType == 'financialAttachment';
+      allow delete: if canManageFinancialSpace(spaceId);
     }
   }
 }

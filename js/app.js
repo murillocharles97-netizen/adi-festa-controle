@@ -433,6 +433,7 @@
       fiados,
       produtos,
       campanhas: () => CampanhasUI.render(),
+      financeiro: () => FinanceiroUI.render(),
       catalogo: () => CatalogoUI.render(),
       pedidos: () => VisitasUI.renderOrdersPage(),
       historico,
@@ -450,6 +451,7 @@
       fiados: "Fiados",
       produtos: "Produtos",
       campanhas: "Campanhas",
+      financeiro: "Financeiro",
       catalogo: "Catálogo online",
       pedidos: "Pedidos online",
       historico: "Histórico",
@@ -1178,6 +1180,7 @@
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
     const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
+    if (root.dataset.route === "financeiro" && route !== "financeiro") FinanceiroUI.destroy();
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
     root.innerHTML = views[route]();
@@ -1194,6 +1197,8 @@
           ? "Preços, custos e estoque dos seus doces."
           : route === "campanhas"
             ? "Fidelização, pontos e recompensas."
+            : route === "financeiro"
+              ? "Controle entradas, saídas e contas."
             : route === "catalogo"
               ? (matchMedia("(max-width:767px)").matches ? "Seu catálogo online." : "Link permanente, produtos e disponibilidade.")
               : route === "pedidos"
@@ -1224,6 +1229,7 @@
     if (route === "catalogo") CatalogoUI.bind();
     if (route === "pedidos") VisitasUI.bindOrdersPage();
     if (route === "campanhas") CampanhasUI.bind();
+    if (route === "financeiro") FinanceiroUI.bind();
     if (route === "historico") window.ActivityCenter?.bind?.();
     if (route === "planos") window.PlansUI.bind($("#app"));
     if (route === "cupons") window.CouponsAdmin?.bind?.();

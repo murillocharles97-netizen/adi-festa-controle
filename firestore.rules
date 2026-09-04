@@ -89,6 +89,28 @@ service cloud.firestore {
           )
         );
     }
+    function financialSpace(spaceId) {
+      return get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data;
+    }
+    function canReadFinancialSpace(spaceId) {
+      let space = financialSpace(spaceId);
+      return signedIn() && space.active != false && (
+        (space.type == 'business' && belongsToBusiness(space.linkedBusinessId))
+        || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid)
+      );
+    }
+    function canManageFinancialSpace(spaceId) {
+      let space = financialSpace(spaceId);
+      return signedIn() && space.active != false && (
+        (
+          space.type == 'business'
+          && belongsToBusiness(space.linkedBusinessId)
+          && subscriptionAllowsWrites(space.linkedBusinessId)
+          && userProfile().role in ['owner', 'admin', 'manager']
+        )
+        || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid)
+      );
+    }
     match /plans/{planId} {
       allow read: if true;
       allow write: if false;
@@ -398,6 +420,125 @@ service cloud.firestore {
           && (collectionName != 'settings' || documentId != 'operation' || hasPermission(businessId, 'manageOperationSettings'));
         allow delete: if false;
       }
+    }
+
+    match /financialSpaces/{spaceId} {
+      allow read: if signedIn() && resource.data.active != false && (
+        (resource.data.type == 'business' && belongsToBusiness(resource.data.linkedBusinessId))
+        || (resource.data.type in ['personal', 'other'] && resource.data.ownerUid == request.auth.uid)
+      );
+      allow create: if signedIn()
+        && request.resource.data.id == spaceId
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.type in ['business', 'personal', 'other']
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && (
+          (
+            request.resource.data.type == 'business'
+            && request.resource.data.linkedBusinessId is string
+            && belongsToBusiness(request.resource.data.linkedBusinessId)
+            && subscriptionAllowsWrites(request.resource.data.linkedBusinessId)
+            && userProfile().role in ['owner', 'admin', 'manager']
+          )
+          || (
+            request.resource.data.type in ['personal', 'other']
+            && request.resource.data.linkedBusinessId == null
+          )
+        );
+      allow update: if canManageFinancialSpace(spaceId)
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId;
+      allow delete: if false;
+
+      match /entries/{entryId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == entryId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.operationId is string
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.currency == 'BRL'
+          && request.resource.data.direction in ['in', 'out']
+          && request.resource.data.status in ['pending', 'paid', 'cancelled', 'reversed'];
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && (
+            request.resource.data.amountCents == resource.data.amountCents
+            || (
+              resource.data.status == 'pending'
+              && request.resource.data.status == 'pending'
+              && request.resource.data.amountCents is int
+              && request.resource.data.amountCents > 0
+            )
+          )
+          && request.resource.data.currency == resource.data.currency
+          && request.resource.data.direction == resource.data.direction
+          && request.resource.data.sourceType == resource.data.sourceType
+          && request.resource.data.sourceId == resource.data.sourceId
+          && request.resource.data.status in ['pending', 'paid', 'cancelled', 'reversed'];
+        allow delete: if false;
+      }
+      match /events/{eventId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == eventId
+          && request.resource.data.operationId == eventId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data == resource.data;
+        allow delete: if false;
+      }
+      match /categories/{categoryId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == categoryId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid;
+        allow delete: if false;
+      }
+      match /recurrences/{recurrenceId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == recurrenceId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid;
+        allow delete: if false;
+      }
+    }
+
+    match /financialTransfers/{transferId} {
+      allow read: if signedIn()
+        && canReadFinancialSpace(resource.data.fromSpaceId)
+        && canReadFinancialSpace(resource.data.toSpaceId);
+      allow create: if signedIn()
+        && request.resource.data.id == transferId
+        && request.resource.data.operationId == transferId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amountCents is int
+        && request.resource.data.amountCents > 0
+        && request.resource.data.fromSpaceId != request.resource.data.toSpaceId
+        && canManageFinancialSpace(request.resource.data.fromSpaceId)
+        && canManageFinancialSpace(request.resource.data.toSpaceId);
+      allow update, delete: if false;
     }
 
     match /subscriptionIndex/{subscriptionId} {
