@@ -110,9 +110,30 @@ async function listSpaces(options = {}) {
   if (options.cacheOnly || !navigator.onLine) return listCachedSpaces();
   state.loading = true;
   try {
-    const queries = [getDocs(query(collection(db, "financialSpaces"), where("ownerUid", "==", currentUid), limit(100)))];
+    const spaces = collection(db, "financialSpaces"), queries = [
+      getDocs(query(
+        spaces,
+        where("ownerUid", "==", currentUid),
+        where("type", "==", "personal"),
+        where("active", "==", true),
+        limit(100),
+      )),
+      getDocs(query(
+        spaces,
+        where("ownerUid", "==", currentUid),
+        where("type", "==", "other"),
+        where("active", "==", true),
+        limit(100),
+      )),
+    ];
     if (currentBusinessId)
-      queries.push(getDocs(query(collection(db, "financialSpaces"), where("linkedBusinessId", "==", currentBusinessId), limit(20))));
+      queries.push(getDocs(query(
+        spaces,
+        where("linkedBusinessId", "==", currentBusinessId),
+        where("type", "==", "business"),
+        where("active", "==", true),
+        limit(20),
+      )));
     const snapshots = await Promise.all(queries), map = new Map();
     for (const snapshot of snapshots)
       for (const item of snapshot.docs) {
@@ -127,6 +148,16 @@ async function listSpaces(options = {}) {
     return rememberSpaces(spaces);
   } catch (error) {
     if (state.spaces.length) return listCachedSpaces();
+    const context = {
+      operation: "list",
+      path: "financialSpaces",
+      uidPresent: Boolean(auth.currentUser?.uid),
+      businessId: currentBusinessId || null,
+      query: "active space by owner/type or linkedBusinessId/type",
+      code: error?.code || "unknown",
+    };
+    console.error("[FINANCIAL_PERMISSION_ERROR]", context);
+    try { error.financialContext = context; } catch {}
     throw error;
   } finally {
     state.loading = false;

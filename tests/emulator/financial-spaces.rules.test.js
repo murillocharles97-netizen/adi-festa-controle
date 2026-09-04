@@ -2,7 +2,20 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require("@firebase/rules-unit-testing");
-const { doc, setDoc, getDoc, deleteDoc, updateDoc, runTransaction, writeBatch } = require("firebase/firestore");
+const {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  deleteDoc,
+  limit,
+  query,
+  runTransaction,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+} = require("firebase/firestore");
 
 let env;
 const projectId = "adi-festa-variations-test", businessA = "financial-a", businessB = "financial-b";
@@ -49,6 +62,35 @@ test("espaço pessoal é privado mesmo para colega da empresa", async () => {
   const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore();
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", "personal-a"), { id: "personal-a", name: "Pessoal", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));
   await assertFails(getDoc(doc(manager, "financialSpaces", "personal-a")));
+});
+
+test("query real da tela lista espaços próprios", async () => {
+  const db = env.authenticatedContext("owner-a").firestore();
+  await assertSucceeds(getDocs(query(
+    collection(db, "financialSpaces"),
+    where("ownerUid", "==", "owner-a"),
+    where("type", "==", "personal"),
+    where("active", "==", true),
+    limit(100),
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(db, "financialSpaces"),
+    where("ownerUid", "==", "owner-a"),
+    where("type", "==", "other"),
+    where("active", "==", true),
+    limit(100),
+  )));
+});
+
+test("query real da tela lista espaços da empresa", async () => {
+  const db = env.authenticatedContext("owner-a").firestore();
+  await assertSucceeds(getDocs(query(
+    collection(db, "financialSpaces"),
+    where("linkedBusinessId", "==", businessA),
+    where("type", "==", "business"),
+    where("active", "==", true),
+    limit(20),
+  )));
 });
 
 test("lançamento pago não pode ser apagado nem ter valor reescrito", async () => {

@@ -186,8 +186,14 @@ window.FinanceiroUI = (() => {
       state.dashboard = data;
       paint();
     } catch (error) {
-      console.error("[FinanceiroUI] refresh failed", { code: error.code, message: error.message });
-      state.error = error.message || "Não foi possível carregar o Financeiro.";
+      console.error("[FinanceiroUI] refresh failed", {
+        code: error.code,
+        operation: error.financialContext?.operation || "load",
+        path: error.financialContext?.path || "financialSpaces",
+      });
+      state.error = error.code === "permission-denied"
+        ? "Não foi possível acessar este espaço financeiro."
+        : "Não foi possível carregar seus dados financeiros agora.";
       root().innerHTML = `<section class="financial-error">${icon("triangle-alert")}<h2>Não foi possível carregar o Financeiro</h2><p>${esc(state.error)}</p><button class="btn btn-primary" type="button" data-financial-retry>Tentar novamente</button></section>`;
       bindPage();
     } finally {
