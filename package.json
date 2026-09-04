@@ -13,6 +13,7 @@
     "test:engagement-browser": "node scripts/audit-mobile-engagement-operations.cjs",
     "test:crm-mobile-browser": "node scripts/audit-crm-mobile-carousel.cjs",
     "test:public-catalog-browser": "node scripts/audit-public-catalog-desktop-v2.cjs",
+    "test:financial-browser": "node scripts/audit-financial-module-v1.cjs",
     "test:subscription-browser": "node scripts/audit-subscription-pix.cjs && node scripts/audit-subscription-card-monthly.cjs",
     "test:mobile-structural": "node scripts/audit-mobile-structural.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth,storage --project adi-festa-variations-test \"node --test --test-concurrency=1 tests/emulator/*.rules.test.js\"",

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Financeiro V1 fixture</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../css/style.css"><link rel="stylesheet" href="../css/mobile.css"><link rel="stylesheet" href="../css/visual.css"><link rel="stylesheet" href="../css/mobile-navigation.css"><link rel="stylesheet" href="../css/financial.css">
+  <style>
+    body{background:#f8fafc}.fixture-sidebar{position:fixed;inset:0 auto 0 0;width:250px;padding:28px 18px;background:#10243d;color:#fff}.fixture-sidebar h2{margin:0 0 30px}.fixture-sidebar a{display:flex;gap:10px;padding:14px;border-radius:12px;color:#dbe5ef}.fixture-sidebar a.active{background:#24405e;color:#fff}.fixture-shell{margin-left:250px}.fixture-topbar{display:flex;align-items:center;gap:18px;height:76px;padding:0 34px;border-bottom:1px solid #e1e7eb;background:#fff}.fixture-topbar h1{margin:0}.fixture-topbar small{color:#68758c}.fixture-avatar{display:grid;place-items:center;width:42px;height:42px;margin-left:auto;border-radius:50%;background:#112441;color:#fff;font-weight:900}#app{padding:28px 34px 54px}.fixture-bottom{display:none}
+    @media(max-width:780px){.fixture-sidebar{display:none}.fixture-shell{margin:0}.fixture-topbar{height:92px;padding:14px 22px}.fixture-topbar h1{font-size:27px}.fixture-topbar small{display:block}.fixture-menu{display:block!important}#app{padding:15px 16px 110px}.fixture-bottom{position:fixed;z-index:20;display:grid;grid-template-columns:repeat(5,1fr);inset:auto 0 0;height:76px;padding:8px 5px env(safe-area-inset-bottom);border-top:1px solid #dde5e9;background:#fff}.fixture-bottom span{display:grid;place-items:center;color:#66738b;font-size:11px}.fixture-bottom span:nth-child(3){margin-top:-30px;width:62px;height:62px;justify-self:center;border-radius:50%;background:#08ad85;color:#fff;font-size:32px}}
+  </style>
+</head>
+<body>
+  <aside class="fixture-sidebar"><h2>Adi Festa</h2><a>Início</a><a>Vender</a><a>Clientes</a><a class="active">Financeiro</a><a>Produtos</a></aside>
+  <div class="fixture-shell"><header class="fixture-topbar"><button class="icon-btn fixture-menu" style="display:none"><i data-lucide="menu"></i></button><div><h1>Financeiro</h1><small>Controle entradas, saídas e contas</small></div><span class="fixture-avatar">M</span></header><main id="app"></main></div>
+  <nav class="fixture-bottom"><span>Início</span><span>Vender</span><span>＋</span><span>Clientes</span><span>Produtos</span></nav><div id="modal"></div><div id="toasts"></div>
+  <script src="../assets/lucide.min.js"></script><script src="../js/financial-engine.js"></script>
+  <script>
+    const E=FinancialEngine, spaces=[{id:'business',name:'Adi Festa',type:'business',icon:'store',linkedBusinessId:'adi-festa'},{id:'primeline',name:'PrimeLine 3D',type:'business',icon:'store',linkedBusinessId:'prime-line-3d'},{id:'personal',name:'Meu financeiro pessoal',type:'personal',icon:'home',linkedBusinessId:null}], paid=[
+      E.normalizeEntry({id:'sale',operationId:'sale',description:'Venda do dia',amountCents:842000,direction:'in',status:'paid',occurredAt:'2026-09-04T12:00:00',dueAt:'2026-09-04T12:00:00',categoryId:'sales',categoryName:'Vendas'}),
+      E.normalizeEntry({id:'rent-paid',operationId:'rent-paid',description:'Aluguel',amountCents:238000,direction:'out',status:'paid',occurredAt:'2026-09-02T12:00:00',dueAt:'2026-09-02T12:00:00',categoryId:'rent',categoryName:'Aluguel'}),
+      E.normalizeEntry({id:'stock',operationId:'stock',description:'Compra de mercadoria',amountCents:145000,direction:'out',status:'paid',occurredAt:'2026-09-03T12:00:00',dueAt:'2026-09-03T12:00:00',categoryId:'stock',categoryName:'Compras'}),
+      E.normalizeEntry({id:'marketing',operationId:'marketing',description:'Anúncios',amountCents:82000,direction:'out',status:'paid',occurredAt:'2026-09-03T12:00:00',dueAt:'2026-09-03T12:00:00',categoryId:'marketing',categoryName:'Marketing'}),
+      E.normalizeEntry({id:'energy-paid',operationId:'energy-paid',description:'Energia',amountCents:53000,direction:'out',status:'paid',occurredAt:'2026-09-01T12:00:00',dueAt:'2026-09-01T12:00:00',categoryId:'energy',categoryName:'Energia'})
+    ], pending=[
+      E.normalizeEntry({id:'rent',operationId:'rent',description:'Aluguel',amountCents:120000,direction:'out',status:'pending',dueAt:'2026-09-05T12:00:00',categoryId:'rent',categoryName:'Aluguel'}),
+      E.normalizeEntry({id:'energy',operationId:'energy',description:'Energia',amountCents:34000,direction:'out',status:'pending',dueAt:'2026-09-08T12:00:00',categoryId:'energy',categoryName:'Energia'}),
+      E.normalizeEntry({id:'internet',operationId:'internet',description:'Internet',amountCents:11900,direction:'out',status:'pending',dueAt:'2026-09-10T12:00:00',categoryId:'internet',categoryName:'Internet'})
+    ];
+    let selected='business', consolidated=[];
+    const dashboard=(space=spaces.find(s=>s.id===selected))=>{const entries=space.id==='personal'?[paid[0],paid[2]]:space.id==='primeline'?[paid[0],paid[3],pending[1]]:[...paid,...pending], summary=E.summarize(entries,{now:'2026-09-04T12:00:00'});return{space,periodKey:'2026-09',entries,latest:entries.filter(e=>e.status==='paid'),payables:entries.filter(e=>e.status==='pending'),categories:E.defaultCategories(space.type),summary}};
+    window.FinancialSpaceService={listSpaces:async()=>spaces,listCachedSpaces:()=>spaces,selectedSpaceId:()=>selected,selectSpace:id=>(selected=id,spaces.find(s=>s.id===id)),selectedConsolidatedIds:()=>consolidated,setConsolidatedIds:ids=>(consolidated=ids),loadDashboard:async()=>dashboard(),loadConsolidated:async ids=>{const ds=ids.map(id=>dashboard(spaces.find(s=>s.id===id))), combined=E.consolidate(ds);return{...combined,spaces:ds.map(d=>d.space),selectedIds:ids,consolidated:true}},listCategories:async id=>E.defaultCategories(spaces.find(s=>s.id===id)?.type),createEntry:async()=>[{id:'fixture-entry'}],updatePendingEntry:async()=>({}),markPaid:async()=>({}),cancelPendingEntry:async()=>({}),createCategory:async()=>({}),createTransfer:async()=>({}),createSpace:async input=>{const value={id:`space-${spaces.length}`,icon:'wallet',...input};spaces.push(value);selected=value.id;return value},uploadAttachment:async()=>({})};
+    window.Utils={toast:()=>{}};window.BusinessContext={get:()=>({businessId:'adi-festa',business:{id:'adi-festa',name:'Adi Festa'}})};window.DB={carregar:()=>({config:{nome:'Adi Festa'}})};window.Router={atual:()=> 'financeiro'};
+  </script>
+  <script src="../js/financial-ui.js"></script>
+  <script>app.innerHTML=FinanceiroUI.render();FinanceiroUI.bind();window.__financialReady=true;</script>
+</body></html>

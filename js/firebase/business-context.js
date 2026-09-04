@@ -2,7 +2,7 @@ const DAY=86400000;
 export const APP_NAME='Adi Festa Controle';
 export const INTERNAL_BUSINESS_ID='adi-festa';
 
-const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true,reports:true,receipts:true};
+const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true,reports:true,receipts:true,financialModule:true};
 const GROWTH_FEATURES={campaigns:true,crm:true,crmExport:true,onlineCatalog:true,onlineOrders:true,bulkMessages:true,loyalty:true,advancedStock:true,dataImport:true,advancedReports:true};
 const PREMIUM_FEATURES={multipleUsers:true,rolesPermissions:true,advancedExports:true,automations:true,prioritySupport:true,multipleStocks:false,multipleUnits:false};
 const allFeatures={...OPERATION_FEATURES,...GROWTH_FEATURES,...PREMIUM_FEATURES};
@@ -11,7 +11,7 @@ const FEATURE_ALIASES={
   'sales.create':'sales','customers.create':'clients','products.create':'products','campaigns.create':'campaigns',
   'catalog.publish':'onlineCatalog','orders.receive':'onlineOrders','crm.view':'crm','crm.export':'crmExport',
   'users.add':'multipleUsers','variants.use':'products','reports.premium':'advancedReports','sync.write':'cloudBackup',
-  'payments.receive':'payments','stock.adjust':'stock','balance.adjust':'creditAccounts'
+  'payments.receive':'payments','stock.adjust':'stock','balance.adjust':'creditAccounts','finance.view':'financialModule','finance.manage':'financialModule'
 };
 
 export const PLANS={
@@ -23,8 +23,8 @@ export const PLANS={
 };
 
 const ROLE_PERMISSIONS={
-  platform_admin:['*'],owner:['manageBusiness','manageSubscription','manageUsers','manageProducts','manageClients','manageSales','manageStock','manageCampaigns','viewReports'],
-  admin:['manageProducts','manageClients','manageSales','manageStock','manageCampaigns','viewReports'],manager:['manageProducts','manageClients','manageSales','manageStock','manageCampaigns','viewReports'],cashier:['manageClients','manageSales'],viewer:['viewReports']
+  platform_admin:['*'],owner:['manageBusiness','manageSubscription','manageUsers','manageProducts','manageClients','manageSales','manageStock','manageCampaigns','manageFinancial','viewFinancial','viewReports'],
+  admin:['manageProducts','manageClients','manageSales','manageStock','manageCampaigns','manageFinancial','viewFinancial','viewReports'],manager:['manageProducts','manageClients','manageSales','manageStock','manageCampaigns','manageFinancial','viewFinancial','viewReports'],cashier:['manageClients','manageSales','viewFinancial'],viewer:['viewFinancial','viewReports']
 };
 const toDate=value=>{if(!value)return null;if(typeof value.toDate==='function')return value.toDate();const date=new Date(value);return Number.isNaN(date.getTime())?null:date};
 const normalizeStatus=value=>{const status=String(value||'inactive').toLowerCase();return status==='trial'?'trialing':status==='cancelled'?'canceled':status};

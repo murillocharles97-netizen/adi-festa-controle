@@ -274,6 +274,9 @@ window.Vendas = (() => {
       criada.campaignUpdates =
         window.Campanhas?.aplicarVendaNoBanco(db, criada) || [];
     });
+    window.FinancialSpaceService?.recordSale?.(criada).catch((error) =>
+      console.warn("[Financeiro] venda aguardando projeção", { saleId: criada?.id, code: error?.code || "unknown" }),
+    );
     return criada;
   };
   const ultima = () => {
@@ -406,6 +409,9 @@ window.Vendas = (() => {
         });
       }
     });
+    window.FinancialSpaceService?.reverseSale?.(removida).catch((error) =>
+      console.warn("[Financeiro] estorno aguardando projeção", { saleId: removida?.id, code: error?.code || "unknown" }),
+    );
     return removida;
   };
   return {
