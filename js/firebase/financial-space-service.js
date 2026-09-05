@@ -225,19 +225,39 @@ async function listCustomCategories(spaceId) {
 
 async function listCategories(spaceId) {
   const space = assertSpace(spaceId), custom = await listCustomCategories(spaceId).catch(() => []), map = new Map();
-  for (const item of [...Engine.defaultCategories(space.type), ...custom]) map.set(item.id, item);
-  return [...map.values()];
+  for (const item of [...Engine.defaultCategoryTree(space.type), ...custom]) map.set(item.id, {
+    ...item,
+    type: item.type === "subcategory" || item.parentCategoryId ? "subcategory" : "category",
+    parentCategoryId: item.parentCategoryId || null,
+    financialSpaceId: item.financialSpaceId || null,
+    isDefault: item.isDefault === true || item.system === true,
+  });
+  return [...map.values()].sort((left, right) => {
+    if (left.type !== right.type) return left.type === "category" ? -1 : 1;
+    if (left.parentCategoryId !== right.parentCategoryId)
+      return String(left.parentCategoryId || "").localeCompare(String(right.parentCategoryId || ""), "pt-BR");
+    return Number(left.sortOrder ?? 1000) - Number(right.sortOrder ?? 1000)
+      || String(left.name).localeCompare(String(right.name), "pt-BR");
+  });
 }
 
 async function createCategory(spaceId, input = {}) {
-  const space = assertSpace(spaceId), name = String(input.name || "").trim();
+  const space = assertSpace(spaceId), name = String(input.name || "").trim(), parentCategoryId = String(input.parentCategoryId || "").trim() || null,
+    categories = await listCategories(spaceId), parent = parentCategoryId ? categories.find((item) => item.id === parentCategoryId && item.type === "category") : null;
   if (!name) throw new Error("Informe o nome da categoria.");
+  if (parentCategoryId && !parent) throw new Error("Escolha uma categoria principal válida.");
+  if (categories.some((item) => item.parentCategoryId === parentCategoryId && String(item.name).localeCompare(name, "pt-BR", { sensitivity: "base" }) === 0))
+    throw new Error(parentCategoryId ? "Esta subcategoria já existe." : "Esta categoria já existe.");
   const id = String(input.id || crypto.randomUUID()), opId = operationId("category"), value = {
     id,
     ...baseMetadata(space, opId),
     name: name.slice(0, 60),
-    icon: String(input.icon || "shapes"),
+    icon: String(input.icon || (parentCategoryId ? "tag" : "shapes")),
+    type: parentCategoryId ? "subcategory" : "category",
+    parentCategoryId,
+    isDefault: false,
     active: true,
+    sortOrder: 1000,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -295,6 +315,10 @@ async function createEntry(spaceId, input = {}) {
       amountCents: Number(input.amountCents),
       categoryId: input.categoryId || category.id || "default_other",
       categoryName: input.categoryName || category.name || "Outros",
+      categoryIcon: input.categoryIcon || category.icon || "shapes",
+      subcategoryId: input.subcategoryId || null,
+      subcategoryName: input.subcategoryName || null,
+      categorySchemaVersion: 2,
       status: paid ? "paid" : "pending",
       dueAt: input.dueAt || at,
       occurredAt: paid ? at : null,
@@ -320,6 +344,10 @@ async function createEntry(spaceId, input = {}) {
       amountCents: base.amountCents,
       categoryId: base.categoryId,
       categoryName: base.categoryName,
+      categoryIcon: base.categoryIcon,
+      subcategoryId: base.subcategoryId,
+      subcategoryName: base.subcategoryName,
+      categorySchemaVersion: 2,
       direction: base.direction,
       entryType: base.entryType,
       nextDueAt: created[1]?.dueAt || Engine.addFrequency(base.dueAt, input.frequency).toISOString(),
@@ -380,6 +408,10 @@ async function updatePendingEntry(spaceId, entry, input = {}) {
     amountCents: Number(input.amountCents ?? entry.amountCents),
     categoryId: String(input.categoryId || entry.categoryId || "default_other"),
     categoryName: String(input.categoryName || entry.categoryName || "Outros"),
+    categoryIcon: String(input.categoryIcon || entry.categoryIcon || "shapes"),
+    subcategoryId: input.subcategoryId || null,
+    subcategoryName: input.subcategoryName || null,
+    categorySchemaVersion: 2,
     dueAt,
     sortAt: dueAt,
     periodKey: Engine.periodKey(dueAt),
@@ -422,6 +454,10 @@ async function reversePaidEntry(spaceId, entry, reason = "") {
     description: `Estorno · ${entry.description}`,
     categoryId: entry.categoryId,
     categoryName: entry.categoryName,
+    categoryIcon: entry.categoryIcon,
+    subcategoryId: entry.subcategoryId || null,
+    subcategoryName: entry.subcategoryName || null,
+    categorySchemaVersion: Number(entry.categorySchemaVersion || 2),
     status: "paid",
     occurredAt: reversedAt,
     paidAt: reversedAt,
@@ -499,13 +535,35 @@ async function latestEntries(spaceId) {
   return snapshot.docs.map(convert).filter((entry) => !entry.reversedByEntryId);
 }
 
+async function migrateLegacyCategories(space, entryLists = []) {
+  const byId = new Map();
+  for (const list of entryLists) for (const entry of list || []) byId.set(entry.id, entry);
+  const upgrades = [...byId.values()].map((entry) => {
+    if (entry.direction !== "out" || entry.categorySchemaVersion >= 2 || entry.categoryMigrationStatus === "manual_review") return { entry, patch: null };
+    return { entry, patch: Engine.legacyCategoryUpgrade(entry, space.type) || { categoryMigrationStatus: "manual_review" } };
+  }).filter((item) => item.patch);
+  if (!upgrades.length) return { migrated: 0, manualReview: 0 };
+  for (let offset = 0; offset < upgrades.length; offset += 400) {
+    const batch = writeBatch(db);
+    for (const { entry, patch } of upgrades.slice(offset, offset + 400))
+      batch.update(childRef(space.id, "entries", entry.id), clean({ ...patch, updatedAt: serverTimestamp() }));
+    await batch.commit();
+  }
+  const patches = new Map(upgrades.map(({ entry, patch }) => [entry.id, patch]));
+  for (const list of entryLists) for (const entry of list || []) Object.assign(entry, patches.get(entry.id) || {});
+  return {
+    migrated: upgrades.filter(({ patch }) => patch.categoryMigrationStatus === "migrated").length,
+    manualReview: upgrades.filter(({ patch }) => patch.categoryMigrationStatus === "manual_review").length,
+  };
+}
+
 async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
   const space = assertSpace(spaceId), started = performance.now(), [month, pending, latest, categories] = await Promise.all([
     monthEntries(space.id, selectedPeriod),
     pendingEntries(space.id),
     latestEntries(space.id),
     listCategories(space.id),
-  ]), byId = new Map();
+  ]), categoryMigration = await migrateLegacyCategories(space, [month, pending, latest]), byId = new Map();
   for (const entry of [...month, ...pending, ...latest]) byId.set(entry.id, entry);
   const summary = Engine.summarize(month), payables = Engine.sortPayables(pending), result = {
     space: structuredClone(space),
@@ -519,6 +577,8 @@ async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
       pendingPayablesCents: payables.filter((entry) => entry.direction === "out").reduce((sum, entry) => sum + Number(entry.amountCents || 0), 0),
       pendingCount: payables.filter((entry) => entry.direction === "out").length,
       dueSoonCount: Engine.summarize(pending).dueSoonCount,
+      migratedCategories: categoryMigration.migrated,
+      manualReviewCategories: categoryMigration.manualReview,
     },
   };
   state.lastReadStats = {
@@ -697,6 +757,7 @@ const FinancialSpaceService = {
   archiveSpace,
   listCategories,
   createCategory,
+  migrateLegacyCategories,
   createEntry,
   updatePendingEntry,
   markPaid,

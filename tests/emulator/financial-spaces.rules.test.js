@@ -64,6 +64,39 @@ test("espaço pessoal é privado mesmo para colega da empresa", async () => {
   await assertFails(getDoc(doc(manager, "financialSpaces", "personal-a")));
 });
 
+test("categoria e subcategoria customizadas ficam isoladas no espaço", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore();
+  for (const id of ["category-space-a", "category-space-b"])
+    await assertSucceeds(setDoc(doc(db, "financialSpaces", id), { id, name: id, type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));
+  const macro = {
+    id: "custom-printing", financialSpaceId: "category-space-a", ownerUid: "owner-a", createdBy: "owner-a",
+    operationId: "category:macro", name: "Impressão 3D", type: "category", parentCategoryId: null,
+    isDefault: false, active: true,
+  };
+  const subcategory = {
+    id: "custom-filament", financialSpaceId: "category-space-a", ownerUid: "owner-a", createdBy: "owner-a",
+    operationId: "category:sub", name: "Filamentos", type: "subcategory", parentCategoryId: "custom-printing",
+    isDefault: false, active: true,
+  };
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", macro.id), macro));
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", subcategory.id), subcategory));
+  assert.equal((await getDocs(collection(db, "financialSpaces", "category-space-a", "categories"))).size, 2);
+  assert.equal((await getDocs(collection(db, "financialSpaces", "category-space-b", "categories"))).size, 0);
+  await assertFails(getDoc(doc(other, "financialSpaces", "category-space-a", "categories", macro.id)));
+  await assertFails(setDoc(doc(other, "financialSpaces", "category-space-a", "categories", "intruder"), { ...macro, id: "intruder", createdBy: "owner-b" }));
+});
+
+test("Rules rejeitam hierarquia de categoria malformada", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), base = {
+    financialSpaceId: "category-space-a", ownerUid: "owner-a", createdBy: "owner-a",
+    operationId: "category:invalid", name: "Inválida", isDefault: false, active: true,
+  };
+  await assertFails(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", "invalid-type"), { ...base, id: "invalid-type", type: "expense", parentCategoryId: null }));
+  await assertFails(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", "invalid-parent"), { ...base, id: "invalid-parent", type: "subcategory", parentCategoryId: null }));
+  await assertFails(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", "missing-parent"), { ...base, id: "missing-parent", type: "subcategory", parentCategoryId: "custom-does-not-exist" }));
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", "category-space-a", "categories", "default-child"), { ...base, id: "default-child", type: "subcategory", parentCategoryId: "default_personal_home" }));
+});
+
 test("query real da tela lista espaços próprios", async () => {
   const db = env.authenticatedContext("owner-a").firestore();
   await assertSucceeds(getDocs(query(
@@ -97,6 +130,17 @@ test("lançamento pago não pode ser apagado nem ter valor reescrito", async () 
   const db = env.authenticatedContext("owner-a").firestore(), ref = doc(db, "financialSpaces", "space-a", "entries", "entry-a");
   await assertFails(deleteDoc(ref));
   await assertFails(updateDoc(ref, { amountCents: 1 }));
+});
+
+test("migração conservadora pode classificar sem alterar o valor financeiro", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore(), ref = doc(db, "financialSpaces", "space-a", "entries", "entry-a");
+  await assertSucceeds(updateDoc(ref, {
+    categoryId: "default_business_structure", categoryName: "Estrutura", categoryIcon: "store",
+    subcategoryId: "default_business_structure_rent", subcategoryName: "Aluguel",
+    categorySchemaVersion: 2, categoryMigrationStatus: "migrated",
+  }));
+  assert.equal((await getDoc(ref)).data().amountCents, 1000);
+  await assertFails(updateDoc(doc(other, "financialSpaces", "space-a", "entries", "entry-a"), { categoryName: "Outro negócio" }));
 });
 
 test("pagamento transacional é idempotente e preserva um único evento", async () => {

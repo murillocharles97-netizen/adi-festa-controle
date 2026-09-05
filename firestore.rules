@@ -504,11 +504,39 @@ service cloud.firestore {
         allow create: if canManageFinancialSpace(spaceId)
           && request.resource.data.id == categoryId
           && request.resource.data.financialSpaceId == spaceId
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.ownerUid == get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.ownerUid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60
+          && request.resource.data.type in ['category', 'subcategory']
+          && request.resource.data.isDefault == false
+          && request.resource.data.active == true
+          && (
+            (request.resource.data.type == 'category' && request.resource.data.parentCategoryId == null)
+            || (
+              request.resource.data.type == 'subcategory'
+              && request.resource.data.parentCategoryId is string
+              && request.resource.data.parentCategoryId.size() > 0
+              && (
+                request.resource.data.parentCategoryId.matches('^default_(business|personal)_[a-z0-9_]+$')
+                || (
+                  exists(/databases/$(database)/documents/financialSpaces/$(spaceId)/categories/$(request.resource.data.parentCategoryId))
+                  && get(/databases/$(database)/documents/financialSpaces/$(spaceId)/categories/$(request.resource.data.parentCategoryId)).data.type == 'category'
+                )
+              )
+            )
+          );
         allow update: if canManageFinancialSpace(spaceId)
           && request.resource.data.id == resource.data.id
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
-          && request.resource.data.ownerUid == resource.data.ownerUid;
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.parentCategoryId == resource.data.parentCategoryId
+          && request.resource.data.isDefault == resource.data.isDefault
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60;
         allow delete: if false;
       }
       match /recurrences/{recurrenceId} {

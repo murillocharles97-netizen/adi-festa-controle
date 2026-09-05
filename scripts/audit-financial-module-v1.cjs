@@ -40,17 +40,40 @@ async function main() {
   await reset(390,844); await shot("01-mobile-financeiro-adi-festa.png");
   await click("[data-financial-open-spaces]"); await click('[data-financial-select-space="primeline"]'); await shot("02-mobile-financeiro-primeline.png");
   await reset(390,844); await click("[data-financial-open-spaces]"); await shot("03-mobile-seletor-espacos.png");
-  await reset(360,800); await click('[data-financial-new="expense"]'); await page.waitForSelector('[data-financial-entry-form]'); await shot("04-mobile-nova-despesa.png");
-  await reset(390,844); await click('[data-financial-view="accounts"]'); await shot("05-mobile-conta-a-pagar.png");
-  await reset(390,844); await click('[data-financial-register-payment]'); await shot("06-mobile-registrar-pagamento.png");
-  await reset(430,932); await click('[data-financial-view="cashflow"]'); await shot("07-mobile-fluxo-caixa.png");
-  await reset(430,932); await click('[data-financial-view="categories"]'); await shot("08-mobile-categorias.png");
-  await reset(430,932); await click('[data-financial-view="entries"]'); await shot("09-mobile-ultimos-lancamentos.png");
-  await reset(390,844); await click("[data-financial-open-spaces]"); await click('[data-financial-select-space="personal"]'); await shot("10-mobile-espaco-pessoal.png");
-  await reset(430,932); await click("[data-financial-open-spaces]"); await click("[data-financial-open-consolidated]"); await page.$$eval('[name="spaceId"]', items => items.slice(0,2).forEach(item => item.checked=true)); await click('[data-financial-consolidated-form] [type="submit"]'); await shot("11-mobile-consolidado.png");
+  await reset(390,844); await click('[data-financial-new="expense"]'); await page.waitForSelector('[data-financial-entry-wizard]');
+  const wizard = await page.evaluate(() => ({
+    step: document.querySelector(".financial-wizard-head small")?.textContent,
+    title: document.querySelector(".financial-wizard-body h3")?.textContent,
+    macroLabels: [...document.querySelectorAll("[data-wizard-category] span")].slice(0, 6).map((item) => item.textContent),
+    hasLegacyForm: Boolean(document.querySelector("[data-financial-entry-form]")),
+  }));
+  if (wizard.step !== "Passo 1 de 4" || wizard.title !== "O que você vai registrar?" || wizard.hasLegacyForm || wizard.macroLabels[0] !== "Estrutura") throw Error(`Wizard inválido ${JSON.stringify(wizard)}`);
+  await page.type('[name="description"]', 'Aluguel + condomínio'); await page.type('[name="amount"]', '1500,00');
+  await click('[data-wizard-category="default_business_structure"]'); await click('[data-wizard-subcategory="default_business_structure_rent"]');
+  await shot("04-mobile-nova-despesa-passo-1.png");
+  await click('[data-wizard-next]'); await click('[data-wizard-schedule="recurring"]'); await shot("05-mobile-nova-despesa-passo-2.png");
+  await click('[data-wizard-next]'); await shot("06-mobile-nova-despesa-passo-3.png");
+  await click('[data-wizard-next]');
+  const review = await page.evaluate(() => document.querySelector(".financial-wizard-review")?.innerText || "");
+  if (!review.includes("Casa") && (!review.includes("Estrutura") || !review.includes("Aluguel"))) throw Error(`Revisão sem hierarquia: ${review}`);
+  await shot("07-mobile-nova-despesa-passo-4.png"); await close();
+  await reset(390,844); await click('[data-financial-new="expense"]'); await click('[data-wizard-custom-category]'); await page.type('[name="customCategoryName"]', 'Impressão 3D'); await click('[data-wizard-custom-subcategory]'); await page.type('[name="customSubcategoryName"]', 'Filamentos');
+  const customPicker = await page.evaluate(() => ({ category: document.querySelector('[name="customCategoryName"]')?.value.trim(), subcategory: document.querySelector('[name="customSubcategoryName"]')?.value.trim() }));
+  if (customPicker.category !== "Impressão 3D" || customPicker.subcategory !== "Filamentos") throw Error(`Categoria custom inválida ${JSON.stringify(customPicker)}`);
+  await close();
+  await reset(390,844); await click('[data-financial-view="accounts"]'); await shot("08-mobile-conta-a-pagar.png");
+  await reset(390,844); await click('[data-financial-register-payment]'); await shot("09-mobile-registrar-pagamento.png");
+  await reset(430,932); await click('[data-financial-view="cashflow"]'); await shot("10-mobile-fluxo-caixa.png");
+  await reset(430,932); await click('[data-financial-view="categories"]');
+  const categoryReport = await page.evaluate(() => ({ subtitle: document.querySelector(".financial-subpage-head p")?.textContent || "", labels: [...document.querySelectorAll(".financial-category-list b")].map((item) => item.textContent) }));
+  if (categoryReport.subtitle.includes("${") || !categoryReport.subtitle.includes("Setembro de 2026") || categoryReport.labels.includes("Aluguel") || !categoryReport.labels.includes("Estrutura")) throw Error(`Relatório macro inválido ${JSON.stringify(categoryReport)}`);
+  await shot("11-mobile-categorias-macro.png");
+  await reset(430,932); await click('[data-financial-view="entries"]'); await shot("12-mobile-ultimos-lancamentos.png");
+  await reset(390,844); await click("[data-financial-open-spaces]"); await click('[data-financial-select-space="personal"]'); await shot("13-mobile-espaco-pessoal.png");
+  await reset(430,932); await click("[data-financial-open-spaces]"); await click("[data-financial-open-consolidated]"); await page.$$eval('[name="spaceId"]', items => items.slice(0,2).forEach(item => item.checked=true)); await click('[data-financial-consolidated-form] [type="submit"]'); await shot("14-mobile-consolidado.png");
 
-  await reset(1366,768); await shot("12-desktop-dashboard-financeiro.png"); await click("[data-financial-open-spaces]"); await shot("13-desktop-seletor-espacos.png");
-  await reset(1366,768); await click('[data-financial-view="accounts"]'); await shot("14-desktop-contas-a-pagar.png");
+  await reset(1366,768); await shot("15-desktop-dashboard-financeiro.png"); await click("[data-financial-open-spaces]"); await shot("16-desktop-seletor-espacos.png");
+  await reset(1366,768); await click('[data-financial-view="accounts"]'); await shot("17-desktop-contas-a-pagar.png");
 
   if (pageErrors.length) throw Error(`Erros no browser: ${pageErrors.join(" | ")}`);
   console.log(JSON.stringify({ ok: true, audits, screenshots: fs.readdirSync(OUTPUT).sort() }, null, 2));
