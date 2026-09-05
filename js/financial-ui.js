@@ -91,7 +91,7 @@ window.FinanceiroUI = (() => {
     return `<div class="financial-list ${full ? "" : "is-compact"}">${entries.map((entry) => `
       <article class="financial-list-row financial-entry-row">
         <span class="financial-row-icon ${entry.direction === "in" ? "is-income" : "is-expense"}">${icon(entry.direction === "in" ? "arrow-up" : "arrow-down")}</span>
-        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${esc(entry.categoryName || "Outros")} · ${dateLabel(entry.occurredAt)}</small></span>
+        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${esc(entry.categoryName || "Outros")}${entry.subcategoryName ? ` · ${esc(entry.subcategoryName)}` : ""} · ${dateLabel(entry.occurredAt)}</small></span>
         <span class="financial-status ${entry.direction === "in" ? "is-paid" : "is-overdue"}">${entry.direction === "in" ? "Entrada" : "Saída"}</span>
         <strong class="financial-row-amount ${entry.direction === "in" ? "is-income" : "is-expense"}">${entry.direction === "in" ? "+ " : "− "}${money(entry.amountCents)}</strong>
       </article>`).join("")}</div>`;
@@ -147,7 +147,7 @@ window.FinanceiroUI = (() => {
   }
 
   function categoriesPageMarkup(data) {
-    return `${subpageHeader("Categorias", "Saídas realizadas em ${monthLabel(state.period)}", `<button class="btn btn-primary" type="button" data-financial-new-category>${icon("plus")} Categoria</button>`)}
+    return `${subpageHeader("Categorias", `Saídas realizadas em ${monthLabel(state.period)}`, `<button class="btn btn-primary" type="button" data-financial-new-category>${icon("plus")} Categoria</button>`)}
       <section class="financial-section financial-subpage-card">${categoriesMarkup(data.summary?.categories || [], data.summary?.totalOutCents || 0)}</section>`;
   }
 
@@ -298,51 +298,132 @@ window.FinanceiroUI = (() => {
 
   async function openEntryForm(direction = "out") {
     if (state.consolidated) return Utils.toast("Escolha um espaço antes de lançar uma movimentação.", true);
-    const service = window.FinancialSpaceService, categoryItems = await service.listCategories(state.selectedSpaceId), isExpense = direction === "out";
-    sheet(`${sheetHeader(isExpense ? "Nova despesa" : "Nova entrada", isExpense ? "Registre o que saiu ou ainda precisa ser pago." : "Adicione uma entrada que não veio de venda.")}
-      <form data-financial-entry-form><div class="modal-body financial-form-grid">
-        <label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" placeholder="Ex.: Aluguel" required></label>
-        ${isExpense ? `<label class="financial-field"><span>Tipo *</span><select name="entryType"><option value="expense">Despesa</option><option value="investment">Investimento</option></select></label>` : `<input type="hidden" name="entryType" value="manual_income">`}
-        <label class="financial-field"><span>Categoria *</span><select name="categoryId">${categoryItems.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}">${esc(category.name)}</option>`).join("")}</select></label>
-        <label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" placeholder="R$ 0,00" required></label>
-        <label class="financial-field"><span>${isExpense ? "Data / vencimento" : "Data da entrada"} *</span><input type="date" name="dueAt" value="${Engine.localIsoDate()}" required></label>
-        <label class="financial-field"><span>Repetição</span><select name="frequency"><option value="none">Sem repetição</option><option value="weekly">Semanal</option><option value="biweekly">Quinzenal</option><option value="monthly">Mensal</option><option value="yearly">Anual</option></select></label>
-        <label class="financial-field"><span>Parcelas</span><input type="number" name="installmentCount" min="1" max="60" value="1"></label>
-        <label class="financial-toggle full"><input type="checkbox" name="paidNow" ${isExpense ? "" : "checked"}><span></span><b>${isExpense ? "Pago agora?" : "Entrada recebida?"}</b></label>
-        <div class="financial-paid-fields full" data-paid-fields><label class="financial-field"><span>Forma de pagamento</span><select name="paymentMethod">${Object.entries(paymentLabel).map(([id, label]) => `<option value="${id}">${label}</option>`).join("")}</select></label><label class="financial-field"><span>Data do pagamento</span><input type="date" name="paidAt" value="${Engine.localIsoDate()}"></label></div>
-        <label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500" placeholder="Opcional"></textarea></label>
-        <label class="financial-file full"><input type="file" name="attachment" accept="image/jpeg,image/png,image/webp,application/pdf"><span>${icon("paperclip")}<b>Anexar comprovante</b><small>JPG, PNG, WebP ou PDF · até 10 MB</small></span></label>
-      </div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar ${isExpense ? "despesa" : "entrada"}</button></footer></form>`);
-    const form = modal().querySelector("[data-financial-entry-form]"), paid = form.paidNow, paidFields = form.querySelector("[data-paid-fields]"), togglePaid = () => paidFields.hidden = !paid.checked;
-    paid.onchange = togglePaid; togglePaid();
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      const submit = form.querySelector("[type=submit]"), values = new FormData(form), selected = form.categoryId.selectedOptions[0], file = form.attachment.files[0];
-      submit.disabled = true;
-      try {
-        if (Number(values.get("installmentCount") || 1) > 1 && values.get("frequency") !== "none") throw new Error("Escolha parcelamento ou repetição, não os dois ao mesmo tempo.");
-        const dueAt = new Date(`${values.get("dueAt")}T12:00:00`).toISOString(), paidAt = new Date(`${values.get("paidAt") || values.get("dueAt")}T12:00:00`).toISOString(), created = await service.createEntry(state.selectedSpaceId, {
-          direction,
-          description: values.get("description"),
-          entryType: values.get("entryType"),
-          categoryId: values.get("categoryId"),
-          categoryName: selected?.dataset.name || selected?.textContent || "Outros",
-          amountCents: Engine.moneyInputToCents(values.get("amount")),
-          dueAt,
-          paidAt,
-          occurredAt: paidAt,
-          paidNow: paid.checked,
-          paymentMethod: values.get("paymentMethod"),
-          frequency: values.get("frequency"),
-          installmentCount: Number(values.get("installmentCount") || 1),
-          notes: values.get("notes"),
-        });
-        if (file) await service.uploadAttachment(state.selectedSpaceId, created[0].id, file);
-        closeModal();
-        Utils.toast(`${isExpense ? "Despesa" : "Entrada"} salva com sucesso.`);
-        await refresh();
-      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    const service = window.FinancialSpaceService, categoryItems = await service.listCategories(state.selectedSpaceId), isExpense = direction === "out",
+      categories = categoryItems.filter((item) => item.type === "category"), draft = {
+        step: 1,
+        description: "",
+        amount: "",
+        categoryId: "",
+        subcategoryId: "",
+        customCategoryName: "",
+        customSubcategoryName: "",
+        entryType: isExpense ? "expense" : "manual_income",
+        scheduleMode: "once",
+        frequency: "monthly",
+        installmentCount: 2,
+        dueAt: Engine.localIsoDate(),
+        paidNow: !isExpense,
+        paymentMethod: "pix",
+        paidAt: Engine.localIsoDate(),
+        notes: "",
+        attachment: null,
+        showAllCategories: false,
+        showAllSubcategories: false,
+        categorySearch: "",
+      };
+    sheet(`<div data-financial-entry-wizard></div>`, "financial-entry-wizard");
+    const host = modal().querySelector("[data-financial-entry-wizard]");
+    const selectedCategory = () => categories.find((item) => item.id === draft.categoryId) || null;
+    const selectedSubcategory = () => categoryItems.find((item) => item.id === draft.subcategoryId) || null;
+    const subcategories = () => draft.categoryId ? Engine.subcategoriesFor(categoryItems, draft.categoryId) : [];
+    const scheduleLabel = () => draft.scheduleMode === "recurring"
+      ? ({ weekly: "Toda semana", biweekly: "A cada 15 dias", monthly: "Todo mês", yearly: "Todo ano" })[draft.frequency]
+      : draft.scheduleMode === "installments" ? `${draft.installmentCount} parcelas` : "Uma vez";
+    const syncVisibleFields = () => {
+      const read = (name) => host.querySelector(`[name="${name}"]`)?.value;
+      for (const name of ["description", "amount", "customCategoryName", "customSubcategoryName", "frequency", "dueAt", "paymentMethod", "paidAt", "notes", "categorySearch"])
+        if (read(name) !== undefined) draft[name] = read(name);
+      const count = read("installmentCount");
+      if (count !== undefined) draft.installmentCount = Math.min(60, Math.max(2, Number(count || 2)));
+      const attachment = host.querySelector('[name="attachment"]')?.files?.[0];
+      if (attachment) draft.attachment = attachment;
     };
+    const progress = () => `<div class="financial-wizard-progress" aria-label="Passo ${draft.step} de 4">${[1, 2, 3, 4].map((step) => `<i class="${step <= draft.step ? "active" : ""}"></i>`).join("")}</div>`;
+    const categoryCards = () => {
+      const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR"), query = normalize(draft.categorySearch),
+        filtered = query ? categories.filter((item) => normalize(item.name).includes(query)) : categories,
+        visible = draft.showAllCategories ? filtered : categories.slice(0, 6);
+      return `${draft.showAllCategories ? `<label class="financial-category-search">${icon("search")}<input name="categorySearch" value="${esc(draft.categorySearch)}" placeholder="Buscar categoria"></label>` : ""}<div class="financial-category-picker">${visible.map((category) => `<button type="button" data-wizard-category="${esc(category.id)}" data-category-label="${esc(normalize(category.name))}" class="${draft.categoryId === category.id && !draft.customCategoryName ? "active" : ""}">${icon(category.icon || "shapes")}<span>${esc(category.name)}</span></button>`).join("")}${visible.length ? "" : `<p class="financial-picker-empty">Nenhuma categoria encontrada.</p>`}<button type="button" data-wizard-custom-category class="is-create ${draft.customCategoryName ? "active" : ""}">${icon("plus")}<span>Criar categoria</span></button></div>${categories.length > 6 ? `<button type="button" class="financial-picker-more" data-wizard-more-categories>${draft.showAllCategories ? "Mostrar principais" : "Ver mais categorias"}</button>` : ""}`;
+    };
+    const subcategoryPicker = () => {
+      if (!draft.categoryId && !draft.customCategoryName) return "";
+      const items = subcategories(), visible = draft.showAllSubcategories ? items : items.slice(0, 6);
+      return `<section class="financial-wizard-subcategory"><header><b>Subcategoria <small>(opcional)</small></b><span>Detalhe somente se fizer sentido.</span></header><div class="financial-subcategory-picker"><button type="button" data-wizard-subcategory="" class="${!draft.subcategoryId && !draft.customSubcategoryName ? "active" : ""}">Sem detalhar</button>${visible.map((item) => `<button type="button" data-wizard-subcategory="${esc(item.id)}" class="${draft.subcategoryId === item.id && !draft.customSubcategoryName ? "active" : ""}">${esc(item.name)}</button>`).join("")}<button type="button" data-wizard-custom-subcategory class="is-create ${draft.customSubcategoryName ? "active" : ""}">${icon("plus")} Criar subcategoria</button></div>${items.length > 6 ? `<button type="button" class="financial-picker-more" data-wizard-more-subcategories>${draft.showAllSubcategories ? "Mostrar principais" : "Ver mais"}</button>` : ""}${draft.customSubcategoryName !== "" ? `<label class="financial-field"><span>Nome da subcategoria</span><input name="customSubcategoryName" maxlength="60" value="${esc(draft.customSubcategoryName)}" placeholder="Ex.: Aluguel"></label>` : ""}</section>`;
+    };
+    const stepOne = () => `<div class="modal-body financial-wizard-body"><h3>O que você vai registrar?</h3><p>Informe o que exatamente está pagando e a qual área pertence.</p><div class="financial-form-grid"><label class="financial-field full"><span>${isExpense ? "Nome da despesa" : "Nome da entrada"} *</span><input name="description" maxlength="160" value="${esc(draft.description)}" placeholder="Ex.: Aluguel + condomínio" required></label><label class="financial-field full"><span>Valor *</span><input name="amount" inputmode="decimal" value="${esc(draft.amount)}" placeholder="R$ 0,00" required></label></div><section class="financial-wizard-category"><header><b>Categoria *</b><span>A área ampla desta ${isExpense ? "despesa" : "entrada"}.</span></header>${categoryCards()}${draft.customCategoryName !== "" ? `<label class="financial-field"><span>Nome da nova categoria</span><input name="customCategoryName" maxlength="60" value="${esc(draft.customCategoryName)}" placeholder="Ex.: Impressão 3D"></label>` : ""}</section>${subcategoryPicker()}${isExpense ? `<section class="financial-wizard-type"><b>Tipo *</b><div><button type="button" data-wizard-entry-type="expense" class="${draft.entryType === "expense" ? "active" : ""}">${icon("minus")}<span><strong>Despesa</strong><small>Sai do seu dinheiro</small></span></button><button type="button" data-wizard-entry-type="investment" class="${draft.entryType === "investment" ? "active" : ""}">${icon("chart-no-axes-column-increasing")}<span><strong>Investimento</strong><small>Gera valor no futuro</small></span></button></div></section>` : ""}</div>`;
+    const stepTwo = () => `<div class="modal-body financial-wizard-body"><h3>Como essa conta funciona?</h3><p>Escolha se acontece uma vez, se repete ou é parcelada.</p><div class="financial-schedule-picker"><button type="button" data-wizard-schedule="once" class="${draft.scheduleMode === "once" ? "active" : ""}">${icon("calendar")}<span><b>Uma vez</b><small>Acontece apenas uma vez.</small></span></button><button type="button" data-wizard-schedule="recurring" class="${draft.scheduleMode === "recurring" ? "active" : ""}">${icon("refresh-cw")}<span><b>Recorrente</b><small>Repete até você cancelar.</small></span></button><button type="button" data-wizard-schedule="installments" class="${draft.scheduleMode === "installments" ? "active" : ""}">${icon("credit-card")}<span><b>Parcelada</b><small>Dividida em várias parcelas.</small></span></button></div><div class="financial-form-grid"><label class="financial-field full"><span>Primeiro vencimento *</span><input type="date" name="dueAt" value="${esc(draft.dueAt)}" required></label>${draft.scheduleMode === "recurring" ? `<label class="financial-field full"><span>Repete *</span><select name="frequency"><option value="weekly" ${draft.frequency === "weekly" ? "selected" : ""}>Semanalmente</option><option value="biweekly" ${draft.frequency === "biweekly" ? "selected" : ""}>Quinzenalmente</option><option value="monthly" ${draft.frequency === "monthly" ? "selected" : ""}>Mensalmente</option><option value="yearly" ${draft.frequency === "yearly" ? "selected" : ""}>Anualmente</option></select></label><div class="financial-wizard-note full">${icon("repeat")}<span><b>Até você cancelar</b><small>A recorrência continua independente da categoria.</small></span></div>` : ""}${draft.scheduleMode === "installments" ? `<label class="financial-field full"><span>Quantidade de parcelas *</span><input type="number" name="installmentCount" min="2" max="60" value="${draft.installmentCount}"></label>` : ""}</div></div>`;
+    const stepThree = () => `<div class="modal-body financial-wizard-body"><h3>${isExpense ? "Já foi pago?" : "Já foi recebido?"}</h3><p>Informe o estado real para manter contas e fluxo de caixa corretos.</p><div class="financial-payment-state"><button type="button" data-wizard-paid="false" class="${!draft.paidNow ? "active" : ""}">${icon("clock-3")}<span><b>${isExpense ? "Ainda não" : "Ainda não"}</b><small>Vai para contas pendentes.</small></span></button><button type="button" data-wizard-paid="true" class="${draft.paidNow ? "active" : ""}">${icon("circle-check-big")}<span><b>${isExpense ? "Sim, já paguei" : "Sim, já recebi"}</b><small>Registra no fluxo realizado.</small></span></button></div>${draft.paidNow ? `<div class="financial-form-grid"><label class="financial-field"><span>Forma de pagamento</span><select name="paymentMethod">${Object.entries(paymentLabel).map(([id, label]) => `<option value="${id}" ${draft.paymentMethod === id ? "selected" : ""}>${label}</option>`).join("")}</select></label><label class="financial-field"><span>Data do pagamento</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}"></label></div>` : `<div class="financial-wizard-info">${icon("info")}<span>Esta ${isExpense ? "despesa" : "entrada"} ficará pendente até a confirmação.</span></div>`}<label class="financial-field"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500" placeholder="Ex.: referente ao apartamento, inclui condomínio.">${esc(draft.notes)}</textarea></label><label class="financial-file"><input type="file" name="attachment" accept="image/jpeg,image/png,image/webp,application/pdf"><span>${icon("paperclip")}<b>${draft.attachment ? esc(draft.attachment.name) : "Anexar comprovante"}</b><small>JPG, PNG, WebP ou PDF · até 10 MB</small></span></label></div>`;
+    const stepFour = () => {
+      const category = selectedCategory(), subcategory = selectedSubcategory(), categoryName = draft.customCategoryName || category?.name || "—", subcategoryName = draft.customSubcategoryName || subcategory?.name || "Sem detalhar";
+      return `<div class="modal-body financial-wizard-body"><h3>Conferir e salvar</h3><p>Revise as informações antes de criar.</p><article class="financial-wizard-review"><header><span>${icon(category?.icon || "receipt-text")}</span><div><b>${esc(draft.description)}</b><strong>${money(Engine.moneyInputToCents(draft.amount))}</strong></div></header><dl><div><dt>Categoria</dt><dd>${esc(categoryName)}</dd></div><div><dt>Subcategoria</dt><dd>${esc(subcategoryName)}</dd></div><div><dt>Tipo</dt><dd>${isExpense ? draft.entryType === "investment" ? "Investimento" : "Despesa" : "Entrada"}</dd></div><div><dt>Recorrência</dt><dd>${esc(scheduleLabel())}</dd></div><div><dt>Vencimento</dt><dd>${dateLabel(`${draft.dueAt}T12:00:00`)}</dd></div><div><dt>Status</dt><dd><span class="financial-status ${draft.paidNow ? "is-paid" : "is-pending"}">${draft.paidNow ? isExpense ? "Pago" : "Recebido" : "Ainda não"}</span></dd></div></dl></article><div class="financial-wizard-success-note">${icon("circle-check")}<span><b>${isExpense ? "Despesa" : "Entrada"} pronta para ser criada</b><small>Categoria, recorrência e tipo continuarão independentes.</small></span></div></div>`;
+    };
+    const validateStep = () => {
+      syncVisibleFields();
+      if (draft.step === 1) {
+        if (!draft.description.trim()) throw new Error(`Informe o nome da ${isExpense ? "despesa" : "entrada"}.`);
+        Engine.moneyInputToCents(draft.amount);
+        if (!draft.categoryId && !draft.customCategoryName.trim()) throw new Error("Escolha ou crie uma categoria.");
+        if (draft.customCategoryName !== "" && !draft.customCategoryName.trim()) throw new Error("Informe o nome da nova categoria.");
+        if (draft.customSubcategoryName !== "" && !draft.customSubcategoryName.trim()) throw new Error("Informe o nome da nova subcategoria.");
+      }
+      if (draft.step === 2 && !draft.dueAt) throw new Error("Informe o primeiro vencimento.");
+    };
+    const renderWizard = () => {
+      host.innerHTML = `<header class="modal-head financial-wizard-head"><div><small>Passo ${draft.step} de 4</small>${progress()}</div><button class="icon-btn" type="button" data-financial-close aria-label="Fechar">${icon("x")}</button></header>${[stepOne, stepTwo, stepThree, stepFour][draft.step - 1]()}<footer class="modal-foot"><button class="btn btn-light" type="button" data-wizard-back>${draft.step === 1 ? "Cancelar" : "Voltar"}</button><button class="btn btn-primary" type="button" data-wizard-next>${draft.step === 4 ? `Criar ${isExpense ? "despesa" : "entrada"}` : "Continuar"}</button></footer>`;
+      host.querySelector("[data-financial-close]").onclick = closeModal;
+      host.querySelector("[data-wizard-back]").onclick = () => { syncVisibleFields(); if (draft.step === 1) closeModal(); else { draft.step -= 1; renderWizard(); } };
+      host.querySelectorAll("[data-wizard-category]").forEach((button) => button.onclick = () => { syncVisibleFields(); draft.categoryId = button.dataset.wizardCategory; draft.subcategoryId = ""; draft.customCategoryName = ""; draft.customSubcategoryName = ""; renderWizard(); });
+      host.querySelector("[data-wizard-custom-category]")?.addEventListener("click", () => { syncVisibleFields(); draft.categoryId = ""; draft.subcategoryId = ""; draft.customCategoryName = draft.customCategoryName || " "; draft.customSubcategoryName = ""; renderWizard(); host.querySelector('[name="customCategoryName"]')?.focus(); });
+      host.querySelectorAll("[data-wizard-subcategory]").forEach((button) => button.onclick = () => { syncVisibleFields(); draft.subcategoryId = button.dataset.wizardSubcategory; draft.customSubcategoryName = ""; renderWizard(); });
+      host.querySelector("[data-wizard-custom-subcategory]")?.addEventListener("click", () => { syncVisibleFields(); draft.subcategoryId = ""; draft.customSubcategoryName = draft.customSubcategoryName || " "; renderWizard(); host.querySelector('[name="customSubcategoryName"]')?.focus(); });
+      host.querySelector("[data-wizard-more-categories]")?.addEventListener("click", () => { syncVisibleFields(); draft.showAllCategories = !draft.showAllCategories; renderWizard(); });
+      host.querySelector("[data-wizard-more-subcategories]")?.addEventListener("click", () => { syncVisibleFields(); draft.showAllSubcategories = !draft.showAllSubcategories; renderWizard(); });
+      host.querySelectorAll("[data-wizard-entry-type]").forEach((button) => button.onclick = () => { draft.entryType = button.dataset.wizardEntryType; renderWizard(); });
+      host.querySelectorAll("[data-wizard-schedule]").forEach((button) => button.onclick = () => { syncVisibleFields(); draft.scheduleMode = button.dataset.wizardSchedule; renderWizard(); });
+      host.querySelectorAll("[data-wizard-paid]").forEach((button) => button.onclick = () => { syncVisibleFields(); draft.paidNow = button.dataset.wizardPaid === "true"; renderWizard(); });
+      host.querySelector('[name="categorySearch"]')?.addEventListener("input", (event) => {
+        draft.categorySearch = event.currentTarget.value;
+        const query = draft.categorySearch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+        host.querySelectorAll("[data-wizard-category]").forEach((button) => button.hidden = !button.dataset.categoryLabel.includes(query));
+      });
+      host.querySelector("[data-wizard-next]").onclick = async (event) => {
+        try {
+          validateStep();
+          if (draft.step < 4) { draft.step += 1; renderWizard(); return; }
+          const submit = event.currentTarget;
+          submit.disabled = true;
+          let category = selectedCategory();
+          if (draft.customCategoryName.trim()) category = await service.createCategory(state.selectedSpaceId, { name: draft.customCategoryName.trim() });
+          let subcategory = selectedSubcategory();
+          if (draft.customSubcategoryName.trim()) subcategory = await service.createCategory(state.selectedSpaceId, { name: draft.customSubcategoryName.trim(), parentCategoryId: category.id });
+          const dueAt = new Date(`${draft.dueAt}T12:00:00`).toISOString(), paidAt = new Date(`${draft.paidAt || draft.dueAt}T12:00:00`).toISOString(), created = await service.createEntry(state.selectedSpaceId, {
+            direction,
+            description: draft.description,
+            entryType: draft.entryType,
+            categoryId: category.id,
+            categoryName: category.name,
+            categoryIcon: category.icon,
+            subcategoryId: subcategory?.id || null,
+            subcategoryName: subcategory?.name || null,
+            amountCents: Engine.moneyInputToCents(draft.amount),
+            dueAt,
+            paidAt,
+            occurredAt: paidAt,
+            paidNow: draft.paidNow,
+            paymentMethod: draft.paymentMethod,
+            frequency: draft.scheduleMode === "recurring" ? draft.frequency : "none",
+            installmentCount: draft.scheduleMode === "installments" ? draft.installmentCount : 1,
+            notes: draft.notes,
+          });
+          if (draft.attachment) await service.uploadAttachment(state.selectedSpaceId, created[0].id, draft.attachment);
+          closeModal();
+          Utils.toast(`${isExpense ? "Despesa" : "Entrada"} salva com sucesso.`);
+          await refresh();
+        } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; }
+      };
+      window.lucide?.createIcons();
+    };
+    renderWizard();
   }
 
   function openRegisterPayment(selectedEntry = null) {
@@ -366,7 +447,7 @@ window.FinanceiroUI = (() => {
   async function openAccount(entry) {
     if (!entry) return;
     const editable = entry.status === "pending";
-    sheet(`${sheetHeader(entry.description, `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><div class="financial-account-details"><span>${icon("calendar-days")} Vencimento <b>${dateLabel(entry.dueAt)}</b></span><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span></div><div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como pago</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light" type="button" data-financial-account-cancel>${icon("ban")} Cancelar conta</button>` : ""}<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label></div></div>`);
+    sheet(`${sheetHeader(entry.description, `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><div class="financial-account-details"><span>${icon("calendar-days")} Vencimento <b>${dateLabel(entry.dueAt)}</b></span><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span>${entry.subcategoryName ? `<span>${icon("tags")} Subcategoria <b>${esc(entry.subcategoryName)}</b></span>` : ""}</div><div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como pago</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light" type="button" data-financial-account-cancel>${icon("ban")} Cancelar conta</button>` : ""}<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label></div></div>`);
     modal().querySelector("[data-financial-account-pay]")?.addEventListener("click", () => { closeModal(); openRegisterPayment(entry); });
     modal().querySelector("[data-financial-account-edit]")?.addEventListener("click", () => openEditAccount(entry));
     modal().querySelector("[data-financial-account-cancel]")?.addEventListener("click", async () => { try { await window.FinancialSpaceService.cancelPendingEntry(state.selectedSpaceId, entry, "Cancelada pelo usuário"); closeModal(); Utils.toast("Conta cancelada com histórico preservado."); await refresh(); } catch (error) { Utils.toast(error.message, true); } });
@@ -375,17 +456,24 @@ window.FinanceiroUI = (() => {
   }
 
   async function openEditAccount(entry) {
-    const categories = await window.FinancialSpaceService.listCategories(state.selectedSpaceId);
-    sheet(`${sheetHeader("Editar conta pendente", "O histórico da alteração será preservado.")}<form data-financial-edit-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" value="${esc(entry.description)}" required></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" value="${(Number(entry.amountCents) / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field"><span>Vencimento *</span><input type="date" name="dueAt" value="${Engine.localIsoDate(entry.dueAt)}" required></label><label class="financial-field full"><span>Categoria</span><select name="categoryId">${categories.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}"${category.id === entry.categoryId ? " selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(entry.notes || "")}</textarea></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar alterações</button></footer></form>`);
+    const allCategories = await window.FinancialSpaceService.listCategories(state.selectedSpaceId), categories = allCategories.filter((item) => item.type === "category");
+    let selectedSubcategoryId = entry.subcategoryId || "";
+    sheet(`${sheetHeader("Editar conta pendente", "O histórico da alteração será preservado.")}<form data-financial-edit-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" value="${esc(entry.description)}" required></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" value="${(Number(entry.amountCents) / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field"><span>Vencimento *</span><input type="date" name="dueAt" value="${Engine.localIsoDate(entry.dueAt)}" required></label><label class="financial-field"><span>Categoria</span><select name="categoryId">${categories.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}" data-icon="${esc(category.icon || "shapes")}"${category.id === entry.categoryId ? " selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field"><span>Subcategoria (opcional)</span><select name="subcategoryId"></select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(entry.notes || "")}</textarea></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar alterações</button></footer></form>`);
     const form = modal().querySelector("[data-financial-edit-form]");
-    form.onsubmit = async (event) => { event.preventDefault(); const data = new FormData(form), option = form.categoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await window.FinancialSpaceService.updatePendingEntry(state.selectedSpaceId, entry, { description: data.get("description"), amountCents: Engine.moneyInputToCents(data.get("amount")), dueAt: new Date(`${data.get("dueAt")}T12:00:00`).toISOString(), categoryId: data.get("categoryId"), categoryName: option?.dataset.name, notes: data.get("notes") }); closeModal(); Utils.toast("Conta atualizada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
+    const refreshSubcategories = () => { const items = Engine.subcategoriesFor(allCategories, form.categoryId.value); form.subcategoryId.innerHTML = `<option value="">Sem detalhar</option>${items.map((item) => `<option value="${esc(item.id)}" data-name="${esc(item.name)}"${item.id === selectedSubcategoryId ? " selected" : ""}>${esc(item.name)}</option>`).join("")}`; };
+    form.categoryId.onchange = () => { selectedSubcategoryId = ""; refreshSubcategories(); };
+    refreshSubcategories();
+    form.onsubmit = async (event) => { event.preventDefault(); const data = new FormData(form), option = form.categoryId.selectedOptions[0], subcategory = form.subcategoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await window.FinancialSpaceService.updatePendingEntry(state.selectedSpaceId, entry, { description: data.get("description"), amountCents: Engine.moneyInputToCents(data.get("amount")), dueAt: new Date(`${data.get("dueAt")}T12:00:00`).toISOString(), categoryId: data.get("categoryId"), categoryName: option?.dataset.name, categoryIcon: option?.dataset.icon, subcategoryId: data.get("subcategoryId") || null, subcategoryName: data.get("subcategoryId") ? subcategory?.dataset.name : null, notes: data.get("notes") }); closeModal(); Utils.toast("Conta atualizada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
   }
 
-  function openNewCategory() {
+  async function openNewCategory() {
     if (state.consolidated) return Utils.toast("Escolha um espaço para criar a categoria.", true);
-    sheet(`${sheetHeader("Nova categoria", "A categoria ficará disponível somente neste espaço.")}<form data-financial-category-form><div class="modal-body"><label class="financial-field"><span>Nome *</span><input name="name" maxlength="60" placeholder="Ex.: Embalagens" required></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar categoria</button></footer></form>`);
+    const categories = (await window.FinancialSpaceService.listCategories(state.selectedSpaceId)).filter((item) => item.type === "category");
+    sheet(`${sheetHeader("Nova categoria", "Ela ficará disponível somente neste espaço.")}<form data-financial-category-form><div class="modal-body financial-form-grid"><label class="financial-field"><span>Tipo *</span><select name="nodeType"><option value="category">Categoria principal</option><option value="subcategory">Subcategoria</option></select></label><label class="financial-field" data-financial-parent hidden><span>Categoria principal *</span><select name="parentCategoryId">${categories.map((category) => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="60" placeholder="Ex.: Impressão 3D" required></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar</button></footer></form>`);
     const form = modal().querySelector("[data-financial-category-form]");
-    form.onsubmit = async (event) => { event.preventDefault(); const submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await window.FinancialSpaceService.createCategory(state.selectedSpaceId, { name: new FormData(form).get("name") }); closeModal(); Utils.toast("Categoria criada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
+    const toggleParent = () => modal().querySelector("[data-financial-parent]").hidden = form.nodeType.value !== "subcategory";
+    form.nodeType.onchange = toggleParent; toggleParent();
+    form.onsubmit = async (event) => { event.preventDefault(); const submit = form.querySelector("[type=submit]"), values = new FormData(form); submit.disabled = true; try { await window.FinancialSpaceService.createCategory(state.selectedSpaceId, { name: values.get("name"), parentCategoryId: values.get("nodeType") === "subcategory" ? values.get("parentCategoryId") : null }); closeModal(); Utils.toast(values.get("nodeType") === "subcategory" ? "Subcategoria criada." : "Categoria criada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
   }
 
   function openTransfer() {

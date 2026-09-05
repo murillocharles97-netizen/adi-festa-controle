@@ -12,34 +12,37 @@ window.FinancialEngine = (() => {
     "transfer",
     "other",
   ]);
-  const BUSINESS_CATEGORIES = [
-    ["rent", "Aluguel", "house"],
-    ["energy", "Energia", "zap"],
-    ["internet", "Internet", "wifi"],
-    ["employees", "Funcionários", "users"],
-    ["suppliers", "Fornecedores", "truck"],
-    ["merchandise", "Mercadoria", "package"],
-    ["marketing", "Marketing", "megaphone"],
-    ["taxes", "Impostos", "landmark"],
-    ["fees", "Taxas", "receipt"],
-    ["transport", "Transporte", "car"],
-    ["maintenance", "Manutenção", "wrench"],
-    ["equipment", "Equipamentos", "monitor"],
-    ["other", "Outros", "shapes"],
+  const PERSONAL_CATEGORY_TEMPLATES = [
+    ["home", "Casa", "house", [["rent", "Aluguel"], ["condominium", "Condomínio"], ["energy", "Energia"], ["water", "Água"], ["internet", "Internet"], ["gas", "Gás"], ["maintenance", "Manutenção"], ["furniture", "Móveis"], ["other", "Outros"]]],
+    ["food", "Alimentação", "utensils", [["market", "Mercado"], ["restaurant", "Restaurante"], ["delivery", "Delivery"], ["bakery", "Padaria"], ["other", "Outros"]]],
+    ["transport", "Transporte", "bus", [["fuel", "Combustível"], ["apps", "Aplicativos"], ["bus", "Ônibus"], ["parking", "Estacionamento"], ["toll", "Pedágio"], ["other", "Outros"]]],
+    ["car", "Carro", "car", [["fuel", "Combustível"], ["insurance", "Seguro"], ["maintenance", "Manutenção"], ["wash", "Lavagem"], ["documents", "Documentação"], ["financing", "Financiamento"], ["other", "Outros"]]],
+    ["health", "Saúde", "heart-pulse", [["consultations", "Consultas"], ["medicines", "Medicamentos"], ["exams", "Exames"], ["health_plan", "Plano de saúde"], ["other", "Outros"]]],
+    ["education", "Educação", "graduation-cap", [["tuition", "Mensalidade"], ["courses", "Cursos"], ["books", "Livros"], ["materials", "Materiais"], ["other", "Outros"]]],
+    ["leisure", "Lazer", "party-popper", [["trips", "Viagens"], ["events", "Eventos"], ["games", "Jogos"], ["other", "Outros"]]],
+    ["subscriptions", "Assinaturas", "repeat", [["streaming", "Streaming"], ["software", "Software"], ["mobile", "Celular"], ["internet", "Internet"], ["gym", "Academia"], ["other", "Outros"]]],
+    ["shopping", "Compras", "shopping-bag", [["clothes", "Roupas"], ["electronics", "Eletrônicos"], ["home", "Casa"], ["other", "Outros"]]],
+    ["debts", "Dívidas", "badge-dollar-sign", [["loan", "Empréstimo"], ["financing", "Financiamento"], ["credit_card", "Cartão de crédito"], ["other", "Outros"]]],
+    ["taxes", "Impostos", "landmark", [["property", "Imóvel"], ["vehicle", "Veículo"], ["income", "Renda"], ["other", "Outros"]]],
+    ["pets", "Pets", "paw-print", [["food", "Alimentação"], ["veterinary", "Veterinário"], ["hygiene", "Higiene"], ["other", "Outros"]]],
+    ["family", "Família", "users", [["children", "Filhos"], ["support", "Ajuda familiar"], ["other", "Outros"]]],
+    ["other", "Outros", "shapes", []],
   ];
-  const PERSONAL_CATEGORIES = [
-    ["home", "Casa", "house"],
-    ["market", "Mercado", "shopping-basket"],
-    ["energy", "Energia", "zap"],
-    ["internet", "Internet", "wifi"],
-    ["transport", "Transporte", "bus"],
-    ["car", "Carro", "car"],
-    ["health", "Saúde", "heart-pulse"],
-    ["leisure", "Lazer", "party-popper"],
-    ["subscriptions", "Assinaturas", "repeat"],
-    ["shopping", "Compras", "shopping-bag"],
-    ["education", "Educação", "graduation-cap"],
-    ["other", "Outros", "shapes"],
+  const BUSINESS_CATEGORY_TEMPLATES = [
+    ["structure", "Estrutura", "store", [["rent", "Aluguel"], ["condominium", "Condomínio"], ["energy", "Energia"], ["water", "Água"], ["internet", "Internet"], ["cleaning", "Limpeza"], ["security", "Segurança"], ["maintenance", "Manutenção"]]],
+    ["inventory", "Estoque e mercadorias", "package", [["merchandise", "Compra de mercadoria"], ["supplies", "Insumos"], ["packaging", "Embalagens"], ["replacement", "Reposição"], ["freight", "Frete"]]],
+    ["suppliers", "Fornecedores", "truck", []],
+    ["team", "Equipe", "users", [["salary", "Salários"], ["commission", "Comissões"], ["benefits", "Benefícios"], ["freelancer", "Freelancer"]]],
+    ["marketing", "Marketing", "megaphone", [["ads", "Anúncios"], ["social", "Redes sociais"], ["print", "Impressos"], ["influencers", "Influenciadores"], ["promotions", "Promoções"]]],
+    ["transport", "Transporte", "car", [["fuel", "Combustível"], ["freight", "Frete"], ["apps", "Aplicativos"], ["parking", "Estacionamento"], ["toll", "Pedágio"]]],
+    ["systems", "Sistemas e assinaturas", "monitor-cog", [["erp", "ERP"], ["software", "Software"], ["internet", "Internet"], ["phone", "Telefone"], ["online", "Serviços online"]]],
+    ["taxes", "Impostos e taxas", "landmark", [["taxes", "Impostos"], ["bank", "Taxas bancárias"], ["marketplace", "Taxas de marketplace"], ["card", "Taxas de cartão"]]],
+    ["maintenance", "Manutenção", "wrench", []],
+    ["equipment", "Equipamentos", "monitor", [["computer", "Computador"], ["printer", "Impressora"], ["machine", "Máquina"], ["tools", "Ferramentas"], ["furniture", "Móveis"]]],
+    ["services", "Serviços", "briefcase-business", []],
+    ["withdrawals", "Retiradas", "hand-coins", []],
+    ["finance", "Financeiro", "wallet-cards", []],
+    ["other", "Outros", "shapes", []],
   ];
 
   const finite = (value) => Number.isFinite(Number(value));
@@ -103,10 +106,85 @@ window.FinancialEngine = (() => {
     else if (frequency === "yearly") date.setFullYear(date.getFullYear() + count);
     return date;
   };
+  const templateType = (spaceType = "business") => spaceType === "business" ? "business" : "personal";
+  const defaultCategoryTree = (spaceType = "business") => {
+    const type = templateType(spaceType), templates = type === "business" ? BUSINESS_CATEGORY_TEMPLATES : PERSONAL_CATEGORY_TEMPLATES;
+    return templates.flatMap(([slug, name, icon, children], categoryIndex) => {
+      const id = `default_${type}_${slug}`, category = {
+        id,
+        name,
+        icon,
+        type: "category",
+        parentCategoryId: null,
+        financialSpaceId: null,
+        isDefault: true,
+        system: true,
+        active: true,
+        sortOrder: categoryIndex,
+      };
+      return [category, ...children.map(([childSlug, childName], subcategoryIndex) => ({
+        id: `${id}_${childSlug}`,
+        name: childName,
+        icon: "tag",
+        type: "subcategory",
+        parentCategoryId: id,
+        financialSpaceId: null,
+        isDefault: true,
+        system: true,
+        active: true,
+        sortOrder: subcategoryIndex,
+      }))];
+    });
+  };
   const defaultCategories = (spaceType = "business") =>
-    (spaceType === "personal" ? PERSONAL_CATEGORIES : BUSINESS_CATEGORIES).map(
-      ([id, name, icon]) => ({ id: `default_${id}`, name, icon, system: true, active: true }),
-    );
+    defaultCategoryTree(spaceType).filter((item) => item.type === "category");
+  const subcategoriesFor = (items = [], categoryId = "") => items.filter(
+    (item) => item.type === "subcategory" && item.parentCategoryId === categoryId && item.active !== false,
+  );
+  const LEGACY_CATEGORY_MAP = {
+    business: {
+      rent: ["structure", "rent"], aluguel: ["structure", "rent"],
+      energy: ["structure", "energy"], energia: ["structure", "energy"],
+      internet: ["structure", "internet"],
+      employees: ["team", null], funcionarios: ["team", null], funcionários: ["team", null],
+      suppliers: ["suppliers", null], fornecedores: ["suppliers", null],
+      merchandise: ["inventory", "merchandise"], mercadoria: ["inventory", "merchandise"],
+      marketing: ["marketing", null], taxes: ["taxes", "taxes"], impostos: ["taxes", "taxes"],
+      transport: ["transport", null], transporte: ["transport", null],
+      maintenance: ["maintenance", null], manutenção: ["maintenance", null], manutencao: ["maintenance", null],
+      equipment: ["equipment", null], equipamentos: ["equipment", null],
+      other: ["other", null], outros: ["other", null],
+    },
+    personal: {
+      home: ["home", null], casa: ["home", null],
+      rent: ["home", "rent"], aluguel: ["home", "rent"],
+      market: ["food", "market"], mercado: ["food", "market"],
+      energy: ["home", "energy"], energia: ["home", "energy"],
+      internet: ["home", "internet"],
+      transport: ["transport", null], transporte: ["transport", null],
+      car: ["car", null], carro: ["car", null], health: ["health", null], saúde: ["health", null], saude: ["health", null],
+      leisure: ["leisure", null], lazer: ["leisure", null], subscriptions: ["subscriptions", null], assinaturas: ["subscriptions", null],
+      shopping: ["shopping", null], compras: ["shopping", null], education: ["education", null], educação: ["education", null], educacao: ["education", null],
+      other: ["other", null], outros: ["other", null],
+    },
+  };
+  const normalizedLabel = (value) => String(value || "").trim().toLocaleLowerCase("pt-BR");
+  const legacyCategoryUpgrade = (entry = {}, spaceType = "business") => {
+    if (entry.categorySchemaVersion >= 2 || entry.subcategoryId || entry.subcategoryName) return null;
+    const type = templateType(spaceType), rawId = String(entry.categoryId || "").replace(/^default_/, ""), rawName = normalizedLabel(entry.categoryName), pair = LEGACY_CATEGORY_MAP[type][rawId] || LEGACY_CATEGORY_MAP[type][rawName];
+    if (!pair) return null;
+    const [categorySlug, subcategorySlug] = pair, tree = defaultCategoryTree(type), categoryId = `default_${type}_${categorySlug}`, category = tree.find((item) => item.id === categoryId), subcategoryId = subcategorySlug ? `${categoryId}_${subcategorySlug}` : null, subcategory = subcategoryId ? tree.find((item) => item.id === subcategoryId) : null;
+    if (!category) return null;
+    return {
+      categoryId: category.id,
+      categoryName: category.name,
+      categoryIcon: category.icon,
+      subcategoryId: subcategory?.id || null,
+      subcategoryName: subcategory?.name || null,
+      categorySchemaVersion: 2,
+      categoryMigrationStatus: "migrated",
+    };
+  };
   const normalizeSpace = (raw = {}) => {
     const type = SPACE_TYPES.has(raw.type) ? raw.type : "other",
       name = String(raw.name || "").trim();
@@ -142,6 +220,9 @@ window.FinancialEngine = (() => {
       paymentMethod: raw.paymentMethod && PAYMENT_METHODS.has(raw.paymentMethod)
         ? raw.paymentMethod
         : null,
+      subcategoryId: raw.subcategoryId || null,
+      subcategoryName: raw.subcategoryName || null,
+      categorySchemaVersion: Number(raw.categorySchemaVersion || (raw.subcategoryId || raw.subcategoryName ? 2 : 1)),
     };
   };
   const effectiveStatus = (entry, now = new Date()) => {
@@ -272,6 +353,9 @@ window.FinancialEngine = (() => {
     addMonths,
     addFrequency,
     defaultCategories,
+    defaultCategoryTree,
+    subcategoriesFor,
+    legacyCategoryUpgrade,
     normalizeSpace,
     normalizeEntry,
     effectiveStatus,

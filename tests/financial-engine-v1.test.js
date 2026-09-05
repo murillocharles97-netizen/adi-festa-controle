@@ -70,3 +70,70 @@ test("consolidado soma espaços sem misturar suas identidades", () => {
   assert.equal(result.summary.resultCents, 7500);
   assert.equal(result.entries.length, 2);
 });
+
+test("templates pessoais usam categorias macro e subcategorias opcionais", () => {
+  const tree = engine.defaultCategoryTree("personal"), categories = tree.filter((item) => item.type === "category");
+  assert.deepEqual(Array.from(categories, (item) => item.name), [
+    "Casa", "Alimentação", "Transporte", "Carro", "Saúde", "Educação", "Lazer",
+    "Assinaturas", "Compras", "Dívidas", "Impostos", "Pets", "Família", "Outros",
+  ]);
+  const home = categories.find((item) => item.name === "Casa");
+  assert.deepEqual(Array.from(engine.subcategoriesFor(tree, home.id), (item) => item.name), [
+    "Aluguel", "Condomínio", "Energia", "Água", "Internet", "Gás", "Manutenção", "Móveis", "Outros",
+  ]);
+  assert.equal(home.financialSpaceId, null);
+  assert.equal(home.isDefault, true);
+});
+
+test("templates de negócio cobrem estoque, marketing, equipe e equipamentos", () => {
+  const tree = engine.defaultCategoryTree("business"), categories = tree.filter((item) => item.type === "category");
+  assert.deepEqual(Array.from(categories, (item) => item.name), [
+    "Estrutura", "Estoque e mercadorias", "Fornecedores", "Equipe", "Marketing", "Transporte",
+    "Sistemas e assinaturas", "Impostos e taxas", "Manutenção", "Equipamentos", "Serviços",
+    "Retiradas", "Financeiro", "Outros",
+  ]);
+  const inventory = categories.find((item) => item.name === "Estoque e mercadorias"),
+    equipment = categories.find((item) => item.name === "Equipamentos");
+  assert.ok(engine.subcategoriesFor(tree, inventory.id).some((item) => item.name === "Insumos"));
+  assert.ok(engine.subcategoriesFor(tree, equipment.id).some((item) => item.name === "Impressora"));
+});
+
+test("resumo agrega por categoria macro sem fragmentar pelas subcategorias", () => {
+  const items = [
+    entry({ id: "rent", amountCents: 150000, categoryId: "default_personal_home", categoryName: "Casa", subcategoryId: "default_personal_home_rent", subcategoryName: "Aluguel" }),
+    entry({ id: "energy", amountCents: 34000, categoryId: "default_personal_home", categoryName: "Casa", subcategoryId: "default_personal_home_energy", subcategoryName: "Energia" }),
+    entry({ id: "netflix", amountCents: 5000, categoryId: "default_personal_subscriptions", categoryName: "Assinaturas", subcategoryId: "default_personal_subscriptions_streaming", subcategoryName: "Streaming" }),
+  ];
+  const summary = engine.summarize(items);
+  assert.equal(summary.categories.length, 2);
+  assert.equal(summary.categories.find((item) => item.categoryName === "Casa").amountCents, 184000);
+});
+
+test("migra apenas categorias legadas claramente reconhecíveis", () => {
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(engine.legacyCategoryUpgrade({ categoryId: "default_rent", categoryName: "Aluguel" }, "personal"))),
+    {
+      categoryId: "default_personal_home",
+      categoryName: "Casa",
+      categoryIcon: "house",
+      subcategoryId: "default_personal_home_rent",
+      subcategoryName: "Aluguel",
+      categorySchemaVersion: 2,
+      categoryMigrationStatus: "migrated",
+    },
+  );
+  assert.equal(engine.legacyCategoryUpgrade({ categoryId: "custom-unknown", categoryName: "Impressão 3D" }, "business"), null);
+  assert.equal(engine.legacyCategoryUpgrade({ categoryId: "default_fees", categoryName: "Taxas" }, "business"), null);
+});
+
+test("lançamentos preservam categoria macro, detalhe e tipo independentes", () => {
+  const examples = [
+    entry({ description: "Aluguel + condomínio", categoryId: "default_personal_home", categoryName: "Casa", subcategoryId: "default_personal_home_rent", subcategoryName: "Aluguel", entryType: "expense" }),
+    entry({ description: "Conta CPFL", categoryId: "default_personal_home", categoryName: "Casa", subcategoryId: "default_personal_home_energy", subcategoryName: "Energia", entryType: "expense" }),
+    entry({ description: "Filamento PLA", categoryId: "default_business_inventory", categoryName: "Estoque e mercadorias", subcategoryId: "default_business_inventory_supplies", subcategoryName: "Insumos", entryType: "expense" }),
+    entry({ description: "Notebook", categoryId: "default_business_equipment", categoryName: "Equipamentos", subcategoryId: "default_business_equipment_computer", subcategoryName: "Computador", entryType: "investment", frequency: "none" }),
+  ];
+  assert.deepEqual(Array.from(examples, (item) => [item.categoryName, item.subcategoryName]), [["Casa", "Aluguel"], ["Casa", "Energia"], ["Estoque e mercadorias", "Insumos"], ["Equipamentos", "Computador"]]);
+  assert.equal(examples[3].entryType, "investment");
+  assert.equal(examples[3].frequency, "none");
+});

@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=117") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=118") < html.indexOf("auth.js?v=115"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -56,9 +56,24 @@ test("comprovantes aceitam somente imagens/PDF e ficam no lançamento", () => {
   assert.match(service, /financialSpaces\/\$\{space\.id\}\/entries\/\$\{entryId\}/);
 });
 
-test("release 117 publica correção de permissões e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "117"/);
-  assert.match(sw, /adi-festa-v117-financial-permissions/);
+test("categorias V2 separam macro, subcategoria e customização por espaço", () => {
+  const engine = read("js/financial-engine.js"), ui = read("js/financial-ui.js");
+  assert.match(engine, /defaultCategoryTree/);
+  assert.match(engine, /parentCategoryId/);
+  assert.match(engine, /categorySchemaVersion/);
+  assert.match(service, /childRef\(spaceId, "categories", id\)/);
+  assert.match(service, /parentCategoryId/);
+  assert.match(service, /migrateLegacyCategories/);
+  assert.match(ui, /Passo \$\{draft\.step\} de 4/);
+  assert.match(ui, /Subcategoria <small>\(opcional\)<\/small>/);
+  assert.match(ui, /Criar categoria/);
+  assert.match(ui, /Criar subcategoria/);
+  assert.doesNotMatch(ui, /data-financial-entry-form/);
+});
+
+test("release 118 publica hierarquia financeira e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "118"/);
+  assert.match(sw, /adi-festa-v118-financial-category-hierarchy/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
