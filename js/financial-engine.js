@@ -90,6 +90,14 @@ window.FinancialEngine = (() => {
       endExclusive = new Date(year, month, 1);
     return { key, start, endExclusive, end: new Date(endExclusive.getTime() - 1) };
   };
+  const belongsToPeriod = (entry = {}, key = periodKey()) => {
+    const { start, endExclusive } = monthRange(key), candidate = localDate(
+      entry.status === "paid"
+        ? entry.occurredAt || entry.paidAt || entry.dueAt
+        : entry.dueAt || entry.sortAt,
+    );
+    return Boolean(candidate && candidate >= start && candidate < endExclusive);
+  };
   const addMonths = (value, count) => {
     const date = localDay(value),
       day = date.getDate(),
@@ -216,6 +224,7 @@ window.FinancialEngine = (() => {
       amountCents,
       currency: "BRL",
       periodKey: raw.periodKey || periodKey(date),
+      duePeriodKey: raw.duePeriodKey || periodKey(raw.dueAt || date),
       sortAt: raw.sortAt || date,
       paymentMethod: raw.paymentMethod && PAYMENT_METHODS.has(raw.paymentMethod)
         ? raw.paymentMethod
@@ -331,11 +340,38 @@ window.FinancialEngine = (() => {
       });
     });
   };
+  const occurrenceKey = (entryOrDate) => localIsoDate(
+    entryOrDate && typeof entryOrDate === "object" && !(entryOrDate instanceof Date)
+      ? entryOrDate.dueAt
+      : entryOrDate,
+  );
+  const shouldGenerateOccurrence = (recurrence = {}, dueAt) => {
+    if (recurrence.active === false) return false;
+    const due = localDay(dueAt), start = localDate(recurrence.seriesStartAt), end = localDate(recurrence.seriesEndAt), key = occurrenceKey(due);
+    if (start && due < localDay(start)) return false;
+    if (end && due >= localDay(end)) return false;
+    const exceptions = new Set([
+      ...(recurrence.skippedOccurrenceKeys || []),
+      ...(recurrence.overrideOccurrenceKeys || []),
+    ]);
+    return !exceptions.has(key);
+  };
+  const rescheduleRecurringInstances = (entries = [], anchorEntry = {}, newStart, frequency = "monthly") => {
+    const start = localDay(newStart || anchorEntry.dueAt), anchorSequence = Number(anchorEntry.recurrenceSequence || 0);
+    return entries.map((entry, index) => {
+      const sequence = Number(entry.recurrenceSequence || 0), offset = anchorSequence && sequence >= anchorSequence
+        ? sequence - anchorSequence
+        : index,
+        dueAt = (offset ? addFrequency(start, frequency, offset) : start).toISOString();
+      return { ...entry, dueAt, duePeriodKey: periodKey(dueAt), periodKey: periodKey(dueAt), sortAt: dueAt };
+    });
+  };
   const consolidate = (dashboards = []) => {
     const combined = dashboards.flatMap((item) => item.entries || []),
+      combinedAccounts = dashboards.flatMap((item) => item.accounts || item.entries || []),
       summary = summarize(combined),
       latest = [...combined].sort((a, b) => (localDate(b.sortAt)?.getTime() || 0) - (localDate(a.sortAt)?.getTime() || 0));
-    return { summary, entries: combined, latest: latest.slice(0, 20), payables: sortPayables(combined).slice(0, 20) };
+    return { summary, entries: combined, accounts: combinedAccounts, latest: latest.slice(0, 20), payables: sortPayables(combinedAccounts).slice(0, 20) };
   };
 
   return {
@@ -350,6 +386,7 @@ window.FinancialEngine = (() => {
     localIsoDate,
     periodKey,
     monthRange,
+    belongsToPeriod,
     addMonths,
     addFrequency,
     defaultCategories,
@@ -365,6 +402,9 @@ window.FinancialEngine = (() => {
     installmentAmounts,
     buildInstallments,
     buildRecurringInstances,
+    occurrenceKey,
+    shouldGenerateOccurrence,
+    rescheduleRecurringInstances,
     consolidate,
   };
 })();
