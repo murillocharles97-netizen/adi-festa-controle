@@ -9,6 +9,7 @@ const {
   getDocs,
   deleteDoc,
   limit,
+  orderBy,
   query,
   runTransaction,
   setDoc,
@@ -124,6 +125,52 @@ test("query real da tela lista espaços da empresa", async () => {
     where("active", "==", true),
     limit(20),
   )));
+});
+
+test("consulta mensal de contas usa dueAt e não traz outubro em setembro", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), entries = collection(db, "financialSpaces", "space-a", "entries");
+  await assertSucceeds(setDoc(doc(entries, "rent-september"), { ...entry, id: "rent-september", operationId: "rent-september", sourceId: "rent-september", dueAt: "2026-09-10T12:00:00.000Z", periodKey: "2026-09" }));
+  await assertSucceeds(setDoc(doc(entries, "rent-october"), { ...entry, id: "rent-october", operationId: "rent-october", sourceId: "rent-october", dueAt: "2026-10-10T12:00:00.000Z", periodKey: "2026-10" }));
+  const snapshot = await assertSucceeds(getDocs(query(
+    entries,
+    where("dueAt", ">=", "2026-09-01T03:00:00.000Z"),
+    where("dueAt", "<", "2026-10-01T03:00:00.000Z"),
+    orderBy("dueAt", "asc"),
+    limit(500),
+  )));
+  assert.deepEqual(snapshot.docs.map((item) => item.id), ["rent-september"]);
+});
+
+test("ocorrência e série recorrente podem ser canceladas sem apagar histórico pago", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), recurrenceRef = doc(db, "financialSpaces", "space-a", "recurrences", "rent-series"),
+    septemberRef = doc(db, "financialSpaces", "space-a", "entries", "series-september"), octoberRef = doc(db, "financialSpaces", "space-a", "entries", "series-october"),
+    novemberRef = doc(db, "financialSpaces", "space-a", "entries", "series-november");
+  await assertSucceeds(setDoc(recurrenceRef, { id: "rent-series", financialSpaceId: "space-a", ownerUid: "owner-a", createdBy: "owner-a", operationId: "rent-series", active: true, frequency: "monthly", seriesStartAt: "2026-09-10T12:00:00.000Z", seriesEndAt: null }));
+  await assertSucceeds(setDoc(septemberRef, { ...entry, id: "series-september", operationId: "series-september", sourceId: "series-september", amountCents: 150000, status: "paid", dueAt: "2026-09-10T12:00:00.000Z", recurrenceId: "rent-series" }));
+  await assertSucceeds(setDoc(octoberRef, { ...entry, id: "series-october", operationId: "series-october", sourceId: "series-october", amountCents: 150000, dueAt: "2026-10-10T12:00:00.000Z", recurrenceId: "rent-series" }));
+  await assertSucceeds(setDoc(novemberRef, { ...entry, id: "series-november", operationId: "series-november", sourceId: "series-november", amountCents: 150000, dueAt: "2026-11-10T12:00:00.000Z", recurrenceId: "rent-series" }));
+  await assertSucceeds(updateDoc(octoberRef, { amountCents: 165000 }));
+  await assertSucceeds(updateDoc(recurrenceRef, { overrideOccurrenceKeys: ["2026-10-10"] }));
+  assert.equal((await getDoc(septemberRef)).data().amountCents, 150000);
+  assert.equal((await getDoc(octoberRef)).data().amountCents, 165000);
+  assert.equal((await getDoc(novemberRef)).data().amountCents, 150000);
+  const seriesEdit = writeBatch(db);
+  seriesEdit.update(octoberRef, { amountCents: 170000 });
+  seriesEdit.update(novemberRef, { amountCents: 170000 });
+  seriesEdit.update(recurrenceRef, { amountCents: 170000, effectiveFrom: "2026-10-10T12:00:00.000Z" });
+  await assertSucceeds(seriesEdit.commit());
+  assert.equal((await getDoc(septemberRef)).data().amountCents, 150000);
+  assert.equal((await getDoc(octoberRef)).data().amountCents, 170000);
+  assert.equal((await getDoc(novemberRef)).data().amountCents, 170000);
+  const batch = writeBatch(db);
+  batch.update(octoberRef, { status: "cancelled", cancellationScope: "this_and_future" });
+  batch.update(novemberRef, { status: "cancelled", cancellationScope: "this_and_future" });
+  batch.update(recurrenceRef, { active: false, seriesEndAt: "2026-10-10T12:00:00.000Z" });
+  await assertSucceeds(batch.commit());
+  assert.equal((await getDoc(septemberRef)).data().status, "paid");
+  assert.equal((await getDoc(octoberRef)).data().status, "cancelled");
+  assert.equal((await getDoc(novemberRef)).data().status, "cancelled");
+  await assertFails(deleteDoc(septemberRef));
 });
 
 test("lançamento pago não pode ser apagado nem ter valor reescrito", async () => {

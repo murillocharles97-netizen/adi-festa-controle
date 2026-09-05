@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=118") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=119") < html.indexOf("auth.js?v=115"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -19,6 +19,27 @@ test("persistência usa espaços isolados, centavos e consultas mensais limitada
   assert.match(service, /MAX_MONTH_ENTRIES = 500/);
   assert.match(service, /amountCents/);
   assert.doesNotMatch(service, /onSnapshot/);
+});
+
+test("dashboard separa competência realizada de vencimentos do período", () => {
+  assert.match(service, /where\("periodKey", "==", selectedPeriod\)/);
+  assert.match(service, /where\("dueAt", ">=", start\.toISOString\(\)\)/);
+  assert.match(service, /where\("dueAt", "<", endExclusive\.toISOString\(\)\)/);
+  assert.doesNotMatch(service, /async function pendingEntries/);
+  assert.match(read("js/financial-ui.js"), /data\.accounts/);
+});
+
+test("contas abrem detalhes e diferenciam ocorrência, série e estorno", () => {
+  const ui = read("js/financial-ui.js");
+  assert.match(ui, /Detalhes da conta/);
+  assert.match(ui, /Somente esta conta/);
+  assert.match(ui, /Esta e as próximas/);
+  assert.match(ui, /Gerenciar recorrência/);
+  assert.match(ui, /Reverter lançamento/);
+  assert.match(service, /overrideOccurrenceKeys: arrayUnion/);
+  assert.match(service, /skippedOccurrenceKeys: arrayUnion/);
+  assert.match(service, /async function updateRecurrenceFrom/);
+  assert.match(service, /async function cancelRecurrenceFrom/);
 });
 
 test("listagem inicial satisfaz as Rules sem depender de filtro implícito", () => {
@@ -71,9 +92,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 118 publica hierarquia financeira e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "118"/);
-  assert.match(sw, /adi-festa-v118-financial-category-hierarchy/);
+test("release 119 publica ações financeiras, período isolado e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "119"/);
+  assert.match(sw, /adi-festa-v119-financial-account-actions-period/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

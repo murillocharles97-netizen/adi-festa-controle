@@ -24,6 +24,10 @@ window.FinanceiroUI = (() => {
     const date = Engine.localDate(value);
     return date ? date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "—";
   };
+  const fullDateLabel = (value) => {
+    const date = Engine.localDate(value);
+    return date ? date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+  };
   const paymentLabel = {
     cash: "Dinheiro",
     pix: "Pix",
@@ -89,7 +93,7 @@ window.FinanceiroUI = (() => {
   function latestMarkup(entries = [], full = false) {
     if (!entries.length) return `<div class="financial-empty-inline">${icon("arrow-left-right")}<div><b>Nenhum lançamento realizado</b><span>Entradas e pagamentos aparecerão aqui.</span></div></div>`;
     return `<div class="financial-list ${full ? "" : "is-compact"}">${entries.map((entry) => `
-      <article class="financial-list-row financial-entry-row">
+      <article class="financial-list-row financial-entry-row" data-financial-entry-id="${esc(entry.id)}">
         <span class="financial-row-icon ${entry.direction === "in" ? "is-income" : "is-expense"}">${icon(entry.direction === "in" ? "arrow-up" : "arrow-down")}</span>
         <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${esc(entry.categoryName || "Outros")}${entry.subcategoryName ? ` · ${esc(entry.subcategoryName)}` : ""} · ${dateLabel(entry.occurredAt)}</small></span>
         <span class="financial-status ${entry.direction === "in" ? "is-paid" : "is-overdue"}">${entry.direction === "in" ? "Entrada" : "Saída"}</span>
@@ -132,9 +136,9 @@ window.FinanceiroUI = (() => {
 
   function accountsMarkup(data) {
     const byId = new Map(), filter = state.accountFilter;
-    for (const entry of [...(data.payables || []), ...(data.entries || []).filter((item) => item.direction === "out")]) byId.set(entry.id, entry);
+    for (const entry of [...(data.accounts || []), ...(data.payables || [])]) if (entry.direction === "out") byId.set(entry.id, entry);
     const accounts = [...byId.values()].filter((entry) => filter === "all" || (filter === "paid" ? entry.status === "paid" : Engine.effectiveStatus(entry) === filter));
-    return `${subpageHeader("Contas a pagar", "Pendentes, vencidas e pagamentos", `<button class="btn btn-primary" type="button" data-financial-new="expense">${icon("plus")} Nova conta</button>`)}
+    return `${subpageHeader("Contas a pagar", `Contas com vencimento em ${monthLabel(state.period)}`, `<button class="btn btn-primary" type="button" data-financial-new="expense">${icon("plus")} Nova conta</button>`)}
       <section class="financial-section financial-subpage-card"><div class="financial-filter-chips"><button data-financial-account-filter="all" class="${filter === "all" ? "active" : ""}">Todas</button><button data-financial-account-filter="pending" class="${filter === "pending" ? "active" : ""}">Pendentes</button><button data-financial-account-filter="overdue" class="${filter === "overdue" ? "active" : ""}">Vencidas</button><button data-financial-account-filter="paid" class="${filter === "paid" ? "active" : ""}">Pagas</button></div>${payablesMarkup(accounts, false)}</section>`;
   }
 
@@ -444,26 +448,71 @@ window.FinanceiroUI = (() => {
     };
   }
 
+  const frequencyLabel = (frequency) => ({ weekly: "Toda semana", biweekly: "A cada 15 dias", monthly: "Todo mês", yearly: "Todo ano" })[frequency] || "Sem recorrência";
+  const entryOriginLabel = (entry) => entry.recurrenceId
+    ? "Despesa recorrente"
+    : entry.installmentGroupId ? "Despesa parcelada" : ({ sale: "Venda", transfer: "Transferência", reversal: "Estorno", manual_income: "Entrada manual", investment: "Investimento" })[entry.sourceType] || "Despesa avulsa";
+
   async function openAccount(entry) {
     if (!entry) return;
-    const editable = entry.status === "pending";
-    sheet(`${sheetHeader(entry.description, `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><div class="financial-account-details"><span>${icon("calendar-days")} Vencimento <b>${dateLabel(entry.dueAt)}</b></span><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span>${entry.subcategoryName ? `<span>${icon("tags")} Subcategoria <b>${esc(entry.subcategoryName)}</b></span>` : ""}</div><div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como pago</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light" type="button" data-financial-account-cancel>${icon("ban")} Cancelar conta</button>` : ""}<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label></div></div>`);
+    const editable = entry.status === "pending", reversible = entry.status === "paid" && !entry.reversedByEntryId && entry.sourceType !== "reversal";
+    sheet(`${sheetHeader("Detalhes da conta", `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><article class="financial-account-summary"><span>${icon(entry.categoryIcon || "receipt-text")}</span><div><h3>${esc(entry.description)}</h3><strong>${money(entry.amountCents)}</strong></div></article><div class="financial-account-details"><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span><span>${icon("tags")} Subcategoria <b>${esc(entry.subcategoryName || "Sem detalhar")}</b></span><span>${icon("circle-dot")} Status <b>${statusLabel(entry)}</b></span><span>${icon("calendar-days")} Vencimento <b>${fullDateLabel(entry.dueAt)}</b></span><span>${icon("repeat")} Recorrência <b>${entry.recurrenceId ? frequencyLabel(entry.frequency) : "Não"}</b></span><span>${icon("file-clock")} Origem <b>${entryOriginLabel(entry)}</b></span></div><div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como paga</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-account-cancel>${icon("trash-2")} Excluir</button>` : ""}${reversible ? `<button class="btn btn-light financial-danger-action" type="button" data-financial-account-reverse>${icon("undo-2")} Reverter lançamento</button>` : ""}${entry.recurrenceId ? `<button class="btn btn-light" type="button" data-financial-manage-recurrence>${icon("calendar-cog")} Gerenciar recorrência</button>` : ""}<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label></div></div>`);
     modal().querySelector("[data-financial-account-pay]")?.addEventListener("click", () => { closeModal(); openRegisterPayment(entry); });
-    modal().querySelector("[data-financial-account-edit]")?.addEventListener("click", () => openEditAccount(entry));
-    modal().querySelector("[data-financial-account-cancel]")?.addEventListener("click", async () => { try { await window.FinancialSpaceService.cancelPendingEntry(state.selectedSpaceId, entry, "Cancelada pelo usuário"); closeModal(); Utils.toast("Conta cancelada com histórico preservado."); await refresh(); } catch (error) { Utils.toast(error.message, true); } });
+    modal().querySelector("[data-financial-account-edit]")?.addEventListener("click", () => entry.recurrenceId ? openEditChoice(entry) : openEditAccount(entry, "occurrence"));
+    modal().querySelector("[data-financial-account-cancel]")?.addEventListener("click", () => entry.recurrenceId ? openDeleteChoice(entry) : confirmOccurrenceCancellation(entry));
+    modal().querySelector("[data-financial-account-reverse]")?.addEventListener("click", () => confirmPaidReversal(entry));
+    modal().querySelector("[data-financial-manage-recurrence]")?.addEventListener("click", () => openManageRecurrence(entry));
     const fileInput = modal().querySelector(".financial-attachment-action input");
     if (fileInput) fileInput.onchange = async () => { const file = fileInput.files[0]; if (!file) return; try { await window.FinancialSpaceService.uploadAttachment(state.selectedSpaceId, entry.id, file); closeModal(); Utils.toast("Comprovante anexado."); await refresh(); } catch (error) { Utils.toast(error.message, true); } };
   }
 
-  async function openEditAccount(entry) {
-    const allCategories = await window.FinancialSpaceService.listCategories(state.selectedSpaceId), categories = allCategories.filter((item) => item.type === "category");
+  function openEditChoice(entry) {
+    sheet(`${sheetHeader("O que deseja editar?", "Escolha o alcance da alteração na recorrência.")}<div class="modal-body financial-scope-actions"><button type="button" data-financial-edit-scope="occurrence">${icon("calendar-days")}<span><b>Somente esta conta</b><small>As demais ocorrências continuam iguais.</small></span></button><button type="button" data-financial-edit-scope="series">${icon("calendar-range")}<span><b>Esta e as próximas</b><small>O histórico anterior será preservado.</small></span></button></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button></footer>`);
+    modal().querySelector('[data-financial-edit-scope="occurrence"]').onclick = () => openEditAccount(entry, "occurrence");
+    modal().querySelector('[data-financial-edit-scope="series"]').onclick = () => openEditAccount(entry, "series");
+  }
+
+  function openDeleteChoice(entry) {
+    sheet(`${sheetHeader("O que deseja excluir?", "Nenhum lançamento pago será apagado.")}<div class="modal-body financial-scope-actions"><button type="button" data-financial-delete-scope="occurrence">${icon("calendar-minus")}<span><b>Somente esta conta</b><small>Esta ocorrência será ignorada pela recorrência.</small></span></button><button type="button" data-financial-delete-scope="series">${icon("calendar-x")}<span><b>Esta e as próximas</b><small>Encerra a série a partir deste vencimento.</small></span></button></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button></footer>`);
+    modal().querySelector('[data-financial-delete-scope="occurrence"]').onclick = () => confirmOccurrenceCancellation(entry);
+    modal().querySelector('[data-financial-delete-scope="series"]').onclick = () => confirmSeriesCancellation(entry, false);
+  }
+
+  function confirmOccurrenceCancellation(entry) {
+    sheet(`${sheetHeader("Excluir esta conta?", "A exclusão será registrada no histórico.")}<div class="modal-body financial-confirm-copy">${icon("triangle-alert")}<p><b>${esc(entry.description)}</b><span>${money(entry.amountCents)} · vencimento ${fullDateLabel(entry.dueAt)}</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-occurrence>Excluir conta</button></footer>`);
+    modal().querySelector("[data-financial-confirm-occurrence]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.cancelPendingEntry(state.selectedSpaceId, entry, "Conta removida pelo usuário"); closeModal(); Utils.toast("Conta removida."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
+  }
+
+  function confirmSeriesCancellation(entry, fromStart) {
+    const title = fromStart ? "Cancelar recorrência?" : "Excluir esta e as próximas?";
+    sheet(`${sheetHeader(title, "O histórico pago continuará intacto.")}<div class="modal-body financial-confirm-copy">${icon("triangle-alert")}<p><b>${esc(entry.description)}</b><span>${fromStart ? "Todas as ocorrências pendentes serão canceladas." : `A série será encerrada a partir de ${fullDateLabel(entry.dueAt)}.`}</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-series>Confirmar cancelamento</button></footer>`);
+    modal().querySelector("[data-financial-confirm-series]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.cancelRecurrenceFrom(state.selectedSpaceId, entry, { fromStart }); closeModal(); Utils.toast("Recorrência cancelada."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
+  }
+
+  function confirmPaidReversal(entry) {
+    sheet(`${sheetHeader("Reverter lançamento pago?", "O original continuará no histórico.")}<div class="modal-body financial-confirm-copy">${icon("rotate-ccw")}<p><b>${esc(entry.description)}</b><span>Será criado um contralançamento de ${money(entry.amountCents)}.</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-reversal>Reverter</button></footer>`);
+    modal().querySelector("[data-financial-confirm-reversal]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.reversePaidEntry(state.selectedSpaceId, entry, "Revertido pelo usuário"); closeModal(); Utils.toast("Lançamento revertido com histórico preservado."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
+  }
+
+  async function openManageRecurrence(entry) {
+    try {
+      const recurrence = await window.FinancialSpaceService.recurrenceDetails(state.selectedSpaceId, entry.recurrenceId);
+      if (!recurrence) throw new Error("Recorrência não encontrada.");
+      sheet(`${sheetHeader("Gerenciar recorrência", "Edite a regra ou encerre as próximas ocorrências.")}<div class="modal-body"><article class="financial-account-summary"><span>${icon("repeat")}</span><div><h3>${esc(recurrence.description || entry.description)}</h3><strong>${money(recurrence.amountCents || entry.amountCents)}</strong></div></article><div class="financial-account-details"><span>${icon("calendar-sync")} Frequência <b>${frequencyLabel(recurrence.frequency)}</b></span><span>${icon("calendar-plus")} Início <b>${fullDateLabel(recurrence.seriesStartAt || entry.dueAt)}</b></span><span>${icon("calendar-off")} Fim <b>${recurrence.seriesEndAt ? fullDateLabel(recurrence.seriesEndAt) : "Até eu cancelar"}</b></span><span>${icon("circle-dot")} Status <b>${recurrence.active === false ? "Cancelada" : "Ativa"}</b></span></div><div class="financial-account-actions">${recurrence.active === false ? "" : `<button class="btn btn-primary" type="button" data-financial-edit-recurrence>${icon("pencil")} Editar recorrência</button><button class="btn btn-light financial-danger-action" type="button" data-financial-cancel-recurrence>${icon("calendar-x")} Cancelar recorrência</button>`}</div></div>`);
+      modal().querySelector("[data-financial-edit-recurrence]")?.addEventListener("click", () => openEditAccount(entry, "series", recurrence));
+      modal().querySelector("[data-financial-cancel-recurrence]")?.addEventListener("click", () => confirmSeriesCancellation(entry, true));
+    } catch (error) { Utils.toast(error.message, true); }
+  }
+
+  async function openEditAccount(entry, scope = "occurrence", recurrenceInput = null) {
+    const allCategories = await window.FinancialSpaceService.listCategories(state.selectedSpaceId), categories = allCategories.filter((item) => item.type === "category"), recurrence = recurrenceInput || (scope === "series" ? await window.FinancialSpaceService.recurrenceDetails(state.selectedSpaceId, entry.recurrenceId) : null);
     let selectedSubcategoryId = entry.subcategoryId || "";
-    sheet(`${sheetHeader("Editar conta pendente", "O histórico da alteração será preservado.")}<form data-financial-edit-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" value="${esc(entry.description)}" required></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" value="${(Number(entry.amountCents) / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field"><span>Vencimento *</span><input type="date" name="dueAt" value="${Engine.localIsoDate(entry.dueAt)}" required></label><label class="financial-field"><span>Categoria</span><select name="categoryId">${categories.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}" data-icon="${esc(category.icon || "shapes")}"${category.id === entry.categoryId ? " selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field"><span>Subcategoria (opcional)</span><select name="subcategoryId"></select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(entry.notes || "")}</textarea></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar alterações</button></footer></form>`);
+    sheet(`${sheetHeader(scope === "series" ? "Editar esta e as próximas" : "Editar conta pendente", scope === "series" ? "O histórico anterior será preservado." : "Somente esta ocorrência será alterada.")}<form data-financial-edit-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" value="${esc(entry.description)}" required></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" value="${(Number(entry.amountCents) / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field"><span>${scope === "series" ? "Próximo vencimento" : "Vencimento"} *</span><input type="date" name="dueAt" value="${Engine.localIsoDate(entry.dueAt)}" required></label>${scope === "series" ? `<label class="financial-field"><span>Recorrência *</span><select name="frequency"><option value="weekly" ${(recurrence?.frequency || entry.frequency) === "weekly" ? "selected" : ""}>Semanal</option><option value="biweekly" ${(recurrence?.frequency || entry.frequency) === "biweekly" ? "selected" : ""}>Quinzenal</option><option value="monthly" ${(recurrence?.frequency || entry.frequency) === "monthly" ? "selected" : ""}>Mensal</option><option value="yearly" ${(recurrence?.frequency || entry.frequency) === "yearly" ? "selected" : ""}>Anual</option></select></label>` : ""}<label class="financial-field"><span>Categoria</span><select name="categoryId">${categories.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}" data-icon="${esc(category.icon || "shapes")}"${category.id === entry.categoryId ? " selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field"><span>Subcategoria (opcional)</span><select name="subcategoryId"></select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(entry.notes || "")}</textarea></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar alterações</button></footer></form>`);
     const form = modal().querySelector("[data-financial-edit-form]");
     const refreshSubcategories = () => { const items = Engine.subcategoriesFor(allCategories, form.categoryId.value); form.subcategoryId.innerHTML = `<option value="">Sem detalhar</option>${items.map((item) => `<option value="${esc(item.id)}" data-name="${esc(item.name)}"${item.id === selectedSubcategoryId ? " selected" : ""}>${esc(item.name)}</option>`).join("")}`; };
     form.categoryId.onchange = () => { selectedSubcategoryId = ""; refreshSubcategories(); };
     refreshSubcategories();
-    form.onsubmit = async (event) => { event.preventDefault(); const data = new FormData(form), option = form.categoryId.selectedOptions[0], subcategory = form.subcategoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await window.FinancialSpaceService.updatePendingEntry(state.selectedSpaceId, entry, { description: data.get("description"), amountCents: Engine.moneyInputToCents(data.get("amount")), dueAt: new Date(`${data.get("dueAt")}T12:00:00`).toISOString(), categoryId: data.get("categoryId"), categoryName: option?.dataset.name, categoryIcon: option?.dataset.icon, subcategoryId: data.get("subcategoryId") || null, subcategoryName: data.get("subcategoryId") ? subcategory?.dataset.name : null, notes: data.get("notes") }); closeModal(); Utils.toast("Conta atualizada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
+    form.onsubmit = async (event) => { event.preventDefault(); const data = new FormData(form), option = form.categoryId.selectedOptions[0], subcategory = form.subcategoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"), patch = { description: data.get("description"), amountCents: Engine.moneyInputToCents(data.get("amount")), dueAt: new Date(`${data.get("dueAt")}T12:00:00`).toISOString(), frequency: data.get("frequency") || undefined, categoryId: data.get("categoryId"), categoryName: option?.dataset.name, categoryIcon: option?.dataset.icon, subcategoryId: data.get("subcategoryId") || null, subcategoryName: data.get("subcategoryId") ? subcategory?.dataset.name : null, notes: data.get("notes") }; submit.disabled = true; try { if (scope === "series") await window.FinancialSpaceService.updateRecurrenceFrom(state.selectedSpaceId, entry, patch); else await window.FinancialSpaceService.updatePendingEntry(state.selectedSpaceId, entry, patch); closeModal(); Utils.toast("Conta atualizada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
   }
 
   async function openNewCategory() {
@@ -496,7 +545,11 @@ window.FinanceiroUI = (() => {
     page.querySelectorAll("[data-financial-new]").forEach((button) => button.onclick = () => openEntryForm(button.dataset.financialNew === "income" ? "in" : "out"));
     page.querySelectorAll("[data-financial-register-payment]").forEach((button) => button.onclick = openRegisterPayment);
     page.querySelectorAll("[data-financial-pay]").forEach((button) => button.onclick = () => { const entry = state.dashboard?.payables?.find((item) => item.id === button.dataset.financialPay); if (entry) openRegisterPayment(entry); });
-    if (state.view === "accounts") page.querySelectorAll("[data-financial-entry-id]").forEach((row) => row.onclick = (event) => { if (event.target.closest("button")) return; const entry = [...(state.dashboard?.payables || []), ...(state.dashboard?.entries || [])].find((item) => item.id === row.dataset.financialEntryId); openAccount(entry); });
+    page.querySelectorAll("[data-financial-entry-id]").forEach((row) => row.onclick = (event) => {
+      if (event.target.closest("button")) return;
+      const entries = [...(state.dashboard?.accounts || []), ...(state.dashboard?.payables || []), ...(state.dashboard?.entries || []), ...(state.dashboard?.latest || [])], entry = entries.find((item) => item.id === row.dataset.financialEntryId);
+      openAccount(entry);
+    });
     page.querySelectorAll("[data-financial-new-category]").forEach((button) => button.onclick = openNewCategory);
     page.querySelectorAll("[data-financial-transfer]").forEach((button) => button.onclick = openTransfer);
     page.querySelectorAll("[data-financial-onboard-business]").forEach((button) => button.onclick = async () => { const context = window.BusinessContext?.get?.() || {}, name = context.business?.name || DB.carregar().config?.nome || "Minha empresa"; try { const space = await window.FinancialSpaceService.createSpace({ name, type: "business", linkedBusinessId: context.businessId }); state.selectedSpaceId = space.id; await refresh(); } catch (error) { Utils.toast(error.message, true); } });

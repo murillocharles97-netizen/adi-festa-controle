@@ -1,5 +1,6 @@
 import { auth, db, app } from "./firebase-config.js";
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -30,8 +31,7 @@ const storage = getStorage(app),
   LAST_SPACE_PREFIX = "adiFesta:lastFinancialSpaceId:v1:",
   CONSOLIDATED_PREFIX = "adiFesta:financial-consolidated:v1:",
   MAX_MONTH_ENTRIES = 500,
-  MAX_PAYABLES = 100,
-  MAX_LATEST = 20,
+  MAX_RECURRENCE_OCCURRENCES = 120,
   state = {
     spaces: [],
     loadedForUid: "",
@@ -352,6 +352,11 @@ async function createEntry(spaceId, input = {}) {
       entryType: base.entryType,
       nextDueAt: created[1]?.dueAt || Engine.addFrequency(base.dueAt, input.frequency).toISOString(),
       active: true,
+      seriesStartAt: base.dueAt,
+      seriesEndAt: null,
+      skippedOccurrenceKeys: [],
+      overrideOccurrenceKeys: [],
+      version: 1,
       generatedThrough: created.at(-1)?.dueAt,
       createdAt: now(),
       updatedAt: now(),
@@ -413,6 +418,7 @@ async function updatePendingEntry(spaceId, entry, input = {}) {
     subcategoryName: input.subcategoryName || null,
     categorySchemaVersion: 2,
     dueAt,
+    duePeriodKey: Engine.periodKey(dueAt),
     sortAt: dueAt,
     periodKey: Engine.periodKey(dueAt),
     notes: String(input.notes ?? entry.notes ?? "").slice(0, 500),
@@ -421,6 +427,10 @@ async function updatePendingEntry(spaceId, entry, input = {}) {
   if (!patch.description || !Number.isInteger(patch.amountCents) || patch.amountCents <= 0) throw new Error("Revise a descrição e o valor da conta.");
   const batch = writeBatch(db);
   batch.update(childRef(space.id, "entries", entry.id), clean(patch));
+  if (entry.recurrenceId) batch.update(childRef(space.id, "recurrences", entry.recurrenceId), {
+    overrideOccurrenceKeys: arrayUnion(Engine.occurrenceKey(entry)),
+    updatedAt: serverTimestamp(),
+  });
   batch.set(childRef(space.id, "events", opId), clean({ id: opId, ...baseMetadata(space, opId), entryId: entry.id, eventKind: "pending_entry_edited", transition: "edited", status: "applied", previousAmountCents: entry.amountCents, amountCents: patch.amountCents, createdAt: now() }));
   await batch.commit();
   emit("financial-data-changed", { entity: "entry", id: entry.id, action: "edited", spaceId });
@@ -429,18 +439,143 @@ async function updatePendingEntry(spaceId, entry, input = {}) {
 
 async function cancelPendingEntry(spaceId, entry, reason = "") {
   const space = assertSpace(spaceId);
-  const opId = `cancel_${entry.id}`, entryRef = childRef(space.id, "entries", entry.id), eventRef = childRef(space.id, "events", opId), cancelledAt = now();
+  const opId = `cancel_${entry.id}`, entryRef = childRef(space.id, "entries", entry.id), eventRef = childRef(space.id, "events", opId),
+    recurrenceRef = entry.recurrenceId ? childRef(space.id, "recurrences", entry.recurrenceId) : null, cancelledAt = now();
   await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(entryRef);
+    const [snapshot, recurrenceSnapshot] = await Promise.all([
+      transaction.get(entryRef),
+      recurrenceRef ? transaction.get(recurrenceRef) : Promise.resolve(null),
+    ]);
     if (!snapshot.exists()) throw new Error("Conta não encontrada.");
     const current = convert(snapshot);
     if (current.status === "cancelled") return current;
     if (current.status === "paid") throw new Error("Lançamentos pagos devem ser estornados, não excluídos.");
-    transaction.update(entryRef, { status: "cancelled", cancelledAt, cancellationReason: String(reason).slice(0, 300), updatedAt: cancelledAt });
-    transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId: current.id, eventKind: "entry_cancelled", transition: "cancelled", status: "applied", createdAt: cancelledAt }));
+    transaction.update(entryRef, { status: "cancelled", cancelledAt, cancellationReason: String(reason).slice(0, 300), cancellationScope: "occurrence", updatedAt: cancelledAt });
+    if (recurrenceRef && recurrenceSnapshot?.exists()) transaction.update(recurrenceRef, {
+      skippedOccurrenceKeys: arrayUnion(Engine.occurrenceKey(current)),
+      updatedAt: cancelledAt,
+    });
+    transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId: current.id, recurrenceId: current.recurrenceId || null, occurrenceKey: Engine.occurrenceKey(current), eventKind: "entry_cancelled", transition: "cancelled", status: "applied", scope: "occurrence", createdAt: cancelledAt }));
     return { ...current, status: "cancelled", cancelledAt };
   });
   emit("financial-data-changed", { entity: "entry", id: entry.id, action: "cancelled", spaceId });
+}
+
+async function recurrenceDetails(spaceId, recurrenceId) {
+  assertSpace(spaceId);
+  if (!recurrenceId) return null;
+  return convert(await getDoc(childRef(spaceId, "recurrences", recurrenceId)));
+}
+
+async function recurrenceOccurrences(spaceId, recurrenceId) {
+  assertSpace(spaceId);
+  if (!recurrenceId) return [];
+  const snapshot = await getDocs(query(
+    childCollection(spaceId, "entries"),
+    where("recurrenceId", "==", recurrenceId),
+    limit(MAX_RECURRENCE_OCCURRENCES),
+  ));
+  return snapshot.docs.map(convert).sort((left, right) =>
+    (Engine.localDate(left.dueAt)?.getTime() || 0) - (Engine.localDate(right.dueAt)?.getTime() || 0),
+  );
+}
+
+async function updateRecurrenceFrom(spaceId, entry, input = {}) {
+  const space = assertSpace(spaceId);
+  if (!entry?.recurrenceId) throw new Error("Esta conta não pertence a uma recorrência.");
+  if (entry.status !== "pending") throw new Error("Somente ocorrências pendentes podem alterar a série.");
+  const [recurrence, occurrences] = await Promise.all([
+    recurrenceDetails(space.id, entry.recurrenceId),
+    recurrenceOccurrences(space.id, entry.recurrenceId),
+  ]);
+  if (!recurrence) throw new Error("Recorrência não encontrada.");
+  const cutoff = Engine.localDay(entry.dueAt), frequency = String(input.frequency || recurrence.frequency || "monthly"),
+    firstDueAt = Engine.localDay(input.dueAt || entry.dueAt), future = occurrences.filter((item) =>
+      item.status === "pending" && Engine.localDay(item.dueAt) >= cutoff,
+    ), rescheduled = Engine.rescheduleRecurringInstances(future, entry, firstDueAt, frequency);
+  if (!future.length) throw new Error("Não existem ocorrências futuras para editar.");
+  const opId = operationId(`recurrence_edit_${entry.recurrenceId}`), changedAt = now(), batch = writeBatch(db), affectedEntryIds = [];
+  future.forEach((item, index) => {
+    const dueAt = rescheduled[index].dueAt, patch = {
+      description: String(input.description || item.description).trim().slice(0, 160),
+      amountCents: Number(input.amountCents ?? item.amountCents),
+      categoryId: String(input.categoryId || item.categoryId || "default_other"),
+      categoryName: String(input.categoryName || item.categoryName || "Outros"),
+      categoryIcon: String(input.categoryIcon || item.categoryIcon || "shapes"),
+      subcategoryId: input.subcategoryId || null,
+      subcategoryName: input.subcategoryName || null,
+      categorySchemaVersion: 2,
+      dueAt,
+      duePeriodKey: Engine.periodKey(dueAt),
+      sortAt: dueAt,
+      periodKey: Engine.periodKey(dueAt),
+      notes: String(input.notes ?? item.notes ?? "").slice(0, 500),
+      recurrenceSequence: Number(item.recurrenceSequence || index + 1),
+      updatedAt: serverTimestamp(),
+    };
+    if (!patch.description || !Number.isInteger(patch.amountCents) || patch.amountCents <= 0) throw new Error("Revise a descrição e o valor da recorrência.");
+    affectedEntryIds.push(item.id);
+    batch.update(childRef(space.id, "entries", item.id), clean(patch));
+  });
+  const lastDueAt = rescheduled.at(-1).dueAt;
+  batch.update(childRef(space.id, "recurrences", entry.recurrenceId), clean({
+    description: String(input.description || recurrence.description).trim().slice(0, 160),
+    amountCents: Number(input.amountCents ?? recurrence.amountCents),
+    categoryId: String(input.categoryId || recurrence.categoryId || "default_other"),
+    categoryName: String(input.categoryName || recurrence.categoryName || "Outros"),
+    categoryIcon: String(input.categoryIcon || recurrence.categoryIcon || "shapes"),
+    subcategoryId: input.subcategoryId || null,
+    subcategoryName: input.subcategoryName || null,
+    frequency,
+    effectiveFrom: firstDueAt.toISOString(),
+    generatedThrough: lastDueAt,
+    nextDueAt: Engine.addFrequency(lastDueAt, frequency).toISOString(),
+    version: Number(recurrence.version || 1) + 1,
+    updatedAt: serverTimestamp(),
+  }));
+  batch.set(childRef(space.id, "events", opId), clean({ id: opId, ...baseMetadata(space, opId), recurrenceId: entry.recurrenceId, entryId: entry.id, affectedEntryIds, eventKind: "recurrence_edited", transition: "edited", status: "applied", scope: "this_and_future", createdAt: changedAt }));
+  await batch.commit();
+  emit("financial-data-changed", { entity: "recurrence", id: entry.recurrenceId, action: "edited", spaceId });
+  return { recurrenceId: entry.recurrenceId, affectedEntryIds };
+}
+
+async function cancelRecurrenceFrom(spaceId, entry, options = {}) {
+  const space = assertSpace(spaceId);
+  if (!entry?.recurrenceId) throw new Error("Esta conta não pertence a uma recorrência.");
+  const [recurrence, occurrences] = await Promise.all([
+    recurrenceDetails(space.id, entry.recurrenceId),
+    recurrenceOccurrences(space.id, entry.recurrenceId),
+  ]);
+  if (!recurrence) throw new Error("Recorrência não encontrada.");
+  const firstOccurrence = occurrences[0], cutoffSource = options.fromStart
+      ? recurrence.seriesStartAt || firstOccurrence?.dueAt || entry.dueAt
+      : entry.dueAt,
+    cutoff = Engine.localDay(cutoffSource), cancelledAt = now(), scope = options.fromStart ? "series" : "this_and_future",
+    opId = `recurrence_cancel_${entry.recurrenceId}_${Engine.occurrenceKey(cutoff)}_${scope}`,
+    batch = writeBatch(db), affectedEntryIds = [];
+  for (const item of occurrences) {
+    if (item.status !== "pending" || Engine.localDay(item.dueAt) < cutoff) continue;
+    affectedEntryIds.push(item.id);
+    batch.update(childRef(space.id, "entries", item.id), {
+      status: "cancelled",
+      cancelledAt,
+      cancellationReason: String(options.reason || "Recorrência cancelada pelo usuário").slice(0, 300),
+      cancellationScope: scope,
+      updatedAt: cancelledAt,
+    });
+  }
+  batch.update(childRef(space.id, "recurrences", entry.recurrenceId), clean({
+    active: false,
+    seriesEndAt: cutoff.toISOString(),
+    cancelledAt,
+    cancellationScope: scope,
+    version: Number(recurrence.version || 1) + 1,
+    updatedAt: cancelledAt,
+  }));
+  batch.set(childRef(space.id, "events", opId), clean({ id: opId, ...baseMetadata(space, opId), recurrenceId: entry.recurrenceId, entryId: entry.id, affectedEntryIds, eventKind: "recurrence_cancelled", transition: "cancelled", status: "applied", scope, createdAt: cancelledAt }));
+  await batch.commit();
+  emit("financial-data-changed", { entity: "recurrence", id: entry.recurrenceId, action: "cancelled", spaceId });
+  return { recurrenceId: entry.recurrenceId, affectedEntryIds };
 }
 
 async function reversePaidEntry(spaceId, entry, reason = "") {
@@ -514,27 +649,17 @@ async function monthEntries(spaceId, selectedPeriod) {
   ));
   return snapshot.docs.map(convert).filter((entry) => entry.status !== "cancelled");
 }
-async function pendingEntries(spaceId) {
+async function dueMonthEntries(spaceId, selectedPeriod) {
   assertSpace(spaceId);
-  const snapshot = await getDocs(query(
+  const { start, endExclusive } = Engine.monthRange(selectedPeriod), snapshot = await getDocs(query(
     childCollection(spaceId, "entries"),
-    where("status", "==", "pending"),
+    where("dueAt", ">=", start.toISOString()),
+    where("dueAt", "<", endExclusive.toISOString()),
     orderBy("dueAt", "asc"),
-    limit(MAX_PAYABLES),
+    limit(MAX_MONTH_ENTRIES),
   ));
-  return snapshot.docs.map(convert);
+  return snapshot.docs.map(convert).filter((entry) => entry.status !== "cancelled");
 }
-async function latestEntries(spaceId) {
-  assertSpace(spaceId);
-  const snapshot = await getDocs(query(
-    childCollection(spaceId, "entries"),
-    where("status", "==", "paid"),
-    orderBy("occurredAt", "desc"),
-    limit(MAX_LATEST),
-  ));
-  return snapshot.docs.map(convert).filter((entry) => !entry.reversedByEntryId);
-}
-
 async function migrateLegacyCategories(space, entryLists = []) {
   const byId = new Map();
   for (const list of entryLists) for (const entry of list || []) byId.set(entry.id, entry);
@@ -558,17 +683,18 @@ async function migrateLegacyCategories(space, entryLists = []) {
 }
 
 async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
-  const space = assertSpace(spaceId), started = performance.now(), [month, pending, latest, categories] = await Promise.all([
+  const space = assertSpace(spaceId), started = performance.now(), [month, accounts, categories] = await Promise.all([
     monthEntries(space.id, selectedPeriod),
-    pendingEntries(space.id),
-    latestEntries(space.id),
+    dueMonthEntries(space.id, selectedPeriod),
     listCategories(space.id),
-  ]), categoryMigration = await migrateLegacyCategories(space, [month, pending, latest]), byId = new Map();
-  for (const entry of [...month, ...pending, ...latest]) byId.set(entry.id, entry);
-  const summary = Engine.summarize(month), payables = Engine.sortPayables(pending), result = {
+  ]), categoryMigration = await migrateLegacyCategories(space, [month, accounts]),
+    payables = Engine.sortPayables(accounts), latest = month.filter((entry) => entry.status === "paid" && !entry.reversedByEntryId)
+      .sort((left, right) => (Engine.localDate(right.occurredAt)?.getTime() || 0) - (Engine.localDate(left.occurredAt)?.getTime() || 0)),
+    summary = Engine.summarize(month), accountSummary = Engine.summarize(accounts), result = {
     space: structuredClone(space),
     periodKey: selectedPeriod,
     entries: month,
+    accounts,
     latest: latest.slice(0, 10),
     payables: payables.slice(0, 20),
     categories,
@@ -576,15 +702,15 @@ async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
       ...summary,
       pendingPayablesCents: payables.filter((entry) => entry.direction === "out").reduce((sum, entry) => sum + Number(entry.amountCents || 0), 0),
       pendingCount: payables.filter((entry) => entry.direction === "out").length,
-      dueSoonCount: Engine.summarize(pending).dueSoonCount,
+      dueSoonCount: accountSummary.dueSoonCount,
       migratedCategories: categoryMigration.migrated,
       manualReviewCategories: categoryMigration.manualReview,
     },
   };
   state.lastReadStats = {
     operation: "loadDashboard",
-    documents: month.length + pending.length + latest.length,
-    limits: { month: MAX_MONTH_ENTRIES, payables: MAX_PAYABLES, latest: MAX_LATEST },
+    documents: month.length + accounts.length,
+    limits: { month: MAX_MONTH_ENTRIES, accounts: MAX_MONTH_ENTRIES },
     durationMs: Math.round(performance.now() - started),
     at: now(),
   };
@@ -762,6 +888,9 @@ const FinancialSpaceService = {
   updatePendingEntry,
   markPaid,
   cancelPendingEntry,
+  recurrenceDetails,
+  updateRecurrenceFrom,
+  cancelRecurrenceFrom,
   reversePaidEntry,
   createTransfer,
   loadDashboard,
@@ -773,7 +902,7 @@ const FinancialSpaceService = {
   recordCreditPayment,
   reverseSale,
   getReadStats: () => state.lastReadStats ? structuredClone(state.lastReadStats) : null,
-  limits: Object.freeze({ month: MAX_MONTH_ENTRIES, payables: MAX_PAYABLES, latest: MAX_LATEST }),
+  limits: Object.freeze({ month: MAX_MONTH_ENTRIES, recurrenceOccurrences: MAX_RECURRENCE_OCCURRENCES }),
 };
 
 window.FinancialSpaceService = FinancialSpaceService;

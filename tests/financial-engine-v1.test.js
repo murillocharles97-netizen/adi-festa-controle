@@ -137,3 +137,34 @@ test("lançamentos preservam categoria macro, detalhe e tipo independentes", () 
   assert.equal(examples[3].entryType, "investment");
   assert.equal(examples[3].frequency, "none");
 });
+
+test("período mensal usa limites locais e nunca mistura setembro com outubro", () => {
+  const september = entry({ id: "sep", status: "pending", dueAt: "2026-09-10T12:00:00.000Z", amountCents: 150000 }),
+    october = entry({ id: "oct", status: "pending", dueAt: "2026-10-10T12:00:00.000Z", amountCents: 150000 });
+  assert.equal(engine.belongsToPeriod(september, "2026-09"), true);
+  assert.equal(engine.belongsToPeriod(october, "2026-09"), false);
+  assert.equal(engine.belongsToPeriod(october, "2026-10"), true);
+  assert.equal(engine.summarize([september]).pendingPayablesCents, 150000);
+});
+
+test("exceções e fim de série impedem recriar uma ocorrência removida", () => {
+  const recurrence = {
+    active: true,
+    seriesStartAt: "2026-09-10T12:00:00.000Z",
+    seriesEndAt: null,
+    skippedOccurrenceKeys: ["2026-10-10"],
+    overrideOccurrenceKeys: ["2026-11-10"],
+  };
+  assert.equal(engine.shouldGenerateOccurrence(recurrence, "2026-09-10T12:00:00.000Z"), true);
+  assert.equal(engine.shouldGenerateOccurrence(recurrence, "2026-10-10T12:00:00.000Z"), false);
+  assert.equal(engine.shouldGenerateOccurrence(recurrence, "2026-11-10T12:00:00.000Z"), false);
+  assert.equal(engine.shouldGenerateOccurrence({ ...recurrence, skippedOccurrenceKeys: [], seriesEndAt: "2026-10-10T12:00:00.000Z" }, "2026-10-10T12:00:00.000Z"), false);
+});
+
+test("editar esta e as próximas preserva a sequência mesmo com exceção intermediária", () => {
+  const september = { recurrenceSequence: 1, dueAt: "2026-09-10T12:00:00.000Z" },
+    november = { recurrenceSequence: 3, dueAt: "2026-11-10T12:00:00.000Z" },
+    changed = engine.rescheduleRecurringInstances([september, november], september, "2026-09-12T12:00:00.000Z", "monthly");
+  assert.equal(engine.localIsoDate(changed[0].dueAt), "2026-09-12");
+  assert.equal(engine.localIsoDate(changed[1].dueAt), "2026-11-12");
+});
