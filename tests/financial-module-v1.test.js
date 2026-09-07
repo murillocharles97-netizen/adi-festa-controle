@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=120") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=121") < html.indexOf("auth.js?v=121"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -103,9 +103,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 120 publica automação financeira server-side e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "120"/);
-  assert.match(sw, /adi-festa-v120-financial-business-income/);
+test("release 121 publica automação financeira server-side e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "121"/);
+  assert.match(sw, /adi-festa-v121-financial-payment-projection/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
