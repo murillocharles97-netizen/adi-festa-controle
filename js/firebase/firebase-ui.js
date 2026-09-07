@@ -1,4 +1,4 @@
-import './sync.js?v=108';
+import './sync.js?v=121';
 
 let unsubscribe=null,lastState=null;
 const escape=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
