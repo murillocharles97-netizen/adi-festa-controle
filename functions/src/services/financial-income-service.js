@@ -1,0 +1,215 @@
+'use strict';
+
+const {FieldValue,Timestamp}=require('firebase-admin/firestore');
+
+const INVALID_STATUSES=new Set(['cancelado','cancelada','cancelled','canceled','desfeito','desfeita','venda_desfeita','estornado','estornada','reversed','refunded','conflict']);
+const PAID_SALE_STATUSES=new Set(['pago','paid','confirmed','completed','concluido','concluida','entregue']);
+const CREDIT_SALE_STATUSES=new Set(['fiado','credit','on_credit']);
+const APPLIED_PAYMENT_STATUSES=new Set(['applied','confirmed','paid','approved','completed']);
+
+const text=value=>String(value??'').trim();
+const lower=value=>text(value).toLocaleLowerCase('pt-BR');
+const cents=value=>{
+  const amount=Number(value);
+  return Number.isFinite(amount)?Math.round(Math.abs(amount)*100):0;
+};
+const iso=value=>{
+  if(!value)return null;
+  if(typeof value.toDate==='function')return value.toDate().toISOString();
+  const date=value instanceof Date?value:new Date(value);
+  return Number.isNaN(date.getTime())?null:date.toISOString();
+};
+const timestamp=value=>{
+  const normalized=iso(value);
+  return normalized?Timestamp.fromDate(new Date(normalized)):null;
+};
+const firstDate=(source,fields)=>fields.map(field=>source?.[field]).find(value=>iso(value))||null;
+const paymentMethod=value=>{
+  const normalized=lower(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(normalized.includes('pix'))return'pix';
+  if(normalized.includes('dinheiro')||normalized==='cash')return'cash';
+  if(normalized.includes('debito')||normalized==='debit_card')return'debit_card';
+  if(normalized.includes('cartao')||normalized.includes('credito')||normalized==='credit_card')return'credit_card';
+  if(normalized.includes('transfer'))return'transfer';
+  return'other';
+};
+const automationFor=space=>{
+  const legacyActivation=space?.autoIncomeSince||space?.autoEntryFromPaymentsSince||space?.autoEntryFromSalesSince||null;
+  const automation=space?.automation||{};
+  return{
+    enabled:automation.enabled===true||(automation.enabled===undefined&&Boolean(legacyActivation)),
+    activatedAt:automation.activatedAt||legacyActivation,
+    sales:automation.autoIncome?.sales!==false,
+    customerPayments:automation.autoIncome?.customerPayments!==false,
+    onlineOrders:automation.autoIncome?.onlineOrders!==false,
+  };
+};
+const afterActivation=(automation,value)=>{
+  const occurred=iso(value),activated=iso(automation.activatedAt);
+  return Boolean(occurred&&(!activated||new Date(occurred)>=new Date(activated)));
+};
+const entryIdentity=(spaceId,sourceType,sourceId)=>`${spaceId}:${sourceType}:${sourceId}`;
+
+function financialIncomeService(db){
+  const spaceIdFor=businessId=>`business_${businessId}`;
+  const spaceRefFor=businessId=>db.doc(`financialSpaces/${spaceIdFor(businessId)}`);
+  const entryRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/entries/${id}`);
+  const eventRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/events/${id}`);
+
+  async function linkedSpace(businessId,{requireEnabled=true}={}){
+    const ref=spaceRefFor(businessId),snapshot=await ref.get();
+    if(!snapshot.exists)return null;
+    const space={id:snapshot.id,...snapshot.data()};
+    if(space.active===false||space.type!=='business'||text(space.linkedBusinessId)!==text(businessId))return null;
+    const automation=automationFor(space);
+    if(requireEnabled&&!automation.enabled)return null;
+    return{space,automation,ref};
+  }
+
+  const baseEntry=({space,businessId,id,sourceType,sourceId,amountCents,occurredAt,description,paymentMethodId,customerId=null,relatedSaleIds=[],relatedOrderId=null,direction='in',reversesEntryId=null,legacyAmountCents=0,allocatedAmountCents=0})=>({
+    id,
+    financialSpaceId:space.id,
+    spaceType:'business',
+    linkedBusinessId:businessId,
+    ownerUid:space.ownerUid,
+    createdBy:'system',
+    generatedBy:'firebase_function',
+    operationId:id,
+    idempotencyKey:entryIdentity(space.id,sourceType,sourceId),
+    schemaVersion:2,
+    direction,
+    entryType:direction==='out'?'automatic_reversal':'automatic_income',
+    amountCents,
+    currency:'BRL',
+    description,
+    categoryId:'default_business_sales',
+    categoryName:'Vendas',
+    categoryIcon:'badge-dollar-sign',
+    subcategoryId:'default_business_sales_customer_receipt',
+    subcategoryName:'Recebimento de cliente',
+    categorySchemaVersion:2,
+    status:'paid',
+    dueAt:occurredAt,
+    occurredAt,
+    paidAt:occurredAt,
+    sortAt:occurredAt,
+    periodKey:occurredAt.slice(0,7),
+    duePeriodKey:occurredAt.slice(0,7),
+    paymentMethod:paymentMethodId,
+    sourceType,
+    sourceId:text(sourceId),
+    customerId:text(customerId)||null,
+    relatedSaleIds:[...new Set(relatedSaleIds.map(text).filter(Boolean))],
+    relatedOrderId:text(relatedOrderId)||null,
+    legacyAmountCents:Number(legacyAmountCents||0),
+    allocatedAmountCents:Number(allocatedAmountCents||0),
+    reversesEntryId:text(reversesEntryId)||null,
+    autoGenerated:true,
+    createdAt:Timestamp.fromDate(new Date(occurredAt)),
+    updatedAt:FieldValue.serverTimestamp(),
+  });
+
+  async function createOnce({space,businessId,eventKind,...input}){
+    const value=baseEntry({space,businessId,...input}),ref=entryRef(space.id,value.id),event=eventRef(space.id,value.id);
+    return db.runTransaction(async transaction=>{
+      const existing=await transaction.get(ref);
+      if(existing.exists)return{created:false,entry:{id:existing.id,...existing.data()}};
+      transaction.create(ref,value);
+      transaction.create(event,{
+        id:value.id,
+        financialSpaceId:space.id,
+        linkedBusinessId:businessId,
+        ownerUid:space.ownerUid,
+        createdBy:'system',
+        generatedBy:'firebase_function',
+        operationId:value.id,
+        idempotencyKey:value.idempotencyKey,
+        schemaVersion:2,
+        entryId:value.id,
+        eventKind,
+        transition:'created',
+        status:'applied',
+        amountCents:value.amountCents,
+        sourceType:value.sourceType,
+        sourceId:value.sourceId,
+        createdAt:Timestamp.fromDate(new Date(value.occurredAt)),
+      });
+      return{created:true,entry:value};
+    });
+  }
+
+  async function projectSale(businessId,saleId,sale={}){
+    const linked=await linkedSpace(businessId,{requireEnabled:false});
+    if(!linked)return{skipped:'space-not-linked'};
+    const {space,automation}=linked,status=lower(sale.status||sale.saleStatus),occurredAt=iso(firstDate(sale,['paidAt','receivedAt','data','createdAt'])),amountCents=cents(sale.valorFinal??sale.valorTotal??sale.total??sale.amount);
+    const orderMatch=text(sale.operationId).match(/^catalog-order:(.+)$/);
+    if(INVALID_STATUSES.has(status)||sale.deletedAt||sale.active===false||sale.ativo===false){
+      const reversedAt=firstDate(sale,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt','updatedAt'])||new Date();
+      return reverseSource(businessId,'sale',saleId,reversedAt);
+    }
+    if(!automation.enabled)return{skipped:'automation-disabled'};
+    if(!automation.sales)return{skipped:'sales-disabled'};
+    if(orderMatch&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
+    if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
+    if(!amountCents)return{skipped:'zero-value'};
+    if(CREDIT_SALE_STATUSES.has(status))return{skipped:'credit-sale-not-realized'};
+    if(!PAID_SALE_STATUSES.has(status))return{skipped:'sale-not-paid'};
+    const customerName=text(sale.clienteNome||sale.customerName)||'Venda avulsa';
+    return createOnce({space,businessId,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderMatch?.[1]||null,eventKind:'sale_receipt_recorded'});
+  }
+
+  async function projectPayment(businessId,paymentId,payment={}){
+    const linked=await linkedSpace(businessId,{requireEnabled:false});
+    if(!linked)return{skipped:'space-not-linked'};
+    const {space,automation}=linked,status=lower(payment.applicationStatus||payment.status),occurredAt=iso(firstDate(payment,['receivedAt','paidAt','data','createdAt'])),amountCents=cents(payment.effectiveAmount??payment.valor??payment.amount);
+    if(INVALID_STATUSES.has(status)||payment.reversedAt||payment.cancelledAt){
+      const reversedAmountCents=cents(payment.reversedAmount??payment.reversalAmount??payment.effectiveReversalAmount)||amountCents,
+        reversalKey=text(payment.reversalOperationId||payment.reversedByOperationId||payment.cancelOperationId)||'full';
+      return reverseSource(businessId,'customer_payment',paymentId,firstDate(payment,['reversedAt','cancelledAt','updatedAt'])||new Date(),reversedAmountCents,reversalKey);
+    }
+    if(!automation.enabled)return{skipped:'automation-disabled'};
+    if(!automation.customerPayments)return{skipped:'customer-payments-disabled'};
+    if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
+    if(!APPLIED_PAYMENT_STATUSES.has(status))return{skipped:'payment-not-applied'};
+    if(!amountCents)return{skipped:'zero-value'};
+    const directSaleId=text(payment.saleId||payment.relatedSaleId||payment.sourceSaleId);
+    if(directSaleId&&(await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
+    const allocations=Array.isArray(payment.allocations)?payment.allocations:[],saleIds=allocations.map(item=>item?.saleId),customerName=text(payment.clienteNome||payment.customerName)||'Cliente';
+    return createOnce({space,businessId,id:`credit_payment_${paymentId}`,sourceType:'customer_payment',sourceId:paymentId,amountCents,occurredAt,description:`Pagamento de ${customerName}`,paymentMethodId:paymentMethod(payment.paymentMethod||payment.formaPagamento||payment.observacao),customerId:payment.clienteId||payment.clientId||payment.customerId,relatedSaleIds:saleIds,legacyAmountCents:cents(payment.legacyAmount),allocatedAmountCents:cents(payment.allocatedAmount),eventKind:'customer_payment_recorded'});
+  }
+
+  async function reverseSource(businessId,sourceType,sourceId,when=new Date(),requestedAmountCents=0,reversalKey='full'){
+    const linked=await linkedSpace(businessId,{requireEnabled:false});
+    if(!linked)return{skipped:'automation-disabled'};
+    const {space}=linked,originalId=sourceType==='sale'?`sale_${sourceId}`:`credit_payment_${sourceId}`,originalSnapshot=await entryRef(space.id,originalId).get();
+    if(!originalSnapshot.exists)return{skipped:'original-missing'};
+    const original=originalSnapshot.data(),amountCents=Math.min(Number(original.amountCents||0),Number(requestedAmountCents||original.amountCents||0)),occurredAt=iso(when)||new Date().toISOString();
+    if(!amountCents)return{skipped:'zero-value'};
+    const reversalType=sourceType==='sale'?'sale_reversal':'customer_payment_reversal',key=text(reversalKey).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,80)||'full',reversalId=`reversal_${sourceType}_${sourceId}_${key}`;
+    if(key==='full'&&(original.reversalStatus==='reversed'||original.reversedByEntryId||original.reversalEntryId))return{skipped:'already-reversed'};
+    const result=await createOnce({space,businessId,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId});
+    if(result.created)await entryRef(space.id,originalId).set({reversalStatus:'reversed',reversalEntryId:reversalId,reversedAt:timestamp(occurredAt),updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    return result;
+  }
+
+  async function reconcileBusiness(businessId,{limit=100}={}){
+    const linked=await linkedSpace(businessId);
+    if(!linked)return{skipped:'automation-disabled',checked:0,created:0};
+    const activationIso=iso(linked.automation.activatedAt);
+    if(!activationIso)return{skipped:'activation-missing',checked:0,created:0};
+    const capped=Math.max(1,Math.min(200,Number(limit)||100)),business=db.collection('businesses').doc(businessId),results=[];
+    if(linked.automation.sales){
+      const sales=await business.collection('sales').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
+      for(const snapshot of sales.docs)results.push(await projectSale(businessId,snapshot.id,snapshot.data()));
+    }
+    if(linked.automation.customerPayments){
+      const payments=await business.collection('payments').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
+      for(const snapshot of payments.docs)results.push(await projectPayment(businessId,snapshot.id,snapshot.data()));
+    }
+    return{checked:results.length,created:results.filter(result=>result?.created).length,skipped:results.filter(result=>result?.skipped).length,activation:activationIso};
+  }
+
+  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness};
+}
+
+module.exports={financialIncomeService,automationFor,paymentMethod,cents,iso,entryIdentity};

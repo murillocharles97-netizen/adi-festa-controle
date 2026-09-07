@@ -68,6 +68,7 @@ window.Fiados = (() => {
         requestedAmount: requested,
         effectiveAmount: received,
         paymentMode,
+        paymentMethod: String(options.paymentMethod || "other"),
         saldoAnterior: previousBalance,
         saldoNovo: client.saldo,
         expectedBalance: expected.expectedBalance,
@@ -130,9 +131,6 @@ window.Fiados = (() => {
       db.pagamentos.push(pagamento);
       db.movimentacoes.push({ ...pagamento });
     });
-    window.FinancialSpaceService?.recordCreditPayment?.(pagamento).catch((error) =>
-      console.warn("[Financeiro] recebimento aguardando projeção", { paymentId: pagamento?.id, code: error?.code || "unknown" }),
-    );
     return pagamento;
   }
 

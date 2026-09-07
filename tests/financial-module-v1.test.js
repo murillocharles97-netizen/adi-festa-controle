@@ -2,14 +2,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
-const read = (file) => fs.readFileSync(file, "utf8"), service = read("js/firebase/financial-space-service.js"), app = read("js/app.js"), html = read("index.html"), sw = read("service-worker.js");
+const read = (file) => fs.readFileSync(file, "utf8"), service = read("js/firebase/financial-space-service.js"), backend = read("functions/src/services/financial-income-service.js"), functionsIndex = read("functions/src/index.js"), app = read("js/app.js"), html = read("index.html"), sw = read("service-worker.js");
 
 test("Financeiro está no router, shell e usa um único renderer responsivo", () => {
   assert.match(read("js/router.js"), /'financeiro'/);
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=119") < html.indexOf("auth.js?v=115"));
+  assert.ok(html.indexOf("financial-space-service.js?v=120") < html.indexOf("auth.js?v=115"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -50,24 +50,35 @@ test("listagem inicial satisfaz as Rules sem depender de filtro implícito", () 
   assert.doesNotMatch(read("js/financial-ui.js"), /state\.error = error\.message/);
 });
 
-test("venda, fiado e cancelamento alimentam a projeção sem legado retroativo", () => {
-  assert.match(read("js/vendas.js"), /recordSale\?\.\(criada\)/);
-  assert.match(read("js/vendas.js"), /reverseSale\?\.\(removida\)/);
-  assert.match(read("js/fiados.js"), /recordCreditPayment\?\.\(pagamento\)/);
-  assert.match(service, /autoEntryFromSalesSince/);
-  assert.match(service, /matchedAllocations/);
-  assert.match(service, /childRef\(space\.id, "entries", `sale_\$\{allocation\.saleId\}`\)/);
-  assert.doesNotMatch(service, /payment\.effectiveAmount \?\? payment\.valor/);
+test("venda, pagamento e estorno usam projeção server-side sem dupla fonte", () => {
+  assert.doesNotMatch(read("js/vendas.js"), /recordSale\?\.\(criada\)/);
+  assert.doesNotMatch(read("js/fiados.js"), /recordCreditPayment\?\.\(pagamento\)/);
+  assert.match(functionsIndex, /projectSaleFinancialIncome/);
+  assert.match(functionsIndex, /projectCustomerPaymentFinancialIncome/);
+  assert.match(backend, /credit-sale-not-realized/);
+  assert.match(backend, /payment\.effectiveAmount\?\?payment\.valor/);
+  assert.match(backend, /legacyAmount/);
+  assert.match(backend, /automatic_income_reversed/);
 });
 
 test("operações automáticas e transferências têm IDs determinísticos", () => {
-  assert.match(service, /runTransaction/);
-  assert.match(service, /existing\.exists\(\)/);
-  assert.match(service, /`sale_\$\{sale\.id\}`/);
-  assert.match(service, /`credit_payment_\$\{payment\.id\}`/);
+  assert.match(backend, /runTransaction/);
+  assert.match(backend, /existing\.exists/);
+  assert.match(backend, /`sale_\$\{saleId\}`/);
+  assert.match(backend, /`credit_payment_\$\{paymentId\}`/);
   assert.match(service, /`reversal_\$\{entry\.id\}`/);
   assert.match(service, /`\$\{transferId\}_out`/);
   assert.match(service, /`\$\{transferId\}_in`/);
+});
+
+test("automação é explícita por espaço e reconciliação é limitada", () => {
+  assert.match(service, /automationState/);
+  assert.match(service, /reconcileBusinessFinancialIncome/);
+  assert.match(service, /limit: 100/);
+  assert.match(backend, /where\('data','>=',activationIso\)/);
+  assert.match(backend, /\.limit\(capped\)/);
+  assert.match(read("js/financial-ui.js"), /Automação financeira/);
+  assert.match(read("js/financial-ui.js"), /Automático/);
 });
 
 test("comprovantes aceitam somente imagens/PDF e ficam no lançamento", () => {
@@ -92,9 +103,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 119 publica ações financeiras, período isolado e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "119"/);
-  assert.match(sw, /adi-festa-v119-financial-account-actions-period/);
+test("release 120 publica automação financeira server-side e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "120"/);
+  assert.match(sw, /adi-festa-v120-financial-business-income/);
   for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

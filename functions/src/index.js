@@ -24,6 +24,7 @@ const {pixBillingService,orderDetails,pixDetails,pendingManualSubscription,pendi
 const {normalizeManualCardPayment}=require('./services/manual-card-service');
 const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-service');
 const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-state-service');
+const {financialIncomeService}=require('./services/financial-income-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -61,6 +62,7 @@ const permissions=()=>permissionService(db);
 const providerStore=()=>firestoreSubscriptionService(db);
 const coupons=()=>couponFirestoreService(db);
 const pixBilling=()=>pixBillingService(db);
+const financialIncome=()=>financialIncomeService(db);
 const iso=()=>new Date().toISOString();
 async function latestCardPaymentDiagnostic(subscriptionId){
   const search=await mp().searchAuthorizedPayments(subscriptionId,{limit:10}),rows=Array.isArray(search?.results)?search.results:[];
@@ -430,6 +432,33 @@ exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{bu
     }
     transaction.create(marker,{businessId,eventId,type:'sale_metrics_v2',createdAt:FieldValue.serverTimestamp()});
   });
+});
+
+exports.projectSaleFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
+  const source=event.data?.after?.exists?event.data.after.data():{...(event.data?.before?.data?.()||{}),deletedAt:new Date().toISOString()};
+  const result=await financialIncome().projectSale(event.params.businessId,event.params.saleId,source);
+  logger.info('[FINANCIAL_INCOME_SALE]',{businessId:event.params.businessId,saleId:event.params.saleId,created:result?.created===true,skipped:result?.skipped||null});
+  return result;
+});
+
+exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/payments/{paymentId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
+  const source=event.data?.after?.exists?event.data.after.data():{...(event.data?.before?.data?.()||{}),cancelledAt:new Date().toISOString()};
+  const result=await financialIncome().projectPayment(event.params.businessId,event.params.paymentId,source);
+  logger.info('[FINANCIAL_INCOME_PAYMENT]',{businessId:event.params.businessId,paymentId:event.params.paymentId,created:result?.created===true,skipped:result?.skipped||null});
+  return result;
+});
+
+exports.reconcileBusinessFinancialIncome=onCall({region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:10},async request=>{
+  const businessId=requestedBusinessId(request);
+  await permissions().authenticatedContext(request,businessId,{ownerOnly:false});
+  try{
+    const result=await financialIncome().reconcileBusiness(businessId,{limit:request.data?.limit});
+    logger.info('[FINANCIAL_INCOME_RECONCILED]',{businessId,...result});
+    return result;
+  }catch(error){
+    logger.error('[FINANCIAL_INCOME_RECONCILIATION_FAILED]',{businessId,code:error?.code||'unknown'});
+    throw new HttpsError('internal','Não foi possível reconciliar os recebimentos agora.');
+  }
 });
 
 exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
