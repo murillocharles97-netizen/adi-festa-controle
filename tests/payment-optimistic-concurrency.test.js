@@ -231,6 +231,19 @@ test("sync revalida o efeito antes de campanhas e preserva resolução auditáve
   assert.match(source, /processedOperations/);
 });
 
+test("pagamento não é ocultado por uma atualização da venda fiada no mesmo lote", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../js/firebase/sync.js"),
+    "utf8",
+  );
+  assert.match(source, /if \(!source && payment\)/);
+  assert.match(source, /if \(!source && adjustment\)/);
+  assert.doesNotMatch(source, /else if \(payment\)/);
+  assert.match(source, /saleLifecycleWrite = writes\.find/);
+  assert.match(source, /paymentCreateWrite = writes\.find/);
+  assert.match(source, /: paymentCreateWrite\s*\? "payment"/);
+});
+
 test("modal explica o conflito e oferece somente cancelar ou confirmar", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../js/fiados.js"),

@@ -14,6 +14,10 @@ const cents=value=>{
   const amount=Number(value);
   return Number.isFinite(amount)?Math.round(Math.abs(amount)*100):0;
 };
+const signedCents=value=>{
+  const amount=Number(value);
+  return Number.isFinite(amount)?Math.round(amount*100):null;
+};
 const iso=value=>{
   if(!value)return null;
   if(typeof value.toDate==='function')return value.toDate().toISOString();
@@ -56,6 +60,7 @@ function financialIncomeService(db){
   const spaceRefFor=businessId=>db.doc(`financialSpaces/${spaceIdFor(businessId)}`);
   const entryRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/entries/${id}`);
   const eventRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/events/${id}`);
+  const balanceEventRef=(businessId,paymentId)=>db.doc(`businesses/${businessId}/balanceEvents/payment_received:${paymentId}`);
 
   async function linkedSpace(businessId,{requireEnabled=true}={}){
     const ref=spaceRefFor(businessId),snapshot=await ref.get();
@@ -139,6 +144,69 @@ function financialIncomeService(db){
     });
   }
 
+  const paymentEvidenceMatches=(snapshot,paymentId,payment,amountCents)=>{
+    const evidence=snapshot.data()||{},paymentClientId=text(payment.clienteId||payment.clientId||payment.customerId),evidenceClientId=text(evidence.customerId||evidence.clientId);
+    return snapshot.exists&&lower(evidence.type)==='payment_received'&&APPLIED_BALANCE_EVENT_STATUSES.has(lower(evidence.status))&&text(evidence.sourceDocumentId)===text(paymentId)&&cents(evidence.amount)===amountCents&&(!paymentClientId||!evidenceClientId||paymentClientId===evidenceClientId);
+  };
+
+  async function backfillProcessedPaymentEvidence(businessId,paymentId,space,expectedAmountCents){
+    const paymentRef=db.doc(`businesses/${businessId}/payments/${paymentId}`),evidenceRef=balanceEventRef(businessId,paymentId);
+    return db.runTransaction(async transaction=>{
+      const paymentSnapshot=await transaction.get(paymentRef);
+      if(!paymentSnapshot.exists)return{applied:false,reason:'payment-missing'};
+      const payment={id:paymentSnapshot.id,...paymentSnapshot.data()},amountCents=cents(payment.effectiveAmount??payment.valor??payment.amount),clientId=text(payment.clienteId||payment.clientId||payment.customerId),operationId=text(payment.operationId),ownerId=text(payment.ownerId||payment.ownerUid),occurredAt=iso(firstDate(payment,['receivedAt','paidAt','data','createdAt']));
+      if(amountCents!==expectedAmountCents||!clientId||!operationId||operationId!==text(paymentId)||text(payment.idempotencyKey)!==operationId)return{applied:false,reason:'payment-identity-mismatch'};
+      if(text(payment.businessId)!==text(businessId)||ownerId!==text(space.ownerUid)||payment.financialStateDependent!==true)return{applied:false,reason:'payment-scope-mismatch'};
+      if(!['pending','pending_sync'].includes(lower(payment.applicationStatus))||!['pending','pending_sync'].includes(lower(payment.status)))return{applied:false,reason:'payment-status-not-eligible'};
+      if(payment.confirmedConflictId||payment.reversedAt||payment.cancelledAt||payment.financialAppliedAt||payment.financialOperationId)return{applied:false,reason:'payment-already-resolved'};
+      if(cents(payment.valor)!==amountCents||cents(payment.requestedAmount)!==amountCents||cents(payment.legacyAmount)+cents(payment.allocatedAmount)!==amountCents)return{applied:false,reason:'payment-amount-mismatch'};
+      const beforeCents=signedCents(payment.saldoAnterior),afterCents=signedCents(payment.saldoNovo);
+      if(beforeCents===null||afterCents===null||beforeCents+amountCents!==afterCents)return{applied:false,reason:'payment-transition-mismatch'};
+      const evidenceSnapshot=await transaction.get(evidenceRef);
+      if(evidenceSnapshot.exists)return paymentEvidenceMatches(evidenceSnapshot,paymentId,payment,amountCents)?{applied:true,created:false}:{applied:false,reason:'existing-evidence-mismatch'};
+      const clientRef=db.doc(`businesses/${businessId}/clients/${clientId}`),markerRef=db.doc(`businesses/${businessId}/processedOperations/${operationId}`),clientSnapshot=await transaction.get(clientRef),markerSnapshot=await transaction.get(markerRef);
+      if(!clientSnapshot.exists||!markerSnapshot.exists)return{applied:false,reason:'transaction-proof-missing'};
+      const client=clientSnapshot.data()||{},marker=markerSnapshot.data()||{},committedAt=iso(payment.updatedAt);
+      if(text(client.businessId)!==text(businessId)||text(marker.businessId)!==text(businessId)||text(client.ownerId||client.ownerUid)!==ownerId||text(marker.ownerId||marker.ownerUid)!==ownerId)return{applied:false,reason:'transaction-scope-mismatch'};
+      if(lower(marker.status)!=='processed'||lower(marker.eventKind)!=='sale'||text(marker.id||markerSnapshot.id)!==operationId||text(marker.idempotencyKey)!==operationId)return{applied:false,reason:'processed-marker-mismatch'};
+      if(!committedAt||iso(marker.processedAt)!==committedAt||iso(client.updatedAt)!==committedAt||iso(client.atualizadoEm)!==occurredAt||signedCents(client.saldo)!==afterCents)return{applied:false,reason:'atomic-commit-proof-mismatch'};
+      const effectId=`payment_received:${paymentId}`;
+      transaction.create(evidenceRef,{
+        id:effectId,
+        operationId,
+        idempotencyKey:effectId,
+        businessId,
+        ownerId,
+        customerId:clientId,
+        clientId,
+        saleId:null,
+        sourceCollection:'payments',
+        sourceDocumentId:paymentId,
+        sourceDeviceId:text(payment.sourceDeviceId)||null,
+        type:'payment_received',
+        direction:'credit',
+        amount:amountCents/100,
+        balanceDelta:amountCents/100,
+        eventKind:'payment_reconciliation',
+        status:'applied_by_reconciliation',
+        appliedAt:FieldValue.serverTimestamp(),
+        createdAt:timestamp(occurredAt)||FieldValue.serverTimestamp(),
+        updatedAt:FieldValue.serverTimestamp(),
+        schemaVersion:3,
+      });
+      transaction.set(paymentRef,{
+        financialAppliedAt:FieldValue.serverTimestamp(),
+        financialOperationId:effectId,
+        status:'applied',
+        applicationStatus:'applied',
+        reconciliationReason:'processed_payment_missing_balance_event',
+        reconciledAt:FieldValue.serverTimestamp(),
+        updatedAt:FieldValue.serverTimestamp(),
+      },{merge:true});
+      return{applied:true,created:true};
+    });
+  }
+
   async function projectSale(businessId,saleId,sale={}){
     const linked=await linkedSpace(businessId,{requireEnabled:false});
     if(!linked)return{skipped:'space-not-linked'};
@@ -173,9 +241,12 @@ function financialIncomeService(db){
     if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
     if(!amountCents)return{skipped:'zero-value'};
     if(!APPLIED_PAYMENT_STATUSES.has(status)){
-      const evidenceSnapshot=await db.doc(`businesses/${businessId}/balanceEvents/payment_received:${paymentId}`).get(),evidence=evidenceSnapshot.data()||{},paymentClientId=text(payment.clienteId||payment.clientId||payment.customerId),evidenceClientId=text(evidence.customerId||evidence.clientId);
-      const evidenceMatches=evidenceSnapshot.exists&&lower(evidence.type)==='payment_received'&&APPLIED_BALANCE_EVENT_STATUSES.has(lower(evidence.status))&&text(evidence.sourceDocumentId)===text(paymentId)&&cents(evidence.amount)===amountCents&&(!paymentClientId||!evidenceClientId||paymentClientId===evidenceClientId);
-      if(!evidenceMatches)return{skipped:'payment-not-applied'};
+      const evidenceSnapshot=await balanceEventRef(businessId,paymentId).get();
+      if(!paymentEvidenceMatches(evidenceSnapshot,paymentId,payment,amountCents)){
+        if(evidenceSnapshot.exists)return{skipped:'payment-not-applied',evidence:'existing-evidence-mismatch'};
+        const backfill=await backfillProcessedPaymentEvidence(businessId,paymentId,space,amountCents);
+        if(!backfill.applied)return{skipped:'payment-not-applied',evidence:backfill.reason};
+      }
     }
     const directSaleId=text(payment.saleId||payment.relatedSaleId||payment.sourceSaleId);
     if(directSaleId&&(await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
@@ -223,7 +294,7 @@ function financialIncomeService(db){
     return{checked:results.length,created:results.filter(result=>result?.created).length,skipped:results.filter(result=>result?.skipped).length,activation:activationIso,reasons,sourceStates};
   }
 
-  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness};
+  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness,backfillProcessedPaymentEvidence};
 }
 
-module.exports={financialIncomeService,automationFor,paymentMethod,cents,iso,entryIdentity};
+module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity};
