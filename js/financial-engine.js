@@ -29,6 +29,7 @@ window.FinancialEngine = (() => {
     ["other", "Outros", "shapes", []],
   ];
   const BUSINESS_CATEGORY_TEMPLATES = [
+    ["sales", "Vendas", "badge-dollar-sign", [["customer_receipt", "Recebimento de cliente"], ["online_order", "Pedido online"], ["other", "Outros"]]],
     ["structure", "Estrutura", "store", [["rent", "Aluguel"], ["condominium", "Condomínio"], ["energy", "Energia"], ["water", "Água"], ["internet", "Internet"], ["cleaning", "Limpeza"], ["security", "Segurança"], ["maintenance", "Manutenção"]]],
     ["inventory", "Estoque e mercadorias", "package", [["merchandise", "Compra de mercadoria"], ["supplies", "Insumos"], ["packaging", "Embalagens"], ["replacement", "Reposição"], ["freight", "Frete"]]],
     ["suppliers", "Fornecedores", "truck", []],

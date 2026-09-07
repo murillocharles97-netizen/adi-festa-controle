@@ -39,6 +39,7 @@ const storage = getStorage(app),
     loading: false,
     spacesLoadedAt: 0,
     lastReadStats: null,
+    reconciliation: new Map(),
   };
 
 const now = () => new Date().toISOString();
@@ -58,6 +59,20 @@ const lastSpaceKey = () => `${LAST_SPACE_PREFIX}${uid()}`;
 const consolidatedKey = () => `${CONSOLIDATED_PREFIX}${uid()}`;
 const emit = (name, detail = {}) => dispatchEvent(new CustomEvent(name, { detail }));
 const operationId = (prefix = "financial") => `${prefix}_${crypto.randomUUID()}`;
+const automationState = (space = {}) => {
+  const legacyActivation = space.autoIncomeSince || space.autoEntryFromPaymentsSince || space.autoEntryFromSalesSince || null,
+    automation = space.automation || {}, autoIncome = automation.autoIncome || {};
+  return {
+    enabled: automation.enabled === true || (automation.enabled === undefined && Boolean(legacyActivation)),
+    linkedBusinessId: space.type === "business" ? space.linkedBusinessId || null : null,
+    activatedAt: automation.activatedAt || legacyActivation,
+    autoIncome: {
+      sales: autoIncome.sales !== false,
+      customerPayments: autoIncome.customerPayments !== false,
+      onlineOrders: autoIncome.onlineOrders !== false,
+    },
+  };
+};
 const spaceRef = (spaceId) => doc(db, "financialSpaces", String(spaceId));
 const childRef = (spaceId, collectionName, id) => doc(
   db,
@@ -195,6 +210,18 @@ async function createSpace(input = {}) {
     ...normalized,
     ownerUid: currentUid,
     createdBy: currentUid,
+    automation: {
+      enabled: normalized.type === "business",
+      linkedBusinessId: normalized.type === "business" ? normalized.linkedBusinessId : null,
+      activatedAt: normalized.type === "business" ? createdAt : null,
+      autoIncome: {
+        sales: normalized.type === "business",
+        customerPayments: normalized.type === "business",
+        onlineOrders: normalized.type === "business",
+      },
+    },
+    autoIncomeSince: normalized.type === "business" ? createdAt : null,
+    autoEntryFromPaymentsSince: normalized.type === "business" ? createdAt : null,
     autoEntryFromSalesSince: normalized.type === "business" ? createdAt : null,
     currency: "BRL",
     createdAt,
@@ -206,6 +233,48 @@ async function createSpace(input = {}) {
   selectSpace(id);
   emit("financial-data-changed", { entity: "space", id });
   return structuredClone(value);
+}
+
+async function updateAutomation(spaceId, input = {}) {
+  const space = assertSpace(spaceId);
+  if (space.type !== "business" || !space.linkedBusinessId)
+    throw new Error("Somente um espaço vinculado à empresa pode usar automação.");
+  const current = automationState(space), enabled = input.enabled !== false,
+    activatedAt = current.activatedAt || (enabled ? now() : null), automation = {
+      enabled,
+      linkedBusinessId: space.linkedBusinessId,
+      activatedAt,
+      autoIncome: {
+        sales: input.sales ?? current.autoIncome.sales,
+        customerPayments: input.customerPayments ?? current.autoIncome.customerPayments,
+        onlineOrders: input.onlineOrders ?? current.autoIncome.onlineOrders,
+      },
+    };
+  await updateDoc(spaceRef(space.id), { automation: clean(automation), autoIncomeSince: activatedAt, updatedAt: serverTimestamp() });
+  rememberSpaces(state.spaces.map((item) => item.id === space.id ? { ...item, automation, autoIncomeSince: activatedAt, updatedAt: now() } : item));
+  state.reconciliation.delete(space.id);
+  emit("financial-data-changed", { entity: "space", id: space.id, action: "automation-updated" });
+  return structuredClone(automation);
+}
+
+async function reconcileBusinessIncome(spaceId, options = {}) {
+  const space = assertSpace(spaceId), automation = automationState(space);
+  if (space.type !== "business" || !space.linkedBusinessId || !automation.enabled)
+    return { skipped: "automation-disabled" };
+  const previous = state.reconciliation.get(space.id);
+  if (!options.force && previous && Date.now() - previous.at < 120_000) return previous.result;
+  if (!navigator.onLine || typeof window.FirebaseCallable !== "function") return { skipped: "offline" };
+  const promise = window.FirebaseCallable("reconcileBusinessFinancialIncome", {
+    businessId: space.linkedBusinessId,
+    limit: 100,
+  }).then((response) => response.data || {}).catch((error) => {
+    console.warn("[FINANCIAL_INCOME_RECONCILIATION_PENDING]", { spaceId: space.id, code: error?.code || "unknown" });
+    return { skipped: "temporarily-unavailable" };
+  });
+  state.reconciliation.set(space.id, { at: Date.now(), result: promise });
+  const result = await promise;
+  state.reconciliation.set(space.id, { at: Date.now(), result });
+  return result;
 }
 
 async function archiveSpace(spaceId) {
@@ -769,117 +838,15 @@ async function uploadAttachment(spaceId, entryId, file, options = {}) {
   return attachment;
 }
 
-async function businessSpaceFor(sourceBusinessId) {
-  let available = state.loadedForUid === auth.currentUser?.uid ? state.spaces : await listSpaces();
-  let match = available.find((space) => space.type === "business" && space.linkedBusinessId === sourceBusinessId && space.active !== false) || null;
-  if (!match) {
-    available = await listSpaces({ force: true });
-    match = available.find((space) => space.type === "business" && space.linkedBusinessId === sourceBusinessId && space.active !== false) || null;
-  }
-  return match;
-}
-const afterActivation = (space, date) => !space.autoEntryFromSalesSince || new Date(date) >= new Date(space.autoEntryFromSalesSince);
-async function recordSale(sale = {}) {
-  if (!auth.currentUser || !sale?.id || !sale.businessId) return { skipped: "context-missing" };
-  const space = await businessSpaceFor(String(sale.businessId));
-  if (!space) return { skipped: "space-missing" };
-  if (!afterActivation(space, sale.data || sale.createdAt)) return { skipped: "before-activation" };
-  const paid = String(sale.status) !== "fiado", id = `sale_${sale.id}`, amountCents = Math.round(Number(sale.valorFinal ?? sale.valorTotal ?? 0) * 100);
-  if (amountCents <= 0) return { skipped: "zero-value" };
-  const entry = Engine.normalizeEntry({
-    id,
-    operationId: id,
-    direction: "in",
-    entryType: paid ? "sale_income" : "account_receivable",
-    amountCents,
-    remainingCents: amountCents,
-    description: `Venda · ${sale.clienteNome || "Venda avulsa"}`,
-    categoryId: "default_sales",
-    categoryName: "Vendas",
-    status: paid ? "paid" : "pending",
-    dueAt: sale.data || sale.createdAt,
-    occurredAt: paid ? sale.data || sale.createdAt : null,
-    paidAt: paid ? sale.data || sale.createdAt : null,
-    sourceType: paid ? "sale" : "credit_sale",
-    sourceId: sale.id,
-    customerId: sale.clienteId || sale.customerId || null,
-    paymentMethod: paid ? String(sale.formaPagamento || "other") : null,
-  });
-  await createEntries(space, [entry], "sale_recorded");
-  return entry;
-}
-async function recordCreditPayment(payment = {}) {
-  if (!auth.currentUser || !payment?.id || !payment.businessId) return { skipped: "context-missing" };
-  const space = await businessSpaceFor(String(payment.businessId));
-  if (!space) return { skipped: "space-missing" };
-  if (!afterActivation(space, payment.data || payment.createdAt)) return { skipped: "before-activation" };
-  // O saldo legado não vira receita retroativa. Além disso, uma alocação só
-  // entra no caixa se a venda de origem já possui recebível neste espaço.
-  const id = `credit_payment_${payment.id}`, paymentRef = childRef(space.id, "entries", id), eventRef = childRef(space.id, "events", id),
-    allocations = (payment.allocations || []).filter((allocation) => allocation?.saleId && Number(allocation.amount) > 0), at = payment.data || payment.createdAt || now();
-  const result = await runTransaction(db, async (transaction) => {
-    const existing = await transaction.get(paymentRef);
-    if (existing.exists()) return convert(existing);
-    const matchedAllocations = [];
-    for (const allocation of allocations) {
-      const refEntry = childRef(space.id, "entries", `sale_${allocation.saleId}`), snapshot = await transaction.get(refEntry);
-      if (!snapshot.exists()) continue;
-      const current = convert(snapshot);
-      if (current.status === "cancelled") continue;
-      matchedAllocations.push({ allocation, refEntry, current });
-    }
-    const amountCents = matchedAllocations.reduce((sum, item) => sum + Math.round(Number(item.allocation.amount) * 100), 0);
-    if (amountCents <= 0) return { skipped: "zero-value" };
-    const entry = Engine.normalizeEntry({
-      id,
-      operationId: id,
-      direction: "in",
-      entryType: "credit_payment",
-      amountCents,
-      description: `Recebimento · ${payment.clienteNome || "Cliente"}`,
-      categoryId: "default_receivables",
-      categoryName: "Recebimentos",
-      status: "paid",
-      dueAt: at,
-      occurredAt: at,
-      paidAt: at,
-      sourceType: "credit_payment",
-      sourceId: payment.id,
-      customerId: payment.clienteId || payment.clientId || null,
-      paymentMethod: String(payment.paymentMethod || "other"),
-      allocationSaleIds: matchedAllocations.map((item) => item.allocation.saleId),
-    }), value = { ...baseMetadata(space, id), ...entry, createdAt: at, updatedAt: at };
-    transaction.set(paymentRef, clean(value));
-    transaction.set(eventRef, clean({ ...baseMetadata(space, id), id, entryId: id, eventKind: "credit_payment_recorded", transition: "created", status: "applied", amountCents, createdAt: at }));
-    for (const { allocation, refEntry, current } of matchedAllocations) {
-      const remaining = Math.max(0, Number(current.remainingCents ?? current.amountCents) - Math.round(Number(allocation.amount) * 100));
-      transaction.update(refEntry, { remainingCents: remaining, receivableStatus: remaining ? "partial" : "settled", updatedAt: at });
-    }
-    return value;
-  });
-  if (!result?.skipped) emit("financial-data-changed", { entity: "entry", id, action: "credit-payment", spaceId: space.id });
-  return result;
-}
-async function reverseSale(sale = {}) {
-  if (!auth.currentUser || !sale?.id || !sale.businessId) return { skipped: "context-missing" };
-  const space = await businessSpaceFor(String(sale.businessId));
-  if (!space) return { skipped: "space-missing" };
-  const originalRef = childRef(space.id, "entries", `sale_${sale.id}`), snapshot = await getDoc(originalRef);
-  if (!snapshot.exists()) return { skipped: "entry-missing" };
-  const original = convert(snapshot);
-  if (original.status === "pending") {
-    await updateDoc(originalRef, { status: "cancelled", cancelledAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    return { ...original, status: "cancelled" };
-  }
-  return reversePaidEntry(space.id, original, "Venda desfeita");
-}
-
 const FinancialSpaceService = {
   listSpaces,
   listCachedSpaces,
   selectedSpaceId,
   selectSpace,
   createSpace,
+  updateAutomation,
+  automationState,
+  reconcileBusinessIncome,
   archiveSpace,
   listCategories,
   createCategory,
@@ -898,9 +865,6 @@ const FinancialSpaceService = {
   selectedConsolidatedIds,
   setConsolidatedIds,
   uploadAttachment,
-  recordSale,
-  recordCreditPayment,
-  reverseSale,
   getReadStats: () => state.lastReadStats ? structuredClone(state.lastReadStats) : null,
   limits: Object.freeze({ month: MAX_MONTH_ENTRIES, recurrenceOccurrences: MAX_RECURRENCE_OCCURRENCES }),
 };

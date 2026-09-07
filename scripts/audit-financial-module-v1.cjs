@@ -37,9 +37,23 @@ async function main() {
   const audits = [];
   for (const viewport of [[320,720],[360,800],[375,812],[390,844],[412,915],[430,932],[1024,768],[1366,768],[1920,1080]]) audits.push(await audit(...viewport));
 
-  await reset(390,844); await shot("01-mobile-financeiro-adi-festa.png");
+  await reset(390,844);
+  const automaticIncome = await page.evaluate(() => ({ context: document.querySelector(".financial-context-button small")?.textContent || "", row: document.querySelector('[data-financial-entry-id="beatriz"]')?.innerText || "", total: document.querySelector(".financial-summary-values .is-income")?.textContent || "" }));
+  if (!automaticIncome.context.includes("Automático") || !["Beatriz Maze", "63,50", "Pix", "Automático"].every((text) => automaticIncome.row.includes(text)) || !automaticIncome.total.includes("8.483,50")) throw Error(`Receita automática inválida ${JSON.stringify(automaticIncome)}`);
+  await shot("01-mobile-financeiro-adi-festa.png");
   await click("[data-financial-open-spaces]"); await click('[data-financial-select-space="primeline"]'); await shot("02-mobile-financeiro-primeline.png");
-  await reset(390,844); await click("[data-financial-open-spaces]"); await shot("03-mobile-seletor-espacos.png");
+  await reset(390,844); await click("[data-financial-open-spaces]");
+  const spaceModes = await page.evaluate(() => [...document.querySelectorAll(".financial-space-option small")].map((item) => item.textContent));
+  if (!spaceModes.includes("Negócio · Automático") || spaceModes.filter((text) => text.endsWith("· Manual")).length < 2) throw Error(`Modos dos espaços inválidos ${JSON.stringify(spaceModes)}`);
+  await shot("03-mobile-seletor-espacos.png");
+  await click('[data-financial-manage-space="business"]');
+  const automationPanel = await page.evaluate(() => document.querySelector(".financial-sheet")?.innerText || "");
+  if (!["Automação financeira", "Ativa", "Vendas pagas", "Pagamentos de clientes", "Pedidos online pagos", "01/09/2026"].every((text) => automationPanel.includes(text))) throw Error(`Painel de automação incompleto: ${automationPanel}`);
+  await shot("03b-mobile-automacao-negocio.png");
+  await reset(390,844); await click('[data-financial-entry-id="beatriz"]');
+  const automaticDetail = await page.evaluate(() => ({ text: document.querySelector(".financial-sheet")?.innerText || "", editable: Boolean(document.querySelector("[data-financial-account-edit],[data-financial-account-reverse],[data-financial-account-cancel]")) }));
+  if (automaticDetail.editable || !["Lançamento automático", "Pagamento de cliente", "PIX"].every((text) => automaticDetail.text.toLocaleUpperCase("pt-BR").includes(text.toLocaleUpperCase("pt-BR")))) throw Error(`Detalhe automático inválido ${JSON.stringify(automaticDetail)}`);
+  await shot("03c-mobile-lancamento-automatico.png");
   await reset(390,844); await click('[data-financial-new="expense"]'); await page.waitForSelector('[data-financial-entry-wizard]');
   const wizard = await page.evaluate(() => ({
     step: document.querySelector(".financial-wizard-head small")?.textContent,
@@ -47,7 +61,7 @@ async function main() {
     macroLabels: [...document.querySelectorAll("[data-wizard-category] span")].slice(0, 6).map((item) => item.textContent),
     hasLegacyForm: Boolean(document.querySelector("[data-financial-entry-form]")),
   }));
-  if (wizard.step !== "Passo 1 de 4" || wizard.title !== "O que você vai registrar?" || wizard.hasLegacyForm || wizard.macroLabels[0] !== "Estrutura") throw Error(`Wizard inválido ${JSON.stringify(wizard)}`);
+  if (wizard.step !== "Passo 1 de 4" || wizard.title !== "O que você vai registrar?" || wizard.hasLegacyForm || !wizard.macroLabels.includes("Estrutura")) throw Error(`Wizard inválido ${JSON.stringify(wizard)}`);
   await page.type('[name="description"]', 'Aluguel + condomínio'); await page.type('[name="amount"]', '1500,00');
   await click('[data-wizard-category="default_business_structure"]'); await click('[data-wizard-subcategory="default_business_structure_rent"]');
   await shot("04-mobile-nova-despesa-passo-1.png");
@@ -85,7 +99,8 @@ async function main() {
   await reset(390,844); await click("[data-financial-open-spaces]"); await click('[data-financial-select-space="personal"]'); await shot("18-mobile-espaco-pessoal.png");
   await reset(430,932); await click("[data-financial-open-spaces]"); await click("[data-financial-open-consolidated]"); await page.$$eval('[name="spaceId"]', items => items.slice(0,2).forEach(item => item.checked=true)); await click('[data-financial-consolidated-form] [type="submit"]'); await shot("19-mobile-consolidado.png");
 
-  await reset(1366,768); await shot("20-desktop-dashboard-financeiro.png"); await click('[data-financial-entry-id="rent"]'); await shot("21-desktop-detalhes-conta.png");
+  await reset(1366,768); await shot("20-desktop-dashboard-financeiro.png"); await click('[data-financial-entry-id="beatriz"]'); await shot("20b-desktop-lancamento-automatico.png");
+  await reset(1366,768); await click('[data-financial-entry-id="rent"]'); await shot("21-desktop-detalhes-conta.png");
   await reset(1366,768); await click("[data-financial-open-spaces]"); await shot("22-desktop-seletor-espacos.png");
   await reset(1366,768); await click('[data-financial-view="accounts"]'); await shot("23-desktop-contas-a-pagar.png");
 

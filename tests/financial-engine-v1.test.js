@@ -88,7 +88,7 @@ test("templates pessoais usam categorias macro e subcategorias opcionais", () =>
 test("templates de negócio cobrem estoque, marketing, equipe e equipamentos", () => {
   const tree = engine.defaultCategoryTree("business"), categories = tree.filter((item) => item.type === "category");
   assert.deepEqual(Array.from(categories, (item) => item.name), [
-    "Estrutura", "Estoque e mercadorias", "Fornecedores", "Equipe", "Marketing", "Transporte",
+    "Vendas", "Estrutura", "Estoque e mercadorias", "Fornecedores", "Equipe", "Marketing", "Transporte",
     "Sistemas e assinaturas", "Impostos e taxas", "Manutenção", "Equipamentos", "Serviços",
     "Retiradas", "Financeiro", "Outros",
   ]);
