@@ -2,7 +2,7 @@
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {automationFor,paymentMethod,cents,iso,entryIdentity}=require('../src/services/financial-income-service');
+const {automationFor,paymentMethod,cents,signedCents,iso,entryIdentity}=require('../src/services/financial-income-service');
 
 test('automação exige vínculo explícito ou marco legado',()=>{
   assert.equal(automationFor({type:'personal'}).enabled,false);
@@ -12,6 +12,7 @@ test('automação exige vínculo explícito ou marco legado',()=>{
 
 test('normaliza valores, datas, métodos e identidade idempotente',()=>{
   assert.equal(cents(63.5),6350);
+  assert.equal(signedCents(-63.5),-6350);
   assert.equal(paymentMethod('PIX · recebido'), 'pix');
   assert.equal(paymentMethod('Cartão de débito'), 'debit_card');
   assert.equal(iso('2026-09-07T12:00:00.000Z'),'2026-09-07T12:00:00.000Z');

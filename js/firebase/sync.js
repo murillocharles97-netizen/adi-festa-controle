@@ -301,7 +301,13 @@ function financialEffectFromWrites(
   operationId,
   eventKind = "simple",
 ) {
-  const sale = writes.find((write) => write.entityType === "sales"),
+  const sale = writes.find((write) => {
+      if (write.entityType !== "sales") return false;
+      const current = { ...(write.before || {}), ...(write.data || {}) },
+        isUndo = Boolean(write.data?.deletedAt || write.data?.active === false),
+        isCredit = String(current.status || "") === "fiado";
+      return isCredit && (write.operation === "create" || isUndo);
+    }),
     payment = writes.find(
       (write) =>
         write.entityType === "payments" && write.operation === "create",
@@ -330,7 +336,8 @@ function financialEffectFromWrites(
       );
       delta = isUndo ? amount : -amount;
     }
-  } else if (payment) {
+  }
+  if (!source && payment) {
     source = payment;
     type = "payment_received";
     customerId = String(
@@ -338,7 +345,8 @@ function financialEffectFromWrites(
     );
     amount = Math.abs(roundedMoney(payment.data?.valor ?? payment.data?.amount));
     delta = amount;
-  } else if (adjustment) {
+  }
+  if (!source && adjustment) {
     source = adjustment;
     type = "balance_adjustment";
     customerId = String(
@@ -1285,12 +1293,23 @@ function captureChanges(before, after) {
         write.entityType === "stockMovements" && write.operation === "create",
     ),
     operationId = eventWrite?.data?.operationId || crypto.randomUUID(),
-    saleWrite = writes.find((write) => write.entityType === "sales"),
-    eventKind = saleWrite
-      ? saleWrite.data?.deletedAt || saleWrite.data?.active === false
+    saleLifecycleWrite = writes.find(
+      (write) =>
+        write.entityType === "sales" &&
+        (write.operation === "create" ||
+          write.data?.deletedAt ||
+          write.data?.active === false),
+    ),
+    paymentCreateWrite = writes.find(
+      (write) =>
+        write.entityType === "payments" && write.operation === "create",
+    ),
+    eventKind = saleLifecycleWrite
+      ? saleLifecycleWrite.data?.deletedAt ||
+        saleLifecycleWrite.data?.active === false
         ? "sale_undo"
         : "sale"
-      : writes.some((write) => write.entityType === "payments")
+      : paymentCreateWrite
         ? "payment"
         : writes.some((write) => write.entityType === "campaignRedemptions")
           ? "campaign_redemption"
