@@ -6,6 +6,7 @@ const INVALID_STATUSES=new Set(['cancelado','cancelada','cancelled','canceled','
 const PAID_SALE_STATUSES=new Set(['pago','paid','confirmed','completed','concluido','concluida','entregue']);
 const CREDIT_SALE_STATUSES=new Set(['fiado','credit','on_credit']);
 const APPLIED_PAYMENT_STATUSES=new Set(['applied','confirmed','paid','approved','completed']);
+const APPLIED_BALANCE_EVENT_STATUSES=new Set(['applied','applied_by_reconciliation']);
 
 const text=value=>String(value??'').trim();
 const lower=value=>text(value).toLocaleLowerCase('pt-BR');
@@ -170,8 +171,12 @@ function financialIncomeService(db){
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.customerPayments)return{skipped:'customer-payments-disabled'};
     if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
-    if(!APPLIED_PAYMENT_STATUSES.has(status))return{skipped:'payment-not-applied'};
     if(!amountCents)return{skipped:'zero-value'};
+    if(!APPLIED_PAYMENT_STATUSES.has(status)){
+      const evidenceSnapshot=await db.doc(`businesses/${businessId}/balanceEvents/payment_received:${paymentId}`).get(),evidence=evidenceSnapshot.data()||{},paymentClientId=text(payment.clienteId||payment.clientId||payment.customerId),evidenceClientId=text(evidence.customerId||evidence.clientId);
+      const evidenceMatches=evidenceSnapshot.exists&&lower(evidence.type)==='payment_received'&&APPLIED_BALANCE_EVENT_STATUSES.has(lower(evidence.status))&&text(evidence.sourceDocumentId)===text(paymentId)&&cents(evidence.amount)===amountCents&&(!paymentClientId||!evidenceClientId||paymentClientId===evidenceClientId);
+      if(!evidenceMatches)return{skipped:'payment-not-applied'};
+    }
     const directSaleId=text(payment.saleId||payment.relatedSaleId||payment.sourceSaleId);
     if(directSaleId&&(await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
     const allocations=Array.isArray(payment.allocations)?payment.allocations:[],saleIds=allocations.map(item=>item?.saleId),customerName=text(payment.clienteNome||payment.customerName)||'Cliente';
@@ -197,16 +202,25 @@ function financialIncomeService(db){
     if(!linked)return{skipped:'automation-disabled',checked:0,created:0};
     const activationIso=iso(linked.automation.activatedAt);
     if(!activationIso)return{skipped:'activation-missing',checked:0,created:0};
-    const capped=Math.max(1,Math.min(200,Number(limit)||100)),business=db.collection('businesses').doc(businessId),results=[];
+    const capped=Math.max(1,Math.min(200,Number(limit)||100)),business=db.collection('businesses').doc(businessId),results=[],sourceStates={};
+    const countState=(kind,value)=>{
+      const state=lower(value).replace(/[^a-z0-9_-]/g,'_').slice(0,48)||'missing',key=`${kind}:${state}`;
+      sourceStates[key]=(sourceStates[key]||0)+1;
+    };
     if(linked.automation.sales){
       const sales=await business.collection('sales').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
-      for(const snapshot of sales.docs)results.push(await projectSale(businessId,snapshot.id,snapshot.data()));
+      for(const snapshot of sales.docs){const value=snapshot.data();countState('sale',value.status||value.saleStatus);results.push(await projectSale(businessId,snapshot.id,value));}
     }
     if(linked.automation.customerPayments){
       const payments=await business.collection('payments').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
-      for(const snapshot of payments.docs)results.push(await projectPayment(businessId,snapshot.id,snapshot.data()));
+      for(const snapshot of payments.docs){const value=snapshot.data();countState('payment',value.applicationStatus||value.status);results.push(await projectPayment(businessId,snapshot.id,value));}
     }
-    return{checked:results.length,created:results.filter(result=>result?.created).length,skipped:results.filter(result=>result?.skipped).length,activation:activationIso};
+    const reasons=results.reduce((counts,result)=>{
+      const reason=result?.created===true?'created':result?.skipped||'already-created';
+      counts[reason]=(counts[reason]||0)+1;
+      return counts;
+    },{});
+    return{checked:results.length,created:results.filter(result=>result?.created).length,skipped:results.filter(result=>result?.skipped).length,activation:activationIso,reasons,sourceStates};
   }
 
   return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness};
