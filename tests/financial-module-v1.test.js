@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=121") < html.indexOf("auth.js?v=121"));
+  assert.ok(html.indexOf("financial-space-service.js?v=122") < html.indexOf("auth.js?v=122"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -103,9 +103,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 121 publica automação financeira server-side e cache atômico", () => {
-  assert.match(read("js/build-info.js"), /release: "121"/);
-  assert.match(sw, /adi-festa-v121-financial-payment-projection/);
-  for (const asset of ["css/financial.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
+test("release 122 publica cartões, faturas e cache atômico", () => {
+  assert.match(read("js/build-info.js"), /release: "122"/);
+  assert.match(sw, /adi-festa-v122-financial-credit-cards-v2/);
+  for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

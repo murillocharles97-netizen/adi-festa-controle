@@ -555,6 +555,160 @@ service cloud.firestore {
           && request.resource.data.ownerUid == resource.data.ownerUid;
         allow delete: if false;
       }
+      match /financialAccounts/{accountId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == accountId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.type in ['cash', 'checking', 'wallet', 'savings', 'other']
+          && request.resource.data.initialBalanceCents is int
+          && request.resource.data.initialBalanceCents >= 0
+          && request.resource.data.active == true;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.initialBalanceCents is int
+          && request.resource.data.initialBalanceCents >= 0;
+        allow delete: if false;
+      }
+      match /creditCards/{cardId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == cardId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.last4 is string
+          && request.resource.data.last4.matches('^[0-9]{4}$')
+          && request.resource.data.limitCents is int
+          && request.resource.data.limitCents >= 0
+          && request.resource.data.committedCents == 0
+          && request.resource.data.closingDay is int
+          && request.resource.data.closingDay >= 1
+          && request.resource.data.closingDay <= 31
+          && request.resource.data.dueDay is int
+          && request.resource.data.dueDay >= 1
+          && request.resource.data.dueDay <= 31
+          && request.resource.data.active == true;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.limitCents is int
+          && request.resource.data.limitCents >= 0
+          && request.resource.data.committedCents is int
+          && request.resource.data.committedCents >= 0
+          && request.resource.data.closingDay is int
+          && request.resource.data.closingDay >= 1
+          && request.resource.data.closingDay <= 31
+          && request.resource.data.dueDay is int
+          && request.resource.data.dueDay >= 1
+          && request.resource.data.dueDay <= 31;
+        allow delete: if false;
+      }
+      match /creditCardInvoices/{invoiceId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == invoiceId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardId is string
+          && request.resource.data.referenceYear is int
+          && request.resource.data.referenceMonth is int
+          && request.resource.data.referenceMonth >= 1
+          && request.resource.data.referenceMonth <= 12
+          && request.resource.data.purchasesTotalCents is int
+          && request.resource.data.purchasesTotalCents >= 0
+          && request.resource.data.adjustmentsTotalCents is int
+          && request.resource.data.paidTotalCents is int
+          && request.resource.data.paidTotalCents >= 0
+          && request.resource.data.remainingCents is int
+          && request.resource.data.remainingCents >= 0
+          && request.resource.data.status in ['open', 'closed', 'paid', 'overdue', 'cancelled'];
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.creditCardId == resource.data.creditCardId
+          && request.resource.data.referenceYear == resource.data.referenceYear
+          && request.resource.data.referenceMonth == resource.data.referenceMonth
+          && request.resource.data.openingDate == resource.data.openingDate
+          && request.resource.data.closingDate == resource.data.closingDate
+          && request.resource.data.dueDate == resource.data.dueDate
+          && request.resource.data.purchasesTotalCents is int
+          && request.resource.data.purchasesTotalCents >= resource.data.purchasesTotalCents
+          && request.resource.data.adjustmentsTotalCents is int
+          && request.resource.data.paidTotalCents is int
+          && request.resource.data.paidTotalCents >= resource.data.paidTotalCents
+          && request.resource.data.remainingCents is int
+          && request.resource.data.remainingCents >= 0
+          && request.resource.data.status in ['open', 'closed', 'paid', 'overdue', 'cancelled'];
+        allow delete: if false;
+      }
+      match /creditCardPurchases/{purchaseId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == purchaseId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardId is string
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.installmentGroupId is string
+          && request.resource.data.installmentNumber is int
+          && request.resource.data.installmentNumber >= 1
+          && request.resource.data.installmentCount is int
+          && request.resource.data.installmentCount >= request.resource.data.installmentNumber
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.status == 'posted';
+        allow update, delete: if false;
+      }
+      match /creditCardInvoicePayments/{paymentId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == paymentId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.creditCardId is string
+          && request.resource.data.financialAccountId is string
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.paymentMethod in ['cash', 'pix', 'debit_card', 'automatic_debit', 'transfer', 'other']
+          && request.resource.data.status == 'confirmed';
+        allow update, delete: if false;
+      }
+      match /creditCardAdjustments/{adjustmentId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == adjustmentId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.creditCardId is string
+          && request.resource.data.kind in ['refund', 'credit', 'fee']
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.effectCents is int
+          && request.resource.data.status == 'confirmed';
+        allow update, delete: if false;
+      }
     }
 
     match /financialTransfers/{transferId} {

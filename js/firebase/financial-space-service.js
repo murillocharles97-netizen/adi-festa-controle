@@ -32,6 +32,9 @@ const storage = getStorage(app),
   CONSOLIDATED_PREFIX = "adiFesta:financial-consolidated:v1:",
   MAX_MONTH_ENTRIES = 500,
   MAX_RECURRENCE_OCCURRENCES = 120,
+  MAX_FINANCIAL_ACCOUNTS = 50,
+  MAX_CREDIT_CARDS = 50,
+  MAX_CREDIT_INVOICES = 72,
   state = {
     spaces: [],
     loadedForUid: "",
@@ -116,6 +119,16 @@ const baseMetadata = (space, opId) => ({
   idempotencyKey: opId,
   schemaVersion: 1,
 });
+const integerCents = (value, label = "valor") => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`Informe um ${label} válido em centavos.`);
+  return parsed;
+};
+const requiredText = (value, label, max = 80) => {
+  const text = String(value || "").trim();
+  if (!text) throw new Error(`Informe ${label}.`);
+  return text.slice(0, max);
+};
 
 async function listSpaces(options = {}) {
   const currentUid = uid(), currentBusinessId = businessId();
@@ -335,6 +348,132 @@ async function createCategory(spaceId, input = {}) {
   return value;
 }
 
+async function listFinancialAccounts(spaceId) {
+  assertSpace(spaceId);
+  const snapshot = await getDocs(query(
+    childCollection(spaceId, "financialAccounts"),
+    where("active", "==", true),
+    limit(MAX_FINANCIAL_ACCOUNTS),
+  ));
+  return snapshot.docs.map(convert).sort((left, right) =>
+    String(left.name).localeCompare(String(right.name), "pt-BR"),
+  );
+}
+
+async function createFinancialAccount(spaceId, input = {}) {
+  const space = assertSpace(spaceId), id = String(input.id || crypto.randomUUID()),
+    opId = String(input.operationId || `financial_account_${id}`), createdAt = now(),
+    allowedTypes = new Set(["cash", "checking", "wallet", "savings", "other"]),
+    type = allowedTypes.has(input.type) ? input.type : "checking", value = {
+      id,
+      ...baseMetadata(space, opId),
+      name: requiredText(input.name, "o nome da conta", 80),
+      type,
+      institution: String(input.institution || "").trim().slice(0, 80) || null,
+      initialBalanceCents: integerCents(input.initialBalanceCents || 0, "saldo inicial"),
+      balanceMode: "initial_plus_movements",
+      active: true,
+      createdAt,
+      updatedAt: createdAt,
+      schemaVersion: 2,
+    };
+  await setDoc(childRef(space.id, "financialAccounts", id), clean(value));
+  emit("financial-data-changed", { entity: "financialAccount", id, spaceId: space.id });
+  return value;
+}
+
+async function listCreditCards(spaceId) {
+  assertSpace(spaceId);
+  const snapshot = await getDocs(query(
+    childCollection(spaceId, "creditCards"),
+    where("active", "==", true),
+    limit(MAX_CREDIT_CARDS),
+  ));
+  return snapshot.docs.map(convert).sort((left, right) =>
+    String(left.name).localeCompare(String(right.name), "pt-BR"),
+  );
+}
+
+async function createCreditCard(spaceId, input = {}) {
+  const space = assertSpace(spaceId), id = String(input.id || crypto.randomUUID()),
+    opId = String(input.operationId || `credit_card_${id}`), createdAt = now(),
+    closingDay = Math.trunc(Number(input.closingDay)), dueDay = Math.trunc(Number(input.dueDay)),
+    last4 = String(input.last4 || "").replace(/\D/g, "").slice(-4);
+  if (closingDay < 1 || closingDay > 31) throw new Error("O fechamento deve ficar entre os dias 1 e 31.");
+  if (dueDay < 1 || dueDay > 31) throw new Error("O vencimento deve ficar entre os dias 1 e 31.");
+  if (last4.length !== 4) throw new Error("Informe os 4 últimos dígitos do cartão.");
+  const value = {
+    id,
+    ...baseMetadata(space, opId),
+    name: requiredText(input.name, "o nome do cartão", 80),
+    issuer: String(input.issuer || input.institution || "").trim().slice(0, 80) || null,
+    institution: String(input.institution || input.issuer || "").trim().slice(0, 80) || null,
+    last4,
+    limitCents: integerCents(input.limitCents || 0, "limite"),
+    closingDay,
+    dueDay,
+    paymentAccountId: input.paymentAccountId ? String(input.paymentAccountId) : null,
+    committedCents: 0,
+    active: true,
+    createdAt,
+    updatedAt: createdAt,
+    schemaVersion: 2,
+  };
+  await setDoc(childRef(space.id, "creditCards", id), clean(value));
+  emit("financial-data-changed", { entity: "creditCard", id, spaceId: space.id });
+  return value;
+}
+
+async function listCreditCardInvoices(spaceId, options = {}) {
+  assertSpace(spaceId);
+  const source = childCollection(spaceId, "creditCardInvoices"), clauses = [];
+  if (options.period) {
+    const { start, endExclusive } = Engine.monthRange(options.period);
+    clauses.push(where("dueDate", ">=", start.toISOString()), where("dueDate", "<", endExclusive.toISOString()), orderBy("dueDate", "asc"));
+  } else {
+    clauses.push(orderBy("dueDate", "desc"));
+  }
+  clauses.push(limit(Math.min(MAX_CREDIT_INVOICES, Math.max(1, Number(options.limit || MAX_CREDIT_INVOICES)))));
+  const snapshot = await getDocs(query(source, ...clauses));
+  return snapshot.docs.map(convert)
+    .filter((invoice) => !options.creditCardId || invoice.creditCardId === options.creditCardId)
+    .map((invoice) => ({ ...invoice, status: Engine.deriveCreditCardInvoiceStatus(invoice, options.now || new Date()) }));
+}
+
+async function listUpcomingCreditCardInvoices(spaceId, selectedPeriod = Engine.periodKey()) {
+  assertSpace(spaceId);
+  const { start } = Engine.monthRange(selectedPeriod), endExclusive = Engine.addMonths(start, 13), snapshot = await getDocs(query(
+    childCollection(spaceId, "creditCardInvoices"),
+    where("dueDate", ">=", start.toISOString()),
+    where("dueDate", "<", endExclusive.toISOString()),
+    orderBy("dueDate", "asc"),
+    limit(MAX_CREDIT_INVOICES),
+  ));
+  return snapshot.docs.map(convert).map((invoice) => ({
+    ...invoice,
+    status: Engine.deriveCreditCardInvoiceStatus(invoice),
+  }));
+}
+
+async function getCreditCardInvoiceDetails(spaceId, invoiceId) {
+  assertSpace(spaceId);
+  const [invoiceSnapshot, purchasesSnapshot, paymentsSnapshot, adjustmentsSnapshot] = await Promise.all([
+    getDoc(childRef(spaceId, "creditCardInvoices", invoiceId)),
+    getDocs(query(childCollection(spaceId, "creditCardPurchases"), where("creditCardInvoiceId", "==", invoiceId), limit(300))),
+    getDocs(query(childCollection(spaceId, "creditCardInvoicePayments"), where("creditCardInvoiceId", "==", invoiceId), limit(100))),
+    getDocs(query(childCollection(spaceId, "creditCardAdjustments"), where("creditCardInvoiceId", "==", invoiceId), limit(100))),
+  ]), invoice = convert(invoiceSnapshot);
+  if (!invoice) throw new Error("Fatura não encontrada.");
+  const byDateDesc = (left, right) => (Engine.localDate(right.purchaseDate || right.paidAt || right.createdAt)?.getTime() || 0)
+    - (Engine.localDate(left.purchaseDate || left.paidAt || left.createdAt)?.getTime() || 0);
+  return {
+    invoice: { ...invoice, status: Engine.deriveCreditCardInvoiceStatus(invoice) },
+    purchases: purchasesSnapshot.docs.map(convert).sort(byDateDesc),
+    payments: paymentsSnapshot.docs.map(convert).sort(byDateDesc),
+    adjustments: adjustmentsSnapshot.docs.map(convert).sort(byDateDesc),
+  };
+}
+
 async function createEntries(space, rawEntries, eventKind = "entry_created") {
   const entries = rawEntries.map((raw) => Engine.normalizeEntry(raw)), refs = entries.map((entry) => ({
     entry,
@@ -433,6 +572,311 @@ async function createEntry(spaceId, input = {}) {
     await setDoc(childRef(space.id, "recurrences", recurrenceId), { ...clean(recurrence), createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
   }
   return created;
+}
+
+async function createCreditCardPurchase(spaceId, input = {}) {
+  const space = assertSpace(spaceId), creditCardId = requiredText(input.creditCardId, "o cartão", 120),
+    cardRef = childRef(space.id, "creditCards", creditCardId), cardSnapshot = await getDoc(cardRef), card = convert(cardSnapshot);
+  if (!card || card.active === false) throw new Error("O cartão escolhido não está disponível neste espaço.");
+  const opId = String(input.operationId || operationId("credit_purchase")), purchaseDate = input.purchaseDate || now(),
+    installments = Engine.buildCreditCardInstallments({
+      amountCents: Number(input.amountCents),
+      installmentCount: Number(input.installmentCount || 1),
+      operationId: opId,
+      purchaseDate,
+      closingDay: card.closingDay,
+      dueDay: card.dueDay,
+    }), invoiceIds = [...new Set(installments.map((item) => `${creditCardId}_${item.invoice.referenceKey}`))],
+    invoiceRefs = new Map(invoiceIds.map((id) => [id, childRef(space.id, "creditCardInvoices", id)])),
+    purchaseRefs = installments.map((item) => childRef(space.id, "creditCardPurchases", item.id)),
+    entryRef = childRef(space.id, "entries", opId), eventRef = childRef(space.id, "events", opId),
+    createdAt = now(), category = input.category || {}, description = requiredText(input.description, "a descrição", 160),
+    amountCents = Number(input.amountCents);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um valor maior que zero.");
+  const entry = Engine.normalizeEntry({
+    id: opId,
+    operationId: opId,
+    direction: "out",
+    entryType: input.entryType === "investment" ? "investment" : "expense",
+    description,
+    amountCents,
+    categoryId: input.categoryId || category.id || "default_other",
+    categoryName: input.categoryName || category.name || "Outros",
+    categoryIcon: input.categoryIcon || category.icon || "shapes",
+    subcategoryId: input.subcategoryId || null,
+    subcategoryName: input.subcategoryName || null,
+    categorySchemaVersion: 2,
+    status: "paid",
+    occurredAt: purchaseDate,
+    paidAt: null,
+    dueAt: installments[0].invoice.dueDate,
+    paymentMethod: "credit_card",
+    paymentType: "credit_card",
+    cashFlowEffect: false,
+    expenseRecognized: true,
+    creditCardId,
+    creditCardInvoiceId: invoiceIds[0],
+    creditCardInvoiceIds: invoiceIds,
+    purchaseDate,
+    installmentGroupId: opId,
+    installmentCount: installments.length,
+    sourceType: "credit_card_purchase",
+    sourceId: opId,
+    merchant: String(input.merchant || description).slice(0, 120),
+    notes: String(input.notes || "").slice(0, 500),
+    attachments: [],
+    createdAt,
+    schemaVersion: 2,
+  });
+  const result = await runTransaction(db, async (transaction) => {
+    const currentCardSnapshot = await transaction.get(cardRef), currentEntrySnapshot = await transaction.get(entryRef),
+      invoiceSnapshots = new Map(), purchaseSnapshots = [];
+    for (const [invoiceId, refValue] of invoiceRefs) invoiceSnapshots.set(invoiceId, await transaction.get(refValue));
+    for (const refValue of purchaseRefs) purchaseSnapshots.push(await transaction.get(refValue));
+    if (!currentCardSnapshot.exists()) throw new Error("Cartão não encontrado.");
+    if (currentEntrySnapshot.exists()) return {
+      entry: convert(currentEntrySnapshot),
+      installments: purchaseSnapshots.filter((snapshot) => snapshot.exists()).map(convert),
+      retried: true,
+    };
+    const cardInTransaction = convert(currentCardSnapshot);
+    if (cardInTransaction.active === false || cardInTransaction.financialSpaceId !== space.id)
+      throw new Error("O cartão não pertence ao espaço selecionado.");
+    const invoiceAmounts = new Map();
+    installments.forEach((item) => {
+      const invoiceId = `${creditCardId}_${item.invoice.referenceKey}`;
+      invoiceAmounts.set(invoiceId, (invoiceAmounts.get(invoiceId) || 0) + item.amountCents);
+    });
+    for (const [invoiceId, addition] of invoiceAmounts) {
+      const snapshot = invoiceSnapshots.get(invoiceId), current = snapshot.exists() ? convert(snapshot) : null,
+        installment = installments.find((item) => `${creditCardId}_${item.invoice.referenceKey}` === invoiceId),
+        totals = Engine.invoiceTotals({
+          purchasesTotalCents: Number(current?.purchasesTotalCents || 0) + addition,
+          adjustmentsTotalCents: Number(current?.adjustmentsTotalCents || 0),
+          paidTotalCents: Number(current?.paidTotalCents || 0),
+        }), invoiceValue = {
+          ...(current || {}),
+          id: invoiceId,
+          ...baseMetadata(space, current?.operationId || `invoice_${invoiceId}`),
+          creditCardId,
+          cardName: cardInTransaction.name,
+          cardLast4: cardInTransaction.last4,
+          referenceKey: installment.invoice.referenceKey,
+          referenceYear: installment.invoice.referenceYear,
+          referenceMonth: installment.invoice.referenceMonth,
+          openingDate: installment.invoice.openingDate,
+          closingDate: installment.invoice.closingDate,
+          dueDate: installment.invoice.dueDate,
+          ...totals,
+          status: Engine.deriveCreditCardInvoiceStatus({ ...(current || {}), ...totals, closingDate: installment.invoice.closingDate, dueDate: installment.invoice.dueDate }),
+          createdBy: current?.createdBy || uid(),
+          createdAt: current?.createdAt || createdAt,
+          updatedAt: createdAt,
+          schemaVersion: 2,
+        };
+      transaction.set(invoiceRefs.get(invoiceId), clean(invoiceValue));
+    }
+    installments.forEach((installment, index) => {
+      const invoiceId = `${creditCardId}_${installment.invoice.referenceKey}`, purchaseValue = {
+        id: installment.id,
+        ...baseMetadata(space, `${opId}:${index + 1}`),
+        purchaseOperationId: opId,
+        creditCardId,
+        creditCardInvoiceId: invoiceId,
+        installmentGroupId: opId,
+        installmentNumber: installment.installmentNumber,
+        installmentCount: installment.installmentCount,
+        amountCents: installment.amountCents,
+        originalPurchaseAmountCents: amountCents,
+        description: installments.length > 1 ? `${description} · ${index + 1}/${installments.length}` : description,
+        merchant: String(input.merchant || description).slice(0, 120),
+        categoryId: entry.categoryId,
+        categoryName: entry.categoryName,
+        subcategoryId: entry.subcategoryId,
+        subcategoryName: entry.subcategoryName,
+        purchaseDate,
+        status: "posted",
+        createdAt,
+        updatedAt: createdAt,
+        schemaVersion: 2,
+      };
+      transaction.set(purchaseRefs[index], clean(purchaseValue));
+    });
+    transaction.update(cardRef, clean({
+      committedCents: Number(cardInTransaction.committedCents || 0) + amountCents,
+      updatedAt: createdAt,
+    }));
+    const entryValue = { ...baseMetadata(space, opId), ...entry, createdAt, updatedAt: createdAt, schemaVersion: 2 };
+    transaction.set(entryRef, clean(entryValue));
+    transaction.set(eventRef, clean({
+      id: opId,
+      ...baseMetadata(space, opId),
+      entryId: opId,
+      creditCardId,
+      creditCardInvoiceIds: invoiceIds,
+      eventKind: "credit_card_purchase_created",
+      transition: "created",
+      status: "applied",
+      amountCents,
+      createdAt,
+      schemaVersion: 2,
+    }));
+    return { entry: entryValue, installments, invoiceIds, retried: false };
+  });
+  emit("financial-data-changed", { entity: "creditCardPurchase", id: opId, spaceId: space.id });
+  return result;
+}
+
+async function payCreditCardInvoice(spaceId, invoiceId, input = {}) {
+  const space = assertSpace(spaceId), opId = String(input.operationId || operationId("invoice_payment")),
+    amountCents = Number(input.amountCents), paidAt = input.paidAt || now(),
+    financialAccountId = requiredText(input.financialAccountId, "a conta de origem", 120),
+    method = String(input.paymentMethod || "other"), invoiceRef = childRef(space.id, "creditCardInvoices", invoiceId),
+    accountRef = childRef(space.id, "financialAccounts", financialAccountId),
+    paymentRef = childRef(space.id, "creditCardInvoicePayments", opId), entryId = `invoice_payment_${opId}`,
+    entryRef = childRef(space.id, "entries", entryId), eventRef = childRef(space.id, "events", opId), createdAt = now();
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um pagamento maior que zero.");
+  if (!["cash", "pix", "debit_card", "automatic_debit", "transfer", "other"].includes(method))
+    throw new Error("Escolha uma forma de pagamento válida para a fatura.");
+  const result = await runTransaction(db, async (transaction) => {
+    const invoiceSnapshot = await transaction.get(invoiceRef), accountSnapshot = await transaction.get(accountRef),
+      paymentSnapshot = await transaction.get(paymentRef), entrySnapshot = await transaction.get(entryRef);
+    if (paymentSnapshot.exists()) return { payment: convert(paymentSnapshot), retried: true };
+    if (!invoiceSnapshot.exists()) throw new Error("Fatura não encontrada.");
+    if (!accountSnapshot.exists() || convert(accountSnapshot).active === false) throw new Error("A conta de origem não está disponível.");
+    const invoice = convert(invoiceSnapshot), cardRef = childRef(space.id, "creditCards", invoice.creditCardId),
+      cardSnapshot = await transaction.get(cardRef), totalsBefore = Engine.invoiceTotals(invoice);
+    if (!cardSnapshot.exists()) throw new Error("Cartão da fatura não encontrado.");
+    const card = convert(cardSnapshot);
+    if (amountCents > totalsBefore.remainingCents) throw new Error("O pagamento não pode ser maior que o saldo da fatura.");
+    const totals = Engine.invoiceTotals({ ...invoice, paidTotalCents: totalsBefore.paidTotalCents + amountCents }),
+      status = Engine.deriveCreditCardInvoiceStatus({ ...invoice, ...totals }, paidAt), payment = {
+        id: opId,
+        ...baseMetadata(space, opId),
+        creditCardInvoiceId: invoice.id,
+        creditCardId: invoice.creditCardId,
+        financialAccountId,
+        amountCents,
+        paymentMethod: method,
+        paidAt,
+        status: "confirmed",
+        createdAt,
+        schemaVersion: 2,
+      }, entry = Engine.normalizeEntry({
+        id: entryId,
+        operationId: opId,
+        direction: "out",
+        entryType: "credit_card_invoice_payment",
+        description: `Pagamento de fatura · ${invoice.cardName || "Cartão"}`,
+        amountCents,
+        categoryId: "default_personal_debts",
+        categoryName: "Financeiro",
+        categoryIcon: "credit-card",
+        status: "paid",
+        dueAt: invoice.dueDate,
+        occurredAt: paidAt,
+        paidAt,
+        paymentMethod: method,
+        cashFlowEffect: true,
+        expenseRecognized: false,
+        financialAccountId,
+        creditCardId: invoice.creditCardId,
+        creditCardInvoiceId: invoice.id,
+        sourceType: "credit_card_invoice_payment",
+        sourceId: opId,
+        notes: String(input.notes || "").slice(0, 500),
+        createdAt,
+        schemaVersion: 2,
+      });
+    transaction.update(invoiceRef, clean({ ...totals, status, paidAt: totals.remainingCents === 0 ? paidAt : invoice.paidAt || null, updatedAt: createdAt }));
+    transaction.update(cardRef, clean({ committedCents: Math.max(0, Number(card.committedCents ?? totalsBefore.remainingCents) - amountCents), updatedAt: createdAt }));
+    transaction.set(paymentRef, clean(payment));
+    if (!entrySnapshot.exists()) transaction.set(entryRef, clean({ ...baseMetadata(space, opId), ...entry, createdAt, updatedAt: createdAt, schemaVersion: 2 }));
+    transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId, creditCardInvoiceId: invoice.id, eventKind: "credit_card_invoice_paid", transition: totals.remainingCents === 0 ? "paid" : "partially_paid", status: "applied", amountCents, createdAt, schemaVersion: 2 }));
+    return { payment, invoice: { ...invoice, ...totals, status }, entry, retried: false };
+  });
+  emit("financial-data-changed", { entity: "creditCardInvoicePayment", id: opId, spaceId: space.id });
+  return result;
+}
+
+async function refundCreditCardPurchase(spaceId, purchaseId, input = {}) {
+  const space = assertSpace(spaceId), opId = `credit_refund_${String(purchaseId).replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+    amountCents = Number(input.amountCents), refundedAt = input.refundedAt || now(), purchaseRef = childRef(space.id, "creditCardPurchases", purchaseId),
+    adjustmentRef = childRef(space.id, "creditCardAdjustments", opId), entryRef = childRef(space.id, "entries", opId),
+    eventRef = childRef(space.id, "events", opId), createdAt = now();
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um estorno maior que zero.");
+  const result = await runTransaction(db, async (transaction) => {
+    const purchaseSnapshot = await transaction.get(purchaseRef), adjustmentSnapshot = await transaction.get(adjustmentRef);
+    if (!purchaseSnapshot.exists()) throw new Error("Compra não encontrada.");
+    if (adjustmentSnapshot.exists()) return { adjustment: convert(adjustmentSnapshot), retried: true };
+    const purchase = convert(purchaseSnapshot), invoiceRef = childRef(space.id, "creditCardInvoices", purchase.creditCardInvoiceId),
+      cardRef = childRef(space.id, "creditCards", purchase.creditCardId), invoiceSnapshot = await transaction.get(invoiceRef),
+      entrySnapshot = await transaction.get(entryRef), cardSnapshot = await transaction.get(cardRef);
+    if (!invoiceSnapshot.exists()) throw new Error("Fatura da compra não encontrada.");
+    if (!cardSnapshot.exists()) throw new Error("Cartão da compra não encontrado.");
+    if (amountCents > Number(purchase.amountCents || 0)) throw new Error("O estorno não pode exceder o valor da parcela.");
+    const invoice = convert(invoiceSnapshot), card = convert(cardSnapshot), adjustmentsTotalCents = Number(invoice.adjustmentsTotalCents || 0) - amountCents,
+      totals = Engine.invoiceTotals({ ...invoice, adjustmentsTotalCents }), adjustment = {
+        id: opId,
+        ...baseMetadata(space, opId),
+        creditCardInvoiceId: invoice.id,
+        creditCardId: purchase.creditCardId,
+        creditCardPurchaseId: purchase.id,
+        kind: "refund",
+        amountCents,
+        effectCents: -amountCents,
+        reason: String(input.reason || "Estorno de compra").slice(0, 300),
+        occurredAt: refundedAt,
+        status: "confirmed",
+        createdAt,
+        schemaVersion: 2,
+      }, entry = Engine.normalizeEntry({
+        id: opId,
+        operationId: opId,
+        direction: "in",
+        entryType: "credit_card_refund",
+        description: `Estorno · ${purchase.description}`,
+        amountCents,
+        categoryId: purchase.categoryId,
+        categoryName: purchase.categoryName,
+        subcategoryId: purchase.subcategoryId || null,
+        subcategoryName: purchase.subcategoryName || null,
+        status: "paid",
+        dueAt: refundedAt,
+        occurredAt: refundedAt,
+        paidAt: null,
+        cashFlowEffect: false,
+        expenseRecognized: false,
+        expenseAdjustmentCents: -amountCents,
+        creditCardId: purchase.creditCardId,
+        creditCardInvoiceId: invoice.id,
+        sourceType: "credit_card_refund",
+        sourceId: opId,
+        createdAt,
+        schemaVersion: 2,
+      });
+    transaction.update(invoiceRef, clean({ ...totals, adjustmentsTotalCents, status: Engine.deriveCreditCardInvoiceStatus({ ...invoice, ...totals }), updatedAt: createdAt }));
+    transaction.update(cardRef, clean({ committedCents: Math.max(0, Number(card.committedCents ?? Engine.invoiceTotals(invoice).remainingCents) - amountCents), updatedAt: createdAt }));
+    transaction.set(adjustmentRef, clean(adjustment));
+    if (!entrySnapshot.exists()) transaction.set(entryRef, clean({ ...baseMetadata(space, opId), ...entry, createdAt, updatedAt: createdAt, schemaVersion: 2 }));
+    transaction.set(eventRef, clean({
+      id: opId,
+      ...baseMetadata(space, opId),
+      entryId: opId,
+      creditCardId: purchase.creditCardId,
+      creditCardInvoiceId: invoice.id,
+      creditCardPurchaseId: purchase.id,
+      eventKind: "credit_card_purchase_refunded",
+      transition: "refunded",
+      status: "applied",
+      amountCents,
+      createdAt,
+      schemaVersion: 2,
+    }));
+    return { adjustment, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, retried: false };
+  });
+  emit("financial-data-changed", { entity: "creditCardAdjustment", id: opId, spaceId: space.id });
+  return result;
 }
 
 async function markPaid(spaceId, entry, input = {}) {
@@ -751,19 +1195,70 @@ async function migrateLegacyCategories(space, entryLists = []) {
   };
 }
 
+async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey()) {
+  const [financialAccounts, creditCards, invoiceValues] = await Promise.all([
+    listFinancialAccounts(spaceId),
+    listCreditCards(spaceId),
+    listCreditCardInvoices(spaceId),
+  ]), invoices = invoiceValues.map((invoice) => ({
+    ...invoice,
+    ...Engine.invoiceTotals(invoice),
+    status: Engine.deriveCreditCardInvoiceStatus(invoice),
+  })), selectedInvoices = invoices.filter((invoice) => Engine.periodKey(invoice.dueDate) === selectedPeriod),
+    cardSummaries = creditCards.map((card) => {
+      const cardInvoices = invoices.filter((invoice) => invoice.creditCardId === card.id && invoice.status !== "cancelled"),
+        committedCents = Number.isInteger(card.committedCents) ? card.committedCents : Engine.creditCardCommitment(cardInvoices),
+        nextInvoice = cardInvoices.filter((invoice) => invoice.remainingCents > 0)
+          .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity))[0] || null;
+      return {
+        ...card,
+        committedCents,
+        availableCents: Math.max(0, Number(card.limitCents || 0) - committedCents),
+        currentInvoice: nextInvoice,
+      };
+    }), invoicePayables = selectedInvoices.filter((invoice) => invoice.remainingCents > 0 && invoice.status !== "cancelled").map((invoice) => ({
+      id: `invoice:${invoice.id}`,
+      creditCardInvoiceId: invoice.id,
+      creditCardId: invoice.creditCardId,
+      entityType: "credit_card_invoice",
+      description: `Fatura ${invoice.cardName || "Cartão"}`,
+      amountCents: invoice.remainingCents,
+      originalAmountCents: invoice.amountDueCents,
+      direction: "out",
+      status: "pending",
+      dueAt: invoice.dueDate,
+      sortAt: invoice.dueDate,
+      categoryId: "credit_card_invoice",
+      categoryName: "Faturas",
+      categoryIcon: "credit-card",
+      invoiceStatus: invoice.status,
+    }));
+  return {
+    financialAccounts,
+    creditCards: cardSummaries,
+    creditCardInvoices: invoices,
+    selectedCreditCardInvoices: selectedInvoices,
+    invoicePayables,
+    creditCommittedCents: cardSummaries.reduce((sum, card) => sum + card.committedCents, 0),
+    futureInvoices: invoices.filter((invoice) => invoice.remainingCents > 0 && invoice.status !== "cancelled")
+      .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity)),
+  };
+}
+
 async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
-  const space = assertSpace(spaceId), started = performance.now(), [month, accounts, categories] = await Promise.all([
+  const space = assertSpace(spaceId), started = performance.now(), [month, accounts, categories, credit] = await Promise.all([
     monthEntries(space.id, selectedPeriod),
     dueMonthEntries(space.id, selectedPeriod),
     listCategories(space.id),
+    loadCreditOverview(space.id, selectedPeriod),
   ]), categoryMigration = await migrateLegacyCategories(space, [month, accounts]),
-    payables = Engine.sortPayables(accounts), latest = month.filter((entry) => entry.status === "paid" && !entry.reversedByEntryId)
+    allAccounts = [...accounts, ...credit.invoicePayables], payables = Engine.sortPayables(allAccounts), latest = month.filter((entry) => entry.status === "paid" && !entry.reversedByEntryId)
       .sort((left, right) => (Engine.localDate(right.occurredAt)?.getTime() || 0) - (Engine.localDate(left.occurredAt)?.getTime() || 0)),
-    summary = Engine.summarize(month), accountSummary = Engine.summarize(accounts), result = {
+    summary = Engine.summarize(month), accountSummary = Engine.summarize(allAccounts), result = {
     space: structuredClone(space),
     periodKey: selectedPeriod,
     entries: month,
-    accounts,
+    accounts: allAccounts,
     latest: latest.slice(0, 10),
     payables: payables.slice(0, 20),
     categories,
@@ -775,11 +1270,12 @@ async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
       migratedCategories: categoryMigration.migrated,
       manualReviewCategories: categoryMigration.manualReview,
     },
+    ...credit,
   };
   state.lastReadStats = {
     operation: "loadDashboard",
-    documents: month.length + accounts.length,
-    limits: { month: MAX_MONTH_ENTRIES, accounts: MAX_MONTH_ENTRIES },
+    documents: month.length + accounts.length + credit.creditCardInvoices.length + credit.creditCards.length + credit.financialAccounts.length,
+    limits: { month: MAX_MONTH_ENTRIES, accounts: MAX_MONTH_ENTRIES, invoices: MAX_CREDIT_INVOICES },
     durationMs: Math.round(performance.now() - started),
     at: now(),
   };
@@ -800,8 +1296,23 @@ function setConsolidatedIds(ids = []) {
 async function loadConsolidated(ids = selectedConsolidatedIds(), selectedPeriod = Engine.periodKey()) {
   const selected = setConsolidatedIds(ids);
   if (!selected.length) return { consolidated: true, selectedIds: [], ...Engine.consolidate([]), spaces: [] };
-  const dashboards = await Promise.all(selected.map((id) => loadDashboard(id, selectedPeriod)));
-  return { consolidated: true, selectedIds: selected, spaces: dashboards.map((item) => item.space), ...Engine.consolidate(dashboards) };
+  const dashboards = await Promise.all(selected.map((id) => loadDashboard(id, selectedPeriod))),
+    withSpace = (items, dashboard) => (items || []).map((item) => ({ ...item, financialSpaceName: dashboard.space.name })),
+    creditCards = dashboards.flatMap((dashboard) => withSpace(dashboard.creditCards, dashboard)),
+    creditCardInvoices = dashboards.flatMap((dashboard) => withSpace(dashboard.creditCardInvoices, dashboard)),
+    futureInvoices = dashboards.flatMap((dashboard) => withSpace(dashboard.futureInvoices, dashboard))
+      .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity));
+  return {
+    consolidated: true,
+    selectedIds: selected,
+    spaces: dashboards.map((item) => item.space),
+    ...Engine.consolidate(dashboards),
+    financialAccounts: dashboards.flatMap((dashboard) => withSpace(dashboard.financialAccounts, dashboard)),
+    creditCards,
+    creditCardInvoices,
+    futureInvoices,
+    creditCommittedCents: creditCards.reduce((sum, card) => sum + Number(card.committedCents || 0), 0),
+  };
 }
 
 async function uploadAttachment(spaceId, entryId, file, options = {}) {
@@ -850,6 +1361,15 @@ const FinancialSpaceService = {
   archiveSpace,
   listCategories,
   createCategory,
+  listFinancialAccounts,
+  createFinancialAccount,
+  listCreditCards,
+  createCreditCard,
+  listCreditCardInvoices,
+  getCreditCardInvoiceDetails,
+  createCreditCardPurchase,
+  payCreditCardInvoice,
+  refundCreditCardPurchase,
   migrateLegacyCategories,
   createEntry,
   updatePendingEntry,
@@ -866,7 +1386,7 @@ const FinancialSpaceService = {
   setConsolidatedIds,
   uploadAttachment,
   getReadStats: () => state.lastReadStats ? structuredClone(state.lastReadStats) : null,
-  limits: Object.freeze({ month: MAX_MONTH_ENTRIES, recurrenceOccurrences: MAX_RECURRENCE_OCCURRENCES }),
+  limits: Object.freeze({ month: MAX_MONTH_ENTRIES, recurrenceOccurrences: MAX_RECURRENCE_OCCURRENCES, cards: MAX_CREDIT_CARDS, invoices: MAX_CREDIT_INVOICES }),
 };
 
 window.FinancialSpaceService = FinancialSpaceService;
