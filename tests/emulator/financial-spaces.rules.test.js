@@ -79,6 +79,38 @@ test("espaço pessoal é privado mesmo para colega da empresa", async () => {
   await assertFails(getDoc(doc(manager, "financialSpaces", "personal-a")));
 });
 
+test("cartões, faturas, contas e pagamentos respeitam o espaço pessoal", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), intruder = env.authenticatedContext("owner-b").firestore(), spaceId = "credit-personal";
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId), { id: spaceId, name: "Casa", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));
+  const base = { financialSpaceId: spaceId, ownerUid: "owner-a", createdBy: "owner-a", schemaVersion: 2 },
+    account = { ...base, id: "account-c6", operationId: "financial_account_account-c6", name: "C6 Bank", type: "checking", institution: "C6 Bank", initialBalanceCents: 0, active: true },
+    card = { ...base, id: "card-c6", operationId: "credit_card_card-c6", name: "C6 Carbon", institution: "C6 Bank", last4: "2429", limitCents: 800000, committedCents: 0, closingDay: 12, dueDay: 20, paymentAccountId: "account-c6", active: true };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "financialAccounts", account.id), account));
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), card));
+  const invoice = { ...base, id: "card-c6_2026-09", operationId: "invoice_card-c6_2026-09", creditCardId: card.id, referenceKey: "2026-09", referenceYear: 2026, referenceMonth: 9, openingDate: "2026-08-13T15:00:00.000Z", closingDate: "2026-09-12T15:00:00.000Z", dueDate: "2026-09-20T15:00:00.000Z", purchasesTotalCents: 23800, adjustmentsTotalCents: 0, paidTotalCents: 0, remainingCents: 23800, status: "open" };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), invoice));
+  const purchase = { ...base, id: "purchase-1_01", operationId: "purchase-1:1", purchaseOperationId: "purchase-1", creditCardId: card.id, creditCardInvoiceId: invoice.id, installmentGroupId: "purchase-1", installmentNumber: 1, installmentCount: 1, amountCents: 23800, originalPurchaseAmountCents: 23800, description: "Mercado", purchaseDate: "2026-09-08T15:00:00.000Z", status: "posted" };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardPurchases", purchase.id), purchase));
+  const payment = { ...base, id: "invoice-pay-1", operationId: "invoice-pay-1", creditCardInvoiceId: invoice.id, creditCardId: card.id, financialAccountId: account.id, amountCents: 10000, paymentMethod: "pix", paidAt: "2026-09-20T15:00:00.000Z", status: "confirmed" };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoicePayments", payment.id), payment));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), { paidTotalCents: 10000, remainingCents: 13800, status: "closed" }));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { committedCents: 13800 }));
+  await assertFails(getDoc(doc(intruder, "financialSpaces", spaceId, "creditCards", card.id)));
+  await assertFails(setDoc(doc(intruder, "financialSpaces", spaceId, "creditCards", "forged"), { ...card, id: "forged", operationId: "forged", createdBy: "owner-b" }));
+  await assertFails(deleteDoc(doc(owner, "financialSpaces", spaceId, "creditCardPurchases", purchase.id)));
+  await assertFails(deleteDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoicePayments", payment.id)));
+});
+
+test("gestor financeiro do business acessa cartões sem transferir a propriedade", async () => {
+  const manager = env.authenticatedContext("manager-a").firestore(), card = {
+    id: "business-card", financialSpaceId: "space-a", ownerUid: "owner-a", createdBy: "manager-a",
+    operationId: "credit_card_business-card", name: "Cartão empresa", institution: "Banco", last4: "9001",
+    limitCents: 100000, committedCents: 0, closingDay: 10, dueDay: 18, paymentAccountId: null, active: true,
+  };
+  await assertSucceeds(setDoc(doc(manager, "financialSpaces", "space-a", "creditCards", card.id), card));
+  assert.equal((await getDoc(doc(manager, "financialSpaces", "space-a", "creditCards", card.id))).data().ownerUid, "owner-a");
+});
+
 test("categoria e subcategoria customizadas ficam isoladas no espaço", async () => {
   const db = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore();
   for (const id of ["category-space-a", "category-space-b"])

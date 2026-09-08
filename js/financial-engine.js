@@ -242,7 +242,13 @@ window.FinancialEngine = (() => {
   };
   // Uma reversão é um contralançamento realizado. O lançamento original
   // permanece no razão para que original + reversão resultem exatamente zero.
-  const isRealized = (entry) => entry?.status === "paid";
+  // `cashFlowEffect` separa competência de caixa. Uma compra no crédito é uma
+  // despesa reconhecida hoje, mas só vira saída quando a fatura é paga.
+  const isRealized = (entry) => entry?.status === "paid" && entry?.cashFlowEffect !== false;
+  const isExpenseRecognized = (entry) => entry?.direction === "out"
+    && entry?.status === "paid"
+    && entry?.expenseRecognized !== false
+    && !entry?.reversedByEntryId;
   const summarize = (entries = [], options = {}) => {
     const today = localDay(options.now || new Date()),
       inSevenDays = new Date(today.getTime() + 7 * DAY),
@@ -253,6 +259,10 @@ window.FinancialEngine = (() => {
       totalOutCents = realized
         .filter((entry) => entry.direction === "out")
         .reduce((sum, entry) => sum + cents(entry.amountCents), 0),
+      expenses = entries.filter(isExpenseRecognized),
+      expenseAdjustmentsCents = entries.reduce((sum, entry) =>
+        sum + (Number.isInteger(entry?.expenseAdjustmentCents) ? entry.expenseAdjustmentCents : 0), 0),
+      expensesTotalCents = Math.max(0, expenses.reduce((sum, entry) => sum + cents(entry.amountCents), 0) + expenseAdjustmentsCents),
       pending = entries.filter((entry) =>
         entry.direction === "out" && ["pending", "overdue"].includes(effectiveStatus(entry, today)),
       ),
@@ -261,7 +271,7 @@ window.FinancialEngine = (() => {
         return due >= today && due <= inSevenDays;
       }),
       categoryTotals = new Map();
-    for (const entry of realized.filter((item) => item.direction === "out")) {
+    for (const entry of expenses) {
       const id = String(entry.categoryId || "default_other"),
         current = categoryTotals.get(id) || {
           categoryId: id,
@@ -271,16 +281,27 @@ window.FinancialEngine = (() => {
       current.amountCents += cents(entry.amountCents);
       categoryTotals.set(id, current);
     }
+    for (const entry of entries.filter((item) => Number.isInteger(item?.expenseAdjustmentCents))) {
+      const id = String(entry.categoryId || "default_other"), current = categoryTotals.get(id) || {
+        categoryId: id,
+        categoryName: entry.categoryName || "Outros",
+        amountCents: 0,
+      };
+      current.amountCents = Math.max(0, current.amountCents + entry.expenseAdjustmentCents);
+      categoryTotals.set(id, current);
+    }
     const categories = [...categoryTotals.values()]
+      .filter((category) => category.amountCents > 0)
       .map((category) => ({
         ...category,
-        percentage: totalOutCents ? Math.round((category.amountCents / totalOutCents) * 100) : 0,
+        percentage: expensesTotalCents ? Math.round((category.amountCents / expensesTotalCents) * 100) : 0,
       }))
       .sort((left, right) => right.amountCents - left.amountCents || left.categoryName.localeCompare(right.categoryName, "pt-BR"));
     return {
       totalInCents,
       totalOutCents,
       resultCents: totalInCents - totalOutCents,
+      expensesTotalCents,
       pendingPayablesCents: pending.reduce((sum, entry) => sum + cents(entry.amountCents), 0),
       pendingCount: pending.length,
       dueSoonCount: dueSoon.length,
@@ -301,6 +322,110 @@ window.FinancialEngine = (() => {
       remainder = total - base * quantity;
     return Array.from({ length: quantity }, (_, index) => base + (index < remainder ? 1 : 0));
   };
+  const dayInMonth = (year, monthIndex, requestedDay) => {
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+    return new Date(year, monthIndex, Math.min(lastDay, Math.max(1, Math.trunc(Number(requestedDay || 1)))), 12);
+  };
+  const invoiceReferenceKey = (year, monthIndex) =>
+    `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+  const parseReferenceKey = (key) => {
+    if (!/^\d{4}-\d{2}$/.test(String(key))) throw new Error("Referência de fatura inválida.");
+    const [year, month] = String(key).split("-").map(Number);
+    return { year, monthIndex: month - 1 };
+  };
+  const resolveCreditCardInvoiceForPurchase = (input = {}) => {
+    const purchaseDate = localDay(input.purchaseDate || new Date()),
+      closingDay = Math.min(31, Math.max(1, Math.trunc(Number(input.closingDay)))),
+      dueDay = Math.min(31, Math.max(1, Math.trunc(Number(input.dueDay))));
+    if (!Number.isInteger(closingDay) || !Number.isInteger(dueDay))
+      throw new Error("Informe fechamento e vencimento válidos.");
+    let referenceYear = purchaseDate.getFullYear(), referenceMonthIndex = purchaseDate.getMonth(),
+      closingDate = dayInMonth(referenceYear, referenceMonthIndex, closingDay);
+    // O dia do fechamento ainda pertence à fatura atual. Somente compras após
+    // o fechamento entram no ciclo seguinte.
+    if (purchaseDate > closingDate) {
+      const next = new Date(referenceYear, referenceMonthIndex + 1, 1, 12);
+      referenceYear = next.getFullYear();
+      referenceMonthIndex = next.getMonth();
+      closingDate = dayInMonth(referenceYear, referenceMonthIndex, closingDay);
+    }
+    const previousReference = new Date(referenceYear, referenceMonthIndex - 1, 1, 12),
+      previousClosing = dayInMonth(previousReference.getFullYear(), previousReference.getMonth(), closingDay),
+      openingDate = new Date(previousClosing);
+    openingDate.setDate(openingDate.getDate() + 1);
+    // Compare os dias configurados, não o dia efetivo após o ajuste de fim de mês.
+    // Ex.: fecha 31 e vence 30 continua vencendo no mês seguinte, inclusive em fevereiro.
+    const dueMonthOffset = dueDay > closingDay ? 0 : 1,
+      dueBase = new Date(referenceYear, referenceMonthIndex + dueMonthOffset, 1, 12),
+      dueDate = dayInMonth(dueBase.getFullYear(), dueBase.getMonth(), dueDay),
+      referenceKey = invoiceReferenceKey(referenceYear, referenceMonthIndex);
+    return {
+      referenceKey,
+      referenceYear,
+      referenceMonth: referenceMonthIndex + 1,
+      openingDate: openingDate.toISOString(),
+      closingDate: closingDate.toISOString(),
+      dueDate: dueDate.toISOString(),
+    };
+  };
+  const buildCreditCardInstallments = (input = {}) => {
+    const amountCents = cents(input.amountCents), count = Math.min(60, Math.max(1, Math.trunc(Number(input.installmentCount || 1)))),
+      amounts = installmentAmounts(amountCents, count), firstInvoice = resolveCreditCardInvoiceForPurchase(input),
+      groupId = String(input.installmentGroupId || input.operationId || "").trim();
+    if (!groupId) throw new Error("A compra precisa de um identificador idempotente.");
+    return amounts.map((installmentAmountCents, index) => {
+      const invoice = index === 0 ? firstInvoice : (() => {
+        const { year, monthIndex } = parseReferenceKey(firstInvoice.referenceKey),
+          target = new Date(year, monthIndex + index, 1, 12),
+          closingDate = dayInMonth(target.getFullYear(), target.getMonth(), input.closingDay),
+          previous = new Date(target.getFullYear(), target.getMonth() - 1, 1, 12),
+          previousClosing = dayInMonth(previous.getFullYear(), previous.getMonth(), input.closingDay),
+          openingDate = new Date(previousClosing);
+        openingDate.setDate(openingDate.getDate() + 1);
+        const dueOffset = Math.trunc(Number(input.dueDay)) > Math.trunc(Number(input.closingDay)) ? 0 : 1,
+          dueBase = new Date(target.getFullYear(), target.getMonth() + dueOffset, 1, 12);
+        return {
+          referenceKey: invoiceReferenceKey(target.getFullYear(), target.getMonth()),
+          referenceYear: target.getFullYear(),
+          referenceMonth: target.getMonth() + 1,
+          openingDate: openingDate.toISOString(),
+          closingDate: closingDate.toISOString(),
+          dueDate: dayInMonth(dueBase.getFullYear(), dueBase.getMonth(), input.dueDay).toISOString(),
+        };
+      })();
+      return {
+        id: `${groupId}_${String(index + 1).padStart(2, "0")}`,
+        installmentGroupId: groupId,
+        installmentNumber: index + 1,
+        installmentCount: count,
+        amountCents: installmentAmountCents,
+        invoice,
+      };
+    });
+  };
+  const invoiceTotals = (invoice = {}) => {
+    const purchasesTotalCents = Math.max(0, cents(invoice.purchasesTotalCents || 0)),
+      adjustmentsTotalCents = cents(invoice.adjustmentsTotalCents || 0),
+      paidTotalCents = Math.max(0, cents(invoice.paidTotalCents || 0)),
+      amountDueCents = Math.max(0, purchasesTotalCents + adjustmentsTotalCents),
+      remainingCents = Math.max(0, amountDueCents - paidTotalCents),
+      creditBalanceCents = Math.max(0, paidTotalCents - amountDueCents);
+    return { purchasesTotalCents, adjustmentsTotalCents, paidTotalCents, amountDueCents, remainingCents, creditBalanceCents };
+  };
+  const deriveCreditCardInvoiceStatus = (invoice = {}, at = new Date()) => {
+    if (invoice.status === "cancelled") return "cancelled";
+    const totals = invoiceTotals(invoice);
+    if (totals.remainingCents === 0 && (totals.amountDueCents > 0 || totals.paidTotalCents > 0)) return "paid";
+    const today = localDay(at), due = localDay(invoice.dueDate), closing = localDay(invoice.closingDate);
+    if (today > due) return "overdue";
+    if (today > closing) return "closed";
+    return "open";
+  };
+  const creditCardCommitment = (invoices = []) => invoices
+    .filter((invoice) => deriveCreditCardInvoiceStatus(invoice) !== "cancelled")
+    .reduce((sum, invoice) => sum + invoiceTotals(invoice).remainingCents, 0);
+  const creditCardAvailableLimit = (limitCents, invoices = []) =>
+    Math.max(0, cents(limitCents || 0) - creditCardCommitment(invoices));
   const buildInstallments = (input = {}) => {
     const amounts = installmentAmounts(input.amountCents, input.installmentCount),
       start = localDay(input.dueAt || new Date()),
@@ -398,9 +523,17 @@ window.FinancialEngine = (() => {
     normalizeEntry,
     effectiveStatus,
     isRealized,
+    isExpenseRecognized,
     summarize,
     sortPayables,
     installmentAmounts,
+    dayInMonth,
+    resolveCreditCardInvoiceForPurchase,
+    buildCreditCardInstallments,
+    invoiceTotals,
+    deriveCreditCardInvoiceStatus,
+    creditCardCommitment,
+    creditCardAvailableLimit,
     buildInstallments,
     buildRecurringInstances,
     occurrenceKey,
