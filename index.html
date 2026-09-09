@@ -3,16 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#31d0ad">
+  <meta name="theme-color" content="#07141b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Adi Festa">
+  <meta name="apple-mobile-web-app-title" content="VECONI">
   <meta name="adi-festa-build" content="4d9acb64f81620d9160d9a34ce21d8279587d563">
   <meta name="adi-festa-build-time" content="2026-08-01T23:45:30Z">
-  <title>Adi Festa Controle</title>
+  <title>VECONI</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" href="./assets/icon.svg">
-  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./assets/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon-180.png">
   <link rel="stylesheet" href="./css/style.css">
   <link rel="stylesheet" href="./css/design-system/tokens.css?v=94">
   <link rel="stylesheet" href="./css/finance.css">
@@ -56,7 +58,9 @@
   <link rel="stylesheet" href="./css/financial.css?v=122">
   <link rel="stylesheet" href="./css/financial-credit-v2.css?v=122">
   <link rel="stylesheet" href="./css/design-system/desktop.css?v=94">
+  <link rel="stylesheet" href="./css/design-system/veconi-theme.css?v=123">
   <script>document.documentElement.classList.add('auth-pending');</script>
+  <script src="./js/veconi-brand.js?v=123"></script>
   <script src="./js/campaign-engine-v2.js?v=86"></script>
   <script src="./js/financial-engine.js?v=122"></script>
   <script src="./js/financial-ui.js?v=122"></script>
@@ -64,7 +68,11 @@
 </head>
 <body>
   <aside class="sidebar" id="sidebar" aria-label="Menu principal">
-    <div class="brand"><span class="brand-logo" data-mobile-business-initials>AF</span><div class="brand-copy"><strong data-mobile-business-name>Adi Festa</strong><small>Controle de vendas</small><span class="mobile-plan-pill" data-mobile-plan>Plano atual</span></div><button class="mobile-drawer-close" id="mobile-drawer-close" type="button" aria-label="Fechar menu"><i data-lucide="x"></i></button></div>
+    <div class="brand">
+      <div class="brand-platform" data-veconi-logo="horizontal" data-veconi-tagline="true"></div>
+      <div class="brand-business"><span data-mobile-business-initials>AF</span><div class="brand-business-copy"><strong data-mobile-business-name data-business-name>Adi Festa</strong><small>Negócio ativo</small><span class="mobile-plan-pill" data-mobile-plan>Plano atual</span></div></div>
+      <button class="mobile-drawer-close" id="mobile-drawer-close" type="button" aria-label="Fechar menu"><i data-lucide="x"></i></button>
+    </div>
     <nav id="nav" class="desktop-sidebar-nav" aria-label="Navegação principal no desktop">
       <span class="desktop-nav-section">Gestão</span>
       <a href="#/inicio" data-route="inicio"><i data-lucide="house"></i>Início</a>
@@ -121,10 +129,10 @@
       </nav>
     </div>
     <footer class="desktop-sidebar-footer"><span></span>Dados salvos neste aparelho</footer>
-    <footer class="mobile-sidebar-footer"><span>Adi Festa <b data-mobile-app-version>v1.0.0</b></span><span class="mobile-sync-state"><i data-lucide="cloud"></i><b data-mobile-sync-label>Dados no aparelho</b></span></footer>
+    <footer class="mobile-sidebar-footer"><span>VECONI <b data-mobile-app-version>v1.0.0</b></span><span class="mobile-sync-state"><i data-lucide="cloud"></i><b data-mobile-sync-label>Dados no aparelho</b></span></footer>
   </aside>
   <div class="overlay" id="overlay"></div>
-  <div class="shell"><header class="topbar"><button class="icon-btn menu-btn" id="menu" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><i data-lucide="menu"></i></button><div><h1 id="title">Início</h1><small id="date"></small></div><span class="local-badge"><i data-lucide="database"></i> Local</span><span class="avatar">A</span></header><main id="app"></main></div>
+  <div class="shell"><header class="topbar"><button class="icon-btn menu-btn" id="menu" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><i data-lucide="menu"></i></button><div class="topbar-title"><img class="topbar-brand-mark" src="./assets/veconi-symbol.svg" alt=""><div class="topbar-title-copy"><h1 id="title">Início</h1><small id="date"></small></div></div><span class="local-badge"><i data-lucide="cloud"></i> Nuvem</span><span class="avatar">A</span></header><main id="app"></main></div>
   <nav class="bottom-nav" id="bottom-nav" aria-label="Navegação rápida">
     <a href="#/inicio" data-mobile-route="inicio"><i data-lucide="house"></i><span>Início</span></a>
     <a href="#/vender" data-mobile-route="vender"><i data-lucide="shopping-bag"></i><span>Vender</span></a>
@@ -132,26 +140,26 @@
     <a href="#/clientes" data-mobile-route="clientes"><i data-lucide="users"></i><span>Clientes</span></a>
     <a href="#/produtos" data-mobile-route="produtos"><i data-lucide="candy"></i><span>Produtos</span></a>
   </nav>
-  <div id="modal"></div><div id="toasts"></div><div id="auth-gate" aria-live="polite"></div>
+  <div id="modal"></div><div id="toasts"></div><div id="auth-gate" aria-live="polite"><section class="veconi-splash"><span data-veconi-logo="stacked" data-veconi-tagline="true"></span><small>Preparando seu ambiente…</small></section></div>
   <script src="./js/lifecycle-manager.js?v=83"></script>
   <script src="./js/page-runtime.js?v=83"></script>
   <script src="./js/client-filter-rules.js?v=84"></script>
-  <script src="./js/runtime-diagnostics.js?v=81"></script><script src="./js/build-info.js?v=122"></script><script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/phone.js"></script><script src="./js/storage.js?v=95"></script><script src="./js/operation-mode.js?v=57"></script><script src="./js/backup.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/financial-concurrency.js?v=108"></script><script src="./js/clientes.js?v=100"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/barcode.js?v=87"></script><script src="./js/plans.js?v=114"></script><script src="./js/produtos.js?v=92"></script><script src="./js/product-images.js?v=92"></script><script src="./js/campanhas.js"></script><script src="./js/vendas.js?v=121"></script><script src="./js/fiados.js?v=121"></script><script src="./js/cobrancas.js"></script><script src="./js/mensagens.js"></script><script src="./js/customer-metrics.js?v=80"></script><script src="./js/crm.js?v=92"></script><script src="./js/crm-segment-engine-v2.js?v=101"></script><script src="./js/engagement-segments.js?v=101"></script><script src="./js/crm-segment-builder.js?v=101"></script><script src="./js/crm-dashboard.js?v=101"></script><script src="./js/crm-mobile.js?v=101"></script><script src="./js/router.js?v=115"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js?v=92"></script><script src="./js/activity-center.js?v=98"></script><script src="./js/repositories.js"></script><script src="./js/checkout.js?v=103"></script><script src="./js/clientes-page.js?v=121"></script><script src="./js/crm-ui.js?v=92"></script><script src="./js/mensagens-mobile.js"></script><script src="./js/client-actions.js?v=85"></script><script src="./js/clientes-mobile.js?v=99"></script><script src="./js/produtos-mobile.js?v=92"></script><script src="./js/campanhas-ui.js?v=101"></script><script src="./js/campanhas-mobile.js"></script><script src="./js/configuracoes-mobile.js?v=98"></script><script src="./assets/qrcode.min.js"></script><script src="./js/catalog-presentation.js?v=112"></script><script src="./js/catalogo-admin.js?v=112"></script><script src="./js/desktop-dashboard.js?v=81"></script><script src="./js/desktop-sales.js?v=103"></script><script src="./js/desktop-settings.js?v=61"></script><script src="./js/app.js?v=122"></script>
+  <script src="./js/runtime-diagnostics.js?v=81"></script><script src="./js/build-info.js?v=123"></script><script src="./js/kyteData.js"></script><script src="./js/kyteBalances.js"></script><script src="./js/utils.js"></script><script src="./js/phone.js"></script><script src="./js/storage.js?v=123"></script><script src="./js/operation-mode.js?v=57"></script><script src="./js/backup.js"></script><script src="./js/cleanupDemo.js"></script><script src="./js/financial-concurrency.js?v=108"></script><script src="./js/clientes.js?v=100"></script><script src="./js/kyteBootstrap.js"></script><script src="./js/saldoCorrecoes.js"></script><script src="./js/financeMigration.js"></script><script src="./js/barcode.js?v=87"></script><script src="./js/plans.js?v=123"></script><script src="./js/produtos.js?v=92"></script><script src="./js/product-images.js?v=92"></script><script src="./js/campanhas.js"></script><script src="./js/vendas.js?v=121"></script><script src="./js/fiados.js?v=121"></script><script src="./js/cobrancas.js"></script><script src="./js/mensagens.js"></script><script src="./js/customer-metrics.js?v=80"></script><script src="./js/crm.js?v=92"></script><script src="./js/crm-segment-engine-v2.js?v=101"></script><script src="./js/engagement-segments.js?v=101"></script><script src="./js/crm-segment-builder.js?v=101"></script><script src="./js/crm-dashboard.js?v=101"></script><script src="./js/crm-mobile.js?v=101"></script><script src="./js/router.js?v=115"></script><script src="./js/csvImport.js"></script><script src="./js/recibos.js?v=92"></script><script src="./js/activity-center.js?v=98"></script><script src="./js/repositories.js"></script><script src="./js/checkout.js?v=103"></script><script src="./js/clientes-page.js?v=121"></script><script src="./js/crm-ui.js?v=92"></script><script src="./js/mensagens-mobile.js"></script><script src="./js/client-actions.js?v=85"></script><script src="./js/clientes-mobile.js?v=99"></script><script src="./js/produtos-mobile.js?v=92"></script><script src="./js/campanhas-ui.js?v=101"></script><script src="./js/campanhas-mobile.js"></script><script src="./js/configuracoes-mobile.js?v=123"></script><script src="./assets/qrcode.min.js"></script><script src="./js/catalog-presentation.js?v=112"></script><script src="./js/catalogo-admin.js?v=112"></script><script src="./js/desktop-dashboard.js?v=81"></script><script src="./js/desktop-sales.js?v=103"></script><script src="./js/desktop-settings.js?v=61"></script><script src="./js/app.js?v=123"></script>
   <script src="./js/client-cloud-pagination.js?v=99"></script>
   <script src="./js/product-variations.js?v=89"></script>
   <script src="./js/customer-subscriptions.js?v=93"></script>
   <script src="./js/runtime-access.js?v=58"></script>
   <script src="./js/mobile-navigation-gesture.js?v=78"></script>
   <script src="./js/mobile-navigation.js?v=78"></script>
-  <script src="./js/home-mobile.js?v=93"></script>
+  <script src="./js/home-mobile.js?v=123"></script>
   <script src="./js/visitas.js?v=112"></script>
   <script src="./js/checkout-mobile.js?v=92"></script>
   <script src="./js/coupons-admin.js?v=98"></script>
-  <script src="./js/visual-ui.js"></script>
+  <script src="./js/visual-ui.js?v=123"></script>
   <script src="./js/client-smart-mode.js?v=57"></script>
   <script>window.startPrivateUI=()=>{if(window.privateUIStarted)return;window.privateUIStarted=true;window.Checkout&&Checkout.mount();window.VisualUI&&VisualUI.start()};addEventListener('firebase-auth-ready',window.startPrivateUI);</script>
   <script type="module" src="./js/firebase/financial-space-service.js?v=122"></script>
-  <script type="module" src="./js/firebase/auth.js?v=122"></script>
+  <script type="module" src="./js/firebase/auth.js?v=123"></script>
   <script type="module" src="./js/firebase/firebase-ui.js?v=122"></script>
   <script type="module" src="./js/firebase/product-image-storage.js?v=88"></script>
   <script type="module" src="./js/firebase/catalog-image-storage.js?v=95"></script>
