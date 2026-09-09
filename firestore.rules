@@ -111,6 +111,51 @@ service cloud.firestore {
         || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid)
       );
     }
+    function creditCardAt(homeSpaceId, cardId) {
+      return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/creditCards/$(cardId)).data;
+    }
+    function validCreditCardAccess(card, homeSpaceId) {
+      return card.cardHomeSpaceId == homeSpaceId
+        && card.accessMode in ['all_spaces', 'selected_spaces', 'single_space']
+        && card.allowedFinancialSpaceIds is list
+        && card.allowedFinancialSpaceIds.size() <= 50
+        && card.defaultFinancialSpaceId is string
+        && card.defaultFinancialSpaceId.size() > 0
+        && (
+          (card.accessMode == 'all_spaces' && card.allowedFinancialSpaceIds.size() == 0)
+          || (card.accessMode == 'selected_spaces' && card.allowedFinancialSpaceIds.size() > 0)
+          || (card.accessMode == 'single_space' && card.allowedFinancialSpaceIds.size() == 1 && card.allowedFinancialSpaceIds[0] == card.defaultFinancialSpaceId)
+        );
+    }
+    function creditCardAllowsSpace(card, targetSpaceId) {
+      let target = financialSpace(targetSpaceId);
+      return card.active == true
+        && card.ownerUid == target.ownerUid
+        && (
+          (!('accessMode' in card) && card.financialSpaceId == targetSpaceId)
+          || card.accessMode == 'all_spaces'
+          || (card.accessMode == 'selected_spaces' && targetSpaceId in card.allowedFinancialSpaceIds)
+          || (card.accessMode == 'single_space' && card.defaultFinancialSpaceId == targetSpaceId)
+        );
+    }
+    function validCrossSpaceCardUse(targetSpaceId, cardHomeSpaceId, cardId) {
+      let card = creditCardAt(cardHomeSpaceId, cardId);
+      return exists(/databases/$(database)/documents/financialSpaces/$(cardHomeSpaceId)/creditCards/$(cardId))
+        && creditCardAllowsSpace(card, targetSpaceId)
+        && (
+          cardHomeSpaceId == targetSpaceId
+          || request.auth.uid == card.ownerUid
+        );
+    }
+    function creditCardScopeUpdateAllowed(before, after, homeSpaceId) {
+      return !after.diff(before).affectedKeys().hasAny([
+          'cardHomeSpaceId', 'accessMode', 'allowedFinancialSpaceIds', 'defaultFinancialSpaceId'
+        ])
+        || (
+          request.auth.uid == before.ownerUid
+          && validCreditCardAccess(after, homeSpaceId)
+        );
+    }
     match /plans/{planId} {
       allow read: if true;
       allow write: if false;
@@ -599,12 +644,15 @@ service cloud.firestore {
           && request.resource.data.dueDay is int
           && request.resource.data.dueDay >= 1
           && request.resource.data.dueDay <= 31
+          && validCreditCardAccess(request.resource.data, spaceId)
           && request.resource.data.active == true;
         allow update: if canManageFinancialSpace(spaceId)
           && request.resource.data.id == resource.data.id
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.last4 is string
+          && request.resource.data.last4.matches('^[0-9]{4}$')
           && request.resource.data.limitCents is int
           && request.resource.data.limitCents >= 0
           && request.resource.data.committedCents is int
@@ -614,7 +662,8 @@ service cloud.firestore {
           && request.resource.data.closingDay <= 31
           && request.resource.data.dueDay is int
           && request.resource.data.dueDay >= 1
-          && request.resource.data.dueDay <= 31;
+          && request.resource.data.dueDay <= 31
+          && creditCardScopeUpdateAllowed(resource.data, request.resource.data, spaceId);
         allow delete: if false;
       }
       match /creditCardInvoices/{invoiceId} {
@@ -625,6 +674,11 @@ service cloud.firestore {
           && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.creditCardId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && exists(/databases/$(database)/documents/financialSpaces/$(spaceId)/creditCards/$(request.resource.data.creditCardId))
+          && request.resource.data.spaceTotals is map
+          && request.resource.data.categoryTotals is map
+          && request.resource.data.spacesUsedIds is list
           && request.resource.data.referenceYear is int
           && request.resource.data.referenceMonth is int
           && request.resource.data.referenceMonth >= 1
@@ -643,6 +697,10 @@ service cloud.firestore {
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
           && request.resource.data.creditCardId == resource.data.creditCardId
+          && (!('cardHomeSpaceId' in request.resource.data) || request.resource.data.cardHomeSpaceId == spaceId)
+          && (!('spaceTotals' in request.resource.data) || request.resource.data.spaceTotals is map)
+          && (!('categoryTotals' in request.resource.data) || request.resource.data.categoryTotals is map)
+          && (!('spacesUsedIds' in request.resource.data) || request.resource.data.spacesUsedIds is list)
           && request.resource.data.referenceYear == resource.data.referenceYear
           && request.resource.data.referenceMonth == resource.data.referenceMonth
           && request.resource.data.openingDate == resource.data.openingDate
@@ -667,6 +725,10 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.creditCardId is string
           && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.cardHomeSpaceId is string
+          && validCrossSpaceCardUse(spaceId, request.resource.data.cardHomeSpaceId, request.resource.data.creditCardId)
+          && existsAfter(/databases/$(database)/documents/financialSpaces/$(request.resource.data.cardHomeSpaceId)/creditCardInvoices/$(request.resource.data.creditCardInvoiceId))
+          && getAfter(/databases/$(database)/documents/financialSpaces/$(request.resource.data.cardHomeSpaceId)/creditCardInvoices/$(request.resource.data.creditCardInvoiceId)).data.creditCardId == request.resource.data.creditCardId
           && request.resource.data.installmentGroupId is string
           && request.resource.data.installmentNumber is int
           && request.resource.data.installmentNumber >= 1
@@ -687,6 +749,11 @@ service cloud.firestore {
           && request.resource.data.creditCardInvoiceId is string
           && request.resource.data.creditCardId is string
           && request.resource.data.financialAccountId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && request.resource.data.paymentFinancialSpaceId is string
+          && canManageFinancialSpace(request.resource.data.paymentFinancialSpaceId)
+          && validCrossSpaceCardUse(request.resource.data.paymentFinancialSpaceId, spaceId, request.resource.data.creditCardId)
+          && exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.paymentFinancialSpaceId)/financialAccounts/$(request.resource.data.financialAccountId))
           && request.resource.data.amountCents is int
           && request.resource.data.amountCents > 0
           && request.resource.data.paymentMethod in ['cash', 'pix', 'debit_card', 'automatic_debit', 'transfer', 'other']
@@ -702,6 +769,11 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.creditCardInvoiceId is string
           && request.resource.data.creditCardId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && request.resource.data.purchaseFinancialSpaceId is string
+          && canManageFinancialSpace(request.resource.data.purchaseFinancialSpaceId)
+          && validCrossSpaceCardUse(request.resource.data.purchaseFinancialSpaceId, spaceId, request.resource.data.creditCardId)
+          && exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.purchaseFinancialSpaceId)/creditCardPurchases/$(request.resource.data.creditCardPurchaseId))
           && request.resource.data.kind in ['refund', 'credit', 'fee']
           && request.resource.data.amountCents is int
           && request.resource.data.amountCents > 0

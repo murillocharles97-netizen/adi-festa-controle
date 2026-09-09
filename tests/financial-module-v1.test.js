@@ -9,7 +9,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=122") < html.indexOf("auth.js?v=123"));
+  assert.ok(html.indexOf("financial-space-service.js?v=124") < html.indexOf("auth.js?v=123"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -103,9 +103,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 123 preserva cartões e faturas no novo cache VECONI", () => {
-  assert.match(read("js/build-info.js"), /release: "123"/);
-  assert.match(sw, /veconi-v123-visual-system-v2/);
+test("release 124 publica cartões compartilhados no novo cache VECONI", () => {
+  assert.match(read("js/build-info.js"), /release: "124"/);
+  assert.match(sw, /veconi-v124-shared-credit-cards/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
