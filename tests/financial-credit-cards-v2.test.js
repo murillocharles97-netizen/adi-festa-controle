@@ -126,6 +126,51 @@ test("estorno reduz gasto por categoria sem criar entrada de caixa", () => {
   assert.equal(summary.categories[0].amountCents, 20000);
 });
 
+test("cartão legado continua restrito ao espaço original", () => {
+  const legacy = engine.normalizeCreditCardAccess({ id: "c6", financialSpaceId: "casa", active: true }, "casa");
+  assert.equal(legacy.accessMode, "single_space");
+  assert.equal(legacy.cardHomeSpaceId, "casa");
+  assert.equal(engine.creditCardAllowsSpace(legacy, "casa"), true);
+  assert.equal(engine.creditCardAllowsSpace(legacy, "carro"), false);
+});
+
+test("all_spaces e selected_spaces controlam disponibilidade sem duplicar o cartão", () => {
+  const shared = engine.normalizeCreditCardAccess({ id: "c6", financialSpaceId: "casa", accessMode: "all_spaces", active: true }, "casa"),
+    selected = engine.normalizeCreditCardAccess({ id: "pj", financialSpaceId: "primeline", accessMode: "selected_spaces", allowedFinancialSpaceIds: ["primeline", "carro"], active: true }, "primeline");
+  assert.equal(engine.creditCardAllowsSpace(shared, "casa"), true);
+  assert.equal(engine.creditCardAllowsSpace(shared, "carro"), true);
+  assert.equal(engine.creditCardAllowsSpace(selected, "carro"), true);
+  assert.equal(engine.creditCardAllowsSpace(selected, "casa"), false);
+  assert.equal(shared.id, "c6");
+  assert.equal(shared.cardHomeSpaceId, "casa");
+});
+
+test("uma fatura mantém breakdown por espaço e categoria", () => {
+  let spaces = {}, categories = {};
+  spaces = engine.adjustDimensionTotal(spaces, "casa", 23800);
+  spaces = engine.adjustDimensionTotal(spaces, "carro", 25000);
+  categories = engine.adjustDimensionTotal(categories, "alimentacao", 23800);
+  categories = engine.adjustDimensionTotal(categories, "transporte", 25000);
+  assert.deepEqual(JSON.parse(JSON.stringify(spaces)), { casa: 23800, carro: 25000 });
+  assert.deepEqual(Array.from(engine.breakdownBy([
+    { financialSpaceId: "casa", amountCents: 23800 },
+    { financialSpaceId: "carro", amountCents: 25000 },
+  ], "financialSpaceId"), (item) => item.id), ["carro", "casa"]);
+  assert.equal(Object.values(categories).reduce((sum, value) => sum + value, 0), 48800);
+});
+
+test("compra compartilhada preserva espaço da compra e home da fatura", () => {
+  const service = fs.readFileSync("js/firebase/financial-space-service.js", "utf8"), ui = fs.readFileSync("js/financial-ui.js", "utf8");
+  assert.match(service, /purchaseRefs = installments\.map\(\(item\) => childRef\(space\.id, "creditCardPurchases"/);
+  assert.match(service, /childRef\(cardHomeSpaceId, "creditCardInvoices"/);
+  assert.match(service, /spaceTotals:\s*Engine\.adjustDimensionTotal/);
+  assert.match(service, /categoryTotals:\s*Engine\.adjustDimensionTotal/);
+  assert.match(ui, /Todos os meus espaços/);
+  assert.match(ui, /Espaços selecionados/);
+  assert.match(ui, /Somente este espaço/);
+  assert.match(ui, /data-card-home/);
+});
+
 test("frontend, persistência e rules publicam o domínio V2 sem listener global", () => {
   const service = fs.readFileSync("js/firebase/financial-space-service.js", "utf8"),
     ui = fs.readFileSync("js/financial-ui.js", "utf8"), rules = fs.readFileSync("firestore.rules", "utf8");

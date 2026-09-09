@@ -426,6 +426,55 @@ window.FinancialEngine = (() => {
     .reduce((sum, invoice) => sum + invoiceTotals(invoice).remainingCents, 0);
   const creditCardAvailableLimit = (limitCents, invoices = []) =>
     Math.max(0, cents(limitCents || 0) - creditCardCommitment(invoices));
+  const CREDIT_CARD_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
+  const normalizeCreditCardAccess = (card = {}, homeSpaceId = "") => {
+    const cardHomeSpaceId = String(card.cardHomeSpaceId || card.financialSpaceId || homeSpaceId || "").trim(),
+      requestedMode = String(card.accessMode || ""),
+      accessMode = CREDIT_CARD_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
+      defaultFinancialSpaceId = String(card.defaultFinancialSpaceId || cardHomeSpaceId || "").trim() || null,
+      requestedIds = Array.isArray(card.allowedFinancialSpaceIds) ? card.allowedFinancialSpaceIds : [],
+      allowedFinancialSpaceIds = [...new Set(requestedIds.map(String).map((id) => id.trim()).filter(Boolean))];
+    if (accessMode === "single_space" && defaultFinancialSpaceId && !allowedFinancialSpaceIds.includes(defaultFinancialSpaceId))
+      allowedFinancialSpaceIds.push(defaultFinancialSpaceId);
+    return {
+      ...card,
+      cardHomeSpaceId,
+      accessMode,
+      allowedFinancialSpaceIds: accessMode === "all_spaces" ? [] : allowedFinancialSpaceIds,
+      defaultFinancialSpaceId,
+    };
+  };
+  const creditCardAllowsSpace = (card = {}, financialSpaceId = "") => {
+    const normalized = normalizeCreditCardAccess(card), targetId = String(financialSpaceId || "").trim();
+    if (!targetId || normalized.active === false) return false;
+    if (normalized.accessMode === "all_spaces") return true;
+    if (normalized.accessMode === "selected_spaces") return normalized.allowedFinancialSpaceIds.includes(targetId);
+    return normalized.defaultFinancialSpaceId === targetId || normalized.cardHomeSpaceId === targetId;
+  };
+  const adjustDimensionTotal = (values = {}, key = "", deltaCents = 0) => {
+    const next = { ...(values && typeof values === "object" && !Array.isArray(values) ? values : {}) },
+      id = String(key || "").trim(), delta = cents(deltaCents || 0);
+    if (!id || !delta) return next;
+    const total = Math.max(0, cents(next[id] || 0) + delta);
+    if (total) next[id] = total;
+    else delete next[id];
+    return next;
+  };
+  const breakdownBy = (items = [], keyName = "financialSpaceId") => {
+    const totals = new Map();
+    for (const item of items) {
+      if (item?.status === "cancelled") continue;
+      const key = String(item?.[keyName] || "").trim();
+      if (!key) continue;
+      totals.set(key, (totals.get(key) || 0) + cents(item.amountCents || 0));
+    }
+    const grandTotalCents = [...totals.values()].reduce((sum, value) => sum + value, 0);
+    return [...totals.entries()].map(([id, amountCents]) => ({
+      id,
+      amountCents,
+      percentage: grandTotalCents ? Math.round((amountCents / grandTotalCents) * 100) : 0,
+    })).sort((left, right) => right.amountCents - left.amountCents || left.id.localeCompare(right.id));
+  };
   const buildInstallments = (input = {}) => {
     const amounts = installmentAmounts(input.amountCents, input.installmentCount),
       start = localDay(input.dueAt || new Date()),
@@ -534,6 +583,11 @@ window.FinancialEngine = (() => {
     deriveCreditCardInvoiceStatus,
     creditCardCommitment,
     creditCardAvailableLimit,
+    CREDIT_CARD_ACCESS_MODES,
+    normalizeCreditCardAccess,
+    creditCardAllowsSpace,
+    adjustDimensionTotal,
+    breakdownBy,
     buildInstallments,
     buildRecurringInstances,
     occurrenceKey,
