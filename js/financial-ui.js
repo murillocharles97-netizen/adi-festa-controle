@@ -50,6 +50,32 @@ window.FinanceiroUI = (() => {
   const automation = (space) => window.FinancialSpaceService?.automationState?.(space) || { enabled: false, autoIncome: {} };
   const automationLabel = (space) => space?.type === "business" && automation(space).enabled ? "Automático" : "Manual";
   const invoiceStatusLabel = { open: "Aberta", closed: "Fechada", paid: "Paga", overdue: "Vencida", cancelled: "Cancelada" };
+  const FINANCE_INIT_TIMEOUT_MS = 12_000;
+  const financeTrace = (marker, detail = {}) => console.info(`[${marker}]`, detail);
+
+  function waitForFinancialService() {
+    if (window.FinancialSpaceService) return Promise.resolve(window.FinancialSpaceService);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        removeEventListener("financial-service-ready", onReady);
+        removeEventListener("financial-service-error", onError);
+        callback(value);
+      };
+      const onReady = () => finish(resolve, window.FinancialSpaceService);
+      const onError = (event) => finish(reject, Object.assign(new Error(event.detail?.message || "Serviço financeiro indisponível."), {
+        code: event.detail?.code || "service-unavailable",
+      }));
+      const timer = setTimeout(() => finish(reject, Object.assign(new Error("O serviço financeiro não iniciou."), {
+        code: "finance-service-timeout",
+      })), FINANCE_INIT_TIMEOUT_MS);
+      addEventListener("financial-service-ready", onReady);
+      addEventListener("financial-service-error", onError);
+    });
+  }
 
   function render() {
     return `<section class="financial-page" aria-live="polite">
@@ -152,6 +178,7 @@ window.FinanceiroUI = (() => {
   function cardsMarkup(data) {
     const cards = data.creditCards || [], future = data.futureInvoices || [];
     return `${subpageHeader("Cartões", "Um cartão pode ser usado em vários espaços sem duplicar a fatura", state.consolidated ? "" : `<button class="btn btn-primary" type="button" data-financial-new-card>${icon("plus")} Novo cartão</button>`)}${internalNav()}
+      ${data.creditLoadError ? `<section class="financial-module-error">${icon("triangle-alert")}<span><b>Não foi possível carregar cartões.</b><small>O restante do Financeiro continua disponível.</small></span><button type="button" data-financial-retry-cards>Tentar novamente</button></section>` : ""}
       <section class="financial-credit-overview"><article><small>Compras deste espaço</small><strong>${money(data.creditCommittedCents || 0)}</strong><span>Parte atribuída ao espaço selecionado.</span></article><article><small>Cartões disponíveis</small><strong>${cards.length}</strong><span>Próprios ou compartilhados com este espaço.</span></article></section>
       <section class="financial-section financial-subpage-card"><header><h2>Meus cartões</h2></header>${cards.length ? `<div class="financial-credit-grid">${cards.map(creditCardMarkup).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão cadastrado</b><span>Cadastre um cartão para o vencimento ser calculado automaticamente.</span></div></div>`}</section>
       <section class="financial-section financial-subpage-card"><header><h2>Próximas faturas</h2></header>${future.length ? `<div class="financial-invoice-list">${future.slice(0, 12).map((invoice) => `<button type="button" data-financial-open-invoice="${esc(invoice.id)}" data-financial-invoice-home="${esc(invoice.cardHomeSpaceId)}" ${state.consolidated ? "disabled" : ""}><span>${icon("receipt-text")}<b>${esc(invoice.cardName || "Cartão")}</b><small>${monthLabel(invoice.referenceKey)} · vence ${dateLabel(invoice.dueDate)}${invoice.spaceAmountCents !== invoice.remainingCents ? ` · ${money(invoice.spaceAmountCents)} deste espaço` : ""}</small></span><strong>${money(invoice.remainingCents)}</strong><em class="financial-status is-${invoice.status === "overdue" ? "overdue" : invoice.status === "paid" ? "paid" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</em>${icon("chevron-right")}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("calendar-check")}<div><b>Sem faturas futuras</b><span>As parcelas e compras aparecerão aqui.</span></div></div>`}</section>`;
@@ -160,6 +187,7 @@ window.FinanceiroUI = (() => {
   function dashboardMarkup(data) {
     const summary = data.summary || {};
     return `${metricMarkup(summary)}${internalNav()}
+      ${data.creditLoadError ? `<section class="financial-module-error">${icon("triangle-alert")}<span><b>Cartões temporariamente indisponíveis.</b><small>Entradas, saídas e contas foram carregadas normalmente.</small></span><button type="button" data-financial-retry-cards>Tentar novamente</button></section>` : ""}
       <section class="financial-kpis">
         <button type="button" data-financial-view="accounts"><span>${icon("wallet-cards")}</span><small>Contas a pagar</small><b>${money(summary.pendingPayablesCents)}</b></button>
         <button type="button" data-financial-view="accounts"><span>${icon("calendar-clock")}</span><small>Vencem em 7 dias</small><b>${summary.dueSoonCount || 0} conta${summary.dueSoonCount === 1 ? "" : "s"}</b></button>
@@ -211,14 +239,19 @@ window.FinanceiroUI = (() => {
   }
 
   async function refresh(options = {}) {
-    const service = window.FinancialSpaceService, page = root();
-    if (!service || !page) return;
+    const page = root();
+    if (!page) return;
     const version = ++state.requestVersion;
     state.loading = true;
     state.error = "";
     if (!options.silent) page.classList.add("is-loading");
+    financeTrace("FINANCE_INIT_START", { version, period: state.period, consolidated: state.consolidated });
     try {
+      const service = await waitForFinancialService();
+      financeTrace("FINANCE_AUTH_READY", { authenticated: true });
+      financeTrace("FINANCE_SPACES_START");
       const available = await service.listSpaces();
+      financeTrace("FINANCE_SPACES_DONE", { count: available.length });
       if (version !== state.requestVersion || !root()) return;
       if (!available.length) {
         state.dashboard = null;
@@ -229,14 +262,32 @@ window.FinanceiroUI = (() => {
       state.selectedSpaceId = service.selectedSpaceId() || available[0].id;
       if (!service.listCachedSpaces().some((item) => item.id === state.selectedSpaceId)) state.selectedSpaceId = available[0].id;
       service.selectSpace(state.selectedSpaceId);
-      if (!state.consolidated) await service.reconcileBusinessIncome?.(state.selectedSpaceId);
+      financeTrace("FINANCE_SELECTED_SPACE", { selected: true, type: selectedSpace()?.type || "unknown" });
+      if (!state.consolidated) {
+        financeTrace("FINANCE_RECONCILIATION_START", { blocking: false });
+        Promise.resolve(service.reconcileBusinessIncome?.(state.selectedSpaceId)).then((result) => {
+          financeTrace("FINANCE_RECONCILIATION_DONE", { blocking: false, skipped: result?.skipped || null });
+        }).catch((error) => {
+          console.warn("[FINANCE_RECONCILIATION_ERROR]", { code: error?.code || "unknown" });
+        });
+      }
       const data = state.consolidated
         ? await service.loadConsolidated(service.selectedConsolidatedIds(), state.period)
-        : await service.loadDashboard(state.selectedSpaceId, state.period);
+        : await service.loadDashboard(state.selectedSpaceId, state.period, {
+          trace: financeTrace,
+          onCore: (core) => {
+            if (version !== state.requestVersion || !root()) return;
+            state.dashboard = core;
+            root().classList.remove("is-loading");
+            paint();
+          },
+        });
       if (version !== state.requestVersion || !root()) return;
       state.dashboard = data;
       paint();
+      financeTrace("FINANCE_INIT_DONE", { version, creditAvailable: !data.creditLoadError });
     } catch (error) {
+      console.error("[FINANCE_INIT_ERROR]", { code: error?.code || "unknown", message: error?.message || "finance-init-failed" });
       console.error("[FinanceiroUI] refresh failed", {
         code: error.code,
         operation: error.financialContext?.operation || "load",
@@ -245,8 +296,10 @@ window.FinanceiroUI = (() => {
       state.error = error.code === "permission-denied"
         ? "Não foi possível acessar este espaço financeiro."
         : "Não foi possível carregar seus dados financeiros agora.";
-      root().innerHTML = `<section class="financial-error">${icon("triangle-alert")}<h2>Não foi possível carregar o Financeiro</h2><p>${esc(state.error)}</p><button class="btn btn-primary" type="button" data-financial-retry>Tentar novamente</button></section>`;
-      bindPage();
+      if (root()) {
+        root().innerHTML = `<section class="financial-error">${icon("triangle-alert")}<h2>Não foi possível carregar o Financeiro</h2><p>${esc(state.error)}</p><button class="btn btn-primary" type="button" data-financial-retry>Tentar novamente</button></section>`;
+        bindPage();
+      }
     } finally {
       state.loading = false;
       root()?.classList.remove("is-loading");
@@ -766,6 +819,7 @@ window.FinanceiroUI = (() => {
     const page = root();
     if (!page) return;
     page.querySelector("[data-financial-retry]")?.addEventListener("click", () => refresh());
+    page.querySelectorAll("[data-financial-retry-cards]").forEach((button) => button.onclick = () => refresh({ silent: true }));
     page.querySelectorAll("[data-financial-open-spaces]").forEach((button) => button.onclick = openSpaces);
     page.querySelectorAll("[data-financial-open-period]").forEach((button) => button.onclick = openPeriod);
     page.querySelectorAll("[data-financial-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.financialView; paint(); });

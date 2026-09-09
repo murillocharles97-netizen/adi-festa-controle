@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Financeiro progressivo</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/financial.css">
+  <link rel="stylesheet" href="../css/financial-credit-v2.css">
+</head>
+<body>
+  <main id="app"></main><div id="modal"></div>
+  <script src="../assets/lucide.min.js"></script>
+  <script src="../js/financial-engine.js"></script>
+  <script>
+    const space={id:"car",name:"Carro",type:"other",icon:"car",ownerUid:"fixture-owner",active:true};
+    const core={space,periodKey:"2026-09",entries:[],accounts:[],latest:[],payables:[],categories:FinancialEngine.defaultCategoryTree("other"),financialAccounts:[],creditCards:[],creditCardInvoices:[],futureInvoices:[],creditCommittedCents:0,summary:{totalInCents:0,totalOutCents:0,resultCents:0,pendingPayablesCents:0,dueSoonCount:0,expensesTotalCents:0,categories:[]}};
+    window.FinancialSpaceService={
+      listSpaces:async()=>[space],listCachedSpaces:()=>[space],selectedSpaceId:()=>space.id,selectSpace:()=>space,
+      selectedConsolidatedIds:()=>[],automationState:()=>({enabled:false,autoIncome:{}}),reconcileBusinessIncome:async()=>({skipped:"manual"}),
+      loadDashboard:async(id,period,options={})=>{options.trace?.("FINANCE_ENTRIES_START");options.trace?.("FINANCE_ENTRIES_DONE",{count:0});options.trace?.("FINANCE_ACCOUNTS_START");options.trace?.("FINANCE_ACCOUNTS_DONE",{count:0});options.trace?.("FINANCE_SUMMARY_START");options.trace?.("FINANCE_SUMMARY_DONE",{entryCount:0});options.onCore?.(structuredClone(core));options.trace?.("FINANCE_CARDS_START");return new Promise(()=>{});},
+    };
+    window.Router={atual:()=>"financeiro"};
+  </script>
+  <script src="../js/financial-ui.js"></script>
+  <script>app.innerHTML=FinanceiroUI.render();FinanceiroUI.bind();</script>
+</body>
+</html>

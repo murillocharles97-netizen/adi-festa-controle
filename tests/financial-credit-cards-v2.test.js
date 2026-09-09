@@ -134,6 +134,13 @@ test("cartão legado continua restrito ao espaço original", () => {
   assert.equal(engine.creditCardAllowsSpace(legacy, "carro"), false);
 });
 
+test("cartão legado com campos opcionais ausentes é normalizado sem travar", () => {
+  const legacy = engine.normalizeCreditCardAccess({ id: "legacy", financialSpaceId: "casa", allowedFinancialSpaceIds: null }, "casa");
+  assert.equal(legacy.accessMode, "single_space");
+  assert.deepEqual(Array.from(legacy.allowedFinancialSpaceIds), ["casa"]);
+  assert.equal(engine.creditCardAllowsSpace(legacy, "casa"), true);
+});
+
 test("all_spaces e selected_spaces controlam disponibilidade sem duplicar o cartão", () => {
   const shared = engine.normalizeCreditCardAccess({ id: "c6", financialSpaceId: "casa", accessMode: "all_spaces", active: true }, "casa"),
     selected = engine.normalizeCreditCardAccess({ id: "pj", financialSpaceId: "primeline", accessMode: "selected_spaces", allowedFinancialSpaceIds: ["primeline", "carro"], active: true }, "primeline");
