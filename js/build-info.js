@@ -15,11 +15,11 @@
     commit,
     shortCommit,
     builtAt,
-    release: "122",
+    release: "123",
   });
 
   if (!window.__adiFestaBuildLogged) {
     window.__adiFestaBuildLogged = true;
-    console.info(`[Adi Festa] Build ${shortCommit} carregado`);
+    console.info(`[VECONI] Build ${shortCommit} carregado`);
   }
 })();

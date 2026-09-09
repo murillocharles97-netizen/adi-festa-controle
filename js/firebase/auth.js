@@ -1,7 +1,7 @@
 import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';
 import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
 import {doc,getDoc,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=115';
+import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=123';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
@@ -15,6 +15,7 @@ const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
 const esc=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+const brandMarkup=()=>`<div class="auth-branding">${window.VeconiBrand?.markup?.({mode:'stacked',tagline:true})||'<span class="veconi-logo veconi-logo--stacked"><img src="./assets/veconi-symbol.svg" alt=""><span class="veconi-wordmark"><b>econi</b><small>Seu negócio mais completo.</small></span></span>'}</div>`;
 const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/email-already-in-use':'Este e-mail já possui uma conta. Entre com sua senha.','auth/weak-password':'Use uma senha mais forte, com pelo menos 6 caracteres.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-disabled':'Esta conta está desativada.','auth/too-many-requests':'Muitas tentativas. Aguarde e tente novamente.','auth/network-request-failed':'Não foi possível conectar. Verifique sua internet.','permission-denied':'A operação foi bloqueada pelas regras de segurança.','resource-exhausted':'O limite temporário do Firebase foi atingido. Tente novamente mais tarde.'}[String(code||'').replace(/^(firestore|functions)\//,'')]||'Não foi possível concluir agora. Tente novamente.');
 const businessIdFor=user=>`biz_${user.uid}`;
 const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
@@ -45,9 +46,9 @@ function withTimeout(promise,token){
 function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapSequence)throw Object.assign(new Error('Bootstrap substituído por uma nova tentativa.'),{code:'bootstrap/cancelled'})}
 
 function login(message='',presetEmail=''){
-  screen(`<section class="auth-card auth-entry-card"><div class="auth-logo">AF</div><h1>${APP_NAME}</h1><p>Controle seu negócio com segurança, de qualquer aparelho.</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha">👁</button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar</button><button class="btn btn-light" type="button" id="show-register">Criar minha conta</button><button class="auth-link" type="button" data-show-plans>Ver planos</button></form></section>`);
+  screen(`<section class="auth-card auth-entry-card">${brandMarkup()}<h1>Bem-vindo</h1><p>Vendas, estoque, clientes, CRM e financeiro em um só lugar.</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha"><i data-lucide="eye"></i></button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar</button><button class="btn btn-light" type="button" id="show-register">Criar minha conta</button><button class="auth-link" type="button" data-show-plans>Ver planos</button></form></section>`);
   const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
-  document.querySelector('#toggle-password').onclick=()=>{const input=document.querySelector('[name=password]');input.type=input.type==='password'?'text':'password'};
+  document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('[name=password]'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}"></i>`;window.lucide?.createIcons()};
   document.querySelector('#show-register').onclick=()=>{registerState.step=1;register()};
   document.querySelector('[data-show-plans]').onclick=()=>plansScreen(false);
   document.querySelector('#login-form').onsubmit=async event=>{event.preventDefault();const button=document.querySelector('#login-submit'),form=new FormData(event.currentTarget);setButtonLoading(button,true,'Entrando…');try{await signInWithEmailAndPassword(auth,String(form.get('email')).trim(),form.get('password'))}catch(error){login(friendly(error.code))}};
@@ -63,7 +64,7 @@ function register(message=''){
   if(step===1)content=`<h1>Crie sua conta</h1><p>Primeiro, conte um pouco sobre você.</p><label>Nome completo<input name="name" required autocomplete="name" value="${esc(data.name)}"></label><label>WhatsApp<input name="phone" required inputmode="tel" autocomplete="tel" value="${esc(data.phone)}"></label><label>E-mail<input name="email" type="email" required autocomplete="email" value="${esc(data.email)}"></label><label>Senha<input name="password" type="password" minlength="6" required autocomplete="new-password" value="${esc(data.password)}"></label><label>Confirmar senha<input name="confirm" type="password" minlength="6" required autocomplete="new-password" value="${esc(data.confirm)}"></label>`;
   if(step===2)content=`<h1>Seu negócio</h1><p>Esses dados identificam o ambiente da sua empresa.</p><label>Nome do comércio<input name="businessName" required value="${esc(data.businessName)}"></label><label>Tipo de comércio<select name="businessType">${businessTypes.map(type=>`<option ${data.businessType===type?'selected':''}>${type}</option>`).join('')}</select></label><label>WhatsApp comercial<input name="businessPhone" required inputmode="tel" value="${esc(data.businessPhone||data.phone)}"></label><div class="auth-form-grid"><label>Cidade<input name="city" required value="${esc(data.city)}"></label><label>Estado<input name="state" maxlength="2" required value="${esc(data.state)}"></label></div><label>CPF/CNPJ <small>(opcional)</small><input name="document" value="${esc(data.document)}"></label>`;
   if(step===3)content=`<h1>Revise sua conta</h1><p>Você começará com 7 dias grátis e poderá escolher um plano depois.</p><div class="auth-review"><span><small>Administrador</small><b>${esc(data.name)}</b><em>${esc(data.email)}</em></span><span><small>Empresa</small><b>${esc(data.businessName)}</b><em>${esc(data.businessType)} · ${esc(data.city)}/${esc(data.state)}</em></span><span><small>Plano inicial</small><b>Teste grátis</b><em>7 dias · sem cobrança automática</em></span></div>`;
-  screen(`<section class="auth-card auth-register-card"><div class="auth-logo">AF</div>${progress}<form id="register-form">${content}<p class="auth-error">${esc(message)}</p><div class="auth-form-actions">${step>1?'<button class="btn btn-light" type="button" id="register-back">Voltar</button>':'<button class="btn btn-light" type="button" id="back-login">Já tenho conta</button>'}<button class="btn btn-primary" id="register-next">${step===3?'Criar conta':'Continuar'}</button></div></form></section>`);
+  screen(`<section class="auth-card auth-register-card">${brandMarkup()}${progress}<form id="register-form">${content}<p class="auth-error">${esc(message)}</p><div class="auth-form-actions">${step>1?'<button class="btn btn-light" type="button" id="register-back">Voltar</button>':'<button class="btn btn-light" type="button" id="back-login">Já tenho conta</button>'}<button class="btn btn-primary" id="register-next">${step===3?'Criar conta':'Continuar'}</button></div></form></section>`);
   document.querySelector('#back-login')?.addEventListener('click',()=>login());
   document.querySelector('#register-back')?.addEventListener('click',()=>{registerState.step--;register()});
   document.querySelector('#register-form').onsubmit=async event=>{
@@ -116,7 +117,7 @@ function plansScreen(authenticated=true){
 }
 function blockedScreen(user,context){
   const trial=context.access?.reason==='trial_expired';
-  screen(`<section class="auth-card auth-blocked-card"><div class="auth-logo">AF</div><h1>${trial?'Seu período de teste terminou':'Acesso temporariamente indisponível'}</h1><p>${trial?'Seus dados continuam salvos. Escolha um plano para voltar a criar vendas e cadastros.':'Entre em contato com o responsável pela conta.'}</p><button class="btn btn-primary" data-blocked-plans>Ver planos</button><button class="btn btn-light" data-export-data>Exportar meus dados</button><button class="btn btn-light" data-blocked-logout>Sair da conta</button></section>`);
+  screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${trial?'Seu período de teste terminou':'Acesso temporariamente indisponível'}</h1><p>${trial?'Seus dados continuam salvos. Escolha um plano para voltar a criar vendas e cadastros.':'Entre em contato com o responsável pela conta.'}</p><button class="btn btn-primary" data-blocked-plans>Ver planos</button><button class="btn btn-light" data-export-data>Exportar meus dados</button><button class="btn btn-light" data-blocked-logout>Sair da conta</button></section>`);
   document.querySelector('[data-blocked-plans]').onclick=()=>plansScreen(true);
   document.querySelector('[data-export-data]').onclick=downloadBackup;
   document.querySelector('[data-blocked-logout]').onclick=()=>logout(true);
@@ -124,7 +125,7 @@ function blockedScreen(user,context){
 function pendingOnboarding(uid){try{return JSON.parse(localStorage.getItem(pendingKey(uid))||'null')||{}}catch{return{}}}
 function resumeOnboarding(user,message='',draft=pendingOnboarding(user.uid)){
   const data={name:draft.name||draft.ownerName||user.displayName||'',phone:draft.phone||'',businessName:draft.businessName||'',businessType:draft.businessType||draft.segment||'Doceria',businessPhone:draft.businessPhone||draft.phone||'',city:draft.city||'',state:draft.state||'SP',document:draft.document||''};
-  screen(`<section class="auth-card auth-register-card"><div class="auth-logo">AF</div><h1>Concluir sua empresa</h1><p>Seu acesso já existe. Complete apenas os dados que faltam — nenhuma nova conta será criada.</p><form id="resume-onboarding-form"><label>E-mail<input value="${esc(user.email||'')}" readonly></label><label>Seu nome<input name="name" required autocomplete="name" value="${esc(data.name)}"></label><label>WhatsApp<input name="phone" required inputmode="tel" value="${esc(data.phone)}"></label><label>Nome da empresa<input name="businessName" required value="${esc(data.businessName)}"></label><label>Segmento<select name="businessType">${businessTypes.map(type=>`<option ${data.businessType===type?'selected':''}>${type}</option>`).join('')}</select></label><label>WhatsApp comercial<input name="businessPhone" required inputmode="tel" value="${esc(data.businessPhone)}"></label><div class="auth-form-grid"><label>Cidade<input name="city" required value="${esc(data.city)}"></label><label>Estado<input name="state" maxlength="2" required value="${esc(data.state)}"></label></div><label>CPF/CNPJ <small>(opcional)</small><input name="document" value="${esc(data.document)}"></label><p class="auth-error">${esc(message)}</p><div class="auth-form-actions"><button class="btn btn-light" type="button" id="resume-logout">Sair</button><button class="btn btn-primary" id="resume-submit">Concluir empresa</button></div></form></section>`);
+  screen(`<section class="auth-card auth-register-card">${brandMarkup()}<h1>Concluir sua empresa</h1><p>Seu acesso já existe. Complete apenas os dados que faltam — nenhuma nova conta será criada.</p><form id="resume-onboarding-form"><label>E-mail<input value="${esc(user.email||'')}" readonly></label><label>Seu nome<input name="name" required autocomplete="name" value="${esc(data.name)}"></label><label>WhatsApp<input name="phone" required inputmode="tel" value="${esc(data.phone)}"></label><label>Nome da empresa<input name="businessName" required value="${esc(data.businessName)}"></label><label>Segmento<select name="businessType">${businessTypes.map(type=>`<option ${data.businessType===type?'selected':''}>${type}</option>`).join('')}</select></label><label>WhatsApp comercial<input name="businessPhone" required inputmode="tel" value="${esc(data.businessPhone)}"></label><div class="auth-form-grid"><label>Cidade<input name="city" required value="${esc(data.city)}"></label><label>Estado<input name="state" maxlength="2" required value="${esc(data.state)}"></label></div><label>CPF/CNPJ <small>(opcional)</small><input name="document" value="${esc(data.document)}"></label><p class="auth-error">${esc(message)}</p><div class="auth-form-actions"><button class="btn btn-light" type="button" id="resume-logout">Sair</button><button class="btn btn-primary" id="resume-submit">Concluir empresa</button></div></form></section>`);
   document.querySelector('#resume-logout').onclick=bootstrapLogout;
   document.querySelector('#resume-onboarding-form').onsubmit=async event=>{
     event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget)),button=document.querySelector('#resume-submit'),saved={...data,...values,currentStep:3,updatedAt:new Date().toISOString()};
@@ -134,7 +135,7 @@ function resumeOnboarding(user,message='',draft=pendingOnboarding(user.uid)){
   };
 }
 function unauthorized(user,message,canResume=false,title='Acesso não configurado'){
-  screen(`<section class="auth-card"><div class="auth-logo">AF</div><h1>${esc(title)}</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
+  screen(`<section class="auth-card">${brandMarkup()}<h1>${esc(title)}</h1><p>${esc(message)}</p>${canResume?'<button class="btn btn-primary" id="resume-onboarding">Retomar criação da empresa</button>':''}<button class="btn btn-light" id="logout-unauthorized">Sair da conta</button></section>`);
   document.querySelector('#resume-onboarding')?.addEventListener('click',()=>resumeOnboarding(user));
   document.querySelector('#logout-unauthorized').onclick=bootstrapLogout;
 }
@@ -152,7 +153,7 @@ function bootstrapTechnicalDetails(details={}){
 function bootstrapErrorScreen(user,state,message,{manual=false,title='',details={}}={}){
   setBootstrapState(state,{code:details.code||state});
   const heading=title||(state==='temporary_unavailable'?'Configuração temporariamente indisponível':state==='permission_error'?'Permissão necessária':'Não foi possível abrir o aplicativo');
-  screen(`<section class="auth-card auth-blocked-card"><div class="auth-logo">AF</div><h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
+  screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-retry').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Tentando…';await retryBootstrap(user)};
   document.querySelector('#bootstrap-manual-migration')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Executando…';await completeLegacyMigrationManually()});
   document.querySelector('#bootstrap-logout').onclick=bootstrapLogout;
@@ -176,7 +177,7 @@ async function bootstrapLogout(){
   dispatchEvent(new CustomEvent('firebase-session-cleared',{detail:{uid:signingOutUid||''}}));
   if(signingOutUid)automaticBootstrapAttempts.delete(signingOutUid);
   setBootstrapState('unauthenticated');
-  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Saindo da conta…</p></section>');
+  screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Saindo da conta…</p></section>`);
   try{await Promise.race([signOut(auth),new Promise((_,reject)=>setTimeout(()=>reject(Error('logout-timeout')),5000))])}catch(error){console.warn('[Firebase Bootstrap] logout',{code:normalizedCode(error)||'timeout'})}finally{login()}
 }
 async function retryBootstrap(user=auth.currentUser){
@@ -304,7 +305,7 @@ async function logout(force=false){
 async function bootstrapCore(user,token,mode){
   setBootstrapState('loading_profile',{mode});
   bootstrapLog('profile loading');
-  screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Validando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');
+  screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Validando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
   const profileRef=doc(db,'users',user.uid),profileSnapshot=await getDoc(profileRef);
   assertCurrentRun(token);
@@ -335,7 +336,7 @@ async function bootstrapCore(user,token,mode){
       throw Object.assign(new Error('A conta não atende aos critérios seguros da migração legada.'),{code:'permission-denied'});
     }
     setBootstrapState('migration_required',{mode,businessId:profile.businessId});
-    screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Concluindo a configuração segura da Adi Festa…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');
+    screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Concluindo a configuração segura do seu negócio…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>`);
     document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
     ({profile,business}=await migrateLegacy(user,profile,business,mode));
     assertCurrentRun(token);
@@ -418,7 +419,7 @@ window.LegacyMigrationAdmin={
   complete:completeLegacyMigrationManually,
   state:()=>({bootstrapState,inProgress:Boolean(bootstrapRun),readyUid:readyUid?`${readyUid.slice(0,6)}…`:''})
 };
-screen('<section class="auth-card auth-loading"><div class="auth-logo">AF</div><p>Verificando acesso…</p></section>');
+screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Verificando acesso…</p></section>`);
 window.FirebaseRuntimeMetrics={...(window.FirebaseRuntimeMetrics||{}),activeAuthObservers:1};
 onAuthStateChanged(auth,user=>{
   try{window.SyncFirebase.setAuthReady(true)}catch(error){console.warn('[Bootstrap optional module]',{module:'sync-auth-ready',code:normalizedCode(error)||'SYNC_UNAVAILABLE'})}

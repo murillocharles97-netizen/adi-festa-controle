@@ -1,5 +1,5 @@
 const DAY=86400000;
-export const APP_NAME='Adi Festa Controle';
+export const APP_NAME='VECONI';
 export const INTERNAL_BUSINESS_ID='adi-festa';
 
 const OPERATION_FEATURES={products:true,clients:true,sales:true,payments:true,creditAccounts:true,stock:true,barcode:true,cloudBackup:true,recentHistory:true,basicDashboard:true,reports:true,receipts:true,financialModule:true};
@@ -15,11 +15,11 @@ const FEATURE_ALIASES={
 };
 
 export const PLANS={
-  trial:{id:'trial',name:'Teste grátis',summary:'Todos os recursos do Profissional por 7 dias.',monthlyPrice:0,yearlyPrice:0,trialDays:7,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:300,clients:500,monthlySales:1500}},
-  essential:{id:'essential',name:'Essencial',summary:'Organize o básico do seu negócio.',monthlyPrice:29.90,yearlyPrice:299,trialDays:7,features:{...OPERATION_FEATURES,crm:true,crmExport:false,campaigns:false,onlineCatalog:false,onlineOrders:false,bulkMessages:false,loyalty:false,advancedStock:false,dataImport:false,advancedReports:false,multipleUsers:false,rolesPermissions:false,advancedExports:false,automations:false,prioritySupport:false,multipleStocks:false,multipleUnits:false},limits:{users:1,products:300,clients:500,monthlySales:1500}},
-  professional:{id:'professional',name:'Profissional',summary:'Mais recursos para vender e crescer.',monthlyPrice:49.90,yearlyPrice:499,trialDays:7,recommended:true,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:2000,clients:5000,monthlySales:10000}},
-  premium:{id:'premium',name:'Premium',summary:'Para negócios que querem o máximo.',monthlyPrice:79.90,yearlyPrice:799,trialDays:7,features:{...allFeatures},limits:{users:10,products:10000,clients:25000,monthlySales:50000}},
-  internal:{id:'internal',name:'Plano interno',summary:'Todos os recursos liberados.',monthlyPrice:0,yearlyPrice:0,trialDays:0,features:{...allFeatures,multipleStocks:true,multipleUnits:true},limits:{users:null,products:null,clients:null,monthlySales:null},unlimited:true}
+  trial:{id:'trial',name:'Teste grátis',summary:'Todos os recursos do VECONI Profissional por 7 dias.',monthlyPrice:0,yearlyPrice:0,trialDays:7,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:300,clients:500,monthlySales:1500}},
+  essential:{id:'essential',name:'VECONI Essencial',summary:'Organize o básico do seu negócio.',monthlyPrice:29.90,yearlyPrice:299,trialDays:7,features:{...OPERATION_FEATURES,crm:true,crmExport:false,campaigns:false,onlineCatalog:false,onlineOrders:false,bulkMessages:false,loyalty:false,advancedStock:false,dataImport:false,advancedReports:false,multipleUsers:false,rolesPermissions:false,advancedExports:false,automations:false,prioritySupport:false,multipleStocks:false,multipleUnits:false},limits:{users:1,products:300,clients:500,monthlySales:1500}},
+  professional:{id:'professional',name:'VECONI Profissional',summary:'Mais recursos para vender e crescer.',monthlyPrice:49.90,yearlyPrice:499,trialDays:7,recommended:true,features:{...OPERATION_FEATURES,...GROWTH_FEATURES,multipleUsers:true,prioritySupport:true,rolesPermissions:false,advancedExports:false,automations:false,multipleStocks:false,multipleUnits:false},limits:{users:3,products:2000,clients:5000,monthlySales:10000}},
+  premium:{id:'premium',name:'VECONI Premium',summary:'Para negócios que querem o máximo.',monthlyPrice:79.90,yearlyPrice:799,trialDays:7,features:{...allFeatures},limits:{users:10,products:10000,clients:25000,monthlySales:50000}},
+  internal:{id:'internal',name:'VECONI Interno',summary:'Todos os recursos liberados.',monthlyPrice:0,yearlyPrice:0,trialDays:0,features:{...allFeatures,multipleStocks:true,multipleUnits:true},limits:{users:null,products:null,clients:null,monthlySales:null},unlimited:true}
 };
 
 const ROLE_PERMISSIONS={

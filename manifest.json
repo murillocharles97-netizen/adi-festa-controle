@@ -1,16 +1,18 @@
 {
-  "name": "Adi Festa Controle",
-  "short_name": "Adi Festa",
-  "description": "Controle de vendas, clientes e fiados da Adi Festa.",
+  "name": "VECONI",
+  "short_name": "VECONI",
+  "description": "Vendas, estoque, clientes, CRM e financeiro em um só lugar.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone"],
-  "background_color": "#f5f6f8",
-  "theme_color": "#31d0ad",
+  "background_color": "#07141b",
+  "theme_color": "#07141b",
   "orientation": "portrait",
   "icons": [
-    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
-    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"./assets/icon-maskable-192.png","sizes":"192x192","type":"image/png","purpose":"maskable"},
+    {"src":"./assets/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
   ]
 }

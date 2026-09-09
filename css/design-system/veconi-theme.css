@@ -1,0 +1,303 @@
+:root {
+  color-scheme: light;
+  --veconi-primary: #16cdbb;
+  --veconi-primary-hover: #10b5a5;
+  --veconi-primary-active: #078f89;
+  --veconi-primary-soft: #e6faf7;
+  --veconi-cyan: #22e2d5;
+  --veconi-ink: #101b2d;
+  --veconi-ink-soft: #27364d;
+  --veconi-institutional: #07141b;
+  --veconi-institutional-soft: #0b2631;
+  --veconi-bg: #f5f7fa;
+  --veconi-surface: #fff;
+  --veconi-surface-soft: #f0f4f7;
+  --veconi-border: #dde4ea;
+  --veconi-border-strong: #cbd6df;
+  --veconi-text: #172235;
+  --veconi-text-muted: #758195;
+  --veconi-success: #16a77c;
+  --veconi-success-soft: #e5f8f2;
+  --veconi-warning: #c88716;
+  --veconi-warning-soft: #fff3de;
+  --veconi-danger: #e34855;
+  --veconi-danger-soft: #ffebee;
+  --veconi-info: #3c82d8;
+  --veconi-info-soft: #eaf3ff;
+  --veconi-gradient: linear-gradient(135deg, var(--veconi-cyan), var(--veconi-primary));
+  --veconi-radius-sm: 10px;
+  --veconi-radius-md: 12px;
+  --veconi-radius-card: 18px;
+  --veconi-radius-modal: 24px;
+  --veconi-shadow-sm: 0 5px 18px rgba(12, 32, 47, .055);
+  --veconi-shadow-md: 0 16px 44px rgba(8, 28, 42, .12);
+  --veconi-focus: 0 0 0 3px rgba(22, 205, 187, .24);
+  --veconi-control: 50px;
+  --veconi-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --veconi-font-page: clamp(1.625rem, 2.4vw, 2.125rem);
+  --veconi-font-section: clamp(1.25rem, 1.7vw, 1.5rem);
+  --veconi-font-card: clamp(.9375rem, 1.2vw, 1.125rem);
+
+  /* Compatibilidade controlada com os módulos existentes. */
+  --primary: var(--veconi-primary);
+  --primary-dark: var(--veconi-primary-hover);
+  --primary-soft: var(--veconi-primary-soft);
+  --dark: var(--veconi-ink);
+  --dark-2: var(--veconi-ink-soft);
+  --bg: var(--veconi-bg);
+  --card: var(--veconi-surface);
+  --text: var(--veconi-text);
+  --muted: var(--veconi-text-muted);
+  --line: var(--veconi-border);
+  --danger: var(--veconi-danger);
+  --warning: var(--veconi-warning);
+  --radius: var(--veconi-radius-card);
+  --shadow: var(--veconi-shadow-sm);
+  --af-color-primary: var(--veconi-primary);
+  --af-color-primary-hover: var(--veconi-primary-hover);
+  --af-color-primary-active: var(--veconi-primary-active);
+  --af-color-primary-soft: var(--veconi-primary-soft);
+  --af-color-primary-softer: #f4fcfb;
+  --af-color-navy: var(--veconi-ink);
+  --af-color-navy-soft: var(--veconi-ink-soft);
+  --af-color-text: var(--veconi-text);
+  --af-color-text-secondary: #5e6d82;
+  --af-color-muted: var(--veconi-text-muted);
+  --af-color-success: var(--veconi-success);
+  --af-color-success-soft: var(--veconi-success-soft);
+  --af-color-warning: var(--veconi-warning);
+  --af-color-warning-soft: var(--veconi-warning-soft);
+  --af-color-danger: var(--veconi-danger);
+  --af-color-danger-soft: var(--veconi-danger-soft);
+  --af-color-info: var(--veconi-info);
+  --af-color-info-soft: var(--veconi-info-soft);
+  --af-color-surface: var(--veconi-surface);
+  --af-color-surface-alt: var(--veconi-surface-soft);
+  --af-color-background: var(--veconi-bg);
+  --af-color-border: var(--veconi-border);
+  --af-color-border-strong: var(--veconi-border-strong);
+  --af-radius-sm: var(--veconi-radius-sm);
+  --af-radius-md: var(--veconi-radius-md);
+  --af-radius-lg: 16px;
+  --af-radius-xl: var(--veconi-radius-card);
+  --af-shadow-sm: var(--veconi-shadow-sm);
+  --af-shadow-md: var(--veconi-shadow-md);
+  --af-focus-ring: var(--veconi-focus);
+}
+
+html, body { background: var(--veconi-bg); color: var(--veconi-text); font-family: var(--veconi-font-family); }
+body { min-width: 280px; overflow-x: hidden; }
+::selection { background: rgba(34, 226, 213, .28); color: var(--veconi-ink); }
+.sr-only { position: absolute!important; width: 1px!important; height: 1px!important; padding: 0!important; margin: -1px!important; overflow: hidden!important; clip: rect(0, 0, 0, 0)!important; white-space: nowrap!important; border: 0!important; }
+
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--veconi-primary)!important;
+  outline-offset: 2px;
+  box-shadow: var(--veconi-focus);
+}
+:where(button, input, select, textarea) { font: inherit; }
+:where(input, select, textarea, .search) { accent-color: var(--veconi-primary); }
+
+.veconi-logo { display: inline-flex; align-items: center; min-width: 0; color: inherit; }
+.veconi-logo img { display: block; width: 46px; height: 46px; flex: 0 0 auto; object-fit: contain; }
+.veconi-logo--horizontal { gap: 2px; }
+.veconi-logo--stacked { flex-direction: column; gap: 8px; text-align: center; }
+.veconi-logo--stacked img { width: 72px; height: 72px; }
+.veconi-wordmark { display: grid; min-width: 0; line-height: 1; }
+.veconi-wordmark b { color: inherit; font-size: 28px; font-weight: 850; letter-spacing: -.055em; text-transform: lowercase; }
+.veconi-wordmark small { margin-top: 6px; color: inherit; font-size: 11px; font-weight: 550; letter-spacing: 0; opacity: .68; white-space: nowrap; }
+
+/* Primitivos globais VECONI. */
+.v-card,
+:where(.panel, .metric-card, .entity-card, .desktop-panel, .professional-client-card,
+  .mobile-product-card, .campaign-admin-card, .campaign-detail-panel, .coupon-card,
+  .visit-card, .subscription-plan-card, .desktop-settings-card, .financial-section,
+  .financial-kpis > *, .financial-credit-overview > *, .crm-segment-card) {
+  border-color: var(--veconi-border);
+  border-radius: var(--veconi-radius-card);
+  background-color: var(--veconi-surface);
+  box-shadow: var(--veconi-shadow-sm);
+}
+
+.v-button, .btn { min-height: 44px; border-radius: var(--veconi-radius-md); font-weight: 800; }
+.btn-primary, .v-button--primary { border-color: transparent; background: var(--veconi-primary); color: #071c20; }
+.btn-primary:hover, .v-button--primary:hover { background: var(--veconi-primary-hover); color: #fff; }
+.btn-light, .v-button--secondary { border: 1px solid var(--veconi-border); background: var(--veconi-surface); color: var(--veconi-text); }
+.v-button--ghost { border-color: transparent; background: transparent; color: var(--veconi-text); }
+.v-button--ghost:hover { background: var(--veconi-surface-soft); }
+.v-button--danger { border-color: transparent; background: var(--veconi-danger-soft); color: #bd2d3a; }
+.btn-dark { background: var(--veconi-ink); color: #fff; }
+.btn-danger { background: var(--veconi-danger-soft); color: #bd2d3a; }
+.icon-btn, .mobile-icon-button, .v-icon-button { min-width: 44px; min-height: 44px; border-radius: var(--veconi-radius-md); }
+.v-icon-button { display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--veconi-border); background: var(--veconi-surface); color: var(--veconi-ink); }
+
+:where(.field input, .field select, .field textarea, .search, .toolbar input,
+  .auth-card input, .auth-card select, .financial-field input, .financial-field select,
+  .financial-field textarea, .product-modal-search input) {
+  min-height: var(--veconi-control);
+  border-color: var(--veconi-border-strong);
+  border-radius: var(--veconi-radius-md);
+  background: var(--veconi-surface);
+  color: var(--veconi-text);
+}
+:where(.field input, .field select, .field textarea, .search, .toolbar input,
+  .auth-card input, .auth-card select, .financial-field input, .financial-field select,
+  .financial-field textarea):focus {
+  border-color: var(--veconi-primary-hover);
+  box-shadow: var(--veconi-focus);
+  outline: 0;
+}
+.v-input { width: 100%; min-height: var(--veconi-control); padding: 0 14px; border: 1px solid var(--veconi-border-strong); border-radius: var(--veconi-radius-md); background: var(--veconi-surface); color: var(--veconi-text); }
+.v-input:focus { border-color: var(--veconi-primary-hover); outline: 0; box-shadow: var(--veconi-focus); }
+:where(input[type="checkbox"], input[type="radio"]) { min-width: 20px; min-height: 20px; accent-color: var(--veconi-primary-hover); }
+
+.v-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 13px; border: 1px solid var(--veconi-border); border-radius: 999px; background: var(--veconi-surface); color: var(--veconi-text); font-size: .8125rem; font-weight: 750; }
+.v-chip.is-active, .v-chip[aria-pressed="true"] { border-color: var(--veconi-primary); background: var(--veconi-primary-soft); color: #087f75; }
+.v-tabs { display: flex; gap: 4px; padding: 5px; border: 1px solid var(--veconi-border); border-radius: 14px; background: var(--veconi-surface-soft); }
+.v-tabs > button { flex: 1; min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--veconi-text-muted); font-weight: 800; }
+.v-tabs > button.is-active, .v-tabs > button[aria-selected="true"] { background: var(--veconi-surface); color: #087f75; box-shadow: var(--veconi-shadow-sm); }
+.v-badge { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: var(--veconi-surface-soft); color: var(--veconi-text-muted); font-size: .75rem; font-weight: 800; }
+.v-badge--success { background: var(--veconi-success-soft); color: #08785c; }
+.v-badge--warning { background: var(--veconi-warning-soft); color: #955d08; }
+.v-badge--danger { background: var(--veconi-danger-soft); color: #b92f3b; }
+.v-badge--info { background: var(--veconi-info-soft); color: #246ab5; }
+
+:where(.badge-paid, .af-badge--success, .status-success, .client-status.good) { background: var(--veconi-success-soft); color: #08785c; }
+:where(.badge-debt, .status-warning) { background: var(--veconi-warning-soft); color: #955d08; }
+:where(.status-danger, .toast-error) { background: var(--veconi-danger-soft); color: #b92f3b; }
+:where(.status-info) { background: var(--veconi-info-soft); color: #246ab5; }
+
+:where(.af-chip.active, .client-chip.active, .mobile-filter-chip.active, .product-filter-chip.active,
+  .financial-filter-chips button.active, .campaign-filter-chips button.active,
+  .online-order-chips button.active, .activity-chips button.active) {
+  border-color: var(--veconi-primary);
+  background: var(--veconi-primary-soft);
+  color: #087f75;
+}
+:where(.financial-module-tabs, .campaign-detail-tabs, .catalog-admin-tabs, .mobile-tabs) {
+  border-color: var(--veconi-border);
+  background: rgba(240, 244, 247, .9);
+}
+:where(.financial-module-tabs, .campaign-detail-tabs, .catalog-admin-tabs, .mobile-tabs) button.active {
+  color: #087f75;
+}
+
+.modal-bg { background: rgba(5, 17, 26, .64); backdrop-filter: blur(3px); }
+.modal-box, .mobile-modal, .v-modal, .v-sheet { border-radius: var(--veconi-radius-modal); background: var(--veconi-surface); box-shadow: 0 28px 80px rgba(5, 22, 33, .24); }
+.modal-head, .modal-foot { border-color: var(--veconi-border); }
+.sheet-handle, .mobile-sheet-handle { background: #c5d1d8; }
+.empty, .empty-state, .v-empty-state { color: var(--veconi-text-muted); }
+.v-empty-state { display: grid; justify-items: center; gap: 8px; padding: 24px; text-align: center; }
+.empty :where(svg, i), .empty-state :where(svg, i) { color: var(--veconi-primary-hover); }
+
+table { background: var(--veconi-surface); }
+th { background: #f8fafb; color: var(--veconi-text-muted); }
+tr:hover td { background: #f7fcfb; }
+#toasts .toast { border: 1px solid rgba(255, 255, 255, .08); border-radius: var(--veconi-radius-md); background: var(--veconi-ink); box-shadow: var(--veconi-shadow-md); }
+#toasts .toast-error { background: #a92e3a; color: #fff; }
+
+/* Identidade do shell. */
+.sidebar { background: linear-gradient(180deg, #07141b 0%, #0a1c27 58%, #0b2631 100%); }
+.brand { display: grid; gap: 13px; }
+.brand-platform { display: flex; align-items: center; min-width: 0; color: #fff; }
+.brand-logo { display: block; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 0; background: transparent; }
+.brand-logo img { width: 100%; height: 100%; object-fit: contain; }
+.brand .veconi-wordmark b { font-size: 25px; color: #fff; }
+.brand .veconi-wordmark small { color: #b5c3cc; opacity: 1; }
+.brand-business { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; padding: 9px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(255, 255, 255, .045); }
+.brand-business > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgba(22, 205, 187, .15); color: #71f1e5; font-size: 11px; font-weight: 900; }
+.brand-business-copy { display: grid; min-width: 0; }
+.brand-business-copy strong { overflow: hidden; color: #eef7fa; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.brand-business-copy small { margin-top: 2px; color: #8fa2ae; font-size: 9px; }
+.brand-business-copy .mobile-plan-pill { width: max-content; margin-top: 5px; }
+.sidebar nav a.active { background: rgba(22, 205, 187, .13); box-shadow: inset 3px 0 var(--veconi-primary); color: #fff; }
+.sidebar nav a.active svg { color: var(--veconi-primary); }
+.desktop-sidebar-footer > span:first-child { background: var(--veconi-primary); }
+
+.topbar { border-color: var(--veconi-border); background: rgba(255, 255, 255, .96); }
+.topbar-title { display: flex; align-items: center; min-width: 0; }
+.topbar-title-copy { min-width: 0; }
+.topbar-brand-mark { display: none; width: 30px; height: 30px; flex: 0 0 30px; }
+.topbar h1 { color: var(--veconi-text); font-weight: 850; letter-spacing: -.025em; }
+.local-badge { background: var(--veconi-primary-soft); color: #087e74; }
+.avatar { background: var(--veconi-ink); color: #fff; }
+
+.bottom-nav { border-color: var(--veconi-border); background: rgba(255, 255, 255, .96); backdrop-filter: blur(16px); }
+.bottom-nav :where(a, button) { color: #65758b; }
+.bottom-nav a.active { background: transparent; color: #078f83; }
+.bottom-nav .mobile-client-fab { background: transparent; color: #65758b; box-shadow: none; }
+.bottom-nav .mobile-client-fab > svg { background: var(--veconi-gradient); color: #062529; box-shadow: 0 10px 25px rgba(9, 162, 151, .24); }
+
+/* Módulos preservam semântica, mas compartilham a marca. */
+.mobile-home-dashboard { --home-green: var(--veconi-primary-hover); --home-navy: var(--veconi-ink); }
+.financial-page { --financial-navy: var(--veconi-ink); --financial-muted: var(--veconi-text-muted); --financial-mint: var(--veconi-primary-hover); --financial-mint-dark: #087e74; --financial-mint-soft: var(--veconi-primary-soft); }
+.campaign-v2-page, .campaign-v2-detail { --campaign-green: var(--veconi-primary-hover); --campaign-ink: var(--veconi-ink); --campaign-muted: var(--veconi-text-muted); --campaign-line: var(--veconi-border); }
+:where(.mobile-page, .clients-page) { --mobile-navy: var(--veconi-ink); --mobile-mint: var(--veconi-primary-hover); --mobile-mint-dark: #087e74; --mobile-mint-soft: var(--veconi-primary-soft); --mobile-line: var(--veconi-border); --mobile-muted: var(--veconi-text-muted); }
+.financial-credit-card { background: linear-gradient(145deg, #0a2330, #103950); box-shadow: 0 16px 34px rgba(7, 31, 44, .18); }
+.home-greeting h2, .dashboard-intro h2 { display: flex; align-items: center; gap: 8px; }
+.home-greeting h2 > svg, .dashboard-intro h2 > svg { width: 24px; height: 24px; flex: 0 0 24px; color: var(--veconi-primary-hover); }
+.product-favorite svg { width: 21px; height: 21px; fill: transparent; stroke: currentColor; }
+.product-favorite.is-favorite svg { fill: currentColor; }
+.campaign-participant-main small svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* Login, onboarding e splash. */
+html.auth-pending body { min-height: 100dvh; padding-bottom: 0!important; background: var(--veconi-institutional); }
+#auth-gate:not([hidden]) { position: relative; isolation: isolate; display: grid; place-items: center; width: 100%; min-height: 100dvh; padding: max(22px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); overflow: hidden; background: radial-gradient(circle at 50% 12%, rgba(22, 205, 187, .16), transparent 34%), linear-gradient(145deg, #061016, #09232c 72%, #06383a); }
+#auth-gate:not([hidden])::before { content: ""; position: fixed; z-index: -1; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 0 47%, rgba(34, 226, 213, .035) 47.2% 47.5%, transparent 47.7%); }
+.auth-card { position: relative; width: min(438px, calc(100vw - 32px)); border: 1px solid rgba(221, 228, 234, .9); border-radius: 26px; background: rgba(255, 255, 255, .98); box-shadow: 0 28px 80px rgba(0, 10, 16, .32); }
+.auth-branding { display: grid; place-items: center; margin: 0 auto 22px; color: var(--veconi-ink); }
+.auth-branding .veconi-logo--stacked img { width: 76px; height: 76px; }
+.auth-branding .veconi-wordmark b { font-size: 36px; }
+.auth-branding .veconi-wordmark small { color: var(--veconi-text-muted); font-size: 12px; opacity: 1; }
+.auth-card h1 { color: var(--veconi-text); }
+.auth-card > p { color: var(--veconi-text-muted); }
+.auth-link { color: #087f75; }
+.veconi-splash { display: grid; justify-items: center; gap: 10px; color: #fff; text-align: center; }
+.veconi-splash .veconi-logo--stacked img { width: 104px; height: 104px; }
+.veconi-splash .veconi-wordmark b { font-size: 42px; }
+.veconi-splash .veconi-wordmark small { color: #c2d0d6; font-size: 13px; opacity: 1; }
+.veconi-splash > small { color: #8fa6ae; }
+
+@media (min-width: 768px) {
+  .sidebar { width: 252px; }
+  .shell { margin-left: 252px; }
+  .brand { padding: 0 8px 18px; }
+  .brand-platform { min-height: 48px; }
+  .topbar { height: 72px; }
+}
+
+@media (max-width: 767px) {
+  :root { --mobile-header-base-height: 86px; }
+  .topbar { grid-template-columns: 44px minmax(0, 1fr) 44px 42px; gap: 8px; border-bottom-color: rgba(255, 255, 255, .07); background: linear-gradient(120deg, #071821, #0b3541); color: #fff; }
+  .topbar-title { display: grid!important; grid-template-columns: 30px minmax(0, 1fr); gap: 9px; align-items: center; overflow: hidden; }
+  .topbar-brand-mark { display: block; }
+  .topbar h1 { color: #fff; font-size: clamp(20px, 5.7vw, 25px); }
+  .topbar small { color: #a9bdc6; }
+  .topbar .menu-btn { color: #e8f6f7; }
+  .topbar .local-badge { border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .08); color: #65eee2; }
+  .topbar .local-badge .cloud-count { border-color: #0a2c36; }
+  .topbar .avatar { background: rgba(255, 255, 255, .13); color: #fff; }
+  main#app { padding-top: 20px; }
+  .sidebar .brand { display: grid; gap: 12px; padding-top: calc(18px + var(--safe-top)); }
+  .sidebar .brand-platform { padding-right: 46px; }
+  .sidebar .brand-logo { width: 48px; height: 48px; flex-basis: 48px; }
+  .sidebar .brand .veconi-wordmark b { font-size: 27px; }
+  .sidebar .brand-business { margin-right: 0; }
+  .modal-bg { align-items: end; padding: 8px; }
+  .modal-box, .mobile-modal { max-height: calc(100dvh - max(12px, env(safe-area-inset-top))); border-radius: 26px 26px 12px 12px; }
+  :where(.btn, .v-button, input, select, textarea) { min-height: 48px; }
+  :where(.financial-module-tabs, .qa-tabs) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; overflow: hidden; }
+  :where(.financial-module-tabs, .qa-tabs) button { min-width: 0!important; padding: 10px 3px!important; overflow: hidden; font-size: 11px!important; text-overflow: ellipsis; white-space: nowrap; }
+  .bottom-nav { box-shadow: 0 -10px 30px rgba(9, 29, 43, .08); }
+}
+
+@media (max-width: 350px) {
+  .topbar { grid-template-columns: 42px minmax(0, 1fr) 40px 36px; gap: 4px; padding-inline: 5px; }
+  .topbar-title { grid-template-columns: 25px minmax(0, 1fr); gap: 6px; }
+  .topbar-brand-mark { width: 25px; height: 25px; }
+  .topbar .avatar { width: 36px; min-width: 36px; height: 36px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto!important; animation-duration: .01ms!important; animation-iteration-count: 1!important; transition-duration: .01ms!important; }
+}

@@ -183,7 +183,7 @@
           : []),
       ])}
       ${window.OperationMode?.renderSettings?.() || ""}
-      <button type="button" class="settings-logout" data-settings-logout>${icon("log-out")} Sair da conta</button><p class="settings-version">Adi Festa Controle · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
+      <button type="button" class="settings-logout" data-settings-logout>${icon("log-out")} Sair da conta</button><p class="settings-version">VECONI · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
   }
   function modal(content, className = "settings-sheet") {
     const root = $("#modal");
