@@ -126,6 +126,17 @@ async function main() {
   await reset(1366,768); await click("[data-financial-open-spaces]"); await shot("28-desktop-seletor-espacos.png");
   await reset(1366,768); await click('[data-financial-view="accounts"]'); await shot("29-desktop-contas-a-pagar.png");
 
+  await page.setViewport({ width:390, height:844, deviceScaleFactor:1, isMobile:true });
+  await page.goto(`${base}/tests/financial-loading.fixture.html`, { waitUntil:"networkidle0" });
+  await page.waitForSelector(".financial-summary-values strong", { timeout:2_000 });
+  const progressive = await page.evaluate(() => ({
+    summaryValues:document.querySelectorAll(".financial-summary-values strong").length,
+    loadingVisible:Boolean(document.querySelector(".financial-loading-card")),
+    title:document.querySelector(".financial-context-button b")?.textContent || "",
+  }));
+  if (progressive.summaryValues !== 3 || progressive.loadingVisible || progressive.title !== "Carro") throw Error(`Core bloqueado por cartões: ${JSON.stringify(progressive)}`);
+  await shot("30-mobile-core-carregado-com-cartoes-pendentes.png");
+
   if (pageErrors.length) throw Error(`Erros no browser: ${pageErrors.join(" | ")}`);
   console.log(JSON.stringify({ ok: true, audits, screenshots: fs.readdirSync(OUTPUT).sort() }, null, 2));
   await browser.close();

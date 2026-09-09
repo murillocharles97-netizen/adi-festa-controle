@@ -5,7 +5,13 @@ const {spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),skip=new Set(['node_modules','.git','.codex-remote-attachments','.vscode']),files=[];
 function walk(directory){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){if(skip.has(entry.name))continue;const file=path.join(directory,entry.name);if(entry.isDirectory())walk(file);else if(entry.name.endsWith('.js'))files.push(file)}}
 walk(root);
-for(const file of files){const result=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});if(result.status!==0){process.stderr.write(`${path.relative(root,file)}\n${result.stderr}`);process.exitCode=1}}
+for(const file of files){
+  const source=fs.readFileSync(file,'utf8'),isModule=/^\s*(?:import|export)\s/m.test(source),
+    result=isModule
+      ?spawnSync(process.execPath,['--input-type=module','--check'],{encoding:'utf8',input:source})
+      :spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
+  if(result.status!==0){process.stderr.write(`${path.relative(root,file)}\n${result.stderr}`);process.exitCode=1}
+}
 if(process.exitCode)process.exit(process.exitCode);
 for(const htmlName of ['index.html','catalogo.html']){const html=fs.readFileSync(path.join(root,htmlName),'utf8');for(const match of html.matchAll(/(?:src|href)=["'](\.\/[^"'?#]+)/g)){const target=path.join(root,match[1]);if(!fs.existsSync(target)){console.error(`${htmlName}: arquivo ausente ${match[1]}`);process.exitCode=1}}}
 if(process.argv.includes('--build')){

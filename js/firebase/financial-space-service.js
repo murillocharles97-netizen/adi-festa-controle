@@ -110,13 +110,6 @@ const assertSpace = (spaceId) => {
   return space;
 };
 const ownedSpaces = () => state.spaces.filter((space) => space.ownerUid === uid());
-const normalizeCreditCard = (card, homeSpaceId = "") => Engine.normalizeCreditCardAccess(card, homeSpaceId);
-const cardCanBeUsedInSpace = (card, targetSpace) => {
-  const normalized = normalizeCreditCard(card);
-  if (!targetSpace || normalized.ownerUid !== targetSpace.ownerUid) return false;
-  return Engine.creditCardAllowsSpace(normalized, targetSpace.id);
-};
-const ownedSpaces = () => state.spaces.filter((space) => space.ownerUid === uid());
 const cardHomeSpaceId = (card = {}, fallback = "") => String(
   card.cardHomeSpaceId || card.financialSpaceId || fallback || "",
 ).trim();
@@ -1410,11 +1403,13 @@ async function migrateLegacyCategories(space, entryLists = []) {
   };
 }
 
-async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey()) {
-  const [financialAccounts, creditCards] = await Promise.all([
-    listFinancialAccounts(spaceId),
-    listCreditCards(spaceId),
-  ]), invoiceValues = await listCreditCardInvoices(spaceId, { cards: creditCards }), invoices = invoiceValues.map((invoice) => ({
+async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey(), options = {}) {
+  const trace = typeof options.trace === "function" ? options.trace : () => {}, financialAccounts = options.financialAccounts || [];
+  trace("FINANCE_CARDS_START");
+  const creditCards = await listCreditCards(spaceId);
+  trace("FINANCE_CARDS_DONE", { count: creditCards.length });
+  trace("FINANCE_INVOICES_START");
+  const invoiceValues = await listCreditCardInvoices(spaceId, { cards: creditCards }), invoices = invoiceValues.map((invoice) => ({
     ...invoice,
     ...Engine.invoiceTotals(invoice),
     status: Engine.deriveCreditCardInvoiceStatus(invoice),
@@ -1450,6 +1445,7 @@ async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey()) 
       categoryIcon: "credit-card",
       invoiceStatus: invoice.status,
     }));
+  trace("FINANCE_INVOICES_DONE", { count: invoices.length });
   return {
     financialAccounts,
     creditCards: cardSummaries,
@@ -1462,16 +1458,22 @@ async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey()) 
   };
 }
 
-async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
-  const space = assertSpace(spaceId), started = performance.now(), [month, accounts, categories, credit] = await Promise.all([
-    monthEntries(space.id, selectedPeriod),
-    dueMonthEntries(space.id, selectedPeriod),
-    listCategories(space.id),
-    loadCreditOverview(space.id, selectedPeriod),
-  ]), categoryMigration = await migrateLegacyCategories(space, [month, accounts]),
-    allAccounts = [...accounts, ...credit.invoicePayables], payables = Engine.sortPayables(allAccounts), latest = month.filter((entry) => entry.status === "paid" && !entry.reversedByEntryId)
-      .sort((left, right) => (Engine.localDate(right.occurredAt)?.getTime() || 0) - (Engine.localDate(left.occurredAt)?.getTime() || 0)),
-    summary = Engine.summarize(month), accountSummary = Engine.summarize(allAccounts), result = {
+const emptyCreditOverview = (financialAccounts = [], error = "") => ({
+  financialAccounts,
+  creditCards: [],
+  creditCardInvoices: [],
+  selectedCreditCardInvoices: [],
+  invoicePayables: [],
+  creditCommittedCents: 0,
+  futureInvoices: [],
+  creditLoadError: error,
+});
+
+function composeDashboard(space, selectedPeriod, month, accounts, categories, categoryMigration, credit) {
+  const allAccounts = [...accounts, ...credit.invoicePayables], payables = Engine.sortPayables(allAccounts), latest = month.filter((entry) => entry.status === "paid" && !entry.reversedByEntryId)
+    .sort((left, right) => (Engine.localDate(right.occurredAt)?.getTime() || 0) - (Engine.localDate(left.occurredAt)?.getTime() || 0)),
+    summary = Engine.summarize(month), accountSummary = Engine.summarize(allAccounts);
+  return {
     space: structuredClone(space),
     periodKey: selectedPeriod,
     entries: month,
@@ -1489,6 +1491,45 @@ async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey()) {
     },
     ...credit,
   };
+}
+
+async function loadDashboard(spaceId, selectedPeriod = Engine.periodKey(), options = {}) {
+  const space = assertSpace(spaceId), started = performance.now(), trace = typeof options.trace === "function" ? options.trace : () => {};
+  trace("FINANCE_ENTRIES_START");
+  const monthPromise = monthEntries(space.id, selectedPeriod).then((items) => {
+    trace("FINANCE_ENTRIES_DONE", { count: items.length });
+    return items;
+  });
+  trace("FINANCE_ACCOUNTS_START");
+  const accountsPromise = Promise.all([
+    dueMonthEntries(space.id, selectedPeriod),
+    listFinancialAccounts(space.id),
+  ]).then(([items, financialAccounts]) => {
+    trace("FINANCE_ACCOUNTS_DONE", { count: items.length, financialAccountCount: financialAccounts.length });
+    return { items, financialAccounts };
+  });
+  const [month, accountData, categories] = await Promise.all([
+    monthPromise,
+    accountsPromise,
+    listCategories(space.id),
+  ]), accounts = accountData.items, categoryMigration = await migrateLegacyCategories(space, [month, accounts]);
+  trace("FINANCE_RECURRING_START", { deferred: true });
+  trace("FINANCE_RECURRING_DONE", { deferred: true });
+  trace("FINANCE_SUMMARY_START");
+  const core = composeDashboard(space, selectedPeriod, month, accounts, categories, categoryMigration, emptyCreditOverview(accountData.financialAccounts));
+  trace("FINANCE_SUMMARY_DONE", { entryCount: month.length, payableCount: core.payables.length });
+  options.onCore?.(core);
+  let credit;
+  try {
+    credit = await Promise.race([
+      loadCreditOverview(space.id, selectedPeriod, { financialAccounts: accountData.financialAccounts, trace }),
+      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Tempo limite ao carregar cartões."), { code: "deadline-exceeded" })), 12_000)),
+    ]);
+  } catch (error) {
+    console.error("[FINANCE_CREDIT_ERROR]", { code: error?.code || "unknown", message: error?.message || "credit-load-failed" });
+    credit = emptyCreditOverview(accountData.financialAccounts, error?.code || "unknown");
+  }
+  const result = composeDashboard(space, selectedPeriod, month, accounts, categories, categoryMigration, credit);
   state.lastReadStats = {
     operation: "loadDashboard",
     documents: month.length + accounts.length + credit.creditCardInvoices.length + credit.creditCards.length + credit.financialAccounts.length,
@@ -1588,6 +1629,7 @@ const FinancialSpaceService = {
   rebuildCreditCardInvoiceProjections,
   canShareCreditCards: (spaceId) => assertSpace(spaceId).ownerUid === uid(),
   listCreditCardInvoices,
+  loadCreditOverview,
   getCreditCardInvoiceDetails,
   createCreditCardPurchase,
   payCreditCardInvoice,

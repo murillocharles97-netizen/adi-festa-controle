@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
 
 const read = (file) => fs.readFileSync(file, "utf8"), service = read("js/firebase/financial-space-service.js"), backend = read("functions/src/services/financial-income-service.js"), functionsIndex = read("functions/src/index.js"), app = read("js/app.js"), html = read("index.html"), sw = read("service-worker.js");
 
@@ -9,7 +10,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=124") < html.indexOf("auth.js?v=123"));
+  assert.ok(html.indexOf("financial-space-service.js?v=125") < html.indexOf("auth.js?v=123"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -103,9 +104,30 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 124 publica cartões compartilhados no novo cache VECONI", () => {
-  assert.match(read("js/build-info.js"), /release: "124"/);
-  assert.match(sw, /veconi-v124-shared-credit-cards/);
+test("release 125 publica a correção de inicialização no novo cache VECONI", () => {
+  assert.match(read("js/build-info.js"), /release: "125"/);
+  assert.match(sw, /veconi-v125-finance-loading-fix/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
+});
+
+test("serviço financeiro é sintaticamente válido como módulo ESM", () => {
+  const parsed = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: service, encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.equal((service.match(/const ownedSpaces/g) || []).length, 1);
+  assert.equal((service.match(/const normalizeCreditCard/g) || []).length, 1);
+  assert.equal((service.match(/const cardCanBeUsedInSpace/g) || []).length, 1);
+});
+
+test("inicialização progressiva nunca prende o dashboard ao módulo de cartões", () => {
+  const ui = read("js/financial-ui.js");
+  assert.match(ui, /waitForFinancialService/);
+  assert.match(ui, /FINANCE_INIT_TIMEOUT_MS = 12_000/);
+  assert.match(ui, /onCore: \(core\)/);
+  assert.match(service, /Promise\.race\(\[/);
+  assert.match(service, /FINANCE_CREDIT_ERROR/);
+  assert.match(ui, /Não foi possível carregar cartões\./);
+  assert.match(ui, /FINANCE_INIT_DONE/);
+  assert.match(ui, /FINANCE_INIT_ERROR/);
+  assert.doesNotMatch(ui, /await service\.reconcileBusinessIncome/);
 });
