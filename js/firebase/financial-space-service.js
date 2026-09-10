@@ -760,13 +760,26 @@ async function createCreditCardPurchase(spaceId, input = {}) {
     cardRef = cardHomeSpaceId ? childRef(cardHomeSpaceId, "creditCards", creditCardId) : null;
   if (!card || card.active === false) throw new Error("O cartão escolhido não está disponível neste espaço.");
   const opId = String(input.operationId || operationId("credit_purchase")), purchaseDate = input.purchaseDate || now(),
-    installments = Engine.buildCreditCardInstallments({
+    requestedInstallmentCount = Math.min(60, Math.max(1, Math.trunc(Number(input.installmentCount || 1)))),
+    installmentStartNumber = Math.max(1, Math.trunc(Number(input.installmentStartNumber || 1))),
+    installmentTotalCount = Math.max(requestedInstallmentCount, Math.trunc(Number(input.installmentTotalCount || requestedInstallmentCount)));
+  if (installmentStartNumber + requestedInstallmentCount - 1 > installmentTotalCount)
+    throw new Error("A parcela atual ultrapassa o total do parcelamento.");
+  const installments = Engine.buildCreditCardInstallments({
       amountCents: Number(input.amountCents),
-      installmentCount: Number(input.installmentCount || 1),
+      installmentCount: requestedInstallmentCount,
       operationId: opId,
       purchaseDate,
       closingDay: card.closingDay,
       dueDay: card.dueDay,
+    }).map((item, index) => {
+      const installmentNumber = installmentStartNumber + index;
+      return {
+        ...item,
+        id: `${opId}_${String(installmentNumber).padStart(2, "0")}`,
+        installmentNumber,
+        installmentCount: installmentTotalCount,
+      };
     }), invoiceIds = [...new Set(installments.map((item) => `${creditCardId}_${item.invoice.referenceKey}`))],
     invoiceRefs = new Map(invoiceIds.map((id) => [id, childRef(cardHomeSpaceId, "creditCardInvoices", id)])),
     purchaseRefs = installments.map((item) => childRef(space.id, "creditCardPurchases", item.id)),
@@ -794,15 +807,16 @@ async function createCreditCardPurchase(spaceId, input = {}) {
     paymentMethod: "credit_card",
     paymentType: "credit_card",
     cashFlowEffect: false,
-    expenseRecognized: true,
+    expenseRecognized: input.expenseRecognized !== false,
     creditCardId,
     cardHomeSpaceId,
     creditCardInvoiceId: invoiceIds[0],
     creditCardInvoiceIds: invoiceIds,
     purchaseDate,
     installmentGroupId: opId,
-    installmentCount: installments.length,
-    sourceType: "credit_card_purchase",
+    installmentCount: installmentTotalCount,
+    installmentStartNumber,
+    sourceType: input.sourceType || "credit_card_purchase",
     sourceId: opId,
     merchant: String(input.merchant || description).slice(0, 120),
     notes: String(input.notes || "").slice(0, 500),
@@ -875,8 +889,8 @@ async function createCreditCardPurchase(spaceId, input = {}) {
         installmentNumber: installment.installmentNumber,
         installmentCount: installment.installmentCount,
         amountCents: installment.amountCents,
-        originalPurchaseAmountCents: amountCents,
-        description: installments.length > 1 ? `${description} · ${index + 1}/${installments.length}` : description,
+        originalPurchaseAmountCents: Number(input.originalPurchaseAmountCents || amountCents),
+        description: installment.installmentCount > 1 ? `${description} · ${installment.installmentNumber}/${installment.installmentCount}` : description,
         merchant: String(input.merchant || description).slice(0, 120),
         categoryId: entry.categoryId,
         categoryName: entry.categoryName,
@@ -903,7 +917,7 @@ async function createCreditCardPurchase(spaceId, input = {}) {
       creditCardId,
       cardHomeSpaceId,
       creditCardInvoiceIds: invoiceIds,
-      eventKind: "credit_card_purchase_created",
+      eventKind: input.sourceType === "credit_card_ongoing_installment" ? "credit_card_ongoing_installment_created" : "credit_card_purchase_created",
       transition: "created",
       status: "applied",
       amountCents,
@@ -913,6 +927,96 @@ async function createCreditCardPurchase(spaceId, input = {}) {
     return { entry: entryValue, installments, invoiceIds, retried: false };
   });
   emit("financial-data-changed", { entity: "creditCardPurchase", id: opId, spaceId: space.id });
+  return result;
+}
+
+async function createOngoingCreditCardInstallment(spaceId, input = {}) {
+  const installmentAmountCents = Number(input.installmentAmountCents),
+    currentInstallment = Math.trunc(Number(input.currentInstallment)),
+    totalInstallments = Math.trunc(Number(input.totalInstallments));
+  if (!Number.isInteger(installmentAmountCents) || installmentAmountCents <= 0)
+    throw new Error("Informe o valor da parcela.");
+  if (!Number.isInteger(currentInstallment) || !Number.isInteger(totalInstallments)
+    || currentInstallment < 1 || totalInstallments < currentInstallment || totalInstallments > 60)
+    throw new Error("Revise a parcela atual e o total de parcelas.");
+  const remainingInstallments = totalInstallments - currentInstallment + 1;
+  return createCreditCardPurchase(spaceId, {
+    ...input,
+    amountCents: installmentAmountCents * remainingInstallments,
+    installmentCount: remainingInstallments,
+    installmentStartNumber: currentInstallment,
+    installmentTotalCount: totalInstallments,
+    originalPurchaseAmountCents: installmentAmountCents * totalInstallments,
+    expenseRecognized: false,
+    sourceType: "credit_card_ongoing_installment",
+  });
+}
+
+async function adjustCreditCardInvoice(spaceId, invoiceId, input = {}) {
+  const space = assertSpace(spaceId), found = await findCreditCardInvoice(space.id, invoiceId, input.cardHomeSpaceId),
+    homeSpace = assertSpace(found.homeSpaceId), cardHomeSpaceId = homeSpace.id,
+    targetTotalCents = Number(input.targetTotalCents), opId = String(input.operationId || operationId("invoice_adjustment")),
+    invoiceRef = childRef(cardHomeSpaceId, "creditCardInvoices", invoiceId),
+    adjustmentRef = childRef(cardHomeSpaceId, "creditCardAdjustments", opId),
+    eventRef = childRef(cardHomeSpaceId, "events", opId), createdAt = now();
+  if (!Number.isInteger(targetTotalCents) || targetTotalCents < 0)
+    throw new Error("Informe o valor real da fatura.");
+  const result = await runTransaction(db, async (transaction) => {
+    const invoiceSnapshot = await transaction.get(invoiceRef), adjustmentSnapshot = await transaction.get(adjustmentRef);
+    if (adjustmentSnapshot.exists()) return { adjustment: convert(adjustmentSnapshot), retried: true };
+    if (!invoiceSnapshot.exists()) throw new Error("Fatura não encontrada.");
+    const invoice = convert(invoiceSnapshot), totalsBefore = Engine.invoiceTotals(invoice),
+      cardRef = childRef(cardHomeSpaceId, "creditCards", invoice.creditCardId), cardSnapshot = await transaction.get(cardRef);
+    if (!cardSnapshot.exists()) throw new Error("Cartão da fatura não encontrado.");
+    if (targetTotalCents < totalsBefore.paidTotalCents)
+      throw new Error("O valor real não pode ser menor que o total já pago.");
+    const effectCents = targetTotalCents - totalsBefore.amountDueCents;
+    if (!effectCents) throw new Error("O valor real já corresponde ao calculado pela VECONI.");
+    const card = convert(cardSnapshot), adjustmentsTotalCents = Number(invoice.adjustmentsTotalCents || 0) + effectCents,
+      totals = Engine.invoiceTotals({ ...invoice, adjustmentsTotalCents }), adjustment = {
+        id: opId,
+        ...baseMetadata(homeSpace, opId),
+        cardHomeSpaceId,
+        creditCardInvoiceId: invoice.id,
+        creditCardId: invoice.creditCardId,
+        kind: "opening_balance",
+        amountCents: Math.abs(effectCents),
+        effectCents,
+        previousTotalCents: totalsBefore.amountDueCents,
+        targetTotalCents,
+        reason: String(input.reason || "Saldo inicial / conciliação da fatura").slice(0, 300),
+        occurredAt: input.occurredAt || createdAt,
+        status: "confirmed",
+        createdAt,
+        schemaVersion: 4,
+      };
+    transaction.update(invoiceRef, clean({
+      ...totals,
+      adjustmentsTotalCents,
+      status: Engine.deriveCreditCardInvoiceStatus({ ...invoice, ...totals }),
+      updatedAt: createdAt,
+    }));
+    transaction.update(cardRef, clean({
+      committedCents: Math.max(0, Number(card.committedCents ?? totalsBefore.remainingCents) + effectCents),
+      updatedAt: createdAt,
+    }));
+    transaction.set(adjustmentRef, clean(adjustment));
+    transaction.set(eventRef, clean({
+      id: opId,
+      ...baseMetadata(homeSpace, opId),
+      creditCardInvoiceId: invoice.id,
+      creditCardId: invoice.creditCardId,
+      eventKind: "credit_card_invoice_adjusted",
+      transition: "reconciled",
+      status: "applied",
+      amountCents: Math.abs(effectCents),
+      effectCents,
+      createdAt,
+      schemaVersion: 4,
+    }));
+    return { adjustment, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, retried: false };
+  });
+  emit("financial-data-changed", { entity: "creditCardInvoiceAdjustment", id: opId, spaceId: space.id });
   return result;
 }
 
@@ -1340,19 +1444,25 @@ async function reversePaidEntry(spaceId, entry, reason = "") {
 }
 
 async function createTransfer(fromSpaceId, toSpaceId, input = {}) {
-  if (fromSpaceId === toSpaceId) throw new Error("Escolha espaços diferentes para a transferência.");
   const from = assertSpace(fromSpaceId), to = assertSpace(toSpaceId), amountCents = Number(input.amountCents),
     transferId = String(input.transferId || operationId("transfer")), at = input.occurredAt || now(), transferRef = doc(db, "financialTransfers", transferId),
-    common = { transferId, amountCents, status: "paid", occurredAt: at, paidAt: at, dueAt: at, paymentMethod: "transfer", sourceType: "transfer", sourceId: transferId, categoryId: "default_transfer", categoryName: "Transferência" },
+    fromFinancialAccountId = String(input.fromFinancialAccountId || "").trim(), toFinancialAccountId = String(input.toFinancialAccountId || "").trim(),
+    common = { transferId, amountCents, status: "paid", occurredAt: at, paidAt: at, dueAt: at, paymentMethod: "transfer", sourceType: "transfer", sourceId: transferId, categoryId: "default_transfer", categoryName: "Transferência", cashFlowEffect: false, expenseRecognized: false },
     out = Engine.normalizeEntry({ ...common, id: `${transferId}_out`, operationId: `${transferId}:out`, direction: "out", entryType: "transfer_out", description: input.description || `Transferência para ${to.name}` }),
     incoming = Engine.normalizeEntry({ ...common, id: `${transferId}_in`, operationId: `${transferId}:in`, direction: "in", entryType: "transfer_in", description: input.description || `Transferência de ${from.name}` });
   if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um valor válido para transferir.");
+  if (fromSpaceId === toSpaceId && (!fromFinancialAccountId || !toFinancialAccountId || fromFinancialAccountId === toFinancialAccountId))
+    throw new Error("Escolha contas diferentes para a transferência.");
   const created = await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(transferRef);
+    const snapshot = await transaction.get(transferRef), fromAccountSnapshot = fromFinancialAccountId
+      ? await transaction.get(childRef(from.id, "financialAccounts", fromFinancialAccountId)) : null,
+      toAccountSnapshot = toFinancialAccountId ? await transaction.get(childRef(to.id, "financialAccounts", toFinancialAccountId)) : null;
     if (snapshot.exists()) return false;
-    transaction.set(transferRef, clean({ id: transferId, operationId: transferId, fromSpaceId, toSpaceId, amountCents, description: String(input.description || "Transferência"), createdBy: uid(), status: "completed", occurredAt: at, createdAt: at, updatedAt: at, schemaVersion: 1 }));
-    transaction.set(childRef(from.id, "entries", out.id), clean({ ...baseMetadata(from, out.operationId), ...out, createdAt: at, updatedAt: at }));
-    transaction.set(childRef(to.id, "entries", incoming.id), clean({ ...baseMetadata(to, incoming.operationId), ...incoming, createdAt: at, updatedAt: at }));
+    if (fromAccountSnapshot && (!fromAccountSnapshot.exists() || convert(fromAccountSnapshot).active === false)) throw new Error("A conta de origem não está disponível.");
+    if (toAccountSnapshot && (!toAccountSnapshot.exists() || convert(toAccountSnapshot).active === false)) throw new Error("A conta de destino não está disponível.");
+    transaction.set(transferRef, clean({ id: transferId, operationId: transferId, fromSpaceId, toSpaceId, fromFinancialAccountId: fromFinancialAccountId || null, toFinancialAccountId: toFinancialAccountId || null, amountCents, description: String(input.description || "Transferência"), createdBy: uid(), status: "completed", occurredAt: at, createdAt: at, updatedAt: at, schemaVersion: 2 }));
+    transaction.set(childRef(from.id, "entries", out.id), clean({ ...baseMetadata(from, out.operationId), ...out, financialAccountId: fromFinancialAccountId || null, transferCounterpartyAccountId: toFinancialAccountId || null, createdAt: at, updatedAt: at }));
+    transaction.set(childRef(to.id, "entries", incoming.id), clean({ ...baseMetadata(to, incoming.operationId), ...incoming, financialAccountId: toFinancialAccountId || null, transferCounterpartyAccountId: fromFinancialAccountId || null, createdAt: at, updatedAt: at }));
     return true;
   });
   if (!created) return { transferId, out, in: incoming, retried: true };
@@ -1632,6 +1742,8 @@ const FinancialSpaceService = {
   loadCreditOverview,
   getCreditCardInvoiceDetails,
   createCreditCardPurchase,
+  createOngoingCreditCardInstallment,
+  adjustCreditCardInvoice,
   payCreditCardInvoice,
   refundCreditCardPurchase,
   migrateLegacyCategories,

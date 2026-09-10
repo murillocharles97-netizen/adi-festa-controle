@@ -98,6 +98,34 @@ test("pagamento parcial preserva saldo e pagamento total quita", () => {
   assert.equal(engine.deriveCreditCardInvoiceStatus({ ...paid, closingDate: "2026-09-12T12:00:00-03:00", dueDate: "2026-09-20T12:00:00-03:00" }), "paid");
 });
 
+test("transferência interna não altera entrada, saída, gasto ou resultado", () => {
+  const transferOut = purchaseEntry({ id: "transfer_out", sourceType: "transfer", paymentMethod: "transfer", cashFlowEffect: false, expenseRecognized: false }),
+    transferIn = purchaseEntry({ id: "transfer_in", direction: "in", sourceType: "transfer", paymentMethod: "transfer", cashFlowEffect: false, expenseRecognized: false });
+  const summary = engine.summarize([transferOut, transferIn]);
+  assert.equal(summary.totalInCents, 0);
+  assert.equal(summary.totalOutCents, 0);
+  assert.equal(summary.expensesTotalCents, 0);
+  assert.equal(summary.resultCents, 0);
+});
+
+test("saldo inicial da fatura reconcilia o total sem virar gasto categorizado", () => {
+  const reconciled = engine.invoiceTotals({ purchasesTotalCents: 43800, adjustmentsTotalCents: 106200, paidTotalCents: 0 });
+  assert.equal(reconciled.amountDueCents, 150000);
+  assert.equal(reconciled.remainingCents, 150000);
+  const source = fs.readFileSync("js/firebase/financial-space-service.js", "utf8");
+  assert.match(source, /kind: "opening_balance"/);
+  assert.match(source, /targetTotalCents - totalsBefore\.amountDueCents/);
+  assert.doesNotMatch(source.slice(source.indexOf("async function adjustCreditCardInvoice"), source.indexOf("async function payCreditCardInvoice")), /categoryId/);
+});
+
+test("parcelamento em andamento preserva a numeração real e ignora parcelas passadas", () => {
+  const source = fs.readFileSync("js/firebase/financial-space-service.js", "utf8");
+  assert.match(source, /remainingInstallments = totalInstallments - currentInstallment \+ 1/);
+  assert.match(source, /installmentStartNumber: currentInstallment/);
+  assert.match(source, /sourceType: "credit_card_ongoing_installment"/);
+  assert.match(source, /expenseRecognized: false/);
+});
+
 test("fatura não paga após vencimento fica vencida", () => {
   const invoice = { purchasesTotalCents: 5000, adjustmentsTotalCents: 0, paidTotalCents: 0, closingDate: "2026-09-12T12:00:00-03:00", dueDate: "2026-09-20T12:00:00-03:00" };
   assert.equal(engine.deriveCreditCardInvoiceStatus(invoice, "2026-09-10T12:00:00-03:00"), "open");
@@ -190,7 +218,14 @@ test("frontend, persistência e rules publicam o domínio V2 sem listener global
   assert.match(ui, /operationId:\s*draft\.operationId/);
   assert.match(ui, /Somente leitura/);
   assert.match(ui, /option value="transfer"/);
+  assert.match(ui, /Nova entrada/);
+  assert.match(ui, /Pagar conta/);
+  assert.match(ui, /Ajustar fatura/);
+  assert.match(ui, /Parcelamento em andamento/);
+  assert.match(ui, /Conta\/carteira de destino/);
+  assert.match(ui, /data-filter-category/);
   assert.match(service, /credit_refund_\$\{String\(purchaseId\)/);
+  assert.match(rules, /opening_balance/);
   assert.match(rules, /match \/creditCards\/\{cardId\}/);
   assert.doesNotMatch(service, /onSnapshot\s*\(/);
 });

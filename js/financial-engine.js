@@ -244,10 +244,11 @@ window.FinancialEngine = (() => {
   // permanece no razão para que original + reversão resultem exatamente zero.
   // `cashFlowEffect` separa competência de caixa. Uma compra no crédito é uma
   // despesa reconhecida hoje, mas só vira saída quando a fatura é paga.
-  const isRealized = (entry) => entry?.status === "paid" && entry?.cashFlowEffect !== false;
+  const isRealized = (entry) => entry?.status === "paid" && entry?.cashFlowEffect !== false && entry?.sourceType !== "transfer";
   const isExpenseRecognized = (entry) => entry?.direction === "out"
     && entry?.status === "paid"
     && entry?.expenseRecognized !== false
+    && entry?.sourceType !== "transfer"
     && !entry?.reversedByEntryId;
   const summarize = (entries = [], options = {}) => {
     const today = localDay(options.now || new Date()),
