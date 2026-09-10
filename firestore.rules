@@ -770,11 +770,20 @@ service cloud.firestore {
           && request.resource.data.creditCardInvoiceId is string
           && request.resource.data.creditCardId is string
           && request.resource.data.cardHomeSpaceId == spaceId
-          && request.resource.data.purchaseFinancialSpaceId is string
-          && canManageFinancialSpace(request.resource.data.purchaseFinancialSpaceId)
-          && validCrossSpaceCardUse(request.resource.data.purchaseFinancialSpaceId, spaceId, request.resource.data.creditCardId)
-          && exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.purchaseFinancialSpaceId)/creditCardPurchases/$(request.resource.data.creditCardPurchaseId))
-          && request.resource.data.kind in ['refund', 'credit', 'fee']
+          && (
+            (
+              request.resource.data.kind == 'opening_balance'
+              && !('creditCardPurchaseId' in request.resource.data)
+              && !('purchaseFinancialSpaceId' in request.resource.data)
+            )
+            || (
+              request.resource.data.kind in ['refund', 'credit', 'fee']
+              && request.resource.data.purchaseFinancialSpaceId is string
+              && canManageFinancialSpace(request.resource.data.purchaseFinancialSpaceId)
+              && validCrossSpaceCardUse(request.resource.data.purchaseFinancialSpaceId, spaceId, request.resource.data.creditCardId)
+              && exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.purchaseFinancialSpaceId)/creditCardPurchases/$(request.resource.data.creditCardPurchaseId))
+            )
+          )
           && request.resource.data.amountCents is int
           && request.resource.data.amountCents > 0
           && request.resource.data.effectCents is int
@@ -793,9 +802,26 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.amountCents is int
         && request.resource.data.amountCents > 0
-        && request.resource.data.fromSpaceId != request.resource.data.toSpaceId
+        && (
+          request.resource.data.fromSpaceId != request.resource.data.toSpaceId
+          || (
+            request.resource.data.fromFinancialAccountId is string
+            && request.resource.data.toFinancialAccountId is string
+            && request.resource.data.fromFinancialAccountId != request.resource.data.toFinancialAccountId
+          )
+        )
         && canManageFinancialSpace(request.resource.data.fromSpaceId)
-        && canManageFinancialSpace(request.resource.data.toSpaceId);
+        && canManageFinancialSpace(request.resource.data.toSpaceId)
+        && (
+          !('fromFinancialAccountId' in request.resource.data)
+          || request.resource.data.fromFinancialAccountId == null
+          || exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.fromSpaceId)/financialAccounts/$(request.resource.data.fromFinancialAccountId))
+        )
+        && (
+          !('toFinancialAccountId' in request.resource.data)
+          || request.resource.data.toFinancialAccountId == null
+          || exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.toSpaceId)/financialAccounts/$(request.resource.data.toFinancialAccountId))
+        );
       allow update, delete: if false;
     }
 

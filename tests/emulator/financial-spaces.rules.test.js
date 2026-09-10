@@ -91,10 +91,17 @@ test("cartões, faturas, contas e pagamentos respeitam o espaço pessoal", async
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), invoice));
   const purchase = { ...base, id: "purchase-1_01", operationId: "purchase-1:1", purchaseOperationId: "purchase-1", cardHomeSpaceId: spaceId, creditCardId: card.id, creditCardInvoiceId: invoice.id, installmentGroupId: "purchase-1", installmentNumber: 1, installmentCount: 1, amountCents: 23800, originalPurchaseAmountCents: 23800, description: "Mercado", purchaseDate: "2026-09-08T15:00:00.000Z", status: "posted" };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardPurchases", purchase.id), purchase));
+  const adjustment = { ...base, id: "opening-balance-1", operationId: "opening-balance-1", cardHomeSpaceId: spaceId, creditCardInvoiceId: invoice.id, creditCardId: card.id, kind: "opening_balance", amountCents: 6200, effectCents: 6200, previousTotalCents: 23800, targetTotalCents: 30000, reason: "Conciliação", occurredAt: "2026-09-09T15:00:00.000Z", status: "confirmed" };
+  const reconcile = writeBatch(owner);
+  reconcile.set(doc(owner, "financialSpaces", spaceId, "creditCardAdjustments", adjustment.id), adjustment);
+  reconcile.update(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), { adjustmentsTotalCents: 6200, remainingCents: 30000 });
+  reconcile.update(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { committedCents: 30000 });
+  await assertSucceeds(reconcile.commit());
+  await assertFails(setDoc(doc(intruder, "financialSpaces", spaceId, "creditCardAdjustments", "forged-opening"), { ...adjustment, id: "forged-opening", operationId: "forged-opening", createdBy: "owner-b" }));
   const payment = { ...base, id: "invoice-pay-1", operationId: "invoice-pay-1", cardHomeSpaceId: spaceId, paymentFinancialSpaceId: spaceId, creditCardInvoiceId: invoice.id, creditCardId: card.id, financialAccountId: account.id, amountCents: 10000, paymentMethod: "pix", paidAt: "2026-09-20T15:00:00.000Z", status: "confirmed" };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoicePayments", payment.id), payment));
-  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), { paidTotalCents: 10000, remainingCents: 13800, status: "closed" }));
-  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { committedCents: 13800 }));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), { paidTotalCents: 10000, remainingCents: 20000, status: "closed" }));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { committedCents: 20000 }));
   await assertFails(getDoc(doc(intruder, "financialSpaces", spaceId, "creditCards", card.id)));
   await assertFails(setDoc(doc(intruder, "financialSpaces", spaceId, "creditCards", "forged"), { ...card, id: "forged", operationId: "forged", createdBy: "owner-b" }));
   await assertFails(deleteDoc(doc(owner, "financialSpaces", spaceId, "creditCardPurchases", purchase.id)));
@@ -301,4 +308,39 @@ test("transferência grava os dois lados atomicamente e não pode ser alterada",
   await assertSucceeds(batch.commit());
   await assertFails(updateDoc(transferRef, { amountCents: 1 }));
   await assertFails(getDoc(doc(env.authenticatedContext("owner-b").firestore(), "financialTransfers", transferId)));
+});
+
+test("transferência entre contas do mesmo espaço exige contas distintas e autorizadas", async () => {
+  const db = env.authenticatedContext("owner-a").firestore(), spaceId = "internal-transfer", transferId = "transfer-internal";
+  const space = { id: spaceId, name: "Caixa pessoal", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true };
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", spaceId), space));
+
+  const accountBase = { financialSpaceId: spaceId, ownerUid: "owner-a", createdBy: "owner-a", type: "checking", initialBalanceCents: 0, active: true };
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", spaceId, "financialAccounts", "checking-a"), { ...accountBase, id: "checking-a", operationId: "financial_account_checking-a", name: "Conta A" }));
+  await assertSucceeds(setDoc(doc(db, "financialSpaces", spaceId, "financialAccounts", "checking-b"), { ...accountBase, id: "checking-b", operationId: "financial_account_checking-b", name: "Conta B" }));
+
+  const transfer = {
+    id: transferId,
+    operationId: transferId,
+    fromSpaceId: spaceId,
+    toSpaceId: spaceId,
+    fromFinancialAccountId: "checking-a",
+    toFinancialAccountId: "checking-b",
+    amountCents: 12500,
+    createdBy: "owner-a",
+  };
+  await assertSucceeds(setDoc(doc(db, "financialTransfers", transferId), transfer));
+  await assertFails(setDoc(doc(db, "financialTransfers", "transfer-same-account"), {
+    ...transfer,
+    id: "transfer-same-account",
+    operationId: "transfer-same-account",
+    fromFinancialAccountId: "checking-a",
+    toFinancialAccountId: "checking-a",
+  }));
+  await assertFails(setDoc(doc(db, "financialTransfers", "transfer-missing-account"), {
+    ...transfer,
+    id: "transfer-missing-account",
+    operationId: "transfer-missing-account",
+    toFinancialAccountId: "missing",
+  }));
 });
