@@ -1199,7 +1199,7 @@
           : route === "campanhas"
             ? "Fidelização, pontos e recompensas."
             : route === "financeiro"
-              ? "Controle entradas, saídas e contas."
+              ? "Organize hoje um futuro mais tranquilo."
             : route === "catalogo"
               ? (matchMedia("(max-width:767px)").matches ? "Seu catálogo online." : "Link permanente, produtos e disponibilidade.")
               : route === "pedidos"

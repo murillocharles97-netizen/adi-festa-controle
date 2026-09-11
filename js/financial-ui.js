@@ -8,6 +8,10 @@ window.FinanceiroUI = (() => {
     dashboard: null,
     consolidated: false,
     selectedSpaceId: "",
+    activeViewId: "",
+    activeSpaceIds: [],
+    viewProfile: null,
+    viewInitialized: false,
     accountFilter: "all",
     requestVersion: 0,
   };
@@ -47,6 +51,21 @@ window.FinanceiroUI = (() => {
   const statusClass = (entry) => `is-${Engine.effectiveStatus(entry)}`;
   const spaces = () => window.FinancialSpaceService?.listCachedSpaces?.() || [];
   const selectedSpace = () => spaces().find((item) => item.id === state.selectedSpaceId) || null;
+  const financialViews = () => {
+    const profileViews = state.viewProfile?.views || [], favorites = new Set(state.viewProfile?.favoriteViewIds || []), defaultId = state.viewProfile?.defaultViewId || "";
+    return [...profileViews, ...spaces().map((space) => ({
+      id: `space:${space.id}`,
+      name: space.name,
+      mode: "space",
+      financialSpaceIds: [space.id],
+      isSystem: true,
+      isFavorite: favorites.has(`space:${space.id}`),
+      isDefault: defaultId === `space:${space.id}`,
+      space,
+    }))].sort((left, right) => Number(right.isFavorite) - Number(left.isFavorite) || Number(right.isDefault) - Number(left.isDefault));
+  };
+  const activeFinancialView = () => financialViews().find((view) => view.id === state.activeViewId) || null;
+  const spaceName = (spaceId) => spaces().find((space) => space.id === spaceId)?.name || "Espaço";
   const automation = (space) => window.FinancialSpaceService?.automationState?.(space) || { enabled: false, autoIncome: {} };
   const automationLabel = (space) => space?.type === "business" && automation(space).enabled ? "Automático" : "Manual";
   const invoiceStatusLabel = { open: "Aberta", closed: "Fechada", paid: "Paga", overdue: "Vencida", cancelled: "Cancelada" };
@@ -84,21 +103,21 @@ window.FinanceiroUI = (() => {
   }
 
   const selectorMarkup = () => {
-    const space = selectedSpace();
+    const view = activeFinancialView(), space = selectedSpace();
     return `<div class="financial-context-selectors">
-      <button class="financial-context-button" type="button" data-financial-open-spaces aria-label="Escolher espaço financeiro">
-        <span>${icon(space?.icon || "wallet-cards")}<small>Espaço financeiro${state.consolidated ? "" : ` · ${automationLabel(space)}`}</small><b>${esc(state.consolidated ? "Visão consolidada" : space?.name || "Escolher espaço")}</b></span>${icon("chevron-down")}
+      <button class="financial-context-button" type="button" data-financial-open-spaces aria-label="Escolher visão financeira">
+        <span>${icon(view?.mode === "space" ? space?.icon || "wallet-cards" : "panels-top-left")}<small>${view?.isDefault ? "Visão padrão" : "Visão financeira"}</small><b>${esc(view?.name || space?.name || "Escolher visão")}</b></span>${icon("chevron-down")}
       </button>
       <button class="financial-context-button is-period" type="button" data-financial-open-period aria-label="Escolher período">
         <span>${icon("calendar-days")}<small>Período</small><b>${esc(monthLabel(state.period))}</b></span>${icon("chevron-down")}
       </button>
+      <button class="financial-save-view" type="button" data-financial-save-view>${icon("bookmark")}<span>Salvar visão</span></button>
     </div>`;
   };
 
   function metricMarkup(summary) {
     const resultClass = summary.resultCents < 0 ? "is-negative" : "is-positive";
     return `<section class="financial-summary-card">
-      ${selectorMarkup()}
       <div class="financial-summary-values">
         <article><small>Entradas</small><strong class="is-income">${money(summary.totalInCents)}</strong></article>
         <article><small>Saídas</small><strong class="is-expense">${money(summary.totalOutCents)}</strong></article>
@@ -110,12 +129,12 @@ window.FinanceiroUI = (() => {
   function payablesMarkup(entries = [], compact = true) {
     if (!entries.length) return `<div class="financial-empty-inline">${icon("calendar-check")}<div><b>Nenhuma conta pendente</b><span>As próximas contas aparecerão aqui.</span></div></div>`;
     return `<div class="financial-list ${compact ? "is-compact" : ""}">${entries.map((entry) => `
-      <article class="financial-list-row" ${entry.entityType === "credit_card_invoice" ? `data-financial-invoice-id="${esc(entry.creditCardInvoiceId)}" data-financial-invoice-home="${esc(entry.cardHomeSpaceId || state.selectedSpaceId)}"` : `data-financial-entry-id="${esc(entry.id)}"`}>
+      <article class="financial-list-row" ${entry.entityType === "credit_card_invoice" ? `data-financial-invoice-id="${esc(entry.creditCardInvoiceId)}" data-financial-invoice-home="${esc(entry.cardHomeSpaceId || state.selectedSpaceId)}" data-financial-target-space="${esc(entry.financialSpaceId || state.selectedSpaceId)}"` : `data-financial-entry-id="${esc(entry.id)}"`}>
         <span class="financial-row-icon">${icon(entry.categoryIcon || "receipt-text")}</span>
-        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${money(entry.amountCents)}</small></span>
+        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${state.activeSpaceIds.length > 1 ? `${esc(entry.financialSpaceName || spaceName(entry.financialSpaceId))} · ` : ""}${Engine.effectiveStatus(entry) === "overdue" ? "Venceu" : "Vence"} ${dateLabel(entry.dueAt)}</small></span>
         <span class="financial-row-date">${Engine.effectiveStatus(entry) === "overdue" ? "venceu" : "vence"} ${dateLabel(entry.dueAt)}</span>
         <span class="financial-status ${statusClass(entry)}">${entry.entityType === "credit_card_invoice" ? esc(invoiceStatusLabel[entry.invoiceStatus] || "Fatura") : statusLabel(entry)}</span>
-        ${compact || entry.status === "paid" ? "" : entry.entityType === "credit_card_invoice" ? `<button class="financial-row-action" type="button" data-financial-open-invoice="${esc(entry.creditCardInvoiceId)}" data-financial-invoice-home="${esc(entry.cardHomeSpaceId || state.selectedSpaceId)}">${icon("receipt-text")}<span>Ver fatura</span></button>` : `<button class="financial-row-action" type="button" data-financial-pay="${esc(entry.id)}">${icon("circle-check-big")}<span>Pagar</span></button>`}
+        ${compact || entry.status === "paid" ? "" : entry.entityType === "credit_card_invoice" ? `<button class="financial-row-action" type="button" data-financial-open-invoice="${esc(entry.creditCardInvoiceId)}" data-financial-invoice-home="${esc(entry.cardHomeSpaceId || state.selectedSpaceId)}" data-financial-target-space="${esc(entry.financialSpaceId || state.selectedSpaceId)}">${icon("receipt-text")}<span>Ver fatura</span></button>` : `<button class="financial-row-action" type="button" data-financial-pay="${esc(entry.id)}">${icon("circle-check-big")}<span>Pagar</span></button>`}
       </article>`).join("")}</div>`;
   }
 
@@ -127,7 +146,7 @@ window.FinanceiroUI = (() => {
       return `
       <article class="financial-list-row financial-entry-row" data-financial-entry-id="${esc(entry.id)}">
         <span class="financial-row-icon ${entry.direction === "in" ? "is-income" : "is-expense"}">${icon(entry.direction === "in" ? "arrow-up" : "arrow-down")}</span>
-        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${esc(entry.categoryName || "Outros")}${entry.subcategoryName ? ` · ${esc(entry.subcategoryName)}` : ""} · ${dateLabel(entry.occurredAt)}${entry.paymentMethod ? ` · ${esc(paymentLabel[entry.paymentMethod] || entry.paymentMethod)}` : ""}</small><em class="financial-origin-badge ${badgeClass}">${badgeLabel}</em></span>
+        <span class="financial-row-main"><b>${esc(entry.description)}</b><small>${state.activeSpaceIds.length > 1 ? `${esc(entry.financialSpaceName || spaceName(entry.financialSpaceId))} · ` : ""}${esc(entry.categoryName || "Outros")}${entry.subcategoryName ? ` · ${esc(entry.subcategoryName)}` : ""} · ${dateLabel(entry.occurredAt)}${entry.paymentMethod ? ` · ${esc(paymentLabel[entry.paymentMethod] || entry.paymentMethod)}` : ""}</small><em class="financial-origin-badge ${badgeClass}">${badgeLabel}</em></span>
         <span class="financial-status ${entry.sourceType === "transfer" || entry.direction === "in" ? "is-paid" : entry.cashFlowEffect === false ? "is-pending" : "is-overdue"}">${entry.sourceType === "transfer" ? "Transferência" : entry.direction === "in" ? entry.cashFlowEffect === false ? "Ajuste" : "Entrada" : entry.cashFlowEffect === false ? "Gasto no crédito" : "Saída"}</span>
         <strong class="financial-row-amount ${entry.direction === "in" ? "is-income" : "is-expense"}">${entry.direction === "in" ? entry.cashFlowEffect === false ? "− " : "+ " : "− "}${money(entry.amountCents)}</strong>
       </article>`; }).join("")}</div>`;
@@ -158,6 +177,7 @@ window.FinanceiroUI = (() => {
     if (normalized.accessMode === "selected_spaces") return `${normalized.allowedFinancialSpaceIds.length} espaços`;
     return `Somente ${names.get(normalized.defaultFinancialSpaceId) || "este espaço"}`;
   };
+  const cardTargetSpaceId = (card) => state.activeSpaceIds.find((spaceId) => Engine.creditCardAllowsSpace(card, spaceId)) || card.defaultFinancialSpaceId || card.cardHomeSpaceId || state.selectedSpaceId;
 
   const activeCardInvoices = (data = {}) => {
     const invoices = (data.creditCards || []).map((card) => card.currentInvoice).filter((invoice) => invoice && invoice.status !== "cancelled"), seen = new Set();
@@ -185,20 +205,20 @@ window.FinanceiroUI = (() => {
   function compactCardsMarkup(data = {}) {
     const invoices = activeCardInvoices(data), total = invoices.reduce((sum, invoice) => sum + Number(invoice.remainingCents || 0), 0), next = nearestOpenInvoice(data), nextDays = next ? daysUntil(next.dueDate) : null;
     if (!(data.creditCards || []).length && !data.creditLoadError) return "";
-    return `<section class="financial-section financial-cards-compact"><header><h2>Cartões</h2><button type="button" data-financial-view="cards">Ver cartões</button></header><button type="button" data-financial-view="cards"><span>${icon("credit-card")}</span><div><small>Faturas abertas</small><strong>${money(total)}</strong><em>${(data.creditCards || []).length} cartão${(data.creditCards || []).length === 1 ? "" : "ões"}${nextDays === null ? "" : nextDays < 0 ? " · há fatura vencida" : ` · próxima vence em ${nextDays} dia${nextDays === 1 ? "" : "s"}`}</em></div>${icon("chevron-right")}</button></section>`;
+    return `<section class="financial-section financial-cards-compact"><header><h2>Cartões</h2><button type="button" data-financial-view="cards">Ver cartões</button></header><button type="button" data-financial-view="cards"><span>${icon("credit-card")}</span><div><small>Faturas abertas</small><strong>${money(total)}</strong><em>${(data.creditCards || []).length} ${(data.creditCards || []).length === 1 ? "cartão" : "cartões"}${nextDays === null ? "" : nextDays < 0 ? " · há fatura vencida" : ` · próxima vence em ${nextDays} dia${nextDays === 1 ? "" : "s"}`}</em></div>${icon("chevron-right")}</button></section>`;
   }
 
   const creditCardMarkup = (card) => {
     const invoice = card.currentInvoice, status = invoice ? invoiceStatusLabel[invoice.status] || "Aberta" : "Sem fatura";
-    const invoiceDisabled = !invoice || state.consolidated;
     const shared = card.accessMode !== "single_space", currentSpaceAmount = invoice?.currentSpaceAmountCents ?? invoice?.spaceAmountCents ?? 0,
-      invoiceTotal = invoice?.amountDueCents ?? invoice?.remainingCents ?? 0;
+      invoiceTotal = invoice?.amountDueCents ?? 0, usedPercentage = card.limitCents ? Math.min(100, Math.round((Number(card.committedCents || 0) / Number(card.limitCents)) * 100)) : 0,
+      home = card.cardHomeSpaceId || card.financialSpaceId, target = cardTargetSpaceId(card);
     return `<article class="financial-credit-card" data-financial-card-id="${esc(card.id)}" data-financial-card-home="${esc(card.cardHomeSpaceId || card.financialSpaceId)}">
-      <header><span>${icon("credit-card")}</span><div><h3>${esc(card.name)}</h3><small>•••• ${esc(card.last4)}</small></div><em>${esc(status)}</em>${!state.consolidated && card.canEditScope ? `<button class="financial-card-manage" type="button" data-financial-edit-card="${esc(card.id)}" data-financial-card-home="${esc(card.cardHomeSpaceId || card.financialSpaceId)}" aria-label="Gerenciar ${esc(card.name)}">${icon("settings-2")}</button>` : ""}</header>
+      <header><span class="financial-card-brand">${esc(String(card.name || "CC").slice(0, 2).toUpperCase())}</span><div><h3>${esc(card.name)}</h3><small>•••• ${esc(card.last4)}</small></div><em class="financial-status is-${invoice?.status === "paid" ? "paid" : invoice?.status === "overdue" ? "overdue" : "pending"}">${esc(status)}</em>${card.canEditScope ? `<button class="financial-card-manage" type="button" data-financial-edit-card="${esc(card.id)}" data-financial-card-home="${esc(home)}" aria-label="Gerenciar ${esc(card.name)}">${icon("ellipsis-vertical")}</button>` : ""}</header>
       <span class="financial-card-scope">${icon(shared ? "share-2" : "lock-keyhole")} ${esc(cardScopeLabel(card))}</span>
-      <div class="financial-credit-card-total"><small>Total da fatura</small><strong>${money(invoiceTotal)}</strong><span>${invoice ? `Vence ${dateLabel(invoice.dueDate)}${shared ? ` · neste espaço ${money(currentSpaceAmount)}` : ""}` : "Nenhuma compra lançada"}</span></div>
-      <dl><div><dt>Limite</dt><dd>${money(card.limitCents || 0)}</dd></div><div><dt>Disponível</dt><dd>${money(card.availableCents || 0)}</dd></div></dl>
-      <button type="button" data-financial-card-invoice="${esc(invoice?.id || "")}" data-financial-invoice-home="${esc(invoice?.cardHomeSpaceId || card.cardHomeSpaceId || card.financialSpaceId)}" ${invoiceDisabled ? "disabled" : ""}>${state.consolidated ? "Somente leitura" : "Ver fatura"} ${icon("chevron-right")}</button>
+      <div class="financial-credit-card-total"><small>Total da fatura</small><strong>${money(invoiceTotal)}</strong><span>${invoice ? `Vence em ${fullDateLabel(invoice.dueDate)}${shared && state.activeSpaceIds.length === 1 ? ` · neste espaço: ${money(currentSpaceAmount)}` : ""}` : "Sem fatura neste ciclo"}</span></div>
+      <div class="financial-card-limit-bar"><i style="width:${usedPercentage}%"></i></div><dl><div><dt>Limite</dt><dd>${money(card.limitCents || 0)}</dd></div><div><dt>Disponível</dt><dd>${money(card.availableCents || 0)}</dd></div></dl>
+      <div class="financial-card-context-actions"><button type="button" data-financial-card-action="invoice" data-card-id="${esc(card.id)}" data-card-home="${esc(home)}" data-target-space="${esc(target)}" data-invoice-id="${esc(invoice?.id || "")}">${icon("receipt-text")}<span>Ver fatura</span></button><button type="button" data-financial-card-action="adjust" data-card-id="${esc(card.id)}" data-card-home="${esc(home)}" data-target-space="${esc(target)}" data-invoice-id="${esc(invoice?.id || "")}">${icon("sliders-horizontal")}<span>Ajustar fatura</span></button><button type="button" data-financial-card-action="limit" data-card-id="${esc(card.id)}" data-card-home="${esc(home)}">${icon("chart-no-axes-column-increasing")}<span>Ajustar limite</span></button><button type="button" data-financial-edit-card="${esc(card.id)}" data-financial-card-home="${esc(home)}">${icon("settings")}<span>Configurar</span></button></div>
     </article>`;
   };
 
@@ -210,20 +230,18 @@ window.FinanceiroUI = (() => {
 
   function cardsMarkup(data) {
     const cards = data.creditCards || [], future = data.futureInvoices || [], activeInvoices = activeCardInvoices(data),
-      openTotal = activeInvoices.reduce((sum, invoice) => sum + Number(invoice.remainingCents || 0), 0),
-      futureCommitment = future.filter((invoice) => !activeInvoices.some((current) => current.id === invoice.id && current.cardHomeSpaceId === invoice.cardHomeSpaceId)).reduce((sum, invoice) => sum + Number(invoice.remainingCents || 0), 0),
-      next = nearestOpenInvoice(data), nextDays = next ? daysUntil(next.dueDate) : null;
-    return `${subpageHeader("Cartões", "Gerencie seus cartões em um só lugar")}${internalNav()}
+      openTotal = activeInvoices.reduce((sum, invoice) => sum + Number(invoice.amountDueCents || 0), 0),
+      next = nearestOpenInvoice(data);
+    return `${subpageHeader("Meus cartões", "Gerencie e acompanhe todas as suas faturas.")}${internalNav()}
       ${data.creditLoadError ? `<section class="financial-module-error">${icon("triangle-alert")}<span><b>Não foi possível carregar cartões.</b><small>O restante do Financeiro continua disponível.</small></span><button type="button" data-financial-retry-cards>Tentar novamente</button></section>` : ""}
-      <section class="financial-credit-hero"><span>${icon("credit-card")}</span><div><small>Faturas abertas</small><strong>${money(openTotal)}</strong><em>${cards.length} cartão${cards.length === 1 ? "" : "ões"}${nextDays === null ? "" : nextDays < 0 ? " · há fatura vencida" : ` · próxima vence em ${nextDays} dia${nextDays === 1 ? "" : "s"}`}</em></div><dl><div><dt>Parcelas futuras</dt><dd>${money(futureCommitment)}</dd></div><div><dt>Total comprometido</dt><dd>${money(openTotal + futureCommitment)}</dd></div></dl></section>
-      ${state.consolidated ? "" : `<section class="financial-card-actions"><button type="button" data-financial-new-card>${icon("plus")}<span>Novo cartão</span></button><button type="button" data-financial-adjust-any-invoice ${next ? "" : "disabled"}>${icon("sliders-horizontal")}<span>Ajustar fatura</span></button><button type="button" data-financial-pay-any-invoice ${next ? "" : "disabled"}>${icon("credit-card")}<span>Pagar fatura</span></button><button type="button" data-financial-ongoing-installment>${icon("list-ordered")}<span>Parcelamento</span></button></section>`}
-      <section class="financial-section financial-subpage-card"><header><h2>Meus cartões</h2></header>${cards.length ? `<div class="financial-credit-grid">${cards.map(creditCardMarkup).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão cadastrado</b><span>Cadastre um cartão para o vencimento ser calculado automaticamente.</span></div></div>`}</section>
-      <section class="financial-section financial-subpage-card"><header><h2>Próximas faturas</h2></header>${future.length ? `<div class="financial-invoice-list">${future.slice(0, 12).map((invoice) => `<button type="button" data-financial-open-invoice="${esc(invoice.id)}" data-financial-invoice-home="${esc(invoice.cardHomeSpaceId)}" ${state.consolidated ? "disabled" : ""}><span>${icon("receipt-text")}<b>${esc(invoice.cardName || "Cartão")}</b><small>${monthLabel(invoice.referenceKey)} · vence ${dateLabel(invoice.dueDate)}${invoice.spaceAmountCents !== invoice.remainingCents ? ` · ${money(invoice.spaceAmountCents)} deste espaço` : ""}</small></span><strong>${money(invoice.remainingCents)}</strong><em class="financial-status is-${invoice.status === "overdue" ? "overdue" : invoice.status === "paid" ? "paid" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</em>${icon("chevron-right")}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("calendar-check")}<div><b>Sem faturas futuras</b><span>As parcelas e compras aparecerão aqui.</span></div></div>`}</section>`;
+      <section class="financial-credit-hero"><span>${icon("wallet-cards")}</span><div><small>Fatura total dos cartões</small><strong>${money(openTotal)}</strong><em>Valor consolidado real · ${cards.length} ${cards.length === 1 ? "cartão" : "cartões"}</em></div>${next ? `<aside>${icon("trending-up")}<small>Próximo vencimento</small><b>${fullDateLabel(next.dueDate)}</b></aside>` : ""}</section>
+      <section class="financial-section financial-subpage-card">${cards.length ? `<div class="financial-credit-grid">${cards.map(creditCardMarkup).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão cadastrado</b><span>Cadastre um cartão para o vencimento ser calculado automaticamente.</span></div></div>`}<button class="financial-add-card" type="button" data-financial-new-card>${icon("plus")}<span><b>Adicionar cartão</b><small>Centralize seus gastos e faturas.</small></span></button></section>
+      <section class="financial-section financial-subpage-card"><header><h2>Histórico de faturas</h2></header>${future.length ? `<div class="financial-invoice-list">${future.slice(0, 12).map((invoice) => `<button type="button" data-financial-open-invoice="${esc(invoice.id)}" data-financial-invoice-home="${esc(invoice.cardHomeSpaceId)}"><span>${icon("receipt-text")}<b>${esc(invoice.cardName || "Cartão")}</b><small>${monthLabel(invoice.referenceKey)} · vence ${dateLabel(invoice.dueDate)}</small></span><strong>${money(invoice.amountDueCents)}</strong><em class="financial-status is-${invoice.status === "overdue" ? "overdue" : invoice.status === "paid" ? "paid" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</em>${icon("chevron-right")}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("calendar-check")}<div><b>Sem faturas neste período</b><span>Compras e parcelas aparecerão aqui.</span></div></div>`}</section>`;
   }
 
   function dashboardMarkup(data) {
     const summary = data.summary || {};
-    return `${metricMarkup(summary)}${internalNav()}
+    return `${selectorMarkup()}${metricMarkup(summary)}${internalNav()}
       ${data.creditLoadError ? `<section class="financial-module-error">${icon("triangle-alert")}<span><b>Cartões temporariamente indisponíveis.</b><small>Entradas, saídas e contas foram carregadas normalmente.</small></span><button type="button" data-financial-retry-cards>Tentar novamente</button></section>` : ""}
       <section class="financial-section"><header><h2>Ações rápidas</h2></header><div class="financial-quick-actions">
         <button type="button" data-financial-new="income"><span>${icon("plus")}</span><b>Nova entrada</b></button>
@@ -239,15 +257,20 @@ window.FinanceiroUI = (() => {
   }
 
   function subpageHeader(title, subtitle, action = "") {
-    return `<header class="financial-subpage-head"><button type="button" data-financial-view="dashboard" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>${action}</header>${selectorMarkup()}`;
+    return `<div class="financial-subpage-shell"><header class="financial-subpage-head"><button type="button" data-financial-view="dashboard" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>${action}</header>${selectorMarkup()}</div>`;
   }
 
   function accountsMarkup(data) {
     const byId = new Map(), filter = state.accountFilter;
     for (const entry of [...(data.accounts || []), ...(data.payables || [])]) if (entry.direction === "out") byId.set(entry.id, entry);
-    const accounts = [...byId.values()].filter((entry) => filter === "all" || (filter === "paid" ? entry.status === "paid" : Engine.effectiveStatus(entry) === filter)), wallets = data.financialAccounts || [];
+    const accounts = [...byId.values()].filter((entry) => {
+      if (filter === "all") return true;
+      if (filter === "recurring") return Boolean(entry.recurrenceId);
+      if (filter === "invoices") return entry.entityType === "credit_card_invoice";
+      return filter === "paid" ? entry.status === "paid" : Engine.effectiveStatus(entry) === filter;
+    }), wallets = data.financialAccounts || [];
     return `${subpageHeader("Contas", `Obrigações e carteiras de ${monthLabel(state.period)}`, `<button class="btn btn-primary" type="button" data-financial-new="expense">${icon("plus")} Nova conta</button>`)}${internalNav()}
-      <section class="financial-section financial-subpage-card"><header><h2>Contas a pagar e faturas</h2></header><div class="financial-filter-chips"><button data-financial-account-filter="all" class="${filter === "all" ? "active" : ""}">Todas</button><button data-financial-account-filter="pending" class="${filter === "pending" ? "active" : ""}">Pendentes</button><button data-financial-account-filter="overdue" class="${filter === "overdue" ? "active" : ""}">Vencidas</button><button data-financial-account-filter="paid" class="${filter === "paid" ? "active" : ""}">Pagas</button></div>${payablesMarkup(accounts, false)}</section>
+      <section class="financial-section financial-subpage-card"><header><h2>Contas a pagar e faturas</h2></header><div class="financial-filter-chips"><button data-financial-account-filter="all" class="${filter === "all" ? "active" : ""}">Todas</button><button data-financial-account-filter="pending" class="${filter === "pending" ? "active" : ""}">Pendentes</button><button data-financial-account-filter="recurring" class="${filter === "recurring" ? "active" : ""}">Recorrentes</button><button data-financial-account-filter="invoices" class="${filter === "invoices" ? "active" : ""}">Faturas</button><button data-financial-account-filter="overdue" class="${filter === "overdue" ? "active" : ""}">Vencidas</button><button data-financial-account-filter="paid" class="${filter === "paid" ? "active" : ""}">Pagas</button></div>${payablesMarkup(accounts, false)}</section>
       <section class="financial-section financial-subpage-card"><header><h2>Contas e carteiras</h2>${state.consolidated ? "" : `<button type="button" data-financial-new-account>${icon("plus")} Nova conta</button>`}</header><div class="financial-wallet-list">${wallets.length ? wallets.map((account) => `<article><span>${icon(account.type === "cash" ? "banknote" : "landmark")}</span><div><b>${esc(account.name)}</b><small>${esc(account.institution || (account.type === "cash" ? "Dinheiro" : "Conta manual"))}</small></div><strong>${money(account.initialBalanceCents || 0)}</strong><em>Saldo inicial controlado</em></article>`).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para movimentar valores.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} A VECONI mostra apenas saldos controlados por lançamentos; não inventa o saldo real do banco.</p></section>`;
   }
 
@@ -273,6 +296,32 @@ window.FinanceiroUI = (() => {
     return `<section class="financial-onboarding"><span>${icon("wallet-cards")}</span><h2>Seu financeiro começa aqui.</h2><p>Registre uma despesa, uma entrada ou vincule as vendas da sua empresa.</p><div><button class="btn btn-primary" type="button" data-financial-onboard-business>${icon("store")} Usar empresa atual</button><button class="btn btn-light" type="button" data-financial-create-space="personal">${icon("home")} Criar espaço pessoal</button></div></section>`;
   }
 
+  function resolveActiveView(fallbackSpaceId = "") {
+    const views = financialViews(), fallbackId = fallbackSpaceId ? `space:${fallbackSpaceId}` : views[0]?.id || "",
+      requested = views.find((view) => view.id === state.activeViewId) || views.find((view) => view.id === fallbackId) || views[0],
+      ids = [...new Set((requested?.financialSpaceIds || []).filter((id) => spaces().some((space) => space.id === id)))];
+    state.activeViewId = requested?.id || fallbackId;
+    state.activeSpaceIds = ids.length ? ids : fallbackSpaceId ? [fallbackSpaceId] : [];
+    state.selectedSpaceId = state.activeSpaceIds[0] || fallbackSpaceId;
+    state.consolidated = state.activeSpaceIds.length > 1;
+    return requested;
+  }
+
+  async function selectFinancialView(viewId) {
+    state.activeViewId = String(viewId || "");
+    const view = resolveActiveView(window.FinancialSpaceService.selectedSpaceId() || spaces()[0]?.id || "");
+    if (!view || !state.activeSpaceIds.length) return Utils.toast("Esta visão não possui espaços disponíveis.", true);
+    window.FinancialSpaceService.selectSpace(state.selectedSpaceId);
+    window.FinancialSpaceService.setConsolidatedIds(state.activeSpaceIds);
+    closeModal();
+    try {
+      state.viewProfile = await window.FinancialSpaceService.rememberFinancialView(state.activeViewId);
+    } catch (error) {
+      console.warn("[FINANCIAL_VIEW_REMEMBER_ERROR]", { code: error?.code || "unknown" });
+    }
+    await refresh();
+  }
+
   async function refresh(options = {}) {
     const page = root();
     if (!page) return;
@@ -294,8 +343,12 @@ window.FinanceiroUI = (() => {
         bindPage();
         return;
       }
-      state.selectedSpaceId = service.selectedSpaceId() || available[0].id;
-      if (!service.listCachedSpaces().some((item) => item.id === state.selectedSpaceId)) state.selectedSpaceId = available[0].id;
+      state.viewProfile = await service.listFinancialViews();
+      if (!state.viewInitialized) {
+        state.activeViewId = state.viewProfile.defaultViewId || state.viewProfile.lastViewId || `space:${service.selectedSpaceId() || available[0].id}`;
+        state.viewInitialized = true;
+      }
+      resolveActiveView(service.selectedSpaceId() || available[0].id);
       service.selectSpace(state.selectedSpaceId);
       financeTrace("FINANCE_SELECTED_SPACE", { selected: true, type: selectedSpace()?.type || "unknown" });
       if (!state.consolidated) {
@@ -307,7 +360,7 @@ window.FinanceiroUI = (() => {
         });
       }
       const data = state.consolidated
-        ? await service.loadConsolidated(service.selectedConsolidatedIds(), state.period)
+        ? await service.loadConsolidated(state.activeSpaceIds, state.period)
         : await service.loadDashboard(state.selectedSpaceId, state.period, {
           trace: financeTrace,
           onCore: (core) => {
@@ -362,8 +415,10 @@ window.FinanceiroUI = (() => {
 
   function closeModal() {
     if (modal()) modal().innerHTML = "";
+    document.body.classList.remove("financial-modal-open");
   }
   function sheet(content, className = "") {
+    document.body.classList.add("financial-modal-open");
     modal().innerHTML = `<div class="modal-bg financial-modal-bg"><section class="modal-box financial-sheet ${className}" role="dialog" aria-modal="true">${content}</section></div>`;
     modal().querySelector(".financial-modal-bg").addEventListener("click", (event) => { if (event.target === event.currentTarget) closeModal(); });
     modal().querySelectorAll("[data-financial-close]").forEach((button) => button.onclick = closeModal);
@@ -371,22 +426,54 @@ window.FinanceiroUI = (() => {
   }
   const sheetHeader = (title, subtitle = "") => `<header class="modal-head"><div><h3>${esc(title)}</h3>${subtitle ? `<p>${esc(subtitle)}</p>` : ""}</div><button class="icon-btn" type="button" data-financial-close aria-label="Fechar">${icon("x")}</button></header>`;
 
-  function openSpaces() {
-    const items = spaces();
-    sheet(`${sheetHeader("Escolher espaço financeiro", "Cada espaço mantém valores e contas separados.")}
-      <div class="modal-body"><div class="financial-space-list">${items.map((space) => `<article class="financial-space-option ${!state.consolidated && space.id === state.selectedSpaceId ? "active" : ""}"><button type="button" data-financial-select-space="${esc(space.id)}"><span>${icon(space.icon || "wallet")}</span><b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"} · ${automationLabel(space)}</small>${icon("chevron-right")}</button><button type="button" class="financial-space-manage" data-financial-manage-space="${esc(space.id)}" aria-label="Gerenciar ${esc(space.name)}">${icon("settings-2")}</button></article>`).join("")}
-      <button type="button" data-financial-open-consolidated class="${state.consolidated ? "active" : ""}"><span>${icon("layout-dashboard")}</span><b>Visão consolidada</b><small>Somente leitura</small>${icon("chevron-right")}</button></div></div>
-      <footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-create-space="personal">${icon("plus")} Criar novo espaço</button></footer>`);
-    modal().querySelectorAll("[data-financial-select-space]").forEach((button) => button.onclick = async () => {
-      state.consolidated = false;
-      state.selectedSpaceId = button.dataset.financialSelectSpace;
-      window.FinancialSpaceService.selectSpace(state.selectedSpaceId);
-      closeModal();
-      await refresh();
+  function openActionSpacePicker(title, callback) {
+    const allowed = spaces().filter((space) => state.activeSpaceIds.includes(space.id));
+    sheet(`${sheetHeader(title, "A ação será registrada em um único espaço.")}<div class="modal-body financial-view-list">${allowed.map((space) => `<article class="financial-view-option"><button type="button" data-action-space="${esc(space.id)}"><span>${icon(space.icon || "wallet")}</span><b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small>${icon("chevron-right")}</button></article>`).join("")}</div>`);
+    modal().querySelectorAll("[data-action-space]").forEach((button) => button.onclick = async () => {
+      await selectFinancialView(`space:${button.dataset.actionSpace}`);
+      await callback?.();
     });
-    modal().querySelector("[data-financial-open-consolidated]").onclick = openConsolidated;
+  }
+
+  function openSpaces() {
+    const views = financialViews(), quick = views.filter((view) => view.mode !== "space"), spaceViews = views.filter((view) => view.mode === "space"), row = (view) => `<article class="financial-view-option ${view.id === state.activeViewId ? "active" : ""}">
+      <button type="button" data-financial-select-view="${esc(view.id)}"><span>${icon(view.mode === "all_spaces" ? "panels-top-left" : view.mode === "personal" ? "house" : view.mode === "business" ? "briefcase-business" : view.space?.icon || "bookmark")}</span><b>${esc(view.name)}</b><small>${view.financialSpaceIds.length} espaço${view.financialSpaceIds.length === 1 ? "" : "s"}${view.isDefault ? " · Padrão" : ""}</small>${icon("chevron-right")}</button>
+      <div><button type="button" data-financial-favorite-view="${esc(view.id)}" aria-label="${view.isFavorite ? "Remover dos favoritos" : "Favoritar"}">${icon(view.isFavorite ? "star" : "star")}</button><button type="button" data-financial-default-view="${esc(view.id)}" aria-label="Definir como padrão">${icon(view.isDefault ? "bookmark-check" : "bookmark")}</button>${view.mode === "custom" ? `<button type="button" data-financial-delete-view="${esc(view.id)}" aria-label="Excluir visão">${icon("trash-2")}</button>` : ""}</div>
+    </article>`;
+    sheet(`${sheetHeader("Visões financeiras", "Escolha o que deseja analisar sem duplicar dados.")}
+      <div class="modal-body financial-view-picker"><h4>Visões rápidas</h4><div class="financial-view-list">${quick.map(row).join("")}</div><h4>Espaços</h4><div class="financial-view-list">${spaceViews.map(row).join("")}</div></div>
+      <footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-create-space="personal">${icon("plus")} Espaço</button><button class="btn btn-primary" type="button" data-financial-create-view>${icon("bookmark-plus")} Criar visão</button></footer>`, "financial-view-sheet");
+    modal().querySelectorAll("[data-financial-select-view]").forEach((button) => button.onclick = () => selectFinancialView(button.dataset.financialSelectView));
+    modal().querySelector("[data-financial-create-view]").onclick = () => openSaveView();
     modal().querySelector("[data-financial-create-space]").onclick = () => openCreateSpace("personal");
-    modal().querySelectorAll("[data-financial-manage-space]").forEach((button) => button.onclick = () => openManageSpace(button.dataset.financialManageSpace));
+    modal().querySelectorAll("[data-financial-favorite-view]").forEach((button) => button.onclick = async () => { state.viewProfile = await window.FinancialSpaceService.toggleFavoriteFinancialView(button.dataset.financialFavoriteView); openSpaces(); });
+    modal().querySelectorAll("[data-financial-default-view]").forEach((button) => button.onclick = async () => { state.viewProfile = await window.FinancialSpaceService.setDefaultFinancialView(button.dataset.financialDefaultView); openSpaces(); });
+    modal().querySelectorAll("[data-financial-delete-view]").forEach((button) => button.onclick = async () => {
+      if (!confirm("Excluir esta visão salva? Os espaços e lançamentos não serão alterados.")) return;
+      state.viewProfile = await window.FinancialSpaceService.deleteFinancialView(button.dataset.financialDeleteView);
+      if (!financialViews().some((view) => view.id === state.activeViewId)) state.activeViewId = state.viewProfile.defaultViewId || state.viewProfile.lastViewId;
+      openSpaces();
+    });
+  }
+
+  function openSaveView() {
+    const current = activeFinancialView(), editing = current?.mode === "custom" ? current : null, selected = new Set(editing?.financialSpaceIds || state.activeSpaceIds);
+    sheet(`${sheetHeader(editing ? "Editar visão" : "Criar visão", "Uma visão é apenas uma consulta dos espaços selecionados.")}
+      <form data-financial-view-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome da visão *</span><input name="name" maxlength="60" value="${esc(editing?.name || "")}" placeholder="Ex.: Casa e Carro" required></label><fieldset class="financial-view-spaces full"><legend>Espaços incluídos</legend>${spaces().map((space) => `<label><input type="checkbox" name="spaceId" value="${esc(space.id)}" ${selected.has(space.id) ? "checked" : ""}><span>${icon(space.icon || "wallet")}<b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></label>`).join("")}</fieldset><label class="financial-toggle full"><input type="checkbox" name="favorite" ${editing?.isFavorite ? "checked" : ""}><span></span><b>Adicionar aos favoritos</b></label><label class="financial-toggle full"><input type="checkbox" name="default" ${editing?.isDefault ? "checked" : ""}><span></span><b>Usar como visão padrão</b></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar visão</button></footer></form>`, "financial-view-edit-sheet");
+    modal().querySelector("[data-financial-view-form]").onsubmit = async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget, values = new FormData(form), submit = form.querySelector("[type=submit]");
+      submit.disabled = true;
+      try {
+        const profile = await window.FinancialSpaceService.saveFinancialView({ id: editing?.id, name: values.get("name"), financialSpaceIds: values.getAll("spaceId"), isFavorite: values.get("favorite") === "on", isDefault: values.get("default") === "on" });
+        state.viewProfile = profile;
+        state.activeViewId = profile.lastViewId;
+        resolveActiveView();
+        closeModal();
+        Utils.toast("Visão salva.");
+        await refresh();
+      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    };
   }
 
   function openManageSpace(spaceId) {
@@ -413,22 +500,6 @@ window.FinanceiroUI = (() => {
         Utils.toast("Automação financeira atualizada.");
         await refresh();
       } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
-    };
-  }
-
-  function openConsolidated() {
-    const selected = new Set(window.FinancialSpaceService.selectedConsolidatedIds());
-    sheet(`${sheetHeader("Visão consolidada", "Escolha explicitamente quais espaços deseja somar.")}
-      <form data-financial-consolidated-form><div class="modal-body financial-check-list">${spaces().map((space) => `<label><input type="checkbox" name="spaceId" value="${esc(space.id)}" ${selected.has(space.id) ? "checked" : ""}><span>${icon(space.icon || "wallet")}<b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></label>`).join("")}</div>
-      <footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Aplicar visão</button></footer></form>`);
-    modal().querySelector("[data-financial-consolidated-form]").onsubmit = async (event) => {
-      event.preventDefault();
-      const ids = [...new FormData(event.currentTarget).getAll("spaceId")];
-      if (!ids.length) return Utils.toast("Escolha pelo menos um espaço.", true);
-      window.FinancialSpaceService.setConsolidatedIds(ids);
-      state.consolidated = true;
-      closeModal();
-      await refresh();
     };
   }
 
@@ -459,6 +530,8 @@ window.FinanceiroUI = (() => {
         const space = await window.FinancialSpaceService.createSpace({ name: values.name, type: values.type, linkedBusinessId: values.type === "business" ? values.linkedBusinessId : null });
         state.consolidated = false;
         state.selectedSpaceId = space.id;
+        state.activeViewId = `space:${space.id}`;
+        state.activeSpaceIds = [space.id];
         closeModal();
         await refresh();
       } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
@@ -466,7 +539,7 @@ window.FinanceiroUI = (() => {
   }
 
   function openCreateFinancialAccount(onCreated = null) {
-    if (state.consolidated) return Utils.toast("Escolha um espaço para cadastrar a conta.", true);
+    if (state.consolidated) return openActionSpacePicker("Em qual espaço criar a conta?", () => openCreateFinancialAccount(onCreated));
     sheet(`${sheetHeader("Nova conta ou carteira", "Use somente contas deste espaço financeiro.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" placeholder="Ex.: C6 Bank" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="checking">Conta bancária</option><option value="cash">Dinheiro</option><option value="wallet">Carteira digital</option><option value="savings">Poupança</option><option value="other">Outra</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" placeholder="Ex.: C6 Bank"></label><label class="financial-field full"><span>Saldo inicial</span><input name="initialBalance" inputmode="decimal" value="0,00"><small>Opcional e manual; não consultamos seu banco.</small></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
     const form = modal().querySelector("[data-financial-account-create]");
     form.onsubmit = async (event) => {
@@ -485,7 +558,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function openCreateCreditCard(onCreated = null, existing = null) {
-    if (state.consolidated) return Utils.toast("Escolha um espaço para cadastrar o cartão.", true);
+    if (state.consolidated && !existing) return openActionSpacePicker("Em qual espaço o cartão será criado?", () => openCreateCreditCard(onCreated));
     const service = window.FinancialSpaceService, homeSpaceId = existing?.cardHomeSpaceId || state.selectedSpaceId,
       homeSpace = spaces().find((space) => space.id === homeSpaceId) || selectedSpace(), accounts = await service.listFinancialAccounts(homeSpaceId),
       canShare = service.canShareCreditCards(homeSpaceId), availableSpaces = spaces().filter((space) => space.ownerUid === homeSpace?.ownerUid),
@@ -540,13 +613,49 @@ window.FinanceiroUI = (() => {
     renderCardWizard();
   }
 
-  async function openCreditCardInvoice(invoiceId, cardHomeSpaceId = "") {
+  async function ensureCardCycleInvoice(card, targetSpaceId = cardTargetSpaceId(card)) {
+    if (card.currentInvoice?.referenceKey === state.period) return { ...card.currentInvoice, interactionSpaceId: targetSpaceId };
+    const result = await window.FinancialSpaceService.ensureCreditCardInvoice(targetSpaceId, {
+      creditCardId: card.id,
+      cardHomeSpaceId: card.cardHomeSpaceId,
+      referenceKey: state.period,
+    });
+    return { ...result.invoice, interactionSpaceId: targetSpaceId };
+  }
+
+  function openCreditCardLimitAdjustment(card) {
+    sheet(`${sheetHeader("Ajustar limite", `${card.name} · •••• ${card.last4}`)}<form data-financial-card-limit><div class="modal-body financial-form-grid"><article class="financial-payment-balance full"><small>Limite atual</small><strong>${money(card.limitCents)}</strong></article><label class="financial-field full"><span>Novo limite *</span><input name="limit" inputmode="decimal" value="${(Number(card.limitCents || 0) / 100).toFixed(2).replace(".", ",")}" required><small>A alteração afeta somente este cartão.</small></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar limite</button></footer></form>`, "financial-limit-sheet");
+    const form = modal().querySelector("[data-financial-card-limit]");
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector("[type=submit]"); submit.disabled = true;
+      try {
+        await window.FinancialSpaceService.updateCreditCard(card.cardHomeSpaceId, card.id, { limitCents: Engine.moneyInputToCents(form.limit.value) });
+        closeModal(); Utils.toast("Limite do cartão atualizado."); await refresh();
+      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    };
+  }
+
+  async function handleCreditCardAction(button) {
+    const card = state.dashboard?.creditCards?.find((item) => item.id === button.dataset.cardId && item.cardHomeSpaceId === button.dataset.cardHome), action = button.dataset.financialCardAction;
+    if (!card) return Utils.toast("Cartão não encontrado nesta visão.", true);
+    if (action === "limit") return openCreditCardLimitAdjustment(card);
+    try {
+      button.disabled = true;
+      const invoice = await ensureCardCycleInvoice(card, button.dataset.targetSpace || cardTargetSpaceId(card));
+      if (action === "adjust") return openCreditCardInvoiceAdjustment(invoice);
+      return openCreditCardInvoice(invoice.id, invoice.cardHomeSpaceId, invoice.interactionSpaceId);
+    } catch (error) { Utils.toast(error.message, true); }
+    finally { button.disabled = false; }
+  }
+
+  async function openCreditCardInvoice(invoiceId, cardHomeSpaceId = "", targetSpaceId = state.selectedSpaceId) {
     if (!invoiceId) return;
     try {
-      const details = await window.FinancialSpaceService.getCreditCardInvoiceDetails(state.selectedSpaceId, invoiceId, { cardHomeSpaceId }), invoice = details.invoice,
-        currentSpaceAmount = details.spaceBreakdown.find((item) => item.id === state.selectedSpaceId)?.amountCents || 0,
+      const details = await window.FinancialSpaceService.getCreditCardInvoiceDetails(targetSpaceId, invoiceId, { cardHomeSpaceId }), invoice = { ...details.invoice, interactionSpaceId: targetSpaceId },
+        currentSpaceAmount = details.spaceBreakdown.find((item) => item.id === targetSpaceId)?.amountCents || 0,
         breakdown = (items, empty) => items.length ? `<div class="financial-breakdown-list">${items.map((item) => `<article><div><b>${esc(item.name)}</b><small>${item.percentage}%</small></div><span><i style="width:${Math.max(4, item.percentage)}%"></i></span><strong>${money(item.amountCents)}</strong></article>`).join("")}</div>` : `<p class="financial-panel-empty">${esc(empty)}</p>`,
-        purchaseRows = details.purchases.length ? details.purchases.map((purchase) => `<article data-invoice-purchase data-purchase-category="${esc(purchase.categoryId || "")}"><span><b>${esc(purchase.description)}</b><small>${dateLabel(purchase.purchaseDate)} · ${esc(purchase.financialSpaceName || "Espaço")} · ${esc(purchase.categoryName || "Outros")}${purchase.installmentCount > 1 ? ` · ${purchase.installmentNumber}/${purchase.installmentCount}` : ""}</small></span><strong>${money(purchase.amountCents)}</strong></article>`).join("") : `<p class="financial-panel-empty">Nenhuma compra nesta fatura.</p>`,
+        purchaseRows = details.purchases.length ? details.purchases.map((purchase) => `<article data-invoice-purchase data-purchase-id="${esc(purchase.id)}" data-purchase-category="${esc(purchase.categoryId || "")}" tabindex="0"><span><b>${esc(purchase.description)}</b><small>${dateLabel(purchase.purchaseDate)} · ${esc(purchase.financialSpaceName || "Espaço")} · ${esc(purchase.categoryName || "Outros")}${purchase.installmentCount > 1 ? ` · ${purchase.installmentNumber}/${purchase.installmentCount}` : ""}</small></span><strong>${money(purchase.amountCents)}</strong></article>`).join("") : `<p class="financial-panel-empty">Nenhuma compra nesta fatura.</p>`,
         installmentGroups = new Map(), palette = ["#05b98f", "#378be9", "#8b42d9", "#ff9638", "#94a3b8"];
       for (const purchase of details.purchases.filter((item) => Number(item.installmentCount || 1) > 1)) {
         const key = purchase.installmentGroupId || purchase.purchaseOperationId || purchase.id;
@@ -561,13 +670,26 @@ window.FinanceiroUI = (() => {
       const adjustmentTotal = details.adjustments.reduce((sum, item) => sum + Number(item.effectCents || 0), 0),
         paidPercentage = invoice.amountDueCents ? Math.min(100, Math.round((Number(invoice.paidTotalCents || 0) / invoice.amountDueCents) * 100)) : 0;
       sheet(`${sheetHeader(`Fatura ${invoice.cardName || "Cartão"}`, `${monthLabel(invoice.referenceKey)} · vence ${fullDateLabel(invoice.dueDate)}`)}<div class="modal-body"><article class="financial-invoice-summary-v3"><div><small>Total da fatura</small><strong>${money(invoice.amountDueCents)}</strong></div><div><small>Pago</small><strong>${money(invoice.paidTotalCents)}</strong></div><div><small>Restante</small><strong class="is-expense">${money(invoice.remainingCents)}</strong></div><span class="financial-status is-${invoice.status === "paid" ? "paid" : invoice.status === "overdue" ? "overdue" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</span><div class="financial-invoice-progress"><i style="width:${paidPercentage}%"></i></div><small>${paidPercentage}% pago${currentSpaceAmount && details.spaceBreakdown.length > 1 ? ` · ${money(currentSpaceAmount)} deste espaço` : ""}</small></article><div class="financial-invoice-primary-actions">${invoice.remainingCents > 0 ? `<button class="btn btn-primary" type="button" data-financial-pay-invoice="${esc(invoice.id)}">${invoice.paidTotalCents ? "Pagar valor" : "Pagar total"}</button>` : ""}<button class="btn btn-light" type="button" data-financial-adjust-invoice>${icon("sliders-horizontal")} Ajustar valor</button><button class="btn btn-light" type="button" data-financial-ongoing-for-card>${icon("list-ordered")} Parcelamento em andamento</button></div><article class="financial-invoice-reconciliation"><span><small>Compras registradas</small><b>${money(invoice.purchasesTotalCents)}</b></span><span><small>Saldo inicial/ajustes</small><b class="${adjustmentTotal < 0 ? "is-income" : ""}">${adjustmentTotal < 0 ? "− " : ""}${money(Math.abs(adjustmentTotal))}</b></span><span><small>Total da fatura</small><b>${money(invoice.amountDueCents)}</b></span></article><nav class="financial-invoice-tabs" aria-label="Detalhes da fatura"><button type="button" class="active" data-invoice-tab="purchases">Compras</button><button type="button" data-invoice-tab="spaces">Espaços</button><button type="button" data-invoice-tab="categories">Categorias</button><button type="button" data-invoice-tab="installments">Parcelas</button></nav><section data-invoice-panel="purchases" class="financial-invoice-purchases"><header><h4 data-purchases-title>Compras desta fatura</h4><button type="button" data-clear-category-filter hidden>Limpar filtro</button></header><div data-purchase-list>${purchaseRows}</div></section><section data-invoice-panel="spaces" hidden><h4>Gastos por espaço</h4>${breakdown(details.spaceBreakdown, "Nenhum espaço nesta fatura.")}</section><section data-invoice-panel="categories" hidden><h4>Gastos por categoria</h4><div class="financial-category-analysis"><div class="financial-donut" style="--donut:conic-gradient(${donut})"><span><b>${money(invoice.purchasesTotalCents)}</b><small>categorizado</small></span></div><div class="financial-category-legend">${details.categoryBreakdown.map((item, index) => `<button type="button" data-filter-category="${esc(item.id)}" data-category-name="${esc(item.name)}"><i style="background:${palette[index % palette.length]}"></i><span><b>${esc(item.name)}</b><small>${item.percentage}%</small></span><strong>${money(item.amountCents)}</strong></button>`).join("")}</div></div></section><section data-invoice-panel="installments" hidden><h4>Parcelas e impacto futuro</h4>${installmentGroups.size ? `<div class="financial-installment-list">${[...installmentGroups.values()].map((purchase) => { const remaining = Math.max(0, Number(purchase.installmentCount) - Number(purchase.installmentNumber)); return `<article><span>${icon("calendar-range")}</span><div><b>${esc(String(purchase.description || "").replace(/ · \d+\/\d+$/, ""))}</b><small>Parcela ${purchase.installmentNumber}/${purchase.installmentCount} · restam ${remaining}</small></div><strong>${money(purchase.amountCents)}</strong><em>Futuro: ${money(remaining * Number(purchase.amountCents || 0))}</em></article>`; }).join("")}</div>` : `<p class="financial-panel-empty">Nenhuma compra parcelada nesta fatura.</p>`}</section>${details.payments.length ? `<section class="financial-invoice-purchases financial-payment-history"><h4>Pagamentos</h4>${details.payments.map((payment) => `<article><span><b>${esc(paymentLabel[payment.paymentMethod] || "Pagamento")}</b><small>${fullDateLabel(payment.paidAt)}</small></span><strong>${money(payment.amountCents)}</strong></article>`).join("")}</section>` : ""}</div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Fechar</button></footer>`, "financial-invoice-sheet");
+      const adjustButton = modal().querySelector("[data-financial-adjust-invoice]"), payButton = modal().querySelector("[data-financial-pay-invoice]"), installmentsButton = modal().querySelector("[data-financial-ongoing-for-card]"), purchaseTitle = modal().querySelector("[data-purchases-title]");
+      if (adjustButton) adjustButton.innerHTML = `${icon("sliders-horizontal")}<span><b>Ajustar esta fatura</b><small>Concilie com o banco, sem criar categorias</small></span>`;
+      if (payButton) payButton.innerHTML = `${icon("credit-card")}<span>Registrar pagamento</span>`;
+      if (installmentsButton) installmentsButton.innerHTML = `${icon("pie-chart")}<span>Parcelamentos</span>`;
+      if (purchaseTitle) purchaseTitle.textContent = "Lançamentos da fatura";
+      const invoiceCycles = (state.dashboard?.creditCardInvoices || []).filter((item) => item.creditCardId === invoice.creditCardId && item.cardHomeSpaceId === invoice.cardHomeSpaceId).sort((left, right) => String(right.referenceKey).localeCompare(String(left.referenceKey))), invoiceHead = modal().querySelector(".modal-head");
+      invoiceHead?.insertAdjacentHTML("afterend", `<div class="financial-invoice-identity"><span class="financial-card-brand">${esc(String(invoice.cardName || "CC").slice(0, 2).toUpperCase())}</span><div><b>${esc(invoice.cardName || "Cartão")}</b><small>${invoice.cardLast4 ? `•••• ${esc(invoice.cardLast4)}` : ""}</small></div><em class="financial-status is-${invoice.status === "paid" ? "paid" : invoice.status === "overdue" ? "overdue" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</em></div><div class="financial-invoice-cycle"><select aria-label="Escolher ciclo da fatura">${invoiceCycles.map((item) => `<option value="${esc(item.id)}" data-home="${esc(item.cardHomeSpaceId)}" ${item.id === invoice.id ? "selected" : ""}>${esc(monthLabel(item.referenceKey))}</option>`).join("")}</select><span>${icon("calendar-days")} Vence em ${fullDateLabel(invoice.dueDate)}</span></div>`);
+      const panels = modal().querySelectorAll("[data-invoice-panel]");
+      panels.forEach((panel) => { panel.hidden = false; });
+      modal().querySelector(".financial-invoice-tabs")?.setAttribute("hidden", "");
+      const purchasePanel = modal().querySelector('[data-invoice-panel="purchases"]'), categoryPanel = modal().querySelector('[data-invoice-panel="categories"]'), spacePanel = modal().querySelector('[data-invoice-panel="spaces"]');
+      if (purchasePanel && categoryPanel && spacePanel) { purchasePanel.parentElement.insertBefore(spacePanel, purchasePanel); purchasePanel.parentElement.insertBefore(categoryPanel, spacePanel); }
+      modal().querySelector(".financial-invoice-cycle select")?.addEventListener("change", (event) => { const option = event.currentTarget.selectedOptions[0]; openCreditCardInvoice(option.value, option.dataset.home, targetSpaceId); });
       modal().querySelectorAll("[data-invoice-tab]").forEach((button) => button.onclick = () => {
         modal().querySelectorAll("[data-invoice-tab]").forEach((item) => item.classList.toggle("active", item === button));
         modal().querySelectorAll("[data-invoice-panel]").forEach((panel) => { panel.hidden = panel.dataset.invoicePanel !== button.dataset.invoiceTab; });
       });
       modal().querySelector("[data-financial-pay-invoice]")?.addEventListener("click", () => openCreditCardInvoicePayment(invoice));
       modal().querySelector("[data-financial-adjust-invoice]")?.addEventListener("click", () => openCreditCardInvoiceAdjustment(invoice));
-      modal().querySelector("[data-financial-ongoing-for-card]")?.addEventListener("click", () => openOngoingInstallment({ id: invoice.creditCardId, cardHomeSpaceId: invoice.cardHomeSpaceId }));
+      modal().querySelector("[data-financial-ongoing-for-card]")?.addEventListener("click", () => openOngoingInstallment({ id: invoice.creditCardId, cardHomeSpaceId: invoice.cardHomeSpaceId, interactionSpaceId: targetSpaceId }));
       modal().querySelectorAll("[data-filter-category]").forEach((button) => button.onclick = () => {
         const id = button.dataset.filterCategory, name = button.dataset.categoryName;
         modal().querySelectorAll("[data-invoice-tab]").forEach((item) => item.classList.toggle("active", item.dataset.invoiceTab === "purchases"));
@@ -578,10 +700,19 @@ window.FinanceiroUI = (() => {
       });
       modal().querySelector("[data-clear-category-filter]")?.addEventListener("click", (event) => {
         modal().querySelectorAll("[data-invoice-purchase]").forEach((row) => { row.hidden = false; });
-        modal().querySelector("[data-purchases-title]").textContent = "Compras desta fatura";
+        modal().querySelector("[data-purchases-title]").textContent = "Lançamentos da fatura";
         event.currentTarget.hidden = true;
       });
+      modal().querySelectorAll("[data-invoice-purchase]").forEach((row) => {
+        const openPurchase = () => { const purchase = details.purchases.find((item) => item.id === row.dataset.purchaseId); if (purchase) openCreditCardPurchase(purchase, invoice); };
+        row.addEventListener("click", openPurchase);
+        row.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); openPurchase(); } });
+      });
     } catch (error) { Utils.toast(error.message, true); }
+  }
+
+  function openCreditCardPurchase(purchase, invoice) {
+    sheet(`${sheetHeader("Detalhe da compra", `${invoice.cardName || "Cartão"} · ${monthLabel(invoice.referenceKey)}`)}<div class="modal-body"><article class="financial-account-summary"><span>${icon(purchase.categoryIcon || "shopping-cart")}</span><div><h3>${esc(purchase.description)}</h3><strong>${money(purchase.amountCents)}</strong></div></article><div class="financial-account-details"><span>${icon("calendar-days")} Data <b>${fullDateLabel(purchase.purchaseDate)}</b></span><span>${icon("tag")} Categoria <b>${esc(purchase.categoryName || "Outros")}</b></span><span>${icon("tags")} Subcategoria <b>${esc(purchase.subcategoryName || "Sem detalhar")}</b></span><span>${icon("wallet-cards")} Espaço <b>${esc(purchase.financialSpaceName || spaceName(purchase.financialSpaceId))}</b></span><span>${icon("credit-card")} Cartão <b>${esc(invoice.cardName || "Cartão")}${invoice.cardLast4 ? ` · •••• ${esc(invoice.cardLast4)}` : ""}</b></span><span>${icon("receipt-text")} Fatura <b>${esc(monthLabel(invoice.referenceKey))}</b></span><span>${icon("list-ordered")} Parcelamento <b>${Number(purchase.installmentCount || 1) > 1 ? `${purchase.installmentNumber}/${purchase.installmentCount}` : "À vista"}</b></span><span>${icon("file-clock")} Origem <b>${purchase.sourceType === "opening_balance" ? "Ajuste" : purchase.autoGenerated ? "Automática" : "Manual"}</b></span></div></div><footer class="modal-foot"><button class="btn btn-primary" type="button" data-financial-close>Concluir</button></footer>`, "financial-purchase-sheet");
   }
 
   function openCreditCardInvoiceAdjustment(invoice) {
@@ -590,22 +721,23 @@ window.FinanceiroUI = (() => {
     const form = modal().querySelector("[data-financial-invoice-adjustment]"), difference = modal().querySelector("[data-adjustment-difference]");
     const updateDifference = () => { try { const value = Engine.moneyInputToCents(form.targetTotal.value) - invoice.amountDueCents; difference.textContent = `${value < 0 ? "− " : "+ "}${money(Math.abs(value))}`; difference.className = value < 0 ? "is-income" : value > 0 ? "is-expense" : ""; } catch { difference.textContent = "—"; } };
     form.targetTotal.addEventListener("input", updateDifference); updateDifference();
-    form.onsubmit = async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)), submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await window.FinancialSpaceService.adjustCreditCardInvoice(state.selectedSpaceId, invoice.id, { cardHomeSpaceId: invoice.cardHomeSpaceId, operationId, targetTotalCents: Engine.moneyInputToCents(values.targetTotal), reason: values.reason }); closeModal(); Utils.toast("Fatura conciliada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
+    form.onsubmit = async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)), submit = form.querySelector("[type=submit]"), targetSpaceId = invoice.interactionSpaceId || state.selectedSpaceId; submit.disabled = true; try { await window.FinancialSpaceService.adjustCreditCardInvoice(targetSpaceId, invoice.id, { cardHomeSpaceId: invoice.cardHomeSpaceId, operationId, targetTotalCents: Engine.moneyInputToCents(values.targetTotal), reason: values.reason }); closeModal(); Utils.toast("Fatura conciliada."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
   }
 
   async function openOngoingInstallment(preferredCard = null) {
-    if (state.consolidated) return Utils.toast("Escolha um espaço antes de adicionar parcelas.", true);
-    const service = window.FinancialSpaceService, cards = state.dashboard?.creditCards?.length ? state.dashboard.creditCards : await service.listCreditCards(state.selectedSpaceId),
-      categories = (await service.listCategories(state.selectedSpaceId)).filter((item) => item.type === "category"), operationId = `ongoing_installment_${crypto.randomUUID()}`;
+    if (state.consolidated && !preferredCard?.interactionSpaceId) return openActionSpacePicker("Em qual espaço registrar as parcelas?", () => openOngoingInstallment());
+    const targetSpaceId = preferredCard?.interactionSpaceId || state.selectedSpaceId, service = window.FinancialSpaceService,
+      cards = preferredCard?.interactionSpaceId ? await service.listCreditCards(targetSpaceId) : state.dashboard?.creditCards?.length ? state.dashboard.creditCards : await service.listCreditCards(targetSpaceId),
+      categories = (await service.listCategories(targetSpaceId)).filter((item) => item.type === "category"), operationId = `ongoing_installment_${crypto.randomUUID()}`;
     if (!cards.length) return openCreateCreditCard(() => openOngoingInstallment());
     const selectedCard = cards.find((card) => card.id === preferredCard?.id && card.cardHomeSpaceId === preferredCard?.cardHomeSpaceId) || cards[0];
     sheet(`${sheetHeader("Parcelamento em andamento", "Cadastre somente a parcela atual e as futuras.")}<form data-financial-ongoing-installment><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Descrição *</span><input name="description" maxlength="160" placeholder="Ex.: Notebook" required></label><label class="financial-field full"><span>Cartão *</span><select name="cardKey">${cards.map((card) => `<option value="${esc(`${card.cardHomeSpaceId}::${card.id}`)}" ${card === selectedCard ? "selected" : ""}>${esc(card.name)} · •••• ${esc(card.last4)}</option>`).join("")}</select></label><label class="financial-field full"><span>Categoria *</span><select name="categoryId">${categories.map((category) => `<option value="${esc(category.id)}" data-name="${esc(category.name)}" data-icon="${esc(category.icon || "shapes")}">${esc(category.name)}</option>`).join("")}</select></label><label class="financial-field"><span>Valor da parcela *</span><input name="installmentAmount" inputmode="decimal" placeholder="R$ 0,00" required></label><label class="financial-field"><span>Parcela atual *</span><input name="currentInstallment" type="number" min="1" max="60" value="1" required></label><label class="financial-field"><span>Total de parcelas *</span><input name="totalInstallments" type="number" min="1" max="60" value="2" required></label><label class="financial-field"><span>Primeira fatura controlada *</span><input name="purchaseDate" type="date" value="${Engine.localIsoDate()}" required></label><label class="financial-field full"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500"></textarea></label><article class="financial-wizard-info full">${icon("history")} Parcelas anteriores não serão recriadas nem alterarão seu histórico.</article></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Adicionar parcelas futuras</button></footer></form>`, "financial-ongoing-sheet");
     const form = modal().querySelector("[data-financial-ongoing-installment]");
-    form.onsubmit = async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)), [cardHomeSpaceId, creditCardId] = values.cardKey.split("::"), option = form.categoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await service.createOngoingCreditCardInstallment(state.selectedSpaceId, { operationId, description: values.description, creditCardId, cardHomeSpaceId, installmentAmountCents: Engine.moneyInputToCents(values.installmentAmount), currentInstallment: Number(values.currentInstallment), totalInstallments: Number(values.totalInstallments), purchaseDate: new Date(`${values.purchaseDate}T12:00:00`).toISOString(), categoryId: values.categoryId, categoryName: option.dataset.name, categoryIcon: option.dataset.icon, notes: values.notes }); closeModal(); Utils.toast("Parcelas atuais e futuras adicionadas."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
+    form.onsubmit = async (event) => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)), [cardHomeSpaceId, creditCardId] = values.cardKey.split("::"), option = form.categoryId.selectedOptions[0], submit = form.querySelector("[type=submit]"); submit.disabled = true; try { await service.createOngoingCreditCardInstallment(targetSpaceId, { operationId, description: values.description, creditCardId, cardHomeSpaceId, installmentAmountCents: Engine.moneyInputToCents(values.installmentAmount), currentInstallment: Number(values.currentInstallment), totalInstallments: Number(values.totalInstallments), purchaseDate: new Date(`${values.purchaseDate}T12:00:00`).toISOString(), categoryId: values.categoryId, categoryName: option.dataset.name, categoryIcon: option.dataset.icon, notes: values.notes }); closeModal(); Utils.toast("Parcelas atuais e futuras adicionadas."); await refresh(); } catch (error) { Utils.toast(error.message, true); submit.disabled = false; } };
   }
 
   async function openCreditCardInvoicePayment(invoice) {
-    const accounts = await window.FinancialSpaceService.listFinancialAccounts(state.selectedSpaceId);
+    const targetSpaceId = invoice.interactionSpaceId || state.selectedSpaceId, accounts = await window.FinancialSpaceService.listFinancialAccounts(targetSpaceId);
     if (!accounts.length) return openCreateFinancialAccount(() => openCreditCardInvoicePayment(invoice));
     const operationId = crypto.randomUUID();
     sheet(`${sheetHeader("Pagar fatura", "O pagamento será saída de caixa, sem repetir as despesas.")}<form data-financial-invoice-payment><div class="modal-body financial-form-grid"><article class="financial-payment-balance full"><small>Saldo da fatura</small><strong>${money(invoice.remainingCents)}</strong></article><label class="financial-field full"><span>Conta de origem *</span><select name="financialAccountId">${accounts.map((account) => `<option value="${esc(account.id)}">${esc(account.name)}</option>`).join("")}</select></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" value="${(invoice.remainingCents / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field"><span>Data *</span><input type="date" name="paidAt" value="${Engine.localIsoDate()}" required></label><label class="financial-field full"><span>Forma *</span><select name="paymentMethod"><option value="pix">Pix</option><option value="automatic_debit">Débito automático</option><option value="transfer">Transferência</option><option value="cash">Dinheiro</option><option value="debit_card">Débito</option><option value="other">Outro</option></select></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Confirmar pagamento</button></footer></form>`);
@@ -616,7 +748,7 @@ window.FinanceiroUI = (() => {
       if (amountCents > invoice.remainingCents) return Utils.toast("O pagamento não pode ser maior que o saldo da fatura.", true);
       submit.disabled = true;
       try {
-        await window.FinancialSpaceService.payCreditCardInvoice(state.selectedSpaceId, invoice.id, { ...values, cardHomeSpaceId: invoice.cardHomeSpaceId, operationId, amountCents, paidAt: new Date(`${values.paidAt}T12:00:00`).toISOString() });
+        await window.FinancialSpaceService.payCreditCardInvoice(targetSpaceId, invoice.id, { ...values, cardHomeSpaceId: invoice.cardHomeSpaceId, operationId, amountCents, paidAt: new Date(`${values.paidAt}T12:00:00`).toISOString() });
         closeModal();
         Utils.toast(amountCents === invoice.remainingCents ? "Fatura paga." : "Pagamento parcial registrado.");
         await refresh();
@@ -625,7 +757,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function openEntryForm(direction = "out") {
-    if (state.consolidated) return Utils.toast("Escolha um espaço antes de lançar uma movimentação.", true);
+    if (state.consolidated) return openActionSpacePicker(direction === "out" ? "Em qual espaço registrar a despesa?" : "Em qual espaço registrar a entrada?", () => openEntryForm(direction));
     const service = window.FinancialSpaceService, categoryItems = await service.listCategories(state.selectedSpaceId), isExpense = direction === "out",
       financialAccounts = await service.listFinancialAccounts(state.selectedSpaceId),
       cards = isExpense ? (state.dashboard?.creditCards?.length ? structuredClone(state.dashboard.creditCards) : await service.listCreditCards(state.selectedSpaceId)) : [], categories = categoryItems.filter((item) => item.type === "category"), draft = {
@@ -801,7 +933,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function openRegisterPayment(selectedEntry = null) {
-    if (state.consolidated) return Utils.toast("Escolha um espaço para registrar o pagamento.", true);
+    if (state.consolidated) return openActionSpacePicker("De qual espaço é a conta?", () => openRegisterPayment());
     const entries = (state.dashboard?.payables || []).filter((entry) => entry.entityType !== "credit_card_invoice");
     if (!entries.length) return Utils.toast("Não existem contas pendentes neste espaço.");
     const service = window.FinancialSpaceService, [cards, accounts] = await Promise.all([
@@ -970,7 +1102,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function openTransfer() {
-    if (state.consolidated) return Utils.toast("Escolha o espaço de origem antes de transferir.", true);
+    if (state.consolidated) return openActionSpacePicker("Escolha o espaço de origem", () => openTransfer());
     const service = window.FinancialSpaceService, targets = spaces(), fromAccounts = await service.listFinancialAccounts(state.selectedSpaceId);
     if (!fromAccounts.length) return openCreateFinancialAccount(() => openTransfer());
     sheet(`${sheetHeader("Transferir", "Movimentação interna não altera receita, despesa ou resultado.")}<form data-financial-transfer-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Conta de origem *</span><select name="fromFinancialAccountId">${fromAccounts.map((account) => `<option value="${esc(account.id)}">${esc(account.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Espaço de destino *</span><select name="toSpaceId">${targets.map((space) => `<option value="${esc(space.id)}" ${space.id === state.selectedSpaceId ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Conta de destino *</span><select name="toFinancialAccountId"></select><small data-transfer-account-helper></small></label><label class="financial-field"><span>Valor *</span><input name="amount" inputmode="decimal" placeholder="R$ 0,00" required></label><label class="financial-field"><span>Data *</span><input type="date" name="occurredAt" value="${Engine.localIsoDate()}" required></label><label class="financial-field full"><span>Observação</span><input name="description" maxlength="160" placeholder="Ex.: Reserva para despesas da casa"></label><article class="financial-wizard-info full">${icon("scale")} Saída e entrada ficam vinculadas pelo mesmo identificador. No consolidado, o efeito é zero.</article></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Transferir</button></footer></form>`);
@@ -995,20 +1127,21 @@ window.FinanceiroUI = (() => {
     page.querySelector("[data-financial-retry]")?.addEventListener("click", () => refresh());
     page.querySelectorAll("[data-financial-retry-cards]").forEach((button) => button.onclick = () => refresh({ silent: true }));
     page.querySelectorAll("[data-financial-open-spaces]").forEach((button) => button.onclick = openSpaces);
+    page.querySelectorAll("[data-financial-save-view]").forEach((button) => button.onclick = openSaveView);
     page.querySelectorAll("[data-financial-open-period]").forEach((button) => button.onclick = openPeriod);
     page.querySelectorAll("[data-financial-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.financialView; paint(); });
     page.querySelectorAll("[data-financial-account-filter]").forEach((button) => button.onclick = () => { state.accountFilter = button.dataset.financialAccountFilter; paint(); });
     page.querySelectorAll("[data-financial-new]").forEach((button) => button.onclick = () => openEntryForm(button.dataset.financialNew === "income" ? "in" : "out"));
     page.querySelectorAll("[data-financial-new-account]").forEach((button) => button.onclick = () => openCreateFinancialAccount());
     page.querySelectorAll("[data-financial-new-card]").forEach((button) => button.onclick = () => openCreateCreditCard());
-    page.querySelectorAll("[data-financial-open-invoice]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); openCreditCardInvoice(button.dataset.financialOpenInvoice, button.dataset.financialInvoiceHome); });
-    page.querySelectorAll("[data-financial-card-invoice]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); openCreditCardInvoice(button.dataset.financialCardInvoice, button.dataset.financialInvoiceHome); });
+    page.querySelectorAll("[data-financial-open-invoice]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); openCreditCardInvoice(button.dataset.financialOpenInvoice, button.dataset.financialInvoiceHome, button.dataset.financialTargetSpace || state.selectedSpaceId); });
+    page.querySelectorAll("[data-financial-card-action]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); handleCreditCardAction(button); });
     page.querySelectorAll("[data-financial-card-id]").forEach((cardElement) => cardElement.onclick = (event) => {
       if (event.target.closest("button")) return;
       const card = state.dashboard?.creditCards?.find((item) => item.id === cardElement.dataset.financialCardId && item.cardHomeSpaceId === cardElement.dataset.financialCardHome);
-      if (card?.currentInvoice?.id && !state.consolidated) openCreditCardInvoice(card.currentInvoice.id, card.cardHomeSpaceId);
+      if (card) handleCreditCardAction({ disabled: false, dataset: { financialCardAction: "invoice", cardId: card.id, cardHome: card.cardHomeSpaceId, targetSpace: cardTargetSpaceId(card) } });
     });
-    page.querySelectorAll("[data-financial-invoice-id]").forEach((row) => row.onclick = () => openCreditCardInvoice(row.dataset.financialInvoiceId, row.dataset.financialInvoiceHome));
+    page.querySelectorAll("[data-financial-invoice-id]").forEach((row) => row.onclick = () => openCreditCardInvoice(row.dataset.financialInvoiceId, row.dataset.financialInvoiceHome, row.dataset.financialTargetSpace || state.selectedSpaceId));
     page.querySelectorAll("[data-financial-edit-card]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); const card = state.dashboard?.creditCards?.find((item) => item.id === button.dataset.financialEditCard && item.cardHomeSpaceId === button.dataset.financialCardHome); if (card) openCreateCreditCard(null, card); });
     page.querySelectorAll("[data-financial-register-payment]").forEach((button) => button.onclick = openRegisterPayment);
     page.querySelectorAll("[data-financial-adjust-any-invoice]").forEach((button) => button.onclick = () => { const invoice = nearestOpenInvoice(state.dashboard); if (invoice) openCreditCardInvoiceAdjustment(invoice); });
@@ -1022,7 +1155,7 @@ window.FinanceiroUI = (() => {
     });
     page.querySelectorAll("[data-financial-new-category]").forEach((button) => button.onclick = openNewCategory);
     page.querySelectorAll("[data-financial-transfer]").forEach((button) => button.onclick = openTransfer);
-    page.querySelectorAll("[data-financial-onboard-business]").forEach((button) => button.onclick = async () => { const context = window.BusinessContext?.get?.() || {}, name = context.business?.name || DB.carregar().config?.nome || "Minha empresa"; try { const space = await window.FinancialSpaceService.createSpace({ name, type: "business", linkedBusinessId: context.businessId }); state.selectedSpaceId = space.id; await refresh(); } catch (error) { Utils.toast(error.message, true); } });
+    page.querySelectorAll("[data-financial-onboard-business]").forEach((button) => button.onclick = async () => { const context = window.BusinessContext?.get?.() || {}, name = context.business?.name || DB.carregar().config?.nome || "Minha empresa"; try { const space = await window.FinancialSpaceService.createSpace({ name, type: "business", linkedBusinessId: context.businessId }); state.selectedSpaceId = space.id; state.activeViewId = `space:${space.id}`; state.activeSpaceIds = [space.id]; await refresh(); } catch (error) { Utils.toast(error.message, true); } });
     page.querySelectorAll("[data-financial-create-space]").forEach((button) => button.onclick = () => openCreateSpace(button.dataset.financialCreateSpace));
   }
 
@@ -1030,7 +1163,7 @@ window.FinanceiroUI = (() => {
     bindPage();
     refresh();
   }
-  function destroy() { state.requestVersion += 1; closeModal(); }
+  function destroy() { state.requestVersion += 1; state.viewInitialized = false; closeModal(); }
   function resume() { if (root()) refresh({ silent: true }); }
 
   addEventListener("financial-data-changed", () => { if (root() && !state.loading) refresh({ silent: true }); });
