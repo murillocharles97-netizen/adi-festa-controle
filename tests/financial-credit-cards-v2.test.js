@@ -229,3 +229,57 @@ test("frontend, persistência e rules publicam o domínio V2 sem listener global
   assert.match(rules, /match \/creditCards\/\{cardId\}/);
   assert.doesNotMatch(service, /onSnapshot\s*\(/);
 });
+
+test("pagamento de conta no crédito exige cartão e resolve fatura sem caixa imediato", () => {
+  const entry = engine.normalizeEntry({
+    id: "condominio-setembro", operationId: "condominio-setembro", description: "Condomínio",
+    amountCents: 35000, direction: "out", status: "pending", dueAt: "2026-09-10T12:00:00-03:00",
+    categoryId: "default_personal_home", categoryName: "Casa", spaceType: "personal",
+  }), card = { id: "c6", cardHomeSpaceId: "casa", closingDay: 3, dueDay: 13 };
+  const plan = engine.buildCreditCardBillPaymentPlan({ entry, card, purchaseDate: "2026-09-10T12:00:00-03:00" });
+  assert.equal(plan.creditCardInvoiceId, "c6_2026-10");
+  assert.equal(engine.localIsoDate(plan.invoice.dueDate), "2026-10-13");
+  assert.equal(plan.billAmountCents, 35000);
+  assert.equal(plan.feeCents, 0);
+  assert.equal(plan.totalCardAmountCents, 35000);
+  assert.equal(plan.cashFlowEffectCents, 0);
+  assert.throws(() => engine.buildCreditCardBillPaymentPlan({ entry, card: {}, purchaseDate: "2026-09-10" }), /Escolha o cartão/);
+});
+
+test("taxa explícita fica separada e pagamento da fatura liquida o caixa uma vez", () => {
+  const base = { direction: "out", status: "paid", occurredAt: "2026-09-10T12:00:00-03:00", dueAt: "2026-10-13T12:00:00-03:00", paymentMethod: "credit_card", cashFlowEffect: false, expenseRecognized: true },
+    bill = engine.normalizeEntry({ ...base, id: "bill", operationId: "bill", description: "Condomínio", amountCents: 35000, categoryId: "home", categoryName: "Casa", sourceType: "expense", sourceId: "bill" }),
+    fee = engine.normalizeEntry({ ...base, id: "fee", operationId: "fee", description: "Taxa do pagamento", amountCents: 1800, categoryId: "finance", categoryName: "Financeiro", sourceType: "credit_card_bill_fee", sourceId: "bill" }),
+    invoicePayment = engine.normalizeEntry({ id: "invoice-payment", operationId: "invoice-payment", description: "Pagamento da fatura", amountCents: 36800, direction: "out", status: "paid", occurredAt: "2026-10-13T12:00:00-03:00", dueAt: "2026-10-13T12:00:00-03:00", paymentMethod: "pix", cashFlowEffect: true, expenseRecognized: false, sourceType: "credit_card_invoice_payment", sourceId: "invoice" });
+  const beforeInvoicePayment = engine.summarize([bill, fee]);
+  assert.equal(beforeInvoicePayment.expensesTotalCents, 36800);
+  assert.equal(beforeInvoicePayment.totalOutCents, 0);
+  const afterInvoicePayment = engine.summarize([bill, fee, invoicePayment]);
+  assert.equal(afterInvoicePayment.expensesTotalCents, 36800);
+  assert.equal(afterInvoicePayment.totalOutCents, 36800);
+});
+
+test("desfazer registro restaura pendência sem criar receita e invalida a charge", () => {
+  const pendingBill = engine.normalizeEntry({ id: "bill", operationId: "bill", description: "Condomínio", amountCents: 35000, direction: "out", status: "pending", dueAt: "2026-09-10T12:00:00-03:00", sourceType: "expense", sourceId: "bill" }),
+    reversedFee = engine.normalizeEntry({ id: "fee", operationId: "fee", description: "Taxa", amountCents: 1800, direction: "out", status: "reversed", dueAt: "2026-09-10T12:00:00-03:00", cashFlowEffect: false, expenseRecognized: false, sourceType: "credit_card_bill_fee", sourceId: "bill" });
+  const summary = engine.summarize([pendingBill, reversedFee]);
+  assert.equal(summary.totalInCents, 0);
+  assert.equal(summary.totalOutCents, 0);
+  assert.equal(summary.expensesTotalCents, 0);
+  const service = fs.readFileSync("js/firebase/financial-space-service.js", "utf8"), rules = fs.readFileSync("firestore.rules", "utf8");
+  assert.match(service, /async function undoEntryPayment/);
+  assert.match(service, /kind: "bill_payment_void"/);
+  assert.match(service, /status: "voided"/);
+  assert.match(rules, /request\.resource\.data\.status == 'voided'/);
+});
+
+test("camada de negócio rejeita crédito sem vínculo e o wizard exige cartão", () => {
+  const service = fs.readFileSync("js/firebase/financial-space-service.js", "utf8"), ui = fs.readFileSync("js/financial-ui.js", "utf8");
+  const markPaidBlock = service.slice(service.indexOf("async function markPaid"), service.indexOf("async function undoEntryPayment"));
+  assert.match(markPaidBlock, /method === "credit_card"/);
+  assert.match(markPaidBlock, /Selecione o cartão de crédito e a fatura/);
+  assert.match(ui, /Qual cartão\?/);
+  assert.match(ui, /Saída do caixa agora/);
+  assert.match(ui, /data-payment-create-card/);
+  assert.match(ui, /payEntryByCreditCard/);
+});

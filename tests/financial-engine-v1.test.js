@@ -75,7 +75,7 @@ test("templates pessoais usam categorias macro e subcategorias opcionais", () =>
   const tree = engine.defaultCategoryTree("personal"), categories = tree.filter((item) => item.type === "category");
   assert.deepEqual(Array.from(categories, (item) => item.name), [
     "Casa", "Alimentação", "Transporte", "Carro", "Saúde", "Educação", "Lazer",
-    "Assinaturas", "Compras", "Dívidas", "Impostos", "Pets", "Família", "Outros",
+    "Assinaturas", "Compras", "Dívidas", "Impostos", "Pets", "Família", "Financeiro", "Outros",
   ]);
   const home = categories.find((item) => item.name === "Casa");
   assert.deepEqual(Array.from(engine.subcategoriesFor(tree, home.id), (item) => item.name), [

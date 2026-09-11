@@ -26,6 +26,7 @@ window.FinancialEngine = (() => {
     ["taxes", "Impostos", "landmark", [["property", "Imóvel"], ["vehicle", "Veículo"], ["income", "Renda"], ["other", "Outros"]]],
     ["pets", "Pets", "paw-print", [["food", "Alimentação"], ["veterinary", "Veterinário"], ["hygiene", "Higiene"], ["other", "Outros"]]],
     ["family", "Família", "users", [["children", "Filhos"], ["support", "Ajuda familiar"], ["other", "Outros"]]],
+    ["finance", "Financeiro", "wallet-cards", [["fees", "Taxas financeiras"]]],
     ["other", "Outros", "shapes", []],
   ];
   const BUSINESS_CATEGORY_TEMPLATES = [
@@ -42,7 +43,7 @@ window.FinancialEngine = (() => {
     ["equipment", "Equipamentos", "monitor", [["computer", "Computador"], ["printer", "Impressora"], ["machine", "Máquina"], ["tools", "Ferramentas"], ["furniture", "Móveis"]]],
     ["services", "Serviços", "briefcase-business", []],
     ["withdrawals", "Retiradas", "hand-coins", []],
-    ["finance", "Financeiro", "wallet-cards", []],
+    ["finance", "Financeiro", "wallet-cards", [["fees", "Taxas financeiras"]]],
     ["other", "Outros", "shapes", []],
   ];
 
@@ -427,6 +428,42 @@ window.FinancialEngine = (() => {
     .reduce((sum, invoice) => sum + invoiceTotals(invoice).remainingCents, 0);
   const creditCardAvailableLimit = (limitCents, invoices = []) =>
     Math.max(0, cents(limitCents || 0) - creditCardCommitment(invoices));
+  const creditCardBillFeeCategory = (spaceType = "business") => {
+    const type = templateType(spaceType);
+    return {
+      categoryId: `default_${type}_finance`,
+      categoryName: "Financeiro",
+      categoryIcon: "wallet-cards",
+      subcategoryId: `default_${type}_finance_fees`,
+      subcategoryName: "Taxas financeiras",
+    };
+  };
+  const buildCreditCardBillPaymentPlan = ({ entry = {}, card = {}, purchaseDate = new Date(), feeCents = 0 } = {}) => {
+    if (!entry.id || entry.direction !== "out" || !["pending", "overdue"].includes(effectiveStatus(entry)))
+      throw new Error("Escolha uma conta pendente para pagar.");
+    if (!card.id || !card.cardHomeSpaceId)
+      throw new Error("Escolha o cartão de crédito usado no pagamento.");
+    const billAmountCents = cents(entry.amountCents), explicitFeeCents = cents(feeCents || 0);
+    if (billAmountCents <= 0 || explicitFeeCents < 0) throw new Error("Revise o valor da conta e da taxa.");
+    const invoice = resolveCreditCardInvoiceForPurchase({
+      purchaseDate,
+      closingDay: card.closingDay,
+      dueDay: card.dueDay,
+    });
+    return {
+      billEntryId: entry.id,
+      billAmountCents,
+      feeCents: explicitFeeCents,
+      totalCardAmountCents: billAmountCents + explicitFeeCents,
+      creditCardId: card.id,
+      cardHomeSpaceId: card.cardHomeSpaceId,
+      creditCardInvoiceId: `${card.id}_${invoice.referenceKey}`,
+      purchaseDate: localDate(purchaseDate).toISOString(),
+      invoice,
+      feeCategory: creditCardBillFeeCategory(entry.spaceType || "business"),
+      cashFlowEffectCents: 0,
+    };
+  };
   const CREDIT_CARD_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
   const normalizeCreditCardAccess = (card = {}, homeSpaceId = "") => {
     const cardHomeSpaceId = String(card.cardHomeSpaceId || card.financialSpaceId || homeSpaceId || "").trim(),
@@ -584,6 +621,8 @@ window.FinancialEngine = (() => {
     deriveCreditCardInvoiceStatus,
     creditCardCommitment,
     creditCardAvailableLimit,
+    creditCardBillFeeCategory,
+    buildCreditCardBillPaymentPlan,
     CREDIT_CARD_ACCESS_MODES,
     normalizeCreditCardAccess,
     creditCardAllowsSpace,

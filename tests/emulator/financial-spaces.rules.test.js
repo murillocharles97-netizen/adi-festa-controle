@@ -157,6 +157,82 @@ test("cartão pessoal compartilhado mantém uma fatura e compras isoladas por es
   await assertFails(setDoc(doc(manager, "financialSpaces", "space-a", "creditCardPurchases", "forged-personal"), { ...purchase, id: "forged-personal", financialSpaceId: "space-a", operationId: "forged-personal", createdBy: "manager-a" }));
 });
 
+test("pagamento de conta no crédito exige cartão e fatura e pode ser desfeito sem criar entrada", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), intruder = env.authenticatedContext("owner-b").firestore();
+  const homeId = "bill-card-home", targetId = "bill-card-target", cardId = "bill-card", invoiceId = "bill-card_2026-10", entryId = "condominium-september";
+  await env.withSecurityRulesDisabled(async (context) => {
+    const admin = context.firestore();
+    await setDoc(doc(admin, "financialSpaces", homeId), { id: homeId, name: "Casa", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true });
+    await setDoc(doc(admin, "financialSpaces", targetId), { id: targetId, name: "Apartamento", type: "other", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true });
+  });
+  const card = {
+    id: cardId, financialSpaceId: homeId, cardHomeSpaceId: homeId, ownerUid: "owner-a", createdBy: "owner-a",
+    operationId: `credit_card_${cardId}`, name: "C6 Carbon", institution: "C6", last4: "6357",
+    limitCents: 1050000, committedCents: 0, closingDay: 3, dueDay: 13, paymentAccountId: null,
+    accessMode: "all_spaces", allowedFinancialSpaceIds: [], defaultFinancialSpaceId: homeId, active: true, schemaVersion: 4,
+  };
+  const bill = {
+    id: entryId, financialSpaceId: targetId, ownerUid: "owner-a", createdBy: "owner-a", operationId: entryId,
+    amountCents: 35000, currency: "BRL", direction: "out", status: "pending", sourceType: "expense", sourceId: entryId,
+    description: "Condomínio", categoryId: "default_personal_home", categoryName: "Casa", dueAt: "2026-09-10T15:00:00.000Z",
+  };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", homeId, "creditCards", cardId), card));
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", targetId, "entries", entryId), bill));
+  await assertFails(updateDoc(doc(owner, "financialSpaces", targetId, "entries", entryId), { status: "paid", paymentMethod: "credit_card" }));
+
+  const invoice = {
+    id: invoiceId, financialSpaceId: homeId, cardHomeSpaceId: homeId, ownerUid: "owner-a", createdBy: "owner-a",
+    operationId: `invoice_${invoiceId}`, creditCardId: cardId, referenceKey: "2026-10", referenceYear: 2026, referenceMonth: 10,
+    openingDate: "2026-09-04T15:00:00.000Z", closingDate: "2026-10-03T15:00:00.000Z", dueDate: "2026-10-13T15:00:00.000Z",
+    purchasesTotalCents: 36800, adjustmentsTotalCents: 0, paidTotalCents: 0, remainingCents: 36800,
+    spaceTotals: { [targetId]: 36800 }, categoryTotals: { default_personal_home: 35000, default_personal_finance: 1800 },
+    spacesUsedIds: [targetId], status: "open", schemaVersion: 4,
+  };
+  const purchaseBase = {
+    financialSpaceId: targetId, cardHomeSpaceId: homeId, ownerUid: "owner-a", createdBy: "owner-a", creditCardId: cardId,
+    creditCardInvoiceId: invoiceId, installmentGroupId: "bill-pay", installmentNumber: 1, installmentCount: 1,
+    purchaseDate: "2026-09-10T15:00:00.000Z", status: "posted", schemaVersion: 4,
+  };
+  const principalPurchase = { ...purchaseBase, id: "bill-pay_bill", operationId: "bill-pay_bill", purchaseOperationId: "bill-pay", amountCents: 35000, originalPurchaseAmountCents: 35000, description: "Condomínio" };
+  const feePurchase = { ...purchaseBase, id: "bill-pay_fee", operationId: "bill-pay_fee", purchaseOperationId: "bill-pay", amountCents: 1800, originalPurchaseAmountCents: 1800, description: "Taxa do pagamento · Condomínio" };
+  const feeEntry = {
+    id: "bill-pay_fee_entry", financialSpaceId: targetId, ownerUid: "owner-a", createdBy: "owner-a", operationId: "bill-pay_fee_entry",
+    amountCents: 1800, currency: "BRL", direction: "out", status: "paid", sourceType: "credit_card_bill_fee", sourceId: entryId,
+    description: "Taxa do pagamento · Condomínio", paymentMethod: "credit_card", creditCardId: cardId, cardHomeSpaceId: homeId,
+    creditCardInvoiceId: invoiceId, creditCardPurchaseId: feePurchase.id, cashFlowEffect: false, expenseRecognized: true,
+  };
+  const payBatch = writeBatch(owner);
+  payBatch.set(doc(owner, "financialSpaces", homeId, "creditCardInvoices", invoiceId), invoice);
+  payBatch.set(doc(owner, "financialSpaces", targetId, "creditCardPurchases", principalPurchase.id), principalPurchase);
+  payBatch.set(doc(owner, "financialSpaces", targetId, "creditCardPurchases", feePurchase.id), feePurchase);
+  payBatch.set(doc(owner, "financialSpaces", targetId, "entries", feeEntry.id), feeEntry);
+  payBatch.update(doc(owner, "financialSpaces", targetId, "entries", entryId), {
+    status: "paid", paidAt: "2026-09-10T15:00:00.000Z", paymentMethod: "credit_card", cashFlowEffect: false,
+    creditCardId: cardId, cardHomeSpaceId: homeId, creditCardInvoiceId: invoiceId, creditCardPurchaseId: principalPurchase.id,
+  });
+  payBatch.update(doc(owner, "financialSpaces", homeId, "creditCards", cardId), { committedCents: 36800 });
+  payBatch.set(doc(owner, "financialSpaces", targetId, "events", "bill-pay"), { id: "bill-pay", operationId: "bill-pay", financialSpaceId: targetId, ownerUid: "owner-a", createdBy: "owner-a", eventKind: "bill_paid_by_credit_card" });
+  await assertSucceeds(payBatch.commit());
+  await assertFails(updateDoc(doc(intruder, "financialSpaces", targetId, "entries", entryId), { status: "pending" }));
+
+  const undoneAt = "2026-09-11T15:00:00.000Z", undoId = "undo_bill-pay", undoBatch = writeBatch(owner);
+  undoBatch.update(doc(owner, "financialSpaces", homeId, "creditCardInvoices", invoiceId), { adjustmentsTotalCents: -36800, remainingCents: 0, spaceTotals: {}, categoryTotals: {}, status: "open" });
+  undoBatch.update(doc(owner, "financialSpaces", homeId, "creditCards", cardId), { committedCents: 0 });
+  undoBatch.update(doc(owner, "financialSpaces", targetId, "creditCardPurchases", principalPurchase.id), { status: "voided", voidedAt: undoneAt, voidedByOperationId: undoId, updatedAt: undoneAt });
+  undoBatch.update(doc(owner, "financialSpaces", targetId, "creditCardPurchases", feePurchase.id), { status: "voided", voidedAt: undoneAt, voidedByOperationId: undoId, updatedAt: undoneAt });
+  undoBatch.update(doc(owner, "financialSpaces", targetId, "entries", feeEntry.id), { status: "reversed", expenseRecognized: false });
+  undoBatch.update(doc(owner, "financialSpaces", targetId, "entries", entryId), { status: "pending", paidAt: null, paymentMethod: null, creditCardId: null, cardHomeSpaceId: null, creditCardInvoiceId: null, creditCardPurchaseId: null });
+  undoBatch.set(doc(owner, "financialSpaces", homeId, "creditCardAdjustments", undoId), {
+    id: undoId, operationId: undoId, financialSpaceId: homeId, cardHomeSpaceId: homeId, ownerUid: "owner-a", createdBy: "owner-a",
+    purchaseFinancialSpaceId: targetId, creditCardInvoiceId: invoiceId, creditCardId: cardId, creditCardPurchaseId: principalPurchase.id,
+    kind: "bill_payment_void", amountCents: 36800, effectCents: -36800, status: "confirmed",
+  });
+  undoBatch.set(doc(owner, "financialSpaces", targetId, "events", undoId), { id: undoId, operationId: undoId, financialSpaceId: targetId, ownerUid: "owner-a", createdBy: "owner-a", eventKind: "credit_card_bill_payment_undone" });
+  await assertSucceeds(undoBatch.commit());
+  assert.equal((await getDoc(doc(owner, "financialSpaces", targetId, "entries", entryId))).data().status, "pending");
+  assert.equal((await getDoc(doc(owner, "financialSpaces", homeId, "creditCardInvoices", invoiceId))).data().remainingCents, 0);
+});
+
 test("categoria e subcategoria customizadas ficam isoladas no espaço", async () => {
   const db = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore();
   for (const id of ["category-space-a", "category-space-b"])
