@@ -191,7 +191,7 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
   assert.doesNotMatch(syncSource, /setInterval\([^)]*ensureClientProjection/);
 });
 
-test("a cadeia de módulos mantém versões explícitas na release 126", () => {
+test("a cadeia de módulos mantém versões explícitas na release 127", () => {
   assert.match(authSource, /import ['"]\.\/sync\.js\?v=122['"]/);
   assert.match(authSource, /from ['"]\.\/business-context\.js\?v=123['"]/);
   assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=122['"]/);
@@ -204,7 +204,7 @@ test("a cadeia de módulos mantém versões explícitas na release 126", () => {
     /js\/firebase\/auth\.js\?v=123[\s\S]*js\/firebase\/firebase-ui\.js\?v=122/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /veconi-v126-financial-ui-tools/);
+  assert.match(serviceWorkerSource, /veconi-v127-credit-card-bill-payment/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

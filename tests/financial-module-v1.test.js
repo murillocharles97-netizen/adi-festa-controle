@@ -10,7 +10,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=126") < html.indexOf("auth.js?v=123"));
+  assert.ok(html.indexOf("financial-space-service.js?v=127") < html.indexOf("auth.js?v=123"));
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -30,13 +30,14 @@ test("dashboard separa competência realizada de vencimentos do período", () =>
   assert.match(read("js/financial-ui.js"), /data\.accounts/);
 });
 
-test("contas abrem detalhes e diferenciam ocorrência, série e estorno", () => {
+test("contas abrem detalhes e diferenciam ocorrência, série e desfazer pagamento", () => {
   const ui = read("js/financial-ui.js");
   assert.match(ui, /Detalhes da conta/);
   assert.match(ui, /Somente esta conta/);
   assert.match(ui, /Esta e as próximas/);
   assert.match(ui, /Gerenciar recorrência/);
-  assert.match(ui, /Reverter lançamento/);
+  assert.match(ui, /Desfazer pagamento/);
+  assert.match(ui, /não representa dinheiro recebido/);
   assert.match(service, /overrideOccurrenceKeys: arrayUnion/);
   assert.match(service, /skippedOccurrenceKeys: arrayUnion/);
   assert.match(service, /async function updateRecurrenceFrom/);
@@ -104,9 +105,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 126 publica as ferramentas financeiras no novo cache VECONI", () => {
-  assert.match(read("js/build-info.js"), /release: "126"/);
-  assert.match(sw, /veconi-v126-financial-ui-tools/);
+test("release 127 publica o pagamento de contas por cartão no novo cache VECONI", () => {
+  assert.match(read("js/build-info.js"), /release: "127"/);
+  assert.match(sw, /veconi-v127-credit-card-bill-payment/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

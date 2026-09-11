@@ -627,7 +627,7 @@ async function getCreditCardInvoiceDetails(spaceId, invoiceId, options = {}) {
         }))),
         getDocs(query(childCollection(homeSpaceId, "creditCardInvoicePayments"), where("creditCardInvoiceId", "==", invoiceId), limit(100))),
         getDocs(query(childCollection(homeSpaceId, "creditCardAdjustments"), where("creditCardInvoiceId", "==", invoiceId), limit(100))),
-      ]), purchases = purchaseBatches.flatMap(({ space, snapshot }) => snapshot.docs.map(convert).map((purchase) => ({
+      ]), purchases = purchaseBatches.flatMap(({ space, snapshot }) => snapshot.docs.map(convert).filter((purchase) => purchase.status !== "voided").map((purchase) => ({
         ...purchase,
         financialSpaceId: purchase.financialSpaceId || space.id,
         financialSpaceName: space.name,
@@ -930,6 +930,227 @@ async function createCreditCardPurchase(spaceId, input = {}) {
   return result;
 }
 
+async function resolveCreditCardInvoice(spaceId, input = {}) {
+  const space = assertSpace(spaceId), creditCardId = requiredText(input.creditCardId, "o cartão", 120),
+    cards = await listCreditCards(space.id), card = cards.find((item) => item.id === creditCardId
+      && (!input.cardHomeSpaceId || item.cardHomeSpaceId === input.cardHomeSpaceId));
+  if (!card || card.active === false || !cardCanBeUsedInSpace(card, space))
+    throw new Error("O cartão escolhido não está disponível neste espaço.");
+  const previewEntry = {
+    id: String(input.entryId || "preview"),
+    direction: "out",
+    status: "pending",
+    amountCents: Number(input.amountCents),
+    spaceType: space.type,
+  }, plan = Engine.buildCreditCardBillPaymentPlan({
+    entry: previewEntry,
+    card,
+    purchaseDate: input.purchaseDate || now(),
+    feeCents: Number(input.feeCents || 0),
+  }), invoiceSnapshot = await getDoc(childRef(card.cardHomeSpaceId, "creditCardInvoices", plan.creditCardInvoiceId)),
+    invoice = convert(invoiceSnapshot);
+  return {
+    ...plan,
+    card,
+    currentInvoice: invoice ? { ...invoice, ...Engine.invoiceTotals(invoice) } : null,
+    invoiceTotalAfterCents: Number(invoice ? Engine.invoiceTotals(invoice).amountDueCents : 0) + plan.totalCardAmountCents,
+  };
+}
+
+async function payEntryByCreditCard(spaceId, entry, input = {}) {
+  const space = assertSpace(spaceId);
+  if (!entry?.id) throw new Error("Escolha uma conta para registrar o pagamento.");
+  const opId = requiredText(input.operationId || operationId("bill_card_payment"), "o identificador da operação", 180),
+    preview = await resolveCreditCardInvoice(space.id, {
+      entryId: entry.id,
+      amountCents: entry.amountCents,
+      creditCardId: input.creditCardId,
+      cardHomeSpaceId: input.cardHomeSpaceId,
+      purchaseDate: input.purchaseDate || input.paidAt || now(),
+      feeCents: input.feeCents || 0,
+    }), card = preview.card, cardHomeSpaceId = preview.cardHomeSpaceId, homeSpace = assertSpace(cardHomeSpaceId),
+    invoiceId = preview.creditCardInvoiceId, billPurchaseId = `${opId}_bill`, feePurchaseId = preview.feeCents ? `${opId}_fee` : null,
+    feeEntryId = preview.feeCents ? `${opId}_fee_entry` : null, createdAt = now(), purchaseDate = preview.purchaseDate,
+    entryRef = childRef(space.id, "entries", entry.id), cardRef = childRef(cardHomeSpaceId, "creditCards", card.id),
+    invoiceRef = childRef(cardHomeSpaceId, "creditCardInvoices", invoiceId), billPurchaseRef = childRef(space.id, "creditCardPurchases", billPurchaseId),
+    feePurchaseRef = feePurchaseId ? childRef(space.id, "creditCardPurchases", feePurchaseId) : null,
+    feeEntryRef = feeEntryId ? childRef(space.id, "entries", feeEntryId) : null, eventRef = childRef(space.id, "events", opId);
+  const result = await runTransaction(db, async (transaction) => {
+    const entrySnapshot = await transaction.get(entryRef), cardSnapshot = await transaction.get(cardRef),
+      invoiceSnapshot = await transaction.get(invoiceRef), billPurchaseSnapshot = await transaction.get(billPurchaseRef),
+      feePurchaseSnapshot = feePurchaseRef ? await transaction.get(feePurchaseRef) : null,
+      feeEntrySnapshot = feeEntryRef ? await transaction.get(feeEntryRef) : null, eventSnapshot = await transaction.get(eventRef);
+    if (!entrySnapshot.exists()) throw new Error("Conta não encontrada.");
+    const current = convert(entrySnapshot), currentCard = convert(cardSnapshot);
+    if (current.status === "paid" && current.paymentOperationId === opId)
+      return { entry: current, invoice: convert(invoiceSnapshot), retried: true };
+    if (current.status !== "pending" && Engine.effectiveStatus(current) !== "overdue")
+      throw new Error("Somente contas pendentes podem ser pagas no cartão.");
+    if (!currentCard || currentCard.active === false || !cardCanBeUsedInSpace(normalizeCreditCard(currentCard, cardHomeSpaceId), space))
+      throw new Error("O cartão não está autorizado neste espaço.");
+    if (billPurchaseSnapshot.exists() || feePurchaseSnapshot?.exists() || feeEntrySnapshot?.exists() || eventSnapshot.exists())
+      throw new Error("A operação já existe, mas a conta não está vinculada a ela. Atualize a tela antes de tentar novamente.");
+    const plan = Engine.buildCreditCardBillPaymentPlan({ entry: { ...current, spaceType: space.type }, card: normalizeCreditCard(currentCard, cardHomeSpaceId), purchaseDate, feeCents: preview.feeCents }),
+      currentInvoice = convert(invoiceSnapshot), totals = Engine.invoiceTotals({
+        purchasesTotalCents: Number(currentInvoice?.purchasesTotalCents || 0) + plan.totalCardAmountCents,
+        adjustmentsTotalCents: Number(currentInvoice?.adjustmentsTotalCents || 0),
+        paidTotalCents: Number(currentInvoice?.paidTotalCents || 0),
+      }), categoryTotalsWithBill = Engine.adjustDimensionTotal(currentInvoice?.categoryTotals, current.categoryId || "default_other", plan.billAmountCents),
+      categoryTotals = plan.feeCents ? Engine.adjustDimensionTotal(categoryTotalsWithBill, plan.feeCategory.categoryId, plan.feeCents) : categoryTotalsWithBill,
+      invoiceValue = {
+        ...(currentInvoice || {}),
+        id: invoiceId,
+        ...baseMetadata(homeSpace, currentInvoice?.operationId || `invoice_${invoiceId}`),
+        cardHomeSpaceId,
+        creditCardId: currentCard.id,
+        cardName: currentCard.name,
+        cardLast4: currentCard.last4,
+        referenceKey: plan.invoice.referenceKey,
+        referenceYear: plan.invoice.referenceYear,
+        referenceMonth: plan.invoice.referenceMonth,
+        openingDate: plan.invoice.openingDate,
+        closingDate: plan.invoice.closingDate,
+        dueDate: plan.invoice.dueDate,
+        ...totals,
+        spaceTotals: Engine.adjustDimensionTotal(currentInvoice?.spaceTotals, space.id, plan.totalCardAmountCents),
+        categoryTotals,
+        spacesUsedIds: [...new Set([...(currentInvoice?.spacesUsedIds || []), space.id])],
+        projectionVersion: 1,
+        status: Engine.deriveCreditCardInvoiceStatus({ ...(currentInvoice || {}), ...totals, closingDate: plan.invoice.closingDate, dueDate: plan.invoice.dueDate }),
+        createdBy: currentInvoice?.createdBy || uid(),
+        createdAt: currentInvoice?.createdAt || createdAt,
+        updatedAt: createdAt,
+        schemaVersion: 4,
+      }, purchaseBase = {
+        cardHomeSpaceId,
+        creditCardId: currentCard.id,
+        creditCardInvoiceId: invoiceId,
+        installmentGroupId: opId,
+        installmentNumber: 1,
+        installmentCount: 1,
+        purchaseDate,
+        status: "posted",
+        createdAt,
+        updatedAt: createdAt,
+        schemaVersion: 4,
+      }, billPurchase = {
+        id: billPurchaseId,
+        ...baseMetadata(space, billPurchaseId),
+        ...purchaseBase,
+        purchaseOperationId: opId,
+        amountCents: plan.billAmountCents,
+        originalPurchaseAmountCents: plan.billAmountCents,
+        description: current.description,
+        merchant: String(current.description).slice(0, 120),
+        categoryId: current.categoryId || "default_other",
+        categoryName: current.categoryName || "Outros",
+        subcategoryId: current.subcategoryId || null,
+        subcategoryName: current.subcategoryName || null,
+        sourceType: "bill_payment",
+        sourceId: current.id,
+        relatedEntryId: current.id,
+        chargeComponent: "principal",
+      }, entryPatch = {
+        status: "paid",
+        paidAt: purchaseDate,
+        occurredAt: purchaseDate,
+        sortAt: purchaseDate,
+        periodKey: Engine.periodKey(purchaseDate),
+        paymentMethod: "credit_card",
+        paymentType: "credit_card",
+        cashFlowEffect: false,
+        expenseRecognized: true,
+        paymentOperationId: opId,
+        creditCardId: currentCard.id,
+        cardHomeSpaceId,
+        creditCardInvoiceId: invoiceId,
+        creditCardPurchaseId: billPurchaseId,
+        creditCardFeePurchaseId: feePurchaseId,
+        creditCardFeeEntryId: feeEntryId,
+        billAmountCents: plan.billAmountCents,
+        feeAmountCents: plan.feeCents,
+        cardChargedAmountCents: plan.totalCardAmountCents,
+        settlementType: "credit_card_bill_payment",
+        notes: String(input.notes || current.notes || "").slice(0, 500),
+        updatedAt: createdAt,
+      };
+    transaction.set(invoiceRef, clean(invoiceValue));
+    transaction.set(billPurchaseRef, clean(billPurchase));
+    if (plan.feeCents) {
+      const feePurchase = {
+        id: feePurchaseId,
+        ...baseMetadata(space, feePurchaseId),
+        ...purchaseBase,
+        purchaseOperationId: opId,
+        amountCents: plan.feeCents,
+        originalPurchaseAmountCents: plan.feeCents,
+        description: `Taxa do pagamento · ${current.description}`,
+        merchant: "Taxa do cartão",
+        ...plan.feeCategory,
+        sourceType: "bill_payment_fee",
+        sourceId: current.id,
+        relatedEntryId: feeEntryId,
+        sourceBillEntryId: current.id,
+        chargeComponent: "fee",
+      }, feeEntry = Engine.normalizeEntry({
+        id: feeEntryId,
+        operationId: feeEntryId,
+        direction: "out",
+        entryType: "financial_fee",
+        description: `Taxa do pagamento · ${current.description}`,
+        amountCents: plan.feeCents,
+        ...plan.feeCategory,
+        categorySchemaVersion: 2,
+        status: "paid",
+        occurredAt: purchaseDate,
+        paidAt: null,
+        dueAt: plan.invoice.dueDate,
+        paymentMethod: "credit_card",
+        paymentType: "credit_card",
+        cashFlowEffect: false,
+        expenseRecognized: true,
+        creditCardId: currentCard.id,
+        cardHomeSpaceId,
+        creditCardInvoiceId: invoiceId,
+        creditCardPurchaseId: feePurchaseId,
+        sourceType: "credit_card_bill_fee",
+        sourceId: current.id,
+        relatedBillEntryId: current.id,
+        createdAt,
+        schemaVersion: 3,
+      });
+      transaction.set(feePurchaseRef, clean(feePurchase));
+      transaction.set(feeEntryRef, clean({ ...baseMetadata(space, feeEntryId), ...feeEntry, createdAt, updatedAt: createdAt }));
+    }
+    transaction.update(cardRef, clean({ committedCents: Number(currentCard.committedCents || 0) + plan.totalCardAmountCents, updatedAt: createdAt }));
+    transaction.update(entryRef, clean(entryPatch));
+    transaction.set(eventRef, clean({
+      id: opId,
+      ...baseMetadata(space, opId),
+      entryId: current.id,
+      creditCardId: currentCard.id,
+      cardHomeSpaceId,
+      creditCardInvoiceId: invoiceId,
+      creditCardPurchaseId: billPurchaseId,
+      creditCardFeePurchaseId: feePurchaseId,
+      creditCardFeeEntryId: feeEntryId,
+      eventKind: "bill_paid_by_credit_card",
+      transition: "settled_to_invoice",
+      status: "applied",
+      amountCents: plan.billAmountCents,
+      feeAmountCents: plan.feeCents,
+      cardChargedAmountCents: plan.totalCardAmountCents,
+      paymentMethod: "credit_card",
+      cashFlowEffectCents: 0,
+      createdAt,
+      schemaVersion: 4,
+    }));
+    return { entry: { ...current, ...entryPatch }, invoice: invoiceValue, billPurchase, feeEntryId, retried: false };
+  });
+  emit("financial-data-changed", { entity: "entry", id: entry.id, action: "paid_by_credit_card", spaceId });
+  return result;
+}
+
 async function createOngoingCreditCardInstallment(spaceId, input = {}) {
   const installmentAmountCents = Number(input.installmentAmountCents),
     currentInstallment = Math.trunc(Number(input.currentInstallment)),
@@ -1194,7 +1415,11 @@ async function refundCreditCardPurchase(spaceId, purchaseId, input = {}) {
 async function markPaid(spaceId, entry, input = {}) {
   const space = assertSpace(spaceId);
   if (!entry?.id) throw new Error("Escolha uma conta para registrar o pagamento.");
-  const paidAt = input.paidAt || now(), opId = `payment_${entry.id}`, entryRef = childRef(space.id, "entries", entry.id),
+  const method = String(input.paymentMethod || "other");
+  if (method === "credit_card") throw new Error("Selecione o cartão de crédito e a fatura antes de confirmar.");
+  if (!["cash", "pix", "debit_card", "automatic_debit", "transfer", "other"].includes(method))
+    throw new Error("Escolha uma forma de pagamento válida.");
+  const paidAt = input.paidAt || now(), opId = String(input.operationId || operationId(`payment_${entry.id}`)), entryRef = childRef(space.id, "entries", entry.id),
     eventRef = childRef(space.id, "events", opId), result = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(entryRef);
       if (!snapshot.exists()) throw new Error("Conta não encontrada.");
@@ -1207,7 +1432,11 @@ async function markPaid(spaceId, entry, input = {}) {
         occurredAt: paidAt,
         sortAt: paidAt,
         periodKey: Engine.periodKey(paidAt),
-        paymentMethod: input.paymentMethod || "other",
+        paymentMethod: method,
+        paymentType: method,
+        cashFlowEffect: true,
+        expenseRecognized: true,
+        financialAccountId: input.financialAccountId || current.financialAccountId || null,
         paymentOperationId: opId,
         notes: String(input.notes || current.notes || "").slice(0, 500),
         updatedAt: paidAt,
@@ -1227,6 +1456,149 @@ async function markPaid(spaceId, entry, input = {}) {
       return { ...current, ...patch };
     });
   emit("financial-data-changed", { entity: "entry", id: entry.id, action: "paid", spaceId });
+  return result;
+}
+
+async function undoEntryPayment(spaceId, entry, reason = "Registro de pagamento desfeito") {
+  const space = assertSpace(spaceId);
+  if (!entry?.id) throw new Error("Escolha o pagamento que deseja desfazer.");
+  const entryRef = childRef(space.id, "entries", entry.id), initial = convert(await getDoc(entryRef));
+  if (!initial) throw new Error("Conta não encontrada.");
+  const previousOperationId = String(initial.paymentOperationId || ""), opId = `undo_${previousOperationId || initial.id}`,
+    eventRef = childRef(space.id, "events", opId), undoneAt = now(), isCanonicalCardPayment = initial.paymentMethod === "credit_card"
+      && initial.creditCardId && initial.cardHomeSpaceId && initial.creditCardInvoiceId && initial.creditCardPurchaseId;
+  const reopenPatch = {
+    status: "pending",
+    paidAt: null,
+    occurredAt: null,
+    sortAt: initial.dueAt,
+    periodKey: initial.duePeriodKey || Engine.periodKey(initial.dueAt),
+    paymentMethod: null,
+    paymentType: null,
+    financialAccountId: null,
+    cashFlowEffect: true,
+    expenseRecognized: true,
+    paymentOperationId: null,
+    creditCardId: null,
+    cardHomeSpaceId: null,
+    creditCardInvoiceId: null,
+    creditCardPurchaseId: null,
+    creditCardFeePurchaseId: null,
+    creditCardFeeEntryId: null,
+    billAmountCents: null,
+    feeAmountCents: null,
+    cardChargedAmountCents: null,
+    settlementType: null,
+    paymentUndoneAt: undoneAt,
+    paymentUndoReason: String(reason || "Registro de pagamento desfeito").slice(0, 300),
+    updatedAt: undoneAt,
+  };
+  if (!isCanonicalCardPayment) {
+    const result = await runTransaction(db, async (transaction) => {
+      const currentSnapshot = await transaction.get(entryRef), eventSnapshot = await transaction.get(eventRef);
+      if (!currentSnapshot.exists()) throw new Error("Conta não encontrada.");
+      const current = convert(currentSnapshot);
+      if (eventSnapshot.exists() && current.status === "pending") return { entry: current, retried: true, legacy: current.paymentMethod === "credit_card" };
+      if (current.status !== "paid") throw new Error("Somente pagamentos realizados podem ser desfeitos.");
+      transaction.update(entryRef, clean(reopenPatch));
+      transaction.set(eventRef, clean({
+        id: opId,
+        ...baseMetadata(space, opId),
+        entryId: current.id,
+        previousPaymentOperationId: previousOperationId || null,
+        previousPaymentMethod: current.paymentMethod || null,
+        eventKind: "account_payment_undone",
+        transition: "reopened",
+        status: "applied",
+        amountCents: current.amountCents,
+        reason: reopenPatch.paymentUndoReason,
+        createdAt: undoneAt,
+        schemaVersion: 4,
+      }));
+      return { entry: { ...current, ...reopenPatch }, retried: false, legacy: current.paymentMethod === "credit_card" };
+    });
+    emit("financial-data-changed", { entity: "entry", id: entry.id, action: "payment_undone", spaceId });
+    return result;
+  }
+  const cardHomeSpaceId = initial.cardHomeSpaceId, homeSpace = assertSpace(cardHomeSpaceId),
+    invoiceRef = childRef(cardHomeSpaceId, "creditCardInvoices", initial.creditCardInvoiceId), cardRef = childRef(cardHomeSpaceId, "creditCards", initial.creditCardId),
+    billPurchaseRef = childRef(space.id, "creditCardPurchases", initial.creditCardPurchaseId),
+    feePurchaseRef = initial.creditCardFeePurchaseId ? childRef(space.id, "creditCardPurchases", initial.creditCardFeePurchaseId) : null,
+    feeEntryRef = initial.creditCardFeeEntryId ? childRef(space.id, "entries", initial.creditCardFeeEntryId) : null,
+    adjustmentRef = childRef(cardHomeSpaceId, "creditCardAdjustments", opId);
+  const result = await runTransaction(db, async (transaction) => {
+    const currentSnapshot = await transaction.get(entryRef), invoiceSnapshot = await transaction.get(invoiceRef), cardSnapshot = await transaction.get(cardRef),
+      billPurchaseSnapshot = await transaction.get(billPurchaseRef), feePurchaseSnapshot = feePurchaseRef ? await transaction.get(feePurchaseRef) : null,
+      feeEntrySnapshot = feeEntryRef ? await transaction.get(feeEntryRef) : null, adjustmentSnapshot = await transaction.get(adjustmentRef),
+      eventSnapshot = await transaction.get(eventRef);
+    if (!currentSnapshot.exists() || !invoiceSnapshot.exists() || !cardSnapshot.exists() || !billPurchaseSnapshot.exists())
+      throw new Error("Não foi possível localizar todos os vínculos do pagamento no cartão.");
+    const current = convert(currentSnapshot), invoice = convert(invoiceSnapshot), card = convert(cardSnapshot);
+    if (eventSnapshot.exists() && current.status === "pending") return { entry: current, invoice, retried: true };
+    if (current.status !== "paid" || current.paymentOperationId !== previousOperationId)
+      throw new Error("Este pagamento já foi alterado. Atualize a tela.");
+    if (Number(invoice.paidTotalCents || 0) > 0)
+      throw new Error("A fatura já recebeu pagamento. Registre um estorno real ou ajuste a fatura antes de reabrir esta conta.");
+    const billAmountCents = Number(current.billAmountCents || current.amountCents), feeAmountCents = Number(current.feeAmountCents || 0),
+      totalCardAmountCents = billAmountCents + feeAmountCents, adjustmentsTotalCents = Number(invoice.adjustmentsTotalCents || 0) - totalCardAmountCents,
+      totals = Engine.invoiceTotals({ ...invoice, adjustmentsTotalCents }), feeCategory = Engine.creditCardBillFeeCategory(space.type),
+      categoryTotalsWithBill = Engine.adjustDimensionTotal(invoice.categoryTotals, current.categoryId || "default_other", -billAmountCents),
+      categoryTotals = feeAmountCents ? Engine.adjustDimensionTotal(categoryTotalsWithBill, feeCategory.categoryId, -feeAmountCents) : categoryTotalsWithBill,
+      adjustment = {
+        id: opId,
+        ...baseMetadata(homeSpace, opId),
+        cardHomeSpaceId,
+        purchaseFinancialSpaceId: space.id,
+        creditCardInvoiceId: invoice.id,
+        creditCardId: current.creditCardId,
+        creditCardPurchaseId: current.creditCardPurchaseId,
+        relatedBillEntryId: current.id,
+        kind: "bill_payment_void",
+        amountCents: totalCardAmountCents,
+        effectCents: -totalCardAmountCents,
+        reason: reopenPatch.paymentUndoReason,
+        occurredAt: undoneAt,
+        status: "confirmed",
+        createdAt: undoneAt,
+        schemaVersion: 4,
+      };
+    transaction.update(invoiceRef, clean({
+      ...totals,
+      adjustmentsTotalCents,
+      spaceTotals: Engine.adjustDimensionTotal(invoice.spaceTotals, space.id, -totalCardAmountCents),
+      categoryTotals,
+      status: Engine.deriveCreditCardInvoiceStatus({ ...invoice, ...totals }),
+      updatedAt: undoneAt,
+    }));
+    transaction.update(cardRef, clean({ committedCents: Math.max(0, Number(card.committedCents || 0) - totalCardAmountCents), updatedAt: undoneAt }));
+    transaction.update(billPurchaseRef, clean({ status: "voided", voidedAt: undoneAt, voidedByOperationId: opId, updatedAt: undoneAt }));
+    if (feePurchaseSnapshot?.exists()) transaction.update(feePurchaseRef, clean({ status: "voided", voidedAt: undoneAt, voidedByOperationId: opId, updatedAt: undoneAt }));
+    if (feeEntrySnapshot?.exists()) transaction.update(feeEntryRef, clean({ status: "reversed", expenseRecognized: false, reversedAt: undoneAt, reversedByOperationId: opId, updatedAt: undoneAt }));
+    if (!adjustmentSnapshot.exists()) transaction.set(adjustmentRef, clean(adjustment));
+    transaction.update(entryRef, clean(reopenPatch));
+    transaction.set(eventRef, clean({
+      id: opId,
+      ...baseMetadata(space, opId),
+      entryId: current.id,
+      previousPaymentOperationId,
+      creditCardId: current.creditCardId,
+      cardHomeSpaceId,
+      creditCardInvoiceId: invoice.id,
+      creditCardPurchaseId: current.creditCardPurchaseId,
+      eventKind: "credit_card_bill_payment_undone",
+      transition: "reopened_and_invoice_credited",
+      status: "applied",
+      amountCents: billAmountCents,
+      feeAmountCents,
+      cardCreditCents: totalCardAmountCents,
+      cashFlowEffectCents: 0,
+      reason: reopenPatch.paymentUndoReason,
+      createdAt: undoneAt,
+      schemaVersion: 4,
+    }));
+    return { entry: { ...current, ...reopenPatch }, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, adjustment, retried: false };
+  });
+  emit("financial-data-changed", { entity: "entry", id: entry.id, action: "credit_card_payment_undone", spaceId });
   return result;
 }
 
@@ -1404,6 +1776,11 @@ async function cancelRecurrenceFrom(spaceId, entry, options = {}) {
 }
 
 async function reversePaidEntry(spaceId, entry, reason = "") {
+  // A correção de uma conta paga não é uma entrada financeira. Contas e despesas
+  // voltam a ficar pendentes; estornos econômicos reais (recebimentos/compras)
+  // continuam nos fluxos específicos que geram contrapartida auditável.
+  if (entry?.direction === "out" && (entry?.sourceType === "expense" || entry?.recurrenceId || entry?.entryType === "expense"))
+    return undoEntryPayment(spaceId, entry, reason || "Registro de pagamento desfeito");
   const space = assertSpace(spaceId);
   const id = `reversal_${entry.id}`, opId = id, reversedAt = now(), reversal = Engine.normalizeEntry({
     id,
@@ -1742,6 +2119,8 @@ const FinancialSpaceService = {
   loadCreditOverview,
   getCreditCardInvoiceDetails,
   createCreditCardPurchase,
+  resolveCreditCardInvoice,
+  payEntryByCreditCard,
   createOngoingCreditCardInstallment,
   adjustCreditCardInvoice,
   payCreditCardInvoice,
@@ -1750,6 +2129,7 @@ const FinancialSpaceService = {
   createEntry,
   updatePendingEntry,
   markPaid,
+  undoEntryPayment,
   cancelPendingEntry,
   recurrenceDetails,
   updateRecurrenceFrom,

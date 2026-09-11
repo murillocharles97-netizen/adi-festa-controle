@@ -7,6 +7,7 @@ const ROOT = process.cwd(), OUTPUT = path.join(ROOT, "artifacts", "financial-mod
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" };
 function server() { return http.createServer((request, response) => { const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname), target = path.resolve(ROOT, `.${pathname === "/" ? "/tests/financial-module.fixture.html" : pathname}`); if (!target.startsWith(ROOT) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) return response.writeHead(404).end("Not found"); response.setHeader("Content-Type", `${mime[path.extname(target)] || "application/octet-stream"}; charset=utf-8`); response.setHeader("Cache-Control", "no-store"); fs.createReadStream(target).pipe(response); }); }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
 
 async function main() {
   fs.rmSync(OUTPUT, { recursive: true, force: true });
@@ -89,7 +90,37 @@ async function main() {
   if (!octoberPeriod.total.includes("1.500,00") || octoberPeriod.rows.some((text) => text.includes("10/09")) || !octoberPeriod.rows.some((text) => text.includes("10/10")) || !octoberPeriod.period.includes("Outubro")) throw Error(`Filtro de outubro inválido ${JSON.stringify(octoberPeriod)}`);
   await shot("12-mobile-outubro-isolado.png");
   await reset(390,844); await click('[data-financial-view="accounts"]'); await shot("13-mobile-conta-a-pagar.png");
-  await reset(390,844); await click('[data-financial-register-payment]'); await shot("14-mobile-registrar-pagamento.png");
+  await reset(390,844); await click('[data-financial-register-payment]');
+  let paymentWizardText = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!["Passo 1 de 4", "Qual conta você vai pagar?", "Aluguel + condomínio", "R$ 1.500,00"].every((text) => paymentWizardText.includes(text))) throw Error(`Etapa 1 do pagamento incompleta: ${paymentWizardText}`);
+  await shot("14-mobile-registrar-pagamento.png"); await click('[data-payment-next]');
+  paymentWizardText = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!["Passo 2 de 4", "Como você pagou?", "Cartão de débito", "Cartão de crédito", "Vai para uma fatura"].every((text) => paymentWizardText.includes(text))) throw Error(`Etapa 2 do pagamento incompleta: ${paymentWizardText}`);
+  await shot("14b-mobile-forma-pagamento-conta.png"); await click('[data-payment-method="credit_card"]'); await click('[data-payment-next]');
+  paymentWizardText = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!["Passo 3 de 4", "Qual cartão?", "C6 Carbon", "•••• 6357", "Adicionar taxa/encargo real"].every((text) => paymentWizardText.includes(text))) throw Error(`Etapa 3 do pagamento incompleta: ${paymentWizardText}`);
+  await click('[data-payment-card="card-c6"]'); await click('[name="feeEnabled"]'); await page.type('[name="fee"]', '18,00');
+  await shot("14c-mobile-cartao-e-taxa-explicita.png"); await click('[data-payment-next]');
+  paymentWizardText = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!["Passo 4 de 4", "Prévia da fatura", "Taxa financeira", "R$ 18,00", "Total no cartão", "R$ 1.518,00", "Saída do caixa agora", "R$ 0,00", "Sem despesa duplicada"].every((text) => paymentWizardText.includes(text))) throw Error(`Prévia do pagamento incompleta: ${paymentWizardText}`);
+  await shot("14d-mobile-previa-fatura-sem-duplicidade.png"); await close();
+  const paymentAudits = [];
+  for (const [width,height] of [[320,720],[360,800],[375,812],[390,844],[412,915],[430,932]]) {
+    await reset(width,height); await click('[data-financial-register-payment]'); await click('[data-payment-next]'); await click('[data-payment-method="credit_card"]'); await click('[data-payment-next]');
+    const layout = await page.evaluate(() => { const sheet = document.querySelector('.financial-sheet'), footer = document.querySelector('.financial-sheet .modal-foot'); return { viewport:`${innerWidth}x${innerHeight}`, documentOverflow:Math.max(0,document.documentElement.scrollWidth-innerWidth), sheetOverflow:Math.max(0,sheet.scrollWidth-sheet.clientWidth), footerWidth:footer.getBoundingClientRect().width, sheetWidth:sheet.getBoundingClientRect().width }; });
+    if (layout.documentOverflow > 1 || layout.sheetOverflow > 1 || layout.footerWidth > layout.sheetWidth + 1) throw Error(`Wizard de pagamento com overflow: ${JSON.stringify(layout)}`);
+    paymentAudits.push(layout);
+    if (width === 320) await shot("14e-mobile-320-cartao-sem-overflow.png");
+    if (width === 430) await shot("14f-mobile-430-cartao-sem-overflow.png");
+    await close();
+  }
+  await reset(390,844); await click('[data-financial-entry-id="rent-paid"]');
+  const undoDetail = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!undoDetail.includes("Desfazer pagamento") || undoDetail.includes("Reverter lançamento")) throw Error(`Ação de correção ambígua: ${undoDetail}`);
+  await shot("14g-mobile-detalhe-desfazer-pagamento.png"); await click('[data-financial-account-undo]');
+  const undoConfirmation = normalizeText(await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || ''));
+  if (!["Desfazer pagamento?", "voltará a ficar pendente", "não representa dinheiro recebido"].every((text) => undoConfirmation.toLocaleLowerCase('pt-BR').includes(text.toLocaleLowerCase('pt-BR')))) throw Error(`Confirmação de correção incompleta: ${undoConfirmation}`);
+  await shot("14h-mobile-confirmar-correcao-sem-receita.png"); await close();
   await reset(430,932); await click('[data-financial-view="cashflow"]'); await shot("15-mobile-fluxo-caixa.png");
   await reset(430,932); await click('[data-financial-view="categories"]');
   const categoryReport = await page.evaluate(() => ({ subtitle: document.querySelector(".financial-subpage-head p")?.textContent || "", labels: [...document.querySelectorAll(".financial-category-list b")].map((item) => item.textContent) }));
@@ -163,7 +194,7 @@ async function main() {
   await shot("30-mobile-core-carregado-com-cartoes-pendentes.png");
 
   if (pageErrors.length) throw Error(`Erros no browser: ${pageErrors.join(" | ")}`);
-  console.log(JSON.stringify({ ok: true, audits, screenshots: fs.readdirSync(OUTPUT).sort() }, null, 2));
+  console.log(JSON.stringify({ ok: true, audits, paymentAudits, screenshots: fs.readdirSync(OUTPUT).sort() }, null, 2));
   await browser.close();
   await new Promise((resolve) => staticServer.close(resolve));
 }

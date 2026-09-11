@@ -31,8 +31,8 @@ window.FinanceiroUI = (() => {
   const paymentLabel = {
     cash: "Dinheiro",
     pix: "Pix",
-    credit_card: "Cartão",
-    debit_card: "Débito",
+    credit_card: "Cartão de crédito",
+    debit_card: "Cartão de débito",
     automatic_debit: "Débito automático",
     transfer: "Transferência",
     other: "Outro",
@@ -558,7 +558,7 @@ window.FinanceiroUI = (() => {
         cursor = end;
         return `${palette[index % palette.length]} ${start}% ${end}%`;
       }).join(",") : "#e7eef1 0 100%";
-      const adjustments = details.adjustments.filter((item) => item.kind === "opening_balance"), adjustmentTotal = adjustments.reduce((sum, item) => sum + Number(item.effectCents || 0), 0),
+      const adjustmentTotal = details.adjustments.reduce((sum, item) => sum + Number(item.effectCents || 0), 0),
         paidPercentage = invoice.amountDueCents ? Math.min(100, Math.round((Number(invoice.paidTotalCents || 0) / invoice.amountDueCents) * 100)) : 0;
       sheet(`${sheetHeader(`Fatura ${invoice.cardName || "Cartão"}`, `${monthLabel(invoice.referenceKey)} · vence ${fullDateLabel(invoice.dueDate)}`)}<div class="modal-body"><article class="financial-invoice-summary-v3"><div><small>Total da fatura</small><strong>${money(invoice.amountDueCents)}</strong></div><div><small>Pago</small><strong>${money(invoice.paidTotalCents)}</strong></div><div><small>Restante</small><strong class="is-expense">${money(invoice.remainingCents)}</strong></div><span class="financial-status is-${invoice.status === "paid" ? "paid" : invoice.status === "overdue" ? "overdue" : "pending"}">${esc(invoiceStatusLabel[invoice.status] || invoice.status)}</span><div class="financial-invoice-progress"><i style="width:${paidPercentage}%"></i></div><small>${paidPercentage}% pago${currentSpaceAmount && details.spaceBreakdown.length > 1 ? ` · ${money(currentSpaceAmount)} deste espaço` : ""}</small></article><div class="financial-invoice-primary-actions">${invoice.remainingCents > 0 ? `<button class="btn btn-primary" type="button" data-financial-pay-invoice="${esc(invoice.id)}">${invoice.paidTotalCents ? "Pagar valor" : "Pagar total"}</button>` : ""}<button class="btn btn-light" type="button" data-financial-adjust-invoice>${icon("sliders-horizontal")} Ajustar valor</button><button class="btn btn-light" type="button" data-financial-ongoing-for-card>${icon("list-ordered")} Parcelamento em andamento</button></div><article class="financial-invoice-reconciliation"><span><small>Compras registradas</small><b>${money(invoice.purchasesTotalCents)}</b></span><span><small>Saldo inicial/ajustes</small><b class="${adjustmentTotal < 0 ? "is-income" : ""}">${adjustmentTotal < 0 ? "− " : ""}${money(Math.abs(adjustmentTotal))}</b></span><span><small>Total da fatura</small><b>${money(invoice.amountDueCents)}</b></span></article><nav class="financial-invoice-tabs" aria-label="Detalhes da fatura"><button type="button" class="active" data-invoice-tab="purchases">Compras</button><button type="button" data-invoice-tab="spaces">Espaços</button><button type="button" data-invoice-tab="categories">Categorias</button><button type="button" data-invoice-tab="installments">Parcelas</button></nav><section data-invoice-panel="purchases" class="financial-invoice-purchases"><header><h4 data-purchases-title>Compras desta fatura</h4><button type="button" data-clear-category-filter hidden>Limpar filtro</button></header><div data-purchase-list>${purchaseRows}</div></section><section data-invoice-panel="spaces" hidden><h4>Gastos por espaço</h4>${breakdown(details.spaceBreakdown, "Nenhum espaço nesta fatura.")}</section><section data-invoice-panel="categories" hidden><h4>Gastos por categoria</h4><div class="financial-category-analysis"><div class="financial-donut" style="--donut:conic-gradient(${donut})"><span><b>${money(invoice.purchasesTotalCents)}</b><small>categorizado</small></span></div><div class="financial-category-legend">${details.categoryBreakdown.map((item, index) => `<button type="button" data-filter-category="${esc(item.id)}" data-category-name="${esc(item.name)}"><i style="background:${palette[index % palette.length]}"></i><span><b>${esc(item.name)}</b><small>${item.percentage}%</small></span><strong>${money(item.amountCents)}</strong></button>`).join("")}</div></div></section><section data-invoice-panel="installments" hidden><h4>Parcelas e impacto futuro</h4>${installmentGroups.size ? `<div class="financial-installment-list">${[...installmentGroups.values()].map((purchase) => { const remaining = Math.max(0, Number(purchase.installmentCount) - Number(purchase.installmentNumber)); return `<article><span>${icon("calendar-range")}</span><div><b>${esc(String(purchase.description || "").replace(/ · \d+\/\d+$/, ""))}</b><small>Parcela ${purchase.installmentNumber}/${purchase.installmentCount} · restam ${remaining}</small></div><strong>${money(purchase.amountCents)}</strong><em>Futuro: ${money(remaining * Number(purchase.amountCents || 0))}</em></article>`; }).join("")}</div>` : `<p class="financial-panel-empty">Nenhuma compra parcelada nesta fatura.</p>`}</section>${details.payments.length ? `<section class="financial-invoice-purchases financial-payment-history"><h4>Pagamentos</h4>${details.payments.map((payment) => `<article><span><b>${esc(paymentLabel[payment.paymentMethod] || "Pagamento")}</b><small>${fullDateLabel(payment.paidAt)}</small></span><strong>${money(payment.amountCents)}</strong></article>`).join("")}</section>` : ""}</div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Fechar</button></footer>`, "financial-invoice-sheet");
       modal().querySelectorAll("[data-invoice-tab]").forEach((button) => button.onclick = () => {
@@ -800,22 +800,93 @@ window.FinanceiroUI = (() => {
     renderWizard();
   }
 
-  function openRegisterPayment(selectedEntry = null) {
+  async function openRegisterPayment(selectedEntry = null) {
     if (state.consolidated) return Utils.toast("Escolha um espaço para registrar o pagamento.", true);
     const entries = (state.dashboard?.payables || []).filter((entry) => entry.entityType !== "credit_card_invoice");
     if (!entries.length) return Utils.toast("Não existem contas pendentes neste espaço.");
-    sheet(`${sheetHeader("Registrar pagamento", "Escolha a conta e confirme os dados reais do pagamento.")}
-      <form data-financial-payment-form><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Conta *</span><select name="entryId">${entries.map((entry) => `<option value="${esc(entry.id)}"${selectedEntry?.id === entry.id ? " selected" : ""}>${esc(entry.description)} · ${money(entry.amountCents)}</option>`).join("")}</select></label><label class="financial-field"><span>Data *</span><input type="date" name="paidAt" value="${Engine.localIsoDate()}" required></label><label class="financial-field"><span>Forma *</span><select name="paymentMethod">${Object.entries(paymentLabel).map(([id, label]) => `<option value="${id}">${label}</option>`).join("")}</select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500"></textarea></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Confirmar pagamento</button></footer></form>`);
-    const form = modal().querySelector("[data-financial-payment-form]");
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      const values = Object.fromEntries(new FormData(form)), entry = entries.find((item) => item.id === values.entryId), submit = form.querySelector("[type=submit]");
-      submit.disabled = true;
-      try {
-        await window.FinancialSpaceService.markPaid(state.selectedSpaceId, entry, { paidAt: new Date(`${values.paidAt}T12:00:00`).toISOString(), paymentMethod: values.paymentMethod, notes: values.notes });
-        closeModal(); Utils.toast("Pagamento registrado sem duplicar a saída."); await refresh();
-      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    const service = window.FinancialSpaceService, [cards, accounts] = await Promise.all([
+      service.listCreditCards(state.selectedSpaceId),
+      service.listFinancialAccounts(state.selectedSpaceId),
+    ]), draft = {
+      step: 1,
+      entryId: selectedEntry?.id || entries[0].id,
+      paymentMethod: "",
+      paidAt: Engine.localIsoDate(),
+      financialAccountId: "",
+      creditCardId: "",
+      cardHomeSpaceId: "",
+      feeEnabled: false,
+      fee: "",
+      notes: "",
+      operationId: `bill_payment_${crypto.randomUUID()}`,
+      preview: null,
     };
+    let host;
+    const selected = () => entries.find((item) => item.id === draft.entryId) || entries[0],
+      selectedCard = () => cards.find((item) => item.id === draft.creditCardId && item.cardHomeSpaceId === draft.cardHomeSpaceId),
+      sync = () => {
+        host?.querySelectorAll("input,select,textarea").forEach((field) => {
+          if (field.name === "feeEnabled") draft.feeEnabled = field.checked;
+          else draft[field.name] = field.value;
+        });
+      }, restore = () => {
+        sheet(`<div data-financial-payment-wizard></div>`, "financial-payment-wizard");
+        host = modal().querySelector("[data-financial-payment-wizard]");
+        renderWizard();
+      }, methodChoices = [
+        ["pix", "scan-line", "PIX", "Saída imediata"],
+        ["cash", "banknote", "Dinheiro", "Saída imediata"],
+        ["debit_card", "credit-card", "Cartão de débito", "Saída imediata"],
+        ["credit_card", "calendar-range", "Cartão de crédito", "Vai para uma fatura"],
+        ["transfer", "arrow-left-right", "Transferência", "Saída imediata"],
+        ["other", "wallet", "Outro", "Saída imediata"],
+      ];
+    const stepOne = () => `<div class="modal-body financial-wizard-body"><h3>Qual conta você vai pagar?</h3><p>O valor vem da conta original e não será alterado silenciosamente.</p><label class="financial-field"><span>Conta *</span><select name="entryId">${entries.map((item) => `<option value="${esc(item.id)}" ${item.id === draft.entryId ? "selected" : ""}>${esc(item.description)} · ${money(item.amountCents)}</option>`).join("")}</select></label><article class="financial-account-summary"><span>${icon(selected().categoryIcon || "receipt-text")}</span><div><h3>${esc(selected().description)}</h3><strong>${money(selected().amountCents)}</strong></div></article></div>`;
+    const stepTwo = () => `<div class="modal-body financial-wizard-body"><h3>Como você pagou?</h3><p>Crédito cria obrigação na fatura; os outros meios saem do caixa agora.</p><div class="financial-payment-method-cards">${methodChoices.map(([id, iconName, title, helper]) => `<button type="button" data-payment-method="${id}" class="${draft.paymentMethod === id ? "active" : ""}">${icon(iconName)}<span><b>${title}</b><small>${helper}</small></span>${draft.paymentMethod === id ? icon("circle-check") : ""}</button>`).join("")}</div></div>`;
+    const stepThree = () => {
+      if (draft.paymentMethod !== "credit_card") return `<div class="modal-body financial-wizard-body"><h3>Dados do pagamento</h3><p>Esse meio registra uma saída de caixa imediata.</p><div class="financial-form-grid"><label class="financial-field"><span>Data *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required></label><label class="financial-field"><span>Conta/carteira de origem <small>(opcional)</small></span><select name="financialAccountId"><option value="">Não informar</option>${accounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.financialAccountId ? "selected" : ""}>${esc(account.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div></div>`;
+      return `<div class="modal-body financial-wizard-body"><h3>Qual cartão?</h3><p>Somente cartões autorizados neste espaço são listados.</p>${cards.length ? `<div class="financial-card-choice">${cards.map((card) => `<button type="button" data-payment-card="${esc(card.id)}" data-card-home="${esc(card.cardHomeSpaceId)}" class="${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? "active" : ""}">${icon("credit-card")}<span><b>${esc(card.name)} · •••• ${esc(card.last4)}</b><small>${esc(cardScopeLabel(card))}${card.currentInvoice ? ` · fatura ${money(card.currentInvoice.amountDueCents || 0)}` : ` · fecha dia ${card.closingDay}`}</small></span>${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? icon("circle-check") : ""}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão disponível</b><span>Cadastre um sem perder os dados deste pagamento.</span></div></div>`}<button class="btn btn-light financial-inline-create" type="button" data-payment-create-card>${icon("plus")} Cadastrar cartão</button><div class="financial-form-grid"><label class="financial-field full"><span>Data de uso do cartão *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required><small>A fatura é calculada pelo fechamento e vencimento do cartão.</small></label><label class="financial-toggle full"><input type="checkbox" name="feeEnabled" ${draft.feeEnabled ? "checked" : ""}><span></span><b>Adicionar taxa/encargo real</b></label>${draft.feeEnabled ? `<label class="financial-field full"><span>Taxa *</span><input name="fee" inputmode="decimal" value="${esc(draft.fee)}" placeholder="R$ 0,00"><small>Será uma despesa separada em Financeiro → Taxas financeiras.</small></label>` : ""}<label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div></div>`;
+    };
+    const stepFour = () => {
+      const item = selected(), card = selectedCard(), feeCents = draft.feeEnabled ? Engine.moneyInputToCents(draft.fee) : 0,
+        totalCents = Number(item.amountCents) + feeCents;
+      if (draft.paymentMethod !== "credit_card") return `<div class="modal-body financial-wizard-body"><h3>Conferir pagamento</h3><p>Revise antes de registrar.</p><article class="financial-wizard-review"><header><span>${icon("circle-check-big")}</span><div><b>${esc(item.description)}</b><strong>${money(item.amountCents)}</strong></div></header><dl><div><dt>Forma</dt><dd>${esc(paymentLabel[draft.paymentMethod])}</dd></div><div><dt>Data</dt><dd>${fullDateLabel(`${draft.paidAt}T12:00:00`)}</dd></div><div><dt>Saída do caixa agora</dt><dd>${money(item.amountCents)}</dd></div></dl></article></div>`;
+      return `<div class="modal-body financial-wizard-body"><h3>Prévia da fatura</h3><p>O vencimento foi resolvido automaticamente.</p><article class="financial-wizard-review"><header><span>${icon("receipt-text")}</span><div><b>${esc(item.description)}</b><strong>${money(item.amountCents)}</strong></div></header><dl><div><dt>Pago com</dt><dd>${esc(card?.name || "Cartão")} · •••• ${esc(card?.last4 || "")}</dd></div><div><dt>Será lançado em</dt><dd>Fatura ${monthLabel(draft.preview.invoice.referenceKey)}</dd></div><div><dt>Vencimento</dt><dd>${fullDateLabel(draft.preview.invoice.dueDate)}</dd></div><div><dt>Valor da conta</dt><dd>${money(item.amountCents)}</dd></div>${feeCents ? `<div><dt>Taxa financeira</dt><dd>${money(feeCents)}</dd></div>` : ""}<div><dt>Total no cartão</dt><dd>${money(totalCents)}</dd></div><div><dt>Fatura após confirmar</dt><dd>${money(draft.preview.invoiceTotalAfterCents)}</dd></div><div><dt>Saída do caixa agora</dt><dd>R$ 0,00</dd></div></dl></article><div class="financial-wizard-success-note">${icon("shield-check")}<span><b>Sem despesa duplicada</b><small>A conta será liquidada na fatura. O caixa só muda quando a fatura for paga.</small></span></div></div>`;
+    };
+    const renderWizard = () => {
+      host.innerHTML = `<header class="modal-head financial-wizard-head"><div><small>Passo ${draft.step} de 4</small><div class="financial-wizard-progress">${[1,2,3,4].map((step) => `<i class="${step <= draft.step ? "active" : ""}"></i>`).join("")}</div></div><button class="icon-btn" type="button" data-financial-close>${icon("x")}</button></header>${[stepOne, stepTwo, stepThree, stepFour][draft.step - 1]()}<footer class="modal-foot"><button class="btn btn-light" type="button" data-payment-back>${draft.step === 1 ? "Cancelar" : "Voltar"}</button><button class="btn btn-primary" type="button" data-payment-next>${draft.step === 4 ? "Confirmar pagamento" : "Continuar"}</button></footer>`;
+      host.querySelector("[data-financial-close]").onclick = closeModal;
+      host.querySelector("[data-payment-back]").onclick = () => { sync(); if (draft.step === 1) closeModal(); else { draft.step--; renderWizard(); } };
+      host.querySelectorAll("[data-payment-method]").forEach((button) => button.onclick = () => { sync(); draft.paymentMethod = button.dataset.paymentMethod; draft.preview = null; renderWizard(); });
+      host.querySelectorAll("[data-payment-card]").forEach((button) => button.onclick = () => { sync(); draft.creditCardId = button.dataset.paymentCard; draft.cardHomeSpaceId = button.dataset.cardHome; draft.preview = null; renderWizard(); });
+      host.querySelector('[name="feeEnabled"]')?.addEventListener("change", (event) => { sync(); draft.feeEnabled = event.currentTarget.checked; if (!draft.feeEnabled) draft.fee = ""; draft.preview = null; renderWizard(); });
+      host.querySelector("[data-payment-create-card]")?.addEventListener("click", () => { sync(); openCreateCreditCard(async (card) => { cards.push(card); draft.creditCardId = card.id; draft.cardHomeSpaceId = card.cardHomeSpaceId; restore(); }); });
+      host.querySelector("[data-payment-next]").onclick = async (event) => {
+        try {
+          sync();
+          if (draft.step === 1 && !selected()) throw new Error("Escolha a conta.");
+          if (draft.step === 2 && !draft.paymentMethod) throw new Error("Escolha como você pagou.");
+          if (draft.step === 3) {
+            if (!draft.paidAt) throw new Error("Informe a data do pagamento.");
+            if (draft.paymentMethod === "credit_card") {
+              if (!selectedCard()) throw new Error("Escolha o cartão de crédito.");
+              const feeCents = draft.feeEnabled ? Engine.moneyInputToCents(draft.fee) : 0;
+              draft.preview = await service.resolveCreditCardInvoice(state.selectedSpaceId, { entryId: selected().id, amountCents: selected().amountCents, creditCardId: draft.creditCardId, cardHomeSpaceId: draft.cardHomeSpaceId, purchaseDate: new Date(`${draft.paidAt}T12:00:00`).toISOString(), feeCents });
+            }
+          }
+          if (draft.step < 4) { draft.step++; renderWizard(); return; }
+          event.currentTarget.disabled = true;
+          const common = { operationId: draft.operationId, paidAt: new Date(`${draft.paidAt}T12:00:00`).toISOString(), notes: draft.notes };
+          if (draft.paymentMethod === "credit_card") await service.payEntryByCreditCard(state.selectedSpaceId, selected(), { ...common, purchaseDate: common.paidAt, creditCardId: draft.creditCardId, cardHomeSpaceId: draft.cardHomeSpaceId, feeCents: draft.feeEnabled ? Engine.moneyInputToCents(draft.fee) : 0 });
+          else await service.markPaid(state.selectedSpaceId, selected(), { ...common, paymentMethod: draft.paymentMethod, financialAccountId: draft.financialAccountId || null });
+          closeModal();
+          Utils.toast(draft.paymentMethod === "credit_card" ? "Conta liquidada na fatura, sem saída de caixa agora." : "Pagamento registrado.");
+          await refresh();
+        } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; }
+      };
+      window.lucide?.createIcons();
+    };
+    restore();
   }
 
   const frequencyLabel = (frequency) => ({ weekly: "Toda semana", biweekly: "A cada 15 dias", monthly: "Todo mês", yearly: "Todo ano" })[frequency] || "Sem recorrência";
@@ -825,12 +896,14 @@ window.FinanceiroUI = (() => {
 
   async function openAccount(entry) {
     if (!entry) return;
-    const systemControlled = entry.autoGenerated === true, editable = !systemControlled && entry.status === "pending", reversible = !systemControlled && entry.status === "paid" && !entry.reversedByEntryId && entry.sourceType !== "reversal";
-    sheet(`${sheetHeader(systemControlled ? "Detalhes do lançamento" : "Detalhes da conta", `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><article class="financial-account-summary"><span>${icon(entry.categoryIcon || "receipt-text")}</span><div><h3>${esc(entry.description)}</h3><strong>${money(entry.amountCents)}</strong></div></article><div class="financial-account-details"><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span><span>${icon("tags")} Subcategoria <b>${esc(entry.subcategoryName || "Sem detalhar")}</b></span><span>${icon("circle-dot")} Status <b>${statusLabel(entry)}</b></span><span>${icon("calendar-days")} ${entry.direction === "in" ? "Recebido em" : "Vencimento"} <b>${fullDateLabel(entry.occurredAt || entry.dueAt)}</b></span>${entry.paymentMethod ? `<span>${icon("wallet-cards")} Forma de pagamento <b>${esc(paymentLabel[entry.paymentMethod] || entry.paymentMethod)}</b></span>` : ""}<span>${icon("repeat")} Recorrência <b>${entry.recurrenceId ? frequencyLabel(entry.frequency) : "Não"}</b></span><span>${icon("file-clock")} Origem <b>${entryOriginLabel(entry)}</b></span></div>${systemControlled ? `<div class="financial-automation-note">${icon("shield-check")}<span><b>Lançamento automático</b><small>Para corrigir ou estornar, altere a venda ou o pagamento de origem. O Financeiro preservará o histórico.</small></span></div>` : ""}<div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como paga</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-account-cancel>${icon("trash-2")} Excluir</button>` : ""}${reversible ? `<button class="btn btn-light financial-danger-action" type="button" data-financial-account-reverse>${icon("undo-2")} Reverter lançamento</button>` : ""}${entry.recurrenceId ? `<button class="btn btn-light" type="button" data-financial-manage-recurrence>${icon("calendar-cog")} Gerenciar recorrência</button>` : ""}${systemControlled ? "" : `<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label>`}</div></div>`);
+    const systemControlled = entry.autoGenerated === true, editable = !systemControlled && entry.status === "pending",
+      undoable = !systemControlled && entry.status === "paid" && entry.sourceType !== "reversal" && entry.sourceType !== "credit_card_refund";
+    sheet(`${sheetHeader(systemControlled ? "Detalhes do lançamento" : "Detalhes da conta", `${money(entry.amountCents)} · ${statusLabel(entry)}`)}<div class="modal-body"><article class="financial-account-summary"><span>${icon(entry.categoryIcon || "receipt-text")}</span><div><h3>${esc(entry.description)}</h3><strong>${money(entry.amountCents)}</strong></div></article><div class="financial-account-details"><span>${icon("tag")} Categoria <b>${esc(entry.categoryName || "Outros")}</b></span><span>${icon("tags")} Subcategoria <b>${esc(entry.subcategoryName || "Sem detalhar")}</b></span><span>${icon("circle-dot")} Status <b>${statusLabel(entry)}</b></span><span>${icon("calendar-days")} ${entry.direction === "in" ? "Recebido em" : "Vencimento"} <b>${fullDateLabel(entry.occurredAt || entry.dueAt)}</b></span>${entry.paymentMethod ? `<span>${icon("wallet-cards")} Forma de pagamento <b>${esc(paymentLabel[entry.paymentMethod] || entry.paymentMethod)}</b></span>` : ""}${entry.paymentMethod === "credit_card" && entry.cardChargedAmountCents ? `<span>${icon("receipt")} Total no cartão <b>${money(entry.cardChargedAmountCents)}</b></span>` : ""}<span>${icon("repeat")} Recorrência <b>${entry.recurrenceId ? frequencyLabel(entry.frequency) : "Não"}</b></span><span>${icon("file-clock")} Origem <b>${entryOriginLabel(entry)}</b></span></div>${systemControlled ? `<div class="financial-automation-note">${icon("shield-check")}<span><b>Lançamento automático</b><small>Para corrigir ou estornar, altere a venda ou o pagamento de origem. O Financeiro preservará o histórico.</small></span></div>` : ""}<div class="financial-account-actions">${editable ? `<button class="btn btn-primary" type="button" data-financial-account-pay>${icon("circle-check-big")} Marcar como paga</button><button class="btn btn-light" type="button" data-financial-account-edit>${icon("pencil")} Editar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-account-cancel>${icon("trash-2")} Excluir</button>` : ""}${entry.creditCardInvoiceId ? `<button class="btn btn-light" type="button" data-financial-account-invoice>${icon("receipt-text")} Ver fatura</button>` : ""}${undoable ? `<button class="btn btn-light financial-danger-action" type="button" data-financial-account-undo>${icon("undo-2")} Desfazer pagamento</button>` : ""}${entry.recurrenceId ? `<button class="btn btn-light" type="button" data-financial-manage-recurrence>${icon("calendar-cog")} Gerenciar recorrência</button>` : ""}${systemControlled ? "" : `<label class="btn btn-light financial-attachment-action">${icon("paperclip")} Anexar comprovante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></label>`}</div></div>`);
     modal().querySelector("[data-financial-account-pay]")?.addEventListener("click", () => { closeModal(); openRegisterPayment(entry); });
     modal().querySelector("[data-financial-account-edit]")?.addEventListener("click", () => entry.recurrenceId ? openEditChoice(entry) : openEditAccount(entry, "occurrence"));
     modal().querySelector("[data-financial-account-cancel]")?.addEventListener("click", () => entry.recurrenceId ? openDeleteChoice(entry) : confirmOccurrenceCancellation(entry));
-    modal().querySelector("[data-financial-account-reverse]")?.addEventListener("click", () => confirmPaidReversal(entry));
+    modal().querySelector("[data-financial-account-invoice]")?.addEventListener("click", () => openCreditCardInvoice(entry.creditCardInvoiceId, entry.cardHomeSpaceId));
+    modal().querySelector("[data-financial-account-undo]")?.addEventListener("click", () => confirmPaymentUndo(entry));
     modal().querySelector("[data-financial-manage-recurrence]")?.addEventListener("click", () => openManageRecurrence(entry));
     const fileInput = modal().querySelector(".financial-attachment-action input");
     if (fileInput) fileInput.onchange = async () => { const file = fileInput.files[0]; if (!file) return; try { await window.FinancialSpaceService.uploadAttachment(state.selectedSpaceId, entry.id, file); closeModal(); Utils.toast("Comprovante anexado."); await refresh(); } catch (error) { Utils.toast(error.message, true); } };
@@ -859,9 +932,10 @@ window.FinanceiroUI = (() => {
     modal().querySelector("[data-financial-confirm-series]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.cancelRecurrenceFrom(state.selectedSpaceId, entry, { fromStart }); closeModal(); Utils.toast("Recorrência cancelada."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
   }
 
-  function confirmPaidReversal(entry) {
-    sheet(`${sheetHeader("Reverter lançamento pago?", "O original continuará no histórico.")}<div class="modal-body financial-confirm-copy">${icon("rotate-ccw")}<p><b>${esc(entry.description)}</b><span>Será criado um contralançamento de ${money(entry.amountCents)}.</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-reversal>Reverter</button></footer>`);
-    modal().querySelector("[data-financial-confirm-reversal]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.reversePaidEntry(state.selectedSpaceId, entry, "Revertido pelo usuário"); closeModal(); Utils.toast("Lançamento revertido com histórico preservado."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
+  function confirmPaymentUndo(entry) {
+    const linkedToCard = entry.paymentMethod === "credit_card" && entry.creditCardInvoiceId;
+    sheet(`${sheetHeader("Desfazer pagamento?", "Isso corrige o registro; não representa dinheiro recebido.")}<div class="modal-body financial-confirm-copy">${icon("rotate-ccw")}<p><b>${esc(entry.description)}</b><span>${linkedToCard ? "A conta voltará a ficar pendente e a cobrança será creditada na fatura." : "A conta voltará a ficar pendente, sem criar uma entrada positiva."}</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-undo>Desfazer pagamento</button></footer>`);
+    modal().querySelector("[data-financial-confirm-undo]").onclick = async (event) => { event.currentTarget.disabled = true; try { await window.FinancialSpaceService.undoEntryPayment(state.selectedSpaceId, entry, "Registro desfeito pelo usuário"); closeModal(); Utils.toast("Pagamento desfeito; a conta voltou a ficar pendente."); await refresh(); } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; } };
   }
 
   async function openManageRecurrence(entry) {
