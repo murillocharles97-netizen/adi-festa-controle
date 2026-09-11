@@ -335,6 +335,28 @@ window.FinancialEngine = (() => {
     const [year, month] = String(key).split("-").map(Number);
     return { year, monthIndex: month - 1 };
   };
+  const creditCardInvoiceCycle = (input = {}) => {
+    const { year, monthIndex } = parseReferenceKey(input.referenceKey),
+      closingDay = Math.min(31, Math.max(1, Math.trunc(Number(input.closingDay)))),
+      dueDay = Math.min(31, Math.max(1, Math.trunc(Number(input.dueDay))));
+    if (!Number.isInteger(closingDay) || !Number.isInteger(dueDay))
+      throw new Error("Informe fechamento e vencimento válidos.");
+    const closingDate = dayInMonth(year, monthIndex, closingDay),
+      previousReference = new Date(year, monthIndex - 1, 1, 12),
+      previousClosing = dayInMonth(previousReference.getFullYear(), previousReference.getMonth(), closingDay),
+      openingDate = new Date(previousClosing),
+      dueMonthOffset = dueDay > closingDay ? 0 : 1,
+      dueBase = new Date(year, monthIndex + dueMonthOffset, 1, 12);
+    openingDate.setDate(openingDate.getDate() + 1);
+    return {
+      referenceKey: invoiceReferenceKey(year, monthIndex),
+      referenceYear: year,
+      referenceMonth: monthIndex + 1,
+      openingDate: openingDate.toISOString(),
+      closingDate: closingDate.toISOString(),
+      dueDate: dayInMonth(dueBase.getFullYear(), dueBase.getMonth(), dueDay).toISOString(),
+    };
+  };
   const resolveCreditCardInvoiceForPurchase = (input = {}) => {
     const purchaseDate = localDay(input.purchaseDate || new Date()),
       closingDay = Math.min(31, Math.max(1, Math.trunc(Number(input.closingDay)))),
@@ -615,6 +637,7 @@ window.FinancialEngine = (() => {
     sortPayables,
     installmentAmounts,
     dayInMonth,
+    creditCardInvoiceCycle,
     resolveCreditCardInvoiceForPurchase,
     buildCreditCardInstallments,
     invoiceTotals,

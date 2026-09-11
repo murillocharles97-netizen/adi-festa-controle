@@ -73,6 +73,23 @@ test("empresa diferente não lê nem escreve", async () => {
   await assertFails(getDoc(doc(other, "financialSpaces", "space-a", "entries", "entry-a")));
 });
 
+test("visões financeiras salvas pertencem somente ao usuário", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore(), reference = doc(owner, "financialViewProfiles", "owner-a"), profile = {
+    ownerUid: "owner-a",
+    customViews: [{ id: "view_home_car", name: "Casa e Carro", financialSpaceIds: ["personal-a", "car-a"], mode: "custom" }],
+    favoriteViewIds: ["view_home_car"],
+    defaultViewId: "all_spaces",
+    lastViewId: "view_home_car",
+    schemaVersion: 1,
+    updatedAt: "2026-09-11T12:00:00.000Z",
+  };
+  await assertSucceeds(setDoc(reference, profile));
+  await assertSucceeds(getDoc(reference));
+  await assertFails(getDoc(doc(other, "financialViewProfiles", "owner-a")));
+  await assertFails(setDoc(doc(other, "financialViewProfiles", "owner-a"), { ...profile, ownerUid: "owner-b" }));
+  await assertFails(setDoc(doc(owner, "financialViewProfiles", "owner-a-extra"), profile));
+});
+
 test("espaço pessoal é privado mesmo para colega da empresa", async () => {
   const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore();
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", "personal-a"), { id: "personal-a", name: "Pessoal", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));

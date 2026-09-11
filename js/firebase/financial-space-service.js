@@ -30,11 +30,14 @@ const storage = getStorage(app),
   SPACE_CACHE_PREFIX = "adiFesta:financial-spaces:v1:",
   LAST_SPACE_PREFIX = "adiFesta:lastFinancialSpaceId:v1:",
   CONSOLIDATED_PREFIX = "adiFesta:financial-consolidated:v1:",
+  VIEW_PROFILE_CACHE_PREFIX = "veconi:financial-view-profile:v1:",
+  LAST_VIEW_PREFIX = "veconi:last-financial-view:v1:",
   MAX_MONTH_ENTRIES = 500,
   MAX_RECURRENCE_OCCURRENCES = 120,
   MAX_FINANCIAL_ACCOUNTS = 50,
   MAX_CREDIT_CARDS = 50,
   MAX_CREDIT_INVOICES = 72,
+  MAX_FINANCIAL_VIEWS = 30,
   state = {
     spaces: [],
     loadedForUid: "",
@@ -43,6 +46,7 @@ const storage = getStorage(app),
     spacesLoadedAt: 0,
     lastReadStats: null,
     reconciliation: new Map(),
+    viewProfile: null,
   };
 
 const now = () => new Date().toISOString();
@@ -60,6 +64,9 @@ const convert = (snapshot) => snapshot.exists()
 const cacheKey = () => `${SPACE_CACHE_PREFIX}${uid()}`;
 const lastSpaceKey = () => `${LAST_SPACE_PREFIX}${uid()}`;
 const consolidatedKey = () => `${CONSOLIDATED_PREFIX}${uid()}`;
+const viewProfileCacheKey = () => `${VIEW_PROFILE_CACHE_PREFIX}${uid()}`;
+const lastViewKey = () => `${LAST_VIEW_PREFIX}${uid()}`;
+const viewProfileRef = () => doc(db, "financialViewProfiles", uid());
 const emit = (name, detail = {}) => dispatchEvent(new CustomEvent(name, { detail }));
 const operationId = (prefix = "financial") => `${prefix}_${crypto.randomUUID()}`;
 const automationState = (space = {}) => {
@@ -218,6 +225,139 @@ function selectSpace(spaceId) {
   localStorage.setItem(lastSpaceKey(), space.id);
   emit("financial-space-changed", { space });
   return structuredClone(space);
+}
+
+const systemFinancialViews = () => {
+  const idsFor = (predicate) => state.spaces.filter(predicate).map((space) => space.id);
+  return [
+    { id: "all_spaces", name: "Todos os espaços", mode: "all_spaces", financialSpaceIds: idsFor(() => true), isSystem: true },
+    { id: "personal_spaces", name: "Pessoal", mode: "personal", financialSpaceIds: idsFor((space) => space.type !== "business"), isSystem: true },
+    { id: "business_spaces", name: "Empresas", mode: "business", financialSpaceIds: idsFor((space) => space.type === "business"), isSystem: true },
+  ].filter((view) => view.financialSpaceIds.length);
+};
+
+const normalizeViewProfile = (raw = {}) => {
+  const allowed = new Set(state.spaces.map((space) => space.id)), system = systemFinancialViews(), systemIds = new Set(system.map((view) => view.id)),
+    customViews = (Array.isArray(raw.customViews) ? raw.customViews : []).slice(0, MAX_FINANCIAL_VIEWS).map((view) => ({
+      id: String(view?.id || "").trim(),
+      name: String(view?.name || "").trim().slice(0, 60),
+      mode: "custom",
+      financialSpaceIds: [...new Set((Array.isArray(view?.financialSpaceIds) ? view.financialSpaceIds : []).map(String))].filter((id) => allowed.has(id)),
+      createdAt: view?.createdAt || null,
+      updatedAt: view?.updatedAt || null,
+      isSystem: false,
+    })).filter((view) => view.id && view.name && view.financialSpaceIds.length && !systemIds.has(view.id)),
+    validIds = new Set([...system.map((view) => view.id), ...customViews.map((view) => view.id), ...state.spaces.map((space) => `space:${space.id}`)]),
+    favoriteViewIds = [...new Set((Array.isArray(raw.favoriteViewIds) ? raw.favoriteViewIds : []).map(String))].filter((id) => validIds.has(id)),
+    fallback = system.find((view) => view.id === "all_spaces")?.id || (state.spaces[0] ? `space:${state.spaces[0].id}` : ""),
+    defaultViewId = validIds.has(String(raw.defaultViewId || "")) ? String(raw.defaultViewId) : "",
+    remembered = localStorage.getItem(lastViewKey()) || "",
+    lastViewId = validIds.has(String(raw.lastViewId || "")) ? String(raw.lastViewId) : validIds.has(remembered) ? remembered : fallback,
+    views = [...system, ...customViews].map((view) => ({
+      ...view,
+      isFavorite: favoriteViewIds.includes(view.id),
+      isDefault: defaultViewId === view.id,
+    })).sort((left, right) => Number(right.isFavorite) - Number(left.isFavorite) || Number(right.isSystem) - Number(left.isSystem) || left.name.localeCompare(right.name, "pt-BR"));
+  return { customViews, favoriteViewIds, defaultViewId, lastViewId, views };
+};
+
+const rememberViewProfile = (profile) => {
+  state.viewProfile = normalizeViewProfile(profile);
+  try { localStorage.setItem(viewProfileCacheKey(), JSON.stringify(profile)); } catch {}
+  return structuredClone(state.viewProfile);
+};
+
+async function listFinancialViews(options = {}) {
+  if (!options.force && state.viewProfile) return structuredClone(normalizeViewProfile(state.viewProfile));
+  let cached = {};
+  try { cached = JSON.parse(localStorage.getItem(viewProfileCacheKey()) || "{}"); } catch {}
+  if (options.cacheOnly || !navigator.onLine) return rememberViewProfile(cached);
+  try {
+    const snapshot = await getDoc(viewProfileRef()), raw = snapshot.exists() ? convert(snapshot) : cached;
+    return rememberViewProfile(raw || {});
+  } catch (error) {
+    if (Object.keys(cached).length) return rememberViewProfile(cached);
+    throw error;
+  }
+}
+
+async function mutateFinancialViewProfile(mutator) {
+  const reference = viewProfileRef(), currentUid = uid(), result = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(reference), current = normalizeViewProfile(snapshot.exists() ? convert(snapshot) : state.viewProfile || {}),
+      next = normalizeViewProfile(mutator(structuredClone(current)) || current), value = {
+        ownerUid: currentUid,
+        customViews: next.customViews,
+        favoriteViewIds: next.favoriteViewIds,
+        defaultViewId: next.defaultViewId || null,
+        lastViewId: next.lastViewId || null,
+        schemaVersion: 1,
+        updatedAt: now(),
+      };
+    transaction.set(reference, clean(value), { merge: true });
+    return value;
+  });
+  return rememberViewProfile(result);
+}
+
+async function saveFinancialView(input = {}) {
+  const allowed = new Set(state.spaces.map((space) => space.id)), ids = [...new Set((input.financialSpaceIds || []).map(String))].filter((id) => allowed.has(id)),
+    name = requiredText(input.name, "o nome da visão", 60), id = String(input.id || `view_${crypto.randomUUID()}`), changedAt = now();
+  if (!ids.length) throw new Error("Escolha ao menos um espaço para esta visão.");
+  return mutateFinancialViewProfile((profile) => {
+    const existing = profile.customViews.find((view) => view.id === id), next = {
+      id,
+      name,
+      mode: "custom",
+      financialSpaceIds: ids,
+      createdAt: existing?.createdAt || changedAt,
+      updatedAt: changedAt,
+    };
+    profile.customViews = [...profile.customViews.filter((view) => view.id !== id), next].slice(-MAX_FINANCIAL_VIEWS);
+    if (input.isFavorite === true && !profile.favoriteViewIds.includes(id)) profile.favoriteViewIds.push(id);
+    if (input.isFavorite === false) profile.favoriteViewIds = profile.favoriteViewIds.filter((item) => item !== id);
+    if (input.isDefault === true) profile.defaultViewId = id;
+    if (input.isDefault === false && profile.defaultViewId === id) profile.defaultViewId = "";
+    profile.lastViewId = id;
+    return profile;
+  });
+}
+
+async function deleteFinancialView(viewId) {
+  const id = String(viewId || "");
+  if (!id.startsWith("view_")) throw new Error("As visões rápidas do sistema não podem ser excluídas.");
+  return mutateFinancialViewProfile((profile) => {
+    profile.customViews = profile.customViews.filter((view) => view.id !== id);
+    profile.favoriteViewIds = profile.favoriteViewIds.filter((item) => item !== id);
+    if (profile.defaultViewId === id) profile.defaultViewId = "";
+    if (profile.lastViewId === id) profile.lastViewId = "";
+    return profile;
+  });
+}
+
+async function setDefaultFinancialView(viewId) {
+  const id = String(viewId || ""), available = normalizeViewProfile(state.viewProfile || {}).views.some((view) => view.id === id)
+    || state.spaces.some((space) => `space:${space.id}` === id);
+  if (!available) throw new Error("Esta visão não está disponível.");
+  return mutateFinancialViewProfile((profile) => ({ ...profile, defaultViewId: profile.defaultViewId === id ? "" : id }));
+}
+
+async function toggleFavoriteFinancialView(viewId) {
+  const id = String(viewId || ""), available = normalizeViewProfile(state.viewProfile || {}).views.some((view) => view.id === id)
+    || state.spaces.some((space) => `space:${space.id}` === id);
+  if (!available) throw new Error("Esta visão não está disponível.");
+  return mutateFinancialViewProfile((profile) => ({
+    ...profile,
+    favoriteViewIds: profile.favoriteViewIds.includes(id) ? profile.favoriteViewIds.filter((item) => item !== id) : [...profile.favoriteViewIds, id],
+  }));
+}
+
+async function rememberFinancialView(viewId) {
+  const id = String(viewId || "");
+  localStorage.setItem(lastViewKey(), id);
+  const normalized = normalizeViewProfile(state.viewProfile || {}), valid = normalized.views.some((view) => view.id === id)
+    || state.spaces.some((space) => `space:${space.id}` === id);
+  if (!valid || normalized.lastViewId === id) return normalized;
+  return mutateFinancialViewProfile((profile) => ({ ...profile, lastViewId: id }));
 }
 
 async function createSpace(input = {}) {
@@ -592,6 +732,39 @@ async function listCreditCardInvoices(spaceId, options = {}) {
     });
   }
   return [...unique.values()];
+}
+
+async function ensureCreditCardInvoice(spaceId, input = {}) {
+  const target = assertSpace(spaceId), cards = await listCreditCards(target.id), card = cards.find((item) =>
+    item.id === String(input.creditCardId || "") && item.cardHomeSpaceId === String(input.cardHomeSpaceId || item.cardHomeSpaceId)),
+    referenceKey = String(input.referenceKey || Engine.periodKey());
+  if (!card) throw new Error("Cartão indisponível para este espaço.");
+  const home = assertSpace(card.cardHomeSpaceId), cycle = Engine.creditCardInvoiceCycle({ referenceKey, closingDay: card.closingDay, dueDay: card.dueDay }),
+    invoiceId = `${card.id}_${cycle.referenceKey}`, invoiceRef = childRef(home.id, "creditCardInvoices", invoiceId), createdAt = now();
+  return runTransaction(db, async (transaction) => {
+    const invoiceSnapshot = await transaction.get(invoiceRef);
+    if (invoiceSnapshot.exists()) return { invoice: { ...convert(invoiceSnapshot), cardHomeSpaceId: home.id }, created: false };
+    const totals = Engine.invoiceTotals({}), invoice = {
+      id: invoiceId,
+      ...baseMetadata(home, `invoice_${invoiceId}`),
+      cardHomeSpaceId: home.id,
+      creditCardId: card.id,
+      cardName: card.name,
+      cardLast4: card.last4,
+      ...cycle,
+      ...totals,
+      spaceTotals: {},
+      categoryTotals: {},
+      spacesUsedIds: [],
+      status: Engine.deriveCreditCardInvoiceStatus({ ...cycle, ...totals }),
+      projectionVersion: 1,
+      createdAt,
+      updatedAt: createdAt,
+      schemaVersion: 4,
+    };
+    transaction.set(invoiceRef, clean(invoice));
+    return { invoice, created: true };
+  });
 }
 
 async function listUpcomingCreditCardInvoices(spaceId, selectedPeriod = Engine.periodKey()) {
@@ -1900,21 +2073,21 @@ async function loadCreditOverview(spaceId, selectedPeriod = Engine.periodKey(), 
     ...invoice,
     ...Engine.invoiceTotals(invoice),
     status: Engine.deriveCreditCardInvoiceStatus(invoice),
-  })), selectedInvoices = invoices.filter((invoice) => Engine.periodKey(invoice.dueDate) === selectedPeriod),
+  })), selectedInvoices = invoices.filter((invoice) => invoice.referenceKey === selectedPeriod),
+    duePeriodInvoices = invoices.filter((invoice) => Engine.periodKey(invoice.dueDate) === selectedPeriod),
     cardSummaries = creditCards.map((card) => {
       const cardInvoices = invoices.filter((invoice) => invoice.creditCardId === card.id && invoice.cardHomeSpaceId === card.cardHomeSpaceId && invoice.status !== "cancelled"),
         committedCents = Number.isInteger(card.committedCents) ? card.committedCents : Engine.creditCardCommitment(cardInvoices),
         spaceCommittedCents = cardInvoices.reduce((sum, invoice) => sum + Number(invoice.spaceTotals?.[spaceId] || (card.cardHomeSpaceId === spaceId && !invoice.spaceTotals ? Engine.invoiceTotals(invoice).remainingCents : 0)), 0),
-        nextInvoice = cardInvoices.filter((invoice) => invoice.remainingCents > 0)
-          .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity))[0] || null;
+        cycleInvoice = cardInvoices.find((invoice) => invoice.referenceKey === selectedPeriod) || null;
       return {
         ...card,
         committedCents,
         spaceCommittedCents,
         availableCents: Math.max(0, Number(card.limitCents || 0) - committedCents),
-        currentInvoice: nextInvoice ? { ...nextInvoice, currentSpaceAmountCents: Number(nextInvoice.spaceTotals?.[spaceId] || (card.cardHomeSpaceId === spaceId && !nextInvoice.spaceTotals ? nextInvoice.remainingCents : 0)) } : null,
+        currentInvoice: cycleInvoice ? { ...cycleInvoice, currentSpaceAmountCents: Number(cycleInvoice.spaceTotals?.[spaceId] || (card.cardHomeSpaceId === spaceId && !cycleInvoice.spaceTotals ? cycleInvoice.remainingCents : 0)) } : null,
       };
-    }), invoicePayables = selectedInvoices.filter((invoice) => invoice.cardHomeSpaceId === spaceId && invoice.remainingCents > 0 && invoice.status !== "cancelled").map((invoice) => ({
+    }), invoicePayables = duePeriodInvoices.filter((invoice) => invoice.cardHomeSpaceId === spaceId && invoice.remainingCents > 0 && invoice.status !== "cancelled").map((invoice) => ({
       id: `invoice:${invoice.id}`,
       creditCardInvoiceId: invoice.id,
       creditCardId: invoice.creditCardId,
@@ -2042,7 +2215,7 @@ async function loadConsolidated(ids = selectedConsolidatedIds(), selectedPeriod 
   const selected = setConsolidatedIds(ids);
   if (!selected.length) return { consolidated: true, selectedIds: [], ...Engine.consolidate([]), spaces: [] };
   const dashboards = await Promise.all(selected.map((id) => loadDashboard(id, selectedPeriod))),
-    withSpace = (items, dashboard) => (items || []).map((item) => ({ ...item, financialSpaceName: dashboard.space.name })),
+    withSpace = (items, dashboard) => (items || []).map((item) => ({ ...item, financialSpaceId: item.financialSpaceId || dashboard.space.id, financialSpaceName: dashboard.space.name })),
     uniqueBy = (items, keyOf) => [...new Map(items.map((item) => [keyOf(item), item])).values()],
     creditCards = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.creditCards, dashboard)), (card) => `${card.cardHomeSpaceId}:${card.id}`)
       .map((card) => ({ ...card, spaceCommittedCents: card.committedCents })),
@@ -2101,6 +2274,12 @@ const FinancialSpaceService = {
   listCachedSpaces,
   selectedSpaceId,
   selectSpace,
+  listFinancialViews,
+  saveFinancialView,
+  deleteFinancialView,
+  setDefaultFinancialView,
+  toggleFavoriteFinancialView,
+  rememberFinancialView,
   createSpace,
   updateAutomation,
   automationState,
@@ -2116,6 +2295,7 @@ const FinancialSpaceService = {
   rebuildCreditCardInvoiceProjections,
   canShareCreditCards: (spaceId) => assertSpace(spaceId).ownerUid === uid(),
   listCreditCardInvoices,
+  ensureCreditCardInvoice,
   loadCreditOverview,
   getCreditCardInvoiceDetails,
   createCreditCardPurchase,

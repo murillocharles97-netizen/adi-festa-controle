@@ -216,7 +216,8 @@ test("frontend, persistência e rules publicam o domínio V2 sem listener global
   assert.match(ui, /Como você .*pagou ou vai pagar/);
   assert.match(ui, /data-financial-new-card/);
   assert.match(ui, /operationId:\s*draft\.operationId/);
-  assert.match(ui, /Somente leitura/);
+  assert.match(ui, /handleCreditCardAction/);
+  assert.match(ui, /interactionSpaceId/);
   assert.match(ui, /option value="transfer"/);
   assert.match(ui, /Nova entrada/);
   assert.match(ui, /Pagar conta/);

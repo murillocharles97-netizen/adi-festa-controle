@@ -216,6 +216,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Preferências de visualização são pessoais e contêm somente referências
+    // para espaços que serão novamente autorizados pelas regras de cada espaço.
+    match /financialViewProfiles/{profileUid} {
+      allow read: if signedIn() && request.auth.uid == profileUid;
+      allow create, update: if signedIn()
+        && request.auth.uid == profileUid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.customViews is list
+        && request.resource.data.customViews.size() <= 30
+        && request.resource.data.favoriteViewIds is list
+        && request.resource.data.favoriteViewIds.size() <= 50
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.keys().hasOnly([
+          'ownerUid', 'customViews', 'favoriteViewIds', 'defaultViewId',
+          'lastViewId', 'schemaVersion', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
     match /publicCatalogs/{visitToken} {
       allow get: if true;
       allow list: if false;
