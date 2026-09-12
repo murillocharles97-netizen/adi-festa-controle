@@ -10,6 +10,7 @@ window.FinanceiroUI = (() => {
     selectedSpaceId: "",
     activeViewId: "",
     activeSpaceIds: [],
+    institutionKey: "",
     viewProfile: null,
     viewInitialized: false,
     accountFilter: "all",
@@ -191,6 +192,80 @@ window.FinanceiroUI = (() => {
     .filter((invoice) => Number(invoice.remainingCents || 0) > 0)
     .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity))[0] || null;
 
+  const normalizeInstitutionKey = (value) => String(value || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR")
+    .replace(/\b(banco|bank|instituicao|financeira|s\.?a\.?)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, "-") || "sem-instituicao";
+  const accountIcon = (account = {}) => ({
+    bank_account: "landmark", digital_wallet: "wallet-cards", cash_wallet: "banknote",
+    investment_account: "chart-no-axes-column-increasing", other_account: "wallet",
+    checking: "landmark", savings: "landmark", wallet: "wallet-cards", cash: "banknote", other: "wallet",
+  })[account.type] || "landmark";
+  const institutionGroups = (data = {}) => {
+    const groups = new Map(), ensure = (key, label) => {
+      if (!groups.has(key)) groups.set(key, { key, name: label || "Sem instituição", accounts: [], cards: [], availableBalanceCents: 0, invoiceTotalCents: 0, spaceIds: new Set(), dueAt: null });
+      return groups.get(key);
+    };
+    for (const account of data.financialAccounts || []) {
+      const label = account.institution || account.name || "Conta", key = normalizeInstitutionKey(label), group = ensure(key, label);
+      group.accounts.push(account);
+      if (Engine.financialAccountIsLiquid(account)) group.availableBalanceCents += Engine.financialAccountBalance(account);
+      if (account.financialSpaceId) group.spaceIds.add(account.financialSpaceId);
+    }
+    for (const card of data.creditCards || []) {
+      const label = card.institution || card.issuer || card.name || "Cartão", key = normalizeInstitutionKey(label), group = ensure(key, label), invoice = card.currentInvoice;
+      group.cards.push(card);
+      if (invoice && invoice.status !== "cancelled") {
+        group.invoiceTotalCents += Number(invoice.amountDueCents || 0);
+        const dueAt = Engine.localDate(invoice.dueDate);
+        if (dueAt && (!group.dueAt || dueAt < group.dueAt)) group.dueAt = dueAt;
+      }
+      for (const spaceId of card.allowedFinancialSpaceIds || []) group.spaceIds.add(spaceId);
+      if (card.defaultFinancialSpaceId || card.cardHomeSpaceId) group.spaceIds.add(card.defaultFinancialSpaceId || card.cardHomeSpaceId);
+    }
+    return [...groups.values()].sort((left, right) => Number(Boolean(right.accounts.length && right.cards.length)) - Number(Boolean(left.accounts.length && left.cards.length)) || left.name.localeCompare(right.name, "pt-BR"));
+  };
+  const institutionKind = (group) => group.accounts.length && group.cards.length ? "Conta + Cartão" : group.cards.length ? "Cartão" : "Conta";
+  const institutionCardMarkup = (group, full = false) => `<article class="financial-institution-card ${full ? "is-full" : ""}" tabindex="0" role="button" data-financial-institution="${esc(group.key)}">
+    <header><span>${esc(String(group.name || "FI").slice(0, 2).toUpperCase())}</span><div><h3>${esc(group.name)}</h3><small>${esc(institutionKind(group))}${group.spaceIds.size > 1 ? ` · ${group.spaceIds.size} espaços` : ""}</small></div>${icon("chevron-right")}</header>
+    <div class="financial-institution-values">${group.accounts.length ? `<span><small>Saldo disponível</small><strong>${money(group.availableBalanceCents)}</strong></span>` : ""}${group.cards.length ? `<span><small>Fatura do cartão</small><strong>${money(group.invoiceTotalCents)}</strong>${group.dueAt ? `<em>Vence em ${dateLabel(group.dueAt)}</em>` : ""}</span>` : ""}</div>
+    <span class="financial-institution-cta">Ver detalhes ${icon("arrow-right")}</span>
+  </article>`;
+
+  function consolidatedSummaryMarkup(summary = {}) {
+    const resultClass = Number(summary.resultCents || 0) < 0 ? "is-negative" : "is-positive";
+    return `<section class="financial-home-summary"><header><h2>Resumo do mês</h2><small>${icon("circle-dot")} Atualizado agora</small></header><div>
+      <article>${icon("wallet")}<span><small>Saldo disponível</small><strong class="is-income">${money(summary.availableBalanceCents)}</strong><em>Contas e carteiras incluídas</em></span></article>
+      <article>${icon("credit-card")}<span><small>Faturas do mês</small><strong class="is-expense">${money(summary.invoiceTotalCents)}</strong><em>Compras no crédito</em></span></article>
+      <article>${icon("receipt-text")}<span><small>Contas a pagar</small><strong class="is-expense">${money(summary.pendingAccountsCents)}</strong><em>Sem repetir faturas</em></span></article>
+      <article>${icon("chart-no-axes-column-increasing")}<span><small>Resultado do mês</small><strong class="${resultClass}">${summary.resultCents >= 0 ? "+ " : "− "}${money(Math.abs(Number(summary.resultCents || 0)))}</strong><em>Entradas menos saídas</em></span></article>
+    </div></section>`;
+  }
+
+  function consolidatedPayablesMarkup(entries = []) {
+    if (!entries.length) return `<div class="financial-empty-inline">${icon("calendar-check")}<div><b>Nenhuma obrigação neste mês</b><span>Contas e faturas do período aparecerão aqui.</span></div></div>`;
+    return `<div class="financial-home-payables">${entries.map((entry) => {
+      const due = Engine.localDate(entry.dueAt), isInvoice = entry.entityType === "credit_card_invoice", iconName = isInvoice ? "credit-card" : entry.categoryIcon || "receipt-text";
+      return `<article ${isInvoice ? `data-financial-invoice-id="${esc(entry.creditCardInvoiceId)}" data-financial-invoice-home="${esc(entry.cardHomeSpaceId || entry.financialSpaceId)}" data-financial-target-space="${esc(entry.financialSpaceId)}"` : `data-financial-entry-id="${esc(entry.id)}"`}><time><b>${due ? String(due.getDate()).padStart(2, "0") : "—"}</b><small>${due ? due.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "").toUpperCase() : ""}</small></time><span class="financial-row-icon">${icon(iconName)}</span><span><b>${esc(entry.description)}</b><small>${isInvoice ? "Fatura de cartão" : esc(entry.subcategoryName || entry.categoryName || "Conta")} · ${esc(entry.financialSpaceName || spaceName(entry.financialSpaceId))}</small></span><em>${money(entry.remainingCents ?? entry.amountCents)}</em>${icon("chevron-right")}</article>`;
+    }).join("")}</div>`;
+  }
+
+  function consolidatedSpacesMarkup(data = {}) {
+    const items = data.spaceSummaries || [];
+    return `<section class="financial-section financial-home-spaces"><header><h2>Seus espaços</h2><button type="button" data-financial-open-spaces>Ver espaços ${icon("arrow-right")}</button></header><div>${items.map((item) => `<button type="button" data-financial-space-detail="${esc(item.financialSpaceId)}"><span>${icon(item.financialSpaceIcon || "wallet")}</span><b>${esc(item.financialSpaceName)}</b><small>${money(item.resultCents || 0)}</small></button>`).join("")}</div></section>`;
+  }
+
+  function consolidatedHomeMarkup(data = {}) {
+    const groups = institutionGroups(data), summary = data.summary || {};
+    return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div><nav><button type="button" data-financial-open-spaces>${icon("layers-3")}<span>Todos os espaços</span>${icon("chevron-down")}</button><button type="button" data-financial-open-period>${icon("calendar-days")}<span>${esc(monthLabel(state.period))}</span>${icon("chevron-down")}</button><button type="button" class="is-manage" data-financial-open-spaces>Gerenciar espaços ${icon("arrow-right")}</button></nav></section>
+      ${consolidatedSummaryMarkup(summary)}
+      <section class="financial-section financial-home-institutions"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma conta ou cartão</b><span>Cadastre dentro de um espaço para acompanhar aqui.</span></div></div>`}</section>
+      ${attentionMarkup(data)}
+      <section class="financial-section financial-home-upcoming"><header><h2>Próximas contas</h2><button type="button" data-financial-view="accounts">Ver todas ${icon("arrow-right")}</button></header>${consolidatedPayablesMarkup((data.payables || []).slice(0, 4))}</section>
+      ${consolidatedSpacesMarkup(data)}
+    </div>`;
+  }
+
   function attentionMarkup(data = {}) {
     const dueSoon = (data.payables || []).filter((entry) => entry.entityType !== "credit_card_invoice" && ["pending", "overdue"].includes(Engine.effectiveStatus(entry)) && (daysUntil(entry.dueAt) ?? 99) <= 7),
       overdue = dueSoon.filter((entry) => Engine.effectiveStatus(entry) === "overdue"), invoice = nearestOpenInvoice(data), invoiceDays = invoice ? daysUntil(invoice.dueDate) : null,
@@ -225,7 +300,7 @@ window.FinanceiroUI = (() => {
   function walletsMarkup(data) {
     const accounts = data.financialAccounts || [];
     return `${subpageHeader("Contas e carteiras", "De onde o dinheiro entra ou sai", state.consolidated ? "" : `<button class="btn btn-primary" type="button" data-financial-new-account>${icon("plus")} Nova conta</button>`)}${internalNav()}
-      <section class="financial-section financial-subpage-card"><div class="financial-wallet-list">${accounts.length ? accounts.map((account) => `<article><span>${icon(account.type === "cash" ? "banknote" : "landmark")}</span><div><b>${esc(account.name)}</b><small>${esc(account.institution || (account.type === "cash" ? "Dinheiro" : "Conta manual"))}</small></div><strong>${money(account.initialBalanceCents || 0)}</strong><em>Saldo inicial</em></article>`).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para pagar faturas.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} O saldo bancário não é inventado: por enquanto ele parte do saldo inicial e dos movimentos registrados.</p></section>`;
+      <section class="financial-section financial-subpage-card"><div class="financial-wallet-list">${accounts.length ? accounts.map((account) => institutionAccountMarkup(account)).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para pagar faturas.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} O saldo é controlado pelo saldo inicial, movimentações e conciliações registradas na VECONI.</p></section>`;
   }
 
   function cardsMarkup(data) {
@@ -240,6 +315,7 @@ window.FinanceiroUI = (() => {
   }
 
   function dashboardMarkup(data) {
+    if (state.activeViewId === "all_spaces") return consolidatedHomeMarkup(data);
     const summary = data.summary || {};
     return `${selectorMarkup()}${metricMarkup(summary)}${internalNav()}
       ${data.creditLoadError ? `<section class="financial-module-error">${icon("triangle-alert")}<span><b>Cartões temporariamente indisponíveis.</b><small>Entradas, saídas e contas foram carregadas normalmente.</small></span><button type="button" data-financial-retry-cards>Tentar novamente</button></section>` : ""}
@@ -254,6 +330,24 @@ window.FinanceiroUI = (() => {
       ${compactCardsMarkup(data)}
       <section class="financial-section"><header><h2>Categorias do mês</h2><button type="button" data-financial-view="categories">Ver relatório</button></header>${categoriesMarkup(summary.categories, summary.expensesTotalCents)}</section>
       <section class="financial-section"><header><h2>Últimos lançamentos</h2><button type="button" data-financial-view="entries">Ver todos</button></header>${latestMarkup((data.latest || []).slice(0, 5))}</section>`;
+  }
+
+  function institutionAccountMarkup(account) {
+    return `<article class="financial-institution-account" tabindex="0" role="button" data-financial-account-id="${esc(account.id)}" data-financial-account-space="${esc(account.financialSpaceId || state.selectedSpaceId)}"><span>${icon(accountIcon(account))}</span><div><b>${esc(account.name)}</b><small>${esc(account.institution || "Conta controlada")} · ${esc(spaceName(account.financialSpaceId))}</small></div><strong>${money(Engine.financialAccountBalance(account))}</strong><em>${Engine.financialAccountIsLiquid(account) ? "No saldo disponível" : "Fora do saldo disponível"}</em>${icon("chevron-right")}</article>`;
+  }
+
+  function institutionsMarkup(data) {
+    const groups = institutionGroups(data);
+    return `${subpageHeader("Contas e cartões", "Instituições consolidadas sem duplicar saldos ou faturas.")}<section class="financial-section financial-subpage-card financial-institutions-page">${groups.length ? `<div>${groups.map((group) => institutionCardMarkup(group, true)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma instituição cadastrada</b><span>Contas e cartões aparecerão aqui.</span></div></div>`}</section>`;
+  }
+
+  function institutionDetailMarkup(data) {
+    const group = institutionGroups(data).find((item) => item.key === state.institutionKey) || institutionGroups(data)[0];
+    if (!group) return institutionsMarkup(data);
+    return `<div class="financial-subpage-shell"><header class="financial-subpage-head"><button type="button" data-financial-view="institutions" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>${esc(group.name)}</h2><p>${esc(institutionKind(group))} · visão consolidada</p></div></header></div>
+      <section class="financial-institution-hero"><span>${esc(String(group.name).slice(0, 2).toUpperCase())}</span><div><small>Saldo disponível</small><strong>${money(group.availableBalanceCents)}</strong></div><div><small>Faturas do mês</small><strong>${money(group.invoiceTotalCents)}</strong></div></section>
+      ${group.accounts.length ? `<section class="financial-section financial-subpage-card"><header><h2>Contas e carteiras</h2></header><div class="financial-institution-account-list">${group.accounts.map(institutionAccountMarkup).join("")}</div></section>` : ""}
+      ${group.cards.length ? `<section class="financial-section financial-subpage-card"><header><h2>Cartões</h2></header><div class="financial-credit-grid">${group.cards.map(creditCardMarkup).join("")}</div></section>` : ""}`;
   }
 
   function subpageHeader(title, subtitle, action = "") {
@@ -271,7 +365,7 @@ window.FinanceiroUI = (() => {
     }), wallets = data.financialAccounts || [];
     return `${subpageHeader("Contas", `Obrigações e carteiras de ${monthLabel(state.period)}`, `<button class="btn btn-primary" type="button" data-financial-new="expense">${icon("plus")} Nova conta</button>`)}${internalNav()}
       <section class="financial-section financial-subpage-card"><header><h2>Contas a pagar e faturas</h2></header><div class="financial-filter-chips"><button data-financial-account-filter="all" class="${filter === "all" ? "active" : ""}">Todas</button><button data-financial-account-filter="pending" class="${filter === "pending" ? "active" : ""}">Pendentes</button><button data-financial-account-filter="recurring" class="${filter === "recurring" ? "active" : ""}">Recorrentes</button><button data-financial-account-filter="invoices" class="${filter === "invoices" ? "active" : ""}">Faturas</button><button data-financial-account-filter="overdue" class="${filter === "overdue" ? "active" : ""}">Vencidas</button><button data-financial-account-filter="paid" class="${filter === "paid" ? "active" : ""}">Pagas</button></div>${payablesMarkup(accounts, false)}</section>
-      <section class="financial-section financial-subpage-card"><header><h2>Contas e carteiras</h2>${state.consolidated ? "" : `<button type="button" data-financial-new-account>${icon("plus")} Nova conta</button>`}</header><div class="financial-wallet-list">${wallets.length ? wallets.map((account) => `<article><span>${icon(account.type === "cash" ? "banknote" : "landmark")}</span><div><b>${esc(account.name)}</b><small>${esc(account.institution || (account.type === "cash" ? "Dinheiro" : "Conta manual"))}</small></div><strong>${money(account.initialBalanceCents || 0)}</strong><em>Saldo inicial controlado</em></article>`).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para movimentar valores.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} A VECONI mostra apenas saldos controlados por lançamentos; não inventa o saldo real do banco.</p></section>`;
+      <section class="financial-section financial-subpage-card"><header><h2>Contas e carteiras</h2>${state.consolidated ? "" : `<button type="button" data-financial-new-account>${icon("plus")} Nova conta</button>`}</header><div class="financial-wallet-list">${wallets.length ? wallets.map((account) => institutionAccountMarkup(account)).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para movimentar valores.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} A VECONI mostra saldos controlados por lançamentos e conciliações; não consulta o banco.</p></section>`;
   }
 
   function cashflowMarkup(data) {
@@ -345,20 +439,28 @@ window.FinanceiroUI = (() => {
       }
       state.viewProfile = await service.listFinancialViews();
       if (!state.viewInitialized) {
-        state.activeViewId = state.viewProfile.defaultViewId || state.viewProfile.lastViewId || `space:${service.selectedSpaceId() || available[0].id}`;
+        state.activeViewId = state.viewProfile.views?.some((view) => view.id === "all_spaces")
+          ? "all_spaces"
+          : `space:${service.selectedSpaceId() || available[0].id}`;
+        state.view = "dashboard";
         state.viewInitialized = true;
       }
       resolveActiveView(service.selectedSpaceId() || available[0].id);
       service.selectSpace(state.selectedSpaceId);
       financeTrace("FINANCE_SELECTED_SPACE", { selected: true, type: selectedSpace()?.type || "unknown" });
-      if (!state.consolidated) {
-        financeTrace("FINANCE_RECONCILIATION_START", { blocking: false });
-        Promise.resolve(service.reconcileBusinessIncome?.(state.selectedSpaceId)).then((result) => {
-          financeTrace("FINANCE_RECONCILIATION_DONE", { blocking: false, skipped: result?.skipped || null });
+      const reconciliationSpaceIds = state.activeSpaceIds.filter((spaceId) => {
+        const space = spaces().find((item) => item.id === spaceId);
+        return space?.type === "business" && automation(space).enabled;
+      });
+      financeTrace("FINANCE_RECONCILIATION_START", { blocking: false, spaces: reconciliationSpaceIds.length });
+      const reconciliationPromise = Promise.all(reconciliationSpaceIds.map((spaceId) => service.reconcileBusinessIncome?.(spaceId)))
+        .then((results) => {
+          financeTrace("FINANCE_RECONCILIATION_DONE", { blocking: false, spaces: results.length });
+          return results;
         }).catch((error) => {
           console.warn("[FINANCE_RECONCILIATION_ERROR]", { code: error?.code || "unknown" });
+          return [];
         });
-      }
       const data = state.consolidated
         ? await service.loadConsolidated(state.activeSpaceIds, state.period)
         : await service.loadDashboard(state.selectedSpaceId, state.period, {
@@ -374,6 +476,16 @@ window.FinanceiroUI = (() => {
       state.dashboard = data;
       paint();
       financeTrace("FINANCE_INIT_DONE", { version, creditAvailable: !data.creditLoadError });
+      reconciliationPromise.then(async (results) => {
+        const created = results.reduce((total, result) => total + Number(result?.cached ? 0 : result?.created || 0), 0);
+        if (!created || version !== state.requestVersion || !root()) return;
+        const refreshed = state.consolidated
+          ? await service.loadConsolidated(state.activeSpaceIds, state.period)
+          : await service.loadDashboard(state.selectedSpaceId, state.period);
+        if (version !== state.requestVersion || !root()) return;
+        state.dashboard = refreshed;
+        paint();
+      }).catch((error) => console.warn("[FINANCE_RECONCILIATION_REFRESH_ERROR]", { code: error?.code || "unknown" }));
     } catch (error) {
       console.error("[FINANCE_INIT_ERROR]", { code: error?.code || "unknown", message: error?.message || "finance-init-failed" });
       console.error("[FinanceiroUI] refresh failed", {
@@ -400,6 +512,8 @@ window.FinanceiroUI = (() => {
     if (!page || !state.dashboard) return;
     const views = {
       dashboard: dashboardMarkup,
+      institutions: institutionsMarkup,
+      institution: institutionDetailMarkup,
       accounts: accountsMarkup,
       wallets: walletsMarkup,
       cards: cardsMarkup,
@@ -438,7 +552,7 @@ window.FinanceiroUI = (() => {
   function openSpaces() {
     const views = financialViews(), quick = views.filter((view) => view.mode !== "space"), spaceViews = views.filter((view) => view.mode === "space"), row = (view) => `<article class="financial-view-option ${view.id === state.activeViewId ? "active" : ""}">
       <button type="button" data-financial-select-view="${esc(view.id)}"><span>${icon(view.mode === "all_spaces" ? "panels-top-left" : view.mode === "personal" ? "house" : view.mode === "business" ? "briefcase-business" : view.space?.icon || "bookmark")}</span><b>${esc(view.name)}</b><small>${view.financialSpaceIds.length} espaço${view.financialSpaceIds.length === 1 ? "" : "s"}${view.isDefault ? " · Padrão" : ""}</small>${icon("chevron-right")}</button>
-      <div><button type="button" data-financial-favorite-view="${esc(view.id)}" aria-label="${view.isFavorite ? "Remover dos favoritos" : "Favoritar"}">${icon(view.isFavorite ? "star" : "star")}</button><button type="button" data-financial-default-view="${esc(view.id)}" aria-label="Definir como padrão">${icon(view.isDefault ? "bookmark-check" : "bookmark")}</button>${view.mode === "custom" ? `<button type="button" data-financial-delete-view="${esc(view.id)}" aria-label="Excluir visão">${icon("trash-2")}</button>` : ""}</div>
+      <div><button type="button" data-financial-favorite-view="${esc(view.id)}" aria-label="${view.isFavorite ? "Remover dos favoritos" : "Favoritar"}">${icon("star")}</button><button type="button" data-financial-default-view="${esc(view.id)}" aria-label="Definir como padrão">${icon(view.isDefault ? "bookmark-check" : "bookmark")}</button>${view.mode === "space" ? `<button type="button" data-financial-manage-space="${esc(view.space.id)}" aria-label="Gerenciar espaço">${icon("settings")}</button>` : ""}${view.mode === "custom" ? `<button type="button" data-financial-delete-view="${esc(view.id)}" aria-label="Excluir visão">${icon("trash-2")}</button>` : ""}</div>
     </article>`;
     sheet(`${sheetHeader("Visões financeiras", "Escolha o que deseja analisar sem duplicar dados.")}
       <div class="modal-body financial-view-picker"><h4>Visões rápidas</h4><div class="financial-view-list">${quick.map(row).join("")}</div><h4>Espaços</h4><div class="financial-view-list">${spaceViews.map(row).join("")}</div></div>
@@ -448,6 +562,7 @@ window.FinanceiroUI = (() => {
     modal().querySelector("[data-financial-create-space]").onclick = () => openCreateSpace("personal");
     modal().querySelectorAll("[data-financial-favorite-view]").forEach((button) => button.onclick = async () => { state.viewProfile = await window.FinancialSpaceService.toggleFavoriteFinancialView(button.dataset.financialFavoriteView); openSpaces(); });
     modal().querySelectorAll("[data-financial-default-view]").forEach((button) => button.onclick = async () => { state.viewProfile = await window.FinancialSpaceService.setDefaultFinancialView(button.dataset.financialDefaultView); openSpaces(); });
+    modal().querySelectorAll("[data-financial-manage-space]").forEach((button) => button.onclick = () => openManageSpace(button.dataset.financialManageSpace));
     modal().querySelectorAll("[data-financial-delete-view]").forEach((button) => button.onclick = async () => {
       if (!confirm("Excluir esta visão salva? Os espaços e lançamentos não serão alterados.")) return;
       state.viewProfile = await window.FinancialSpaceService.deleteFinancialView(button.dataset.financialDeleteView);
@@ -476,13 +591,14 @@ window.FinanceiroUI = (() => {
     };
   }
 
-  function openManageSpace(spaceId) {
+  async function openManageSpace(spaceId) {
     const space = spaces().find((item) => item.id === spaceId);
     if (!space) return;
     const current = automation(space), businessLinked = space.type === "business" && Boolean(space.linkedBusinessId),
-      activated = current.activatedAt ? fullDateLabel(current.activatedAt) : "Ao ativar";
+      activated = current.activatedAt ? fullDateLabel(current.activatedAt) : "Ao ativar",
+      accounts = businessLinked ? await window.FinancialSpaceService.listFinancialAccounts(space.id) : [];
     sheet(`${sheetHeader("Gerenciar espaço financeiro", space.name)}
-      <form data-financial-automation-form><div class="modal-body"><section class="financial-automation-card"><header><span>${icon(businessLinked ? "cloud-cog" : "pencil-line")}</span><div><h4>Automação financeira</h4><p>${businessLinked ? `Negócio vinculado: ${esc(space.name)}` : "Este espaço recebe lançamentos manuais."}</p></div><b class="financial-origin-badge ${current.enabled ? "is-automatic" : ""}">${current.enabled ? "Ativa" : "Manual"}</b></header>${businessLinked ? `<label class="financial-automation-option"><span><b>Automação ativa</b><small>Receitas confirmadas entram sem lançamento manual.</small></span><input type="checkbox" name="enabled" ${current.enabled ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Vendas pagas</b><small>PIX, dinheiro e cartão já confirmados.</small></span><input type="checkbox" name="sales" ${current.autoIncome.sales ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pagamentos de clientes</b><small>Inclui recebimentos parciais de fiado e saldo legado.</small></span><input type="checkbox" name="customerPayments" ${current.autoIncome.customerPayments ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pedidos online pagos</b><small>Somente quando convertidos em uma venda paga confirmada.</small></span><input type="checkbox" name="onlineOrders" ${current.autoIncome.onlineOrders ? "checked" : ""}></label><p class="financial-activation-note">${icon("calendar-check")} Início da automação: <b>${esc(activated)}</b>. Movimentos anteriores não são importados.</p>` : `<div class="financial-wizard-info">${icon("info")} Casa, Carro e outros espaços permanecem manuais por padrão.</div>`}</section></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button>${businessLinked ? '<button class="btn btn-primary" type="submit">Salvar automação</button>' : ""}</footer></form>`);
+      <form data-financial-automation-form><div class="modal-body"><section class="financial-automation-card"><header><span>${icon(businessLinked ? "cloud-cog" : "pencil-line")}</span><div><h4>Automação financeira</h4><p>${businessLinked ? `Negócio vinculado: ${esc(space.name)}` : "Este espaço recebe lançamentos manuais."}</p></div><b class="financial-origin-badge ${current.enabled ? "is-automatic" : ""}">${current.enabled ? "Ativa" : "Manual"}</b></header>${businessLinked ? `<label class="financial-field"><span>Conta padrão para recebimentos</span><select name="defaultIncomeFinancialAccountId"><option value="">Não alocar automaticamente</option>${accounts.map((account) => `<option value="${esc(account.id)}" ${account.id === current.defaultIncomeFinancialAccountId ? "selected" : ""}>${esc(account.name)}</option>`).join("")}</select><small>Somente novos recebimentos serão destinados automaticamente.</small></label><label class="financial-automation-option"><span><b>Automação ativa</b><small>Receitas confirmadas entram sem lançamento manual.</small></span><input type="checkbox" name="enabled" ${current.enabled ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Vendas pagas</b><small>PIX, dinheiro e cartão já confirmados.</small></span><input type="checkbox" name="sales" ${current.autoIncome.sales ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pagamentos de clientes</b><small>Inclui recebimentos parciais de fiado e saldo legado.</small></span><input type="checkbox" name="customerPayments" ${current.autoIncome.customerPayments ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pedidos online pagos</b><small>Somente quando convertidos em uma venda paga confirmada.</small></span><input type="checkbox" name="onlineOrders" ${current.autoIncome.onlineOrders ? "checked" : ""}></label><p class="financial-activation-note">${icon("calendar-check")} Início da automação: <b>${esc(activated)}</b>. Movimentos anteriores não são importados.</p>` : `<div class="financial-wizard-info">${icon("info")} Casa, Carro e outros espaços permanecem manuais por padrão.</div>`}</section></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button>${businessLinked ? '<button class="btn btn-primary" type="submit">Salvar automação</button>' : ""}</footer></form>`);
     const form = modal().querySelector("[data-financial-automation-form]");
     if (businessLinked) form.onsubmit = async (event) => {
       event.preventDefault();
@@ -494,6 +610,7 @@ window.FinanceiroUI = (() => {
           sales: values.get("sales") === "on",
           customerPayments: values.get("customerPayments") === "on",
           onlineOrders: values.get("onlineOrders") === "on",
+          defaultIncomeFinancialAccountId: values.get("defaultIncomeFinancialAccountId") || null,
         });
         await window.FinancialSpaceService.reconcileBusinessIncome(space.id, { force: true });
         closeModal();
@@ -540,19 +657,49 @@ window.FinanceiroUI = (() => {
 
   function openCreateFinancialAccount(onCreated = null) {
     if (state.consolidated) return openActionSpacePicker("Em qual espaço criar a conta?", () => openCreateFinancialAccount(onCreated));
-    sheet(`${sheetHeader("Nova conta ou carteira", "Use somente contas deste espaço financeiro.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" placeholder="Ex.: C6 Bank" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="checking">Conta bancária</option><option value="cash">Dinheiro</option><option value="wallet">Carteira digital</option><option value="savings">Poupança</option><option value="other">Outra</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" placeholder="Ex.: C6 Bank"></label><label class="financial-field full"><span>Saldo inicial</span><input name="initialBalance" inputmode="decimal" value="0,00"><small>Opcional e manual; não consultamos seu banco.</small></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
+    sheet(`${sheetHeader("Nova conta ou carteira", "Defina onde o dinheiro fica, sem consultar seu banco.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" placeholder="Ex.: Inter" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="bank_account">Conta bancária</option><option value="digital_wallet">Carteira digital</option><option value="cash_wallet">Dinheiro físico</option><option value="investment_account">Investimentos</option><option value="other_account">Outra conta</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" placeholder="Ex.: Banco Inter"></label><label class="financial-field full"><span>Saldo real hoje</span><input name="initialBalance" inputmode="decimal" value="0,00"><small>Cria um saldo inicial; não entra como receita do mês.</small></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" checked><span></span><b>Incluir no saldo disponível</b></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
     const form = modal().querySelector("[data-financial-account-create]");
+    form.elements.type.addEventListener("change", () => {
+      if (form.elements.type.value === "investment_account") form.elements.includeInAvailableBalance.checked = false;
+      else if (!form.elements.includeInAvailableBalance.checked) form.elements.includeInAvailableBalance.checked = true;
+    });
     form.onsubmit = async (event) => {
       event.preventDefault();
       const values = Object.fromEntries(new FormData(form)), submit = form.querySelector("[type=submit]");
       submit.disabled = true;
       try {
-        const initialBalanceText = String(values.initialBalance || "").trim(),
-          initialBalanceCents = !initialBalanceText || /^0+(?:[.,]0+)?$/.test(initialBalanceText) ? 0 : Engine.moneyInputToCents(initialBalanceText),
-          account = await window.FinancialSpaceService.createFinancialAccount(state.selectedSpaceId, { ...values, initialBalanceCents });
+        const initialBalanceCents = Engine.balanceInputToCents(values.initialBalance),
+          account = await window.FinancialSpaceService.createFinancialAccount(state.selectedSpaceId, { ...values, initialBalanceCents, includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on" });
         closeModal();
         Utils.toast("Conta criada.");
         if (onCreated) await onCreated(account); else await refresh();
+      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    };
+  }
+
+  function openFinancialAccount(account, spaceId) {
+    const currentBalanceCents = Engine.financialAccountBalance(account), included = Engine.financialAccountIsLiquid(account);
+    sheet(`${sheetHeader(account.name, account.institution || "Conta financeira")}<div class="modal-body"><article class="financial-account-balance-detail"><span>${icon(accountIcon(account))}</span><div><small>Saldo controlado pela VECONI</small><strong>${money(currentBalanceCents)}</strong><em>${included ? "Incluído no saldo disponível" : "Fora do saldo disponível"}</em></div></article><div class="financial-account-details"><span>${icon("layers-3")} Espaço <b>${esc(spaceName(spaceId))}</b></span><span>${icon("database")} Origem <b>Saldo inicial + movimentações</b></span><span>${icon("shield-check")} Integração bancária <b>Não conectada</b></span></div><div class="financial-account-actions"><button class="btn btn-primary" type="button" data-financial-adjust-account>${icon("scale")} Ajustar saldo real</button></div><div class="financial-wizard-info">${icon("info")} Ajustar saldo cria um registro de conciliação sem virar receita ou despesa.</div></div>`);
+    modal().querySelector("[data-financial-adjust-account]").onclick = () => openAdjustFinancialAccount(account, spaceId);
+  }
+
+  function openAdjustFinancialAccount(account, spaceId) {
+    const balance = Engine.financialAccountBalance(account);
+    sheet(`${sheetHeader("Ajustar saldo", `${account.name} · ${spaceName(spaceId)}`)}<form data-financial-account-adjust><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Saldo real hoje *</span><input name="targetBalance" inputmode="decimal" value="${(balance / 100).toFixed(2).replace(".", ",")}" required></label><label class="financial-field full"><span>Motivo</span><input name="reason" maxlength="160" value="Conciliação manual" placeholder="Ex.: conferência do extrato"></label><article class="financial-wizard-info full">${icon("scale")} A diferença ajusta apenas o saldo. Entradas, saídas e resultado do mês não mudam.</article></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar saldo</button></footer></form>`);
+    const form = modal().querySelector("[data-financial-account-adjust]");
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(form)), submit = form.querySelector("[type=submit]");
+      submit.disabled = true;
+      try {
+        await window.FinancialSpaceService.adjustFinancialAccountBalance(spaceId, account.id, {
+          targetBalanceCents: Engine.balanceInputToCents(values.targetBalance),
+          reason: values.reason,
+          operationId: `balance_adjustment_${crypto.randomUUID()}`,
+        });
+        closeModal();
+        Utils.toast("Saldo conciliado sem alterar o resultado.");
+        await refresh();
       } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
     };
   }
@@ -831,14 +978,15 @@ window.FinanceiroUI = (() => {
         return `<div class="modal-body financial-wizard-body"><h3>Qual cartão?</h3><p>Cartões compartilhados autorizados também aparecem aqui.</p>${cards.length ? `<div class="financial-card-choice">${cards.map((card) => `<button type="button" data-wizard-credit-card="${esc(card.id)}" data-card-home="${esc(card.cardHomeSpaceId)}" class="${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? "active" : ""}">${icon("credit-card")}<span><b>${esc(card.name)} · •••• ${esc(card.last4)}</b><small>${esc(cardScopeLabel(card))} · ${card.currentInvoice ? `${money(card.currentInvoice.currentSpaceAmountCents || 0)} deste espaço` : `fecha dia ${card.closingDay}`}</small></span>${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? icon("circle-check") : ""}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão disponível</b><span>Cadastre um sem perder os dados já preenchidos.</span></div></div>`}<button type="button" class="btn btn-light financial-inline-create" data-wizard-create-card>${icon("plus")} Cadastrar cartão</button><div class="financial-form-grid"><label class="financial-field"><span>Data da compra *</span><input type="date" name="purchaseDate" value="${esc(draft.purchaseDate)}" required></label><label class="financial-field"><span>Parcelas *</span><input type="number" name="installmentCount" min="1" max="60" value="${draft.installmentCount}"></label></div>${preview ? `<article class="financial-invoice-preview">${icon("calendar-check")}<span><b>Fatura ${monthLabel(preview.referenceKey)}</b><small>Fecha ${dateLabel(preview.closingDate)} · vence ${dateLabel(preview.dueDate)}</small></span><strong>${money(Engine.moneyInputToCents(draft.amount))}</strong></article>` : ""}<label class="financial-field"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div>`;
       }
       if (draft.paymentChoice === "pending") return `<div class="modal-body financial-wizard-body"><h3>Quando e como essa conta funciona?</h3><p>Vencimento só é pedido porque o dinheiro ainda não saiu.</p><div class="financial-schedule-picker"><button type="button" data-wizard-schedule="once" class="${draft.scheduleMode === "once" ? "active" : ""}">${icon("calendar")}<span><b>Uma vez</b><small>Uma única conta.</small></span></button><button type="button" data-wizard-schedule="recurring" class="${draft.scheduleMode === "recurring" ? "active" : ""}">${icon("refresh-cw")}<span><b>Recorrente</b><small>Repete até cancelar.</small></span></button><button type="button" data-wizard-schedule="installments" class="${draft.scheduleMode === "installments" ? "active" : ""}">${icon("list-ordered")}<span><b>Parcelada</b><small>Várias contas mensais.</small></span></button></div><div class="financial-form-grid"><label class="financial-field full"><span>Primeiro vencimento *</span><input type="date" name="dueAt" value="${esc(draft.dueAt)}" required></label>${draft.scheduleMode === "recurring" ? `<label class="financial-field full"><span>Repete *</span><select name="frequency"><option value="weekly" ${draft.frequency === "weekly" ? "selected" : ""}>Semanalmente</option><option value="biweekly" ${draft.frequency === "biweekly" ? "selected" : ""}>Quinzenalmente</option><option value="monthly" ${draft.frequency === "monthly" ? "selected" : ""}>Mensalmente</option><option value="yearly" ${draft.frequency === "yearly" ? "selected" : ""}>Anualmente</option></select></label>` : ""}${draft.scheduleMode === "installments" ? `<label class="financial-field full"><span>Quantidade de parcelas *</span><input type="number" name="installmentCount" min="2" max="60" value="${Math.max(2, draft.installmentCount)}"></label>` : ""}</div><label class="financial-field"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div>`;
-      return `<div class="modal-body financial-wizard-body"><h3>${isExpense ? "Quando você pagou?" : "Quando você recebeu?"}</h3><p>Pagamento imediato entra no fluxo de caixa realizado.</p><div class="financial-form-grid">${draft.paymentChoice === "pix" ? `<label class="financial-field full"><span>Forma *</span><select name="paymentMethod"><option value="pix" ${draft.paymentMethod === "pix" ? "selected" : ""}>PIX</option><option value="transfer" ${draft.paymentMethod === "transfer" ? "selected" : ""}>Transferência</option></select></label>` : ""}${!isExpense ? `<label class="financial-field full"><span>Conta/carteira de destino *</span><select name="financialAccountId"><option value="">Escolher destino</option>${financialAccounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.financialAccountId ? "selected" : ""}>${esc(account.name)}</option>`).join("")}</select><small>O saldo mostrado é controlado pela VECONI; não consultamos o banco.</small></label><button type="button" class="btn btn-light financial-inline-create full" data-wizard-create-account>${icon("plus")} Nova conta ou carteira</button>` : ""}<label class="financial-field full"><span>Data *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required></label></div><label class="financial-field"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label><label class="financial-file"><input type="file" name="attachment" accept="image/jpeg,image/png,image/webp,application/pdf"><span>${icon("paperclip")}<b>${draft.attachment ? esc(draft.attachment.name) : "Anexar comprovante"}</b><small>JPG, PNG, WebP ou PDF · até 10 MB</small></span></label></div>`;
+      const accountFlowLabel = isExpense ? "Conta/carteira de origem" : "Conta/carteira de destino";
+      return `<div class="modal-body financial-wizard-body"><h3>${isExpense ? "Quando você pagou?" : "Quando você recebeu?"}</h3><p>Pagamento imediato entra no fluxo de caixa realizado.</p><div class="financial-form-grid">${draft.paymentChoice === "pix" ? `<label class="financial-field full"><span>Forma *</span><select name="paymentMethod"><option value="pix" ${draft.paymentMethod === "pix" ? "selected" : ""}>PIX</option><option value="transfer" ${draft.paymentMethod === "transfer" ? "selected" : ""}>Transferência</option></select></label>` : ""}<label class="financial-field full"><span>${accountFlowLabel} *</span><select name="financialAccountId"><option value="">Escolher ${isExpense ? "origem" : "destino"}</option>${financialAccounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.financialAccountId ? "selected" : ""}>${esc(account.name)} · ${money(Engine.financialAccountBalance(account))}</option>`).join("")}</select><small>O saldo mostrado é controlado pela VECONI; não consultamos o banco.</small></label><button type="button" class="btn btn-light financial-inline-create full" data-wizard-create-account>${icon("plus")} Nova conta ou carteira</button><label class="financial-field full"><span>Data *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required></label></div><label class="financial-field"><span>Observação <small>(opcional)</small></span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label><label class="financial-file"><input type="file" name="attachment" accept="image/jpeg,image/png,image/webp,application/pdf"><span>${icon("paperclip")}<b>${draft.attachment ? esc(draft.attachment.name) : "Anexar comprovante"}</b><small>JPG, PNG, WebP ou PDF · até 10 MB</small></span></label></div>`;
     };
     const stepFour = () => {
       const category = selectedCategory(), subcategory = selectedSubcategory(), categoryName = draft.customCategoryName || category?.name || "—", subcategoryName = draft.customSubcategoryName || subcategory?.name || "Sem detalhar",
         card = cards.find((item) => item.id === draft.creditCardId && item.cardHomeSpaceId === draft.cardHomeSpaceId), paymentDescription = draft.paymentChoice === "credit_card" ? `${card?.name || "Cartão"} · ${draft.installmentCount}x` : draft.paymentChoice === "pending" ? `Pendente · ${scheduleLabel()}` : paymentLabel[draft.paymentMethod] || "Pagamento imediato",
         dateDescription = draft.paymentChoice === "credit_card" ? `Compra em ${dateLabel(`${draft.purchaseDate}T12:00:00`)}` : draft.paymentChoice === "pending" ? `Vence ${dateLabel(`${draft.dueAt}T12:00:00`)}` : `Realizado em ${dateLabel(`${draft.paidAt}T12:00:00`)}`,
         destinationAccount = financialAccounts.find((account) => account.id === draft.financialAccountId);
-      return `<div class="modal-body financial-wizard-body"><h3>Conferir e salvar</h3><p>Revise as informações antes de criar.</p><article class="financial-wizard-review"><header><span>${icon(category?.icon || "receipt-text")}</span><div><b>${esc(draft.description)}</b><strong>${money(Engine.moneyInputToCents(draft.amount))}</strong></div></header><dl><div><dt>Categoria</dt><dd>${esc(categoryName)}</dd></div><div><dt>Subcategoria</dt><dd>${esc(subcategoryName)}</dd></div><div><dt>Tipo</dt><dd>${isExpense ? draft.entryType === "investment" ? "Investimento" : "Despesa" : "Entrada"}</dd></div><div><dt>Pagamento</dt><dd>${esc(paymentDescription)}</dd></div>${!isExpense && draft.paymentChoice !== "pending" ? `<div><dt>Destino</dt><dd>${esc(destinationAccount?.name || "—")}</dd></div>` : ""}<div><dt>Data</dt><dd>${esc(dateDescription)}</dd></div><div><dt>Efeito no caixa</dt><dd>${draft.paymentChoice === "credit_card" || draft.paymentChoice === "pending" ? "Ainda não" : "Imediato"}</dd></div></dl></article>${draft.paymentChoice === "credit_card" ? `<div class="financial-wizard-success-note">${icon("shield-check")}<span><b>Sem despesa duplicada</b><small>A compra entra nos gastos; o pagamento da fatura entrará somente no caixa.</small></span></div>` : `<div class="financial-wizard-success-note">${icon("circle-check")}<span><b>${isExpense ? "Despesa" : "Entrada"} pronta para ser criada</b><small>Categoria, recorrência e tipo continuarão independentes.</small></span></div>`}</div>`;
+      return `<div class="modal-body financial-wizard-body"><h3>Conferir e salvar</h3><p>Revise as informações antes de criar.</p><article class="financial-wizard-review"><header><span>${icon(category?.icon || "receipt-text")}</span><div><b>${esc(draft.description)}</b><strong>${money(Engine.moneyInputToCents(draft.amount))}</strong></div></header><dl><div><dt>Categoria</dt><dd>${esc(categoryName)}</dd></div><div><dt>Subcategoria</dt><dd>${esc(subcategoryName)}</dd></div><div><dt>Tipo</dt><dd>${isExpense ? draft.entryType === "investment" ? "Investimento" : "Despesa" : "Entrada"}</dd></div><div><dt>Pagamento</dt><dd>${esc(paymentDescription)}</dd></div>${!["pending", "credit_card"].includes(draft.paymentChoice) ? `<div><dt>${isExpense ? "Origem" : "Destino"}</dt><dd>${esc(destinationAccount?.name || "—")}</dd></div>` : ""}<div><dt>Data</dt><dd>${esc(dateDescription)}</dd></div><div><dt>Efeito no caixa</dt><dd>${draft.paymentChoice === "credit_card" || draft.paymentChoice === "pending" ? "Ainda não" : "Imediato"}</dd></div></dl></article>${draft.paymentChoice === "credit_card" ? `<div class="financial-wizard-success-note">${icon("shield-check")}<span><b>Sem despesa duplicada</b><small>A compra entra nos gastos; o pagamento da fatura entrará somente no caixa.</small></span></div>` : `<div class="financial-wizard-success-note">${icon("circle-check")}<span><b>${isExpense ? "Despesa" : "Entrada"} pronta para ser criada</b><small>Categoria, recorrência e tipo continuarão independentes.</small></span></div>`}</div>`;
     };
     const validateStep = () => {
       syncVisibleFields();
@@ -854,7 +1002,7 @@ window.FinanceiroUI = (() => {
         if (draft.paymentChoice === "credit_card" && (!draft.creditCardId || !draft.cardHomeSpaceId || !draft.purchaseDate)) throw new Error("Escolha o cartão e a data da compra.");
         if (draft.paymentChoice === "pending" && !draft.dueAt) throw new Error("Informe o primeiro vencimento.");
         if (!["credit_card", "pending"].includes(draft.paymentChoice) && !draft.paidAt) throw new Error("Informe a data do pagamento.");
-        if (!isExpense && draft.paymentChoice !== "pending" && !draft.financialAccountId) throw new Error("Escolha a conta ou carteira de destino.");
+        if (!["credit_card", "pending"].includes(draft.paymentChoice) && !draft.financialAccountId) throw new Error(`Escolha a conta ou carteira de ${isExpense ? "origem" : "destino"}.`);
       }
     };
     const renderWizard = () => {
@@ -892,7 +1040,7 @@ window.FinanceiroUI = (() => {
             direction, description: draft.description, entryType: draft.entryType,
             categoryId: category.id, categoryName: category.name, categoryIcon: category.icon,
             subcategoryId: subcategory?.id || null, subcategoryName: subcategory?.name || null,
-            amountCents, notes: draft.notes, financialAccountId: !isExpense && draft.paymentChoice !== "pending" ? draft.financialAccountId : null,
+            amountCents, notes: draft.notes, financialAccountId: !["credit_card", "pending"].includes(draft.paymentChoice) ? draft.financialAccountId : null,
           };
           let created, attachmentEntryId;
           if (draft.paymentChoice === "credit_card") {
@@ -944,7 +1092,7 @@ window.FinanceiroUI = (() => {
       entryId: selectedEntry?.id || entries[0].id,
       paymentMethod: "",
       paidAt: Engine.localIsoDate(),
-      financialAccountId: "",
+      financialAccountId: accounts[0]?.id || "",
       creditCardId: "",
       cardHomeSpaceId: "",
       feeEnabled: false,
@@ -976,7 +1124,7 @@ window.FinanceiroUI = (() => {
     const stepOne = () => `<div class="modal-body financial-wizard-body"><h3>Qual conta você vai pagar?</h3><p>O valor vem da conta original e não será alterado silenciosamente.</p><label class="financial-field"><span>Conta *</span><select name="entryId">${entries.map((item) => `<option value="${esc(item.id)}" ${item.id === draft.entryId ? "selected" : ""}>${esc(item.description)} · ${money(item.amountCents)}</option>`).join("")}</select></label><article class="financial-account-summary"><span>${icon(selected().categoryIcon || "receipt-text")}</span><div><h3>${esc(selected().description)}</h3><strong>${money(selected().amountCents)}</strong></div></article></div>`;
     const stepTwo = () => `<div class="modal-body financial-wizard-body"><h3>Como você pagou?</h3><p>Crédito cria obrigação na fatura; os outros meios saem do caixa agora.</p><div class="financial-payment-method-cards">${methodChoices.map(([id, iconName, title, helper]) => `<button type="button" data-payment-method="${id}" class="${draft.paymentMethod === id ? "active" : ""}">${icon(iconName)}<span><b>${title}</b><small>${helper}</small></span>${draft.paymentMethod === id ? icon("circle-check") : ""}</button>`).join("")}</div></div>`;
     const stepThree = () => {
-      if (draft.paymentMethod !== "credit_card") return `<div class="modal-body financial-wizard-body"><h3>Dados do pagamento</h3><p>Esse meio registra uma saída de caixa imediata.</p><div class="financial-form-grid"><label class="financial-field"><span>Data *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required></label><label class="financial-field"><span>Conta/carteira de origem <small>(opcional)</small></span><select name="financialAccountId"><option value="">Não informar</option>${accounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.financialAccountId ? "selected" : ""}>${esc(account.name)}</option>`).join("")}</select></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div></div>`;
+      if (draft.paymentMethod !== "credit_card") return `<div class="modal-body financial-wizard-body"><h3>Dados do pagamento</h3><p>Esse meio registra uma saída de caixa imediata.</p><div class="financial-form-grid"><label class="financial-field"><span>Data *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required></label><label class="financial-field"><span>Conta/carteira de origem *</span><select name="financialAccountId"><option value="">Escolher origem</option>${accounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.financialAccountId ? "selected" : ""}>${esc(account.name)} · ${money(Engine.financialAccountBalance(account))}</option>`).join("")}</select><small>A saída será abatida deste saldo controlado.</small></label><label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div></div>`;
       return `<div class="modal-body financial-wizard-body"><h3>Qual cartão?</h3><p>Somente cartões autorizados neste espaço são listados.</p>${cards.length ? `<div class="financial-card-choice">${cards.map((card) => `<button type="button" data-payment-card="${esc(card.id)}" data-card-home="${esc(card.cardHomeSpaceId)}" class="${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? "active" : ""}">${icon("credit-card")}<span><b>${esc(card.name)} · •••• ${esc(card.last4)}</b><small>${esc(cardScopeLabel(card))}${card.currentInvoice ? ` · fatura ${money(card.currentInvoice.amountDueCents || 0)}` : ` · fecha dia ${card.closingDay}`}</small></span>${draft.creditCardId === card.id && draft.cardHomeSpaceId === card.cardHomeSpaceId ? icon("circle-check") : ""}</button>`).join("")}</div>` : `<div class="financial-empty-inline">${icon("credit-card")}<div><b>Nenhum cartão disponível</b><span>Cadastre um sem perder os dados deste pagamento.</span></div></div>`}<button class="btn btn-light financial-inline-create" type="button" data-payment-create-card>${icon("plus")} Cadastrar cartão</button><div class="financial-form-grid"><label class="financial-field full"><span>Data de uso do cartão *</span><input type="date" name="paidAt" value="${esc(draft.paidAt)}" required><small>A fatura é calculada pelo fechamento e vencimento do cartão.</small></label><label class="financial-toggle full"><input type="checkbox" name="feeEnabled" ${draft.feeEnabled ? "checked" : ""}><span></span><b>Adicionar taxa/encargo real</b></label>${draft.feeEnabled ? `<label class="financial-field full"><span>Taxa *</span><input name="fee" inputmode="decimal" value="${esc(draft.fee)}" placeholder="R$ 0,00"><small>Será uma despesa separada em Financeiro → Taxas financeiras.</small></label>` : ""}<label class="financial-field full"><span>Observação</span><textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div></div>`;
     };
     const stepFour = () => {
@@ -1004,13 +1152,13 @@ window.FinanceiroUI = (() => {
               if (!selectedCard()) throw new Error("Escolha o cartão de crédito.");
               const feeCents = draft.feeEnabled ? Engine.moneyInputToCents(draft.fee) : 0;
               draft.preview = await service.resolveCreditCardInvoice(state.selectedSpaceId, { entryId: selected().id, amountCents: selected().amountCents, creditCardId: draft.creditCardId, cardHomeSpaceId: draft.cardHomeSpaceId, purchaseDate: new Date(`${draft.paidAt}T12:00:00`).toISOString(), feeCents });
-            }
+            } else if (!draft.financialAccountId) throw new Error("Escolha a conta ou carteira de origem.");
           }
           if (draft.step < 4) { draft.step++; renderWizard(); return; }
           event.currentTarget.disabled = true;
           const common = { operationId: draft.operationId, paidAt: new Date(`${draft.paidAt}T12:00:00`).toISOString(), notes: draft.notes };
           if (draft.paymentMethod === "credit_card") await service.payEntryByCreditCard(state.selectedSpaceId, selected(), { ...common, purchaseDate: common.paidAt, creditCardId: draft.creditCardId, cardHomeSpaceId: draft.cardHomeSpaceId, feeCents: draft.feeEnabled ? Engine.moneyInputToCents(draft.fee) : 0 });
-          else await service.markPaid(state.selectedSpaceId, selected(), { ...common, paymentMethod: draft.paymentMethod, financialAccountId: draft.financialAccountId || null });
+          else await service.markPaid(state.selectedSpaceId, selected(), { ...common, paymentMethod: draft.paymentMethod, financialAccountId: draft.financialAccountId });
           closeModal();
           Utils.toast(draft.paymentMethod === "credit_card" ? "Conta liquidada na fatura, sem saída de caixa agora." : "Pagamento registrado.");
           await refresh();
@@ -1130,6 +1278,26 @@ window.FinanceiroUI = (() => {
     page.querySelectorAll("[data-financial-save-view]").forEach((button) => button.onclick = openSaveView);
     page.querySelectorAll("[data-financial-open-period]").forEach((button) => button.onclick = openPeriod);
     page.querySelectorAll("[data-financial-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.financialView; paint(); });
+    page.querySelectorAll("[data-financial-institution]").forEach((element) => element.onclick = (event) => {
+      event.stopPropagation();
+      state.institutionKey = element.dataset.financialInstitution;
+      state.view = "institution";
+      paint();
+    });
+    page.querySelectorAll("[data-financial-institution]").forEach((element) => element.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); element.click(); }
+    });
+    page.querySelectorAll("[data-financial-space-detail]").forEach((button) => button.onclick = async () => {
+      state.view = "dashboard";
+      await selectFinancialView(`space:${button.dataset.financialSpaceDetail}`);
+    });
+    page.querySelectorAll("[data-financial-account-id]").forEach((element) => element.onclick = () => {
+      const account = state.dashboard?.financialAccounts?.find((item) => item.id === element.dataset.financialAccountId && (item.financialSpaceId || state.selectedSpaceId) === element.dataset.financialAccountSpace);
+      if (account) openFinancialAccount(account, element.dataset.financialAccountSpace);
+    });
+    page.querySelectorAll("[data-financial-account-id]").forEach((element) => element.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); element.click(); }
+    });
     page.querySelectorAll("[data-financial-account-filter]").forEach((button) => button.onclick = () => { state.accountFilter = button.dataset.financialAccountFilter; paint(); });
     page.querySelectorAll("[data-financial-new]").forEach((button) => button.onclick = () => openEntryForm(button.dataset.financialNew === "income" ? "in" : "out"));
     page.querySelectorAll("[data-financial-new-account]").forEach((button) => button.onclick = () => openCreateFinancialAccount());

@@ -64,6 +64,17 @@ window.FinancialEngine = (() => {
       throw new Error("Informe um valor maior que zero.");
     return Math.round(amount * 100);
   };
+  const balanceInputToCents = (value) => {
+    const normalized = String(value ?? "")
+      .trim()
+      .replace(/\s/g, "")
+      .replace(/^R\$/i, "")
+      .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+      .replace(",", ".");
+    const amount = Number(normalized || 0);
+    if (!Number.isFinite(amount)) throw new Error("Informe um saldo válido.");
+    return Math.round(amount * 100);
+  };
   const formatMoney = (amountCents) =>
     (cents(amountCents) / 100).toLocaleString("pt-BR", {
       style: "currency",
@@ -608,6 +619,28 @@ window.FinancialEngine = (() => {
       latest = [...combined].sort((a, b) => (localDate(b.sortAt)?.getTime() || 0) - (localDate(a.sortAt)?.getTime() || 0));
     return { summary, entries: combined, accounts: combinedAccounts, latest: latest.slice(0, 20), payables: sortPayables(combinedAccounts).slice(0, 20) };
   };
+  const FINANCIAL_ACCOUNT_TYPES = Object.freeze([
+    "bank_account",
+    "digital_wallet",
+    "cash_wallet",
+    "investment_account",
+    "other_account",
+  ]);
+  const normalizeFinancialAccountType = (value = "") => ({
+    checking: "bank_account",
+    savings: "bank_account",
+    wallet: "digital_wallet",
+    cash: "cash_wallet",
+    other: "other_account",
+  })[String(value)] || (FINANCIAL_ACCOUNT_TYPES.includes(String(value)) ? String(value) : "bank_account");
+  const financialAccountBalance = (account = {}) => Number.isInteger(account.currentBalanceCents)
+    ? account.currentBalanceCents
+    : cents(account.initialBalanceCents || 0);
+  const financialAccountIsLiquid = (account = {}) => account.includeInAvailableBalance === true
+    || (account.includeInAvailableBalance !== false && normalizeFinancialAccountType(account.type) !== "investment_account");
+  const availableBalance = (accounts = []) => accounts
+    .filter((account) => account?.active !== false && financialAccountIsLiquid(account))
+    .reduce((sum, account) => sum + financialAccountBalance(account), 0);
 
   return {
     SPACE_TYPES,
@@ -615,6 +648,7 @@ window.FinancialEngine = (() => {
     ENTRY_STATUSES,
     PAYMENT_METHODS,
     moneyInputToCents,
+    balanceInputToCents,
     formatMoney,
     localDate,
     localDay,
@@ -657,5 +691,10 @@ window.FinancialEngine = (() => {
     shouldGenerateOccurrence,
     rescheduleRecurringInstances,
     consolidate,
+    FINANCIAL_ACCOUNT_TYPES,
+    normalizeFinancialAccountType,
+    financialAccountBalance,
+    financialAccountIsLiquid,
+    availableBalance,
   };
 })();

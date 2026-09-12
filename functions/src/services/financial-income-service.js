@@ -47,6 +47,7 @@ const automationFor=space=>{
     sales:automation.autoIncome?.sales!==false,
     customerPayments:automation.autoIncome?.customerPayments!==false,
     onlineOrders:automation.autoIncome?.onlineOrders!==false,
+    defaultIncomeFinancialAccountId:text(automation.defaultIncomeFinancialAccountId)||null,
   };
 };
 const afterActivation=(automation,value)=>{
@@ -72,7 +73,7 @@ function financialIncomeService(db){
     return{space,automation,ref};
   }
 
-  const baseEntry=({space,businessId,id,sourceType,sourceId,amountCents,occurredAt,description,paymentMethodId,customerId=null,relatedSaleIds=[],relatedOrderId=null,direction='in',reversesEntryId=null,legacyAmountCents=0,allocatedAmountCents=0})=>({
+  const baseEntry=({space,businessId,id,sourceType,sourceId,amountCents,occurredAt,description,paymentMethodId,customerId=null,relatedSaleIds=[],relatedOrderId=null,direction='in',reversesEntryId=null,legacyAmountCents=0,allocatedAmountCents=0,financialAccountId=null})=>({
     id,
     financialSpaceId:space.id,
     spaceType:'business',
@@ -102,6 +103,7 @@ function financialIncomeService(db){
     periodKey:occurredAt.slice(0,7),
     duePeriodKey:occurredAt.slice(0,7),
     paymentMethod:paymentMethodId,
+    financialAccountId:text(financialAccountId||space.automation?.defaultIncomeFinancialAccountId)||null,
     sourceType,
     sourceId:text(sourceId),
     customerId:text(customerId)||null,
@@ -116,10 +118,20 @@ function financialIncomeService(db){
   });
 
   async function createOnce({space,businessId,eventKind,...input}){
-    const value=baseEntry({space,businessId,...input}),ref=entryRef(space.id,value.id),event=eventRef(space.id,value.id);
+    let value=baseEntry({space,businessId,...input});
+    const ref=entryRef(space.id,value.id),event=eventRef(space.id,value.id);
     return db.runTransaction(async transaction=>{
       const existing=await transaction.get(ref);
       if(existing.exists)return{created:false,entry:{id:existing.id,...existing.data()}};
+      const accountRef=value.financialAccountId?db.doc(`financialSpaces/${space.id}/financialAccounts/${value.financialAccountId}`):null,
+        accountSnapshot=accountRef?await transaction.get(accountRef):null,
+        account=accountSnapshot?.exists?accountSnapshot.data():null;
+      if(!account||account.active===false)value={...value,financialAccountId:null};
+      else if(accountRef){
+        const currentBalanceCents=Number.isInteger(account.currentBalanceCents)?account.currentBalanceCents:Number(account.initialBalanceCents||0),
+          delta=(value.direction==='in'?1:-1)*Number(value.amountCents||0);
+        transaction.update(accountRef,{currentBalanceCents:currentBalanceCents+delta,balanceUpdatedAt:value.occurredAt,lastBalanceOperationId:value.operationId,schemaVersion:Math.max(3,Number(account.schemaVersion||0)),updatedAt:FieldValue.serverTimestamp()});
+      }
       transaction.create(ref,value);
       transaction.create(event,{
         id:value.id,
@@ -263,7 +275,7 @@ function financialIncomeService(db){
     if(!amountCents)return{skipped:'zero-value'};
     const reversalType=sourceType==='sale'?'sale_reversal':'customer_payment_reversal',key=text(reversalKey).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,80)||'full',reversalId=`reversal_${sourceType}_${sourceId}_${key}`;
     if(key==='full'&&(original.reversalStatus==='reversed'||original.reversedByEntryId||original.reversalEntryId))return{skipped:'already-reversed'};
-    const result=await createOnce({space,businessId,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId});
+    const result=await createOnce({space,businessId,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId,financialAccountId:original.financialAccountId||null});
     if(result.created)await entryRef(space.id,originalId).set({reversalStatus:'reversed',reversalEntryId:reversalId,reversedAt:timestamp(occurredAt),updatedAt:FieldValue.serverTimestamp()},{merge:true});
     return result;
   }

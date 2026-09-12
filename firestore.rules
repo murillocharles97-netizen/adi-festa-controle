@@ -92,10 +92,15 @@ service cloud.firestore {
     function financialSpace(spaceId) {
       return get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data;
     }
+    function ownsActiveBusiness(businessId) {
+      return activeUser()
+        && activeBusiness(businessId)
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
     function canReadFinancialSpace(spaceId) {
       let space = financialSpace(spaceId);
       return signedIn() && space.active != false && (
-        (space.type == 'business' && belongsToBusiness(space.linkedBusinessId))
+        (space.type == 'business' && (belongsToBusiness(space.linkedBusinessId) || ownsActiveBusiness(space.linkedBusinessId)))
         || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid)
       );
     }
@@ -104,9 +109,9 @@ service cloud.firestore {
       return signedIn() && space.active != false && (
         (
           space.type == 'business'
-          && belongsToBusiness(space.linkedBusinessId)
+          && (belongsToBusiness(space.linkedBusinessId) || ownsActiveBusiness(space.linkedBusinessId))
           && subscriptionAllowsWrites(space.linkedBusinessId)
-          && userProfile().role in ['owner', 'admin', 'manager']
+          && (ownsActiveBusiness(space.linkedBusinessId) || userProfile().role in ['owner', 'admin', 'manager'])
         )
         || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid)
       );
@@ -501,7 +506,7 @@ service cloud.firestore {
 
     match /financialSpaces/{spaceId} {
       allow read: if signedIn() && resource.data.active != false && (
-        (resource.data.type == 'business' && belongsToBusiness(resource.data.linkedBusinessId))
+        (resource.data.type == 'business' && (belongsToBusiness(resource.data.linkedBusinessId) || ownsActiveBusiness(resource.data.linkedBusinessId)))
         || (resource.data.type in ['personal', 'other'] && resource.data.ownerUid == request.auth.uid)
       );
       allow create: if signedIn()
@@ -644,17 +649,20 @@ service cloud.firestore {
           && request.resource.data.name is string
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() <= 80
-          && request.resource.data.type in ['cash', 'checking', 'wallet', 'savings', 'other']
+          && request.resource.data.type in ['cash', 'checking', 'wallet', 'savings', 'other', 'bank_account', 'digital_wallet', 'cash_wallet', 'investment_account', 'other_account']
           && request.resource.data.initialBalanceCents is int
-          && request.resource.data.initialBalanceCents >= 0
+          && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
+          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool)
           && request.resource.data.active == true;
         allow update: if canManageFinancialSpace(spaceId)
           && request.resource.data.id == resource.data.id
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.type == resource.data.type
           && request.resource.data.initialBalanceCents is int
-          && request.resource.data.initialBalanceCents >= 0;
+          && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
+          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool);
         allow delete: if false;
       }
       match /creditCards/{cardId} {

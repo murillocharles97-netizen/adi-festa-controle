@@ -19,7 +19,7 @@ const {
 } = require("firebase/firestore");
 
 let env;
-const projectId = "adi-festa-variations-test", businessA = "financial-a", businessB = "financial-b";
+const projectId = "adi-festa-variations-test", businessA = "financial-a", businessB = "financial-b", businessC = "financial-owner-a-second";
 
 test.before(async () => {
   env = await initializeTestEnvironment({ projectId, firestore: { rules: fs.readFileSync("firestore.rules", "utf8") } });
@@ -27,6 +27,8 @@ test.before(async () => {
     const db = context.firestore();
     for (const [id, ownerId] of [[businessA, "owner-a"], [businessB, "owner-b"]])
       await setDoc(doc(db, "businesses", id), { id, ownerId, active: true, subscription: { planId: "internal", status: "active" } });
+    await setDoc(doc(db, "businesses", businessC), { id: businessC, ownerId: "owner-a", active: true, subscription: { planId: "internal", status: "active" } });
+    await setDoc(doc(db, "financialSpaces", "space-owner-a-second"), { id: "space-owner-a-second", name: "Segunda empresa", type: "business", linkedBusinessId: businessC, ownerUid: "owner-a", createdBy: "owner-a", active: true });
     for (const user of [
       { uid: "owner-a", businessId: businessA, role: "owner" },
       { uid: "manager-a", businessId: businessA, role: "manager" },
@@ -94,6 +96,25 @@ test("espaço pessoal é privado mesmo para colega da empresa", async () => {
   const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore();
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", "personal-a"), { id: "personal-a", name: "Pessoal", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));
   await assertFails(getDoc(doc(manager, "financialSpaces", "personal-a")));
+});
+
+test("proprietário acessa espaços das próprias empresas sem expor ao funcionário da empresa atual", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore(), reference = doc(owner, "financialSpaces", "space-owner-a-second");
+  await assertSucceeds(getDoc(reference));
+  await assertFails(getDoc(doc(manager, "financialSpaces", "space-owner-a-second")));
+});
+
+test("conta V3 aceita tipo formal e saldo projetado sem expor o espaço pessoal", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), other = env.authenticatedContext("owner-b").firestore(), reference = doc(owner, "financialSpaces", "personal-a", "financialAccounts", "inter-v3"), account = {
+    id: "inter-v3", operationId: "financial_account_inter-v3", financialSpaceId: "personal-a", ownerUid: "owner-a", createdBy: "owner-a",
+    name: "Inter", type: "bank_account", institution: "Banco Inter", initialBalanceCents: 100000, currentBalanceCents: 100000,
+    includeInAvailableBalance: true, balanceMode: "projected_from_opening_balance", active: true, schemaVersion: 3,
+  };
+  await assertSucceeds(setDoc(reference, account));
+  await assertSucceeds(updateDoc(reference, { currentBalanceCents: 125000, balanceUpdatedAt: "2026-09-12T12:00:00.000Z" }));
+  await assertSucceeds(getDoc(reference));
+  await assertFails(getDoc(doc(other, "financialSpaces", "personal-a", "financialAccounts", "inter-v3")));
+  await assertFails(updateDoc(doc(other, "financialSpaces", "personal-a", "financialAccounts", "inter-v3"), { currentBalanceCents: 999999 }));
 });
 
 test("cartões, faturas, contas e pagamentos respeitam o espaço pessoal", async () => {
