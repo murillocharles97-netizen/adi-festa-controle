@@ -218,6 +218,11 @@ window.FinanceiroUI = (() => {
     investment_account: "chart-no-axes-column-increasing", other_account: "wallet",
     checking: "landmark", savings: "landmark", wallet: "wallet-cards", cash: "banknote", other: "wallet",
   })[account.type] || "landmark";
+  const accountTypeLabel = (account = {}) => ({
+    bank_account: "Conta bancária", digital_wallet: "Carteira digital", cash_wallet: "Dinheiro físico",
+    investment_account: "Investimento", other_account: "Outro recurso", checking: "Conta bancária",
+    savings: "Conta bancária", wallet: "Carteira digital", cash: "Dinheiro físico", other: "Outro recurso",
+  })[account.type] || "Recurso financeiro";
   const institutionGroups = (data = {}) => {
     const groups = new Map(), seenAccounts = new Set(), ensure = (key, label) => {
       if (!groups.has(key)) groups.set(key, { key, name: label || "Sem instituição", accounts: [], cards: [], availableBalanceCents: 0, invoiceTotalCents: 0, spaceIds: new Set(), dueAt: null });
@@ -241,8 +246,11 @@ window.FinanceiroUI = (() => {
         const dueAt = Engine.localDate(invoice.dueDate);
         if (dueAt && (!group.dueAt || dueAt < group.dueAt)) group.dueAt = dueAt;
       }
-      for (const spaceId of card.allowedFinancialSpaceIds || []) group.spaceIds.add(spaceId);
-      if (card.defaultFinancialSpaceId || card.cardHomeSpaceId) group.spaceIds.add(card.defaultFinancialSpaceId || card.cardHomeSpaceId);
+      if (card.accessMode === "all_spaces") spaces().filter((space) => space.ownerUid === card.ownerUid).forEach((space) => group.spaceIds.add(space.id));
+      else {
+        for (const spaceId of card.allowedFinancialSpaceIds || []) group.spaceIds.add(spaceId);
+        if (card.defaultFinancialSpaceId || card.cardHomeSpaceId) group.spaceIds.add(card.defaultFinancialSpaceId || card.cardHomeSpaceId);
+      }
     }
     return [...groups.values()].sort((left, right) => Number(Boolean(right.accounts.length && right.cards.length)) - Number(Boolean(left.accounts.length && left.cards.length)) || left.name.localeCompare(right.name, "pt-BR"));
   };
@@ -286,7 +294,7 @@ window.FinanceiroUI = (() => {
     const groups = institutionGroups(data), summary = data.summary || {};
     return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div>${compactContextMarkup()}</section>
       ${consolidatedSummaryMarkup(summary)}
-      <section class="financial-section financial-home-institutions"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma conta ou cartão</b><span>Cadastre dentro de um espaço para acompanhar aqui.</span></div></div>`}</section>
+      <section class="financial-section financial-home-institutions"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhum recurso financeiro</b><span>Cadastre uma conta, carteira, cartão ou investimento para acompanhar aqui.</span></div></div>`}</section>
       ${attentionMarkup(data)}
       <section class="financial-section financial-home-upcoming"><header><h2>Próximas contas</h2><button type="button" data-financial-view="accounts">Ver todas ${icon("arrow-right")}</button></header>${consolidatedPayablesMarkup((data.payables || []).slice(0, 4))}</section>
       ${consolidatedSpacesMarkup(data)}
@@ -326,7 +334,7 @@ window.FinanceiroUI = (() => {
 
   function walletsMarkup(data) {
     const accounts = data.financialAccounts || [];
-    return `${subpageHeader("Contas e carteiras", "De onde o dinheiro entra ou sai", state.consolidated ? "" : `<button class="btn btn-primary" type="button" data-financial-new-account>${icon("plus")} Nova conta</button>`)}${internalNav()}
+    return `${subpageHeader("Contas e carteiras", "De onde o dinheiro entra ou sai", `<button class="btn btn-primary" type="button" data-financial-new-account>${icon("plus")} Adicionar</button>`)}${internalNav()}
       <section class="financial-section financial-subpage-card"><div class="financial-wallet-list">${accounts.length ? accounts.map((account) => institutionAccountMarkup(account)).join("") : `<div class="financial-empty-inline">${icon("wallet")}<div><b>Nenhuma conta cadastrada</b><span>Cadastre banco, dinheiro ou carteira para pagar faturas.</span></div></div>`}</div><p class="financial-data-note">${icon("info")} O saldo é controlado pelo saldo inicial, movimentações e conciliações registradas na VECONI.</p></section>`;
   }
 
@@ -584,10 +592,11 @@ window.FinanceiroUI = (() => {
     });
   }
 
-  function openCreationSpacePicker(title, callback) {
-    const allowed = spaces().filter((space) => !state.activeSpaceIds.length || state.activeSpaceIds.includes(space.id));
-    sheet(`${sheetHeader(title, "O cadastro ficará vinculado a este espaço, sem sair da visão consolidada.")}<div class="modal-body financial-view-list">${allowed.map((space) => `<article class="financial-view-option"><button type="button" data-creation-space="${esc(space.id)}"><span>${icon(space.icon || "wallet")}</span><b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small>${icon("chevron-right")}</button></article>`).join("")}</div>`);
-    modal().querySelectorAll("[data-creation-space]").forEach((button) => button.onclick = () => callback?.(button.dataset.creationSpace));
+  function resourceCreationHomeSpaceId(defaults = {}) {
+    const preferred = [defaults.accountHomeSpaceId, defaults.spaceId, state.selectedSpaceId, ...state.activeSpaceIds]
+      .map(String).map((value) => value.trim()).filter(Boolean);
+    for (const id of preferred) if (spaces().some((space) => space.id === id)) return id;
+    return spaces()[0]?.id || "";
   }
 
   function chooseInstitutionItem(items, title, description, callback, iconName = "wallet") {
@@ -598,7 +607,7 @@ window.FinanceiroUI = (() => {
   }
 
   function openAddFinancialProduct(group = null) {
-    const defaults = group ? { name: group.name, institution: group.name, spaceId: group.accounts[0]?.financialSpaceId || group.cards[0]?.cardHomeSpaceId || "" } : {};
+    const defaults = group ? { name: group.name, institution: group.name, spaceId: accountHomeSpaceId(group.accounts[0] || {}, group.cards[0]?.cardHomeSpaceId || "") } : {};
     const choices = [
       ["bank_account", "landmark", "Conta bancária", "Saldo, entradas e pagamentos."],
       ["credit_card", "credit-card", "Cartão de crédito", "Limite, compras e faturas."],
@@ -611,7 +620,7 @@ window.FinanceiroUI = (() => {
       const kind = button.dataset.financialAddKind;
       if (kind === "credit_card") return openCreateCreditCard(null, null, defaults);
       if (kind === "account_card") return openCreateFinancialAccount((account) => openCreateCreditCard(() => refresh(), null, {
-        spaceId: account.financialSpaceId,
+        spaceId: accountHomeSpaceId(account),
         name: `${account.institution || account.name} Cartão`,
         institution: account.institution || account.name,
       }), { ...defaults, type: "bank_account", title: "Nova conta da instituição" });
@@ -630,7 +639,7 @@ window.FinanceiroUI = (() => {
       try {
         const result = await window.FinancialSpaceService.updateFinancialInstitution({
           name: form.name.value,
-          accounts: group.accounts.map((account) => ({ id: account.id, financialSpaceId: account.financialSpaceId })),
+          accounts: group.accounts.map((account) => ({ id: account.id, accountHomeSpaceId: accountHomeSpaceId(account) })),
           cards: group.cards.map((card) => ({ id: card.id, cardHomeSpaceId: card.cardHomeSpaceId || card.financialSpaceId })),
         });
         state.institutionKey = normalizeInstitutionKey(result.name);
@@ -645,7 +654,7 @@ window.FinanceiroUI = (() => {
       event.currentTarget.disabled = true;
       try {
         await window.FinancialSpaceService.archiveFinancialInstitution({
-          accounts: group.accounts.map((account) => ({ id: account.id, financialSpaceId: account.financialSpaceId })),
+          accounts: group.accounts.map((account) => ({ id: account.id, accountHomeSpaceId: accountHomeSpaceId(account) })),
           cards: group.cards.map((card) => ({ id: card.id, cardHomeSpaceId: card.cardHomeSpaceId || card.financialSpaceId })),
         });
         state.view = "institutions"; state.institutionKey = "";
@@ -802,22 +811,25 @@ window.FinanceiroUI = (() => {
   }
 
   function openCreateFinancialAccount(onCreated = null, defaults = {}) {
-    if (state.consolidated && !defaults.spaceId) return openCreationSpacePicker("Em qual espaço criar a conta?", (spaceId) => openCreateFinancialAccount(onCreated, { ...defaults, spaceId }));
-    const service = window.FinancialSpaceService, targetSpaceId = defaults.spaceId || state.selectedSpaceId,
-      targetSpace = spaces().find((space) => space.id === targetSpaceId), canShare = service.canShareFinancialAccounts(targetSpaceId),
-      availableSpaces = spaces().filter((space) => space.ownerUid === targetSpace?.ownerUid),
-      initialType = Engine.normalizeFinancialAccountType(defaults.type || "bank_account"), included = defaults.includeInAvailableBalance !== false && initialType !== "investment_account";
-    sheet(`${sheetHeader(defaults.title || "Nova conta ou carteira", "A conta fica única e pode ser usada nos espaços autorizados.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" value="${esc(defaults.name || "")}" placeholder="Ex.: Inter" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="bank_account" ${initialType === "bank_account" ? "selected" : ""}>Conta bancária</option><option value="digital_wallet" ${initialType === "digital_wallet" ? "selected" : ""}>Carteira digital</option><option value="cash_wallet" ${initialType === "cash_wallet" ? "selected" : ""}>Dinheiro físico</option><option value="investment_account" ${initialType === "investment_account" ? "selected" : ""}>Investimentos</option><option value="other_account" ${initialType === "other_account" ? "selected" : ""}>Outra conta</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" value="${esc(defaults.institution || "")}" placeholder="Ex.: Banco Inter"></label><label class="financial-field"><span>Final da conta <small>(opcional)</small></span><input name="last4" inputmode="numeric" maxlength="4" value="${esc(defaults.last4 || "")}" placeholder="6357"></label><fieldset class="financial-account-access full"><legend>Onde esta conta pode ser usada?</legend><div class="financial-card-access-picker">${canShare ? `<button type="button" data-account-access="all_spaces">${icon("layers-3")}<span><b>Todos os meus espaços</b><small>Uma conta, sem duplicar o saldo.</small></span></button><button type="button" data-account-access="selected_spaces">${icon("list-checks")}<span><b>Espaços selecionados</b><small>Escolha exatamente onde ela aparece.</small></span></button>` : ""}<button type="button" data-account-access="single_space" class="active">${icon("lock-keyhole")}<span><b>Somente este espaço</b><small>Uso exclusivo em ${esc(targetSpace?.name || "este espaço")}.</small></span>${icon("circle-check")}</button></div><section class="financial-space-checks" data-account-space-list hidden>${availableSpaces.map((space) => `<button type="button" data-account-space="${esc(space.id)}"><i data-lucide="square"></i><span>${esc(space.name)}<small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></button>`).join("")}</section></fieldset><label class="financial-field full"><span>Saldo real hoje</span><input name="initialBalance" inputmode="decimal" value="${esc(defaults.initialBalance || "0,00")}"><small>Saldo físico da conta; não soma lançamentos antigos e não entra como receita.</small></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" ${included ? "checked" : ""}><span></span><b>Incluir no saldo disponível</b></label><div class="financial-wizard-info full">${icon("shield-check")} Compartilhar não transfere acesso e não expõe a conta a outros usuários.</div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
-    const form = modal().querySelector("[data-financial-account-create]"), selectedSpaces = new Set(), accessList = form.querySelector("[data-account-space-list]");
-    let accessMode = "single_space";
+    const service = window.FinancialSpaceService, targetSpaceId = resourceCreationHomeSpaceId(defaults),
+      targetSpace = spaces().find((space) => space.id === targetSpaceId);
+    if (!targetSpaceId || !targetSpace) return Utils.toast("Crie um espaço financeiro antes de cadastrar uma conta.", true);
+    const canShare = service.canShareFinancialAccounts(targetSpaceId), availableSpaces = spaces().filter((space) => space.ownerUid === targetSpace.ownerUid),
+      initialType = Engine.normalizeFinancialAccountType(defaults.type || "bank_account"), included = defaults.includeInAvailableBalance !== false && initialType !== "investment_account",
+      initialAccessMode = canShare && Engine.FINANCIAL_RESOURCE_ACCESS_MODES.includes(defaults.accessMode) ? defaults.accessMode : canShare ? "all_spaces" : "single_space";
+    sheet(`${sheetHeader(defaults.title || "Novo recurso financeiro", "O item terá identidade própria; lançamentos continuam classificados por espaço.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome/apelido *</span><input name="name" maxlength="80" value="${esc(defaults.name || "")}" placeholder="Ex.: Inter" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="bank_account" ${initialType === "bank_account" ? "selected" : ""}>Conta bancária</option><option value="digital_wallet" ${initialType === "digital_wallet" ? "selected" : ""}>Carteira digital</option><option value="cash_wallet" ${initialType === "cash_wallet" ? "selected" : ""}>Dinheiro físico</option><option value="investment_account" ${initialType === "investment_account" ? "selected" : ""}>Investimento</option><option value="other_account" ${initialType === "other_account" ? "selected" : ""}>Outro recurso</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" value="${esc(defaults.institution || "")}" placeholder="Ex.: Banco Inter"></label><label class="financial-field"><span>Final da conta <small>(opcional)</small></span><input name="last4" inputmode="numeric" maxlength="4" value="${esc(defaults.last4 || "")}" placeholder="6357"></label><fieldset class="financial-account-access full"><legend>Onde este item pode ser usado?</legend><div class="financial-card-access-picker">${canShare ? `<button type="button" data-account-access="all_spaces">${icon("layers-3")}<span><b>Todos os espaços</b><small>Disponível também nos novos espaços que você criar.</small></span></button><button type="button" data-account-access="selected_spaces">${icon("list-checks")}<span><b>Alguns espaços</b><small>Escolha exatamente onde este item aparece.</small></span></button>` : ""}<button type="button" data-account-access="single_space">${icon("lock-keyhole")}<span><b>Somente um espaço</b><small>Uma restrição de uso, não a identidade do item.</small></span></button></div><section class="financial-space-checks" data-account-space-list hidden><b>Escolha os espaços</b>${availableSpaces.map((space) => `<button type="button" data-account-space="${esc(space.id)}">${icon("square")}<span>${esc(space.name)}<small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></button>`).join("")}</section><label class="financial-field financial-card-single-space" data-account-single-space hidden><span>Espaço permitido *</span><select name="singleFinancialSpaceId">${availableSpaces.map((space) => `<option value="${esc(space.id)}" ${space.id === (defaults.defaultFinancialSpaceId || targetSpaceId) ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label></fieldset><label class="financial-field full"><span>Saldo real hoje</span><input name="initialBalance" inputmode="decimal" value="${esc(defaults.initialBalance || "0,00")}"><small>Saldo físico deste recurso; não é multiplicado pelos espaços e não entra como receita.</small></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" ${included ? "checked" : ""}><span></span><b>Incluir no saldo disponível</b></label><div class="financial-wizard-info full">${icon("shield-check")} Você poderá usar esta conta nos espaços permitidos. Cada lançamento continuará sendo classificado no espaço correto.</div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar recurso</button></footer></form>`);
+    const form = modal().querySelector("[data-financial-account-create]"), selectedSpaces = new Set(defaults.allowedFinancialSpaceIds || []),
+      accessList = form.querySelector("[data-account-space-list]"), singleSpaceField = form.querySelector("[data-account-single-space]");
+    let accessMode = initialAccessMode;
     const renderAccess = () => {
       form.querySelectorAll("[data-account-access]").forEach((button) => {
         const active = button.dataset.accountAccess === accessMode;
         button.classList.toggle("active", active);
-        button.querySelector("svg:last-child")?.remove();
-        if (active) button.insertAdjacentHTML("beforeend", icon("circle-check"));
+        button.querySelector(".financial-access-check")?.remove();
+        if (active) button.insertAdjacentHTML("beforeend", `<span class="financial-access-check">${icon("circle-check")}</span>`);
       });
       accessList.hidden = accessMode !== "selected_spaces";
+      singleSpaceField.hidden = accessMode !== "single_space";
       form.querySelectorAll("[data-account-space]").forEach((button) => {
         const active = selectedSpaces.has(button.dataset.accountSpace);
         button.classList.toggle("active", active);
@@ -827,6 +839,7 @@ window.FinanceiroUI = (() => {
     };
     form.querySelectorAll("[data-account-access]").forEach((button) => button.onclick = () => { accessMode = button.dataset.accountAccess; renderAccess(); });
     form.querySelectorAll("[data-account-space]").forEach((button) => button.onclick = () => { const id = button.dataset.accountSpace; selectedSpaces.has(id) ? selectedSpaces.delete(id) : selectedSpaces.add(id); renderAccess(); });
+    renderAccess();
     form.elements.type.addEventListener("change", () => {
       if (form.elements.type.value === "investment_account") form.elements.includeInAvailableBalance.checked = false;
       else if (!form.elements.includeInAvailableBalance.checked) form.elements.includeInAvailableBalance.checked = true;
@@ -836,17 +849,21 @@ window.FinanceiroUI = (() => {
       const values = Object.fromEntries(new FormData(form)), submit = form.querySelector("[type=submit]");
       submit.disabled = true;
       try {
+        if (accessMode === "selected_spaces" && !selectedSpaces.size) throw new Error("Escolha ao menos um espaço.");
+        const singleFinancialSpaceId = String(form.elements.singleFinancialSpaceId?.value || targetSpaceId),
+          defaultFinancialSpaceId = accessMode === "single_space" ? singleFinancialSpaceId : accessMode === "selected_spaces" ? [...selectedSpaces][0] : targetSpaceId;
         const initialBalanceCents = Engine.balanceInputToCents(values.initialBalance),
-          payload = { ...values, initialBalanceCents, includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on", accessMode, allowedFinancialSpaceIds: accessMode === "selected_spaces" ? [...selectedSpaces] : [], defaultFinancialSpaceId: targetSpaceId },
+          payload = { ...values, initialBalanceCents, includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on", accessMode, allowedFinancialSpaceIds: accessMode === "selected_spaces" ? [...selectedSpaces] : accessMode === "single_space" ? [singleFinancialSpaceId] : [], defaultFinancialSpaceId },
           account = await service.createFinancialAccount(targetSpaceId, payload);
         closeModal();
-        Utils.toast("Conta criada.");
+        Utils.toast("Recurso financeiro criado.");
         if (onCreated) await onCreated(account); else await refresh();
       } catch (error) {
         if (error.code !== "financial-account-possible-duplicate" || !error.matches?.length) { Utils.toast(error.message, true); submit.disabled = false; return; }
-        const payload = { ...values, initialBalanceCents: Engine.balanceInputToCents(values.initialBalance), includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on", accessMode, allowedFinancialSpaceIds: accessMode === "selected_spaces" ? [...selectedSpaces] : [], defaultFinancialSpaceId: targetSpaceId };
+        const singleFinancialSpaceId = String(form.elements.singleFinancialSpaceId?.value || targetSpaceId), defaultFinancialSpaceId = accessMode === "single_space" ? singleFinancialSpaceId : accessMode === "selected_spaces" ? [...selectedSpaces][0] : targetSpaceId,
+          payload = { ...values, initialBalanceCents: Engine.balanceInputToCents(values.initialBalance), includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on", accessMode, allowedFinancialSpaceIds: accessMode === "selected_spaces" ? [...selectedSpaces] : accessMode === "single_space" ? [singleFinancialSpaceId] : [], defaultFinancialSpaceId };
         sheet(`${sheetHeader("Conta parecida encontrada", "Evite repetir a mesma instituição e duplicar o saldo.")}<div class="modal-body"><div class="financial-account-duplicate-list">${error.matches.map((account) => `<article><span>${icon("landmark")}</span><div><b>${esc(account.name)}</b><small>${esc(account.institution || "Conta financeira")} · ${money(Engine.financialAccountBalance(account))} · ${esc(accountScopeLabel(account))}</small></div><button class="btn btn-primary" type="button" data-use-account="${esc(account.id)}" data-account-home="${esc(accountHomeSpaceId(account))}">Usar conta existente</button></article>`).join("")}</div><div class="financial-wizard-info">${icon("info")} Se for outra conta real da mesma instituição, você ainda pode cadastrá-la.</div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-light" type="button" data-create-similar-account>Criar outra conta</button></footer>`);
-        modal().querySelectorAll("[data-use-account]").forEach((button) => button.onclick = async () => { button.disabled = true; try { const account = await service.useExistingFinancialAccount(button.dataset.accountHome, button.dataset.useAccount, targetSpaceId); closeModal(); Utils.toast("Conta existente disponibilizada neste espaço."); if (onCreated) await onCreated(account); else await refresh(); } catch (useError) { Utils.toast(useError.message, true); button.disabled = false; } });
+        modal().querySelectorAll("[data-use-account]").forEach((button) => button.onclick = async () => { button.disabled = true; try { const account = await service.useExistingFinancialAccount(button.dataset.accountHome, button.dataset.useAccount, { ...payload, targetSpaceId }); closeModal(); Utils.toast("Recurso existente reutilizado sem duplicar o saldo."); if (onCreated) await onCreated(account); else await refresh(); } catch (useError) { Utils.toast(useError.message, true); button.disabled = false; } });
         modal().querySelector("[data-create-similar-account]").onclick = async (createButton) => { createButton.currentTarget.disabled = true; try { const account = await service.createFinancialAccount(targetSpaceId, { ...payload, allowSimilarAccount: true }); closeModal(); Utils.toast("Nova conta criada após confirmação."); if (onCreated) await onCreated(account); else await refresh(); } catch (createError) { Utils.toast(createError.message, true); createButton.currentTarget.disabled = false; } };
         window.lucide?.createIcons();
       }
@@ -855,7 +872,7 @@ window.FinanceiroUI = (() => {
 
   function openFinancialAccount(account, spaceId) {
     const currentBalanceCents = Engine.financialAccountBalance(account), included = Engine.financialAccountIsLiquid(account);
-    sheet(`${sheetHeader(account.name, account.institution || "Conta financeira")}<div class="modal-body"><article class="financial-account-balance-detail"><span>${icon(accountIcon(account))}</span><div><small>Saldo controlado pela VECONI</small><strong>${money(currentBalanceCents)}</strong><em>${included ? "Incluído no saldo disponível" : "Fora do saldo disponível"}</em></div></article><div class="financial-account-details"><span>${icon("layers-3")} Disponibilidade <b>${esc(accountScopeLabel(account))}</b></span><span>${icon("home")} Espaço de cadastro <b>${esc(spaceName(accountHomeSpaceId(account, spaceId)))}</b></span><span>${icon("database")} Origem <b>Saldo inicial + movimentações</b></span><span>${icon("shield-check")} Integração bancária <b>Não conectada</b></span></div><div class="financial-account-actions"><button class="btn btn-primary" type="button" data-financial-adjust-account>${icon("scale")} Ajustar saldo real</button><button class="btn btn-light" type="button" data-financial-edit-account>${icon("pencil")} Editar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-archive-account>${icon("archive")} Arquivar / excluir</button></div><div class="financial-wizard-info">${icon("info")} Ajustar saldo cria um registro de conciliação sem virar receita ou despesa.</div></div>`);
+    sheet(`${sheetHeader(account.name, account.institution || "Recurso financeiro")}<div class="modal-body"><article class="financial-account-balance-detail"><span>${icon(accountIcon(account))}</span><div><small>Saldo controlado pela VECONI</small><strong>${money(currentBalanceCents)}</strong><em>${included ? "Incluído no saldo disponível" : "Fora do saldo disponível"}</em></div></article><div class="financial-account-details"><span>${icon("layers-3")} Disponibilidade <b>${esc(accountScopeLabel(account))}</b></span><span>${icon(accountIcon(account))} Tipo <b>${esc(accountTypeLabel(account))}</b></span><span>${icon("database")} Origem <b>Saldo inicial + movimentações</b></span><span>${icon("shield-check")} Integração bancária <b>Não conectada</b></span></div><div class="financial-account-actions"><button class="btn btn-primary" type="button" data-financial-adjust-account>${icon("scale")} Ajustar saldo real</button><button class="btn btn-light" type="button" data-financial-edit-account>${icon("pencil")} Editar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-archive-account>${icon("archive")} Arquivar / excluir</button></div><div class="financial-wizard-info">${icon("info")} Ajustar saldo cria um registro de conciliação sem virar receita ou despesa.</div></div>`);
     modal().querySelector("[data-financial-adjust-account]").onclick = () => openAdjustFinancialAccount(account, spaceId);
     modal().querySelector("[data-financial-edit-account]").onclick = () => openEditFinancialAccount(account, spaceId);
     modal().querySelector("[data-financial-archive-account]").onclick = () => confirmArchiveFinancialAccount(account, spaceId);
@@ -864,15 +881,20 @@ window.FinanceiroUI = (() => {
   function openEditFinancialAccount(account, spaceId) {
     const service = window.FinancialSpaceService, homeSpaceId = accountHomeSpaceId(account, spaceId), normalized = Engine.normalizeFinancialAccountAccess(account, homeSpaceId),
       availableSpaces = spaces().filter((space) => space.ownerUid === account.ownerUid), canShare = service.canShareFinancialAccounts(homeSpaceId);
-    sheet(`${sheetHeader("Editar conta", account.name)}<form data-financial-account-edit><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" value="${esc(account.name)}" required></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" value="${esc(account.institution || "")}"></label><label class="financial-field"><span>Final da conta</span><input name="last4" inputmode="numeric" maxlength="4" value="${esc(account.last4 || "")}"></label><label class="financial-field full"><span>Disponibilidade</span><select name="accessMode">${canShare ? `<option value="all_spaces" ${normalized.accessMode === "all_spaces" ? "selected" : ""}>Todos os meus espaços</option><option value="selected_spaces" ${normalized.accessMode === "selected_spaces" ? "selected" : ""}>Espaços selecionados</option>` : ""}<option value="single_space" ${normalized.accessMode === "single_space" ? "selected" : ""}>Somente ${esc(spaceName(normalized.defaultFinancialSpaceId || homeSpaceId))}</option></select></label><fieldset class="financial-view-spaces full" data-account-edit-spaces><legend>Espaços autorizados</legend>${availableSpaces.map((space) => `<label><input type="checkbox" name="allowedFinancialSpaceIds" value="${esc(space.id)}" ${normalized.allowedFinancialSpaceIds.includes(space.id) ? "checked" : ""}><span>${icon(space.icon || "wallet")}<b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></label>`).join("")}</fieldset><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" ${Engine.financialAccountIsLiquid(account) ? "checked" : ""}><span></span><b>Incluir no saldo disponível</b></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar conta</button></footer></form>`);
-    const form = modal().querySelector("[data-financial-account-edit]"), spaceList = form.querySelector("[data-account-edit-spaces]"), toggle = () => { spaceList.hidden = form.accessMode.value !== "selected_spaces"; };
+    sheet(`${sheetHeader("Editar recurso financeiro", account.name)}<form data-financial-account-edit><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" value="${esc(account.name)}" required></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" value="${esc(account.institution || "")}"></label><label class="financial-field"><span>Final da conta</span><input name="last4" inputmode="numeric" maxlength="4" value="${esc(account.last4 || "")}"></label><label class="financial-field full"><span>Disponibilidade</span><select name="accessMode">${canShare ? `<option value="all_spaces" ${normalized.accessMode === "all_spaces" ? "selected" : ""}>Todos os espaços</option><option value="selected_spaces" ${normalized.accessMode === "selected_spaces" ? "selected" : ""}>Alguns espaços</option>` : ""}<option value="single_space" ${normalized.accessMode === "single_space" ? "selected" : ""}>Somente um espaço</option></select></label><fieldset class="financial-view-spaces full" data-account-edit-spaces><legend>Espaços autorizados</legend>${availableSpaces.map((space) => `<label><input type="checkbox" name="allowedFinancialSpaceIds" value="${esc(space.id)}" ${normalized.allowedFinancialSpaceIds.includes(space.id) ? "checked" : ""}><span>${icon(space.icon || "wallet")}<b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></label>`).join("")}</fieldset><label class="financial-field full" data-account-edit-single-space><span>Espaço permitido</span><select name="singleFinancialSpaceId">${availableSpaces.map((space) => `<option value="${esc(space.id)}" ${space.id === (normalized.defaultFinancialSpaceId || homeSpaceId) ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" ${Engine.financialAccountIsLiquid(account) ? "checked" : ""}><span></span><b>Incluir no saldo disponível</b></label><div class="financial-wizard-info full">${icon("shield-check")} A disponibilidade muda onde o recurso pode ser usado; movimentações antigas permanecem no espaço original.</div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar recurso</button></footer></form>`);
+    const form = modal().querySelector("[data-financial-account-edit]"), spaceList = form.querySelector("[data-account-edit-spaces]"), singleSpace = form.querySelector("[data-account-edit-single-space]"), toggle = () => {
+      spaceList.hidden = form.accessMode.value !== "selected_spaces";
+      singleSpace.hidden = form.accessMode.value !== "single_space";
+    };
     form.accessMode.onchange = toggle; toggle();
     form.onsubmit = async (event) => {
       event.preventDefault();
       const values = new FormData(form), submit = form.querySelector("[type=submit]"); submit.disabled = true;
       try {
-        await service.updateFinancialAccount(homeSpaceId, account.id, { name: values.get("name"), institution: values.get("institution"), last4: values.get("last4"), accessMode: values.get("accessMode"), allowedFinancialSpaceIds: values.getAll("allowedFinancialSpaceIds"), defaultFinancialSpaceId: normalized.defaultFinancialSpaceId || homeSpaceId, includeInAvailableBalance: values.get("includeInAvailableBalance") === "on" });
-        closeModal(); Utils.toast("Conta atualizada."); await refresh();
+        const accessMode = values.get("accessMode"), selectedIds = values.getAll("allowedFinancialSpaceIds"), singleId = values.get("singleFinancialSpaceId") || homeSpaceId;
+        if (accessMode === "selected_spaces" && !selectedIds.length) throw new Error("Escolha ao menos um espaço.");
+        await service.updateFinancialAccount(homeSpaceId, account.id, { name: values.get("name"), institution: values.get("institution"), last4: values.get("last4"), accessMode, allowedFinancialSpaceIds: accessMode === "selected_spaces" ? selectedIds : accessMode === "single_space" ? [singleId] : [], defaultFinancialSpaceId: accessMode === "single_space" ? singleId : accessMode === "selected_spaces" ? selectedIds[0] : normalized.defaultFinancialSpaceId || homeSpaceId, includeInAvailableBalance: values.get("includeInAvailableBalance") === "on" });
+        closeModal(); Utils.toast("Recurso financeiro atualizado."); await refresh();
       } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
     };
   }

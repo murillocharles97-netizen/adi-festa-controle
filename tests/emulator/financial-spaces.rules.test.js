@@ -178,6 +178,17 @@ test("conta pessoal compartilhada serve a dois espaços do owner sem vazar ao bu
     allowedFinancialSpaceIds: [], defaultFinancialSpaceId: homeId, schemaVersion: 4,
   };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", homeId, "financialAccounts", account.id), account));
+  const ownerAccounts = await assertSucceeds(getDocs(query(
+    collectionGroup(owner, "financialAccounts"),
+    where("ownerUid", "==", "owner-a"),
+    limit(50),
+  )));
+  assert.equal(ownerAccounts.docs.some((item) => item.id === account.id), true);
+  await assertFails(getDocs(query(
+    collectionGroup(other, "financialAccounts"),
+    where("ownerUid", "==", "owner-a"),
+    limit(50),
+  )));
   const carIncome = {
     id: "car-income-shared", financialSpaceId: carId, ownerUid: "owner-a", createdBy: "owner-a", operationId: "car-income-shared",
     amountCents: 7000, currency: "BRL", direction: "in", status: "paid", sourceType: "manual_income", sourceId: "car-income-shared",

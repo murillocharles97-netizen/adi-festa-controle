@@ -497,31 +497,39 @@ window.FinancialEngine = (() => {
       cashFlowEffectCents: 0,
     };
   };
-  const CREDIT_CARD_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
-  const normalizeCreditCardAccess = (card = {}, homeSpaceId = "") => {
-    const cardHomeSpaceId = String(card.cardHomeSpaceId || card.financialSpaceId || homeSpaceId || "").trim(),
-      requestedMode = String(card.accessMode || ""),
-      accessMode = CREDIT_CARD_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
-      defaultFinancialSpaceId = String(card.defaultFinancialSpaceId || cardHomeSpaceId || "").trim() || null,
-      requestedIds = Array.isArray(card.allowedFinancialSpaceIds) ? card.allowedFinancialSpaceIds : [],
+  const FINANCIAL_RESOURCE_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
+  const normalizeFinancialResourceAccess = (resource = {}, options = {}) => {
+    const homeField = String(options.homeField || "resourceHomeSpaceId"),
+      homeSpaceId = String(resource[homeField] || resource.financialSpaceId || options.homeSpaceId || "").trim(),
+      requestedMode = String(resource.accessMode || ""),
+      accessMode = FINANCIAL_RESOURCE_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
+      defaultFinancialSpaceId = String(resource.defaultFinancialSpaceId || homeSpaceId || "").trim() || null,
+      requestedIds = Array.isArray(resource.allowedFinancialSpaceIds) ? resource.allowedFinancialSpaceIds : [],
       allowedFinancialSpaceIds = [...new Set(requestedIds.map(String).map((id) => id.trim()).filter(Boolean))];
     if (accessMode === "single_space" && defaultFinancialSpaceId && !allowedFinancialSpaceIds.includes(defaultFinancialSpaceId))
       allowedFinancialSpaceIds.push(defaultFinancialSpaceId);
     return {
-      ...card,
-      cardHomeSpaceId,
+      ...resource,
+      [homeField]: homeSpaceId,
       accessMode,
       allowedFinancialSpaceIds: accessMode === "all_spaces" ? [] : allowedFinancialSpaceIds,
       defaultFinancialSpaceId,
     };
   };
-  const creditCardAllowsSpace = (card = {}, financialSpaceId = "") => {
-    const normalized = normalizeCreditCardAccess(card), targetId = String(financialSpaceId || "").trim();
-    if (!targetId || normalized.active === false) return false;
-    if (normalized.accessMode === "all_spaces") return true;
-    if (normalized.accessMode === "selected_spaces") return normalized.allowedFinancialSpaceIds.includes(targetId);
-    return normalized.defaultFinancialSpaceId === targetId;
+  const isResourceAvailableInSpace = (resource = {}, financialSpaceId = "") => {
+    const targetId = String(financialSpaceId || "").trim();
+    if (!targetId || resource.active === false) return false;
+    if (resource.accessMode === "all_spaces") return true;
+    if (resource.accessMode === "selected_spaces") return resource.allowedFinancialSpaceIds.includes(targetId);
+    return resource.defaultFinancialSpaceId === targetId;
   };
+  const CREDIT_CARD_ACCESS_MODES = FINANCIAL_RESOURCE_ACCESS_MODES;
+  const normalizeCreditCardAccess = (card = {}, homeSpaceId = "") => normalizeFinancialResourceAccess(card, {
+    homeField: "cardHomeSpaceId",
+    homeSpaceId,
+  });
+  const creditCardAllowsSpace = (card = {}, financialSpaceId = "") =>
+    isResourceAvailableInSpace(normalizeCreditCardAccess(card), financialSpaceId);
   const adjustDimensionTotal = (values = {}, key = "", deltaCents = 0) => {
     const next = { ...(values && typeof values === "object" && !Array.isArray(values) ? values : {}) },
       id = String(key || "").trim(), delta = cents(deltaCents || 0);
@@ -633,7 +641,7 @@ window.FinancialEngine = (() => {
     cash: "cash_wallet",
     other: "other_account",
   })[String(value)] || (FINANCIAL_ACCOUNT_TYPES.includes(String(value)) ? String(value) : "bank_account");
-  const FINANCIAL_ACCOUNT_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
+  const FINANCIAL_ACCOUNT_ACCESS_MODES = FINANCIAL_RESOURCE_ACCESS_MODES;
   const normalizeInstitutionKey = (value = "") => {
     const normalized = String(value || "")
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR")
@@ -642,30 +650,16 @@ window.FinancialEngine = (() => {
     return ({ inter: "banco_inter", interbank: "banco_inter", c6: "c6_bank", c6bank: "c6_bank" })[normalized.replace(/_/g, "")]
       || normalized || "sem_instituicao";
   };
-  const normalizeFinancialAccountAccess = (account = {}, homeSpaceId = "") => {
-    const accountHomeSpaceId = String(account.accountHomeSpaceId || account.financialSpaceId || homeSpaceId || "").trim(),
-      requestedMode = String(account.accessMode || ""),
-      accessMode = FINANCIAL_ACCOUNT_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
-      defaultFinancialSpaceId = String(account.defaultFinancialSpaceId || accountHomeSpaceId || "").trim() || null,
-      requestedIds = Array.isArray(account.allowedFinancialSpaceIds) ? account.allowedFinancialSpaceIds : [],
-      allowedFinancialSpaceIds = [...new Set(requestedIds.map(String).map((id) => id.trim()).filter(Boolean))];
-    if (accessMode === "single_space" && defaultFinancialSpaceId && !allowedFinancialSpaceIds.includes(defaultFinancialSpaceId))
-      allowedFinancialSpaceIds.push(defaultFinancialSpaceId);
-    return {
-      ...account,
-      accountHomeSpaceId,
-      accessMode,
-      allowedFinancialSpaceIds: accessMode === "all_spaces" ? [] : allowedFinancialSpaceIds,
-      defaultFinancialSpaceId,
-      institutionKey: String(account.institutionKey || normalizeInstitutionKey(account.institution || account.name)),
-    };
-  };
+  const normalizeFinancialAccountAccess = (account = {}, homeSpaceId = "") => ({
+    ...normalizeFinancialResourceAccess(account, { homeField: "accountHomeSpaceId", homeSpaceId }),
+    institutionKey: String(account.institutionKey || normalizeInstitutionKey(account.institution || account.name)),
+  });
   const financialAccountAllowsSpace = (account = {}, financialSpaceId = "") => {
-    const normalized = normalizeFinancialAccountAccess(account), targetId = String(financialSpaceId || "").trim();
-    if (!targetId || normalized.active === false) return false;
-    if (normalized.accessMode === "all_spaces") return true;
-    if (normalized.accessMode === "selected_spaces") return normalized.allowedFinancialSpaceIds.includes(targetId);
-    return normalized.defaultFinancialSpaceId === targetId || normalized.accountHomeSpaceId === targetId;
+    const legacyScope = !FINANCIAL_ACCOUNT_ACCESS_MODES.includes(String(account.accessMode || "")),
+      normalized = normalizeFinancialAccountAccess(account),
+      targetId = String(financialSpaceId || "").trim();
+    return isResourceAvailableInSpace(normalized, targetId)
+      || (legacyScope && normalized.accountHomeSpaceId === targetId);
   };
   const financialAccountKey = (account = {}) => {
     const normalized = normalizeFinancialAccountAccess(account);
@@ -724,6 +718,9 @@ window.FinancialEngine = (() => {
     creditCardAvailableLimit,
     creditCardBillFeeCategory,
     buildCreditCardBillPaymentPlan,
+    FINANCIAL_RESOURCE_ACCESS_MODES,
+    normalizeFinancialResourceAccess,
+    isResourceAvailableInSpace,
     CREDIT_CARD_ACCESS_MODES,
     normalizeCreditCardAccess,
     creditCardAllowsSpace,
