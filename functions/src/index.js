@@ -499,6 +499,36 @@ exports.deleteUnusedFinancialAccount=onCall({region:REGION,memory:'256MiB',timeo
   return{deleted:true,archived:false,references:0};
 });
 
+exports.deleteUnusedCreditCard=onCall({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:10},async request=>{
+  const uid=request.auth?.uid,homeSpaceId=String(request.data?.homeSpaceId||'').trim(),cardId=String(request.data?.cardId||'').trim();
+  if(!uid)throw new HttpsError('unauthenticated','Entre na sua conta para gerenciar o cartão.');
+  if(!/^[A-Za-z0-9_-]{1,120}$/.test(homeSpaceId)||!/^[A-Za-z0-9_-]{1,120}$/.test(cardId))throw new HttpsError('invalid-argument','Cartão inválido.');
+  const spaceRef=db.doc(`financialSpaces/${homeSpaceId}`),cardRef=spaceRef.collection('creditCards').doc(cardId),[spaceSnapshot,cardSnapshot]=await Promise.all([spaceRef.get(),cardRef.get()]);
+  if(!spaceSnapshot.exists||!cardSnapshot.exists)throw new HttpsError('not-found','Cartão não encontrado.');
+  const space=spaceSnapshot.data()||{},card=cardSnapshot.data()||{};
+  if(String(space.ownerUid||'')!==uid||String(card.ownerUid||'')!==uid)throw new HttpsError('permission-denied','Somente o proprietário pode remover este cartão.');
+  const ownerSpaces=await db.collection('financialSpaces').where('ownerUid','==',uid).get(),spaceQueries=[
+    ['entries','creditCardId'],['events','creditCardId'],['creditCardPurchases','creditCardId'],['recurrences','creditCardId'],
+  ],homeQueries=[
+    ['creditCardInvoices','creditCardId'],['creditCardAdjustments','creditCardId'],['creditCardInvoicePayments','creditCardId'],
+  ],descriptors=[
+    ...ownerSpaces.docs.flatMap(spaceDoc=>spaceQueries.map(([collection,field])=>({homeSpaceId:spaceDoc.id,promise:spaceDoc.ref.collection(collection).where(field,'==',cardId).get()}))),
+    ...homeQueries.map(([collection,field])=>({homeSpaceId,promise:spaceRef.collection(collection).where(field,'==',cardId).get()})),
+  ],snapshots=await Promise.all(descriptors.map(descriptor=>descriptor.promise));
+  const belongsToCard=(doc,descriptor)=>{
+    const data=doc.data()||{},explicitHome=String(data.cardHomeSpaceId||'').trim();
+    return explicitHome?explicitHome===homeSpaceId:descriptor.homeSpaceId===homeSpaceId;
+  },references=snapshots.reduce((sum,snapshot,index)=>sum+snapshot.docs.filter(doc=>belongsToCard(doc,descriptors[index])).length,0),committedCents=Number(card.committedCents||0);
+  if(references>0||committedCents!==0){
+    await cardRef.set({active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4},{merge:true});
+    logger.info('[FINANCIAL_CREDIT_CARD_ARCHIVED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,cardId,references,committedCents});
+    return{deleted:false,archived:true,references};
+  }
+  await cardRef.delete();
+  logger.info('[FINANCIAL_CREDIT_CARD_DELETED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,cardId,references:0});
+  return{deleted:true,archived:false,references:0};
+});
+
 exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
   const started=Date.now();
   try{

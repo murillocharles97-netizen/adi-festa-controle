@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require("@firebase/rules-unit-testing");
 const {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -204,6 +205,12 @@ test("cartão pessoal compartilhado mantém uma fatura e compras isoladas por es
     accessMode: "all_spaces", allowedFinancialSpaceIds: [], defaultFinancialSpaceId: homeId, active: true, schemaVersion: 3,
   };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", homeId, "creditCards", card.id), card));
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", homeId, "creditCards", "shared-without-last4"), {
+    ...card, id: "shared-without-last4", operationId: "credit_card_shared-without-last4", name: "Nubank", institution: "Nubank", last4: null,
+  }));
+  const ownerCards = await assertSucceeds(getDocs(query(collectionGroup(owner, "creditCards"), where("ownerUid", "==", "owner-a"), limit(50))));
+  assert.equal(ownerCards.docs.some((item) => item.id === card.id), true);
+  assert.equal(ownerCards.docs.some((item) => item.id === "shared-without-last4" && item.data().last4 === null), true);
   const invoice = {
     id: "shared-c6_2026-10", financialSpaceId: homeId, cardHomeSpaceId: homeId, ownerUid: "owner-a", createdBy: "owner-a",
     operationId: "invoice_shared-c6_2026-10", creditCardId: card.id, referenceKey: "2026-10", referenceYear: 2026, referenceMonth: 10,

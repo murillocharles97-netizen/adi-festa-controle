@@ -105,7 +105,6 @@ async function main() {
   await click('[data-financial-view="institutions"]');
   await click("[data-financial-add-product]");
   await click('[data-financial-add-kind="credit_card"]');
-  await click('[data-creation-space="personal"]');
   assert(await page.$("[data-credit-card-wizard]"), "Wizard de cartão não abriu");
   await shot("06-novo-cartao-390.png");
 

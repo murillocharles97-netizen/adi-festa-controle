@@ -2,6 +2,7 @@ import { auth, db, app } from "./firebase-config.js";
 import {
   arrayUnion,
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -47,6 +48,10 @@ const storage = getStorage(app),
     lastReadStats: null,
     reconciliation: new Map(),
     viewProfile: null,
+    creditCardCatalog: [],
+    creditCardCatalogForUid: "",
+    creditCardCatalogLoadedAt: 0,
+    creditCardCatalogPromise: null,
   };
 
 const now = () => new Date().toISOString();
@@ -798,6 +803,7 @@ async function updateFinancialInstitution(input = {}) {
       ? { institution: name, issuer: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt }
       : { institution: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt })));
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "financialInstitution", action: "updated", name });
   return { name, updated: records.length };
 }
@@ -813,6 +819,7 @@ async function archiveFinancialInstitution(input = {}) {
       throw new Error("Quite ou ajuste as faturas dos cartões antes de remover a instituição.");
     records.forEach((record) => transaction.update(record.ref, { active: false, archivedAt: changedAt, updatedAt: changedAt }));
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "financialInstitution", action: "archived" });
   return { archived: records.length };
 }
@@ -826,17 +833,54 @@ async function readCreditCardsFromHome(homeSpaceId) {
   return snapshot.docs.map(convert).map((card) => normalizeCreditCard(card, homeSpaceId));
 }
 
-async function listCreditCards(spaceId) {
-  const targetSpace = assertSpace(spaceId), homes = new Map([[targetSpace.id, targetSpace]]);
-  for (const space of ownedSpaces()) homes.set(space.id, space);
-  const batches = await Promise.all([...homes.keys()].map(async (homeSpaceId) => {
-    try { return await readCreditCardsFromHome(homeSpaceId); }
-    catch (error) {
-      if (homeSpaceId === targetSpace.id) throw error;
-      return [];
+const invalidateCreditCardCatalog = () => {
+  state.creditCardCatalog = [];
+  state.creditCardCatalogForUid = "";
+  state.creditCardCatalogLoadedAt = 0;
+  state.creditCardCatalogPromise = null;
+};
+
+async function listOwnedCreditCards(options = {}) {
+  const currentUid = uid(), includeInactive = options.includeInactive === true,
+    cacheIsFresh = state.creditCardCatalogForUid === currentUid
+      && Date.now() - state.creditCardCatalogLoadedAt < 15_000;
+  if (!options.force && cacheIsFresh)
+    return state.creditCardCatalog.filter((card) => includeInactive || card.active !== false).map((card) => structuredClone(card));
+  if (!options.force && state.creditCardCatalogForUid === currentUid && state.creditCardCatalogPromise) {
+    const cards = await state.creditCardCatalogPromise;
+    return cards.filter((card) => includeInactive || card.active !== false).map((card) => structuredClone(card));
+  }
+  const load = getDocs(query(
+    collectionGroup(db, "creditCards"),
+    where("ownerUid", "==", currentUid),
+    limit(MAX_CREDIT_CARDS * 4),
+  )).then((snapshot) => {
+    const unique = new Map();
+    for (const item of snapshot.docs) {
+      const homeSpaceId = item.ref.parent.parent?.id || "", card = normalizeCreditCard(convert(item), homeSpaceId);
+      if (!homeSpaceId || !card.id) continue;
+      unique.set(card.id, card);
     }
-  })), cards = batches.flat().filter((card) => cardCanBeUsedInSpace(card, targetSpace)), unique = new Map();
-  for (const card of cards) unique.set(`${card.cardHomeSpaceId}:${card.id}`, {
+    const cards = [...unique.values()];
+    state.creditCardCatalog = cards;
+    state.creditCardCatalogForUid = currentUid;
+    state.creditCardCatalogLoadedAt = Date.now();
+    return cards;
+  }).finally(() => {
+    if (state.creditCardCatalogPromise === load) state.creditCardCatalogPromise = null;
+  });
+  state.creditCardCatalogForUid = currentUid;
+  state.creditCardCatalogPromise = load;
+  const cards = await load;
+  return cards.filter((card) => includeInactive || card.active !== false).map((card) => structuredClone(card));
+}
+
+async function listCreditCards(spaceId) {
+  const targetSpace = assertSpace(spaceId), [ownedCards, targetCards] = await Promise.all([
+    listOwnedCreditCards(),
+    targetSpace.ownerUid === uid() ? Promise.resolve([]) : readCreditCardsFromHome(targetSpace.id),
+  ]), cards = [...ownedCards, ...targetCards].filter((card) => cardCanBeUsedInSpace(card, targetSpace)), unique = new Map();
+  for (const card of cards) unique.set(card.id, {
     ...card,
     usageFinancialSpaceId: targetSpace.id,
     sharedAcrossSpaces: card.accessMode !== "single_space",
@@ -848,7 +892,7 @@ async function listCreditCards(spaceId) {
 }
 
 function creditCardAccessValue(space, input = {}, current = {}) {
-  const requestedMode = String(input.accessMode || current.accessMode || "single_space"),
+  const requestedMode = String(input.accessMode || current.accessMode || "all_spaces"),
     accessMode = Engine.CREDIT_CARD_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
     requestedDefault = String(input.defaultFinancialSpaceId || current.defaultFinancialSpaceId || space.id),
     requestedAllowed = accessMode === "selected_spaces"
@@ -870,6 +914,22 @@ function creditCardAccessValue(space, input = {}, current = {}) {
   };
 }
 
+async function similarCreditCards(space, input = {}) {
+  const institutionKey = Engine.normalizeInstitutionKey(input.institution || input.issuer || input.name),
+    nameKey = Engine.normalizeInstitutionKey(input.name), last4 = String(input.last4 || "").replace(/\D/g, "").slice(-4),
+    cards = await listOwnedCreditCards();
+  return cards.filter((card) => {
+    const existingInstitutionKey = String(card.institutionKey || Engine.normalizeInstitutionKey(card.institution || card.issuer || card.name));
+    if (!institutionKey || existingInstitutionKey !== institutionKey) return false;
+    const existingLast4 = String(card.last4 || ""), existingNameKey = Engine.normalizeInstitutionKey(card.name);
+    return last4 && existingLast4 ? last4 === existingLast4 : Boolean(nameKey && nameKey === existingNameKey);
+  }).map((card) => ({
+    ...card,
+    usageFinancialSpaceId: space.id,
+    duplicateConfidence: last4 && card.last4 ? "same_institution_and_last4" : "similar_name_without_last4",
+  }));
+}
+
 async function createCreditCard(spaceId, input = {}) {
   const space = assertSpace(spaceId), id = String(input.id || crypto.randomUUID()),
     opId = String(input.operationId || `credit_card_${id}`), createdAt = now(),
@@ -877,7 +937,14 @@ async function createCreditCard(spaceId, input = {}) {
     last4 = String(input.last4 || "").replace(/\D/g, "").slice(-4);
   if (closingDay < 1 || closingDay > 31) throw new Error("O fechamento deve ficar entre os dias 1 e 31.");
   if (dueDay < 1 || dueDay > 31) throw new Error("O vencimento deve ficar entre os dias 1 e 31.");
-  if (last4.length !== 4) throw new Error("Informe os 4 últimos dígitos do cartão.");
+  if (last4 && last4.length !== 4) throw new Error("Informe os 4 últimos dígitos ou deixe o campo vazio.");
+  if (input.allowSimilarCard !== true) {
+    const matches = await similarCreditCards(space, input);
+    if (matches.length) throw Object.assign(new Error("Este cartão parece já estar cadastrado."), {
+      code: "credit-card-possible-duplicate",
+      matches,
+    });
+  }
   const access = creditCardAccessValue(space, input), paymentAccount = input.paymentAccountId
     ? await resolveFinancialAccountForSpace(space.id, input.paymentAccountId, input.paymentAccountHomeSpaceId) : null, value = {
     id,
@@ -887,7 +954,8 @@ async function createCreditCard(spaceId, input = {}) {
     issuer: String(input.issuer || input.institution || "").trim().slice(0, 80) || null,
     institution: String(input.institution || input.issuer || "").trim().slice(0, 80) || null,
     institutionKey: Engine.normalizeInstitutionKey(input.institution || input.issuer || input.name),
-    last4,
+    last4: last4 || null,
+    notes: String(input.notes || "").trim().slice(0, 500) || null,
     limitCents: integerCents(input.limitCents || 0, "limite"),
     closingDay,
     dueDay,
@@ -898,11 +966,23 @@ async function createCreditCard(spaceId, input = {}) {
     active: true,
     createdAt,
     updatedAt: createdAt,
-    schemaVersion: 3,
+    schemaVersion: 4,
   };
   await setDoc(childRef(space.id, "creditCards", id), clean(value));
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCard", id, spaceId: space.id });
   return value;
+}
+
+async function useExistingCreditCard(homeSpaceId, cardId, input = {}) {
+  const home = assertSpace(homeSpaceId), cardRef = childRef(home.id, "creditCards", cardId), snapshot = await getDoc(cardRef), current = convert(snapshot);
+  if (!current) throw new Error("O cartão existente não foi encontrado.");
+  if (current.ownerUid !== uid()) throw new Error("Somente o proprietário pode compartilhar este cartão.");
+  const access = creditCardAccessValue(home, input, normalizeCreditCard(current, home.id));
+  await updateDoc(cardRef, clean({ cardHomeSpaceId: home.id, ...access, updatedAt: now(), schemaVersion: 4 }));
+  invalidateCreditCardCatalog();
+  emit("financial-data-changed", { entity: "creditCard", id: cardId, spaceId: home.id, action: "reused" });
+  return normalizeCreditCard({ ...current, ...access }, home.id);
 }
 
 async function rebuildCreditCardInvoiceProjections(homeSpaceId, cardId) {
@@ -963,7 +1043,8 @@ async function updateCreditCard(homeSpaceId, cardId, input = {}) {
     institution: input.institution === undefined ? current.institution || null : String(input.institution || "").trim().slice(0, 80) || null,
     issuer: input.institution === undefined ? current.issuer || current.institution || null : String(input.institution || "").trim().slice(0, 80) || null,
     institutionKey: Engine.normalizeInstitutionKey(input.institution === undefined ? current.institution || current.issuer || current.name : input.institution || current.name),
-    last4: input.last4 === undefined ? current.last4 : String(input.last4 || "").replace(/\D/g, "").slice(-4),
+    last4: input.last4 === undefined ? current.last4 || null : String(input.last4 || "").replace(/\D/g, "").slice(-4) || null,
+    notes: input.notes === undefined ? current.notes || null : String(input.notes || "").trim().slice(0, 500) || null,
     limitCents: input.limitCents === undefined ? current.limitCents : integerCents(input.limitCents, "limite"),
     closingDay: input.closingDay === undefined ? current.closingDay : Math.trunc(Number(input.closingDay)),
     dueDay: input.dueDay === undefined ? current.dueDay : Math.trunc(Number(input.dueDay)),
@@ -971,15 +1052,32 @@ async function updateCreditCard(homeSpaceId, cardId, input = {}) {
     paymentAccountHomeSpaceId: paymentAccount?.homeSpaceId || null,
     cardHomeSpaceId: home.id,
     ...access,
-    schemaVersion: 3,
+    schemaVersion: 4,
     updatedAt: now(),
   });
-  if (!/^\d{4}$/.test(patch.last4)) throw new Error("Informe os 4 últimos dígitos do cartão.");
+  if (patch.last4 !== null && !/^\d{4}$/.test(patch.last4)) throw new Error("Informe os 4 últimos dígitos ou deixe o campo vazio.");
   if (patch.closingDay < 1 || patch.closingDay > 31 || patch.dueDay < 1 || patch.dueDay > 31)
     throw new Error("Revise fechamento e vencimento.");
   await updateDoc(refValue, patch);
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCard", id: cardId, spaceId: home.id });
   return normalizeCreditCard({ ...current, ...patch }, home.id);
+}
+
+async function archiveCreditCard(homeSpaceId, cardId, options = {}) {
+  const home = assertSpace(homeSpaceId), refValue = childRef(home.id, "creditCards", cardId), snapshot = await getDoc(refValue), card = convert(snapshot);
+  if (!card) throw new Error("Cartão não encontrado.");
+  if (card.ownerUid !== uid()) throw new Error("Somente o proprietário pode remover este cartão.");
+  if (options.deleteIfUnused === true && typeof window.FirebaseCallable === "function") {
+    const response = await window.FirebaseCallable("deleteUnusedCreditCard", { homeSpaceId: home.id, cardId }), result = response.data || {};
+    invalidateCreditCardCatalog();
+    emit("financial-data-changed", { entity: "creditCard", id: cardId, spaceId: home.id, action: result.deleted ? "deleted" : "archived" });
+    return result;
+  }
+  await updateDoc(refValue, { active: false, archivedAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 4 });
+  invalidateCreditCardCatalog();
+  emit("financial-data-changed", { entity: "creditCard", id: cardId, spaceId: home.id, action: "archived" });
+  return { deleted: false, archived: true, fallback: true };
 }
 
 async function listStoredCreditCardInvoices(homeSpaceId, options = {}) {
@@ -1410,6 +1508,7 @@ async function createCreditCardPurchase(spaceId, input = {}) {
     }));
     return { entry: entryValue, installments, invoiceIds, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCardPurchase", id: opId, spaceId: space.id });
   return result;
 }
@@ -1631,6 +1730,7 @@ async function payEntryByCreditCard(spaceId, entry, input = {}) {
     }));
     return { entry: { ...current, ...entryPatch }, invoice: invoiceValue, billPurchase, feeEntryId, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "entry", id: entry.id, action: "paid_by_credit_card", spaceId });
   return result;
 }
@@ -1721,6 +1821,7 @@ async function adjustCreditCardInvoice(spaceId, invoiceId, input = {}) {
     }));
     return { adjustment, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCardInvoiceAdjustment", id: opId, spaceId: space.id });
   return result;
 }
@@ -1802,6 +1903,7 @@ async function payCreditCardInvoice(spaceId, invoiceId, input = {}) {
     transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId, creditCardInvoiceId: invoice.id, creditCardId: invoice.creditCardId, cardHomeSpaceId, eventKind: "credit_card_invoice_paid", transition: totals.remainingCents === 0 ? "paid" : "partially_paid", status: "applied", amountCents, createdAt, schemaVersion: 3 }));
     return { payment, invoice: { ...invoice, ...totals, status }, entry, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCardInvoicePayment", id: opId, spaceId: space.id });
   return result;
 }
@@ -1896,6 +1998,7 @@ async function refundCreditCardPurchase(spaceId, purchaseId, input = {}) {
     }));
     return { adjustment, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "creditCardAdjustment", id: opId, spaceId: space.id });
   return result;
 }
@@ -2099,6 +2202,7 @@ async function undoEntryPayment(spaceId, entry, reason = "Registro de pagamento 
     }));
     return { entry: { ...current, ...reopenPatch }, invoice: { ...invoice, ...totals, adjustmentsTotalCents }, adjustment, retried: false };
   });
+  invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "entry", id: entry.id, action: "credit_card_payment_undone", spaceId });
   return result;
 }
@@ -2559,7 +2663,7 @@ async function loadConsolidated(ids = selectedConsolidatedIds(), selectedPeriod 
   const dashboards = await Promise.all(selected.map((id) => loadDashboard(id, selectedPeriod))),
     withSpace = (items, dashboard) => (items || []).map((item) => ({ ...item, financialSpaceId: item.financialSpaceId || dashboard.space.id, financialSpaceName: dashboard.space.name })),
     uniqueBy = (items, keyOf) => [...new Map(items.map((item) => [keyOf(item), item])).values()],
-    creditCards = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.creditCards, dashboard)), (card) => `${card.cardHomeSpaceId}:${card.id}`)
+    creditCards = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.creditCards, dashboard)), (card) => card.id)
       .map((card) => ({ ...card, spaceCommittedCents: card.committedCents })),
     creditCardInvoices = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.creditCardInvoices, dashboard)), (invoice) => `${invoice.cardHomeSpaceId}:${invoice.id}`),
     futureInvoices = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.futureInvoices, dashboard)), (invoice) => `${invoice.cardHomeSpaceId}:${invoice.id}`)
@@ -2662,7 +2766,9 @@ const FinancialSpaceService = {
   archiveFinancialInstitution,
   listCreditCards,
   createCreditCard,
+  useExistingCreditCard,
   updateCreditCard,
+  archiveCreditCard,
   rebuildCreditCardInvoiceProjections,
   canShareCreditCards: (spaceId) => assertSpace(spaceId).ownerUid === uid(),
   canShareFinancialAccounts: (spaceId) => assertSpace(spaceId).ownerUid === uid(),

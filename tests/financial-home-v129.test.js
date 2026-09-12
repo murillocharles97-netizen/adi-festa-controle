@@ -130,6 +130,6 @@ test("privacidade continua por owner e membership financeira sem consulta global
 });
 
 test("release inclui o CSS da Home no HTML e no cache offline", () => {
-  assert.match(html, /financial-home-v2\.css\?v=131/);
+  assert.match(html, /financial-home-v2\.css\?v=132/);
   assert.match(sw, /css\/financial-home-v2\.css/);
 });
