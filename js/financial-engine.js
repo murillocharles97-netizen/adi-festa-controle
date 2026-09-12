@@ -633,14 +633,58 @@ window.FinancialEngine = (() => {
     cash: "cash_wallet",
     other: "other_account",
   })[String(value)] || (FINANCIAL_ACCOUNT_TYPES.includes(String(value)) ? String(value) : "bank_account");
+  const FINANCIAL_ACCOUNT_ACCESS_MODES = Object.freeze(["all_spaces", "selected_spaces", "single_space"]);
+  const normalizeInstitutionKey = (value = "") => {
+    const normalized = String(value || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR")
+      .replace(/\b(banco|bank|instituicao|financeira|s\.?a\.?)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, "_");
+    return ({ inter: "banco_inter", interbank: "banco_inter", c6: "c6_bank", c6bank: "c6_bank" })[normalized.replace(/_/g, "")]
+      || normalized || "sem_instituicao";
+  };
+  const normalizeFinancialAccountAccess = (account = {}, homeSpaceId = "") => {
+    const accountHomeSpaceId = String(account.accountHomeSpaceId || account.financialSpaceId || homeSpaceId || "").trim(),
+      requestedMode = String(account.accessMode || ""),
+      accessMode = FINANCIAL_ACCOUNT_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
+      defaultFinancialSpaceId = String(account.defaultFinancialSpaceId || accountHomeSpaceId || "").trim() || null,
+      requestedIds = Array.isArray(account.allowedFinancialSpaceIds) ? account.allowedFinancialSpaceIds : [],
+      allowedFinancialSpaceIds = [...new Set(requestedIds.map(String).map((id) => id.trim()).filter(Boolean))];
+    if (accessMode === "single_space" && defaultFinancialSpaceId && !allowedFinancialSpaceIds.includes(defaultFinancialSpaceId))
+      allowedFinancialSpaceIds.push(defaultFinancialSpaceId);
+    return {
+      ...account,
+      accountHomeSpaceId,
+      accessMode,
+      allowedFinancialSpaceIds: accessMode === "all_spaces" ? [] : allowedFinancialSpaceIds,
+      defaultFinancialSpaceId,
+      institutionKey: String(account.institutionKey || normalizeInstitutionKey(account.institution || account.name)),
+    };
+  };
+  const financialAccountAllowsSpace = (account = {}, financialSpaceId = "") => {
+    const normalized = normalizeFinancialAccountAccess(account), targetId = String(financialSpaceId || "").trim();
+    if (!targetId || normalized.active === false) return false;
+    if (normalized.accessMode === "all_spaces") return true;
+    if (normalized.accessMode === "selected_spaces") return normalized.allowedFinancialSpaceIds.includes(targetId);
+    return normalized.defaultFinancialSpaceId === targetId || normalized.accountHomeSpaceId === targetId;
+  };
+  const financialAccountKey = (account = {}) => {
+    const normalized = normalizeFinancialAccountAccess(account);
+    return `${normalized.accountHomeSpaceId || "legacy"}:${String(normalized.id || "")}`;
+  };
   const financialAccountBalance = (account = {}) => Number.isInteger(account.currentBalanceCents)
     ? account.currentBalanceCents
     : cents(account.initialBalanceCents || 0);
   const financialAccountIsLiquid = (account = {}) => account.includeInAvailableBalance === true
     || (account.includeInAvailableBalance !== false && normalizeFinancialAccountType(account.type) !== "investment_account");
-  const availableBalance = (accounts = []) => accounts
-    .filter((account) => account?.active !== false && financialAccountIsLiquid(account))
-    .reduce((sum, account) => sum + financialAccountBalance(account), 0);
+  const availableBalance = (accounts = []) => {
+    const unique = new Map();
+    for (const account of accounts || []) {
+      if (account?.active === false || !financialAccountIsLiquid(account)) continue;
+      const key = financialAccountKey(account);
+      if (!unique.has(key)) unique.set(key, account);
+    }
+    return [...unique.values()].reduce((sum, account) => sum + financialAccountBalance(account), 0);
+  };
 
   return {
     SPACE_TYPES,
@@ -692,7 +736,12 @@ window.FinancialEngine = (() => {
     rescheduleRecurringInstances,
     consolidate,
     FINANCIAL_ACCOUNT_TYPES,
+    FINANCIAL_ACCOUNT_ACCESS_MODES,
     normalizeFinancialAccountType,
+    normalizeInstitutionKey,
+    normalizeFinancialAccountAccess,
+    financialAccountAllowsSpace,
+    financialAccountKey,
     financialAccountBalance,
     financialAccountIsLiquid,
     availableBalance,
