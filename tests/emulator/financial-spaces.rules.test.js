@@ -112,6 +112,9 @@ test("conta V3 aceita tipo formal e saldo projetado sem expor o espaço pessoal"
   };
   await assertSucceeds(setDoc(reference, account));
   await assertSucceeds(updateDoc(reference, { currentBalanceCents: 125000, balanceUpdatedAt: "2026-09-12T12:00:00.000Z" }));
+  await assertSucceeds(updateDoc(reference, { active: false, archivedAt: "2026-09-12T13:00:00.000Z" }));
+  await assertSucceeds(updateDoc(reference, { active: true }));
+  await assertFails(updateDoc(reference, { active: "false" }));
   await assertSucceeds(getDoc(reference));
   await assertFails(getDoc(doc(other, "financialSpaces", "personal-a", "financialAccounts", "inter-v3")));
   await assertFails(updateDoc(doc(other, "financialSpaces", "personal-a", "financialAccounts", "inter-v3"), { currentBalanceCents: 999999 }));
@@ -125,6 +128,9 @@ test("cartões, faturas, contas e pagamentos respeitam o espaço pessoal", async
     card = { ...base, id: "card-c6", operationId: "credit_card_card-c6", cardHomeSpaceId: spaceId, name: "C6 Carbon", institution: "C6 Bank", last4: "2429", limitCents: 800000, committedCents: 0, closingDay: 12, dueDay: 20, paymentAccountId: "account-c6", accessMode: "single_space", allowedFinancialSpaceIds: [spaceId], defaultFinancialSpaceId: spaceId, active: true };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "financialAccounts", account.id), account));
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), card));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { active: false, archivedAt: "2026-09-12T13:00:00.000Z" }));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { active: true }));
+  await assertFails(updateDoc(doc(owner, "financialSpaces", spaceId, "creditCards", card.id), { active: "false" }));
   const invoice = { ...base, id: "card-c6_2026-09", operationId: "invoice_card-c6_2026-09", cardHomeSpaceId: spaceId, creditCardId: card.id, referenceKey: "2026-09", referenceYear: 2026, referenceMonth: 9, openingDate: "2026-08-13T15:00:00.000Z", closingDate: "2026-09-12T15:00:00.000Z", dueDate: "2026-09-20T15:00:00.000Z", purchasesTotalCents: 23800, adjustmentsTotalCents: 0, paidTotalCents: 0, remainingCents: 23800, spaceTotals: { [spaceId]: 23800 }, categoryTotals: { food: 23800 }, spacesUsedIds: [spaceId], status: "open" };
   await assertSucceeds(setDoc(doc(owner, "financialSpaces", spaceId, "creditCardInvoices", invoice.id), invoice));
   const purchase = { ...base, id: "purchase-1_01", operationId: "purchase-1:1", purchaseOperationId: "purchase-1", cardHomeSpaceId: spaceId, creditCardId: card.id, creditCardInvoiceId: invoice.id, installmentGroupId: "purchase-1", installmentNumber: 1, installmentCount: 1, amountCents: 23800, originalPurchaseAmountCents: 23800, description: "Mercado", purchaseDate: "2026-09-08T15:00:00.000Z", status: "posted" };

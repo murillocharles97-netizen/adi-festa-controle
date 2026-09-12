@@ -662,7 +662,8 @@ service cloud.firestore {
           && request.resource.data.type == resource.data.type
           && request.resource.data.initialBalanceCents is int
           && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
-          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool);
+          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool)
+          && request.resource.data.active is bool;
         allow delete: if false;
       }
       match /creditCards/{cardId} {
@@ -705,6 +706,7 @@ service cloud.firestore {
           && request.resource.data.dueDay is int
           && request.resource.data.dueDay >= 1
           && request.resource.data.dueDay <= 31
+          && request.resource.data.active is bool
           && creditCardScopeUpdateAllowed(resource.data, request.resource.data, spaceId);
         allow delete: if false;
       }

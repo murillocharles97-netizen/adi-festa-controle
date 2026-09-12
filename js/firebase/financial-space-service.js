@@ -614,6 +614,47 @@ async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
   return result;
 }
 
+function financialInstitutionRefs(input = {}) {
+  const accounts = (Array.isArray(input.accounts) ? input.accounts : []).map((account) => {
+    const space = assertSpace(requiredText(account.financialSpaceId, "o espaço da conta", 120));
+    return { kind: "account", ref: childRef(space.id, "financialAccounts", requiredText(account.id, "a conta", 120)) };
+  }), cards = (Array.isArray(input.cards) ? input.cards : []).map((card) => {
+    const home = assertSpace(requiredText(card.cardHomeSpaceId, "o espaço do cartão", 120));
+    return { kind: "card", ref: childRef(home.id, "creditCards", requiredText(card.id, "o cartão", 120)) };
+  }), records = [...accounts, ...cards];
+  if (!records.length) throw new Error("Nenhuma conta ou cartão foi informado.");
+  if (records.length > 50) throw new Error("Esta instituição possui itens demais para uma única atualização.");
+  return records;
+}
+
+async function updateFinancialInstitution(input = {}) {
+  const name = requiredText(input.name, "o nome da instituição", 80), records = financialInstitutionRefs(input), changedAt = now();
+  await runTransaction(db, async (transaction) => {
+    const snapshots = await Promise.all(records.map((record) => transaction.get(record.ref)));
+    snapshots.forEach((snapshot) => { if (!snapshot.exists()) throw new Error("Um item desta instituição não foi encontrado."); });
+    records.forEach((record) => transaction.update(record.ref, clean(record.kind === "card"
+      ? { institution: name, issuer: name, updatedAt: changedAt }
+      : { institution: name, updatedAt: changedAt })));
+  });
+  emit("financial-data-changed", { entity: "financialInstitution", action: "updated", name });
+  return { name, updated: records.length };
+}
+
+async function archiveFinancialInstitution(input = {}) {
+  const records = financialInstitutionRefs(input), changedAt = now();
+  await runTransaction(db, async (transaction) => {
+    const snapshots = await Promise.all(records.map((record) => transaction.get(record.ref))), values = snapshots.map(convert);
+    if (values.some((value) => !value)) throw new Error("Um item desta instituição não foi encontrado.");
+    if (values.some((value, index) => records[index].kind === "account" && accountBalanceCents(value) !== 0))
+      throw new Error("Zere ou transfira o saldo das contas antes de remover a instituição.");
+    if (values.some((value, index) => records[index].kind === "card" && Number(value.committedCents || 0) !== 0))
+      throw new Error("Quite ou ajuste as faturas dos cartões antes de remover a instituição.");
+    records.forEach((record) => transaction.update(record.ref, { active: false, archivedAt: changedAt, updatedAt: changedAt }));
+  });
+  emit("financial-data-changed", { entity: "financialInstitution", action: "archived" });
+  return { archived: records.length };
+}
+
 async function readCreditCardsFromHome(homeSpaceId) {
   const snapshot = await getDocs(query(
     childCollection(homeSpaceId, "creditCards"),
@@ -2427,6 +2468,8 @@ const FinancialSpaceService = {
   listFinancialAccounts,
   createFinancialAccount,
   adjustFinancialAccountBalance,
+  updateFinancialInstitution,
+  archiveFinancialInstitution,
   listCreditCards,
   createCreditCard,
   updateCreditCard,

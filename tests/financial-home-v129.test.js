@@ -69,6 +69,48 @@ test("carrossel agrupa conta e cartão por instituição e preserva teaser mobil
   assert.match(ui, /Instituições consolidadas sem duplicar saldos ou faturas/);
 });
 
+test("Contas e cartões centraliza inclusão, resumo e ações aplicáveis por instituição", () => {
+  for (const marker of [
+    "financial-accounts-cards-page",
+    "data-financial-add-product",
+    "Saldo disponível total",
+    "Faturas abertas",
+    "data-financial-institution-actions",
+    "openInstitutionActions",
+  ]) assert.match(ui, new RegExp(marker));
+  for (const label of [
+    "Conta bancária",
+    "Cartão de crédito",
+    "Conta + cartão",
+    "Carteira / dinheiro físico",
+    "Investimento",
+    "Atualizar saldo",
+    "Ajustar fatura",
+    "Ajustar limite",
+    "Pagar fatura",
+    "Gerenciar espaços",
+  ]) assert.ok(ui.includes(label), `rótulo ausente: ${label}`);
+});
+
+test("instituição pode ser renomeada ou arquivada sem excluir histórico financeiro", () => {
+  assert.match(service, /async function updateFinancialInstitution/);
+  assert.match(service, /async function archiveFinancialInstitution/);
+  assert.match(service, /transaction\.update\(record\.ref, \{ active: false, archivedAt:/);
+  assert.match(service, /Zere ou transfira o saldo das contas/);
+  assert.match(service, /Quite ou ajuste as faturas dos cartões/);
+  assert.doesNotMatch(service.match(/async function archiveFinancialInstitution[\s\S]*?\n}/)?.[0] || "", /transaction\.delete/);
+  assert.match(rules, /request\.resource\.data\.active is bool/);
+});
+
+test("contexto de visão e período permanece compacto no mobile", () => {
+  const css = read("css/financial-home-v2.css");
+  assert.match(ui, /const compactContextMarkup/);
+  assert.match(ui, /financial-compact-context/);
+  assert.doesNotMatch(ui.match(/function consolidatedHomeMarkup[\s\S]*?\n  }/)?.[0] || "", /is-manage/);
+  assert.match(css, /body:has\(\.financial-page\) \.topbar\{display:grid/);
+  assert.match(css, /@media\(max-width:360px\)/);
+});
+
 test("próximas obrigações incluem faturas, não compras de cartão", () => {
   assert.match(ui, /entityType === "credit_card_invoice"/);
   assert.match(ui, /Fatura de cartão/);
@@ -88,6 +130,6 @@ test("privacidade continua por owner e membership financeira sem consulta global
 });
 
 test("release inclui o CSS da Home no HTML e no cache offline", () => {
-  assert.match(html, /financial-home-v2\.css\?v=129/);
+  assert.match(html, /financial-home-v2\.css\?v=130/);
   assert.match(sw, /css\/financial-home-v2\.css/);
 });

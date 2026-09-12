@@ -116,6 +116,11 @@ window.FinanceiroUI = (() => {
     </div>`;
   };
 
+  const compactContextMarkup = () => `<nav class="financial-compact-context" aria-label="Contexto financeiro">
+    <button type="button" data-financial-open-spaces aria-label="Escolher visão ou gerenciar espaços">${icon("layers-3")}<span>${esc(activeFinancialView()?.name || "Todos os espaços")}</span>${icon("chevron-down")}</button>
+    <button type="button" data-financial-open-period aria-label="Escolher período">${icon("calendar-days")}<span>${esc(monthLabel(state.period))}</span>${icon("chevron-down")}</button>
+  </nav>`;
+
   function metricMarkup(summary) {
     const resultClass = summary.resultCents < 0 ? "is-negative" : "is-positive";
     return `<section class="financial-summary-card">
@@ -225,9 +230,15 @@ window.FinanceiroUI = (() => {
     }
     return [...groups.values()].sort((left, right) => Number(Boolean(right.accounts.length && right.cards.length)) - Number(Boolean(left.accounts.length && left.cards.length)) || left.name.localeCompare(right.name, "pt-BR"));
   };
-  const institutionKind = (group) => group.accounts.length && group.cards.length ? "Conta + Cartão" : group.cards.length ? "Cartão" : "Conta";
+  const institutionKind = (group) => {
+    if (group.accounts.length && group.cards.length) return "Conta + Cartão";
+    if (group.cards.length) return group.cards.length === 1 ? "Cartão" : `${group.cards.length} cartões`;
+    if (group.accounts.some((account) => account.type === "investment_account")) return "Investimento";
+    if (group.accounts.some((account) => account.type === "cash_wallet")) return "Carteira";
+    return group.accounts.length === 1 ? "Conta" : `${group.accounts.length} contas`;
+  };
   const institutionCardMarkup = (group, full = false) => `<article class="financial-institution-card ${full ? "is-full" : ""}" tabindex="0" role="button" data-financial-institution="${esc(group.key)}">
-    <header><span>${esc(String(group.name || "FI").slice(0, 2).toUpperCase())}</span><div><h3>${esc(group.name)}</h3><small>${esc(institutionKind(group))}${group.spaceIds.size > 1 ? ` · ${group.spaceIds.size} espaços` : ""}</small></div>${icon("chevron-right")}</header>
+    <header><span>${esc(String(group.name || "FI").slice(0, 2).toUpperCase())}</span><div><h3>${esc(group.name)}</h3><small>${esc(institutionKind(group))}${group.spaceIds.size > 1 ? ` · ${group.spaceIds.size} espaços` : ""}</small></div><button type="button" data-financial-institution-actions="${esc(group.key)}" aria-label="Ações de ${esc(group.name)}">${icon("ellipsis-vertical")}</button></header>
     <div class="financial-institution-values">${group.accounts.length ? `<span><small>Saldo disponível</small><strong>${money(group.availableBalanceCents)}</strong></span>` : ""}${group.cards.length ? `<span><small>Fatura do cartão</small><strong>${money(group.invoiceTotalCents)}</strong>${group.dueAt ? `<em>Vence em ${dateLabel(group.dueAt)}</em>` : ""}</span>` : ""}</div>
     <span class="financial-institution-cta">Ver detalhes ${icon("arrow-right")}</span>
   </article>`;
@@ -257,7 +268,7 @@ window.FinanceiroUI = (() => {
 
   function consolidatedHomeMarkup(data = {}) {
     const groups = institutionGroups(data), summary = data.summary || {};
-    return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div><nav><button type="button" data-financial-open-spaces>${icon("layers-3")}<span>Todos os espaços</span>${icon("chevron-down")}</button><button type="button" data-financial-open-period>${icon("calendar-days")}<span>${esc(monthLabel(state.period))}</span>${icon("chevron-down")}</button><button type="button" class="is-manage" data-financial-open-spaces>Gerenciar espaços ${icon("arrow-right")}</button></nav></section>
+    return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div>${compactContextMarkup()}</section>
       ${consolidatedSummaryMarkup(summary)}
       <section class="financial-section financial-home-institutions"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma conta ou cartão</b><span>Cadastre dentro de um espaço para acompanhar aqui.</span></div></div>`}</section>
       ${attentionMarkup(data)}
@@ -337,17 +348,24 @@ window.FinanceiroUI = (() => {
   }
 
   function institutionsMarkup(data) {
-    const groups = institutionGroups(data);
-    return `${subpageHeader("Contas e cartões", "Instituições consolidadas sem duplicar saldos ou faturas.")}<section class="financial-section financial-subpage-card financial-institutions-page">${groups.length ? `<div>${groups.map((group) => institutionCardMarkup(group, true)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma instituição cadastrada</b><span>Contas e cartões aparecerão aqui.</span></div></div>`}</section>`;
+    const groups = institutionGroups(data), summary = data.summary || {};
+    return `<div class="financial-accounts-cards-page"><header class="financial-accounts-cards-head"><button type="button" data-financial-view="dashboard" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>Contas e cartões</h2><p>Instituições consolidadas sem duplicar saldos ou faturas.</p></div><button type="button" data-financial-add-product>${icon("plus")}<span>Adicionar</span></button></header>
+      ${compactContextMarkup()}
+      <section class="financial-institution-summary"><article>${icon("wallet")}<span><small>Saldo disponível total</small><strong>${money(summary.availableBalanceCents)}</strong></span></article><article>${icon("credit-card")}<span><small>Faturas abertas</small><strong>${money(summary.invoiceTotalCents)}</strong></span></article></section>
+      <aside class="financial-institution-note">${icon("info")}<span>Uma instituição pode conter conta, cartão, carteira ou investimento. Tudo consolidado em um único lugar.</span><button type="button" data-financial-dismiss-note aria-label="Ocultar aviso">${icon("x")}</button></aside>
+      <section class="financial-section financial-subpage-card financial-institutions-page">${groups.length ? `<div>${groups.map((group) => institutionCardMarkup(group, true)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhuma instituição cadastrada</b><span>Use Adicionar para cadastrar a primeira conta ou cartão.</span></div></div>`}</section></div>`;
   }
 
   function institutionDetailMarkup(data) {
     const group = institutionGroups(data).find((item) => item.key === state.institutionKey) || institutionGroups(data)[0];
     if (!group) return institutionsMarkup(data);
-    return `<div class="financial-subpage-shell"><header class="financial-subpage-head"><button type="button" data-financial-view="institutions" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>${esc(group.name)}</h2><p>${esc(institutionKind(group))} · visão consolidada</p></div></header></div>
+    const accountIds = new Set(group.accounts.map((account) => account.id)), cardIds = new Set(group.cards.map((card) => card.id)), movements = (data.latest || []).filter((entry) => accountIds.has(entry.financialAccountId) || cardIds.has(entry.creditCardId)).slice(0, 6);
+    return `<div class="financial-subpage-shell"><header class="financial-subpage-head financial-institution-detail-head"><button type="button" data-financial-view="institutions" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>${esc(group.name)}</h2><p>${esc(institutionKind(group))} · visão consolidada</p></div><button type="button" data-financial-institution-actions="${esc(group.key)}" aria-label="Gerenciar ${esc(group.name)}">${icon("ellipsis-vertical")}</button></header></div>
       <section class="financial-institution-hero"><span>${esc(String(group.name).slice(0, 2).toUpperCase())}</span><div><small>Saldo disponível</small><strong>${money(group.availableBalanceCents)}</strong></div><div><small>Faturas do mês</small><strong>${money(group.invoiceTotalCents)}</strong></div></section>
+      <button class="financial-institution-manage-cta" type="button" data-financial-institution-actions="${esc(group.key)}">${icon("sliders-horizontal")}<span><b>Gerenciar esta instituição</b><small>Saldos, cartões, faturas, limites e espaços.</small></span>${icon("chevron-right")}</button>
       ${group.accounts.length ? `<section class="financial-section financial-subpage-card"><header><h2>Contas e carteiras</h2></header><div class="financial-institution-account-list">${group.accounts.map(institutionAccountMarkup).join("")}</div></section>` : ""}
-      ${group.cards.length ? `<section class="financial-section financial-subpage-card"><header><h2>Cartões</h2></header><div class="financial-credit-grid">${group.cards.map(creditCardMarkup).join("")}</div></section>` : ""}`;
+      ${group.cards.length ? `<section class="financial-section financial-subpage-card"><header><h2>Cartões e faturas</h2></header><div class="financial-credit-grid">${group.cards.map(creditCardMarkup).join("")}</div></section>` : ""}
+      <section class="financial-section financial-subpage-card"><header><h2>Últimas movimentações</h2><button type="button" data-financial-view="entries">Ver todas</button></header>${latestMarkup(movements)}</section>`;
   }
 
   function subpageHeader(title, subtitle, action = "") {
@@ -549,6 +567,113 @@ window.FinanceiroUI = (() => {
     });
   }
 
+  function openCreationSpacePicker(title, callback) {
+    const allowed = spaces().filter((space) => !state.activeSpaceIds.length || state.activeSpaceIds.includes(space.id));
+    sheet(`${sheetHeader(title, "O cadastro ficará vinculado a este espaço, sem sair da visão consolidada.")}<div class="modal-body financial-view-list">${allowed.map((space) => `<article class="financial-view-option"><button type="button" data-creation-space="${esc(space.id)}"><span>${icon(space.icon || "wallet")}</span><b>${esc(space.name)}</b><small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small>${icon("chevron-right")}</button></article>`).join("")}</div>`);
+    modal().querySelectorAll("[data-creation-space]").forEach((button) => button.onclick = () => callback?.(button.dataset.creationSpace));
+  }
+
+  function chooseInstitutionItem(items, title, description, callback, iconName = "wallet") {
+    if (!items.length) return Utils.toast("Nenhum item disponível para esta ação.", true);
+    if (items.length === 1) return callback(items[0]);
+    sheet(`${sheetHeader(title, description)}<div class="modal-body financial-view-list">${items.map((item, index) => `<article class="financial-view-option"><button type="button" data-institution-choice="${index}"><span>${icon(iconName)}</span><b>${esc(item.name || item.cardName || "Item financeiro")}</b><small>${item.last4 ? `•••• ${esc(item.last4)}` : esc(item.institution || spaceName(item.financialSpaceId))}</small>${icon("chevron-right")}</button></article>`).join("")}</div>`);
+    modal().querySelectorAll("[data-institution-choice]").forEach((button) => button.onclick = () => callback(items[Number(button.dataset.institutionChoice)]));
+  }
+
+  function openAddFinancialProduct(group = null) {
+    const defaults = group ? { name: group.name, institution: group.name, spaceId: group.accounts[0]?.financialSpaceId || group.cards[0]?.cardHomeSpaceId || "" } : {};
+    const choices = [
+      ["bank_account", "landmark", "Conta bancária", "Saldo, entradas e pagamentos."],
+      ["credit_card", "credit-card", "Cartão de crédito", "Limite, compras e faturas."],
+      ["account_card", "wallet-cards", "Conta + cartão", "Cadastre os dois na mesma instituição."],
+      ["digital_wallet", "wallet", "Carteira / dinheiro físico", "Carteira digital ou dinheiro em mãos."],
+      ["investment_account", "chart-no-axes-column-increasing", "Investimento", "Acompanhe sem somar à liquidez por padrão."],
+    ];
+    sheet(`${sheetHeader("O que deseja adicionar?", group ? `Adicionar em ${group.name}.` : "Centralize tudo em Contas e cartões.")}<div class="modal-body financial-add-product-list">${choices.map(([kind, iconName, label, helper]) => `<button type="button" data-financial-add-kind="${kind}">${icon(iconName)}<span><b>${label}</b><small>${helper}</small></span>${icon("chevron-right")}</button>`).join("")}</div>`);
+    modal().querySelectorAll("[data-financial-add-kind]").forEach((button) => button.onclick = () => {
+      const kind = button.dataset.financialAddKind;
+      if (kind === "credit_card") return openCreateCreditCard(null, null, defaults);
+      if (kind === "account_card") return openCreateFinancialAccount((account) => openCreateCreditCard(() => refresh(), null, {
+        spaceId: account.financialSpaceId,
+        name: `${account.institution || account.name} Cartão`,
+        institution: account.institution || account.name,
+      }), { ...defaults, type: "bank_account", title: "Nova conta da instituição" });
+      if (kind === "digital_wallet") return openCreateFinancialAccount(null, { ...defaults, type: "digital_wallet", title: "Nova carteira ou dinheiro físico" });
+      if (kind === "investment_account") return openCreateFinancialAccount(null, { ...defaults, type: "investment_account", includeInAvailableBalance: false, title: "Novo investimento" });
+      return openCreateFinancialAccount(null, { ...defaults, type: "bank_account" });
+    });
+  }
+
+  function openEditFinancialInstitution(group) {
+    sheet(`${sheetHeader("Editar instituição", "O nome será atualizado nas contas e cartões deste agrupamento.")}<form data-financial-institution-edit><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome da instituição *</span><input name="name" maxlength="80" value="${esc(group.name)}" required></label><article class="financial-wizard-info full">${icon("info")} Saldos, faturas, limites, compras e identificadores não serão alterados.</article></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar</button></footer></form>`);
+    const form = modal().querySelector("[data-financial-institution-edit]");
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector("[type=submit]"); submit.disabled = true;
+      try {
+        const result = await window.FinancialSpaceService.updateFinancialInstitution({
+          name: form.name.value,
+          accounts: group.accounts.map((account) => ({ id: account.id, financialSpaceId: account.financialSpaceId })),
+          cards: group.cards.map((card) => ({ id: card.id, cardHomeSpaceId: card.cardHomeSpaceId || card.financialSpaceId })),
+        });
+        state.institutionKey = normalizeInstitutionKey(result.name);
+        closeModal(); Utils.toast("Instituição atualizada."); await refresh();
+      } catch (error) { Utils.toast(error.message, true); submit.disabled = false; }
+    };
+  }
+
+  function openArchiveFinancialInstitution(group) {
+    sheet(`${sheetHeader("Remover instituição?", "A remoção segura arquiva os cadastros sem apagar o histórico.")}<div class="modal-body financial-confirm-copy">${icon("archive")}<p><b>${esc(group.name)}</b><span>Para arquivar, contas precisam estar zeradas e cartões não podem ter fatura em aberto.</span></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-light financial-danger-action" type="button" data-financial-confirm-archive>Arquivar instituição</button></footer>`);
+    modal().querySelector("[data-financial-confirm-archive]").onclick = async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        await window.FinancialSpaceService.archiveFinancialInstitution({
+          accounts: group.accounts.map((account) => ({ id: account.id, financialSpaceId: account.financialSpaceId })),
+          cards: group.cards.map((card) => ({ id: card.id, cardHomeSpaceId: card.cardHomeSpaceId || card.financialSpaceId })),
+        });
+        state.view = "institutions"; state.institutionKey = "";
+        closeModal(); Utils.toast("Instituição arquivada; histórico preservado."); await refresh();
+      } catch (error) { Utils.toast(error.message, true); event.currentTarget.disabled = false; }
+    };
+  }
+
+  function openInstitutionActions(institutionKey) {
+    const group = institutionGroups(state.dashboard).find((item) => item.key === institutionKey);
+    if (!group) return Utils.toast("Instituição não encontrada.", true);
+    const invoiceCards = group.cards.filter((card) => card.currentInvoice), payableCards = invoiceCards.filter((card) => Number(card.currentInvoice?.remainingCents || 0) > 0),
+      canAddCard = group.cards.length || group.accounts.some((account) => ["bank_account", "digital_wallet", "other_account", "checking", "savings", "wallet", "other"].includes(account.type)),
+      action = (id, iconName, label, helper, danger = false) => `<button type="button" data-institution-action="${id}" class="${danger ? "is-danger" : ""}">${icon(iconName)}<span><b>${label}</b><small>${helper}</small></span>${icon("chevron-right")}</button>`;
+    sheet(`<span class="financial-sheet-handle"></span>${sheetHeader(group.name, `${institutionKind(group)}${group.spaceIds.size > 1 ? ` · ${group.spaceIds.size} espaços` : ""}`)}<div class="modal-body"><section class="financial-institution-action-summary"><span>${esc(String(group.name).slice(0, 2).toUpperCase())}</span>${group.accounts.length ? `<div><small>Saldo atual</small><strong>${money(group.availableBalanceCents)}</strong></div>` : ""}${group.cards.length ? `<div><small>Fatura atual</small><strong>${money(group.invoiceTotalCents)}</strong>${group.dueAt ? `<em>Vence em ${dateLabel(group.dueAt)}</em>` : ""}</div>` : ""}</section><div class="financial-institution-action-list">
+      ${action("details", "layout-dashboard", "Ver detalhes", "Contas, cartões, faturas e movimentações.")}
+      ${group.accounts.length ? action("balance", "refresh-cw", "Atualizar saldo", "Concilie com o valor real sem criar receita.") : ""}
+      ${canAddCard ? action("add-card", "credit-card", "Adicionar cartão", `Vincule um novo cartão a ${group.name}.`) : ""}
+      ${action("add-account", "plus", "Adicionar conta, carteira ou investimento", "Inclua outro produto desta instituição.")}
+      ${invoiceCards.length ? action("invoice-adjust", "sliders-horizontal", "Ajustar fatura", "Conciliação individual por cartão e ciclo.") : ""}
+      ${group.cards.length ? action("limit", "chart-no-axes-column-increasing", "Ajustar limite", "Altere somente o cartão selecionado.") : ""}
+      ${payableCards.length ? action("pay", "circle-check-big", "Pagar fatura", "Escolha a conta de origem do pagamento.") : ""}
+      ${action("movements", "arrow-left-right", "Movimentações", "Veja lançamentos, receitas e despesas.")}
+      ${action("edit", "settings", "Editar instituição", "Nome e organização do agrupamento.")}
+      ${group.cards.length ? action("spaces", "layers-3", "Gerenciar espaços", "Disponibilidade dos cartões sem duplicação.") : ""}
+      ${action("archive", "trash-2", "Remover instituição", "Arquive com segurança e preserve o histórico.", true)}
+    </div></div>`, "financial-institution-action-sheet");
+    const chooseAccount = (callback) => chooseInstitutionItem(group.accounts, "Escolher conta", "Selecione a conta ou carteira.", callback, "wallet");
+    const chooseCard = (items, title, callback) => chooseInstitutionItem(items, title, "A ação afetará somente o cartão escolhido.", callback, "credit-card");
+    const handlers = {
+      details: () => { closeModal(); state.institutionKey = group.key; state.view = "institution"; paint(); },
+      balance: () => chooseAccount((account) => openAdjustFinancialAccount(account, account.financialSpaceId)),
+      "add-card": () => openCreateCreditCard(null, null, { institution: group.name, name: `${group.name} Cartão`, spaceId: group.accounts[0]?.financialSpaceId || group.cards[0]?.cardHomeSpaceId }),
+      "add-account": () => openAddFinancialProduct(group),
+      "invoice-adjust": () => chooseCard(invoiceCards, "Escolher fatura", (card) => openCreditCardInvoiceAdjustment({ ...card.currentInvoice, interactionSpaceId: cardTargetSpaceId(card) })),
+      limit: () => chooseCard(group.cards, "Escolher cartão", openCreditCardLimitAdjustment),
+      pay: () => chooseCard(payableCards, "Escolher fatura", (card) => openCreditCardInvoicePayment({ ...card.currentInvoice, interactionSpaceId: cardTargetSpaceId(card) })),
+      movements: () => { closeModal(); state.view = "entries"; paint(); },
+      edit: () => openEditFinancialInstitution(group),
+      spaces: () => chooseCard(group.cards, "Escolher cartão", (card) => openCreateCreditCard(null, card)),
+      archive: () => openArchiveFinancialInstitution(group),
+    };
+    modal().querySelectorAll("[data-institution-action]").forEach((button) => button.onclick = () => handlers[button.dataset.institutionAction]?.());
+  }
+
   function openSpaces() {
     const views = financialViews(), quick = views.filter((view) => view.mode !== "space"), spaceViews = views.filter((view) => view.mode === "space"), row = (view) => `<article class="financial-view-option ${view.id === state.activeViewId ? "active" : ""}">
       <button type="button" data-financial-select-view="${esc(view.id)}"><span>${icon(view.mode === "all_spaces" ? "panels-top-left" : view.mode === "personal" ? "house" : view.mode === "business" ? "briefcase-business" : view.space?.icon || "bookmark")}</span><b>${esc(view.name)}</b><small>${view.financialSpaceIds.length} espaço${view.financialSpaceIds.length === 1 ? "" : "s"}${view.isDefault ? " · Padrão" : ""}</small>${icon("chevron-right")}</button>
@@ -655,9 +780,11 @@ window.FinanceiroUI = (() => {
     };
   }
 
-  function openCreateFinancialAccount(onCreated = null) {
-    if (state.consolidated) return openActionSpacePicker("Em qual espaço criar a conta?", () => openCreateFinancialAccount(onCreated));
-    sheet(`${sheetHeader("Nova conta ou carteira", "Defina onde o dinheiro fica, sem consultar seu banco.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" placeholder="Ex.: Inter" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="bank_account">Conta bancária</option><option value="digital_wallet">Carteira digital</option><option value="cash_wallet">Dinheiro físico</option><option value="investment_account">Investimentos</option><option value="other_account">Outra conta</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" placeholder="Ex.: Banco Inter"></label><label class="financial-field full"><span>Saldo real hoje</span><input name="initialBalance" inputmode="decimal" value="0,00"><small>Cria um saldo inicial; não entra como receita do mês.</small></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" checked><span></span><b>Incluir no saldo disponível</b></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
+  function openCreateFinancialAccount(onCreated = null, defaults = {}) {
+    if (state.consolidated && !defaults.spaceId) return openCreationSpacePicker("Em qual espaço criar a conta?", (spaceId) => openCreateFinancialAccount(onCreated, { ...defaults, spaceId }));
+    const targetSpaceId = defaults.spaceId || state.selectedSpaceId;
+    const initialType = Engine.normalizeFinancialAccountType(defaults.type || "bank_account"), included = defaults.includeInAvailableBalance !== false && initialType !== "investment_account";
+    sheet(`${sheetHeader(defaults.title || "Nova conta ou carteira", "Defina onde o dinheiro fica, sem consultar seu banco.")}<form data-financial-account-create><div class="modal-body financial-form-grid"><label class="financial-field full"><span>Nome *</span><input name="name" maxlength="80" value="${esc(defaults.name || "")}" placeholder="Ex.: Inter" required></label><label class="financial-field"><span>Tipo *</span><select name="type"><option value="bank_account" ${initialType === "bank_account" ? "selected" : ""}>Conta bancária</option><option value="digital_wallet" ${initialType === "digital_wallet" ? "selected" : ""}>Carteira digital</option><option value="cash_wallet" ${initialType === "cash_wallet" ? "selected" : ""}>Dinheiro físico</option><option value="investment_account" ${initialType === "investment_account" ? "selected" : ""}>Investimentos</option><option value="other_account" ${initialType === "other_account" ? "selected" : ""}>Outra conta</option></select></label><label class="financial-field"><span>Instituição</span><input name="institution" maxlength="80" value="${esc(defaults.institution || "")}" placeholder="Ex.: Banco Inter"></label><label class="financial-field full"><span>Saldo real hoje</span><input name="initialBalance" inputmode="decimal" value="${esc(defaults.initialBalance || "0,00")}"><small>Cria um saldo inicial; não entra como receita do mês.</small></label><label class="financial-toggle full"><input type="checkbox" name="includeInAvailableBalance" ${included ? "checked" : ""}><span></span><b>Incluir no saldo disponível</b></label></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Criar conta</button></footer></form>`);
     const form = modal().querySelector("[data-financial-account-create]");
     form.elements.type.addEventListener("change", () => {
       if (form.elements.type.value === "investment_account") form.elements.includeInAvailableBalance.checked = false;
@@ -669,7 +796,7 @@ window.FinanceiroUI = (() => {
       submit.disabled = true;
       try {
         const initialBalanceCents = Engine.balanceInputToCents(values.initialBalance),
-          account = await window.FinancialSpaceService.createFinancialAccount(state.selectedSpaceId, { ...values, initialBalanceCents, includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on" });
+          account = await window.FinancialSpaceService.createFinancialAccount(targetSpaceId, { ...values, initialBalanceCents, includeInAvailableBalance: new FormData(form).get("includeInAvailableBalance") === "on" });
         closeModal();
         Utils.toast("Conta criada.");
         if (onCreated) await onCreated(account); else await refresh();
@@ -704,15 +831,15 @@ window.FinanceiroUI = (() => {
     };
   }
 
-  async function openCreateCreditCard(onCreated = null, existing = null) {
-    if (state.consolidated && !existing) return openActionSpacePicker("Em qual espaço o cartão será criado?", () => openCreateCreditCard(onCreated));
-    const service = window.FinancialSpaceService, homeSpaceId = existing?.cardHomeSpaceId || state.selectedSpaceId,
+  async function openCreateCreditCard(onCreated = null, existing = null, defaults = {}) {
+    if (state.consolidated && !existing && !defaults.spaceId) return openCreationSpacePicker("Em qual espaço o cartão será criado?", (spaceId) => openCreateCreditCard(onCreated, null, { ...defaults, spaceId }));
+    const service = window.FinancialSpaceService, homeSpaceId = existing?.cardHomeSpaceId || defaults.spaceId || state.selectedSpaceId,
       homeSpace = spaces().find((space) => space.id === homeSpaceId) || selectedSpace(), accounts = await service.listFinancialAccounts(homeSpaceId),
       canShare = service.canShareCreditCards(homeSpaceId), availableSpaces = spaces().filter((space) => space.ownerUid === homeSpace?.ownerUid),
       normalized = Engine.normalizeCreditCardAccess(existing || {}, homeSpaceId), draft = {
         step: 1,
-        name: existing?.name || "",
-        institution: existing?.institution || existing?.issuer || "",
+        name: existing?.name || defaults.name || "",
+        institution: existing?.institution || existing?.issuer || defaults.institution || "",
         last4: existing?.last4 || "",
         limit: existing ? (Number(existing.limitCents || 0) / 100).toFixed(2).replace(".", ",") : "",
         closingDay: existing?.closingDay || "",
@@ -720,7 +847,7 @@ window.FinanceiroUI = (() => {
         paymentAccountId: existing?.paymentAccountId || "",
         accessMode: existing ? normalized.accessMode : "",
         allowedFinancialSpaceIds: existing ? [...normalized.allowedFinancialSpaceIds] : [],
-        defaultFinancialSpaceId: existing ? normalized.defaultFinancialSpaceId : state.selectedSpaceId,
+        defaultFinancialSpaceId: existing ? normalized.defaultFinancialSpaceId : homeSpaceId,
       };
     sheet(`<div data-credit-card-wizard></div>`, "financial-card-wizard");
     const host = modal().querySelector("[data-credit-card-wizard]"), sync = () => {
@@ -731,13 +858,13 @@ window.FinanceiroUI = (() => {
       const steps = [
         `<div class="modal-body financial-wizard-body"><h3>Qual é o cartão?</h3><p>Esses dados ajudam a identificar a fatura.</p><div class="financial-form-grid"><label class="financial-field full"><span>Nome do cartão *</span><input name="name" maxlength="80" value="${esc(draft.name)}" placeholder="Ex.: C6 Carbon"></label><label class="financial-field"><span>Banco/instituição</span><input name="institution" maxlength="80" value="${esc(draft.institution)}" placeholder="Ex.: C6 Bank"></label><label class="financial-field"><span>Final do cartão *</span><input name="last4" inputmode="numeric" maxlength="4" value="${esc(draft.last4)}" placeholder="2429"></label></div></div>`,
         `<div class="modal-body financial-wizard-body"><h3>Como funciona a fatura?</h3><p>A VECONI usará estes dias para escolher a fatura automaticamente.</p><div class="financial-form-grid"><label class="financial-field full"><span>Limite total *</span><input name="limit" inputmode="decimal" value="${esc(draft.limit)}" placeholder="R$ 8.000,00"></label><label class="financial-field"><span>Fecha no dia *</span><input name="closingDay" type="number" min="1" max="31" value="${esc(draft.closingDay)}" placeholder="12"></label><label class="financial-field"><span>Vence no dia *</span><input name="dueDay" type="number" min="1" max="31" value="${esc(draft.dueDay)}" placeholder="20"></label></div><div class="financial-wizard-info">${icon("calendar-check")} Dias 29, 30 e 31 usam o último dia válido nos meses menores.</div></div>`,
-        `<div class="modal-body financial-wizard-body"><h3>Onde este cartão pode ser usado?</h3><p>O cartão continua único; cada compra pertence ao espaço escolhido.</p><div class="financial-card-access-picker">${canShare ? `<button type="button" data-card-access="all_spaces" class="${draft.accessMode === "all_spaces" ? "active" : ""}">${icon("layers-3")}<span><b>Todos os meus espaços</b><small>Disponível nos seus espaços financeiros.</small></span>${draft.accessMode === "all_spaces" ? icon("circle-check") : ""}</button><button type="button" data-card-access="selected_spaces" class="${draft.accessMode === "selected_spaces" ? "active" : ""}">${icon("list-checks")}<span><b>Espaços selecionados</b><small>Escolha exatamente onde ele aparece.</small></span>${draft.accessMode === "selected_spaces" ? icon("circle-check") : ""}</button>` : ""}<button type="button" data-card-access="single_space" class="${draft.accessMode === "single_space" ? "active" : ""}">${icon("lock-keyhole")}<span><b>Somente este espaço</b><small>Uso exclusivo em ${esc(selectedSpace()?.name || "este espaço")}.</small></span>${draft.accessMode === "single_space" ? icon("circle-check") : ""}</button></div>${draft.accessMode === "selected_spaces" ? `<section class="financial-space-checks"><b>Escolha os espaços</b>${availableSpaces.map((space) => `<button type="button" data-card-space="${esc(space.id)}" class="${draft.allowedFinancialSpaceIds.includes(space.id) ? "active" : ""}">${icon(draft.allowedFinancialSpaceIds.includes(space.id) ? "square-check-big" : "square")}<span>${esc(space.name)}<small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></button>`).join("")}</section>` : ""}<div class="financial-wizard-info">${icon("shield-check")} Compartilhar um cartão não transfere acesso nem expõe outros espaços.</div></div>`,
+        `<div class="modal-body financial-wizard-body"><h3>Onde este cartão pode ser usado?</h3><p>O cartão continua único; cada compra pertence ao espaço escolhido.</p><div class="financial-card-access-picker">${canShare ? `<button type="button" data-card-access="all_spaces" class="${draft.accessMode === "all_spaces" ? "active" : ""}">${icon("layers-3")}<span><b>Todos os meus espaços</b><small>Disponível nos seus espaços financeiros.</small></span>${draft.accessMode === "all_spaces" ? icon("circle-check") : ""}</button><button type="button" data-card-access="selected_spaces" class="${draft.accessMode === "selected_spaces" ? "active" : ""}">${icon("list-checks")}<span><b>Espaços selecionados</b><small>Escolha exatamente onde ele aparece.</small></span>${draft.accessMode === "selected_spaces" ? icon("circle-check") : ""}</button>` : ""}<button type="button" data-card-access="single_space" class="${draft.accessMode === "single_space" ? "active" : ""}">${icon("lock-keyhole")}<span><b>Somente este espaço</b><small>Uso exclusivo em ${esc(homeSpace?.name || "este espaço")}.</small></span>${draft.accessMode === "single_space" ? icon("circle-check") : ""}</button></div>${draft.accessMode === "selected_spaces" ? `<section class="financial-space-checks"><b>Escolha os espaços</b>${availableSpaces.map((space) => `<button type="button" data-card-space="${esc(space.id)}" class="${draft.allowedFinancialSpaceIds.includes(space.id) ? "active" : ""}">${icon(draft.allowedFinancialSpaceIds.includes(space.id) ? "square-check-big" : "square")}<span>${esc(space.name)}<small>${space.type === "business" ? "Negócio" : space.type === "personal" ? "Pessoal" : "Outro"}</small></span></button>`).join("")}</section>` : ""}<div class="financial-wizard-info">${icon("shield-check")} Compartilhar um cartão não transfere acesso nem expõe outros espaços.</div></div>`,
         `<div class="modal-body financial-wizard-body"><h3>Conferir cartão</h3><p>Compras de espaços diferentes irão para a mesma fatura real.</p><article class="financial-wizard-review"><header><span>${icon("credit-card")}</span><div><b>${esc(draft.name || "Cartão")}</b><strong>•••• ${esc(draft.last4 || "0000")}</strong></div></header><dl><div><dt>Instituição</dt><dd>${esc(draft.institution || "Não informada")}</dd></div><div><dt>Limite</dt><dd>${draft.limit ? money(Engine.moneyInputToCents(draft.limit)) : "—"}</dd></div><div><dt>Fechamento</dt><dd>Dia ${esc(draft.closingDay)}</dd></div><div><dt>Vencimento</dt><dd>Dia ${esc(draft.dueDay)}</dd></div><div><dt>Disponibilidade</dt><dd>${esc(accessLabel)}</dd></div><div><dt>Conta para pagamento</dt><dd>${esc(accounts.find((item) => item.id === draft.paymentAccountId)?.name || "Escolher ao pagar")}</dd></div></dl></article><label class="financial-field"><span>Conta padrão para pagar <small>(opcional)</small></span><select name="paymentAccountId"><option value="">Escolher ao pagar</option>${accounts.map((account) => `<option value="${esc(account.id)}" ${account.id === draft.paymentAccountId ? "selected" : ""}>${esc(account.name)}</option>`).join("")}</select></label></div>`,
       ];
       host.innerHTML = `<header class="modal-head financial-wizard-head"><div><small>Passo ${draft.step} de 4</small><div class="financial-wizard-progress">${[1, 2, 3, 4].map((step) => `<i class="${step <= draft.step ? "active" : ""}"></i>`).join("")}</div></div><button class="icon-btn" type="button" data-financial-close>${icon("x")}</button></header>${steps[draft.step - 1]}<footer class="modal-foot"><button class="btn btn-light" type="button" data-card-back>${draft.step === 1 ? "Cancelar" : "Voltar"}</button><button class="btn btn-primary" type="button" data-card-next>${draft.step === 4 ? existing ? "Salvar cartão" : "Criar cartão" : "Continuar"}</button></footer>`;
       host.querySelector("[data-financial-close]").onclick = closeModal;
       host.querySelector("[data-card-back]").onclick = () => { sync(); if (draft.step === 1) closeModal(); else { draft.step--; renderCardWizard(); } };
-      host.querySelectorAll("[data-card-access]").forEach((button) => button.onclick = () => { sync(); draft.accessMode = button.dataset.cardAccess; if (draft.accessMode === "single_space") { draft.defaultFinancialSpaceId = state.selectedSpaceId; draft.allowedFinancialSpaceIds = [state.selectedSpaceId]; } renderCardWizard(); });
+      host.querySelectorAll("[data-card-access]").forEach((button) => button.onclick = () => { sync(); draft.accessMode = button.dataset.cardAccess; if (draft.accessMode === "single_space") { draft.defaultFinancialSpaceId = homeSpaceId; draft.allowedFinancialSpaceIds = [homeSpaceId]; } renderCardWizard(); });
       host.querySelectorAll("[data-card-space]").forEach((button) => button.onclick = () => { sync(); const id = button.dataset.cardSpace; draft.allowedFinancialSpaceIds = draft.allowedFinancialSpaceIds.includes(id) ? draft.allowedFinancialSpaceIds.filter((value) => value !== id) : [...draft.allowedFinancialSpaceIds, id]; renderCardWizard(); });
       host.querySelector("[data-card-next]").onclick = async (event) => {
         sync();
@@ -749,7 +876,7 @@ window.FinanceiroUI = (() => {
           event.currentTarget.disabled = true;
           const payload = { ...draft, limitCents: Engine.moneyInputToCents(draft.limit) }, card = existing
             ? await service.updateCreditCard(homeSpaceId, existing.id, payload)
-            : await service.createCreditCard(state.selectedSpaceId, payload);
+            : await service.createCreditCard(homeSpaceId, payload);
           closeModal();
           Utils.toast(existing ? "Cartão atualizado." : "Cartão criado.");
           if (onCreated) await onCreated(card); else await refresh();
@@ -1279,14 +1406,19 @@ window.FinanceiroUI = (() => {
     page.querySelectorAll("[data-financial-open-period]").forEach((button) => button.onclick = openPeriod);
     page.querySelectorAll("[data-financial-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.financialView; paint(); });
     page.querySelectorAll("[data-financial-institution]").forEach((element) => element.onclick = (event) => {
+      if (event.target.closest("[data-financial-institution-actions]")) return;
       event.stopPropagation();
       state.institutionKey = element.dataset.financialInstitution;
       state.view = "institution";
       paint();
     });
     page.querySelectorAll("[data-financial-institution]").forEach((element) => element.onkeydown = (event) => {
+      if (event.target.closest("[data-financial-institution-actions]")) return;
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); element.click(); }
     });
+    page.querySelectorAll("[data-financial-institution-actions]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); openInstitutionActions(button.dataset.financialInstitutionActions); });
+    page.querySelectorAll("[data-financial-add-product]").forEach((button) => button.onclick = () => openAddFinancialProduct());
+    page.querySelectorAll("[data-financial-dismiss-note]").forEach((button) => button.onclick = () => button.closest(".financial-institution-note")?.remove());
     page.querySelectorAll("[data-financial-space-detail]").forEach((button) => button.onclick = async () => {
       state.view = "dashboard";
       await selectFinancialView(`space:${button.dataset.financialSpaceDetail}`);
