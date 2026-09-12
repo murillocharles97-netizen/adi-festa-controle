@@ -8,16 +8,20 @@ const {financialIncomeService}=require('../src/services/financial-income-service
 async function main(){
   const projectId=process.env.GCLOUD_PROJECT||'adi-festa-variations-test',app=initializeApp({projectId},`financial-income-${Date.now()}`),db=getFirestore(app),service=financialIncomeService(db),businessId='financial-income-a',spaceId=`business_${businessId}`,activatedAt='2026-09-07T10:00:00.000Z';
   try{
-    await db.doc(`financialSpaces/${spaceId}`).set({id:spaceId,name:'Adi Festa',type:'business',linkedBusinessId:businessId,ownerUid:'owner-a',active:true,automation:{enabled:true,linkedBusinessId:businessId,activatedAt,autoIncome:{sales:true,customerPayments:true,onlineOrders:true}},autoIncomeSince:activatedAt});
+    await db.doc(`financialSpaces/${spaceId}`).set({id:spaceId,name:'Adi Festa',type:'business',linkedBusinessId:businessId,ownerUid:'owner-a',active:true,automation:{enabled:true,linkedBusinessId:businessId,activatedAt,defaultIncomeFinancialAccountId:'account-inter',autoIncome:{sales:true,customerPayments:true,onlineOrders:true}},autoIncomeSince:activatedAt});
+    await db.doc(`financialSpaces/${spaceId}/financialAccounts/account-inter`).set({id:'account-inter',financialSpaceId:spaceId,ownerUid:'owner-a',name:'Inter',type:'bank_account',initialBalanceCents:10000,currentBalanceCents:10000,includeInAvailableBalance:true,active:true,schemaVersion:3});
     await db.doc('financialSpaces/personal-income-a').set({id:'personal-income-a',name:'Casa',type:'personal',linkedBusinessId:null,ownerUid:'owner-a',active:true,automation:{enabled:false}});
 
     const sale={status:'pago',valorFinal:50,formaPagamento:'pix',clienteNome:'Cliente PIX',clienteId:'client-a',data:'2026-09-07T11:00:00.000Z'};
     const firstSale=await service.projectSale(businessId,'sale-1',sale),retrySale=await service.projectSale(businessId,'sale-1',sale);
     assert.equal(firstSale.created,true);assert.equal(retrySale.created,false);
     assert.equal((await db.doc(`financialSpaces/${spaceId}/entries/sale_sale-1`).get()).data().amountCents,5000);
+    assert.equal((await db.doc(`financialSpaces/${spaceId}/entries/sale_sale-1`).get()).data().financialAccountId,'account-inter');
+    assert.equal((await db.doc(`financialSpaces/${spaceId}/financialAccounts/account-inter`).get()).data().currentBalanceCents,15000);
     const reversedSale=await service.projectSale(businessId,'sale-1',{...sale,status:'cancelado',reversedAt:'2026-09-08T09:00:00.000Z'});
     assert.equal(reversedSale.created,true);
     assert.equal((await db.doc(`financialSpaces/${spaceId}/entries/reversal_sale_sale-1_full`).get()).data().occurredAt,'2026-09-08T09:00:00.000Z');
+    assert.equal((await db.doc(`financialSpaces/${spaceId}/financialAccounts/account-inter`).get()).data().currentBalanceCents,10000);
 
     const credit=await service.projectSale(businessId,'sale-credit',{...sale,status:'fiado'});
     assert.equal(credit.skipped,'credit-sale-not-realized');
@@ -27,6 +31,7 @@ async function main(){
     const remaining=await service.projectPayment(businessId,'payment-30',{status:'applied',applicationStatus:'applied',effectiveAmount:30,allocations:[{saleId:'sale-credit',amount:30}],clienteNome:'Cliente Fiado',clienteId:'client-a',paymentMethod:'cash',data:'2026-09-07T13:00:00.000Z'});
     assert.equal(partial.entry.amountCents,2000);assert.equal(remaining.entry.amountCents,3000);
     assert.equal((await service.projectPayment(businessId,'payment-20',{status:'applied',applicationStatus:'applied',effectiveAmount:20,data:'2026-09-07T12:00:00.000Z'})).created,false);
+    assert.equal((await db.doc(`financialSpaces/${spaceId}/financialAccounts/account-inter`).get()).data().currentBalanceCents,15000);
 
     const online=await service.projectSale(businessId,'sale-online',{...sale,operationId:'catalog-order:order-1'});
     assert.equal(online.entry.relatedOrderId,'order-1');
