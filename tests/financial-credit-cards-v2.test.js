@@ -200,9 +200,9 @@ test("compra compartilhada preserva espaço da compra e home da fatura", () => {
   assert.match(service, /childRef\(cardHomeSpaceId, "creditCardInvoices"/);
   assert.match(service, /spaceTotals:\s*Engine\.adjustDimensionTotal/);
   assert.match(service, /categoryTotals:\s*Engine\.adjustDimensionTotal/);
-  assert.match(ui, /Todos os meus espaços/);
-  assert.match(ui, /Espaços selecionados/);
-  assert.match(ui, /Somente este espaço/);
+  assert.match(ui, /Todos os espaços/);
+  assert.match(ui, /Alguns espaços/);
+  assert.match(ui, /Somente um espaço/);
   assert.match(ui, /data-card-home/);
 });
 

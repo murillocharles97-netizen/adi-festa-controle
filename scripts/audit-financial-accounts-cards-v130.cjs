@@ -97,8 +97,12 @@ async function main() {
   await shot("04-menu-adicionar-390.png");
 
   await click('[data-financial-add-kind="bank_account"]');
-  await click('[data-creation-space="business"]');
   assert(await page.$("[data-financial-account-create]"), "Formulário de conta não abriu");
+  const accountScope = await page.evaluate(() => ({
+    picker: Boolean(document.querySelector("[data-creation-space]")),
+    allSpaces: document.querySelector('[data-account-access="all_spaces"]')?.classList.contains("active"),
+  }));
+  assert(!accountScope.picker && accountScope.allSpaces, `Conta não abriu global por padrão: ${JSON.stringify(accountScope)}`);
   await shot("05-nova-conta-390.png");
 
   await reset(390, 844);

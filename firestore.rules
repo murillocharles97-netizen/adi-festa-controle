@@ -931,6 +931,10 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
+    match /{path=**}/financialAccounts/{accountId} {
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
     match /financialTransfers/{transferId} {
       allow read: if signedIn()
         && canReadFinancialSpace(resource.data.fromSpaceId)

@@ -48,6 +48,10 @@ const storage = getStorage(app),
     lastReadStats: null,
     reconciliation: new Map(),
     viewProfile: null,
+    financialAccountCatalog: [],
+    financialAccountCatalogForUid: "",
+    financialAccountCatalogLoadedAt: 0,
+    financialAccountCatalogPromise: null,
     creditCardCatalog: [],
     creditCardCatalogForUid: "",
     creditCardCatalogLoadedAt: 0,
@@ -72,7 +76,15 @@ const consolidatedKey = () => `${CONSOLIDATED_PREFIX}${uid()}`;
 const viewProfileCacheKey = () => `${VIEW_PROFILE_CACHE_PREFIX}${uid()}`;
 const lastViewKey = () => `${LAST_VIEW_PREFIX}${uid()}`;
 const viewProfileRef = () => doc(db, "financialViewProfiles", uid());
-const emit = (name, detail = {}) => dispatchEvent(new CustomEvent(name, { detail }));
+const emit = (name, detail = {}) => {
+  if (name === "financial-data-changed") {
+    state.financialAccountCatalog = [];
+    state.financialAccountCatalogForUid = "";
+    state.financialAccountCatalogLoadedAt = 0;
+    state.financialAccountCatalogPromise = null;
+  }
+  dispatchEvent(new CustomEvent(name, { detail }));
+};
 const operationId = (prefix = "financial") => `${prefix}_${crypto.randomUUID()}`;
 const automationState = (space = {}) => {
   const legacyActivation = space.autoIncomeSince || space.autoEntryFromPaymentsSince || space.autoEntryFromSalesSince || null,
@@ -173,7 +185,7 @@ const accountBalancePatch = (account, deltaCents, changedAt, operationIdValue) =
   currentBalanceCents: accountBalanceCents(account) + Number(deltaCents || 0),
   balanceUpdatedAt: changedAt,
   lastBalanceOperationId: operationIdValue,
-  schemaVersion: Math.max(3, Number(account.schemaVersion || 0)),
+  schemaVersion: Math.max(5, Number(account.schemaVersion || 0)),
   updatedAt: changedAt,
 });
 const cashAccountDelta = (entry = {}) => entry.status === "paid" && entry.cashFlowEffect !== false && entry.financialAccountId
@@ -555,13 +567,46 @@ async function readFinancialAccountsFromHome(homeSpaceId, includeInactive = fals
   return snapshot.docs.map(convert).map((account) => normalizeFinancialAccount(account, homeSpaceId));
 }
 
+const invalidateFinancialAccountCatalog = () => {
+  state.financialAccountCatalog = [];
+  state.financialAccountCatalogForUid = "";
+  state.financialAccountCatalogLoadedAt = 0;
+  state.financialAccountCatalogPromise = null;
+};
+
 async function listOwnedFinancialAccounts(options = {}) {
-  const batches = await Promise.all(ownedSpaces().map(async (space) => {
-    try { return await readFinancialAccountsFromHome(space.id, options.includeInactive === true); }
-    catch { return []; }
-  })), unique = new Map();
-  for (const account of batches.flat()) unique.set(Engine.financialAccountKey(account), account);
-  return [...unique.values()];
+  const currentUid = uid(), includeInactive = options.includeInactive === true,
+    cacheIsFresh = state.financialAccountCatalogForUid === currentUid
+      && Date.now() - state.financialAccountCatalogLoadedAt < 15_000;
+  if (!options.force && cacheIsFresh)
+    return state.financialAccountCatalog.filter((account) => includeInactive || account.active !== false).map((account) => structuredClone(account));
+  if (!options.force && state.financialAccountCatalogForUid === currentUid && state.financialAccountCatalogPromise) {
+    const accounts = await state.financialAccountCatalogPromise;
+    return accounts.filter((account) => includeInactive || account.active !== false).map((account) => structuredClone(account));
+  }
+  const load = getDocs(query(
+    collectionGroup(db, "financialAccounts"),
+    where("ownerUid", "==", currentUid),
+    limit(MAX_FINANCIAL_ACCOUNTS * 4),
+  )).then((snapshot) => {
+    const unique = new Map();
+    for (const item of snapshot.docs) {
+      const homeSpaceId = item.ref.parent.parent?.id || "", account = normalizeFinancialAccount(convert(item), homeSpaceId);
+      if (!homeSpaceId || !account.id) continue;
+      unique.set(Engine.financialAccountKey(account), account);
+    }
+    const accounts = [...unique.values()];
+    state.financialAccountCatalog = accounts;
+    state.financialAccountCatalogForUid = currentUid;
+    state.financialAccountCatalogLoadedAt = Date.now();
+    return accounts;
+  }).finally(() => {
+    if (state.financialAccountCatalogPromise === load) state.financialAccountCatalogPromise = null;
+  });
+  state.financialAccountCatalogForUid = currentUid;
+  state.financialAccountCatalogPromise = load;
+  const accounts = await load;
+  return accounts.filter((account) => includeInactive || account.active !== false).map((account) => structuredClone(account));
 }
 
 async function listFinancialAccounts(spaceId) {
@@ -589,7 +634,7 @@ async function listFinancialAccounts(spaceId) {
 }
 
 function financialAccountAccessValue(space, input = {}, current = {}) {
-  const requestedMode = String(input.accessMode || current.accessMode || "single_space"),
+  const requestedMode = String(input.accessMode || current.accessMode || "all_spaces"),
     accessMode = Engine.FINANCIAL_ACCOUNT_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
     requestedDefault = String(input.defaultFinancialSpaceId || current.defaultFinancialSpaceId || space.id),
     requestedAllowed = accessMode === "selected_spaces"
@@ -654,27 +699,38 @@ async function createFinancialAccount(spaceId, input = {}) {
       active: true,
       createdAt,
       updatedAt: createdAt,
-      schemaVersion: 4,
+      schemaVersion: 5,
     };
   await setDoc(childRef(space.id, "financialAccounts", id), clean(value));
+  invalidateFinancialAccountCatalog();
   emit("financial-data-changed", { entity: "financialAccount", id, spaceId: space.id });
   return value;
 }
 
-async function useExistingFinancialAccount(homeSpaceId, accountId, targetSpaceId) {
-  const home = assertSpace(homeSpaceId), target = assertSpace(targetSpaceId), accountRef = childRef(home.id, "financialAccounts", accountId), snapshot = await getDoc(accountRef);
+async function useExistingFinancialAccount(homeSpaceId, accountId, targetOrOptions = {}) {
+  const options = typeof targetOrOptions === "string" ? { targetSpaceId: targetOrOptions } : targetOrOptions,
+    home = assertSpace(homeSpaceId), target = assertSpace(options.targetSpaceId || options.defaultFinancialSpaceId || home.id),
+    accountRef = childRef(home.id, "financialAccounts", accountId), snapshot = await getDoc(accountRef);
   if (!snapshot.exists()) throw new Error("A conta existente não foi encontrada.");
   const current = normalizeFinancialAccount(convert(snapshot), home.id);
   if (current.ownerUid !== uid() || target.ownerUid !== current.ownerUid)
     throw new Error("Esta conta não pode ser compartilhada com o espaço selecionado.");
-  if (Engine.financialAccountAllowsSpace(current, target.id)) return { ...current, usageFinancialSpaceId: target.id };
-  const allowedFinancialSpaceIds = [...new Set([
-    ...(current.accessMode === "selected_spaces" ? current.allowedFinancialSpaceIds : [current.defaultFinancialSpaceId || home.id]),
-    target.id,
-  ].filter(Boolean))], accessMode = allowedFinancialSpaceIds.length > 1 ? "selected_spaces" : "single_space";
-  await updateDoc(accountRef, clean({ accountHomeSpaceId: home.id, accessMode, allowedFinancialSpaceIds, defaultFinancialSpaceId: current.defaultFinancialSpaceId || home.id, updatedAt: now(), schemaVersion: 4 }));
+  const requested = options.accessMode ? options : {
+      accessMode: Engine.financialAccountAllowsSpace(current, target.id) ? current.accessMode : "selected_spaces",
+      allowedFinancialSpaceIds: [...new Set([
+        ...(current.accessMode === "selected_spaces" ? current.allowedFinancialSpaceIds : [current.defaultFinancialSpaceId || home.id]),
+        target.id,
+      ].filter(Boolean))],
+      defaultFinancialSpaceId: current.defaultFinancialSpaceId || home.id,
+    }, access = financialAccountAccessValue(home, requested, current);
+  if (current.accessMode === access.accessMode
+    && current.defaultFinancialSpaceId === access.defaultFinancialSpaceId
+    && JSON.stringify(current.allowedFinancialSpaceIds) === JSON.stringify(access.allowedFinancialSpaceIds))
+    return { ...current, usageFinancialSpaceId: target.id };
+  await updateDoc(accountRef, clean({ accountHomeSpaceId: home.id, ...access, updatedAt: now(), schemaVersion: 5 }));
+  invalidateFinancialAccountCatalog();
   emit("financial-data-changed", { entity: "financialAccount", id: current.id, spaceId: target.id, action: "shared" });
-  return normalizeFinancialAccount({ ...current, accessMode, allowedFinancialSpaceIds }, home.id);
+  return normalizeFinancialAccount({ ...current, ...access, usageFinancialSpaceId: target.id }, home.id);
 }
 
 async function updateFinancialAccount(homeSpaceId, accountId, input = {}) {
@@ -693,11 +749,12 @@ async function updateFinancialAccount(homeSpaceId, accountId, input = {}) {
       includeInAvailableBalance: input.includeInAvailableBalance === undefined ? current.includeInAvailableBalance !== false : input.includeInAvailableBalance === true,
       accountHomeSpaceId: home.id,
       ...access,
-      schemaVersion: 4,
+      schemaVersion: 5,
       updatedAt: now(),
     });
   if (last4 && last4.length !== 4) throw new Error("Informe os 4 últimos dígitos ou deixe o campo vazio.");
   await updateDoc(refValue, patch);
+  invalidateFinancialAccountCatalog();
   emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: "updated" });
   return normalizeFinancialAccount({ ...current, ...patch }, home.id);
 }
@@ -708,10 +765,12 @@ async function archiveFinancialAccount(homeSpaceId, accountId, options = {}) {
   if (account.ownerUid !== uid()) throw new Error("Somente o proprietário pode remover esta conta.");
   if (options.deleteIfUnused === true && typeof window.FirebaseCallable === "function") {
     const response = await window.FirebaseCallable("deleteUnusedFinancialAccount", { homeSpaceId: home.id, accountId }), result = response.data || {};
+    invalidateFinancialAccountCatalog();
     emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: result.deleted ? "deleted" : "archived" });
     return result;
   }
-  await updateDoc(refValue, { active: false, archivedAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 4 });
+  await updateDoc(refValue, { active: false, archivedAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 5 });
+  invalidateFinancialAccountCatalog();
   emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: "archived" });
   return { deleted: false, archived: true, fallback: true };
 }
@@ -777,6 +836,7 @@ async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
     transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId: opId, financialAccountId: id, financialAccountHomeSpaceId: resolved.homeSpaceId, eventKind: "financial_account_balance_adjusted", transition: "reconciled", status: "applied", amountCents: Math.abs(differenceCents), previousBalanceCents, targetBalanceCents, createdAt: changedAt, schemaVersion: 4 }));
     return { account: { ...account, ...accountBalancePatch(account, differenceCents, changedAt, opId) }, entry: value, retried: false };
   });
+  invalidateFinancialAccountCatalog();
   emit("financial-data-changed", { entity: "financialAccount", id, spaceId: space.id, action: "balance-adjusted" });
   return result;
 }
@@ -803,6 +863,7 @@ async function updateFinancialInstitution(input = {}) {
       ? { institution: name, issuer: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt }
       : { institution: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt })));
   });
+  invalidateFinancialAccountCatalog();
   invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "financialInstitution", action: "updated", name });
   return { name, updated: records.length };
@@ -819,6 +880,7 @@ async function archiveFinancialInstitution(input = {}) {
       throw new Error("Quite ou ajuste as faturas dos cartões antes de remover a instituição.");
     records.forEach((record) => transaction.update(record.ref, { active: false, archivedAt: changedAt, updatedAt: changedAt }));
   });
+  invalidateFinancialAccountCatalog();
   invalidateCreditCardCatalog();
   emit("financial-data-changed", { entity: "financialInstitution", action: "archived" });
   return { archived: records.length };
