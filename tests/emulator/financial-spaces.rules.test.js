@@ -163,6 +163,33 @@ test("gestor financeiro do business acessa cartões sem transferir a propriedade
   assert.equal((await getDoc(doc(manager, "financialSpaces", "space-a", "creditCards", card.id))).data().ownerUid, "owner-a");
 });
 
+test("conta pessoal compartilhada serve a dois espaços do owner sem vazar ao business", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore(), other = env.authenticatedContext("owner-b").firestore(), homeId = "shared-account-home", carId = "shared-account-car";
+  await env.withSecurityRulesDisabled(async (context) => {
+    const admin = context.firestore();
+    await setDoc(doc(admin, "financialSpaces", homeId), { id: homeId, name: "IPTV", type: "personal", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true });
+    await setDoc(doc(admin, "financialSpaces", carId), { id: carId, name: "Carro", type: "other", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true });
+  });
+  const account = {
+    id: "shared-inter", operationId: "financial_account_shared-inter", financialSpaceId: homeId, accountHomeSpaceId: homeId,
+    ownerUid: "owner-a", createdBy: "owner-a", name: "Inter", institution: "Banco Inter", institutionKey: "banco_inter", type: "bank_account",
+    initialBalanceCents: 0, currentBalanceCents: 0, includeInAvailableBalance: true, active: true, accessMode: "all_spaces",
+    allowedFinancialSpaceIds: [], defaultFinancialSpaceId: homeId, schemaVersion: 4,
+  };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", homeId, "financialAccounts", account.id), account));
+  const carIncome = {
+    id: "car-income-shared", financialSpaceId: carId, ownerUid: "owner-a", createdBy: "owner-a", operationId: "car-income-shared",
+    amountCents: 7000, currency: "BRL", direction: "in", status: "paid", sourceType: "manual_income", sourceId: "car-income-shared",
+    financialAccountId: account.id, financialAccountHomeSpaceId: homeId,
+  };
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", carId, "entries", carIncome.id), carIncome));
+  await assertFails(getDoc(doc(other, "financialSpaces", homeId, "financialAccounts", account.id)));
+  await assertFails(getDoc(doc(manager, "financialSpaces", homeId, "financialAccounts", account.id)));
+  await assertFails(setDoc(doc(manager, "financialSpaces", "space-a", "entries", "business-using-personal-account"), {
+    ...carIncome, id: "business-using-personal-account", operationId: "business-using-personal-account", sourceId: "business-using-personal-account", financialSpaceId: "space-a", createdBy: "manager-a",
+  }));
+});
+
 test("cartão pessoal compartilhado mantém uma fatura e compras isoladas por espaço", async () => {
   const owner = env.authenticatedContext("owner-a").firestore(), manager = env.authenticatedContext("manager-a").firestore(), homeId = "shared-card-home", carId = "shared-card-car";
   await env.withSecurityRulesDisabled(async (context) => {

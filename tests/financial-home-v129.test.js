@@ -43,9 +43,9 @@ test("movimentações atualizam a conta sem transformar ajuste ou transferência
   assert.match(service, /transaction\.update\(accountRef, clean\(accountBalancePatch/);
   assert.match(service, /fromFinancialAccountId/);
   assert.match(service, /toFinancialAccountId/);
-  assert.match(ui, /accountFlowLabel = isExpense \? "Conta\/carteira de origem" : "Conta\/carteira de destino"/);
+  assert.match(ui, /accountFlowLabel = isExpense \? "De onde saiu o dinheiro\?" : "Onde você recebeu\?"/);
   assert.match(ui, /\$\{accountFlowLabel\} \*/);
-  assert.match(ui, /Conta\/carteira de origem \*/);
+  assert.match(ui, /De onde saiu o dinheiro\? \*/);
 });
 
 test("receitas automáticas usam conta padrão opcional sem perder idempotência", () => {
@@ -130,6 +130,6 @@ test("privacidade continua por owner e membership financeira sem consulta global
 });
 
 test("release inclui o CSS da Home no HTML e no cache offline", () => {
-  assert.match(html, /financial-home-v2\.css\?v=130/);
+  assert.match(html, /financial-home-v2\.css\?v=131/);
   assert.match(sw, /css\/financial-home-v2\.css/);
 });

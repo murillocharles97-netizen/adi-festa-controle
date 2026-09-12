@@ -223,7 +223,7 @@ test("frontend, persistência e rules publicam o domínio V2 sem listener global
   assert.match(ui, /Pagar conta/);
   assert.match(ui, /Ajustar fatura/);
   assert.match(ui, /Parcelamento em andamento/);
-  assert.match(ui, /Conta\/carteira de destino/);
+  assert.match(ui, /Onde você recebeu\?/);
   assert.match(ui, /data-filter-category/);
   assert.match(service, /credit_refund_\$\{String\(purchaseId\)/);
   assert.match(rules, /opening_balance/);

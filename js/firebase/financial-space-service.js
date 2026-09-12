@@ -77,6 +77,7 @@ const automationState = (space = {}) => {
     linkedBusinessId: space.type === "business" ? space.linkedBusinessId || null : null,
     activatedAt: automation.activatedAt || legacyActivation,
     defaultIncomeFinancialAccountId: String(automation.defaultIncomeFinancialAccountId || "").trim() || null,
+    defaultIncomeFinancialAccountHomeSpaceId: String(automation.defaultIncomeFinancialAccountHomeSpaceId || "").trim() || null,
     autoIncome: {
       sales: autoIncome.sales !== false,
       customerPayments: autoIncome.customerPayments !== false,
@@ -118,6 +119,18 @@ const assertSpace = (spaceId) => {
   return space;
 };
 const ownedSpaces = () => state.spaces.filter((space) => space.ownerUid === uid());
+const accountHomeSpaceId = (account = {}, fallback = "") => String(
+  account.accountHomeSpaceId || account.financialSpaceId || fallback || "",
+).trim();
+const normalizeFinancialAccount = (account = {}, homeSpaceId = "") => Engine.normalizeFinancialAccountAccess({
+  ...account,
+  accountHomeSpaceId: accountHomeSpaceId(account, homeSpaceId),
+}, homeSpaceId);
+const accountCanBeUsedInSpace = (account = {}, space = {}) => {
+  const normalized = normalizeFinancialAccount(account), targetId = String(space.id || "");
+  if (!targetId || normalized.ownerUid !== space.ownerUid) return false;
+  return Engine.financialAccountAllowsSpace(normalized, targetId);
+};
 const cardHomeSpaceId = (card = {}, fallback = "") => String(
   card.cardHomeSpaceId || card.financialSpaceId || fallback || "",
 ).trim();
@@ -426,11 +439,13 @@ async function updateAutomation(spaceId, input = {}) {
     throw new Error("Somente um espaço vinculado à empresa pode usar automação.");
   const current = automationState(space), enabled = input.enabled !== false,
     requestedAccountId = String(input.defaultIncomeFinancialAccountId ?? current.defaultIncomeFinancialAccountId ?? "").trim(),
+    requestedAccountHomeSpaceId = String(input.defaultIncomeFinancialAccountHomeSpaceId ?? current.defaultIncomeFinancialAccountHomeSpaceId ?? "").trim(),
     activatedAt = current.activatedAt || (enabled ? now() : null), automation = {
       enabled,
       linkedBusinessId: space.linkedBusinessId,
       activatedAt,
       defaultIncomeFinancialAccountId: requestedAccountId || null,
+      defaultIncomeFinancialAccountHomeSpaceId: requestedAccountId ? (requestedAccountHomeSpaceId || space.id) : null,
       autoIncome: {
         sales: input.sales ?? current.autoIncome.sales,
         customerPayments: input.customerPayments ?? current.autoIncome.customerPayments,
@@ -438,8 +453,8 @@ async function updateAutomation(spaceId, input = {}) {
       },
     };
   if (requestedAccountId) {
-    const account = convert(await getDoc(childRef(space.id, "financialAccounts", requestedAccountId)));
-    if (!account || account.active === false) throw new Error("A conta padrão de recebimentos não está disponível.");
+    const resolved = await resolveFinancialAccountForSpace(space.id, requestedAccountId, requestedAccountHomeSpaceId);
+    automation.defaultIncomeFinancialAccountHomeSpaceId = resolved.homeSpaceId;
   }
   await updateDoc(spaceRef(space.id), { automation: clean(automation), autoIncomeSince: activatedAt, updatedAt: serverTimestamp() });
   rememberSpaces(state.spaces.map((item) => item.id === space.id ? { ...item, automation, autoIncomeSince: activatedAt, updatedAt: now() } : item));
@@ -526,16 +541,76 @@ async function createCategory(spaceId, input = {}) {
   return value;
 }
 
-async function listFinancialAccounts(spaceId) {
-  assertSpace(spaceId);
+async function readFinancialAccountsFromHome(homeSpaceId, includeInactive = false) {
   const snapshot = await getDocs(query(
-    childCollection(spaceId, "financialAccounts"),
-    where("active", "==", true),
+    childCollection(homeSpaceId, "financialAccounts"),
+    ...(includeInactive ? [] : [where("active", "==", true)]),
     limit(MAX_FINANCIAL_ACCOUNTS),
   ));
-  return snapshot.docs.map(convert).sort((left, right) =>
+  return snapshot.docs.map(convert).map((account) => normalizeFinancialAccount(account, homeSpaceId));
+}
+
+async function listOwnedFinancialAccounts(options = {}) {
+  const batches = await Promise.all(ownedSpaces().map(async (space) => {
+    try { return await readFinancialAccountsFromHome(space.id, options.includeInactive === true); }
+    catch { return []; }
+  })), unique = new Map();
+  for (const account of batches.flat()) unique.set(Engine.financialAccountKey(account), account);
+  return [...unique.values()];
+}
+
+async function listFinancialAccounts(spaceId) {
+  const targetSpace = assertSpace(spaceId), homes = new Map([[targetSpace.id, targetSpace]]);
+  for (const space of ownedSpaces()) homes.set(space.id, space);
+  const batches = await Promise.all([...homes.keys()].map(async (homeSpaceId) => {
+    try { return await readFinancialAccountsFromHome(homeSpaceId); }
+    catch (error) {
+      if (homeSpaceId === targetSpace.id) throw error;
+      return [];
+    }
+  })), unique = new Map();
+  for (const account of batches.flat().filter((item) => accountCanBeUsedInSpace(item, targetSpace))) {
+    const normalized = normalizeFinancialAccount(account);
+    unique.set(Engine.financialAccountKey(normalized), {
+      ...normalized,
+      usageFinancialSpaceId: targetSpace.id,
+      sharedAcrossSpaces: normalized.accessMode !== "single_space",
+      canEditScope: normalized.ownerUid === uid(),
+    });
+  }
+  return [...unique.values()].sort((left, right) =>
     String(left.name).localeCompare(String(right.name), "pt-BR"),
   );
+}
+
+function financialAccountAccessValue(space, input = {}, current = {}) {
+  const requestedMode = String(input.accessMode || current.accessMode || "single_space"),
+    accessMode = Engine.FINANCIAL_ACCOUNT_ACCESS_MODES.includes(requestedMode) ? requestedMode : "single_space",
+    requestedDefault = String(input.defaultFinancialSpaceId || current.defaultFinancialSpaceId || space.id),
+    requestedAllowed = accessMode === "selected_spaces"
+      ? (Array.isArray(input.allowedFinancialSpaceIds) ? input.allowedFinancialSpaceIds : current.allowedFinancialSpaceIds || [])
+      : accessMode === "single_space" ? [requestedDefault] : [],
+    allowedFinancialSpaceIds = [...new Set(requestedAllowed.map(String).map((id) => id.trim()).filter(Boolean))],
+    available = new Map(state.spaces.filter((candidate) => candidate.ownerUid === space.ownerUid).map((candidate) => [candidate.id, candidate]));
+  available.set(space.id, space);
+  if (accessMode !== "single_space" && uid() !== space.ownerUid)
+    throw new Error("Somente o proprietário financeiro pode compartilhar esta conta.");
+  if (accessMode === "selected_spaces" && !allowedFinancialSpaceIds.length)
+    throw new Error("Escolha ao menos um espaço para a conta.");
+  if ([...allowedFinancialSpaceIds, requestedDefault].some((id) => !available.has(id)))
+    throw new Error("A conta só pode ser compartilhada com espaços do mesmo proprietário.");
+  return { accessMode, allowedFinancialSpaceIds, defaultFinancialSpaceId: requestedDefault };
+}
+
+async function similarFinancialAccounts(space, input = {}) {
+  const institutionKey = Engine.normalizeInstitutionKey(input.institution || input.name),
+    last4 = String(input.last4 || "").replace(/\D/g, "").slice(-4), accounts = await listOwnedFinancialAccounts();
+  return accounts.filter((account) => {
+    if (Engine.normalizeFinancialAccountType(account.type) !== Engine.normalizeFinancialAccountType(input.type)) return false;
+    if (String(account.institutionKey || Engine.normalizeInstitutionKey(account.institution || account.name)) !== institutionKey) return false;
+    const existingLast4 = String(account.last4 || "");
+    return !last4 || !existingLast4 || last4 === existingLast4;
+  }).map((account) => ({ ...account, usageFinancialSpaceId: space.id }));
 }
 
 async function createFinancialAccount(spaceId, input = {}) {
@@ -543,12 +618,28 @@ async function createFinancialAccount(spaceId, input = {}) {
     opId = String(input.operationId || `financial_account_${id}`), createdAt = now(),
     type = Engine.normalizeFinancialAccountType(input.type), initialBalanceCents = Number(input.initialBalanceCents || 0),
     includeInAvailableBalance = input.includeInAvailableBalance === true
-      || (input.includeInAvailableBalance !== false && type !== "investment_account"), value = {
+      || (input.includeInAvailableBalance !== false && type !== "investment_account"),
+    access = financialAccountAccessValue(space, input), last4 = String(input.last4 || "").replace(/\D/g, "").slice(-4),
+    institution = String(input.institution || "").trim().slice(0, 80) || null;
+  if (!Number.isSafeInteger(initialBalanceCents)) throw new Error("Informe um saldo inicial válido em centavos.");
+  if (last4 && last4.length !== 4) throw new Error("Informe os 4 últimos dígitos ou deixe o campo vazio.");
+  if (input.allowSimilarAccount !== true) {
+    const matches = await similarFinancialAccounts(space, { ...input, type });
+    if (matches.length) throw Object.assign(new Error("Você já possui uma conta parecida nesta instituição."), {
+      code: "financial-account-possible-duplicate",
+      matches,
+    });
+  }
+  const value = {
       id,
       ...baseMetadata(space, opId),
+      accountHomeSpaceId: space.id,
       name: requiredText(input.name, "o nome da conta", 80),
       type,
-      institution: String(input.institution || "").trim().slice(0, 80) || null,
+      institution,
+      institutionKey: Engine.normalizeInstitutionKey(institution || input.name),
+      last4: last4 || null,
+      ...access,
       initialBalanceCents,
       currentBalanceCents: initialBalanceCents,
       includeInAvailableBalance,
@@ -558,18 +649,88 @@ async function createFinancialAccount(spaceId, input = {}) {
       active: true,
       createdAt,
       updatedAt: createdAt,
-      schemaVersion: 3,
+      schemaVersion: 4,
     };
-  if (!Number.isSafeInteger(initialBalanceCents)) throw new Error("Informe um saldo inicial válido em centavos.");
   await setDoc(childRef(space.id, "financialAccounts", id), clean(value));
   emit("financial-data-changed", { entity: "financialAccount", id, spaceId: space.id });
   return value;
 }
 
+async function useExistingFinancialAccount(homeSpaceId, accountId, targetSpaceId) {
+  const home = assertSpace(homeSpaceId), target = assertSpace(targetSpaceId), accountRef = childRef(home.id, "financialAccounts", accountId), snapshot = await getDoc(accountRef);
+  if (!snapshot.exists()) throw new Error("A conta existente não foi encontrada.");
+  const current = normalizeFinancialAccount(convert(snapshot), home.id);
+  if (current.ownerUid !== uid() || target.ownerUid !== current.ownerUid)
+    throw new Error("Esta conta não pode ser compartilhada com o espaço selecionado.");
+  if (Engine.financialAccountAllowsSpace(current, target.id)) return { ...current, usageFinancialSpaceId: target.id };
+  const allowedFinancialSpaceIds = [...new Set([
+    ...(current.accessMode === "selected_spaces" ? current.allowedFinancialSpaceIds : [current.defaultFinancialSpaceId || home.id]),
+    target.id,
+  ].filter(Boolean))], accessMode = allowedFinancialSpaceIds.length > 1 ? "selected_spaces" : "single_space";
+  await updateDoc(accountRef, clean({ accountHomeSpaceId: home.id, accessMode, allowedFinancialSpaceIds, defaultFinancialSpaceId: current.defaultFinancialSpaceId || home.id, updatedAt: now(), schemaVersion: 4 }));
+  emit("financial-data-changed", { entity: "financialAccount", id: current.id, spaceId: target.id, action: "shared" });
+  return normalizeFinancialAccount({ ...current, accessMode, allowedFinancialSpaceIds }, home.id);
+}
+
+async function updateFinancialAccount(homeSpaceId, accountId, input = {}) {
+  const home = assertSpace(homeSpaceId), refValue = childRef(home.id, "financialAccounts", accountId), snapshot = await getDoc(refValue), current = convert(snapshot);
+  if (!current) throw new Error("Conta não encontrada.");
+  if (current.ownerUid !== uid()) throw new Error("Somente o proprietário pode editar esta conta.");
+  const access = financialAccountAccessValue(home, input, normalizeFinancialAccount(current, home.id)), last4 = input.last4 === undefined
+    ? String(current.last4 || "") : String(input.last4 || "").replace(/\D/g, "").slice(-4),
+    institution = input.institution === undefined ? current.institution || null : String(input.institution || "").trim().slice(0, 80) || null,
+    patch = clean({
+      name: input.name === undefined ? current.name : requiredText(input.name, "o nome da conta", 80),
+      institution,
+      institutionKey: Engine.normalizeInstitutionKey(institution || (input.name === undefined ? current.name : input.name)),
+      last4: last4 || null,
+      type: input.type === undefined ? current.type : Engine.normalizeFinancialAccountType(input.type),
+      includeInAvailableBalance: input.includeInAvailableBalance === undefined ? current.includeInAvailableBalance !== false : input.includeInAvailableBalance === true,
+      accountHomeSpaceId: home.id,
+      ...access,
+      schemaVersion: 4,
+      updatedAt: now(),
+    });
+  if (last4 && last4.length !== 4) throw new Error("Informe os 4 últimos dígitos ou deixe o campo vazio.");
+  await updateDoc(refValue, patch);
+  emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: "updated" });
+  return normalizeFinancialAccount({ ...current, ...patch }, home.id);
+}
+
+async function archiveFinancialAccount(homeSpaceId, accountId, options = {}) {
+  const home = assertSpace(homeSpaceId), refValue = childRef(home.id, "financialAccounts", accountId), snapshot = await getDoc(refValue), account = convert(snapshot);
+  if (!account) throw new Error("Conta não encontrada.");
+  if (account.ownerUid !== uid()) throw new Error("Somente o proprietário pode remover esta conta.");
+  if (options.deleteIfUnused === true && typeof window.FirebaseCallable === "function") {
+    const response = await window.FirebaseCallable("deleteUnusedFinancialAccount", { homeSpaceId: home.id, accountId }), result = response.data || {};
+    emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: result.deleted ? "deleted" : "archived" });
+    return result;
+  }
+  await updateDoc(refValue, { active: false, archivedAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 4 });
+  emit("financial-data-changed", { entity: "financialAccount", id: accountId, spaceId: home.id, action: "archived" });
+  return { deleted: false, archived: true, fallback: true };
+}
+
+async function resolveFinancialAccountForSpace(spaceId, accountId, explicitHomeSpaceId = "") {
+  const target = assertSpace(spaceId), id = requiredText(accountId, "a conta", 120), explicitHome = String(explicitHomeSpaceId || "").trim();
+  if (explicitHome) {
+    const home = assertSpace(explicitHome), ref = childRef(home.id, "financialAccounts", id), snapshot = await getDoc(ref),
+      account = normalizeFinancialAccount(convert(snapshot), home.id);
+    if (!account || account.active === false || !accountCanBeUsedInSpace(account, target))
+      throw new Error("A conta de origem ou destino não está disponível neste espaço.");
+    return { account, ref, homeSpaceId: home.id };
+  }
+  const account = (await listFinancialAccounts(target.id)).find((item) => item.id === id);
+  if (!account) throw new Error("A conta de origem ou destino não está disponível neste espaço.");
+  const homeSpaceId = accountHomeSpaceId(account, target.id);
+  return { account, ref: childRef(homeSpaceId, "financialAccounts", id), homeSpaceId };
+}
+
 async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
   const space = assertSpace(spaceId), id = requiredText(accountId, "a conta", 120), targetBalanceCents = Number(input.targetBalanceCents),
     opId = String(input.operationId || operationId("balance_adjustment")), changedAt = input.occurredAt || now(),
-    accountRef = childRef(space.id, "financialAccounts", id), entryRef = childRef(space.id, "entries", opId), eventRef = childRef(space.id, "events", opId);
+    resolved = await resolveFinancialAccountForSpace(space.id, id, input.financialAccountHomeSpaceId), accountRef = resolved.ref,
+    entryRef = childRef(space.id, "entries", opId), eventRef = childRef(space.id, "events", opId);
   if (!Number.isInteger(targetBalanceCents)) throw new Error("Informe o saldo real em centavos.");
   const result = await runTransaction(db, async (transaction) => {
     const [accountSnapshot, entrySnapshot] = await Promise.all([transaction.get(accountRef), transaction.get(entryRef)]);
@@ -595,6 +756,7 @@ async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
       paidAt: changedAt,
       paymentMethod: "other",
       financialAccountId: id,
+      financialAccountHomeSpaceId: resolved.homeSpaceId,
       cashFlowEffect: false,
       expenseRecognized: false,
       sourceType: "balance_adjustment",
@@ -603,11 +765,11 @@ async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
       targetBalanceCents,
       notes: String(input.reason || "Conciliação manual de saldo").slice(0, 300),
       createdAt: changedAt,
-      schemaVersion: 3,
+      schemaVersion: 4,
     }), value = { ...baseMetadata(space, opId), ...entry, createdAt: changedAt, updatedAt: changedAt };
     transaction.update(accountRef, clean(accountBalancePatch(account, differenceCents, changedAt, opId)));
     transaction.set(entryRef, clean(value));
-    transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId: opId, financialAccountId: id, eventKind: "financial_account_balance_adjusted", transition: "reconciled", status: "applied", amountCents: Math.abs(differenceCents), previousBalanceCents, targetBalanceCents, createdAt: changedAt, schemaVersion: 3 }));
+    transaction.set(eventRef, clean({ id: opId, ...baseMetadata(space, opId), entryId: opId, financialAccountId: id, financialAccountHomeSpaceId: resolved.homeSpaceId, eventKind: "financial_account_balance_adjusted", transition: "reconciled", status: "applied", amountCents: Math.abs(differenceCents), previousBalanceCents, targetBalanceCents, createdAt: changedAt, schemaVersion: 4 }));
     return { account: { ...account, ...accountBalancePatch(account, differenceCents, changedAt, opId) }, entry: value, retried: false };
   });
   emit("financial-data-changed", { entity: "financialAccount", id, spaceId: space.id, action: "balance-adjusted" });
@@ -616,7 +778,7 @@ async function adjustFinancialAccountBalance(spaceId, accountId, input = {}) {
 
 function financialInstitutionRefs(input = {}) {
   const accounts = (Array.isArray(input.accounts) ? input.accounts : []).map((account) => {
-    const space = assertSpace(requiredText(account.financialSpaceId, "o espaço da conta", 120));
+    const space = assertSpace(requiredText(account.accountHomeSpaceId || account.financialSpaceId, "o espaço da conta", 120));
     return { kind: "account", ref: childRef(space.id, "financialAccounts", requiredText(account.id, "a conta", 120)) };
   }), cards = (Array.isArray(input.cards) ? input.cards : []).map((card) => {
     const home = assertSpace(requiredText(card.cardHomeSpaceId, "o espaço do cartão", 120));
@@ -633,8 +795,8 @@ async function updateFinancialInstitution(input = {}) {
     const snapshots = await Promise.all(records.map((record) => transaction.get(record.ref)));
     snapshots.forEach((snapshot) => { if (!snapshot.exists()) throw new Error("Um item desta instituição não foi encontrado."); });
     records.forEach((record) => transaction.update(record.ref, clean(record.kind === "card"
-      ? { institution: name, issuer: name, updatedAt: changedAt }
-      : { institution: name, updatedAt: changedAt })));
+      ? { institution: name, issuer: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt }
+      : { institution: name, institutionKey: Engine.normalizeInstitutionKey(name), updatedAt: changedAt })));
   });
   emit("financial-data-changed", { entity: "financialInstitution", action: "updated", name });
   return { name, updated: records.length };
@@ -716,18 +878,21 @@ async function createCreditCard(spaceId, input = {}) {
   if (closingDay < 1 || closingDay > 31) throw new Error("O fechamento deve ficar entre os dias 1 e 31.");
   if (dueDay < 1 || dueDay > 31) throw new Error("O vencimento deve ficar entre os dias 1 e 31.");
   if (last4.length !== 4) throw new Error("Informe os 4 últimos dígitos do cartão.");
-  const access = creditCardAccessValue(space, input), value = {
+  const access = creditCardAccessValue(space, input), paymentAccount = input.paymentAccountId
+    ? await resolveFinancialAccountForSpace(space.id, input.paymentAccountId, input.paymentAccountHomeSpaceId) : null, value = {
     id,
     ...baseMetadata(space, opId),
     cardHomeSpaceId: space.id,
     name: requiredText(input.name, "o nome do cartão", 80),
     issuer: String(input.issuer || input.institution || "").trim().slice(0, 80) || null,
     institution: String(input.institution || input.issuer || "").trim().slice(0, 80) || null,
+    institutionKey: Engine.normalizeInstitutionKey(input.institution || input.issuer || input.name),
     last4,
     limitCents: integerCents(input.limitCents || 0, "limite"),
     closingDay,
     dueDay,
     paymentAccountId: input.paymentAccountId ? String(input.paymentAccountId) : null,
+    paymentAccountHomeSpaceId: paymentAccount?.homeSpaceId || null,
     ...access,
     committedCents: 0,
     active: true,
@@ -790,17 +955,20 @@ async function updateCreditCard(homeSpaceId, cardId, input = {}) {
   const home = assertSpace(homeSpaceId), refValue = childRef(home.id, "creditCards", cardId), snapshot = await getDoc(refValue), current = convert(snapshot);
   if (!current) throw new Error("Cartão não encontrado.");
   if (current.ownerUid !== uid()) throw new Error("Somente o proprietário pode editar este cartão.");
-  const access = creditCardAccessValue(home, input, normalizeCreditCard(current, home.id));
+  const access = creditCardAccessValue(home, input, normalizeCreditCard(current, home.id)), requestedPaymentAccountId = input.paymentAccountId === undefined ? current.paymentAccountId : input.paymentAccountId,
+    paymentAccount = requestedPaymentAccountId ? await resolveFinancialAccountForSpace(home.id, requestedPaymentAccountId, input.paymentAccountHomeSpaceId || current.paymentAccountHomeSpaceId) : null;
   if (access.accessMode !== "single_space") await rebuildCreditCardInvoiceProjections(home.id, cardId);
   const patch = clean({
     name: input.name === undefined ? current.name : requiredText(input.name, "o nome do cartão", 80),
     institution: input.institution === undefined ? current.institution || null : String(input.institution || "").trim().slice(0, 80) || null,
     issuer: input.institution === undefined ? current.issuer || current.institution || null : String(input.institution || "").trim().slice(0, 80) || null,
+    institutionKey: Engine.normalizeInstitutionKey(input.institution === undefined ? current.institution || current.issuer || current.name : input.institution || current.name),
     last4: input.last4 === undefined ? current.last4 : String(input.last4 || "").replace(/\D/g, "").slice(-4),
     limitCents: input.limitCents === undefined ? current.limitCents : integerCents(input.limitCents, "limite"),
     closingDay: input.closingDay === undefined ? current.closingDay : Math.trunc(Number(input.closingDay)),
     dueDay: input.dueDay === undefined ? current.dueDay : Math.trunc(Number(input.dueDay)),
     paymentAccountId: input.paymentAccountId === undefined ? current.paymentAccountId || null : input.paymentAccountId ? String(input.paymentAccountId) : null,
+    paymentAccountHomeSpaceId: paymentAccount?.homeSpaceId || null,
     cardHomeSpaceId: home.id,
     ...access,
     schemaVersion: 3,
@@ -947,7 +1115,12 @@ async function getCreditCardInvoiceDetails(spaceId, invoiceId, options = {}) {
 }
 
 async function createEntries(space, rawEntries, eventKind = "entry_created") {
-  const entries = rawEntries.map((raw) => Engine.normalizeEntry(raw)), refs = entries.map((entry) => ({
+  const entries = rawEntries.map((raw) => Engine.normalizeEntry(raw));
+  for (const entry of entries) if (cashAccountDelta(entry)) {
+    const resolved = await resolveFinancialAccountForSpace(space.id, entry.financialAccountId, entry.financialAccountHomeSpaceId);
+    entry.financialAccountHomeSpaceId = resolved.homeSpaceId;
+  }
+  const refs = entries.map((entry) => ({
     entry,
     entryRef: childRef(space.id, "entries", entry.id),
     eventRef: childRef(space.id, "events", entry.operationId),
@@ -958,14 +1131,15 @@ async function createEntries(space, rawEntries, eventKind = "entry_created") {
     const accountDeltas = new Map();
     refs.forEach((item, index) => {
       if (snapshots[index].exists()) return;
-      const delta = cashAccountDelta(item.entry), accountId = String(item.entry.financialAccountId || "");
-      if (delta && accountId) accountDeltas.set(accountId, (accountDeltas.get(accountId) || 0) + delta);
+      const delta = cashAccountDelta(item.entry), accountId = String(item.entry.financialAccountId || ""),
+        homeSpaceId = String(item.entry.financialAccountHomeSpaceId || space.id), key = `${homeSpaceId}:${accountId}`;
+      if (delta && accountId) accountDeltas.set(key, (accountDeltas.get(key) || 0) + delta);
     });
     const accountSnapshots = new Map();
-    for (const accountId of accountDeltas.keys()) {
-      const snapshot = await transaction.get(childRef(space.id, "financialAccounts", accountId));
+    for (const key of accountDeltas.keys()) {
+      const [homeSpaceId, accountId] = key.split(":"), snapshot = await transaction.get(childRef(homeSpaceId, "financialAccounts", accountId));
       if (!snapshot.exists() || convert(snapshot).active === false) throw new Error("A conta de origem ou destino não está disponível.");
-      accountSnapshots.set(accountId, snapshot);
+      accountSnapshots.set(key, snapshot);
     }
     const values = refs.map((item, index) => {
       if (snapshots[index].exists()) return convert(snapshots[index]);
@@ -989,9 +1163,9 @@ async function createEntries(space, rawEntries, eventKind = "entry_created") {
       }));
       return value;
     });
-    for (const [accountId, delta] of accountDeltas) {
-      const snapshot = accountSnapshots.get(accountId), account = convert(snapshot);
-      transaction.update(snapshot.ref, clean(accountBalancePatch(account, delta, now(), `entries:${refs.filter((item) => item.entry.financialAccountId === accountId).map((item) => item.entry.operationId).join(",")}`)));
+    for (const [key, delta] of accountDeltas) {
+      const snapshot = accountSnapshots.get(key), account = convert(snapshot);
+      transaction.update(snapshot.ref, clean(accountBalancePatch(account, delta, now(), `entries:${refs.filter((item) => `${item.entry.financialAccountHomeSpaceId || space.id}:${item.entry.financialAccountId}` === key).map((item) => item.entry.operationId).join(",")}`)));
     }
     return values;
   });
@@ -1557,8 +1731,9 @@ async function payCreditCardInvoice(spaceId, invoiceId, input = {}) {
     opId = String(input.operationId || operationId("invoice_payment")),
     amountCents = Number(input.amountCents), paidAt = input.paidAt || now(),
     financialAccountId = requiredText(input.financialAccountId, "a conta de origem", 120),
+    resolvedAccount = await resolveFinancialAccountForSpace(space.id, financialAccountId, input.financialAccountHomeSpaceId),
     method = String(input.paymentMethod || "other"), invoiceRef = childRef(cardHomeSpaceId, "creditCardInvoices", invoiceId),
-    accountRef = childRef(space.id, "financialAccounts", financialAccountId),
+    accountRef = resolvedAccount.ref,
     paymentRef = childRef(cardHomeSpaceId, "creditCardInvoicePayments", opId), entryId = `invoice_payment_${opId}`,
     entryRef = childRef(space.id, "entries", entryId), eventRef = childRef(space.id, "events", opId), createdAt = now();
   if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um pagamento maior que zero.");
@@ -1584,6 +1759,7 @@ async function payCreditCardInvoice(spaceId, invoiceId, input = {}) {
         creditCardInvoiceId: invoice.id,
         creditCardId: invoice.creditCardId,
         financialAccountId,
+        financialAccountHomeSpaceId: resolvedAccount.homeSpaceId,
         amountCents,
         paymentMethod: method,
         paidAt,
@@ -1608,6 +1784,7 @@ async function payCreditCardInvoice(spaceId, invoiceId, input = {}) {
         cashFlowEffect: true,
         expenseRecognized: false,
         financialAccountId,
+        financialAccountHomeSpaceId: resolvedAccount.homeSpaceId,
         creditCardId: invoice.creditCardId,
         cardHomeSpaceId,
         creditCardInvoiceId: invoice.id,
@@ -1731,14 +1908,17 @@ async function markPaid(spaceId, entry, input = {}) {
   if (!["cash", "pix", "debit_card", "automatic_debit", "transfer", "other"].includes(method))
     throw new Error("Escolha uma forma de pagamento válida.");
   const paidAt = input.paidAt || now(), opId = String(input.operationId || operationId(`payment_${entry.id}`)), entryRef = childRef(space.id, "entries", entry.id),
+    initial = convert(await getDoc(entryRef));
+  if (!initial) throw new Error("Conta não encontrada.");
+  const financialAccountId = requiredText(input.financialAccountId || initial.financialAccountId, "a conta ou carteira de origem", 120),
+    resolvedAccount = await resolveFinancialAccountForSpace(space.id, financialAccountId, input.financialAccountHomeSpaceId || initial.financialAccountHomeSpaceId),
     eventRef = childRef(space.id, "events", opId), result = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(entryRef);
       if (!snapshot.exists()) throw new Error("Conta não encontrada.");
       const current = convert(snapshot);
       if (["cancelled", "reversed"].includes(current.status)) throw new Error("Esta conta não pode ser paga.");
       if (current.status === "paid") return current;
-      const financialAccountId = requiredText(input.financialAccountId || current.financialAccountId, "a conta ou carteira de origem", 120),
-        accountRef = childRef(space.id, "financialAccounts", financialAccountId), accountSnapshot = await transaction.get(accountRef);
+      const accountRef = resolvedAccount.ref, accountSnapshot = await transaction.get(accountRef);
       if (!accountSnapshot.exists() || convert(accountSnapshot).active === false) throw new Error("A conta de origem não está disponível.");
       const patch = {
         status: "paid",
@@ -1751,6 +1931,7 @@ async function markPaid(spaceId, entry, input = {}) {
         cashFlowEffect: true,
         expenseRecognized: true,
         financialAccountId,
+        financialAccountHomeSpaceId: resolvedAccount.homeSpaceId,
         paymentOperationId: opId,
         notes: String(input.notes || current.notes || "").slice(0, 500),
         updatedAt: paidAt,
@@ -1791,6 +1972,7 @@ async function undoEntryPayment(spaceId, entry, reason = "Registro de pagamento 
     paymentMethod: null,
     paymentType: null,
     financialAccountId: null,
+    financialAccountHomeSpaceId: null,
     cashFlowEffect: true,
     expenseRecognized: true,
     paymentOperationId: null,
@@ -1815,7 +1997,7 @@ async function undoEntryPayment(spaceId, entry, reason = "Registro de pagamento 
       const current = convert(currentSnapshot);
       if (eventSnapshot.exists() && current.status === "pending") return { entry: current, retried: true, legacy: current.paymentMethod === "credit_card" };
       if (current.status !== "paid") throw new Error("Somente pagamentos realizados podem ser desfeitos.");
-      const accountRef = current.financialAccountId ? childRef(space.id, "financialAccounts", current.financialAccountId) : null,
+      const accountRef = current.financialAccountId ? childRef(current.financialAccountHomeSpaceId || space.id, "financialAccounts", current.financialAccountId) : null,
         accountSnapshot = accountRef ? await transaction.get(accountRef) : null;
       if (accountRef && (!accountSnapshot.exists() || convert(accountSnapshot).active === false)) throw new Error("A conta vinculada ao pagamento não está disponível.");
       transaction.update(entryRef, clean(reopenPatch));
@@ -2122,6 +2304,7 @@ async function reversePaidEntry(spaceId, entry, reason = "") {
     sourceId: entry.id,
     reversedEntryId: entry.id,
     financialAccountId: entry.financialAccountId || null,
+    financialAccountHomeSpaceId: entry.financialAccountHomeSpaceId || (entry.financialAccountId ? spaceId : null),
     notes: String(reason).slice(0, 300),
   }), entryRef = childRef(space.id, "entries", entry.id), reversalRef = childRef(space.id, "entries", id), eventRef = childRef(space.id, "events", opId),
     result = await runTransaction(db, async (transaction) => {
@@ -2130,10 +2313,10 @@ async function reversePaidEntry(spaceId, entry, reason = "") {
       if (!currentSnapshot.exists()) throw new Error("Lançamento não encontrado.");
       const current = convert(currentSnapshot);
       if (current.status !== "paid") throw new Error("Somente lançamentos realizados podem ser estornados.");
-      const accountRef = current.financialAccountId ? childRef(space.id, "financialAccounts", current.financialAccountId) : null,
+      const accountRef = current.financialAccountId ? childRef(current.financialAccountHomeSpaceId || space.id, "financialAccounts", current.financialAccountId) : null,
         accountSnapshot = accountRef ? await transaction.get(accountRef) : null;
       if (accountRef && (!accountSnapshot.exists() || convert(accountSnapshot).active === false)) throw new Error("A conta vinculada ao lançamento não está disponível.");
-      const value = { ...baseMetadata(space, opId), ...reversal, amountCents: current.amountCents, financialAccountId: current.financialAccountId || null, createdAt: reversedAt, updatedAt: reversedAt };
+      const value = { ...baseMetadata(space, opId), ...reversal, amountCents: current.amountCents, financialAccountId: current.financialAccountId || null, financialAccountHomeSpaceId: current.financialAccountHomeSpaceId || (current.financialAccountId ? space.id : null), createdAt: reversedAt, updatedAt: reversedAt };
       transaction.set(reversalRef, clean(value));
       transaction.update(entryRef, { reversedByEntryId: id, reversedAt, updatedAt: reversedAt });
       if (accountRef) transaction.update(accountRef, clean(accountBalancePatch(convert(accountSnapshot), current.direction === "in" ? -current.amountCents : current.amountCents, reversedAt, opId)));
@@ -2153,18 +2336,19 @@ async function createTransfer(fromSpaceId, toSpaceId, input = {}) {
     incoming = Engine.normalizeEntry({ ...common, id: `${transferId}_in`, operationId: `${transferId}:in`, direction: "in", entryType: "transfer_in", description: input.description || `Transferência de ${from.name}` });
   if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Informe um valor válido para transferir.");
   if (!fromFinancialAccountId || !toFinancialAccountId) throw new Error("Escolha as contas de origem e destino.");
-  if (fromSpaceId === toSpaceId && (!fromFinancialAccountId || !toFinancialAccountId || fromFinancialAccountId === toFinancialAccountId))
+  const fromAccount = await resolveFinancialAccountForSpace(from.id, fromFinancialAccountId, input.fromFinancialAccountHomeSpaceId),
+    toAccount = await resolveFinancialAccountForSpace(to.id, toFinancialAccountId, input.toFinancialAccountHomeSpaceId);
+  if (fromAccount.homeSpaceId === toAccount.homeSpaceId && fromFinancialAccountId === toFinancialAccountId)
     throw new Error("Escolha contas diferentes para a transferência.");
   const created = await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(transferRef), fromAccountSnapshot = fromFinancialAccountId
-      ? await transaction.get(childRef(from.id, "financialAccounts", fromFinancialAccountId)) : null,
-      toAccountSnapshot = toFinancialAccountId ? await transaction.get(childRef(to.id, "financialAccounts", toFinancialAccountId)) : null;
+    const snapshot = await transaction.get(transferRef), fromAccountSnapshot = await transaction.get(fromAccount.ref),
+      toAccountSnapshot = await transaction.get(toAccount.ref);
     if (snapshot.exists()) return false;
     if (fromAccountSnapshot && (!fromAccountSnapshot.exists() || convert(fromAccountSnapshot).active === false)) throw new Error("A conta de origem não está disponível.");
     if (toAccountSnapshot && (!toAccountSnapshot.exists() || convert(toAccountSnapshot).active === false)) throw new Error("A conta de destino não está disponível.");
-    transaction.set(transferRef, clean({ id: transferId, operationId: transferId, fromSpaceId, toSpaceId, fromFinancialAccountId: fromFinancialAccountId || null, toFinancialAccountId: toFinancialAccountId || null, amountCents, description: String(input.description || "Transferência"), createdBy: uid(), status: "completed", occurredAt: at, createdAt: at, updatedAt: at, schemaVersion: 2 }));
-    transaction.set(childRef(from.id, "entries", out.id), clean({ ...baseMetadata(from, out.operationId), ...out, financialAccountId: fromFinancialAccountId || null, transferCounterpartyAccountId: toFinancialAccountId || null, createdAt: at, updatedAt: at }));
-    transaction.set(childRef(to.id, "entries", incoming.id), clean({ ...baseMetadata(to, incoming.operationId), ...incoming, financialAccountId: toFinancialAccountId || null, transferCounterpartyAccountId: fromFinancialAccountId || null, createdAt: at, updatedAt: at }));
+    transaction.set(transferRef, clean({ id: transferId, operationId: transferId, fromSpaceId, toSpaceId, fromFinancialAccountId, fromFinancialAccountHomeSpaceId: fromAccount.homeSpaceId, toFinancialAccountId, toFinancialAccountHomeSpaceId: toAccount.homeSpaceId, amountCents, description: String(input.description || "Transferência"), createdBy: uid(), status: "completed", occurredAt: at, createdAt: at, updatedAt: at, schemaVersion: 3 }));
+    transaction.set(childRef(from.id, "entries", out.id), clean({ ...baseMetadata(from, out.operationId), ...out, financialAccountId: fromFinancialAccountId, financialAccountHomeSpaceId: fromAccount.homeSpaceId, transferCounterpartyAccountId: toFinancialAccountId, transferCounterpartyAccountHomeSpaceId: toAccount.homeSpaceId, createdAt: at, updatedAt: at, schemaVersion: 4 }));
+    transaction.set(childRef(to.id, "entries", incoming.id), clean({ ...baseMetadata(to, incoming.operationId), ...incoming, financialAccountId: toFinancialAccountId, financialAccountHomeSpaceId: toAccount.homeSpaceId, transferCounterpartyAccountId: fromFinancialAccountId, transferCounterpartyAccountHomeSpaceId: fromAccount.homeSpaceId, createdAt: at, updatedAt: at, schemaVersion: 4 }));
     if (fromAccountSnapshot) transaction.update(fromAccountSnapshot.ref, clean(accountBalancePatch(convert(fromAccountSnapshot), -amountCents, at, `${transferId}:out`)));
     if (toAccountSnapshot) transaction.update(toAccountSnapshot.ref, clean(accountBalancePatch(convert(toAccountSnapshot), amountCents, at, `${transferId}:in`)));
     return true;
@@ -2381,7 +2565,10 @@ async function loadConsolidated(ids = selectedConsolidatedIds(), selectedPeriod 
     futureInvoices = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.futureInvoices, dashboard)), (invoice) => `${invoice.cardHomeSpaceId}:${invoice.id}`)
       .sort((left, right) => (Engine.localDate(left.dueDate)?.getTime() || Infinity) - (Engine.localDate(right.dueDate)?.getTime() || Infinity)),
     selectedCreditCardInvoices = uniqueBy(dashboards.flatMap((dashboard) => withSpace(dashboard.selectedCreditCardInvoices, dashboard)), (invoice) => `${invoice.cardHomeSpaceId}:${invoice.id}`),
-    financialAccounts = dashboards.flatMap((dashboard) => withSpace(dashboard.financialAccounts, dashboard));
+    financialAccounts = uniqueBy(
+      dashboards.flatMap((dashboard) => withSpace(dashboard.financialAccounts, dashboard)),
+      (account) => Engine.financialAccountKey(account),
+    );
   const consolidated = Engine.consolidate(dashboards), pendingAccounts = (consolidated.payables || []).filter((entry) => entry.entityType !== "credit_card_invoice"),
     result = {
     consolidated: true,
@@ -2467,6 +2654,9 @@ const FinancialSpaceService = {
   createCategory,
   listFinancialAccounts,
   createFinancialAccount,
+  useExistingFinancialAccount,
+  updateFinancialAccount,
+  archiveFinancialAccount,
   adjustFinancialAccountBalance,
   updateFinancialInstitution,
   archiveFinancialInstitution,
@@ -2475,6 +2665,7 @@ const FinancialSpaceService = {
   updateCreditCard,
   rebuildCreditCardInvoiceProjections,
   canShareCreditCards: (spaceId) => assertSpace(spaceId).ownerUid === uid(),
+  canShareFinancialAccounts: (spaceId) => assertSpace(spaceId).ownerUid === uid(),
   listCreditCardInvoices,
   ensureCreditCardInvoice,
   loadCreditOverview,

@@ -461,6 +461,44 @@ exports.reconcileBusinessFinancialIncome=onCall({region:REGION,memory:'256MiB',t
   }
 });
 
+exports.deleteUnusedFinancialAccount=onCall({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:10},async request=>{
+  const uid=request.auth?.uid,homeSpaceId=String(request.data?.homeSpaceId||'').trim(),accountId=String(request.data?.accountId||'').trim();
+  if(!uid)throw new HttpsError('unauthenticated','Entre na sua conta para gerenciar a conta financeira.');
+  if(!/^[A-Za-z0-9_-]{1,120}$/.test(homeSpaceId)||!/^[A-Za-z0-9_-]{1,120}$/.test(accountId))throw new HttpsError('invalid-argument','Conta financeira inválida.');
+  const spaceRef=db.doc(`financialSpaces/${homeSpaceId}`),accountRef=spaceRef.collection('financialAccounts').doc(accountId),[spaceSnapshot,accountSnapshot]=await Promise.all([spaceRef.get(),accountRef.get()]);
+  if(!spaceSnapshot.exists||!accountSnapshot.exists)throw new HttpsError('not-found','Conta financeira não encontrada.');
+  const space=spaceSnapshot.data()||{},account=accountSnapshot.data()||{};
+  if(String(space.ownerUid||'')!==uid||String(account.ownerUid||'')!==uid)throw new HttpsError('permission-denied','Somente o proprietário pode remover esta conta.');
+  const accountBalance=Number.isInteger(account.currentBalanceCents)?account.currentBalanceCents:Number(account.initialBalanceCents||0);
+  const ownerSpaces=await db.collection('financialSpaces').where('ownerUid','==',uid).get(),businessIds=[...new Set(ownerSpaces.docs.map(doc=>String(doc.data()?.linkedBusinessId||'')).filter(Boolean))],
+    spaceQueries=[['entries','financialAccountId'],['creditCardInvoicePayments','financialAccountId'],['creditCards','paymentAccountId'],['recurrences','financialAccountId']],
+    businessQueries=[['payments','financialAccountId'],['payments','destinationAccountId'],['payments','sourceAccountId'],['income','destinationAccountId'],['expenses','sourceAccountId']],
+    queryDescriptors=[
+      ...ownerSpaces.docs.flatMap(spaceDoc=>spaceQueries.map(([collection,field])=>({kind:'space',legacyHomeSpaceId:spaceDoc.id,promise:spaceDoc.ref.collection(collection).where(field,'==',accountId).get()}))),
+      ...businessIds.flatMap(businessId=>businessQueries.map(([collection,field])=>({kind:'business',businessId,promise:db.collection(`businesses/${businessId}/${collection}`).where(field,'==',accountId).get()}))),
+      {kind:'transfer',promise:db.collection('financialTransfers').where('fromFinancialAccountId','==',accountId).get()},
+      {kind:'transfer',promise:db.collection('financialTransfers').where('toFinancialAccountId','==',accountId).get()},
+    ],snapshots=await Promise.all(queryDescriptors.map(descriptor=>descriptor.promise));
+  const belongsToAccount=(doc,descriptor)=>{
+    const data=doc.data()||{},homes=[data.financialAccountHomeSpaceId,data.paymentAccountHomeSpaceId,data.fromFinancialAccountHomeSpaceId,data.toFinancialAccountHomeSpaceId].map(value=>String(value||'')).filter(Boolean);
+    if(homes.length)return homes.includes(homeSpaceId);
+    if(descriptor.kind==='space')return descriptor.legacyHomeSpaceId===homeSpaceId;
+    if(descriptor.kind==='business')return true;
+    return String(data.ownerUid||data.ownerId||data.createdBy||'')===uid;
+  };
+  const automationReferences=ownerSpaces.docs.filter(doc=>String(doc.data()?.automation?.defaultIncomeFinancialAccountId||'')===accountId&&String(doc.data()?.automation?.defaultIncomeFinancialAccountHomeSpaceId||doc.id)===homeSpaceId).length,
+    references=automationReferences+snapshots.reduce((sum,snapshot,index)=>sum+snapshot.docs.filter(doc=>belongsToAccount(doc,queryDescriptors[index])).length,0);
+  if(references>0){
+    await accountRef.set({active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4},{merge:true});
+    logger.info('[FINANCIAL_ACCOUNT_ARCHIVED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,accountId,references});
+    return{deleted:false,archived:true,references};
+  }
+  if(accountBalance!==0)throw new HttpsError('failed-precondition','Zere ou transfira o saldo antes de excluir esta conta.');
+  await accountRef.delete();
+  logger.info('[FINANCIAL_ACCOUNT_DELETED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,accountId,references:0});
+  return{deleted:true,archived:false,references:0};
+});
+
 exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
   const started=Date.now();
   try{
