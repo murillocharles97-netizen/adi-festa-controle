@@ -162,7 +162,7 @@
       f = resumoFechamento(),
       ultima = Vendas.ultima();
     return (
-      cabecalho("Olá! Vamos vender?", "Seu resumo rápido da Adi Festa.") +
+      cabecalho("Olá! Vamos vender?", "Seu resumo rápido do seu negócio.") +
       `<section class="metrics">${metric("Vendas hoje", hoje.length, "registros", "shopping-cart")}${metric("Vendido hoje", dinheiro(valorHoje), "valor final", "circle-dollar-sign")}${metric("Lucro hoje", dinheiro(lucroHoje), "somente para você", "trending-up")}${metric("Fiado em aberto", dinheiro(fiado), "saldo de clientes", "hand-coins")}${metric("Recebido no mês", dinheiro(recebido), "pagamentos", "wallet-cards")}${metric("Clientes", d.clientes.length, "cadastrados", "users")}${metric("Produtos", d.produtos.length, "cadastrados", "candy")}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon("plus")}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button><button class="quick-card" data-go="fiados"><span>${icon("banknote-arrow-down")}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button></section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric("Vendido", dinheiro(f.vendido), "hoje", "circle-dollar-sign")}${metric("Recebido", dinheiro(f.recebido), "pagamentos", "wallet-cards")}${metric("Fiado", dinheiro(f.fiado), "novas contas", "hand-coins")}${metric("Lucro estimado", dinheiro(f.lucro), "privado", "trending-up")}${metric("Vendas", f.vendas, "realizadas", "shopping-cart")}${metric("Clientes", f.clientes, "atendidos", "users")}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon("copy")} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon("message-circle")} Compartilhar no WhatsApp</button>${ultima ? `<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer() ? "" : "disabled"}>${icon("undo-2")} Desfazer última venda</button>` : ""}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0, 5), "Vendas recentes")}`
     );
   }
@@ -655,12 +655,21 @@
           });
         if (b.dataset.clientWhatsapp) {
           const c = Clientes.obter(b.dataset.clientWhatsapp),
+            businessName = String(
+              window.BusinessContext?.get?.().business?.name ||
+                window.DB?.carregar?.().config?.nome ||
+                "seu estabelecimento",
+            ).trim(),
+            businessReference =
+              businessName === "seu estabelecimento"
+                ? "no seu estabelecimento"
+                : `em ${businessName}`,
             texto =
               c.saldo < 0
-                ? `sua conta atual na Adi Festa está em ${dinheiro(Math.abs(c.saldo))}`
+                ? `sua conta atual ${businessReference} está em ${dinheiro(Math.abs(c.saldo))}`
                 : c.saldo > 0
-                  ? `você possui um crédito de ${dinheiro(c.saldo)} na Adi Festa`
-                  : "sua conta na Adi Festa está zerada",
+                  ? `você possui um crédito de ${dinheiro(c.saldo)} ${businessReference}`
+                  : `sua conta ${businessReference} está zerada`,
             msg = `Olá, tudo bem? Passando para avisar que ${texto}. Obrigado!`;
           window.open(
             `https://wa.me/${telefoneWhatsApp(c.telefone)}?text=${encodeURIComponent(msg)}`,
@@ -1049,7 +1058,7 @@
         $("#replace-word").value.trim() !== "SUBSTITUIR"
       )
         return toast("Digite SUBSTITUIR para confirmar.", true);
-      baixarBackup("adi-festa-backup-automatico");
+      baixarBackup("veconi-backup-automatico");
       const button = $("#modal .confirm");
       button.disabled = true;
       button.textContent = "Restaurando…";

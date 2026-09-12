@@ -1,7 +1,10 @@
 {
+  "id": "./index.html",
   "name": "VECONI",
   "short_name": "VECONI",
-  "description": "Vendas, estoque, clientes, CRM e financeiro em um só lugar.",
+  "description": "VECONI — Seu negócio mais completo. Vendas, estoque, clientes, CRM e financeiro em um só lugar.",
+  "lang": "pt-BR",
+  "dir": "ltr",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -9,10 +12,11 @@
   "background_color": "#07141b",
   "theme_color": "#07141b",
   "orientation": "portrait",
+  "prefer_related_applications": false,
   "icons": [
-    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
-    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
-    {"src":"./assets/icon-maskable-192.png","sizes":"192x192","type":"image/png","purpose":"maskable"},
-    {"src":"./assets/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+    {"src":"./assets/veconi-icon-192-v133.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./assets/veconi-icon-512-v133.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"./assets/veconi-maskable-192-v133.png","sizes":"192x192","type":"image/png","purpose":"maskable"},
+    {"src":"./assets/veconi-maskable-512-v133.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
   ]
 }

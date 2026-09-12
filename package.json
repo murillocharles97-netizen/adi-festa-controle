@@ -14,6 +14,7 @@
     "test:crm-mobile-browser": "node scripts/audit-crm-mobile-carousel.cjs",
     "test:public-catalog-browser": "node scripts/audit-public-catalog-desktop-v2.cjs",
     "test:financial-browser": "node scripts/audit-financial-accounts-cards-v130.cjs && node scripts/audit-financial-shared-accounts-v131.cjs && node scripts/audit-financial-global-credit-cards-v132.cjs",
+    "test:pwa-branding": "node scripts/audit-veconi-pwa-v133.cjs",
     "test:subscription-browser": "node scripts/audit-subscription-pix.cjs && node scripts/audit-subscription-card-monthly.cjs",
     "test:mobile-structural": "node scripts/audit-mobile-structural.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth,storage --project adi-festa-variations-test \"node --test --test-concurrency=1 tests/emulator/*.rules.test.js\"",

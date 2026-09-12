@@ -25,7 +25,7 @@ window.Modais=(()=>{
   function currentBusiness(){
     const local=DB.carregar().config||{},cloud=window.FirebaseSession?.business||{};
     return{
-      name:cloud.receiptName||cloud.name||local.receiptName||local.nome||'Adi Festa',
+      name:cloud.receiptName||cloud.name||local.receiptName||local.nome||'Seu negócio',
       receiptName:cloud.receiptName||local.receiptName||'',
       phone:cloud.phone||local.telefone||'',
       primaryColor:cloud.primaryColor||local.primaryColor||'#31d0ad'
@@ -47,7 +47,7 @@ window.Modais=(()=>{
     return /^55[1-9]{2}\d{8,9}$/.test(digits)?digits:'';
   }
   function buildSaleShareMessage({business={},customer={},sale={},balanceBefore,balanceAfter}={}){
-    const businessName=business.receiptName||business.name||'Adi Festa';
+    const businessName=business.receiptName||business.name||'Seu negócio';
     const customerName=customer.nome||sale.clienteNome||'',guest=!customerName||customerName.toLowerCase()==='venda avulsa';
     const lines=[guest?'Olá! 😊':`Olá, ${customerName}! 😊`,''],amount=dinheiro(value(sale));
     if(sale.status==='fiado'){

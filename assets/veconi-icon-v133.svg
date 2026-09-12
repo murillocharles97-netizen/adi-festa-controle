@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Ícone VECONI</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="68%"><stop offset="0" stop-color="#0b3336"/><stop offset=".62" stop-color="#07191f"/><stop offset="1" stop-color="#040a0d"/></radialGradient>
+    <linearGradient id="left" x1="124" y1="145" x2="267" y2="364" gradientUnits="userSpaceOnUse"><stop stop-color="#2af2e4"/><stop offset=".58" stop-color="#16cdbb"/><stop offset="1" stop-color="#078f91"/></linearGradient>
+    <linearGradient id="right" x1="388" y1="141" x2="245" y2="371" gradientUnits="userSpaceOnUse"><stop stop-color="#31f4ea"/><stop offset=".5" stop-color="#16cdbb"/><stop offset="1" stop-color="#067c82"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="25" y="25" width="462" height="462" rx="92" fill="none" stroke="#18cbbb" stroke-opacity=".34"/>
+  <path d="M118 159c-5-9 2-19 12-19h56c12 0 23 7 29 17l70 126-42 76c-10 18-37 17-46-1l-79-199Z" fill="url(#left)"/>
+  <path d="m228 329 91-172c6-11 17-17 29-17h35c11 0 18 12 13 21l-101 190c-17 31-61 32-79 2l-12-20c8 13 18 12 24-4Z" fill="url(#right)"/>
+</svg>
