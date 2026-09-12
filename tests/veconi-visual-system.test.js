@@ -11,7 +11,7 @@ test('manifesto publica a identidade e todos os ícones VECONI', () => {
   assert.equal(manifest.name, 'VECONI');
   assert.equal(manifest.short_name, 'VECONI');
   assert.equal(manifest.theme_color, '#07141b');
-  const expectedDimensions = new Map([['icon-192.png',192],['icon-512.png',512],['icon-maskable-192.png',192],['icon-maskable-512.png',512],['apple-touch-icon-180.png',180],['favicon-16.png',16],['favicon-32.png',32],['favicon-48.png',48]]);
+  const expectedDimensions = new Map([['veconi-icon-192-v133.png',192],['veconi-icon-512-v133.png',512],['veconi-maskable-192-v133.png',192],['veconi-maskable-512-v133.png',512],['veconi-apple-touch-icon-180-v133.png',180],['veconi-favicon-16-v133.png',16],['veconi-favicon-32-v133.png',32],['veconi-favicon-48-v133.png',48]]);
   for (const [file, expectedSize] of expectedDimensions) {
     assert.ok(fs.statSync(path.join(root, 'assets', file)).size > 500, `${file} precisa existir e conter imagem`);
     const image = fs.readFileSync(path.join(root, 'assets', file));
@@ -30,13 +30,13 @@ test('design system centraliza tokens, primitives e estados acessíveis', () => 
   assert.match(css, /env\(safe-area-inset/);
 });
 
-test('shell identifica VECONI sem renomear o negócio Adi Festa', () => {
+test('shell identifica VECONI sem fixar um negócio legado antes da hidratação', () => {
   const html = read('index.html');
   assert.match(html, /<title>VECONI<\/title>/);
   assert.match(html, /data-veconi-logo="horizontal"/);
-  assert.match(html, /data-mobile-business-name data-business-name>Adi Festa/);
+  assert.match(html, /data-mobile-business-name data-business-name>Seu negócio/);
   assert.match(html, /veconi-theme\.css\?v=123/);
-  assert.match(html, /apple-touch-icon-180\.png/);
+  assert.match(html, /veconi-apple-touch-icon-180-v133\.png/);
   assert.doesNotMatch(html, /apple-mobile-web-app-title" content="Adi Festa"/);
 });
 
@@ -50,12 +50,12 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
   assert.match(read('functions/src/services/mercado-pago-service.js'), /reason:`VECONI - \$\{plan\.name\}`/);
 });
 
-test('service worker v132 troca o cache e inclui os assets da nova marca e do Financeiro', () => {
+test('service worker v133 troca o cache e inclui os assets versionados da marca e do Financeiro', () => {
   const worker = read('service-worker.js');
-  assert.match(worker, /veconi-v132-global-credit-cards/);
+  assert.match(worker, /veconi-v133-branding-pwa/);
   assert.match(worker, /financial-refinement\.css/);
-  assert.match(worker, /release:'131'/);
-  for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','icon-maskable-512.png','apple-touch-icon-180.png','favicon-32.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
+  assert.match(worker, /release:'133'/);
+  for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','veconi-maskable-512-v133.png','veconi-apple-touch-icon-180-v133.png','veconi-favicon-32-v133.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
 });
 
 test('fixture do screenshot gate cobre todos os módulos pedidos', () => {

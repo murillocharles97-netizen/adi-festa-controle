@@ -161,7 +161,7 @@ test("integração usa consulta limitada por cliente/vencimento e recibo não ex
   assert.match(receipt, /subscriptionExpiresAt/);
   assert.match(receipt, /Vigência da renovação/);
   assert.doesNotMatch(receipt, /custoUnitario|Custo total|Lucro/);
-  assert.match(worker, /veconi-v132-global-credit-cards/);
+  assert.match(worker, /veconi-v133-branding-pwa/);
 });
 
 test("venda recorrente exige cliente; fiado ativa na hora, aumenta dívida e mantém campanha pendente", () => {

@@ -105,9 +105,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 132 publica cartões globais no novo cache VECONI", () => {
-  assert.match(read("js/build-info.js"), /release: "132"/);
-  assert.match(sw, /veconi-v132-global-credit-cards/);
+test("release 133 publica o branding PWA sem remover cartões globais", () => {
+  assert.match(read("js/build-info.js"), /release: "133"/);
+  assert.match(sw, /veconi-v133-branding-pwa/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

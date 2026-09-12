@@ -243,7 +243,7 @@
     const context = window.BusinessContext?.get?.() || {};
     const business = context.business || window.FirebaseSession?.business || {};
     const name = String(business.name || window.DB?.carregar?.().config?.nome || "Sua empresa").trim();
-    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "AF";
+    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "--";
     document.querySelectorAll("[data-mobile-business-name]").forEach((item) => (item.textContent = name));
     document.querySelectorAll("[data-mobile-business-initials]").forEach((item) => (item.textContent = initials));
     document.querySelectorAll("[data-mobile-plan]").forEach((item) => (item.textContent = planName()));
