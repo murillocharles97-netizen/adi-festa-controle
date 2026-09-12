@@ -520,7 +520,7 @@ window.FinancialEngine = (() => {
     if (!targetId || normalized.active === false) return false;
     if (normalized.accessMode === "all_spaces") return true;
     if (normalized.accessMode === "selected_spaces") return normalized.allowedFinancialSpaceIds.includes(targetId);
-    return normalized.defaultFinancialSpaceId === targetId || normalized.cardHomeSpaceId === targetId;
+    return normalized.defaultFinancialSpaceId === targetId;
   };
   const adjustDimensionTotal = (values = {}, key = "", deltaCents = 0) => {
     const next = { ...(values && typeof values === "object" && !Array.isArray(values) ? values : {}) },

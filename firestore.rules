@@ -225,7 +225,7 @@ service cloud.firestore {
     }
     function creditCardScopeUpdateAllowed(before, after, homeSpaceId) {
       return !after.diff(before).affectedKeys().hasAny([
-          'cardHomeSpaceId', 'accessMode', 'allowedFinancialSpaceIds', 'defaultFinancialSpaceId'
+          'cardHomeSpaceId', 'accessMode', 'allowedFinancialSpaceIds', 'defaultFinancialSpaceId', 'active'
         ])
         || (
           request.auth.uid == before.ownerUid
@@ -738,8 +738,10 @@ service cloud.firestore {
           && request.resource.data.name is string
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() <= 80
-          && request.resource.data.last4 is string
-          && request.resource.data.last4.matches('^[0-9]{4}$')
+          && (
+            request.resource.data.last4 == null
+            || (request.resource.data.last4 is string && request.resource.data.last4.matches('^[0-9]{4}$'))
+          )
           && request.resource.data.limitCents is int
           && request.resource.data.limitCents >= 0
           && request.resource.data.committedCents == 0
@@ -756,8 +758,10 @@ service cloud.firestore {
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
-          && request.resource.data.last4 is string
-          && request.resource.data.last4.matches('^[0-9]{4}$')
+          && (
+            request.resource.data.last4 == null
+            || (request.resource.data.last4 is string && request.resource.data.last4.matches('^[0-9]{4}$'))
+          )
           && request.resource.data.limitCents is int
           && request.resource.data.limitCents >= 0
           && request.resource.data.committedCents is int
@@ -918,6 +922,13 @@ service cloud.firestore {
           && request.resource.data.status == 'confirmed';
         allow update, delete: if false;
       }
+    }
+
+    // Catálogo global do proprietário: a consulta collectionGroup sempre deve
+    // incluir ownerUid == request.auth.uid. A regra não concede essa visão
+    // consolidada a membros de empresa nem atravessa proprietários.
+    match /{path=**}/creditCards/{cardId} {
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
     match /financialTransfers/{transferId} {
