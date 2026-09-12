@@ -49,7 +49,7 @@ test("diagnóstico é carregado antes do app e cache PWA publica a correção", 
     index.indexOf("runtime-diagnostics.js") < index.indexOf("app.js?v=123"),
   );
   assert.match(index, /lifecycle-manager\.js\?v=83/);
-  assert.match(worker, /veconi-v129-financial-consolidated-home/);
+  assert.match(worker, /veconi-v130-financial-accounts-cards-ux/);
   assert.match(worker, /runtime-diagnostics\.js/);
   assert.match(worker, /lifecycle-manager\.js/);
 });
