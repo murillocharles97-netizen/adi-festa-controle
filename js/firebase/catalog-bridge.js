@@ -75,12 +75,19 @@ function mergeRedemptionRequests(visit,docs){
 
 function subscribeVisit(visit){
   if(!visit?.publicToken||subscriptions.has(visit.publicToken))return;
-  let firstOrders=true,firstRewards=true;
+  let firstOrders=true,firstRewards=true,stopped=false;
+  const failed=(collectionName,error)=>{
+    recordFirestoreOperation('listen',{collection:collectionName,error});
+    console.error(`[Catalog ${collectionName} listener]`,error);
+    stop();
+    subscriptions.delete(visit.publicToken);
+  };
   listenerOpened('publicCatalogOrders');
-  const orderUnsub=onSnapshot(collection(db,'publicCatalogs',visit.publicToken,'orders'),snap=>{recordFirestoreOperation('listen',{collection:'publicCatalogOrders',documents:firstOrders?snap.size:snap.docChanges().length,source:firstOrders?'initial':'realtime'});firstOrders=false;mergeOrders(visit,snap.docs)},error=>{recordFirestoreOperation('listen',{collection:'publicCatalogOrders',error});console.error('[Catalog orders listener]',error)});
+  const orderUnsub=onSnapshot(collection(db,'publicCatalogs',visit.publicToken,'orders'),snap=>{recordFirestoreOperation('listen',{collection:'publicCatalogOrders',documents:firstOrders?snap.size:snap.docChanges().length,source:firstOrders?'initial':'realtime'});firstOrders=false;mergeOrders(visit,snap.docs)},error=>failed('publicCatalogOrders',error));
   listenerOpened('publicCatalogRedemptions');
-  const rewardUnsub=onSnapshot(collection(db,'publicCatalogs',visit.publicToken,'redemptionRequests'),snap=>{recordFirestoreOperation('listen',{collection:'publicCatalogRedemptions',documents:firstRewards?snap.size:snap.docChanges().length,source:firstRewards?'initial':'realtime'});firstRewards=false;mergeRedemptionRequests(visit,snap.docs)},error=>{recordFirestoreOperation('listen',{collection:'publicCatalogRedemptions',error});console.error('[Catalog rewards listener]',error)});
-  subscriptions.set(visit.publicToken,()=>{orderUnsub();rewardUnsub();listenerClosed('publicCatalogOrders');listenerClosed('publicCatalogRedemptions')});
+  const rewardUnsub=onSnapshot(collection(db,'publicCatalogs',visit.publicToken,'redemptionRequests'),snap=>{recordFirestoreOperation('listen',{collection:'publicCatalogRedemptions',documents:firstRewards?snap.size:snap.docChanges().length,source:firstRewards?'initial':'realtime'});firstRewards=false;mergeRedemptionRequests(visit,snap.docs)},error=>failed('publicCatalogRedemptions',error));
+  const stop=()=>{if(stopped)return;stopped=true;orderUnsub();rewardUnsub();listenerClosed('publicCatalogOrders');listenerClosed('publicCatalogRedemptions')};
+  subscriptions.set(visit.publicToken,stop);
 }
 
 function stopAllSubscriptions(){for(const stop of subscriptions.values())stop();subscriptions.clear()}

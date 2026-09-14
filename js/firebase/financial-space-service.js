@@ -2867,6 +2867,7 @@ const FinancialSpaceService = {
 
 window.FinancialSpaceService = FinancialSpaceService;
 addEventListener("firebase-auth-ready", async () => {
+  if (window.Router?.atual?.() !== "financeiro") return;
   try {
     await listSpaces();
     emit("financial-service-ready", { spaces: listCachedSpaces() });

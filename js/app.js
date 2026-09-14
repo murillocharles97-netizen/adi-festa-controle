@@ -1420,7 +1420,9 @@
       })
       .catch((error) => console.error("[Service worker registration]", error));
   let appRouterStarted = false,
-    pageRuntime = null;
+    pageRuntime = null,
+    financialModulePromise = null,
+    financialMountToken = 0;
   function showAppMountError(error) {
     console.error("[BOOT] app mount failed", {
       code: String(error?.code || "UI_MOUNT_FAILED"),
@@ -1437,6 +1439,35 @@
     window.lucide?.createIcons();
   }
   function mountRoute(route) {
+    const mountToken = ++financialMountToken;
+    if (route === "financeiro" && (!window.FinanceiroUI || !window.FinancialSpaceService)) {
+      const root = $("#app");
+      root.innerHTML = `<section class="financial-page" aria-live="polite"><div class="financial-loading-card"><i data-lucide="loader-circle"></i><b>Carregando seu financeiro…</b></div></section>`;
+      window.lucide?.createIcons();
+      if (!financialModulePromise) {
+        const loadScript = (src) => new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.onload = resolve;
+          script.onerror = () => { script.remove(); reject(new Error(`Falha ao carregar ${src}`)); };
+          document.head.append(script);
+        });
+        financialModulePromise = (async () => {
+          if (!window.FinancialEngine) await loadScript("./js/financial-engine.js?v=135");
+          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=135");
+          if (!window.FinancialSpaceService) await import("./firebase/financial-space-service.js?v=135");
+        })().catch((error) => {
+          financialModulePromise = null;
+          throw error;
+        });
+      }
+      financialModulePromise.then(() => {
+        if (mountToken === financialMountToken && Router.atual() === "financeiro" && window.FirebaseSession?.user) pageRuntime.mount("financeiro");
+      }).catch((error) => {
+        if (mountToken === financialMountToken && Router.atual() === "financeiro" && window.FirebaseSession?.user) showAppMountError(error);
+      });
+      return false;
+    }
     return pageRuntime?.mount(route) ?? false;
   }
   pageRuntime = window.PageRuntime.create({

@@ -270,6 +270,7 @@ window.CatalogoUniversal = (() => {
 })();
 
 window.CatalogoUI = (() => {
+  const qrScriptUrl = new URL("../assets/qrcode.min.js", document.currentScript?.src || location.href).href;
   const esc = (value) =>
       String(value ?? "").replace(
         /[&<>'"]/g,
@@ -385,11 +386,28 @@ window.CatalogoUI = (() => {
       .then(() => Utils.toast("Link do catálogo copiado."))
       .catch(() => prompt("Copie o link:", CatalogoUniversal.link()));
   }
-  function qr() {
+  let qrLibraryPromise = null;
+  function loadQrLibrary() {
+    if (window.qrcode) return Promise.resolve();
+    if (!qrLibraryPromise) qrLibraryPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = qrScriptUrl;
+      script.onload = resolve;
+      script.onerror = () => { script.remove(); reject(new Error("QR Code indisponível")); };
+      document.head.append(script);
+    }).catch((error) => { qrLibraryPromise = null; throw error; });
+    return qrLibraryPromise;
+  }
+  async function qr() {
     const url = CatalogoUniversal.link(),
       modal = document.querySelector("#modal");
     modal.innerHTML = `<div class="modal-bg"><section class="modal-box catalog-qr-modal"><header class="modal-head"><div><h3>QR Code do catálogo</h3><small>O código aponta para o link permanente.</small></div><button class="icon-btn close">${ico("x")}</button></header><div class="modal-body"><div id="catalog-qr"></div><p>${esc(url)}</p></div><footer class="modal-foot"><button class="btn btn-light close">Fechar</button><button class="btn btn-primary" id="download-catalog-qr">Baixar PNG</button></footer></section></div>`;
     const target = modal.querySelector("#catalog-qr");
+    modal.querySelectorAll(".close").forEach((button) => (button.onclick = () => (modal.innerHTML = "")));
+    window.lucide?.createIcons();
+    target.textContent = "Carregando QR Code…";
+    await loadQrLibrary().catch(() => {});
+    if (!target.isConnected) return;
     if (window.qrcode) {
       const code = window.qrcode(0, "M");
       code.addData(url);
@@ -398,9 +416,6 @@ window.CatalogoUI = (() => {
     } else
       target.innerHTML =
         "<p>Gerador indisponível. Use o botão Copiar link.</p>";
-    modal
-      .querySelectorAll(".close")
-      .forEach((b) => (b.onclick = () => (modal.innerHTML = "")));
     modal.querySelector("#download-catalog-qr").onclick = () => {
       const image = target.querySelector("img");
       if (!image) return copyLink();
@@ -409,7 +424,6 @@ window.CatalogoUI = (() => {
       a.download = "qr-code-catalogo.png";
       a.click();
     };
-    window.lucide?.createIcons();
   }
   async function uploadCatalogImage(scope, id, file, old) {
     if (!file) return {};
