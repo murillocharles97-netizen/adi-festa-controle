@@ -11,6 +11,19 @@ test.before(async()=>{
   env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});
 });
 
+test('preferência versionada de tutorial é editável só pelo próprio uid, sem liberar campos protegidos',async()=>{
+  const uid='tour-owner',other='tour-other',email='tour@example.test';
+  await env.withSecurityRulesDisabled(async context=>{
+    await setDoc(doc(context.firestore(),'users',uid),{uid,email,businessId:'biz_tour',role:'owner',active:true,name:'Tour'});
+    await setDoc(doc(context.firestore(),'users',other),{uid:other,email:'other@example.test',businessId:'biz_other',role:'owner',active:true,name:'Other'});
+  });
+  const db=env.authenticatedContext(uid,{email}).firestore();
+  await assertSucceeds(setDoc(doc(db,'users',uid),{tutorialVersions:{appIntro:1}},{merge:true}));
+  await assertFails(setDoc(doc(db,'users',other),{tutorialVersions:{appIntro:1}},{merge:true}));
+  await assertFails(setDoc(doc(db,'users',uid),{tutorialVersions:{appIntro:-1}},{merge:true}));
+  await assertFails(setDoc(doc(db,'users',uid),{role:'admin',tutorialVersions:{appIntro:2}},{merge:true}));
+});
+
 test.after(async()=>env?.cleanup());
 
 function onboardingData(uid,email,{trialDays=7,ownerId=uid,businessId=`biz_${uid}`}={}){
