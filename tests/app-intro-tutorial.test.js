@@ -25,7 +25,7 @@ function fixture({ version = 1, online = true, profileDate = "2026-09-15T00:00:0
   return { window, context, session, listeners, writes, values, tutorial: registered, opened: () => opened };
 }
 
-test("apresenta automaticamente apenas usuário novo com datas confiáveis", () => {
+test("apresenta versão pendente automaticamente também para conta antiga ou sem data", () => {
   const fresh = fixture();
   assert.equal(fresh.window.VeconiAppIntro.eligible(fresh.session), true);
   fresh.listeners.get("firebase-ui-mounted")();
@@ -33,7 +33,7 @@ test("apresenta automaticamente apenas usuário novo com datas confiáveis", () 
   for (const options of [{ profileDate: "2026-09-13T00:00:00Z" }, { authDate: "2026-09-13T00:00:00Z" }, { profileDate: null }, { authDate: null }]) {
     const old = fixture(options);
     old.listeners.get("firebase-ui-mounted")();
-    assert.equal(old.opened(), 0);
+    assert.equal(old.opened(), 1);
     assert.equal(old.window.VeconiAppIntro.open({ manual: true }), true);
   }
 });
@@ -46,6 +46,7 @@ test("pular e finalizar persistem por uid, permitem reabertura e respeitam vers�
   assert.equal(state.writes.length, 1);
   assert.equal(state.window.VeconiAppIntro.eligible(state.session), false);
   assert.equal(state.window.VeconiAppIntro.open({ manual: true }), true);
+  assert.equal(state.window.VeconiAppIntro.getStoredVersion("person-1"), 1);
   const reload = fixture({ remote: 1 });
   assert.equal(reload.window.VeconiAppIntro.eligible(reload.session), false);
   const upgraded = fixture({ version: 2, remote: 1 });

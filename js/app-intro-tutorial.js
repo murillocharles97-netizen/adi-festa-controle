@@ -3,20 +3,11 @@
 
   const ID = "appIntro";
   const VERSION = 1;
-  // A data fixa evita apresentar a novidade automaticamente a contas antigas.
-  const ROLLOUT_AT = Date.parse("2026-09-14T20:04:00Z");
   const key = (uid) => `veconi:tutorialVersions:${uid}`;
   let syncing = false;
   let localFallback = new Map();
   let pendingAuto = false;
 
-  function timestamp(value) {
-    if (!value) return NaN;
-    if (typeof value.toMillis === "function") return value.toMillis();
-    if (typeof value.seconds === "number") return value.seconds * 1000;
-    if (value instanceof Date) return value.getTime();
-    return Date.parse(value);
-  }
   function read(uid) {
     if (!uid) return 0;
     try {
@@ -42,11 +33,7 @@
   }
   function eligible(session) {
     if (!session?.user?.uid || !session.profile) return false;
-    const profileCreated = timestamp(session.profile.createdAt);
-    const authCreated = timestamp(session.user.metadata?.creationTime);
-    return Number.isFinite(profileCreated) && Number.isFinite(authCreated)
-      && profileCreated >= ROLLOUT_AT && authCreated >= ROLLOUT_AT
-      && reconcile(session) < VERSION;
+    return reconcile(session) < VERSION;
   }
   async function sync() {
     const session = window.FirebaseSession;
@@ -111,5 +98,5 @@
     pendingAuto = false;
   });
 
-  window.VeconiAppIntro = Object.freeze({ open, eligible, version: VERSION, rolloutAt: ROLLOUT_AT, getStoredVersion: read, sync });
+  window.VeconiAppIntro = Object.freeze({ open, eligible, version: VERSION, getStoredVersion: read, sync });
 })();
