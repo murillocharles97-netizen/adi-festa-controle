@@ -56,6 +56,7 @@
         ${card("puzzle", "Integrações", "Conecte ferramentas e serviços.", `<ul class="desktop-integration-list"><li>${icon("message-circle")}<span>WhatsApp</span><b>Conectado</b></li><li>${icon("credit-card")}<span>Mercado Pago</span><b>${business.mercadoPagoConnected ? "Conectado" : "Disponível"}</b></li><li>${icon("printer")}<span>Impressora</span><em>Não conectado</em></li></ul><button class="btn btn-light" type="button" data-settings-placeholder="Integrações">Gerenciar integrações</button>`)}
         ${card("bell", "Notificações", "Configure alertas e avisos do sistema.", `<ul class="desktop-integration-list"><li>${icon("package-search")}<span>Estoque baixo</span><b>Ativado</b></li><li>${icon("badge-dollar-sign")}<span>Vendas e recebimentos</span><b>Ativado</b></li><li>${icon("megaphone")}<span>Campanhas e fidelidade</span><b>Ativado</b></li></ul><button class="btn btn-light" type="button" data-settings-placeholder="Notificações">Configurar notificações</button>`)}
         ${card("user-round", "Conta", "Gerencie seu acesso e segurança.", `<dl><dt>Usuário</dt><dd>${esc(profile.name || "Administrador")}</dd><dt>E-mail</dt><dd>${esc(session.user?.email || profile.email || "")}</dd><dt>Perfil</dt><dd>${esc(roleNames[profile.role] || profile.role || "Usuário")}</dd><dt>Acesso</dt><dd>${profile.active === false ? "Inativo" : "Ativo"}</dd></dl><div class="desktop-settings-actions"><button class="btn btn-light" type="button" data-desktop-edit-profile>Meus dados</button><button class="btn btn-light" type="button" data-desktop-reset-password>Trocar senha</button><button class="desktop-settings-logout" type="button" data-settings-logout>${icon("log-out")} Sair</button></div>`)}
+        ${card("circle-help", "Ajuda e tutoriais", "Conheça a navegação da VECONI no seu ritmo.", `<p>Primeiros passos com a VECONI</p><button class="btn btn-light" type="button" data-open-app-intro>Rever tutorial</button>`)}
         ${card("ellipsis", "Outros", "Outras ações importantes.", `<ul class="desktop-settings-other"><li><button type="button" data-settings-placeholder="Preferências">${icon("sliders-horizontal")} Preferências do sistema</button></li><li><button type="button" id="desktop-clear-cache">${icon("eraser")} Limpar cache local</button></li><li><button type="button" data-settings-placeholder="Ferramentas">${icon("wrench")} Ferramentas</button></li></ul><button class="btn btn-light" type="button" id="clear-device">Limpar dados deste aparelho</button>`)}
         ${card("settings", "Detalhes técnicos", "Identifique a versão e o ambiente deste aparelho.", `<details class="desktop-technical-details"><summary>Mostrar diagnóstico</summary><dl class="firebase-details" id="firebase-details"></dl></details>`, "desktop-settings-technical")}
       </div>
@@ -195,6 +196,9 @@
       ?.addEventListener("click", () =>
         root.querySelector("#clear-device")?.click(),
       );
+    root.querySelector("[data-open-app-intro]")?.addEventListener("click", () =>
+      window.VeconiAppIntro?.open?.({ manual: true }),
+    );
     root
       .querySelectorAll("[data-settings-placeholder]")
       .forEach((button) =>

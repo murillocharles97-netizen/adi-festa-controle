@@ -166,6 +166,12 @@
           action: "backup",
         }),
         row({
+          iconName: "circle-help",
+          title: "Ajuda e tutoriais",
+          subtitle: "Primeiros passos com a VECONI.",
+          action: "tutorials",
+        }),
+        row({
           iconName: "user-round",
           title: "Conta",
           subtitle: `${profile.name || "Usuário"} · ${roleNames[profile.role] || profile.role || "Perfil"}`,
@@ -201,6 +207,14 @@
     $$("[data-settings-close]", root).forEach(
       (button) => (button.onclick = close),
     );
+  }
+  function tutorials() {
+    const root = modal(`${sheetHead("Ajuda e tutoriais", "Aprenda no seu ritmo.")}<div class="modal-body"><h4>Primeiros passos com a VECONI</h4><p>Um guia rápido para conhecer a navegação do aplicativo.</p></div><footer class="modal-foot"><button type="button" class="btn btn-primary mobile-button primary" data-settings-review-intro>Rever tutorial</button></footer>`);
+    bindClose(root);
+    root.querySelector("[data-settings-review-intro]")?.addEventListener("click", () => {
+      close();
+      window.VeconiAppIntro?.open?.({ manual: true });
+    });
   }
   function editBusiness(phoneOnly = false) {
     const business = window.FirebaseSession?.business || {},
@@ -321,6 +335,7 @@
           if (action === "whatsapp") editBusiness(true);
           if (action === "account") account();
           if (action === "backup") backup();
+          if (action === "tutorials") tutorials();
           if (action === "sync") syncNow(button);
         }),
     );

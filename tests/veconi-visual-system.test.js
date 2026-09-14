@@ -50,11 +50,11 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
   assert.match(read('functions/src/services/mercado-pago-service.js'), /reason:`VECONI - \$\{plan\.name\}`/);
 });
 
-test('service worker v135 troca o cache e inclui os assets V133 da marca e do Financeiro', () => {
+test('service worker v136 troca o cache e inclui os assets V133 da marca e do Financeiro', () => {
   const worker = read('service-worker.js');
-  assert.match(worker, /veconi-v135-performance-safe-cleanup/);
+  assert.match(worker, /veconi-v136-app-intro/);
   assert.match(worker, /financial-refinement\.css/);
-  assert.match(worker, /release:'135'/);
+  assert.match(worker, /release:'136'/);
   for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','veconi-maskable-512-v133.png','veconi-apple-touch-icon-180-v133.png','veconi-favicon-32-v133.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
 });
 

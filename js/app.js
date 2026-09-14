@@ -1454,7 +1454,7 @@
         });
         financialModulePromise = (async () => {
           if (!window.FinancialEngine) await loadScript("./js/financial-engine.js?v=135");
-          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=135");
+          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=136");
           if (!window.FinancialSpaceService) await import("./firebase/financial-space-service.js?v=135");
         })().catch((error) => {
           financialModulePromise = null;
