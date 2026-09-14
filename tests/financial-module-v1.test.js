@@ -10,7 +10,8 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(html, /data-route="financeiro"/);
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
-  assert.ok(html.indexOf("financial-space-service.js?v=134") < html.indexOf("auth.js?v=123"));
+  assert.doesNotMatch(html, /<script[^>]+financial-space-service\.js/);
+  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=135"\)/);
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -105,9 +106,9 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
   assert.doesNotMatch(ui, /data-financial-entry-form/);
 });
 
-test("release 134 publica recursos financeiros globais sem remover o branding PWA", () => {
-  assert.match(read("js/build-info.js"), /release: "134"/);
-  assert.match(sw, /veconi-v134-global-financial-resources/);
+test("release 135 mantém recursos financeiros globais no cache PWA", () => {
+  assert.match(read("js/build-info.js"), /release: "135"/);
+  assert.match(sw, /veconi-v135-performance-safe-cleanup/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
