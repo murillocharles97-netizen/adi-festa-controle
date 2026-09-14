@@ -6,7 +6,7 @@ const path = require("node:path");
 const root = path.join(__dirname, ".."),
   read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
-test("PDV e Configurações desktop são isolados do mobile e não consultam Firebase", () => {
+test("PDV desktop continua isolado; Configurações compartilha UI sem consultas novas", () => {
   const sales = read("js/desktop-sales.js"),
     settings = read("js/desktop-settings.js"),
     salesCss = read("css/desktop-sales.css"),
@@ -26,7 +26,7 @@ test("PDV e Configurações desktop são isolados do mobile e não consultam Fir
   assert.doesNotMatch(`${salesCss}\n${settingsCss}`, /max-width:\s*767px/);
   assert.match(
     app,
-    /ConfiguracoesMobile\?\.isMobile\(\)[\s\S]*ConfiguracoesMobile\.render\(\)/,
+    /ConfiguracoesMobile\?\.render[\s\S]*ConfiguracoesMobile\.render\(\)/,
   );
   assert.match(app, /Checkout\?\.view/);
   assert.match(app, /Checkout\?\.bindDesktop/);
@@ -77,17 +77,17 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
     build = read("js/build-info.js");
 
   assert.match(index, /desktop-sales\.js\?v=103/);
-  assert.match(index, /desktop-settings\.js\?v=136/);
-  assert.match(index, /app\.js\?v=136/);
-  assert.match(index, /build-info\.js\?v=136/);
+  assert.match(index, /desktop-settings\.js\?v=137/);
+  assert.match(index, /app\.js\?v=137/);
+  assert.match(index, /build-info\.js\?v=137/);
   assert.match(index, /desktop-sales\.css\?v=103/);
   assert.match(index, /checkout\.js\?v=103/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /veconi-v\d+-/);
-  assert.match(worker, /release:'136'/);
-  assert.match(build, /release: "136"/);
-  assert.match(index, /firebase-ui\.js\?v=122/);
+  assert.match(worker, /release:'137'/);
+  assert.match(build, /release: "137"/);
+  assert.match(index, /firebase-ui\.js\?v=137/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[VECONI\] Build/);
   assert.match(build, /__adiFestaBuildLogged/);
