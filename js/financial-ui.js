@@ -269,7 +269,7 @@ window.FinanceiroUI = (() => {
 
   function consolidatedSummaryMarkup(summary = {}) {
     const resultClass = Number(summary.resultCents || 0) < 0 ? "is-negative" : "is-positive";
-    return `<section class="financial-home-summary"><header><h2>Resumo do mês</h2><small>${icon("circle-dot")} Atualizado agora</small></header><div>
+    return `<section class="financial-home-summary" data-tour="finance-summary"><header><h2>Resumo do mês</h2><small>${icon("circle-dot")} Atualizado agora</small></header><div>
       <article>${icon("wallet")}<span><small>Saldo disponível</small><strong class="is-income">${money(summary.availableBalanceCents)}</strong><em>Contas e carteiras incluídas</em></span></article>
       <article>${icon("credit-card")}<span><small>Faturas do mês</small><strong class="is-expense">${money(summary.invoiceTotalCents)}</strong><em>Compras no crédito</em></span></article>
       <article>${icon("receipt-text")}<span><small>Contas a pagar</small><strong class="is-expense">${money(summary.pendingAccountsCents)}</strong><em>Sem repetir faturas</em></span></article>
@@ -287,14 +287,14 @@ window.FinanceiroUI = (() => {
 
   function consolidatedSpacesMarkup(data = {}) {
     const items = data.spaceSummaries || [];
-    return `<section class="financial-section financial-home-spaces"><header><h2>Seus espaços</h2><button type="button" data-financial-open-spaces>Ver espaços ${icon("arrow-right")}</button></header><div>${items.map((item) => `<button type="button" data-financial-space-detail="${esc(item.financialSpaceId)}"><span>${icon(item.financialSpaceIcon || "wallet")}</span><b>${esc(item.financialSpaceName)}</b><small>${money(item.resultCents || 0)}</small></button>`).join("")}</div></section>`;
+    return `<section class="financial-section financial-home-spaces" data-tour="financial-spaces"><header><h2>Seus espaços</h2><button type="button" data-financial-open-spaces>Ver espaços ${icon("arrow-right")}</button></header><div>${items.map((item) => `<button type="button" data-financial-space-detail="${esc(item.financialSpaceId)}"><span>${icon(item.financialSpaceIcon || "wallet")}</span><b>${esc(item.financialSpaceName)}</b><small>${money(item.resultCents || 0)}</small></button>`).join("")}</div></section>`;
   }
 
   function consolidatedHomeMarkup(data = {}) {
     const groups = institutionGroups(data), summary = data.summary || {};
     return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div>${compactContextMarkup()}</section>
       ${consolidatedSummaryMarkup(summary)}
-      <section class="financial-section financial-home-institutions"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhum recurso financeiro</b><span>Cadastre uma conta, carteira, cartão ou investimento para acompanhar aqui.</span></div></div>`}</section>
+      <section class="financial-section financial-home-institutions" data-tour="financial-accounts"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhum recurso financeiro</b><span>Cadastre uma conta, carteira, cartão ou investimento para acompanhar aqui.</span></div></div>`}</section>
       ${attentionMarkup(data)}
       <section class="financial-section financial-home-upcoming"><header><h2>Próximas contas</h2><button type="button" data-financial-view="accounts">Ver todas ${icon("arrow-right")}</button></header>${consolidatedPayablesMarkup((data.payables || []).slice(0, 4))}</section>
       ${consolidatedSpacesMarkup(data)}
@@ -374,7 +374,7 @@ window.FinanceiroUI = (() => {
 
   function institutionsMarkup(data) {
     const groups = institutionGroups(data), summary = data.summary || {};
-    return `<div class="financial-accounts-cards-page"><header class="financial-accounts-cards-head"><button type="button" data-financial-view="dashboard" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>Contas e cartões</h2><p>Instituições consolidadas sem duplicar saldos ou faturas.</p></div><button type="button" data-financial-add-product>${icon("plus")}<span>Adicionar</span></button></header>
+    return `<div class="financial-accounts-cards-page"><header class="financial-accounts-cards-head"><button type="button" data-financial-view="dashboard" aria-label="Voltar">${icon("arrow-left")}</button><div><h2>Contas e cartões</h2><p>Instituições consolidadas sem duplicar saldos ou faturas.</p></div><button type="button" data-financial-add-product data-tour="financial-add">${icon("plus")}<span>Adicionar</span></button></header>
       ${compactContextMarkup()}
       <section class="financial-institution-summary"><article>${icon("wallet")}<span><small>Saldo disponível total</small><strong>${money(summary.availableBalanceCents)}</strong></span></article><article>${icon("credit-card")}<span><small>Faturas abertas</small><strong>${money(summary.invoiceTotalCents)}</strong></span></article></section>
       <aside class="financial-institution-note">${icon("info")}<span>Uma instituição pode conter conta, cartão, carteira ou investimento. Tudo consolidado em um único lugar.</span><button type="button" data-financial-dismiss-note aria-label="Ocultar aviso">${icon("x")}</button></aside>
