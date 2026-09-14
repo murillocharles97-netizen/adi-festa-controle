@@ -21,7 +21,7 @@ function fixture({ version = 1, online = true, profileDate = "2026-09-15T00:00:0
     document: { querySelector: (selector) => selector === "#auth-gate" ? { hidden: true } : selector === "#app" ? { children: [{}] } : selector === "#modal" ? { children: [] } : null },
     addEventListener: (name, callback) => listeners.set(name, callback), setTimeout: (callback) => callback(), matchMedia: () => ({ matches: true }), console,
   };
-  vm.runInNewContext(source.replace("const VERSION = 1;", `const VERSION = ${version};`), context);
+  vm.runInNewContext(source.replace("const APP_INTRO_TUTORIAL_VERSION = 1;", `const APP_INTRO_TUTORIAL_VERSION = ${version};`), context);
   return { window, context, session, listeners, writes, values, tutorial: registered, opened: () => opened };
 }
 

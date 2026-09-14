@@ -2,7 +2,8 @@
   "use strict";
 
   const ID = "appIntro";
-  const VERSION = 1;
+  const APP_INTRO_TUTORIAL_VERSION = 1;
+  const VERSION = APP_INTRO_TUTORIAL_VERSION;
   const key = (uid) => `veconi:tutorialVersions:${uid}`;
   let syncing = false;
   let localFallback = new Map();
