@@ -274,8 +274,21 @@ service cloud.firestore {
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'uid', 'name', 'phone', 'role', 'permissions', 'onboardingCompleted',
-          'lastLoginAt', 'migrationVersion', 'migratedAt', 'updatedAt'
-        ]);
+          'lastLoginAt', 'migrationVersion', 'migratedAt', 'updatedAt', 'tutorialVersions'
+        ])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tutorialVersions'])
+          || (
+            request.resource.data.tutorialVersions is map
+            && request.resource.data.tutorialVersions.keys().hasOnly([
+              'appIntro', 'financial', 'selling', 'products', 'clients',
+              'crm', 'campaigns', 'catalog', 'orders', 'settings'
+            ])
+            && request.resource.data.tutorialVersions.get('appIntro', 0) is int
+            && request.resource.data.tutorialVersions.get('appIntro', 0) >= 0
+            && request.resource.data.tutorialVersions.get('appIntro', 0) <= 100
+          )
+        );
       allow delete: if false;
     }
 

@@ -224,7 +224,7 @@ function allowed(user,profile,business){
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   bootstrapLog('local environment loaded');
   window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
-  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,sendPasswordReset};
+  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset};
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
@@ -278,6 +278,17 @@ async function updateProfileDetails(values={}){
   document.querySelector('.avatar').textContent=(profile.name||session.user.email||'A')[0].toUpperCase();
   window.SyncFirebase?.notifyRemoteChange?.(['userProfile']).catch(()=>{});
   return profile;
+}
+async function updateTutorialVersion(tutorialId,version){
+  const session=window.FirebaseSession;
+  if(!session?.user?.uid||!session.profile)throw Error('A sessão do usuário não está disponível.');
+  const allowedIds=new Set(['appIntro','financial','selling','products','clients','crm','campaigns','catalog','orders','settings']);
+  if(!allowedIds.has(tutorialId)||!Number.isInteger(version)||version<0||version>100)throw Error('Versão de tutorial inválida.');
+  await setDoc(doc(db,'users',session.user.uid),{tutorialVersions:{[tutorialId]:version}},{merge:true});
+  if(window.FirebaseSession?.user?.uid===session.user.uid){
+    window.FirebaseSession.profile={...window.FirebaseSession.profile,tutorialVersions:{...window.FirebaseSession.profile.tutorialVersions,[tutorialId]:version}};
+  }
+  return true;
 }
 async function sendPasswordReset(){
   const email=auth.currentUser?.email;
