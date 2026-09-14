@@ -393,7 +393,7 @@
     window.lucide?.createIcons();
   }
   function configuracoes() {
-    if (window.ConfiguracoesMobile?.isMobile())
+    if (window.ConfiguracoesMobile?.render)
       return ConfiguracoesMobile.render();
     if (window.DesktopSettings?.isDesktop?.()) return DesktopSettings.render();
     const session = window.FirebaseSession || {},
@@ -771,7 +771,6 @@
     if (route === "configuracoes") {
       bindConfig();
       window.DesktopSettings?.bind?.();
-      window.OperationMode?.bindSettings?.(document);
     }
   }
   function confirmarEstoqueInsuficiente(faltas, acao) {
@@ -1193,6 +1192,7 @@
     if (root.dataset.route === "financeiro" && route !== "financeiro") FinanceiroUI.destroy();
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
+    document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
     root.innerHTML = views[route]();
     const mobileTitle = matchMedia("(max-width:767px)").matches
       ? { crm: "CRM", catalogo: "Catálogo", pedidos: "Pedidos" }[route]
@@ -1215,9 +1215,8 @@
                 ? (matchMedia("(max-width:767px)").matches ? "Gerencie os pedidos online." : "Gestão dos pedidos recebidos pelo catálogo.")
                 : route === "relatorios"
                   ? "Análises detalhadas do seu negócio."
-                  : route === "configuracoes" &&
-                      matchMedia("(max-width:767px)").matches
-                    ? "Gerencie sua conta, empresa e dados."
+                  : route === "configuracoes"
+                    ? "Ajustes essenciais do seu negócio"
                     : route === "planos"
                       ? "Escolha o plano ideal para o seu negócio."
                       : new Date().toLocaleDateString("pt-BR", {

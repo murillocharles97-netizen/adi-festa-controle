@@ -27,12 +27,8 @@ assert.match(app,/addEventListener\(["']firebase-session-cleared["']/);
 assert.match(app,/carrinho\s*=\s*\[\]/);
 assert.match(app,/ConfiguracoesMobile\.render\(\)/);
 
-assert.match(mobile,/Minha empresa/);
-assert.match(mobile,/Conta e acesso/);
-assert.match(mobile,/Nuvem e sincronização/);
-assert.match(mobile,/Backup e dados/);
-assert.match(mobile,/Detalhes técnicos/);
-assert.match(mobile,/Área de risco/);
+for (const label of ['Conta e operação','Dados da empresa','Plano e assinatura','WhatsApp padrão','Modelo de operação','Conta','Sistema','Sincronização','Backup de dados','Ajuda e tutoriais','Ações','Sair da conta']) assert.ok(mobile.includes(label), label);
+for (const redundant of ['Clientes e fiado','Produtos e estoque','Histórico de operações','Catálogo online','Pedidos online','Cupons de desconto']) assert.ok(!mobile.includes(redundant), redundant);
 assert.match(mobile,/data-settings-logout/);
 assert.match(mobile,/SyncFirebase\.synchronizeNow\(\)/);
 assert.match(css,/@media \(max-width:767px\)/);
