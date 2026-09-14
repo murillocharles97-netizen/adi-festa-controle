@@ -1,21 +1,10 @@
 (function () {
   "use strict";
-  // Rótulos históricos mantidos para contratos de regressão: Minha empresa; Conta e acesso;
-  // Nuvem e sincronização; Detalhes técnicos; Área de risco.
-  const mq = matchMedia("(max-width:767px)");
   const $ = (selector, root = document) => root.querySelector(selector),
     $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const icon = (name) => `<i data-lucide="${name}"></i>`,
     esc = (value) =>
       window.Utils?.escapar?.(String(value ?? "")) ?? String(value ?? "");
-  const planNames = {
-    internal: "Plano interno",
-    trial: "Teste grátis",
-    trialing: "Teste grátis",
-    essential: "Essencial",
-    professional: "Profissional",
-    premium: "Premium",
-  };
   const roleNames = {
     owner: "Proprietário",
     admin: "Administrador",
@@ -24,172 +13,100 @@
     viewer: "Consulta",
     platform_admin: "Administrador da plataforma",
   };
-  const formatTime = (value) =>
-    value
-      ? new Date(value).toLocaleString("pt-BR", {
-          dateStyle: "short",
-          timeStyle: "short",
-        })
-      : "Ainda não sincronizado";
   const row = ({
     iconName,
     title,
     subtitle,
-    value = "",
     action = "",
     route = "",
+    operation = false,
+    logout = false,
     tone = "",
   }) =>
-    `<button type="button" class="settings-list-row ${tone}" ${action ? `data-settings-action="${action}"` : ""} ${route ? `data-settings-route="${route}"` : ""}><span class="settings-row-icon">${icon(iconName)}</span><span><b>${esc(title)}</b><small>${esc(subtitle)}</small></span>${value ? `<em>${esc(value)}</em>` : ""}${icon("chevron-right")}</button>`;
-  const group = (title, items) =>
-    `<section class="settings-group"><h2>${esc(title)}</h2><div>${items.join("")}</div></section>`;
+    `<button type="button" class="settings-list-row ${tone}" ${action ? `data-settings-action="${action}"` : ""} ${route ? `data-settings-route="${route}"` : ""} ${operation ? "data-edit-operation" : ""} ${logout ? "data-settings-logout" : ""}><span class="settings-row-icon" aria-hidden="true">${icon(iconName)}</span><span class="settings-row-copy"><b>${esc(title)}</b><small>${esc(subtitle)}</small></span>${icon("chevron-right")}</button>`;
+  const group = (title, subtitle, items) =>
+    `<section class="settings-group"><header class="settings-group-heading"><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></header><div class="settings-group-list">${items.join("")}</div></section>`;
+
+  function syncPresentation(sync = {}) {
+    const pending = Number(sync.queueTotal ?? sync.pending ?? 0);
+    const errors = Number(sync.errors || 0);
+    if (!navigator.onLine || sync.status === "offline") return { state: "offline", title: "Sem conexão", subtitle: pending ? `${pending} alteração(ões) salvas no aparelho, aguardando rede.` : "Dados disponíveis neste aparelho." };
+    if (errors || sync.status === "error") return { state: "error", title: "Sincronização precisa de atenção", subtitle: errors ? `${errors} operação(ões) com erro.` : sync.message || "Confira o status da sincronização." };
+    if (pending) return { state: "pending", title: "Envio pendente", subtitle: `${pending} alteração(ões) aguardando envio.` };
+    if (sync.status === "syncing" || sync.status === "testing") return { state: "syncing", title: "Sincronizando", subtitle: sync.message || "Conferindo dados com a nuvem." };
+    if (sync.status === "success" && sync.testPassed && sync.hydrated && sync.listenerConnected) return { state: "ready", title: "Sincronização pronta", subtitle: "Todos os dados salvos." };
+    return { state: "waiting", title: "Verificando sincronização", subtitle: sync.message || "Aguardando confirmação da nuvem." };
+  }
+
+  function updateSyncView(sync) {
+    const card = $("[data-settings-sync]");
+    if (!card) return;
+    const view = syncPresentation(sync);
+    card.dataset.syncState = view.state;
+    $("[data-settings-sync-title]", card).textContent = view.title;
+    $("[data-settings-sync-subtitle]", card).textContent = view.subtitle;
+  }
+  addEventListener("firebase-sync-status", (event) => updateSyncView(event.detail));
+
   function render() {
-    const session = window.FirebaseSession || {},
-      business = session.business || {},
-      profile = session.profile || {},
-      subscription = session.subscription || business.subscription || {},
-      sync = window.SyncFirebaseState || {},
-      data = window.DB?.carregar?.() || {},
-      config = data.config || {};
-    const name = business.name || config.nome || "Meu negócio",
-      phone = business.phone || config.telefone || "Não informado",
-      plan =
-        planNames[subscription.planId] || subscription.planId || "Plano atual",
-      internal =
-        business.id === "adi-festa" &&
-        subscription.planId === "internal" &&
-        ["active", "internal"].includes(subscription.status) &&
-        profile.role === "owner";
-    const ok =
-        sync.status === "synced" ||
-        (!Number(sync.pending || sync.queueTotal || 0) &&
-          !Number(sync.errors || 0) &&
-          Boolean(sync.lastSync)),
-      syncTitle =
-        sync.message || (ok ? "Sincronizado" : "Preparando sincronização…"),
-      syncSubtitle = ok
-        ? "Todos os dados estão atualizados."
-        : Number(sync.errors || 0)
-          ? `${Number(sync.errors)} operação(ões) precisam de atenção.`
-          : `${Number(sync.pending || sync.queueTotal || 0)} alteração(ões) aguardando envio.`;
-    return `<section class="mobile-settings-page settings-mobile-v2" data-settings-root><header class="settings-page-heading"><h1>Configurações</h1><p>Ajustes da empresa, vendas e sistema.</p></header><section class="settings-sync-hero ${ok ? "is-ok" : sync.status === "error" ? "is-error" : ""}"><span>${icon(ok ? "cloud-check" : "refresh-cw")}</span><div><h2 id="firebase-status">${esc(syncTitle)}</h2><p>${esc(syncSubtitle)}</p></div><small>Última atualização<b id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</b></small><i aria-hidden="true"></i></section>
-      ${group("Empresa", [
+    const sync = syncPresentation(window.SyncFirebaseState || {});
+    return `<section class="mobile-settings-page settings-mobile-v2" data-settings-root><button type="button" class="settings-sync-hero" data-settings-sync data-settings-action="sync" data-sync-state="${sync.state}"><span class="settings-sync-icon" aria-hidden="true">${icon("cloud")}<i></i></span><span class="settings-sync-copy"><b data-settings-sync-title>${esc(sync.title)}</b><small data-settings-sync-subtitle>${esc(sync.subtitle)}</small></span>${icon("chevron-right")}</button>
+      ${group("Conta e operação", "Gerencie as informações do seu negócio.", [
         row({
           iconName: "building-2",
           title: "Dados da empresa",
-          subtitle: "Nome e tipo do comércio.",
+          subtitle: "Nome, telefone e documento",
           action: "business",
-        }),
-        row({
-          iconName: "message-circle",
-          title: "WhatsApp padrão",
-          subtitle: "Número usado nas comunicações.",
-          value: phone,
-          action: "whatsapp",
         }),
         row({
           iconName: "gem",
           title: "Plano e assinatura",
-          subtitle: "Status, uso e cobrança.",
-          value: plan,
+          subtitle: "Plano atual e cobrança",
           route: "planos",
         }),
-      ])}
-      ${group("Vendas", [
         row({
-          iconName: "users",
-          title: "Clientes e fiado",
-          subtitle: "Cadastros, saldos e pagamentos.",
-          route: "clientes",
+          iconName: "message-circle",
+          title: "WhatsApp padrão",
+          subtitle: "Número usado nas comunicações",
+          action: "whatsapp",
         }),
         row({
-          iconName: "package",
-          title: "Produtos e estoque",
-          subtitle: "Itens, variações, categorias e alertas.",
-          route: "produtos",
+          iconName: "truck",
+          title: "Modelo de operação",
+          subtitle: "Entrega, retirada e fiado",
+          operation: true,
         }),
         row({
-          iconName: "history",
-          title: "Histórico de operações",
-          subtitle: "Vendas, ajustes e recibos.",
-          route: "historico",
+          iconName: "user-round",
+          title: "Conta",
+          subtitle: "Perfil e acesso",
+          action: "account",
         }),
       ])}
-      ${group("Relacionamento", [
-        row({
-          iconName: "megaphone",
-          title: "Campanhas",
-          subtitle: "Crie e gerencie campanhas.",
-          route: "campanhas",
-        }),
-        row({
-          iconName: "calendar-sync",
-          title: "Renovações",
-          subtitle: "Prazos e vigências dos clientes.",
-          route: "clientes",
-        }),
-        row({
-          iconName: "contact-round",
-          title: "CRM",
-          subtitle: "Segmentos, filtros e relacionamento.",
-          route: "crm",
-        }),
-      ])}
-      ${group("Online", [
-        row({
-          iconName: "shopping-basket",
-          title: "Catálogo online",
-          subtitle: "Apresentação, categorias e imagens.",
-          route: "catalogo",
-        }),
-        row({
-          iconName: "clipboard-list",
-          title: "Pedidos online",
-          subtitle: "Fila, status e conversão em venda.",
-          route: "pedidos",
-        }),
-      ])}
-      ${group("Sistema", [
+      ${group("Sistema", "Configurações e manutenção do app.", [
         row({
           iconName: "refresh-cw",
           title: "Sincronização",
-          subtitle: syncSubtitle,
-          value: Number(sync.pending || sync.queueTotal || 0)
-            ? `${Number(sync.pending || sync.queueTotal)} pendentes`
-            : "Em dia",
+          subtitle: "Status e envios pendentes",
           action: "sync",
         }),
         row({
-          iconName: "folder-down",
-          title: "Backup e dados",
-          subtitle: "Exportar, importar ou limpar dados locais.",
+          iconName: "database",
+          title: "Backup de dados",
+          subtitle: "Exportar, importar e restaurar",
           action: "backup",
         }),
         row({
           iconName: "circle-help",
           title: "Ajuda e tutoriais",
-          subtitle: "Primeiros passos com a VECONI.",
+          subtitle: "Primeiros passos com a VECONI",
           action: "tutorials",
         }),
-        row({
-          iconName: "user-round",
-          title: "Conta",
-          subtitle: `${profile.name || "Usuário"} · ${roleNames[profile.role] || profile.role || "Perfil"}`,
-          action: "account",
-        }),
-        ...(internal
-          ? [
-              row({
-                iconName: "ticket-percent",
-                title: "Cupons de desconto",
-                subtitle: "Administração global protegida.",
-                route: "cupons",
-              }),
-            ]
-          : []),
       ])}
-      ${window.OperationMode?.renderSettings?.() || ""}
-      <button type="button" class="settings-logout" data-settings-logout>${icon("log-out")} Sair da conta</button><p class="settings-version">VECONI · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
+      ${group("Ações", "Gerencie sua sessão com segurança.", [
+        row({ iconName: "log-out", title: "Sair da conta", subtitle: "Encerrar sessão neste dispositivo", logout: true, tone: "is-danger" }),
+      ])}
+      <p class="settings-version">VECONI · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
   }
   function modal(content, className = "settings-sheet") {
     const root = $("#modal");
@@ -318,10 +235,9 @@
     }
   }
   function bind() {
-    if (!mq.matches) return;
-    window.OperationMode?.bindSettings?.(document);
     const root = $("[data-settings-root]");
     if (!root) return;
+    window.OperationMode?.bindSettings?.(root);
     $$("[data-settings-route]", root).forEach(
       (button) =>
         (button.onclick = () =>
@@ -336,12 +252,16 @@
           if (action === "account") account();
           if (action === "backup") backup();
           if (action === "tutorials") tutorials();
-          if (action === "sync") syncNow(button);
+          if (action === "sync") {
+            const badge = $(".local-badge");
+            if (badge?.dataset.cloudPanelBound === "true") badge.click();
+            else void syncNow(button);
+          }
         }),
     );
     $("[data-settings-logout]", root)?.addEventListener("click", () =>
       window.FirebaseAuthActions?.signOut?.(),
     );
   }
-  window.ConfiguracoesMobile = { isMobile: () => mq.matches, render, bind };
+  window.ConfiguracoesMobile = { render, bind };
 })();
