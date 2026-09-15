@@ -25,6 +25,7 @@ const {normalizeManualCardPayment}=require('./services/manual-card-service');
 const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-service');
 const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-state-service');
 const {financialIncomeService}=require('./services/financial-income-service');
+const {terminalPaymentService}=require('./terminal-payments/terminal-payment-service');
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
@@ -36,6 +37,7 @@ const MP_PUBLIC_KEY=defineString('MERCADO_PAGO_PUBLIC_KEY',{default:''});
 const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles97-netizen.github.io/adi-festa-controle/'});
 const MP_WEBHOOK_URL=defineString('MERCADO_PAGO_WEBHOOK_URL',{default:'https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
+const TERMINAL_PAYMENT_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
 const ONBOARDING_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20};
 const validCatalogToken=value=>/^[A-Za-z0-9_-]{20,128}$/.test(String(value||''));
@@ -63,6 +65,7 @@ const providerStore=()=>firestoreSubscriptionService(db);
 const coupons=()=>couponFirestoreService(db);
 const pixBilling=()=>pixBillingService(db);
 const financialIncome=()=>financialIncomeService(db);
+const terminalPayments=()=>terminalPaymentService(db,{permissionService,simulatorEnabled:()=>process.env.TERMINAL_PAYMENT_SIMULATOR_ENABLED==='true'});
 const iso=()=>new Date().toISOString();
 async function latestCardPaymentDiagnostic(subscriptionId){
   const search=await mp().searchAuthorizedPayments(subscriptionId,{limit:10}),rows=Array.isArray(search?.results)?search.results:[];
@@ -159,6 +162,18 @@ function callableError(error){
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
 function requestedBusinessId(request){return String(request.data?.companyId||request.data?.businessId||'').trim()}
+
+exports.getTerminalPaymentSetup=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().getSetup(request));
+exports.savePaymentTerminal=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().saveTerminal(request));
+exports.archivePaymentTerminal=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().archiveTerminal(request));
+exports.createTerminalPayment=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().createPayment(request));
+exports.dispatchTerminalPayment=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().dispatchPayment(request));
+exports.getTerminalPaymentStatus=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().getPaymentStatus(request));
+exports.cancelTerminalPayment=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().cancelPayment(request));
+exports.refundTerminalPayment=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().refundPayment(request));
+exports.claimTerminalPaymentFinalization=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().claimFinalization(request));
+exports.acknowledgeTerminalPaymentSale=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().acknowledgeFinalization(request));
+exports.getActiveTerminalPayment=onCall(TERMINAL_PAYMENT_OPTIONS,request=>terminalPayments().activePayment(request));
 
 exports.completeBusinessOnboarding=onCall(ONBOARDING_OPTIONS,async request=>{
   const uid=request.auth?.uid,email=String(request.auth?.token?.email||'').trim().toLowerCase();
@@ -412,9 +427,9 @@ exports.reconcileBillingRequest=onDocumentCreated({document:'billingReconciliati
 });
 
 exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{businessId}',region:REGION},async event=>{
-  const snapshot=event.data;if(!snapshot)return;const business=snapshot.data();if(business.subscription)return;
-  const now=Timestamp.now(),trialEndsAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000);await snapshot.ref.update({subscription:{status:'trialing',subscriptionStatus:'trialing',planId:'trial',trialStartedAt:now,trialEndsAt,startedAt:now,expiresAt:trialEndsAt,nextBillingDate:null,lastPaymentDate:null,mercadoPago:{subscriptionId:null,customerId:null,preapprovalId:null,lastWebhook:null}},updatedAt:now});
-  logger.info('[Subscriptions] trial initialized',{businessId:event.params.businessId});
+  const snapshot=event.data;if(!snapshot)return;
+  const now=Timestamp.now(),trialEndsAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000),initialized=await db.runTransaction(async transaction=>{const current=await transaction.get(snapshot.ref);if(!current.exists||current.data()?.subscription)return false;transaction.update(snapshot.ref,{subscription:{status:'trialing',subscriptionStatus:'trialing',planId:'trial',trialStartedAt:now,trialEndsAt,startedAt:now,expiresAt:trialEndsAt,nextBillingDate:null,lastPaymentDate:null,mercadoPago:{subscriptionId:null,customerId:null,preapprovalId:null,lastWebhook:null}},updatedAt:now});return true});
+  if(initialized)logger.info('[Subscriptions] trial initialized',{businessId:event.params.businessId});
 });
 
 // Um evento de venda atualiza apenas o cliente e o mês afetados. O marcador do

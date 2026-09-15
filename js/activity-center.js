@@ -481,11 +481,33 @@
     window.lucide?.createIcons();
   }
   function saleDetail(item, db) {
-    const sale = db.vendas?.find(
+    let sale = db.vendas?.find(
       (entry) => String(entry.id) === String(item.resourceId),
     );
     if (!sale)
       return `<div class="activity-detail-empty">${icon("circle-alert")}<p>Esta venda foi cancelada ou não está mais disponível. O evento permanece no histórico.</p></div>`;
+    if (
+      sale.formaPagamento === "cartao_presencial" ||
+      sale.paymentMetadata?.channel === "card_present"
+    ) {
+      const metadata = sale.paymentMetadata || {};
+      const provider =
+        {
+          cielo: "Cielo",
+          mercado_pago: "Mercado Pago",
+          pagbank: "PagBank",
+          simulator: "Simulador VECONI",
+        }[metadata.provider] || "Maquininha";
+      const method =
+        (metadata.method || metadata.paymentMethod) === "debit"
+          ? "Débito"
+          : "Crédito";
+      const installments = Number(metadata.installments || 1);
+      sale = {
+        ...sale,
+        formaPagamento: `Cartão presencial · ${provider}${metadata.terminalNickname ? ` · ${metadata.terminalNickname}` : ""} · ${method}${installments > 1 ? ` ${installments}x` : ""}`,
+      };
+    }
     const canCancel =
         window.Vendas?.ultima?.()?.id === sale.id &&
         window.Vendas?.podeDesfazer?.(),
