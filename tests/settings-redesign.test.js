@@ -20,10 +20,11 @@ function fixture(sync = {}, online = true) {
 test("configurações renderiza grupos essenciais a partir do estado já disponível", () => {
   const html = fixture({ status: "success", testPassed: true, hydrated: true, listenerConnected: true }).html;
   assert.equal((html.match(/class="settings-group-list"/g) || []).length, 3);
-  assert.equal((html.match(/class="settings-list-row /g) || []).length, 9);
+  assert.equal((html.match(/class="settings-list-row /g) || []).length, 10);
   assert.match(html, /Sincronização pronta/);
   assert.match(html, /data-edit-operation/);
   assert.match(html, /data-settings-route="planos"/);
+  assert.match(html, /Integrações e maquininhas/);
   assert.match(html, /data-settings-logout/);
   assert.doesNotMatch(html, /Notificações|CRM|Catálogo online|Produtos e estoque/);
   assert.doesNotMatch(source.slice(source.indexOf("function render()"), source.indexOf("function modal(")), /DB\.carregar|\bgetDocs\b|\bonSnapshot\b/);

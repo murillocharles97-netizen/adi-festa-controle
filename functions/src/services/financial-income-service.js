@@ -38,6 +38,7 @@ const paymentMethod=value=>{
   if(normalized.includes('transfer'))return'transfer';
   return'other';
 };
+const isTerminalPaymentSale=sale=>lower(sale?.formaPagamento||sale?.paymentMethod)==='cartao_presencial'||sale?.paymentMetadata?.channel==='card_present';
 const automationFor=space=>{
   const legacyActivation=space?.autoIncomeSince||space?.autoEntryFromPaymentsSince||space?.autoEntryFromSalesSince||null;
   const automation=space?.automation||{};
@@ -241,6 +242,7 @@ function financialIncomeService(db){
     if(!amountCents)return{skipped:'zero-value'};
     if(CREDIT_SALE_STATUSES.has(status))return{skipped:'credit-sale-not-realized'};
     if(!PAID_SALE_STATUSES.has(status))return{skipped:'sale-not-paid'};
+    if(isTerminalPaymentSale(sale))return{skipped:'terminal-payment-is-receivable'};
     const customerName=text(sale.clienteNome||sale.customerName)||'Venda avulsa';
     return createOnce({space,businessId,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderMatch?.[1]||null,eventKind:'sale_receipt_recorded'});
   }
@@ -315,4 +317,4 @@ function financialIncomeService(db){
   return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness,backfillProcessedPaymentEvidence};
 }
 
-module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity};
+module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale};

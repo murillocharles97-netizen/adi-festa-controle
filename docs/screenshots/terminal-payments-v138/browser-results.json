@@ -1,0 +1,212 @@
+{
+  "ok": true,
+  "version": 138,
+  "mobileWidths": [
+    360,
+    375,
+    390,
+    412,
+    430
+  ],
+  "checks": 13,
+  "screenshots": [
+    "360-checkout-options.png",
+    "375-checkout-options.png",
+    "390-checkout-options.png",
+    "412-checkout-options.png",
+    "430-checkout-options.png",
+    "390-settings-terminals.png",
+    "390-awaiting-payment.png",
+    "390-timeout-reconciliation.png",
+    "390-declined-retry.png",
+    "390-no-terminal.png",
+    "1366-settings-terminals.png",
+    "1366-checkout-options.png",
+    "1366-awaiting-payment.png"
+  ],
+  "pageErrors": [],
+  "results": [
+    {
+      "width": 360,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 352,
+        "top": 110,
+        "bottom": 770
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 375,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 367,
+        "top": 142,
+        "bottom": 802
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 193,
+        "bottom": 834
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 412,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 404,
+        "top": 241,
+        "bottom": 882
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 430,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 422,
+        "top": 280,
+        "bottom": 921
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "settings",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 60,
+        "bottom": 836
+      },
+      "controls": 2,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "waiting",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 477,
+        "bottom": 836
+      },
+      "controls": 1,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "timeout",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 319,
+        "bottom": 836
+      },
+      "controls": 2,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "declined",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 406,
+        "bottom": 836
+      },
+      "controls": 2,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 390,
+      "state": "no-terminal",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 535,
+        "bottom": 836
+      },
+      "controls": 2,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 1366,
+      "state": "settings",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 273,
+        "right": 1093,
+        "top": 90,
+        "bottom": 678
+      },
+      "controls": 2,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 1366,
+      "state": "options",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 373,
+        "right": 993,
+        "top": 54,
+        "bottom": 715
+      },
+      "controls": 5,
+      "undersized": [],
+      "problems": []
+    },
+    {
+      "width": 1366,
+      "state": "waiting",
+      "horizontalOverflow": 0,
+      "dialog": {
+        "left": 373,
+        "right": 993,
+        "top": 204,
+        "bottom": 564
+      },
+      "controls": 1,
+      "undersized": [],
+      "problems": []
+    }
+  ]
+}

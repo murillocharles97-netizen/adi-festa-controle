@@ -116,7 +116,7 @@ window.Checkout = (() => {
         recentProducts,
       });
     }
-    return `<div class="pos-page"><div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Cadastre um produto primeiro</div>'}</section><section class="pos-summary" id="pos-summary" hidden><div class="pos-summary-head"><div><h3>Resumo da venda</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select></div><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
+    return `<div class="pos-page"><div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Cadastre um produto primeiro</div>'}</section><section class="pos-summary" id="pos-summary" hidden><div class="pos-summary-head"><div><h3>Resumo da venda</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -312,8 +312,8 @@ window.Checkout = (() => {
           finalPayment = modal.querySelector('[name="renewalPayment"]')?.value || "pix",
           item = ProductVariations.saleItem(product, variant, 1), draftId = Utils.uuid();
         Object.assign(item, { productType: "recurring", precoOriginal: finalPrice, precoFinalUnitario: finalPrice, precoUnitario: finalPrice, recurringActivation: { draftId, subscriptionId: chosen?.id || null, label: finalLabel, durationValue: finalDurationValue, durationUnit: finalDurationUnit, contractedPrice: finalPrice, renewalMessage: product.renewalMessage || "", reminders: product.renewalReminders || [], clientIdSnapshot: clientId } });
-        const status = finalPayment === "fiado" ? "fiado" : "pago", statusSelect = document.querySelector("#sale-status");
-        statusSelect.value = status; window.CheckoutPaymentMethod = finalPayment; statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        const status = finalPayment === "fiado" ? "fiado" : "pago", statusSelect = document.querySelector("#sale-status"), paymentSelect = document.querySelector("#sale-payment-method");
+        statusSelect.value = status; if (paymentSelect) paymentSelect.value = finalPayment; window.CheckoutPaymentMethod = finalPayment; statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
         addSaleItem(item, { source }); modal.innerHTML = ""; toast(chosen ? "Renovação adicionada à sacola" : "Ativação adicionada à sacola");
       };
       window.lucide?.createIcons();
@@ -662,6 +662,11 @@ window.Checkout = (() => {
       drawCart();
     };
     document.querySelector("#sale-status").onchange = drawCart;
+    document.querySelector("#sale-payment-method")?.addEventListener("change", event => {
+      window.CheckoutPaymentMethod = event.target.value;
+      document.querySelector("#sale-status").value = event.target.value === "fiado" ? "fiado" : "pago";
+      drawCart();
+    });
     document.querySelector("#selected-client-card").onclick = (e) => {
       if (e.target.closest("[data-change-client]")) picker();
       const b = e.target.closest("[data-client-wa]");
@@ -733,11 +738,12 @@ window.Checkout = (() => {
       selectedCampaignIds.clear();
       drawCart();
     };
-    document.querySelector("#finish-sale").onclick = () => {
+    document.querySelector("#finish-sale").onclick = async () => {
       if (finishing) return;
       if (!cart.length) return toast("Adicione ao menos um produto", true);
       const clienteId = document.querySelector("#sale-client").value || null,
-        status = document.querySelector("#sale-status").value;
+        paymentMethod = document.querySelector("#sale-payment-method")?.value || window.CheckoutPaymentMethod || "pix",
+        status = paymentMethod === "fiado" ? "fiado" : document.querySelector("#sale-status").value;
       if (status === "fiado" && !clienteId)
         return toast("Selecione um cliente para vender fiado", true);
       if (cart.some((item) => item.productType === "recurring") && !clienteId)
@@ -746,20 +752,37 @@ window.Checkout = (() => {
         return toast("Revise as renovações: o cliente da sacola foi alterado.", true);
       const client = clienteId ? clients().getById(clienteId) : null,
         operationId = crypto.randomUUID(),
-        proceed = () => {
+        saleId = crypto.randomUUID(),
+        proceed = async () => {
           if (finishing) return;
           finishing = true;
           document.querySelector("#finish-sale").disabled = true;
-          const sale = Repositories.saleRepository().create({
+          const saleDraft = {
+            id: saleId,
             clienteId,
             status,
             operationId,
+            formaPagamento: paymentMethod,
             observacao: document.querySelector("#sale-note").value,
             itens: cart,
             ajusteManual: manual,
             descontoTipo: discountKind,
             appliedCampaignIds: [...selectedCampaignIds],
-          });
+          };
+          if (paymentMethod === "cartao_presencial") {
+            try {
+              await window.TerminalPayments.beginCheckout({
+                saleDraft,
+                amountCents: Math.round(Number(document.querySelector("#manual-total")?.value || 0) * 100),
+              });
+            } catch (error) {
+              finishing = false;
+              document.querySelector("#finish-sale").disabled = false;
+              toast(error.message || "Não foi possível iniciar a cobrança.", true);
+            }
+            return;
+          }
+          const sale = Repositories.saleRepository().create(saleDraft);
           cart = [];
           Recibos.mostrar(sale, client);
         };
@@ -771,7 +794,7 @@ window.Checkout = (() => {
         )
       )
         return;
-      proceed();
+      await proceed();
     };
     document.querySelector("#desktop-clear-cart")?.addEventListener(
       "click",
@@ -829,6 +852,42 @@ window.Checkout = (() => {
     pendingRenewal = null;
     selectedCampaignIds.clear();
   }
+  function finalizeTerminalPayment(intent) {
+    if (!intent?.saleDraft || intent.status !== "approved")
+      throw Error("Pagamento ainda não foi aprovado.");
+    const existing = Vendas.listar().find(
+      (sale) => sale.operationId === intent.finalizationOperationId,
+    );
+    const sale = existing || Repositories.saleRepository().create({
+      ...intent.saleDraft,
+      id: intent.saleId,
+      status: "pago",
+      operationId: intent.finalizationOperationId,
+      formaPagamento: "cartao_presencial",
+      paymentIntentId: intent.id,
+      paymentState: "paid",
+      receivableStatus: "pending_settlement",
+      paymentMetadata: {
+        channel: "card_present",
+        provider: intent.provider,
+        terminalId: intent.terminalId,
+        terminalNickname: intent.terminalNickname,
+        method: intent.paymentMethod,
+        installments: intent.installments,
+        providerPaymentId: intent.providerPaymentId || null,
+        providerOrderId: intent.providerOrderId || null,
+      },
+    });
+    cart = [];
+    selectedCampaignIds.clear();
+    manual = false;
+    discountKind = null;
+    finishing = true;
+    window.CheckoutPaymentMethod = "cartao_presencial";
+    const client = sale.clienteId ? clients().getById(sale.clienteId) : null;
+    Recibos.mostrar(sale, client);
+    return sale;
+  }
   function prepareRenewal(subscriptionId) {
     const subscription = CustomerSubscriptions.get(subscriptionId);
     if (!subscription) return (toast("Renovação não encontrada", true), false);
@@ -856,6 +915,11 @@ window.Checkout = (() => {
     setTimeout(paint, 0);
   }
   addEventListener("firebase-session-cleared", resetSession);
+  addEventListener("terminal-payment-retry-ready", () => {
+    finishing = false;
+    const button = document.querySelector("#finish-sale");
+    if (button) button.disabled = false;
+  });
   return {
     view,
     enhance,
@@ -868,6 +932,7 @@ window.Checkout = (() => {
     addSaleItem,
     bindDesktop: standalone,
     filterProducts: filter,
+    finalizeTerminalPayment,
     cartCount: () =>
       cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),
   };

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>QA — Pagamento presencial</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/design-system/tokens.css">
+  <link rel="stylesheet" href="/css/terminal-payments.css">
+  <style>
+    body{min-height:100vh;background:linear-gradient(145deg,#eef8f5,#f6f8fa 60%,#edf1f4)}
+    .qa-store{max-width:1040px;margin:auto;padding:32px 24px;color:#405161}.qa-store header{display:flex;align-items:center;gap:12px}.qa-store img{width:42px;height:42px}.qa-store h1{margin:0;color:#1d2b38;font-size:22px}.qa-store p{margin:3px 0 0;color:#71808d}.qa-skeleton{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:28px}.qa-skeleton div{height:180px;border:1px solid #e1e8eb;border-radius:22px;background:rgba(255,255,255,.75)}
+    @media(max-width:767px){.qa-store{padding:20px 16px}.qa-skeleton{grid-template-columns:1fr}.qa-skeleton div{height:120px}}
+  </style>
+</head>
+<body>
+  <div class="qa-store" aria-hidden="true">
+    <header><img src="/assets/veconi-symbol.svg" alt=""><div><h1>Caixa VECONI</h1><p>Ambiente visual de validação</p></div></header>
+    <section class="qa-skeleton"><div></div><div></div></section>
+  </div>
+  <div id="modal"></div>
+  <div id="toasts"></div>
+  <script src="/assets/lucide.min.js"></script>
+  <script>
+    const fixtureState=new URLSearchParams(location.search).get('state')||'options';
+    const capabilities={supportsCredit:true,supportsDebit:true,supportsPix:false,supportsInstallments:true,maxInstallments:12,supportsRefund:true,supportsCancellation:true,supportsRemotePayment:true};
+    const terminal={id:'terminal_simulator_1',businessId:'business-qa',provider:'simulator',nickname:'Simulador Caixa 1',model:'VECONI Simulator',status:'connected',isDefault:true,capabilities};
+    const saleDraft={id:'sale_visual_138',clienteId:'cliente_visual',observacao:'',itens:[{produtoId:'produto_visual',nome:'Kit Festa Verde',quantidade:1,precoFinalUnitario:89.9}]};
+    const baseIntent={id:'pi_visual_138',businessId:'business-qa',saleId:saleDraft.id,terminalId:terminal.id,terminalNickname:terminal.nickname,provider:'simulator',amountCents:8990,currency:'BRL',paymentMethod:'credit',installments:2,status:'awaiting_terminal',saleStatus:'payment_pending',idempotencyKey:'terminal_sale_visual_138',capabilities,saleDraft,finalizationOperationId:'terminal_payment_pi_visual_138',finalizationStatus:'pending',canCancel:true};
+    const providers=[{id:'cielo',name:'Cielo',availability:'not_configured'},{id:'mercado_pago',name:'Mercado Pago',availability:'not_configured'},{id:'pagbank',name:'PagBank',availability:'coming_soon'},{id:'simulator',name:'Simulador VECONI',availability:'connected'}];
+    const setup={simulatorAllowed:true,providers,terminals:fixtureState==='no-terminal'?[]:[terminal]};
+    window.FirebaseSession={businessId:'business-qa',profile:{role:'owner',name:'Operador QA'}};
+    window.DB={getBusinessId:()=>window.FirebaseSession.businessId};
+    window.Utils={escapar:value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character])),toast:()=>{}};
+    window.FirebaseDocumentListener=()=>()=>{};
+    window.Checkout={finalizeTerminalPayment:()=>({id:saleDraft.id})};
+    window.FirebaseCallable=async(name,data)=>{
+      if(name==='getTerminalPaymentSetup')return{data:setup};
+      if(name==='createTerminalPayment')return{data:{intent:{...baseIntent,paymentMethod:data.paymentMethod,installments:data.installments},reused:false}};
+      if(name==='dispatchTerminalPayment'){
+        const status={waiting:'processing',timeout:'pending_confirmation',declined:'declined',error:'error',cancelled:'cancelled'}[fixtureState]||'processing';
+        return{data:{intent:{...baseIntent,status,canCancel:['processing','pending_confirmation'].includes(status),failureReason:status==='declined'?'simulated_decline':null}}};
+      }
+      if(name==='getTerminalPaymentStatus')return{data:{intent:{...baseIntent,status:'pending_confirmation',canCancel:true}}};
+      if(name==='cancelTerminalPayment')return{data:{intent:{...baseIntent,status:'cancelled',canCancel:false}}};
+      if(name==='claimTerminalPaymentFinalization')return{data:{claimed:false,busy:true,intent:{...baseIntent,status:'approved'}}};
+      return{data:{}};
+    };
+  </script>
+  <script src="/js/terminal-payments.js"></script>
+  <script>
+    (async()=>{
+      if(fixtureState==='settings')await window.TerminalPayments.openSettings();
+      else{
+        await window.TerminalPayments.beginCheckout({saleDraft,amountCents:8990});
+        if(!['options','no-terminal'].includes(fixtureState))document.querySelector('[data-terminal-checkout-form] button[type="submit"]').click();
+      }
+      window.__terminalPaymentFixture={ready:true,state:fixtureState};
+    })();
+  </script>
+</body>
+</html>
