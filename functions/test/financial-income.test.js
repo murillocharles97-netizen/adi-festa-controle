@@ -2,12 +2,18 @@
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {automationFor,paymentMethod,cents,signedCents,iso,entryIdentity}=require('../src/services/financial-income-service');
+const {automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale}=require('../src/services/financial-income-service');
 
 test('automação exige vínculo explícito ou marco legado',()=>{
   assert.equal(automationFor({type:'personal'}).enabled,false);
   assert.equal(automationFor({type:'business',autoEntryFromSalesSince:'2026-09-01T00:00:00.000Z'}).enabled,true);
   assert.equal(automationFor({automation:{enabled:false},autoEntryFromSalesSince:'2026-09-01T00:00:00.000Z'}).enabled,false);
+});
+
+test('cartão presencial permanece como recebível e não saldo bancário',()=>{
+  assert.equal(isTerminalPaymentSale({formaPagamento:'cartao_presencial'}),true);
+  assert.equal(isTerminalPaymentSale({paymentMetadata:{channel:'card_present'}}),true);
+  assert.equal(isTerminalPaymentSale({formaPagamento:'pix'}),false);
 });
 
 test('normaliza valores, datas, métodos e identidade idempotente',()=>{

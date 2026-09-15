@@ -226,7 +226,8 @@
           <button type="button" class="desktop-continue-sale" id="desktop-continue-sale"><span>Continuar venda <b id="desktop-cta-total">• ${money(total)}</b></span>${icon("chevron-right")}</button>
           <section class="desktop-checkout-fields" id="desktop-checkout-fields" hidden>
             <button class="desktop-back-to-cart" id="desktop-back-to-cart" type="button">${icon("arrow-left")} Voltar ao carrinho</button>
-            <div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select></div>
+            <div class="field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div>
+            <select id="sale-status" hidden aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select>
             <div id="debt-preview"></div>
             <div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Observação opcional"></textarea></div>
             <button class="btn btn-primary" id="finish-sale" type="button">${icon("check")} Concluir venda <span id="desktop-finish-total">• ${money(total)}</span></button>
@@ -300,7 +301,7 @@
       checkoutFields.hidden = false;
       root.querySelector("#desktop-continue-sale").hidden = true;
       checkoutFields.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      checkoutFields.querySelector("#sale-status")?.focus({ preventScroll: true });
+      checkoutFields.querySelector("#sale-payment-method")?.focus({ preventScroll: true });
     });
     root.querySelector("#desktop-back-to-cart")?.addEventListener("click", () => {
       checkoutFields.hidden = true;
