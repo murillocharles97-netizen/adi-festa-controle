@@ -17,7 +17,7 @@ window.Modais=(()=>{
   const unitPrice=item=>Number(item?.precoFinalUnitario??item?.precoUnitario??0);
   const debt=balance=>Math.abs(Math.min(0,Number(balance||0)));
   const isMobile=()=>matchMedia('(max-width:767px)').matches;
-  const paymentLabels={pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão',credito:'Cartão de crédito',debito:'Cartão de débito',entrega:'Pago na entrega',pago:'Pago',fiado:'Fiado'};
+  const paymentLabels={pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão',cartao_presencial:'Cartão presencial',credito:'Cartão de crédito',debito:'Cartão de débito',entrega:'Pago na entrega',pago:'Pago',fiado:'Fiado'};
   const durationLabel=item=>`${Number(item.durationValue||30)} ${{days:Number(item.durationValue)===1?'dia':'dias',weeks:Number(item.durationValue)===1?'semana':'semanas',months:Number(item.durationValue)===1?'mês':'meses',years:Number(item.durationValue)===1?'ano':'anos'}[item.durationUnit]||'dias'}`;
   const recurringItems=sale=>(sale?.itens||[]).filter(item=>item.productType==='recurring'&&item.subscriptionExpiresAt);
   let active=null;
@@ -34,6 +34,12 @@ window.Modais=(()=>{
   function paymentLabel(sale){
     const method=String(sale?.formaPagamento||'').toLowerCase();
     return sale?.status==='fiado'?'Fiado':paymentLabels[method]||'Pago';
+  }
+  function terminalPaymentMarkup(sale){
+    const payment=sale?.paymentMetadata;
+    if(!payment||payment.channel!=='card_present')return'';
+    const provider=({cielo:'Cielo',mercado_pago:'Mercado Pago',pagbank:'PagBank',simulator:'Simulador VECONI'})[payment.provider]||payment.provider||'Maquininha',method=payment.method==='debit'?'Débito':'Crédito',installments=payment.method==='credit'?` · ${Number(payment.installments||1)}x`:'';
+    return`<div class="sale-terminal-payment-meta"><span>${escapar(provider)} · ${escapar(payment.terminalNickname||'Terminal')}</span><small>${method}${installments}${payment.providerPaymentId?` · Transação ${escapar(payment.providerPaymentId)}`:''}</small></div>`;
   }
   function publicSaleNumber(sale){
     if(sale?.publicOrderNumber)return String(sale.publicOrderNumber).replace(/^#/,'');
@@ -120,7 +126,7 @@ window.Modais=(()=>{
   function receiptMarkup(sale,customer,business){
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';
     const financed=sale.status==='fiado'?`<div class="receipt-debt"><div><span>Saldo anterior</span><strong>${dinheiro(debt(sale.saldoAnterior))}</strong></div><div><span>Valor fiado nesta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>Total em aberto agora</span><strong>${dinheiro(debt(sale.saldoAtual))}</strong></div></div>`:'';
-    const paid=sale.status!=='fiado'?`<div class="sale-payment-confirmed"><i data-lucide="badge-check"></i><span><b>${paymentLabel(sale)}</b><small>Pagamento confirmado</small>${Number(sale.valorRecebido)>0?`<small>Recebido: ${dinheiro(sale.valorRecebido)}</small>`:''}${Number(sale.troco)>0?`<small>Troco: ${dinheiro(sale.troco)}</small>`:''}</span></div>`:'';
+    const paid=sale.status!=='fiado'?`<div class="sale-payment-confirmed"><i data-lucide="badge-check"></i><span><b>${paymentLabel(sale)}</b><small>Pagamento confirmado</small>${Number(sale.valorRecebido)>0?`<small>Recebido: ${dinheiro(sale.valorRecebido)}</small>`:''}${Number(sale.troco)>0?`<small>Troco: ${dinheiro(sale.troco)}</small>`:''}</span></div>${terminalPaymentMarkup(sale)}`:'';
     const campaigns=(sale.campaignReceiptSummary||[]).length?`<div class="sale-receipt-campaigns"><b>Benefícios da compra</b>${sale.campaignReceiptSummary.map(item=>`<span><i data-lucide="gift"></i><span><strong>${escapar(item.campaignName)}</strong><small>${escapar(item.text)}${item.rewardUnlocked?` · ${Number(item.rewardUnlocked)} recompensa disponível`:''}</small></span></span>`).join('')}</div>`:'';
     return`<section class="receipt-paper sale-receipt-paper"><header><h2>${escapar(business.receiptName||business.name)}</h2><span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
   }

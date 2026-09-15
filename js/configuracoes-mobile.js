@@ -77,6 +77,12 @@
           operation: true,
         }),
         row({
+          iconName: "credit-card",
+          title: "Integrações e maquininhas",
+          subtitle: "Terminais e pagamentos presenciais",
+          action: "terminals",
+        }),
+        row({
           iconName: "user-round",
           title: "Conta",
           subtitle: "Perfil e acesso",
@@ -252,6 +258,7 @@
           if (action === "account") account();
           if (action === "backup") backup();
           if (action === "tutorials") tutorials();
+          if (action === "terminals") window.TerminalPayments?.openSettings?.();
           if (action === "sync") {
             const badge = $(".local-badge");
             if (badge?.dataset.cloudPanelBound === "true") badge.click();

@@ -55,3 +55,4 @@
 }
 @media(max-width:767px) and (orientation:landscape){.mobile-sale-completion{height:98dvh}.mobile-sale-completion .sale-receipt-items{max-height:110px}.sale-share-preview textarea{min-height:120px;max-height:26dvh}}
 @media(prefers-reduced-motion:reduce){.mobile-sale-completion,.sale-share-sheet{scroll-behavior:auto}}
+.sale-terminal-payment-meta{display:flex;flex-direction:column;gap:3px;margin:10px 0;padding:12px 14px;border-radius:12px;background:#eefaf7;color:#285f53}.sale-terminal-payment-meta span{font-weight:800}.sale-terminal-payment-meta small{overflow-wrap:anywhere;color:#55776f}

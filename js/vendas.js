@@ -133,7 +133,7 @@ window.Vendas = (() => {
         cliente.campaignFinanceVersion = 2;
       }
       criada = {
-        id: Utils.uuid(),
+        id: d.id || Utils.uuid(),
         operationId,
         clienteId: d.clienteId || null,
         clientId: d.clienteId || null,
@@ -152,6 +152,12 @@ window.Vendas = (() => {
           d.formaPagamento ||
           window.CheckoutPaymentMethod ||
           (d.status === "fiado" ? "fiado" : "pago"),
+        paymentIntentId: d.paymentIntentId || null,
+        paymentState: d.paymentState || (d.status === "fiado" ? null : "paid"),
+        receivableStatus: d.receivableStatus || null,
+        paymentMetadata: d.paymentMetadata
+          ? structuredClone(d.paymentMetadata)
+          : null,
         data,
         createdAt: data,
         observacao: d.observacao || "",
