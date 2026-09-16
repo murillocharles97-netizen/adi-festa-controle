@@ -5,6 +5,15 @@
     { dinheiro, dataHora, escapar, telefoneWhatsApp, toast } = Utils;
   let carrinho = [];
   const desktopProductState = { query: "", filter: "todos", limit: 40 };
+  const activeSalesSpaceId = () => {
+      if (!window.SpaceContext) throw Error("O contexto de espaços ainda não foi carregado.");
+      return window.SpaceContext.requireSalesSpace();
+    },
+    availableForCurrentSale = (product) => {
+      const spaceId = String(window.SpaceContext?.salesId?.() || "").trim();
+      return Boolean(spaceId) &&
+        window.SpaceContext?.productAllowsSpace?.(product, spaceId) !== false;
+    };
   const icon = (n) => `<i data-lucide="${n}"></i>`,
     cartKey = (item) =>
       window.ProductVariations?.itemKey?.(item) ||
@@ -86,7 +95,8 @@
   }
   window.requestSafeSaleUndo = requestSafeSaleUndo;
   function resumoFechamento() {
-    const d = DB.carregar(),
+    const base = DB.carregar(),
+      d = window.SpaceContext?.contextualData?.(base, "home") || base,
       vendas = d.vendas.filter((v) => Utils.hoje(v.data)),
       pagamentos = d.pagamentos.filter((p) => Utils.hoje(p.data)),
       vendido = vendas.reduce(
@@ -115,7 +125,8 @@
     };
   }
   function resumoEstoque() {
-    const d = DB.carregar(),
+    const base = DB.carregar(),
+      d = window.SpaceContext?.contextualData?.(base, "home") || base,
       produtos = d.produtos.filter((p) => p.ativo !== false),
       esgotados = produtos.filter(
         (p) => getProductStockStatus(p) === "esgotado",
@@ -145,7 +156,8 @@
     return `<section class="panel stock-alerts"><div class="panel-head"><h3>Alertas de estoque</h3><button class="btn btn-light btn-sm" data-go="produtos">${icon("package")} Ver produtos</button></div><div class="stock-alert-grid"><div class="stock-alert danger"><b>${e.esgotados.length}</b><span>Produtos esgotados</span></div><div class="stock-alert warning"><b>${e.baixos.length}</b><span>Abaixo do mínimo</span></div><div><h4>Mais vendidos hoje</h4>${e.maisVendidos.length ? e.maisVendidos.map((p) => `<p>${escapar(p.nome)} <b>${p.quantidade} un.</b></p>`).join("") : '<p class="muted">Nenhuma venda hoje</p>'}</div><div><h4>Sugestão de reposição</h4>${e.reposicao.length ? e.reposicao.map((p) => `<p>${escapar(p.nome)} <b>${Number(p.estoqueAtual || 0)} un.</b></p>`).join("") : '<p class="muted">Estoque tranquilo por enquanto</p>'}</div></div></section>`;
   }
   function inicio() {
-    const d = DB.carregar(),
+    const base = DB.carregar(),
+      d = window.SpaceContext?.contextualData?.(base, "home") || base,
       hoje = d.vendas.filter((v) => Utils.hoje(v.data)),
       valorHoje = hoje.reduce(
         (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
@@ -315,10 +327,11 @@
   function vender() {
     if (window.DesktopSales?.isDesktop?.())
       return window.Checkout?.view?.() || "";
-    const ps = Produtos.listar().filter((p) => p.ativo),
+    const ps = Produtos.listar().filter((p) => p.ativo && availableForCurrentSale(p)),
       cs = Clientes.listar().filter((c) => c.ativo),
       t = totaisCarrinho();
     return (
+      (window.SpaceContext?.renderBar?.("sales") || "") +
       cabecalho(
         "Nova venda",
         "Edite quantidades, preços e descontos antes de concluir.",
@@ -608,6 +621,7 @@
   }
   function bind(route) {
     $$("[data-go]").forEach((b) => (b.onclick = () => Router.ir(b.dataset.go)));
+    window.SpaceContext?.bind?.($("#app"));
     if (route === "inicio" && !window.MobileHome?.isMobile())
       window.DesktopDashboard?.bind?.();
     if (route === "clientes") {
@@ -988,6 +1002,7 @@
       const cliente = clienteId ? Clientes.obter(clienteId) : null,
         seguir = () => {
           const venda = Vendas.registrar({
+            spaceId: activeSalesSpaceId(),
             clienteId,
             status,
             observacao: $("#sale-note").value,
@@ -1358,6 +1373,11 @@
     }, 220);
   }
   addEventListener("cloud-data-updated", scheduleCloudRender);
+  addEventListener("veconi-spaces-ready", () => {
+    const route = Router.atual();
+    if (!["inicio", "vender"].includes(route) || document.querySelector("#modal")?.children.length) return;
+    try { mountRoute(route); } catch (error) { showAppMountError(error); }
+  });
   document.addEventListener("focusout", () => {
     if (cloudRenderPending) setTimeout(scheduleCloudRender, 80);
   });
