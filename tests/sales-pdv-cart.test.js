@@ -15,7 +15,7 @@ test("tela principal do PDV mantém checkout oculto e carrinho acionável", () =
   assert.match(checkout, /data-sale-cart-overlay hidden/);
   assert.match(
     checkout,
-    /class="pos-bag" id="open-sale-summary"[^>]*aria-expanded="false"/,
+    /class="pos-bag is-empty" id="open-sale-summary"[^>]*aria-expanded="false"/,
   );
   assert.match(
     desktop,
@@ -68,9 +68,9 @@ test("carrinho abre como sheet no mobile e drawer no desktop sem formulário inl
   assert.match(mobile, /event\.key==='Escape'/);
   assert.match(checkoutCss, /\.mobile-sale-page \.pos-summary\[hidden\]:not\(\.mobile-open\)\{display:none!important\}/);
   assert.match(checkoutCss, /\.mobile-sale-page \.pos-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.doesNotMatch(checkoutCss, /width:58px;height:58px/);
-  assert.match(mobileFixes, /\.mobile-sale-page \.pos-bag\{[\s\S]*width:auto;height:auto;min-height:64px/);
-  assert.doesNotMatch(mobileFixes, /\.mobile-sale-page \.pos-bag\{[\s\S]{0,260}border-radius:50%/);
+  assert.match(checkoutCss, /width:58px;height:58px;min-height:58px/);
+  assert.match(mobileFixes, /\.mobile-sale-page \.pos-bag\{[\s\S]*width:58px;height:58px;min-height:58px/);
+  assert.match(mobileFixes, /\.mobile-sale-page \.pos-bag:before[\s\S]*content:attr\(data-count\)/);
   assert.match(desktopCss, /\.desktop-sales-cart-overlay\.is-open/);
   assert.match(desktopCss, /\.desktop-sales-cart\.is-open/);
   assert.match(desktopCss, /\.desktop-sales \.desktop-cart-fab/);
@@ -86,7 +86,7 @@ test("venda e catálogo continuam vinculados ao espaço selecionado", () => {
   assert.match(checkout, /SpaceContext\?\.requireSalesSpace/);
   assert.match(checkout, /spaceId,\s*financialSpaceId: spaceId/);
   assert.match(spaces, /Checkout\?\.resetSession/);
-  assert.match(spaces, /Trocar o espaço limpará a venda atual/);
+  assert.match(spaces, /Você possui itens no carrinho deste espaço/);
 });
 
 test("rota Vender possui um único renderizador e um único binding canônico", () => {
@@ -122,4 +122,20 @@ test("atualizações assíncronas da venda preservam o componente e renovam só 
   assert.match(app, /window\.Checkout\?\.refreshClients\?\.\(\)/);
   assert.match(checkout, /function refreshProducts\(\)[\s\S]*grid\.innerHTML/);
   assert.match(checkout, /function refreshClients\(\)[\s\S]*select\.innerHTML/);
+});
+
+test("hotfix mantém tentativa idempotente, recuperável e nunca deixa finalização presa", () => {
+  const checkout = read("js/checkout.js"),
+    sales = read("js/vendas.js");
+
+  assert.match(checkout, /activeAttempt\?\.fingerprint === fingerprint/);
+  assert.match(checkout, /setSubmissionState\("processing"/);
+  assert.match(checkout, /setSubmissionState\("error"[\s\S]*Tentar novamente/);
+  assert.match(checkout, /cart = \[\][\s\S]*finishing = false[\s\S]*setSubmissionState\("success"/);
+  assert.match(checkout, /if \(started === false\)[\s\S]*finishing = false/);
+  assert.match(checkout, /sessionStorage\.setItem\(key/);
+  assert.match(checkout, /restoreDraft\(\)/);
+  assert.match(checkout, /businessId,[\s\S]*spaceId,/);
+  assert.match(sales, /const nextData =/);
+  assert.match(sales, /DB\.salvar\(nextData\)/);
 });

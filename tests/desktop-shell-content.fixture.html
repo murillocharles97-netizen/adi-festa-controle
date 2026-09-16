@@ -117,7 +117,7 @@
       data.campanhas = []; data.progressosCampanha = []; data.recompensas = []; data.catalogOrders = [];
     });
     window.FirebaseSession = { user: { uid: "fixture-owner", email: "owner@fixture.local" }, profile: { role: "owner", active: true, businessId: "desktop-shell-fixture" }, businessId: "desktop-shell-fixture", business: { id: "desktop-shell-fixture", name: "Empresa fixture" }, access: { planId: "internal", readOnly: false, limits: {} } };
-    window.SpaceContext = { salesId: () => "fixture-space", list: () => [{ id: "fixture-space", name: "Espaço fixture" }], renderBar: () => "", bind() {}, requireSalesSpace: () => "fixture-space" };
+    window.SpaceContext = { ALL_SPACES:"all_spaces", salesId: () => "fixture-space", homeId:()=>"all_spaces", list: () => [{ id: "fixture-space", name: "Espaço fixture" }], contextualData:data=>({...data,spaceSelectionId:"all_spaces",unassignedLegacySales:0}), goalFor:()=>300, renderBar: kind => kind==="home"?'<section class="space-context-bar" data-space-context="home"><label><span><i data-lucide="layers-3"></i>Espaço</span><select data-space-select="home"><option value="all_spaces" selected>Todos os espaços</option><option value="fixture-space">Espaço fixture</option></select></label><button type="button" data-space-manage aria-label="Filtros"><i data-lucide="sliders-horizontal"></i><span>Filtros</span></button></section>':"", bind() {}, requireSalesSpace: () => "fixture-space" };
     window.SyncFirebase = { setScreen() {}, subscribe() { return () => {}; } };
     window.FirebaseAuthActions = { signOut() {} };
   </script>

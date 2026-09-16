@@ -35,3 +35,35 @@
   .home-chart{padding:12px 11px 2px}.home-chart svg{height:122px}.home-quick>div button{min-height:80px}
 }
 @media(max-width:350px){.home-main-metrics{grid-template-columns:1fr}.goal-values strong{font-size:1.65rem}.home-attention button{grid-template-columns:36px minmax(0,1fr)}.home-attention button>strong{grid-column:2;justify-self:start}}
+
+/* Home mobile v142 — hierarquia aprovada: contexto, meta, indicadores e atenção. */
+@media(max-width:767px){
+  .mobile-home-dashboard{--home-green:#06a982;--home-navy:#101a37;gap:14px;padding:2px 0 26px;color:var(--home-navy)}
+  .mobile-home-dashboard .space-context-bar{display:grid;grid-template-columns:minmax(0,1fr) 54px;gap:10px;margin:0;padding:0;border:0;background:transparent;box-shadow:none}
+  .mobile-home-dashboard .space-context-bar label{position:relative;display:block}
+  .mobile-home-dashboard .space-context-bar label>span{position:absolute;z-index:2;left:17px;top:50%;display:grid;place-items:center;width:28px;height:28px;overflow:hidden;color:#069e7c;font-size:0;transform:translateY(-50%);pointer-events:none}
+  .mobile-home-dashboard .space-context-bar label>span svg{width:28px;height:28px}
+  .mobile-home-dashboard .space-context-bar select{width:100%;height:60px;border:1px solid #d5e2ea;border-radius:20px;padding:0 42px 0 58px;background:#fff;color:#40506d;font-size:16px;font-weight:800;box-shadow:0 5px 16px rgba(25,48,74,.04)}
+  .mobile-home-dashboard .space-context-bar>button{display:grid;place-items:center;width:54px;min-width:54px;height:60px;min-height:60px;border:1px solid #d5e2ea;border-radius:19px;padding:0;background:#fff;color:#40506d;box-shadow:0 5px 16px rgba(25,48,74,.04)}
+  .mobile-home-dashboard .space-context-bar>button svg{width:23px;height:23px}
+  .mobile-home-dashboard .home-goal-card{min-height:232px;border-radius:25px;padding:20px;background:linear-gradient(135deg,#09b784 0%,#008d79 72%,#087669 100%);box-shadow:0 15px 32px rgba(0,137,105,.2)}
+  .mobile-home-dashboard .home-goal-card header>span{font-size:15px;letter-spacing:.01em}.mobile-home-dashboard .home-goal-card header>span svg{width:24px;height:24px}
+  .mobile-home-dashboard .home-goal-card header>strong{padding:8px 13px;background:#ffffff24;font-size:16px}
+  .mobile-home-dashboard .goal-values{margin:17px 0 18px;gap:7px}.mobile-home-dashboard .goal-values strong{font-size:clamp(2rem,10.8vw,2.85rem);letter-spacing:-.035em}.mobile-home-dashboard .goal-values span{font-size:clamp(1rem,5.3vw,1.35rem)}
+  .mobile-home-dashboard .goal-progress{height:12px;margin:0 0 20px;background:#ffffff35}.mobile-home-dashboard .goal-progress span{background:linear-gradient(90deg,#5be4ba,#87e2cf)}
+  .mobile-home-dashboard .goal-footer p{font-size:13px}.mobile-home-dashboard .goal-footer button{font-size:11px}
+  .mobile-home-dashboard .home-goal-card.empty-goal{min-height:150px}.mobile-home-dashboard .empty-goal>svg{width:38px;height:38px}.mobile-home-dashboard .empty-goal span b{font-size:18px}
+  .mobile-home-dashboard .home-main-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .mobile-home-dashboard .home-main-metrics article{min-height:132px;gap:10px;padding:17px 12px;border-radius:21px;align-items:flex-start}.mobile-home-dashboard .home-main-metrics article>svg{flex:0 0 39px;width:39px;height:39px;padding:9px;border-radius:50%}
+  .mobile-home-dashboard .home-main-metrics small{font-size:12px}.mobile-home-dashboard .home-main-metrics strong{margin:7px 0 5px;font-size:clamp(1.28rem,6.3vw,1.72rem);letter-spacing:-.03em}.mobile-home-dashboard .home-main-metrics em{font-size:10px}
+  .mobile-home-dashboard .home-secondary-scroller{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;overflow:visible;padding:0}
+  .mobile-home-dashboard .home-secondary-scroller article{display:grid;grid-template-columns:36px minmax(0,1fr);grid-template-rows:auto auto;column-gap:8px;width:auto;min-height:82px;padding:12px 10px;border-radius:18px}.mobile-home-dashboard .home-secondary-scroller svg{width:36px;height:36px;padding:8px;border-radius:14px}.mobile-home-dashboard .home-secondary-scroller strong{font-size:20px}.mobile-home-dashboard .home-secondary-scroller span{font-size:12px}
+  .mobile-home-dashboard .home-attention{gap:10px;margin-top:4px}.mobile-home-dashboard .home-attention>header h3{font-size:20px;letter-spacing:-.02em}
+  .mobile-home-dashboard .home-attention>div{gap:9px}.mobile-home-dashboard .home-attention button,.mobile-home-dashboard .home-attention>div>p{min-height:78px;grid-template-columns:46px minmax(0,1fr) auto;gap:12px;padding:12px 13px;border-radius:19px}.mobile-home-dashboard .home-attention button>i{width:46px;height:46px;border-radius:50%}.mobile-home-dashboard .home-attention button>i svg{width:23px}.mobile-home-dashboard .home-attention button b{font-size:15px}.mobile-home-dashboard .home-attention button small{font-size:12px}.mobile-home-dashboard .home-attention button>strong{font-size:11px}.mobile-home-dashboard .home-attention button>strong>span{display:none}.mobile-home-dashboard .home-attention button>strong svg{width:20px;height:20px}
+}
+@media(max-width:350px){
+  .mobile-home-dashboard{gap:11px}.mobile-home-dashboard .space-context-bar{grid-template-columns:minmax(0,1fr) 50px;gap:8px}.mobile-home-dashboard .space-context-bar select{height:56px;padding-left:52px;font-size:14px}.mobile-home-dashboard .space-context-bar>button{width:50px;min-width:50px;height:56px;min-height:56px}
+  .mobile-home-dashboard .home-main-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.mobile-home-dashboard .home-main-metrics article{min-height:122px;gap:7px;padding:13px 9px}.mobile-home-dashboard .home-main-metrics article>svg{flex-basis:33px;width:33px;height:33px}.mobile-home-dashboard .home-main-metrics strong{font-size:1.18rem}
+  .mobile-home-dashboard .home-secondary-scroller{gap:6px}.mobile-home-dashboard .home-secondary-scroller article{grid-template-columns:30px minmax(0,1fr);padding:9px 7px}.mobile-home-dashboard .home-secondary-scroller svg{width:30px;height:30px;padding:7px}.mobile-home-dashboard .home-secondary-scroller strong{font-size:17px}.mobile-home-dashboard .home-secondary-scroller span{font-size:10px}
+  .mobile-home-dashboard .home-attention button{grid-template-columns:40px minmax(0,1fr) 18px}.mobile-home-dashboard .home-attention button>strong{grid-column:3}.mobile-home-dashboard .home-attention button>i{width:40px;height:40px}
+}
