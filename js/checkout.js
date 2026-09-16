@@ -135,7 +135,7 @@ window.Checkout = (() => {
         recentProducts,
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><section class="pos-summary" id="pos-summary" hidden><div class="pos-summary-head"><div><h3>Resumo da venda</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -167,6 +167,7 @@ window.Checkout = (() => {
       cartCount = document.querySelector("#desktop-cart-count"),
       ctaTotal = document.querySelector("#desktop-cta-total"),
       finishTotal = document.querySelector("#desktop-finish-total"),
+      cartBadge = document.querySelector("[data-desktop-cart-badge]"),
       discountPreview = document.querySelector("#desktop-discount-preview"),
       currentTotals = totals();
     if (bagLabel)
@@ -174,6 +175,7 @@ window.Checkout = (() => {
         ? `${items} ${items === 1 ? "item" : "itens"} · ${dinheiro(total)}`
         : "Nenhum item selecionado";
     if (bagTotal) bagTotal.textContent = dinheiro(total);
+    if (cartBadge) cartBadge.textContent = items > 99 ? "99+" : String(items);
     if (cartCount)
       cartCount.textContent = `${items} ${items === 1 ? "item" : "itens"}`;
     if (ctaTotal) ctaTotal.textContent = `• ${dinheiro(currentTotals.final)}`;
@@ -407,16 +409,8 @@ window.Checkout = (() => {
       }
       setTimeout(refresh, 0);
     };
-    document.querySelector("#open-sale-summary").onclick = () => {
-      document.querySelector("#pos-summary").hidden = false;
-      document
-        .querySelector("#pos-summary")
-        .scrollIntoView({ behavior: "smooth" });
-    };
-    document.querySelector("#close-sale-summary").onclick = () => {
-      document.querySelector("#pos-summary").hidden = true;
-      scrollTo({ top: 0, behavior: "smooth" });
-    };
+    document.querySelector("#open-sale-summary").onclick = openCartSurface;
+    document.querySelector("#close-sale-summary").onclick = closeCartSurface;
     document.querySelector("#open-client-picker").onclick = () => picker();
     document.querySelector("#sale-client").onchange = refresh;
     document.querySelector("#sale-status").addEventListener("change", refresh);
@@ -677,16 +671,8 @@ window.Checkout = (() => {
     };
     const openSummary = document.querySelector("#open-sale-summary"),
       closeSummary = document.querySelector("#close-sale-summary");
-    if (openSummary && !openSummary.hidden) openSummary.onclick = () => {
-      document.querySelector("#pos-summary").hidden = false;
-      document
-        .querySelector("#pos-summary")
-        .scrollIntoView({ behavior: "smooth" });
-    };
-    if (closeSummary && !closeSummary.hidden) closeSummary.onclick = () => {
-      document.querySelector("#pos-summary").hidden = true;
-      scrollTo({ top: 0, behavior: "smooth" });
-    };
+    if (openSummary && !openSummary.hidden) openSummary.onclick = openCartSurface;
+    if (closeSummary && !closeSummary.hidden) closeSummary.onclick = closeCartSurface;
     document.querySelector("#open-client-picker").onclick = () => picker();
     document.querySelector("#sale-client").onchange = () => {
       selectedCampaignIds.clear();
@@ -825,6 +811,7 @@ window.Checkout = (() => {
           try {
             const sale = Repositories.saleRepository().create(saleDraft);
             cart = [];
+            closeCartSurface();
             Recibos.mostrar(sale, client);
           } catch (error) {
             finishing = false;
@@ -899,6 +886,46 @@ window.Checkout = (() => {
     pendingRenewal = null;
     selectedCampaignIds.clear();
   }
+
+  function openCartSurface() {
+    if (window.DesktopSales?.isDesktop?.())
+      return window.DesktopSales.openCart?.();
+    if (window.CheckoutMobile?.openSummary)
+      return window.CheckoutMobile.openSummary();
+    const summary = document.querySelector("#pos-summary"),
+      overlay = document.querySelector("[data-sale-cart-overlay]"),
+      trigger = document.querySelector("#open-sale-summary");
+    if (!summary) return false;
+    summary.hidden = false;
+    summary.classList.add("mobile-open");
+    summary.setAttribute("aria-hidden", "false");
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.classList.add("open");
+    }
+    trigger?.setAttribute("aria-expanded", "true");
+    document.body.classList.add("sale-sheet-open");
+    return true;
+  }
+
+  function closeCartSurface() {
+    if (window.DesktopSales?.isDesktop?.())
+      return window.DesktopSales.closeCart?.();
+    if (window.CheckoutMobile?.closeSummary)
+      return window.CheckoutMobile.closeSummary();
+    const summary = document.querySelector("#pos-summary"),
+      overlay = document.querySelector("[data-sale-cart-overlay]"),
+      trigger = document.querySelector("#open-sale-summary");
+    if (!summary) return false;
+    summary.classList.remove("mobile-open");
+    summary.hidden = true;
+    summary.setAttribute("aria-hidden", "true");
+    overlay?.classList.remove("open");
+    if (overlay) overlay.hidden = true;
+    trigger?.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("sale-sheet-open");
+    return true;
+  }
   function finalizeTerminalPayment(intent) {
     if (!intent?.saleDraft || intent.status !== "approved")
       throw Error("Pagamento ainda não foi aprovado.");
@@ -932,6 +959,7 @@ window.Checkout = (() => {
     finishing = true;
     window.CheckoutPaymentMethod = "cartao_presencial";
     const client = sale.clienteId ? clients().getById(sale.clienteId) : null;
+    closeCartSurface();
     Recibos.mostrar(sale, client);
     return sale;
   }

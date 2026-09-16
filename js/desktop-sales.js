@@ -217,8 +217,9 @@
             <div class="desktop-sales-product-grid" id="desktop-sale-products">${productsHTML(products)}</div>
           </section>
         </section>
-        <aside class="desktop-sales-cart sale-summary" id="pos-summary">
-          <header><h3>Venda atual <span id="desktop-cart-count">${itemCount} ${itemCount === 1 ? "item" : "itens"}</span></h3><button type="button" id="desktop-clear-cart">${icon("trash-2")} Limpar carrinho</button></header>
+        <div class="desktop-sales-cart-overlay" data-sale-cart-overlay hidden></div>
+        <aside class="desktop-sales-cart sale-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="desktop-cart-title" aria-hidden="true" hidden>
+          <header><div><h3 id="desktop-cart-title">Carrinho <span id="desktop-cart-count">${itemCount} ${itemCount === 1 ? "item" : "itens"}</span></h3><small>Revise a venda e conclua o pagamento.</small></div><div><button type="button" id="desktop-clear-cart">${icon("trash-2")} Limpar</button><button type="button" class="desktop-close-cart" id="close-sale-summary" aria-label="Fechar carrinho">${icon("x")}</button></div></header>
           <section class="desktop-client-area">
             <div class="pos-client-card" id="selected-client-card"></div>
             <select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${clients.map((client) => `<option value="${esc(client.id)}">${esc(client.nome)}</option>`).join("")}</select>
@@ -240,9 +241,9 @@
             <div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Observação opcional"></textarea></div>
             <button class="btn btn-primary" id="finish-sale" type="button">${icon("check")} Concluir venda <span id="desktop-finish-total">• ${money(total)}</span></button>
           </section>
-          <button type="button" id="open-sale-summary" hidden></button><button type="button" id="close-sale-summary" hidden></button><span id="pos-bag-label" hidden></span><span id="pos-bag-total" hidden></span>
         </aside>
       </div>
+      <button type="button" class="desktop-cart-fab pos-bag" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false"><span class="desktop-cart-fab-icon">${icon("shopping-bag")}<em data-desktop-cart-badge>${itemCount > 99 ? "99+" : itemCount}</em></span><span id="pos-bag-label">${itemCount ? `${itemCount} ${itemCount === 1 ? "item" : "itens"}` : "Carrinho vazio"}</span><b id="pos-bag-total">${money(total)}</b>${icon("chevron-up")}</button>
     </section>`;
   }
 
@@ -257,6 +258,10 @@
       return;
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName);
     if (event.key === "Escape") {
+      if (document.querySelector(".desktop-sales-cart.is-open")) {
+        closeCart();
+        return;
+      }
       document.querySelector("#modal .close")?.click();
       return;
     }
@@ -273,10 +278,56 @@
     } else if (event.key === "F8") {
       event.preventDefault();
       const fields = document.querySelector("#desktop-checkout-fields");
+      if (!document.querySelector(".desktop-sales-cart.is-open")) {
+        openCart();
+        return;
+      }
       (fields?.hidden
         ? document.querySelector("#desktop-continue-sale")
         : document.querySelector("#finish-sale"))?.click();
     }
+  }
+
+  let closeTimer = null;
+  function openCart() {
+    const cart = document.querySelector(".desktop-sales-cart"),
+      overlay = document.querySelector(".desktop-sales-cart-overlay"),
+      trigger = document.querySelector("#open-sale-summary");
+    if (!cart || !desktopMedia.matches) return false;
+    clearTimeout(closeTimer);
+    cart.hidden = false;
+    overlay && (overlay.hidden = false);
+    requestAnimationFrame(() => {
+      cart.classList.add("is-open");
+      overlay?.classList.add("is-open");
+    });
+    cart.setAttribute("aria-hidden", "false");
+    trigger?.setAttribute("aria-expanded", "true");
+    document.body.classList.add("sales-cart-open");
+    setTimeout(() => cart.querySelector("#close-sale-summary")?.focus(), 0);
+    return true;
+  }
+
+  function closeCart({ immediate = false } = {}) {
+    const cart = document.querySelector(".desktop-sales-cart"),
+      overlay = document.querySelector(".desktop-sales-cart-overlay"),
+      trigger = document.querySelector("#open-sale-summary");
+    if (!cart) return false;
+    clearTimeout(closeTimer);
+    cart.classList.remove("is-open");
+    overlay?.classList.remove("is-open");
+    cart.setAttribute("aria-hidden", "true");
+    trigger?.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("sales-cart-open");
+    const finish = () => {
+      if (cart.classList.contains("is-open")) return;
+      cart.hidden = true;
+      if (overlay) overlay.hidden = true;
+    };
+    if (immediate) finish();
+    else closeTimer = setTimeout(finish, 220);
+    trigger?.focus({ preventScroll: true });
+    return true;
   }
 
   function bind() {
@@ -288,6 +339,11 @@
       discountTrigger = root.querySelector("#desktop-discount-trigger"),
       discountFields = root.querySelector("#desktop-discount-fields"),
       checkoutFields = root.querySelector("#desktop-checkout-fields");
+    const openCartButton = root.querySelector("#open-sale-summary"),
+      closeCartButton = root.querySelector("#close-sale-summary");
+    if (openCartButton) openCartButton.onclick = openCart;
+    if (closeCartButton) closeCartButton.onclick = () => closeCart();
+    root.querySelector("[data-sale-cart-overlay]")?.addEventListener("click", () => closeCart());
     favorite?.addEventListener("click", () => {
       const active = favorite.getAttribute("aria-pressed") !== "true";
       favorite.setAttribute("aria-pressed", String(active));
@@ -350,8 +406,14 @@
     isDesktop: () => desktopMedia.matches,
     render,
     bind,
+    openCart,
+    closeCart,
     cartHTML,
     refreshProducts,
     refreshClients,
   };
+  addEventListener("hashchange", () => {
+    if (document.querySelector(".desktop-sales-cart")) closeCart({ immediate: true });
+    else document.body.classList.remove("sales-cart-open");
+  });
 })();

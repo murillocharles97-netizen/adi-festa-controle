@@ -64,6 +64,6 @@ test("infraestrutura global publica safe areas e preserva botão existente", () 
   assert.match(navigation, /\[data-swipe-client\]/);
   assert.match(navigation, /\[data-product-shell\]/);
   assert.match(navigation, /#modal > \*/);
-  assert.match(serviceWorker, /veconi-v139-global-spaces/);
+  assert.match(serviceWorker, /veconi-v140-sales-pdv-cart/);
   assert.match(serviceWorker, /mobile-navigation-gesture\.js/);
 });
