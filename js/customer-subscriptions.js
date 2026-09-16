@@ -42,6 +42,7 @@ window.CustomerSubscriptions = (() => {
       id, operationId: id, businessId: DB.getBusinessId?.() || null,
       subscriptionId: subscription.id, clientId: subscription.clientId,
       productId: subscription.productId, variantId: subscription.variantId || null,
+      spaceId: subscription.spaceId || null,
       transition, sourceType: details.sourceType || "sale", sourceId,
       previous: details.previous || null, next: details.next || null,
       note: details.note || "", createdAt: details.createdAt || now(), schemaVersion: 13,
@@ -72,6 +73,7 @@ window.CustomerSubscriptions = (() => {
       const variant = item.variantId ? (db.variacoesProdutos || []).find((entry) => entry.id === item.variantId) : null;
       const next = {
         ...(existing || {}), id, operationId: id, businessId: DB.getBusinessId?.() || null,
+        spaceId: sale.spaceId || existing?.spaceId || null,
         clientId, productId: item.produtoId, variantId: item.variantId || null,
         label: String(config.label || existing?.label || product?.renewalLabel || product?.nome || "Renovação").trim(),
         status: "active", startedAt: existing?.startedAt || saleDate, expiresAt: dates.expiresAt,
@@ -81,7 +83,7 @@ window.CustomerSubscriptions = (() => {
         lastRenewedAt: existing ? saleDate : null, createdFromSaleId: existing?.createdFromSaleId || sale.id,
         lastSaleId: sale.id, reminders: Array.isArray(config.reminders) ? config.reminders : (existing?.reminders || product?.renewalReminders || []),
         renewalMessage: config.renewalMessage || existing?.renewalMessage || product?.renewalMessage || "",
-        createdAt: existing?.createdAt || saleDate, updatedAt: saleDate, schemaVersion: 13,
+        createdAt: existing?.createdAt || saleDate, updatedAt: saleDate, schemaVersion: 14,
       };
       if (existing) Object.assign(existing, next); else db.customerSubscriptions.push(next);
       Object.assign(item, {

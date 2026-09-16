@@ -733,6 +733,15 @@
   window.BarcodePrimaryFab = { update: updatePrimaryFab };
 
   const addSaleProduct = (product) => {
+    const spaceId = String(window.SpaceContext?.salesId?.() || "").trim(),
+      canonicalProduct = window.Produtos?.obter?.(product?.id) || product;
+    if (
+      window.SpaceEngine?.productAllowsSpace &&
+      (!spaceId || !window.SpaceEngine.productAllowsSpace(canonicalProduct, spaceId))
+    ) {
+      Utils.toast("Este item não está disponível no espaço de venda atual.", true);
+      return false;
+    }
     if (product?.barcodeConflict) {
       Utils.toast(
         "Código duplicado. Corrija o cadastro antes de continuar.",
@@ -742,13 +751,14 @@
     }
     if (product?.variantId && product.variant) {
       if (!window.Checkout?.addSaleItem) return false;
-      window.Checkout.addSaleItem(
+      const added = window.Checkout.addSaleItem(
         ProductVariations.saleItem(
           Produtos.obter(product.id),
           product.variant,
           1,
         ),
       );
+      if (added === false) return false;
       Utils.toast(`${product.nome} adicionado.`);
       return true;
     }
@@ -898,7 +908,10 @@
           };
         const add = () => addSaleProduct(product);
         if (
-          !product.semControleEstoque &&
+          (window.productControlsStock?.(product) ??
+            (product.itemKind !== "service" &&
+              !product.semControleEstoque &&
+              product.controlaEstoque !== false)) &&
           Number(product.estoqueAtual || 0) <= 0
         )
           return {

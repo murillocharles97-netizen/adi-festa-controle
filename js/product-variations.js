@@ -76,11 +76,15 @@
         ]),
       ),
     ].filter(Boolean);
-    product.hasAvailableStock = variants.some(
-      (item) => item.allowNegativeStock || num(item.stock) > 0,
-    );
+    const controlsStock =
+      product.itemKind !== "service" &&
+      !product.semControleEstoque &&
+      product.controlaEstoque !== false;
+    product.hasAvailableStock =
+      !controlsStock ||
+      variants.some((item) => item.allowNegativeStock || num(item.stock) > 0);
     product.atualizadoEm = now();
-    product.schemaVersion = 10;
+    product.schemaVersion = Math.max(14, num(product.schemaVersion));
     return product;
   };
   const recompute = (parentProductId) => {
@@ -188,8 +192,15 @@
         throw error;
       }
       data.variacoesProdutos ??= [];
-      const stockChanged = existing && num(existing.stock) !== num(next.stock),
+      const controlsStock = product.itemKind !== "service" &&
+          !product.semControleEstoque && product.controlaEstoque !== false,
+        stockChanged = controlsStock && existing && num(existing.stock) !== num(next.stock),
         previousStock = existing ? num(existing.stock) : 0;
+      if (!controlsStock) {
+        next.stock = existing ? num(existing.stock) : 0;
+        next.minStock = existing ? num(existing.minStock) : 0;
+        next.allowNegativeStock = false;
+      }
       if (existing) Object.assign(existing, next);
       else data.variacoesProdutos.push(next);
       saved = existing || next;
@@ -220,6 +231,11 @@
     return saved;
   }
   function createProduct({ product, attributes = [], variants = [] }) {
+    const itemKind = product.itemKind === "service" ? "service" : "product",
+      controlsStock =
+        itemKind !== "service" &&
+        !product.semControleEstoque &&
+        product.controlaEstoque !== false;
     let created;
     DB.alterar((data) => {
       const timestamp = now(),
@@ -230,8 +246,11 @@
         ...product,
         id,
         nome: text(product.nome),
+        itemKind,
         productType: product.productType === "recurring" ? "recurring" : "variable",
         hasVariations: true,
+        semControleEstoque: !controlsStock,
+        controlaEstoque: controlsStock,
         attributes: attributes.map((attribute, index) => ({
           id: text(attribute.id) || `attr_${index + 1}`,
           name: text(attribute.name) || `Atributo ${index + 1}`,
@@ -251,7 +270,7 @@
         favorito: Boolean(product.favorito),
         criadoEm: timestamp,
         atualizadoEm: timestamp,
-        schemaVersion: 13,
+        schemaVersion: 14,
       };
       data.produtos.push(created);
       data.variacoesProdutos ??= [];
@@ -320,7 +339,11 @@
       if (!variant || variant.parentProductId !== parentProductId)
         throw Error("Variação não encontrada.");
       const product = parent(variant, data);
-      if (product?.semControleEstoque || product?.controlaEstoque === false)
+      if (
+        product?.itemKind === "service" ||
+        product?.semControleEstoque ||
+        product?.controlaEstoque === false
+      )
         throw Error("Este produto não usa controle de estoque.");
       const previous = num(variant.stock),
         next =
@@ -442,6 +465,8 @@
         ? `${product.nome} — ${displayName(variant)}`
         : product.nome,
       productNameSnapshot: product.nome,
+      itemKind: product.itemKind === "service" ? "service" : "product",
+      productType: product.productType || "simple",
       variantNameSnapshot: variant ? displayName(variant) : null,
       attributesSnapshot: variant
         ? structuredClone(variant.attributeValues || {})
