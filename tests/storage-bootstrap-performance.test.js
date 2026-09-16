@@ -10,8 +10,8 @@ const source = fs.readFileSync("js/storage.js", "utf8");
 function fixture(clientCount = 2000, saleCount = 5000) {
   const now = "2026-08-08T12:00:00.000Z";
   return {
-    versao: 13,
-    config: { nome: "Empresa de teste", appSchemaVersion: 2 },
+    versao: 14,
+    config: { nome: "Empresa de teste", appSchemaVersion: 14 },
     clientes: Array.from({ length: clientCount }, (_, index) => ({
       id: `c${index}`,
       nome: `Cliente ${index}`,
@@ -113,5 +113,24 @@ test("alteração persiste uma vez e troca de empresa invalida o cache", () => {
   environment.DB.useBusiness("biz_boot_perf");
   assert.equal(environment.DB.carregar().clientes.length, 20);
   assert.equal(environment.DB.carregar().config.telefone, "17999999999");
+});
+
+test("serviço legado nunca reativa estoque e produto sem escopo continua global", () => {
+  const data = fixture(0, 0);
+  data.produtos = [{
+    id: "service-legacy",
+    nome: "Plano IPTV",
+    itemKind: "service",
+    controlaEstoque: true,
+    semControleEstoque: false,
+    estoqueAtual: 0,
+    preco: 25.9,
+  }];
+  const product = storageSandbox(data).DB.carregar().produtos[0];
+  assert.equal(product.itemKind, "service");
+  assert.equal(product.semControleEstoque, true);
+  assert.equal(product.controlaEstoque, false);
+  assert.equal(product.spaceAccessMode, "all_spaces");
+  assert.deepEqual(Array.from(product.allowedSpaceIds), []);
 });
 

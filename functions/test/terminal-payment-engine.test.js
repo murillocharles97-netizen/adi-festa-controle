@@ -42,12 +42,19 @@ test('validação respeita capabilities, crédito, débito e parcelamento',()=>{
 });
 
 test('sale draft guarda apenas snapshot operacional e descarta dados de cartão',()=>{
-  const draft=normalizeSaleDraft({id:'sale_12345678',clienteId:'client-1',pan:'4111111111111111',cvv:'123',itens:[{produtoId:'p1',nome:'Produto',quantidade:1,precoFinalUnitario:89.9,pan:'5555'}]});
+  const draft=normalizeSaleDraft({id:'sale_12345678',spaceId:'business_a',clienteId:'client-1',pan:'4111111111111111',cvv:'123',itens:[{produtoId:'p1',nome:'Serviço',itemKind:'service',quantidade:1,precoFinalUnitario:89.9,pan:'5555'}]});
   assert.equal(draft.id,'sale_12345678');
+  assert.equal(draft.spaceId,'business_a');
+  assert.equal(draft.financialSpaceId,'business_a');
   assert.equal(draft.itens.length,1);
+  assert.equal(draft.itens[0].itemKind,'service');
   assert.equal('pan' in draft,false);
   assert.equal('cvv' in draft,false);
   assert.equal('pan' in draft.itens[0],false);
+  assert.throws(()=>normalizeSaleDraft({id:'sale_12345678',itens:[{produtoId:'p1',quantidade:1,precoFinalUnitario:1}]}),/Espaço/);
+  assert.throws(()=>normalizeSaleDraft({id:'sale_12345678',spaceId:'all_spaces',itens:[{produtoId:'p1',quantidade:1,precoFinalUnitario:1}]}),/Espaço/);
+  assert.throws(()=>normalizeSaleDraft({id:'sale_12345678',spaceId:'all',itens:[{produtoId:'p1',quantidade:1,precoFinalUnitario:1}]}),/Espaço/);
+  assert.throws(()=>normalizeSaleDraft({id:'sale_12345678',spaceId:'business_a',financialSpaceId:'business_b',itens:[{produtoId:'p1',quantidade:1,precoFinalUnitario:1}]}),/corresponder/);
 });
 
 test('estados internos preservam timeout como pendente e venda só fica paga após aprovação',()=>{
