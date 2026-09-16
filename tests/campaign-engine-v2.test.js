@@ -211,6 +211,25 @@ test("resgate de produto baixa estoque uma vez e pontos são consumidos", () => 
   assert.equal(data.movimentacoesEstoque.length, 1);
 });
 
+test("resgate de serviço consome o benefício sem criar movimento de estoque", () => {
+  const e = engine();
+  const campaign = e.normalizeCampaign({
+    id: "service-points",
+    type: "points",
+    rewards: [{ id: "service", type: "product", productId: "p1", variantId: "service-tier", quantity: 1, pointsCost: 100, name: "Atendimento" }],
+  });
+  const data = db([campaign]);
+  Object.assign(data.produtos[0], { itemKind: "service", semControleEstoque: false, controlaEstoque: true, estoqueAtual: 0 });
+  data.variacoesProdutos.push({ id: "service-tier", parentProductId: "p1", stock: 0, active: true });
+  data.progressosCampanha.push({ id: e.progressId("service-points", "c1"), campaignId: "service-points", clientId: "c1", availablePoints: 100, availableRewards: 0, redeemedRewards: 0, version: 0 });
+  const redeemed = e.redeem(data, "service-points", "c1", "service", { operationId: "redeem-service" });
+  assert.equal(redeemed.stockMovementId, null);
+  assert.equal(data.produtos[0].estoqueAtual, 0);
+  assert.equal(data.variacoesProdutos[0].stock, 0);
+  assert.equal(data.movimentacoesEstoque.length, 0);
+  assert.equal(data.progressosCampanha[0].availablePoints, 0);
+});
+
 test("cancelamento reverte evento sem duplicar", () => {
   const e = engine();
   const data = db([e.normalizeCampaign({ id: "buy", type: "buy_get", qualification: { productIds: ["p1"] }, rule: { requiredQuantity: 5 } })]);

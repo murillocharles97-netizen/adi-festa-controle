@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 
-function salesSandbox(){
+function salesSandbox({browser=false}={}){
   let sequence=0;
   const data={
     clientes:[{id:'c1',nome:'Cliente',saldo:0,totalComprado:0,quantidadeVendas:0,financialVersion:0}],
@@ -21,6 +21,14 @@ function salesSandbox(){
     ProductVariations:{get:()=>null,recomputeInData:()=>{}},
     productControlsStock:product=>product.controlaEstoque!==false,
   };
+  if(browser){
+    sandbox.document={};
+    sandbox.SpaceContext={requireSalesSpace:id=>{
+      if(id==='space-a')return id;
+      throw Error('Selecione o espaço desta venda.');
+    }};
+    sandbox.SpaceEngine={productAllowsSpace:(product,spaceId)=>!product.allowedSpaceIds||product.allowedSpaceIds.includes(spaceId)};
+  }
   sandbox.window=sandbox;
   vm.createContext(sandbox);
   vm.runInContext(read('js/vendas.js'),sandbox,{filename:'vendas.js'});
@@ -28,8 +36,9 @@ function salesSandbox(){
 }
 
 test('finalização repetida usa operationId e baixa estoque/cliente uma vez',()=>{
-  const {sandbox,data}=salesSandbox(),input={
+  const {sandbox,data}=salesSandbox({browser:true}),input={
     id:'sale-terminal-1',operationId:'terminal_payment_pi_same',clienteId:'c1',status:'pago',formaPagamento:'cartao_presencial',
+    spaceId:'space-a',financialSpaceId:'space-a',
     paymentIntentId:'pi_same',paymentState:'paid',receivableStatus:'pending_settlement',
     paymentMetadata:{channel:'card_present',provider:'simulator',terminalId:'t1',terminalNickname:'Caixa 1',method:'credit',installments:1},
     itens:[{produtoId:'p1',nome:'Produto',quantidade:1,precoOriginal:89.9,precoFinalUnitario:89.9,custoUnitario:20}],
@@ -41,7 +50,33 @@ test('finalização repetida usa operationId e baixa estoque/cliente uma vez',()
   assert.equal(data.movimentacoesEstoque.length,1);
   assert.equal(data.clientes[0].totalComprado,89.9);
   assert.equal(data.clientes[0].quantidadeVendas,1);
+  assert.equal(first.spaceId,'space-a');
+  assert.equal(first.financialSpaceId,'space-a');
   assert.equal(first.paymentMetadata.provider,'simulator');
+});
+
+test('registro de venda exige spaceId explícito e aplica o guard final de disponibilidade',()=>{
+  const {sandbox,data}=salesSandbox({browser:true}),base={
+    operationId:'sale-space-guard',clienteId:'c1',status:'pago',
+    itens:[{produtoId:'p1',nome:'Produto',quantidade:1,precoOriginal:89.9,precoFinalUnitario:89.9,custoUnitario:20}],
+  };
+  assert.throws(()=>sandbox.Vendas.registrar(base),/explicitamente o espaço/);
+  assert.throws(()=>sandbox.Vendas.registrar({...base,spaceId:'space-a',financialSpaceId:'space-b'}),/deve corresponder/);
+  data.produtos[0].allowedSpaceIds=['space-b'];
+  assert.throws(()=>sandbox.Vendas.registrar({...base,spaceId:'space-a'}),/não está disponível/);
+  assert.equal(data.vendas.length,0);
+  assert.equal(data.produtos[0].estoqueAtual,5);
+});
+
+test('aliases agregados nunca viram espaço real nem no fallback legado',()=>{
+  const {sandbox,data}=salesSandbox(),base={
+    operationId:'sale-reserved-space',clienteId:'c1',status:'pago',
+    itens:[{produtoId:'p1',nome:'Produto',quantidade:1,precoOriginal:89.9,precoFinalUnitario:89.9,custoUnitario:20}],
+  };
+  assert.throws(()=>sandbox.Vendas.registrar({...base,spaceId:'all'}),/Selecione/);
+  assert.throws(()=>sandbox.Vendas.registrar({...base,spaceId:'all_spaces'}),/Selecione/);
+  assert.equal(data.vendas.length,0);
+  assert.equal(data.produtos[0].estoqueAtual,5);
 });
 
 test('checkout mantém formas existentes e adiciona cartão na maquininha',()=>{
