@@ -89,6 +89,163 @@ service cloud.firestore {
           )
         );
     }
+    function validSpaceCapabilities(capabilities) {
+      return capabilities is map
+        && capabilities.keys().hasAll(['finance', 'sales', 'products', 'inventory', 'goals'])
+        && capabilities.keys().hasOnly(['finance', 'sales', 'products', 'inventory', 'goals'])
+        && capabilities.finance is bool
+        && capabilities.sales is bool
+        && capabilities.products is bool
+        && capabilities.inventory is bool
+        && capabilities.goals is bool;
+    }
+    function hasOperationalSpaceCapabilities(capabilities) {
+      return capabilities.sales
+        || capabilities.products
+        || capabilities.inventory
+        || capabilities.goals;
+    }
+    function validGlobalSpaceFields(space, spaceId) {
+      return space.keys().hasAll([
+          'id', 'type', 'linkedBusinessId', 'businessId', 'operationalType',
+          'active', 'status', 'capabilities', 'isDefault', 'globalSpaceSchemaVersion',
+          'ownerUid'
+        ])
+        && space.id == spaceId
+        && space.operationalType in ['unit', 'operation', 'personal', 'other']
+        && space.status in ['active', 'archived']
+        && space.active is bool
+        && (
+          (space.status == 'active' && space.active == true)
+          || (space.status == 'archived' && space.active == false)
+        )
+        && space.isDefault is bool
+        && space.globalSpaceSchemaVersion == 1
+        && validSpaceCapabilities(space.capabilities)
+        && (space.businessId == null || (space.businessId is string && belongsToBusiness(space.businessId)))
+        && (
+          space.businessId != null
+          || !(space.capabilities.sales || space.capabilities.products || space.capabilities.inventory || space.capabilities.goals)
+        )
+        && (
+          !hasOperationalSpaceCapabilities(space.capabilities)
+          || (
+            space.businessId is string
+            && subscriptionAllowsWrites(space.businessId)
+            && userProfile().role in ['owner', 'admin', 'manager']
+          )
+        )
+        && (!(space.operationalType in ['unit', 'operation']) || space.businessId is string)
+        && (space.type != 'business' || space.businessId == space.linkedBusinessId);
+    }
+    function validOperationalSalesSpace(space, businessId) {
+      return (!('active' in space) || space.active == true)
+        && (!('status' in space) || space.status == 'active')
+        && (
+          (space.type == 'business' && space.linkedBusinessId == businessId)
+          || (
+            space.type in ['personal', 'other']
+            && space.globalSpaceSchemaVersion == 1
+            && space.businessId == businessId
+          )
+        )
+        && (
+          (!('capabilities' in space) && space.type == 'business')
+          || (space.capabilities is map && space.capabilities.sales == true)
+        );
+    }
+    function operationalSalesSpaceBelongsToBusiness(spaceId, businessId) {
+      return !(spaceId in ['all', 'all_spaces'])
+        && spaceId.size() > 0
+        && exists(/databases/$(database)/documents/financialSpaces/$(spaceId))
+        && validOperationalSalesSpace(
+          get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data,
+          businessId
+        );
+    }
+    function validProductSpaceIds(spaceIds) {
+      return spaceIds.size() <= 50
+        && !('all' in spaceIds)
+        && !('all_spaces' in spaceIds);
+    }
+    function validProductItemKind(product) {
+      return !('itemKind' in product) || product.itemKind in ['product', 'service'];
+    }
+    function validProductSpaceScope(product, businessId) {
+      return validProductItemKind(product)
+        && (
+          (!('spaceAccessMode' in product) && !('allowedSpaceIds' in product) && !('defaultSpaceId' in product) && !('spaceScopeVersion' in product))
+          || (
+            product.spaceAccessMode in ['all_spaces', 'selected_spaces', 'single_space']
+            && product.allowedSpaceIds is list
+            && validProductSpaceIds(product.allowedSpaceIds)
+            && product.spaceScopeVersion == 1
+            && (
+              (
+                product.spaceAccessMode == 'all_spaces'
+                && product.allowedSpaceIds.size() == 0
+                && product.defaultSpaceId == null
+              )
+              || (
+                product.spaceAccessMode == 'selected_spaces'
+                && product.allowedSpaceIds.size() > 0
+                && product.defaultSpaceId is string
+                && product.defaultSpaceId in product.allowedSpaceIds
+                && operationalSalesSpaceBelongsToBusiness(product.defaultSpaceId, businessId)
+              )
+              || (
+                product.spaceAccessMode == 'single_space'
+                && product.allowedSpaceIds.size() == 1
+                && product.defaultSpaceId is string
+                && product.allowedSpaceIds[0] == product.defaultSpaceId
+                && operationalSalesSpaceBelongsToBusiness(product.defaultSpaceId, businessId)
+              )
+            )
+          )
+        );
+    }
+    function preservesProductSpaceScope(product, persistedProduct) {
+      return !product.diff(persistedProduct).affectedKeys().hasAny([
+        'spaceAccessMode', 'allowedSpaceIds', 'defaultSpaceId', 'spaceScopeVersion'
+      ]);
+    }
+    function validSaleSpace(sale, businessId) {
+      return sale.spaceId is string
+        && sale.spaceId.size() > 0
+        && sale.spaceId != 'all_spaces'
+        && operationalSalesSpaceBelongsToBusiness(sale.spaceId, businessId)
+        && (!('financialSpaceId' in sale) || sale.financialSpaceId == sale.spaceId);
+    }
+    function persistedSpaceBelongsToBusiness(spaceId, businessId) {
+      return spaceId is string
+        && !(spaceId in ['all', 'all_spaces'])
+        && spaceId.size() > 0
+        && exists(/databases/$(database)/documents/financialSpaces/$(spaceId))
+        && (
+          (
+            get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.type == 'business'
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.linkedBusinessId == businessId
+          )
+          || (
+            get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.type in ['personal', 'other']
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.globalSpaceSchemaVersion == 1
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.businessId == businessId
+          )
+        );
+    }
+    function preservesSaleSpaceAssignment(sale, persistedSale, businessId) {
+      return 'spaceId' in sale
+        && sale.spaceId == persistedSale.spaceId
+        && persistedSpaceBelongsToBusiness(sale.spaceId, businessId)
+        && (
+          !('financialSpaceId' in sale)
+          || sale.financialSpaceId == sale.spaceId
+          || (
+            'financialSpaceId' in persistedSale
+            && sale.financialSpaceId == persistedSale.financialSpaceId
+          )
+        );
+    }
     function financialSpace(spaceId) {
       return get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data;
     }
@@ -578,11 +735,46 @@ service cloud.firestore {
           && request.resource.data.transition in ['activation', 'renewal', 'paused', 'reactivated', 'expired', 'cancelled', 'sale_reversed', 'price_changed', 'plan_changed'];
         allow update, delete: if false;
       }
+      match /products/{productId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'products')
+          && request.resource.data.businessId == businessId
+          && validProductSpaceScope(request.resource.data, businessId);
+        allow update: if canWriteCollection(businessId, 'products')
+          && (resource.data.businessId == businessId || (businessId == 'adi-festa' && !('businessId' in resource.data)))
+          && request.resource.data.businessId == businessId
+          && validProductItemKind(request.resource.data)
+          && (
+            validProductSpaceScope(request.resource.data, businessId)
+            || preservesProductSpaceScope(request.resource.data, resource.data)
+          );
+        allow delete: if false;
+      }
+      match /sales/{saleId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'sales')
+          && request.resource.data.businessId == businessId
+          && validSaleSpace(request.resource.data, businessId);
+        allow update: if canWriteCollection(businessId, 'sales')
+          && (resource.data.businessId == businessId || (businessId == 'adi-festa' && !('businessId' in resource.data)))
+          && request.resource.data.businessId == businessId
+          && (
+            (
+              'spaceId' in resource.data
+              && preservesSaleSpaceAssignment(request.resource.data, resource.data, businessId)
+            )
+            || (
+              !('spaceId' in resource.data)
+              && (!('spaceId' in request.resource.data) || validSaleSpace(request.resource.data, businessId))
+            )
+          );
+        allow delete: if false;
+      }
       match /{collectionName}/{documentId} {
-        allow read: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow read: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow create: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
@@ -591,7 +783,7 @@ service cloud.firestore {
             || documentId != 'operation'
             || hasPermission(businessId, 'manageOperationSettings')
           );
-        allow update: if !(collectionName in ['productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow update: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId
@@ -610,6 +802,7 @@ service cloud.firestore {
         || (resource.data.type in ['personal', 'other'] && resource.data.ownerUid == request.auth.uid)
       );
       allow create: if signedIn()
+        && !(spaceId in ['all', 'all_spaces'])
         && request.resource.data.id == spaceId
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.type in ['business', 'personal', 'other']
@@ -628,12 +821,20 @@ service cloud.firestore {
             request.resource.data.type in ['personal', 'other']
             && request.resource.data.linkedBusinessId == null
           )
-        );
+        )
+        && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId));
       allow update: if canManageFinancialSpace(spaceId)
         && request.resource.data.id == resource.data.id
         && request.resource.data.type == resource.data.type
         && request.resource.data.ownerUid == resource.data.ownerUid
-        && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId;
+        && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId
+        && (
+          (
+            !('globalSpaceSchemaVersion' in resource.data)
+            && !('globalSpaceSchemaVersion' in request.resource.data)
+          )
+          || validGlobalSpaceFields(request.resource.data, spaceId)
+        );
       allow delete: if false;
 
       match /entries/{entryId} {

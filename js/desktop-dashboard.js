@@ -12,7 +12,49 @@
       currency: "BRL",
     });
   const number = (value) => Number(value || 0);
+  const INVALID_SALE_STATUSES = new Set([
+    "cancelado",
+    "cancelada",
+    "cancelled",
+    "canceled",
+    "desfeito",
+    "desfeita",
+    "venda_desfeita",
+    "estornado",
+    "estornada",
+    "refunded",
+  ]);
+  const normalizedStatus = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  const isValidSale = (sale) =>
+    Boolean(
+      sale &&
+        sale.ativo !== false &&
+        sale.active !== false &&
+        sale.desfeita !== true &&
+        !sale.deletedAt &&
+        !INVALID_SALE_STATUSES.has(
+          normalizedStatus(sale.status || sale.saleStatus || sale.tipo),
+        ),
+    );
   const saleValue = (sale) => number(sale.valorFinal ?? sale.valorTotal);
+  const saleDebt = (sale) =>
+    normalizedStatus(sale?.status) !== "fiado" || sale?.creditSettled === true
+      ? 0
+      : Math.max(
+          0,
+          number(
+            sale.creditRemainingAmount ??
+              sale.creditOriginalAmount ??
+              sale.valorFinal ??
+              sale.valorTotal,
+          ),
+        );
+  const recordSpaceId = (record) =>
+    String(record?.spaceId || record?.financialSpaceId || "").trim();
   const startOfDay = (value) => {
     const date = new Date(value);
     date.setHours(0, 0, 0, 0);
@@ -70,11 +112,46 @@
               : "Mês atual",
     };
   }
-  function aggregate(db, period = state.period) {
-    const selected = range(period),
-      sales = (db.vendas || []).filter((sale) => !sale.deletedAt),
+  function aggregate(sourceDb, period = state.period) {
+    const contextualDb =
+        window.SpaceContext?.contextualData?.(sourceDb || {}, "home") ||
+        sourceDb ||
+        {},
+      allSpacesId = window.SpaceContext?.ALL_SPACES || "all_spaces",
+      selectionId = contextualDb.spaceSelectionId || allSpacesId,
+      isAllSpaces = selectionId === allSpacesId,
+      belongsToSelection = (record) =>
+        isAllSpaces || recordSpaceId(record) === selectionId,
+      db = isAllSpaces
+        ? contextualDb
+        : {
+            ...contextualDb,
+            campanhas: (contextualDb.campanhas || []).filter(
+              belongsToSelection,
+            ),
+            progressosCampanha: (
+              contextualDb.progressosCampanha || []
+            ).filter(belongsToSelection),
+            recompensas: (contextualDb.recompensas || []).filter(
+              belongsToSelection,
+            ),
+          },
+      selected = range(period),
+      sales = (db.vendas || []).filter(isValidSale),
       payments = db.pagamentos || [],
-      clients = (db.clientes || []).filter((client) => client.ativo !== false),
+      validClientIds = isAllSpaces
+        ? null
+        : new Set(
+            sales
+              .map((sale) => sale.clienteId || sale.clientId)
+              .filter(Boolean)
+              .map(String),
+          ),
+      clients = (db.clientes || []).filter(
+        (client) =>
+          client.ativo !== false &&
+          (isAllSpaces || validClientIds.has(String(client.id))),
+      ),
       products = (db.produtos || []).filter(
         (product) => product.ativo !== false,
       );
@@ -105,10 +182,13 @@
         (sum, payment) => sum + number(payment.valor),
         0,
       ),
-      openBalance = clients.reduce(
-        (sum, client) => sum + Math.abs(Math.min(0, number(client.saldo))),
-        0,
-      ),
+      openBalance = isAllSpaces
+        ? clients.reduce(
+            (sum, client) =>
+              sum + Math.abs(Math.min(0, number(client.saldo))),
+            0,
+          )
+        : sales.reduce((sum, sale) => sum + saleDebt(sale), 0),
       creditEnabled = window.OperationMode?.enabled?.("creditSales") === true;
     const dayMap = new Map(),
       productMap = new Map();
@@ -155,6 +235,23 @@
       topProducts = [...productMap.values()]
         .sort((a, b) => b.quantity - a.quantity || b.value - a.value)
         .slice(0, 5);
+    const scopedClientMetrics = isAllSpaces
+      ? null
+      : sales.reduce((map, sale) => {
+          const id = String(sale.clienteId || sale.clientId || "");
+          if (!id) return map;
+          const saleAt = validDate(sale.data || sale.createdAt),
+            currentClient = map.get(id) || { count: 0, value: 0, last: null };
+          currentClient.count++;
+          currentClient.value += saleValue(sale);
+          if (
+            saleAt &&
+            (!currentClient.last || saleAt.getTime() > currentClient.last.getTime())
+          )
+            currentClient.last = saleAt;
+          map.set(id, currentClient);
+          return map;
+        }, new Map());
     const out = products.filter(
         (product) => window.getProductStockStatus?.(product) === "esgotado",
       ),
@@ -162,7 +259,9 @@
         (product) => window.getProductStockStatus?.(product) === "baixo",
       ),
       inactive = clients.filter((client) => {
-        const date = validDate(client.ultimaCompra);
+        const date = isAllSpaces
+          ? validDate(client.ultimaCompra)
+          : scopedClientMetrics?.get(String(client.id))?.last || null;
         return date && Date.now() - date.getTime() > 30 * DAY;
       }),
       newClients = clients.filter((client) =>
@@ -173,16 +272,14 @@
         ),
       ),
       vip = clients.filter(
-        (client) =>
-          number(client.totalComprado) >= 1000 ||
-          number(client.quantidadeVendas) >= 10,
-      ),
-      campaignMetrics = window.Campanhas?.metricas?.() || {
-        active: 0,
-        participants: 0,
-        redemptions: 0,
-        conversion: 0,
-      };
+        (client) => {
+          const metrics = scopedClientMetrics?.get(String(client.id));
+          return isAllSpaces
+            ? number(client.totalComprado) >= 1000 ||
+                number(client.quantidadeVendas) >= 10
+            : number(metrics?.value) >= 1000 || number(metrics?.count) >= 10;
+        },
+      );
     const activeCampaigns = (db.campanhas || []).filter(
         (campaign) => window.Campanhas?.status?.(campaign) === "ativa",
       ),
@@ -197,6 +294,32 @@
           !["entregue", "cancelado"].includes(
             order.orderStatus || order.status,
           ),
+      ),
+      campaignMetrics = isAllSpaces
+        ? window.Campanhas?.metricas?.() || {
+            active: 0,
+            participants: 0,
+            redemptions: 0,
+            conversion: 0,
+          }
+        : (() => {
+            const participants = new Set(
+                (db.progressosCampanha || [])
+                  .map((item) => item.clientId || item.clienteId)
+                  .filter(Boolean),
+              ).size,
+              redemptions = (db.recompensas || []).length;
+            return {
+              active: activeCampaigns.length,
+              participants,
+              redemptions,
+              conversion: participants ? (redemptions / participants) * 100 : 0,
+            };
+          })(),
+      goal = number(
+        window.SpaceContext?.goalFor?.(db.config || {}, selectionId) ??
+          db.config?.dashboard?.dailySalesGoal ??
+          db.config?.dailySalesGoal,
       );
     return {
       db,
@@ -227,12 +350,19 @@
       activeCampaigns,
       endingCampaigns,
       pendingOrders,
+      goal,
+      goalPercent: goal > 0 ? (todayRevenue / goal) * 100 : 0,
+      selectionId,
+      isAllSpaces,
+      unassignedLegacySales: number(db.unassignedLegacySales),
       ticket: current.length ? revenue / current.length : 0,
       averageDaily: daily.length ? revenue / daily.length : 0,
-      baseRevenue: clients.reduce(
-        (sum, client) => sum + number(client.totalComprado),
-        0,
-      ),
+      baseRevenue: isAllSpaces
+        ? clients.reduce(
+            (sum, client) => sum + number(client.totalComprado),
+            0,
+          )
+        : sales.reduce((sum, sale) => sum + saleValue(sale), 0),
     };
   }
   function trend(value, label = "vs período anterior") {
@@ -279,11 +409,14 @@
   function recentSales(view) {
     return `<section class="desktop-panel desktop-recent-sales">${panelHeader("Vendas recentes", "Ver todas", "historico")}<div class="desktop-table"><div class="desktop-table-head"><span>Data</span><span>Cliente</span><span>Status</span><span>Valor</span></div>${
       [...view.sales]
-        .sort((a, b) => new Date(b.data) - new Date(a.data))
+        .sort(
+          (a, b) =>
+            new Date(b.data || b.createdAt) - new Date(a.data || a.createdAt),
+        )
         .slice(0, 5)
         .map(
           (sale) =>
-            `<article><time>${new Date(sale.data).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</time><b>${esc(sale.clienteNome || "Venda avulsa")}</b><span class="desktop-status ${sale.status === "pago" ? "paid" : "debt"}">${esc(sale.status || "pago")}</span><strong>${money(saleValue(sale))}</strong></article>`,
+            `<article><time>${new Date(sale.data || sale.createdAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</time><b>${esc(sale.clienteNome || "Venda avulsa")}</b><span class="desktop-status ${sale.status === "pago" ? "paid" : "debt"}">${esc(sale.status || "pago")}</span><strong>${money(saleValue(sale))}</strong></article>`,
         )
         .join("") || '<p class="desktop-empty">Nenhuma venda registrada.</p>'
     }</div></section>`;
@@ -387,6 +520,24 @@
       )
       .join("")}</div></section>`;
   }
+  function legacyNotice(view) {
+    const count = view.unassignedLegacySales;
+    if (!count) return "";
+    return `<aside class="space-data-notice" role="status">${icon("history")}<span><b>${count} venda${count === 1 ? " antiga" : "s antigas"} sem espaço</b><small>${view.isAllSpaces ? (count === 1 ? "Ela continua nesta visão agregada." : "Elas continuam nesta visão agregada.") : count === 1 ? "Ela ficou fora desta visão para não ser atribuída ao espaço errado." : "Elas ficaram fora desta visão para não serem atribuídas ao espaço errado."}</small></span></aside>`;
+  }
+  function goalCard(view) {
+    const label = view.isAllSpaces
+        ? "Meta geral diária"
+        : `Meta diária · ${window.SpaceContext?.selectionLabel?.("home") || "Espaço"}`,
+      description = view.isAllSpaces
+        ? "Configurada de forma independente das metas dos espaços."
+        : "Somente as vendas deste espaço entram no progresso.";
+    if (!view.goal)
+      return `<button class="desktop-space-goal is-empty" type="button" data-home-goal><span class="desktop-space-goal-icon">${icon("target")}</span><span class="desktop-space-goal-copy"><b>${esc(label)}</b><small>${esc(description)}</small></span><strong>Configurar ${icon("chevron-right")}</strong></button>`;
+    const progress = Math.min(100, Math.max(0, view.goalPercent)),
+      reached = view.goalPercent >= 100;
+    return `<section class="desktop-space-goal ${reached ? "is-reached" : ""}"><span class="desktop-space-goal-icon">${icon(reached ? "circle-check-big" : "target")}</span><div class="desktop-space-goal-copy"><b>${esc(label)}</b><small>${esc(description)}</small></div><div class="desktop-space-goal-values"><span><strong>${money(view.todayRevenue)}</strong> de ${money(view.goal)}</span><div role="progressbar" aria-label="Progresso da meta diária" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><i style="--space-goal-progress:${progress}%"></i></div></div><em>${view.goalPercent.toFixed(0)}%</em><button type="button" data-home-goal>Editar ${icon("chevron-right")}</button></section>`;
+  }
   function render() {
     window.AppBootDiagnostics?.count?.("dashboardRenderCount");
     const renderStartedAt = window.performance?.now?.() ?? Date.now(),
@@ -401,7 +552,8 @@
       sales: view.sales.length,
       products: view.products.length,
     });
-    return `<section class="desktop-dashboard" data-desktop-dashboard><section class="desktop-kpis">${kpi("Vendas hoje", money(view.todayRevenue), `${view.today.length} venda(s)`, "shopping-cart", null)}${kpi("Recebido hoje", money(view.receivedToday), "pagamentos recebidos", "circle-dollar-sign", null)}${kpi("Clientes ativos", view.clients.length, "cadastrados", "users", null)}${kpi("Produtos cadastrados", view.products.length, "itens ativos", "package", null)}${kpi("Lucro estimado", money(view.todayProfit), "hoje", "trending-up", null)}${kpi(receivableTitle, money(receivableValue), view.creditEnabled ? "saldo de clientes" : "histórico da base", view.creditEnabled ? "hand-coins" : "chart-line", null, view.creditEnabled ? "danger" : "default")}</section><section class="desktop-performance-grid"><article class="desktop-panel desktop-sales-performance">${panelHeader("Desempenho de vendas")}<label>Período<select id="desktop-dashboard-period"><option value="today">Hoje</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="month">Mês atual</option></select></label><div class="desktop-performance-value"><strong>${money(view.revenue)}</strong>${trend(view.revenueGrowth)}</div><div class="desktop-chart-layout">${chart(view.daily)}<aside><span><small>Média diária</small><b>${money(view.averageDaily)}</b></span><span><small>Melhor dia</small><b>${view.best.date ? view.best.date.toLocaleDateString("pt-BR") : "—"}</b><em>${money(view.best.value)}</em></span><span><small>Ticket médio</small><b>${money(view.ticket)}</b></span><span><small>Crescimento</small><b>${view.revenueGrowth.toFixed(1).replace(".", ",")}%</b></span></aside></div></article><section class="desktop-panel desktop-finance">${panelHeader("Painel financeiro")}<div><span><small>Recebido no período</small><b class="positive">${money((view.db.pagamentos || []).filter((payment) => within(payment.data || payment.createdAt, view.selected.start, view.selected.end)).reduce((sum, payment) => sum + number(payment.valor), 0))}</b></span><span><small>A receber</small><b class="negative">${money(view.openBalance)}</b></span><span><small>Despesas</small><b>${money(0)} <em>placeholder</em></b></span><span class="forecast"><small>Saldo previsto</small><b>${money(view.revenue - view.openBalance)}</b></span></div></section>${topProducts(view)}</section>${quickActions()}<section class="desktop-command-grid">${recentSales(view)}${alerts(view)}${crmSummary(view)}</section>${campaignSummary(view)}</section>`;
+    const contextBar = window.SpaceContext?.renderBar?.("home") || "";
+    return `<section class="desktop-dashboard" data-desktop-dashboard>${contextBar}${legacyNotice(view)}${goalCard(view)}<section class="desktop-kpis">${kpi("Vendas hoje", money(view.todayRevenue), `${view.today.length} venda(s)`, "shopping-cart", null)}${kpi("Recebido hoje", money(view.receivedToday), "pagamentos recebidos", "circle-dollar-sign", null)}${kpi("Clientes ativos", view.clients.length, "cadastrados", "users", null)}${kpi("Produtos cadastrados", view.products.length, "itens ativos", "package", null)}${kpi("Lucro estimado", money(view.todayProfit), "hoje", "trending-up", null)}${kpi(receivableTitle, money(receivableValue), view.creditEnabled ? "saldo de clientes" : "histórico da base", view.creditEnabled ? "hand-coins" : "chart-line", null, view.creditEnabled ? "danger" : "default")}</section><section class="desktop-performance-grid"><article class="desktop-panel desktop-sales-performance">${panelHeader("Desempenho de vendas")}<label>Período<select id="desktop-dashboard-period"><option value="today">Hoje</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="month">Mês atual</option></select></label><div class="desktop-performance-value"><strong>${money(view.revenue)}</strong>${trend(view.revenueGrowth)}</div><div class="desktop-chart-layout">${chart(view.daily)}<aside><span><small>Média diária</small><b>${money(view.averageDaily)}</b></span><span><small>Melhor dia</small><b>${view.best.date ? view.best.date.toLocaleDateString("pt-BR") : "—"}</b><em>${money(view.best.value)}</em></span><span><small>Ticket médio</small><b>${money(view.ticket)}</b></span><span><small>Crescimento</small><b>${view.revenueGrowth.toFixed(1).replace(".", ",")}%</b></span></aside></div></article><section class="desktop-panel desktop-finance">${panelHeader("Painel financeiro")}<div><span><small>Recebido no período</small><b class="positive">${money((view.db.pagamentos || []).filter((payment) => within(payment.data || payment.createdAt, view.selected.start, view.selected.end)).reduce((sum, payment) => sum + number(payment.valor), 0))}</b></span><span><small>A receber</small><b class="negative">${money(view.openBalance)}</b></span><span><small>Despesas</small><b>${money(0)} <em>placeholder</em></b></span><span class="forecast"><small>Saldo previsto</small><b>${money(view.revenue - view.openBalance)}</b></span></div></section>${topProducts(view)}</section>${quickActions()}<section class="desktop-command-grid">${recentSales(view)}${alerts(view)}${crmSummary(view)}</section>${campaignSummary(view)}</section>`;
   }
   function bind() {
     const root = document.querySelector("[data-desktop-dashboard]");
@@ -422,6 +574,7 @@
         (button) =>
           (button.onclick = () => window.Router?.ir?.(button.dataset.go)),
       );
+    window.SpaceContext?.bind?.(root);
     window.lucide?.createIcons();
   }
   window.DesktopDashboard = { render, bind, aggregate, state };

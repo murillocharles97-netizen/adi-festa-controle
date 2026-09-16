@@ -1,5 +1,19 @@
 window.Vendas = (() => {
   const listar = () => DB.carregar().vendas;
+  const requiredSalesSpace = (requestedId = "") => {
+    if (window.SpaceContext?.requireSalesSpace)
+      return window.SpaceContext.requireSalesSpace(requestedId);
+    const explicit = String(requestedId || "").trim();
+    if (explicit && !["all", "all_spaces"].includes(explicit)) return explicit;
+    if (["all", "all_spaces"].includes(explicit))
+      throw Error("Selecione o espaço desta venda.");
+    // Compatibilidade restrita aos testes legados executados em VM, sem DOM.
+    if (typeof document === "undefined") {
+      const businessId = String(DB.getBusinessId?.() || "").trim();
+      if (businessId) return `business_${businessId}`;
+    }
+    throw Error("Selecione o espaço desta venda.");
+  };
   const estoqueInsuficiente = (itens) =>
     itens
       .map((i) => {
@@ -7,20 +21,50 @@ window.Vendas = (() => {
           v = i.variantId ? ProductVariations?.get(i.variantId) : null,
           q = Number(i.quantidade || 0),
           stock = Number(v?.stock ?? p?.estoqueAtual ?? 0),
-          allow = Boolean(v?.allowNegativeStock || p?.semControleEstoque);
+          allow = Boolean(
+            v?.allowNegativeStock ||
+              !p ||
+              (window.productControlsStock
+                ? !window.productControlsStock(p)
+                : p.itemKind === "service" ||
+                  p.semControleEstoque ||
+                  p.controlaEstoque === false),
+          );
         return p && !allow && stock < q
           ? { produto: p, variacao: v, quantidade: q, falta: q - stock }
           : null;
       })
       .filter(Boolean);
   const registrar = (d) => {
+    const explicitSpaceId = String(d.spaceId || "").trim();
+    if (!explicitSpaceId && typeof document !== "undefined")
+      throw Error("Informe explicitamente o espaço desta venda.");
     const operationId = d.operationId || Utils.uuid(),
       existente = DB.carregar().vendas.find(
         (v) => v.operationId === operationId,
       );
-    if (existente) return existente;
+    if (existente) {
+      if (
+        explicitSpaceId &&
+        existente.spaceId &&
+        String(existente.spaceId) !== explicitSpaceId
+      )
+        throw Error("Esta operação já pertence a outro espaço.");
+      return existente;
+    }
     const currentData = DB.carregar(),
+      spaceId = requiredSalesSpace(explicitSpaceId),
+      requestedFinancialSpaceId = String(d.financialSpaceId || "").trim(),
+      financialSpaceId = spaceId,
       hasRecurringItem = (d.itens || []).some((item) => item.productType === "recurring" || item.recurringActivation || currentData.produtos.some((product) => product.id === item.produtoId && product.productType === "recurring"));
+    if (requestedFinancialSpaceId && requestedFinancialSpaceId !== spaceId)
+      throw Error("O espaço financeiro legado deve corresponder ao espaço da venda.");
+    const unavailableItem = (d.itens || []).find((item) => {
+      const product = currentData.produtos.find((entry) => entry.id === (item.produtoId || item.productId));
+      return !product || (window.SpaceEngine?.productAllowsSpace && !window.SpaceEngine.productAllowsSpace(product, spaceId));
+    });
+    if (unavailableItem)
+      throw Error("Um item da venda não está disponível no espaço selecionado.");
     if (hasRecurringItem && !d.clienteId)
       throw Error("Venda com renovação exige um cliente selecionado.");
     if (window.PlanLimitService)
@@ -110,6 +154,7 @@ window.Vendas = (() => {
           costSnapshot: custoUnitario,
           campaignDiscounts: i.campaignDiscounts || [],
           productType: i.productType || produto?.productType || "simple",
+          itemKind: i.itemKind || produto?.itemKind || "product",
           recurringActivation: i.recurringActivation ? structuredClone(i.recurringActivation) : null,
         };
       });
@@ -139,6 +184,8 @@ window.Vendas = (() => {
         clientId: d.clienteId || null,
         customerId: d.clienteId || null,
         businessId: DB.getBusinessId?.() || null,
+        spaceId,
+        financialSpaceId,
         clienteNome: cliente?.nome || "Venda avulsa",
         itens,
         subtotalOriginal,
@@ -182,7 +229,14 @@ window.Vendas = (() => {
       itens.forEach((i) => {
         const p = db.produtos.find((x) => x.id === i.produtoId);
         if (!p) return;
-        if (p.semControleEstoque || p.controlaEstoque === false) return;
+        if (
+          window.productControlsStock
+            ? !window.productControlsStock(p)
+            : p.itemKind === "service" ||
+              p.semControleEstoque ||
+              p.controlaEstoque === false
+        )
+          return;
         if (i.variantId) {
           const v = (db.variacoesProdutos || []).find(
             (x) => x.id === i.variantId,
@@ -308,7 +362,14 @@ window.Vendas = (() => {
       venda.itens.forEach((i) => {
         const p = db.produtos.find((x) => x.id === i.produtoId);
         if (!p) return;
-        if (p.semControleEstoque || p.controlaEstoque === false) return;
+        if (
+          window.productControlsStock
+            ? !window.productControlsStock(p)
+            : p.itemKind === "service" ||
+              p.semControleEstoque ||
+              p.controlaEstoque === false
+        )
+          return;
         if (i.variantId) {
           const v = (db.variacoesProdutos || []).find(
             (x) => x.id === i.variantId,

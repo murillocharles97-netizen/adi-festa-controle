@@ -48,10 +48,18 @@
   }
 
   function productMeta(product) {
-    const recurring = product.productType === "recurring",
+    const service = product.itemKind === "service",
+      recurring = product.productType === "recurring",
       variable = window.ProductVariations?.isVariable?.(product),
       stock = stockValue(product),
       status = window.getProductStockStatus?.(product) || "disponivel";
+    if (service)
+      return {
+        className: "service",
+        icon: "briefcase-business",
+        text: "Serviço · sem estoque físico",
+        disabled: false,
+      };
     if (recurring && !controlsStock(product))
       return {
         className: "renewal",

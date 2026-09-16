@@ -604,18 +604,22 @@
       product = existing || {},
       productType = defaults.productType || product.productType || "simple",
       recurring = productType === "recurring",
+      itemKind = defaults.itemKind || product.itemKind || "product",
+      accessSubject = id ? product : { ...product, ...defaults },
       productId = id || window.Utils.uuid(),
       imageDraft = createDraft(product),
       root = $("#modal"),
       initialBarcode = defaults.barcode ?? product.barcode ?? "";
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-form-modal"><header class="modal-head"><div><small>Produtos</small><h3>${id ? "Editar produto" : "Novo produto"}</h3></div><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><form><div class="modal-body product-form-sections">
-      <section class="product-form-section"><header><i data-lucide="package"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-form-modal"><header class="modal-head"><div><small>Produtos e serviços</small><h3>${id ? "Editar item" : itemKind === "service" ? "Novo serviço" : "Novo produto"}</h3></div><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><form><div class="modal-body product-form-sections">
+      <section class="product-form-section"><header><i data-lucide="${itemKind === "service" ? "briefcase-business" : "package"}"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${itemKind === "product" ? "selected" : ""}>Produto</option><option value="service" ${itemKind === "service" ? "selected" : ""}>Serviço</option></select><small>Serviços não movimentam estoque.</small></div><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
+      ${window.SpaceContext?.availabilityFields?.(accessSubject) || ""}
       <section class="product-form-section image-section">${editorMarkup(imageDraft)}</section>
       ${recurring ? `<section class="product-form-section recurring-product-fields"><header><i data-lucide="calendar-clock"></i><div><b>Renovação</b><small>Defina a vigência sugerida. Ela poderá ser alterada na venda.</small></div></header><div class="form-grid"><div class="field"><label>Período padrão *</label><input name="durationValue" type="number" inputmode="numeric" min="1" required value="${esc(product.durationValue ?? 30)}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${product.durationUnit === "days" || !product.durationUnit ? "selected" : ""}>Dias</option><option value="weeks" ${product.durationUnit === "weeks" ? "selected" : ""}>Semanas</option><option value="months" ${product.durationUnit === "months" ? "selected" : ""}>Meses</option><option value="years" ${product.durationUnit === "years" ? "selected" : ""}>Anos</option></select></div><div class="field full"><label>Nome para renovação</label><input name="renewalLabel" value="${esc(product.renewalLabel || product.nome || "")}" placeholder="Ex.: Plano IPTV Premium"></div><div class="field full"><label>Mensagem sugerida</label><textarea name="renewalMessage" placeholder="Mensagem opcional para o WhatsApp">${esc(product.renewalMessage || "")}</textarea></div></div><label class="product-stock-control"><input type="checkbox" name="hasVariations" ${product.hasVariations ? "checked" : ""}><span><b>Este produto possui variações</b><small>Ex.: 1 tela, 2 telas e Premium.</small></span></label></section>` : ""}
-      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>Defina se este item precisa de movimentação.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${product.semControleEstoque || (recurring && !id && product.controlaEstoque !== true) ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>${recurring ? "Ative apenas se esta venda também consumir um item físico do seu estoque." : "Desative para serviços e itens sem quantidade física."}</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
+      <section class="product-form-section"><header><i data-lucide="boxes"></i><div><b>Estoque</b><small>O estoque permanece geral nesta versão, sem saldo separado por espaço.</small></div></header><label class="product-stock-control"><input type="checkbox" name="controlaEstoque" ${itemKind === "service" || product.semControleEstoque || (recurring && !id && product.controlaEstoque !== true) ? "" : "checked"}><span><b>Controlar estoque deste produto</b><small>${itemKind === "service" ? "Serviços não movimentam quantidade física." : recurring ? "Ative apenas se esta venda também consumir um item físico do seu estoque." : "Desative para itens sem quantidade física."}</small></span></label><div class="form-grid" data-stock-fields><div class="field"><label>Estoque atual</label><input name="estoqueAtual" type="number" inputmode="decimal" step="1" value="${esc(product.estoqueAtual ?? product.estoque ?? 0)}"></div><div class="field"><label>Estoque mínimo</label><input name="estoqueMinimo" type="number" inputmode="decimal" min="0" step="1" value="${esc(product.estoqueMinimo ?? 0)}"></div></div></section>
       </div><div class="product-upload-progress" hidden><span><i></i></span><small>Enviando imagem... <b>0%</b></small></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary" data-save-product>Salvar produto</button></footer></form></section></div>`;
     const form = $("form", root),
       modal = $(".product-form-modal", root),
+      itemKindSelect = $("[name='itemKind']", form),
       controlsStock = $("[name='controlaEstoque']", form),
       stockFields = $("[data-stock-fields]", form),
       barcodeInput = $("[name='barcode']", form),
@@ -630,9 +634,12 @@
       variationControl?.insertAdjacentHTML("beforebegin", `<fieldset class="renewal-reminders"><legend>Lembretes sugeridos</legend><p>Escolha quando esta renovação deve aparecer nos próximos avisos.</p><div>${reminderMarkup}</div></fieldset>`);
     }
     const updateStockFields = () => {
-      stockFields.hidden = !controlsStock.checked;
+      const isService = itemKindSelect.value === "service";
+      if (isService) controlsStock.checked = false;
+      controlsStock.disabled = isService;
+      stockFields.hidden = isService || !controlsStock.checked;
       stockFields.querySelectorAll("input").forEach((input) => {
-        input.disabled = !controlsStock.checked;
+        input.disabled = isService || !controlsStock.checked;
       });
     };
     const validateBarcode = () => {
@@ -666,15 +673,68 @@
       },
       cleanupViewport = () =>
         visualViewport?.removeEventListener("resize", syncViewportHeight),
+      initialSpaceAccess = window.SpaceEngine?.normalizeProductAccess?.(
+        accessSubject,
+      ) || {
+        spaceAccessMode: accessSubject.spaceAccessMode || "all_spaces",
+        allowedSpaceIds: accessSubject.allowedSpaceIds || [],
+        defaultSpaceId: accessSubject.defaultSpaceId || null,
+      };
+    let liveSpaceAccess = initialSpaceAccess;
+    const readSpaceAccess = () => {
+      if (!window.SpaceContext?.productAccessFromForm)
+        return liveSpaceAccess;
+      const fieldset = form.querySelector("[data-product-space-fields]"),
+        formData = new FormData(form),
+        renderedIds = new Set(
+          [...(fieldset?.querySelectorAll('[name="allowedSpaceIds"]') || [])]
+            .map((input) => input.value),
+        ),
+        mode = formData.get("spaceAccessMode") || liveSpaceAccess.spaceAccessMode;
+      if (mode === "selected_spaces") {
+        const selected = formData.getAll("allowedSpaceIds"),
+          temporarilyUnavailable = (liveSpaceAccess.allowedSpaceIds || [])
+            .filter((id) => !renderedIds.has(id));
+        formData.delete("allowedSpaceIds");
+        [...new Set([...selected, ...temporarilyUnavailable])]
+          .forEach((id) => formData.append("allowedSpaceIds", id));
+      }
+      liveSpaceAccess = window.SpaceContext.productAccessFromForm(
+        formData,
+        liveSpaceAccess,
+      );
+      return liveSpaceAccess;
+    };
+    const
+      syncSpaceFields = () => {
+        if (!form.isConnected) {
+          cleanupSpaceLifecycle();
+          return;
+        }
+        const current = form.querySelector("[data-product-space-fields]");
+        if (!current || !window.SpaceContext?.availabilityFields) return;
+        const access = readSpaceAccess();
+        const holder = document.createElement("div");
+        holder.innerHTML = window.SpaceContext.availabilityFields(access);
+        const replacement = holder.firstElementChild;
+        if (!replacement) return;
+        current.replaceWith(replacement);
+        window.SpaceContext.bindProductAvailability(form);
+      },
+      cleanupSpaceLifecycle = () =>
+        removeEventListener("veconi-spaces-ready", syncSpaceFields),
       close = () => {
         cleanupViewport();
+        cleanupSpaceLifecycle();
         cleanupDraft(imageDraft);
         window.Modais.fechar();
       };
     syncViewportHeight();
     visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
+    addEventListener("veconi-spaces-ready", syncSpaceFields);
     root.querySelectorAll(".close,.cancel").forEach((button) => (button.onclick = close));
     controlsStock.onchange = updateStockFields;
+    itemKindSelect.onchange = updateStockFields;
     barcodeInput.addEventListener("input", validateBarcode);
     barcodeInput.addEventListener("blur", validateBarcode);
     $("[data-scan-form-barcode]", root).onclick = () =>
@@ -711,6 +771,8 @@
           id: productId,
           ...data,
           productType,
+          itemKind: formData.get("itemKind") || itemKind,
+          ...readSpaceAccess(),
           hasVariations: recurring && formData.has("hasVariations"),
           renewalReminders: recurring ? formData.getAll("renewalReminders").map(Number) : [],
           semControleEstoque: !formData.has("controlaEstoque"),
@@ -719,6 +781,7 @@
           ...imageData,
         });
         cleanupViewport();
+        cleanupSpaceLifecycle();
         cleanupDraft(imageDraft);
         window.Modais.fechar();
         window.Utils.toast("Produto salvo");
@@ -740,6 +803,7 @@
       }
     };
     updateStockFields();
+    window.SpaceContext?.bindProductAvailability?.(root);
     validateBarcode();
     window.lucide?.createIcons();
     setTimeout(() => $("input[name='nome']", root)?.focus(), 50);

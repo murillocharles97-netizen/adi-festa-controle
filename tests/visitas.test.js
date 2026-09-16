@@ -1,11 +1,13 @@
 const assert=require('node:assert/strict');
 global.window=global;global.crypto=require('node:crypto').webcrypto;global.location={href:'https://example.test/app/index.html',hash:''};global.navigator={};global.dispatchEvent=()=>{};global.Utils={uuid:()=>crypto.randomUUID(),toast:()=>{}};
 let data={config:{nome:'Adi Festa'},clientes:[{id:'c1',nome:'Cliente',telefone:'17999999999',saldo:0,totalComprado:0,quantidadeVendas:0}],produtos:[{id:'p1',nome:'Cone',preco:8,custo:3,estoqueAtual:10,ativo:true}],visitas:[],catalogOrders:[],vendas:[]};
-global.DB={carregar:()=>structuredClone(data),alterar:fn=>{fn(data);return structuredClone(data)}};
+global.DB={getBusinessId:()=> 'adi-festa',carregar:()=>structuredClone(data),alterar:fn=>{fn(data);return structuredClone(data)}};
 global.Vendas={registrar:sale=>{const found=data.vendas.find(v=>v.operationId===sale.operationId);if(found)return found;const made={id:crypto.randomUUID(),...sale};data.vendas.push(made);return made}};
+global.SpaceContext={salesId:()=>"business_test",requireSalesSpace:()=>"business_test"};
+global.SpaceEngine={productAllowsSpace:()=>true};
 global.Clientes={normalizePhone:value=>{let digits=String(value||'').replace(/\D/g,'');if(digits.length===10||digits.length===11)digits=`55${digits}`;return digits},salvar:client=>{const saved={id:crypto.randomUUID(),...client};data.clientes.push(saved);return saved}};
 require('../js/visitas.js');
-const visit=Visitas.salvar({nome:'Shopping',local:'Iguatemi',data:'2026-07-21',horarioChegada:'14:00',horarioLimite:'13:30',status:'recebendo'},['p1']);
+const visit=Visitas.salvar({spaceId:'business_adi-festa',nome:'Shopping',local:'Iguatemi',data:'2026-07-21',horarioChegada:'14:00',horarioLimite:'13:30',status:'recebendo'},['p1']);
 assert.equal(data.visitas.length,1);assert.equal(visit.catalogItems.length,1);assert.equal(visit.catalogItems[0].salePrice,8);assert.equal(visit.publicToken.length,36);
 const publicUrl=new URL(Visitas.link(visit));assert.equal(publicUrl.pathname,'/app/catalogo.html');assert.equal(publicUrl.searchParams.get('v'),visit.publicToken);
 data.catalogOrders.push({id:'o1',visitId:visit.id,publicOrderNumber:'AF001',clientId:'c1',customerPhone:'17999999999',items:[{productId:'p1',name:'Cone',quantity:2,unitPrice:8,subtotal:16}],total:16,paymentPreference:'pix',orderStatus:'separando'});
@@ -22,4 +24,7 @@ assert.equal(data.clientes.filter(client=>Clientes.normalizePhone(client.telefon
 data.catalogOrders.push({id:'o4',visitId:visit.id,customerName:'Visitante',customerPhone:'(17) 97777-6666',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8,subtotal:8}],total:8,paymentPreference:'dinheiro',orderStatus:'recebido'});
 Visitas.manterVisitante('o4');
 assert.equal(data.catalogOrders.find(order=>order.id==='o4').keptAsGuest,true);
+data.catalogOrders.push({id:'legacy-order',visitId:'legacy-visit',customerName:'Legado',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8}],paymentPreference:'pix',orderStatus:'separando'});
+assert.throws(()=>Visitas.converter('legacy-order','pago'),/pedido legado não possui espaço/);
+assert.equal(data.vendas.length,1);
 console.log('visitas.test.js: ok');
