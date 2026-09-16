@@ -4,14 +4,14 @@ const fs = require("node:fs");
 
 const read = (file) => fs.readFileSync(file, "utf8");
 
-test("PDV desktop V2 usa o checkout único sem tocar o renderer mobile", () => {
+test("PDV desktop V2 usa o checkout canônico compartilhado", () => {
   const app = read("js/app.js"),
     checkout = read("js/checkout.js"),
     desktop = read("js/desktop-sales.js"),
     css = read("css/desktop-sales.css");
 
-  assert.match(app, /DesktopSales\?\.isDesktop\?\.\(\)[\s\S]*Checkout\?\.view/);
-  assert.match(app, /Checkout\?\.bindDesktop/);
+  assert.match(app, /function vender\(\)\s*\{\s*return window\.Checkout\?\.view/);
+  assert.match(app, /Checkout\?\.bind/);
   assert.match(checkout, /DesktopSales\.render/);
   assert.match(checkout, /DesktopSales\.cartHTML/);
   assert.match(checkout, /productType === "recurring"/);

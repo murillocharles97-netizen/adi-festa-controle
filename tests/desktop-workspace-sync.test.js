@@ -29,7 +29,7 @@ test("PDV desktop continua isolado; Configurações compartilha UI sem consultas
     /ConfiguracoesMobile\?\.render[\s\S]*ConfiguracoesMobile\.render\(\)/,
   );
   assert.match(app, /Checkout\?\.view/);
-  assert.match(app, /Checkout\?\.bindDesktop/);
+  assert.match(app, /Checkout\?\.bind/);
   assert.match(app, /DesktopSettings\.render/);
   assert.match(checkout, /DesktopSales\?\.isDesktop\?\.\(\)/);
   assert.match(checkout, /DesktopSales\.render/);
@@ -67,8 +67,8 @@ test("sincronização combina listeners compartilhados e reconciliação canôni
   assert.match(sync, /refreshUserContext\(\)/);
   assert.match(repository, /subscribeById\(id, callback, onError\)/);
   assert.doesNotMatch(sync, /setInterval\(/);
-  assert.match(app, /DesktopSales\?\.refreshProducts/);
-  assert.match(app, /DesktopSales\?\.refreshClients/);
+  assert.match(app, /DesktopSales\.refreshProducts/);
+  assert.match(app, /DesktopSales\.refreshClients/);
 });
 
 test("publica os arquivos desktop e o identificador do build em cache novo", () => {
@@ -78,15 +78,15 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
 
   assert.match(index, /desktop-sales\.js\?v=140/);
   assert.match(index, /desktop-settings\.js\?v=138/);
-  assert.match(index, /app\.js\?v=139/);
-  assert.match(index, /build-info\.js\?v=140/);
+  assert.match(index, /app\.js\?v=141/);
+  assert.match(index, /build-info\.js\?v=141/);
   assert.match(index, /desktop-sales\.css\?v=140/);
-  assert.match(index, /checkout\.js\?v=140/);
+  assert.match(index, /checkout\.js\?v=141/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /veconi-v\d+-/);
-  assert.match(worker, /release:'140'/);
-  assert.match(build, /release: "140"/);
+  assert.match(worker, /release:'141'/);
+  assert.match(build, /release: "141"/);
   assert.match(index, /firebase-ui\.js\?v=137/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[VECONI\] Build/);
