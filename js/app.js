@@ -325,19 +325,7 @@
               .join("")
           : vazio("Adicione produtos");
   function vender() {
-    if (window.DesktopSales?.isDesktop?.())
-      return window.Checkout?.view?.() || "";
-    const ps = Produtos.listar().filter((p) => p.ativo && availableForCurrentSale(p)),
-      cs = Clientes.listar().filter((c) => c.ativo),
-      t = totaisCarrinho();
-    return (
-      (window.SpaceContext?.renderBar?.("sales") || "") +
-      cabecalho(
-        "Nova venda",
-        "Edite quantidades, preços e descontos antes de concluir.",
-      ) +
-      `<div class="sale-layout"><section><div class="toolbar"><input class="search" id="product-search" placeholder="Buscar produto ou código..."><button class="desktop-barcode-button" data-scan-sale aria-label="Ler código"><i data-lucide="scan-barcode"></i></button></div><div class="product-picker">${ps.map((p) => `<button class="pick-product" data-add="${p.id}"><b>${escapar(p.nome)}</b><small>${Number(p.estoqueAtual || 0)} disponíveis</small><span>${dinheiro(p.preco)}</span></button>`).join("") || vazio("Cadastre um produto primeiro")}</div></section><aside class="panel sale-summary"><h3>Resumo da venda</h3><div id="cart">${carrinhoHTML()}</div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" min="0" step=".01" value="${t.valorFinal.toFixed(2)}"></div><div id="sale-totals"></div><div class="field"><label>Cliente</label><select id="sale-client"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}${c.saldo < 0 ? ` — deve ${dinheiro(Math.abs(c.saldo))}` : c.saldo > 0 ? ` — crédito ${dinheiro(c.saldo)}` : ""}</option>`).join("")}</select></div><div class="field"><label>Forma de pagamento</label><select id="sale-status"><option value="pago">Pago</option><option value="fiado">Fiado</option></select></div><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale" style="width:100%;margin-top:15px">${icon("check")} Concluir venda</button></aside></div>`
-    );
+    return window.Checkout?.view?.() || "";
   }
   function fiadoCard(c) {
     const tel = Utils.somenteNumeros(c.telefone);
@@ -753,10 +741,8 @@
     }
     if (route === "cobrancas") bindCobrancas();
     if (route === "vender") {
-      if (window.DesktopSales?.isDesktop?.()) {
-        window.Checkout?.bindDesktop?.();
-        window.DesktopSales?.bind?.();
-      } else bindVenda();
+      window.Checkout?.bind?.();
+      if (window.DesktopSales?.isDesktop?.()) window.DesktopSales?.bind?.();
     }
     if (route === "fiados")
       $$("[data-receive]").forEach(
@@ -1359,8 +1345,13 @@
       )
         return;
       if (Router.atual() === "vender") {
-        window.DesktopSales?.refreshProducts?.();
-        window.DesktopSales?.refreshClients?.();
+        if (window.DesktopSales?.isDesktop?.()) {
+          window.DesktopSales.refreshProducts?.();
+          window.DesktopSales.refreshClients?.();
+        } else {
+          window.Checkout?.refreshProducts?.();
+          window.Checkout?.refreshClients?.();
+        }
         cloudRenderPending = false;
         return;
       }

@@ -204,5 +204,5 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(financial, /business_\$\{businessId\}/);
   assert.match(index, /spaces\.js\?v=139/);
   assert.match(index, /firebase\/space-service\.js\?v=139/);
-  assert.match(worker, /veconi-v140-sales-pdv-cart/);
+  assert.match(worker, /veconi-v141-sales-single-renderer/);
 });

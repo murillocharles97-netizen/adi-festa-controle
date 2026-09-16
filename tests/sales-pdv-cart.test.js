@@ -88,3 +88,38 @@ test("venda e catálogo continuam vinculados ao espaço selecionado", () => {
   assert.match(spaces, /Checkout\?\.resetSession/);
   assert.match(spaces, /Trocar o espaço limpará a venda atual/);
 });
+
+test("rota Vender possui um único renderizador e um único binding canônico", () => {
+  const app = read("js/app.js"),
+    checkout = read("js/checkout.js"),
+    index = read("index.html"),
+    vender = app.slice(app.indexOf("function vender()"), app.indexOf("function fiadoCard")),
+    venderBinding = app.slice(
+      app.indexOf('if (route === "vender")'),
+      app.indexOf('if (route === "fiados")'),
+    );
+
+  assert.match(vender, /return window\.Checkout\?\.view\?\.\(\) \|\| ""/);
+  assert.doesNotMatch(vender, /sale-layout|product-picker|Edite quantidades/);
+  assert.match(venderBinding, /window\.Checkout\?\.bind\?\.\(\)/);
+  assert.doesNotMatch(venderBinding, /bindVenda\(\)/);
+  assert.match(checkout, /bind: standalone/);
+  assert.doesNotMatch(index, /Checkout\.mount\(\)/);
+  const compatibilityMount = checkout.slice(
+    checkout.indexOf("function mount()"),
+    checkout.indexOf('addEventListener("firebase-session-cleared"'),
+  );
+  assert.match(compatibilityMount, /AppPageRuntime\?\.mount/);
+  assert.doesNotMatch(compatibilityMount, /innerHTML|hashchange|setTimeout/);
+});
+
+test("atualizações assíncronas da venda preservam o componente e renovam só seus dados", () => {
+  const app = read("js/app.js"),
+    checkout = read("js/checkout.js");
+
+  assert.match(app, /addEventListener\("veconi-spaces-ready"[\s\S]*mountRoute\(route\)/);
+  assert.match(app, /window\.Checkout\?\.refreshProducts\?\.\(\)/);
+  assert.match(app, /window\.Checkout\?\.refreshClients\?\.\(\)/);
+  assert.match(checkout, /function refreshProducts\(\)[\s\S]*grid\.innerHTML/);
+  assert.match(checkout, /function refreshClients\(\)[\s\S]*select\.innerHTML/);
+});

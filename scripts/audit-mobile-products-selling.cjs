@@ -52,6 +52,19 @@ async function navigate(cdp, url) {
   throw Error(`Página não carregou: ${url}`);
 }
 
+async function reloadWithoutCache(cdp) {
+  await cdp.send("Page.reload", { ignoreCache: true });
+  const started = Date.now();
+  while (Date.now() - started < 8000) {
+    if (await evaluate(cdp, "document.readyState==='complete' && document.body?.dataset.visualReady==='vender'")) {
+      await sleep(320);
+      return;
+    }
+    await sleep(60);
+  }
+  throw Error("Página Vender não estabilizou após reload sem cache.");
+}
+
 async function screenshot(cdp, name) {
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
   fs.mkdirSync(path.join(ROOT, "artifacts", "mobile-products-selling-fixes"), { recursive: true });
@@ -84,6 +97,21 @@ async function main() {
       report.push({ viewport: `${width}x${height}`, form, products, selling });
       if (width === 390) {
         await screenshot(cdp, "vender-390x844.png");
+        await navigate(cdp, `http://127.0.0.1:${port}/tests/desktop-shell-content.fixture.html?visual=vender&temporal-regression=1#/vender`);
+        const beforeEvents = await evaluate(cdp, `(()=>({instance:document.querySelector('#app')?.dataset.pageInstance,canonical:Boolean(document.querySelector('.mobile-sale-page')),legacy:document.body.textContent.includes('Edite quantidades, preços e descontos antes de concluir.')}))()`);
+        await evaluate(cdp, `(()=>{dispatchEvent(new CustomEvent('veconi-spaces-ready'));dispatchEvent(new CustomEvent('cloud-data-updated',{detail:{collection:'products',source:'qa-late-product-load'}}));dispatchEvent(new Event('online'));dispatchEvent(new Event('pageshow'));document.dispatchEvent(new Event('visibilitychange'));return true})()`);
+        await sleep(15000);
+        const afterEvents = await evaluate(cdp, `(()=>{const grid=document.querySelector('#pos-grid');return{instance:document.querySelector('#app')?.dataset.pageInstance,canonical:Boolean(document.querySelector('.mobile-sale-page')),legacy:document.body.textContent.includes('Edite quantidades, preços e descontos antes de concluir.'),columns:grid?getComputedStyle(grid).gridTemplateColumns.split(' ').length:0,bag:Boolean(document.querySelector('#open-sale-summary'))}})()`);
+        if (!beforeEvents.canonical || beforeEvents.legacy || !afterEvents.canonical || afterEvents.legacy || afterEvents.columns !== 2 || !afterEvents.bag) throw Error(`390x844: regressão temporal na tela Vender ${JSON.stringify({ beforeEvents, afterEvents })}`);
+        await reloadWithoutCache(cdp);
+        const afterReload = await evaluate(cdp, `(()=>({canonical:Boolean(document.querySelector('.mobile-sale-page')),legacy:document.body.textContent.includes('Edite quantidades, preços e descontos antes de concluir.'),bag:Boolean(document.querySelector('#open-sale-summary'))}))()`);
+        await evaluate(cdp, "(()=>{Router.ir('inicio');return true})()");
+        await sleep(180);
+        await evaluate(cdp, "(()=>{Router.ir('vender');return true})()");
+        await sleep(320);
+        const afterRevisit = await evaluate(cdp, `(()=>({canonical:Boolean(document.querySelector('.mobile-sale-page')),legacy:document.body.textContent.includes('Edite quantidades, preços e descontos antes de concluir.'),bag:Boolean(document.querySelector('#open-sale-summary'))}))()`);
+        if (!afterReload.canonical || afterReload.legacy || !afterReload.bag || !afterRevisit.canonical || afterRevisit.legacy || !afterRevisit.bag) throw Error(`390x844: reload/retorno reativou renderer legado ${JSON.stringify({ afterReload, afterRevisit })}`);
+        report.push({ viewport: "390x844-temporal", waitedMs: 15000, beforeEvents, afterEvents, afterReload, afterRevisit });
         await navigate(cdp, `http://127.0.0.1:${port}/tests/mobile-product-form-fixes.fixture.html`); await screenshot(cdp, "produtos-390x844.png");
         await navigate(cdp, `http://127.0.0.1:${port}/tests/mobile-product-form-fixes.fixture.html?view=form`); await screenshot(cdp, "formulario-recorrente-390x844.png");
       }

@@ -9,6 +9,7 @@
     "test:desktop-selling": "node scripts/audit-desktop-selling-v2.cjs",
     "test:desktop-design-system": "node scripts/audit-desktop-design-system.cjs",
     "test:mobile-browser": "node scripts/audit-mobile-products-selling.cjs",
+    "test:sales-stability-browser": "node scripts/audit-mobile-products-selling.cjs",
     "test:home-clients-browser": "node scripts/audit-mobile-home-clients.cjs",
     "test:engagement-browser": "node scripts/audit-mobile-engagement-operations.cjs",
     "test:crm-mobile-browser": "node scripts/audit-crm-mobile-carousel.cjs",

@@ -245,6 +245,51 @@ window.Checkout = (() => {
       );
     dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: cards.filter((card) => !card.hidden).length } }));
   }
+  function refreshProducts() {
+    const grid = document.querySelector("#pos-grid"),
+      category = document.querySelector("#pos-category");
+    if (!grid || window.DesktopSales?.isDesktop?.()) return false;
+    rebuildSoldIndex();
+    const activeProducts = products()
+        .list()
+        .filter((product) => product.ativo !== false && productAvailableHere(product)),
+      categories = [
+        ...new Set(activeProducts.map((product) => product.categoria).filter(Boolean)),
+      ].sort(),
+      selectedCategory = category?.value || "";
+    grid.innerHTML =
+      activeProducts.map(card).join("") ||
+      '<div class="empty">Nenhum produto disponível neste espaço</div>';
+    if (category) {
+      category.innerHTML = `<option value="">Categorias</option>${categories
+        .map((name) => `<option value="${escapar(norm(name))}">${escapar(name)}</option>`)
+        .join("")}`;
+      if ([...category.options].some((option) => option.value === selectedCategory))
+        category.value = selectedCategory;
+    }
+    window.CheckoutMobile?.enhance?.();
+    filter();
+    refresh();
+    window.lucide?.createIcons();
+    return true;
+  }
+  function refreshClients() {
+    const select = document.querySelector("#sale-client");
+    if (!select) return false;
+    const selected = select.value;
+    select.innerHTML = `<option value="">Venda avulsa</option>${clients()
+      .list()
+      .filter((client) => client.ativo !== false)
+      .map(
+        (client) =>
+          `<option value="${escapar(client.id)}">${escapar(client.nome)}</option>`,
+      )
+      .join("")}`;
+    if ([...select.options].some((option) => option.value === selected))
+      select.value = selected;
+    selectedClient();
+    return true;
+  }
   const row = (c) =>
     `<button class="client-choice" data-choose-client="${c.id}"><div><b>${escapar(c.nome)}</b><small>${escapar(c.telefone) || "Sem telefone"}${c.ultimaCompra ? ` · Última compra: ${new Date(c.ultimaCompra).toLocaleDateString("pt-BR")}` : ""}</small></div>${balance(c)}</button>`;
   function picker(onSelected = null, options = {}) {
@@ -976,18 +1021,8 @@ window.Checkout = (() => {
     return true;
   }
   function mount() {
-    const paint = () => {
-      if (Router.atual() !== "vender") return;
-      if (window.DesktopSales?.isDesktop?.()) return;
-      finishing = false;
-      discountKind = null;
-      manual = false;
-      document.querySelector("#app").innerHTML = view();
-      document.querySelector("#title").textContent = "Vender";
-      standalone();
-    };
-    addEventListener("hashchange", () => setTimeout(paint, 0));
-    setTimeout(paint, 0);
+    if (Router.atual() !== "vender") return false;
+    return window.AppPageRuntime?.mount?.("vender") || false;
   }
   addEventListener("firebase-session-cleared", resetSession);
   addEventListener("terminal-payment-retry-ready", () => {
@@ -1005,8 +1040,11 @@ window.Checkout = (() => {
     openVariantPicker: variablePicker,
     openRecurringProduct,
     addSaleItem,
+    bind: standalone,
     bindDesktop: standalone,
     filterProducts: filter,
+    refreshProducts,
+    refreshClients,
     finalizeTerminalPayment,
     cartCount: () =>
       cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),
