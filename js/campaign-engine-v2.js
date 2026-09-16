@@ -807,15 +807,19 @@
     if (reward.type === "product") {
       const product = (db.produtos || []).find((entry) => entry.id === reward.productId);
       if (!product) throw new Error("Produto da recompensa não encontrado");
+      const controlsStock = product.itemKind !== "service" &&
+        !product.semControleEstoque && product.controlaEstoque !== false;
       const quantity = Math.max(1, n(reward.quantity));
       if (reward.variantId) {
         const variant = (db.variacoesProdutos || []).find((entry) => entry.id === reward.variantId);
         if (!variant) throw new Error("Variação da recompensa não encontrada");
         if (String(variant.parentProductId) !== String(product.id)) throw new Error("A variação não pertence ao produto da recompensa");
-        if (!variant.allowNegativeStock && n(variant.stock) < quantity) throw new Error("Estoque insuficiente para o resgate");
-        stockPlan = { product, variant, quantity, before: n(variant.stock) };
-      } else {
-        if (!product.semControleEstoque && n(product.estoqueAtual) < quantity) throw new Error("Estoque insuficiente para o resgate");
+        if (controlsStock) {
+          if (!variant.allowNegativeStock && n(variant.stock) < quantity) throw new Error("Estoque insuficiente para o resgate");
+          stockPlan = { product, variant, quantity, before: n(variant.stock) };
+        }
+      } else if (controlsStock) {
+        if (n(product.estoqueAtual) < quantity) throw new Error("Estoque insuficiente para o resgate");
         stockPlan = { product, variant: null, quantity, before: n(product.estoqueAtual) };
       }
     }

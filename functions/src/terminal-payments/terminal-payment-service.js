@@ -9,6 +9,7 @@ const {SIMULATOR_CAPABILITIES}=require('./providers/simulator-provider');
 const ACTIVE_STATUSES=new Set(['created','awaiting_terminal','processing','pending_confirmation']);
 const FINAL_STATUSES=new Set(['approved','declined','cancelled','expired','error','refunded']);
 const PAYMENT_METHODS=new Set(['credit','debit']);
+const RESERVED_SPACE_IDS=new Set(['all','all_spaces']);
 const ROLES=new Set(['owner','admin','manager','cashier']);
 const PROVIDERS=Object.freeze([
   {id:'cielo',name:'Cielo',availability:'not_configured'},
@@ -26,8 +27,11 @@ const statusMessage=status=>({created:'Cobrança criada.',awaiting_terminal:'Agu
 const saleStatusForPayment=status=>status==='approved'?'paid':status==='cancelled'?'cancelled':['declined','expired','error'].includes(status)?'payment_failed':'payment_pending';
 
 function normalizeSaleDraft(input={}){
-  const id=text(input.id,100),items=Array.isArray(input.itens)?input.itens:Array.isArray(input.items)?input.items:[];
+  const id=text(input.id,100),spaceId=text(input.spaceId,120),financialSpaceId=text(input.financialSpaceId,120)||spaceId,items=Array.isArray(input.itens)?input.itens:Array.isArray(input.items)?input.items:[];
   if(!/^[A-Za-z0-9_-]{8,100}$/.test(id))throw new HttpsError('invalid-argument','Identificador da venda inválido.');
+  if(RESERVED_SPACE_IDS.has(spaceId)||!/^[A-Za-z0-9_-]{3,120}$/.test(spaceId))throw new HttpsError('invalid-argument','Espaço de venda inválido.');
+  if(RESERVED_SPACE_IDS.has(financialSpaceId)||!/^[A-Za-z0-9_-]{3,120}$/.test(financialSpaceId))throw new HttpsError('invalid-argument','Espaço financeiro legado inválido.');
+  if(financialSpaceId!==spaceId)throw new HttpsError('invalid-argument','O espaço financeiro legado deve corresponder ao espaço da venda.');
   if(!items.length||items.length>100)throw new HttpsError('invalid-argument','A venda precisa ter entre 1 e 100 itens.');
   const normalizedItems=items.map((item,index)=>{
     const productId=text(item.produtoId||item.productId,100),quantity=Number(item.quantidade??item.quantity),unitPrice=Number(item.precoFinalUnitario??item.precoUnitario??item.unitPriceSnapshot);
@@ -44,6 +48,7 @@ function normalizeSaleDraft(input={}){
       precoOriginal:Number(item.precoOriginal??item.precoUnitario??unitPrice),
       precoFinalUnitario:unitPrice,
       custoUnitario:Number(item.custoUnitario||0),
+      itemKind:text(item.itemKind,30)==='service'?'service':'product',
       productType:text(item.productType,30)||'simple',
       recurringActivation:item.recurringActivation&&typeof item.recurringActivation==='object'?item.recurringActivation:null,
       campaignDiscounts:Array.isArray(item.campaignDiscounts)?item.campaignDiscounts.slice(0,20):[],
@@ -51,6 +56,8 @@ function normalizeSaleDraft(input={}){
   });
   return{
     id,
+    spaceId,
+    financialSpaceId,
     clienteId:text(input.clienteId||input.clientId,100)||null,
     observacao:text(input.observacao,500),
     itens:normalizedItems,
@@ -76,6 +83,7 @@ function publicIntent(id,data={}){
   return{
     id,
     businessId:data.businessId,
+    spaceId:data.spaceId||data.saleDraft?.spaceId||null,
     saleId:data.saleId,
     terminalId:data.terminalId,
     terminalNickname:data.terminalNickname,
@@ -168,11 +176,16 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
   async function createPayment(request){
     const value=await context(request),input=request.data||{},idempotencyKey=text(input.idempotencyKey,100),saleDraft=normalizeSaleDraft(input.saleDraft||{});
     if(!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey))throw new HttpsError('invalid-argument','Chave idempotente inválida.');
+    const saleSpaceSnapshot=await db.doc(`financialSpaces/${saleDraft.spaceId}`).get(),saleSpace=saleSpaceSnapshot.data()||{},saleSpaceBusinessId=text(saleSpace.businessId||saleSpace.linkedBusinessId,100);
+    if(!saleSpaceSnapshot.exists)throw new HttpsError('not-found','Espaço de venda não encontrado.');
+    if(saleSpaceBusinessId!==value.businessId)throw new HttpsError('permission-denied','Espaço de venda pertence a outra empresa.');
+    const legacyBusinessSalesSpace=!saleSpace.capabilities&&saleSpace.type==='business';
+    if(saleSpace.active===false||saleSpace.status==='archived'||(saleSpace.capabilities?.sales!==true&&!legacyBusinessSalesSpace))throw new HttpsError('failed-precondition','Este espaço não está ativo para vendas.');
     const terminal=await getIntentOrTerminal(value,input.terminalId,'terminal');
     if(terminal.data.status!=='connected')throw new HttpsError('failed-precondition','A maquininha selecionada não está conectada.');
     if(terminal.data.provider==='simulator'&&!simulatorAllowed(value))throw new HttpsError('permission-denied','Simulador indisponível neste ambiente.');
     const payment=validatePaymentInput(input,terminal.data),simulatorScenario=terminal.data.provider==='simulator'?text(input.simulatorScenario||'approved',30):null,requestHash=sha(JSON.stringify({businessId:value.businessId,saleDraft,terminalId:terminal.ref.id,...payment,simulatorScenario})),intentId=`pi_${sha(`${value.businessId}:${idempotencyKey}`).slice(0,36)}`,ref=intentRef(value.businessId,intentId),actor=actorOf(value),base={
-      id:intentId,businessId:value.businessId,saleId:saleDraft.id,terminalId:terminal.ref.id,terminalNickname:terminal.data.nickname,provider:terminal.data.provider,amountCents:payment.amountCents,currency:'BRL',paymentMethod:payment.paymentMethod,installments:payment.installments,status:'created',saleStatus:'payment_pending',active:true,idempotencyKey,requestHash,providerPaymentId:null,providerOrderId:null,createdByUid:value.uid,createdBy:actor,capabilities:terminal.data.capabilities||{},saleDraft,simulatorScenario,finalizationOperationId:`terminal_payment_${intentId}`,finalizationStatus:'pending',failureReason:null,
+      id:intentId,businessId:value.businessId,spaceId:saleDraft.spaceId,saleId:saleDraft.id,terminalId:terminal.ref.id,terminalNickname:terminal.data.nickname,provider:terminal.data.provider,amountCents:payment.amountCents,currency:'BRL',paymentMethod:payment.paymentMethod,installments:payment.installments,status:'created',saleStatus:'payment_pending',active:true,idempotencyKey,requestHash,providerPaymentId:null,providerOrderId:null,createdByUid:value.uid,createdBy:actor,capabilities:terminal.data.capabilities||{},saleDraft,simulatorScenario,finalizationOperationId:`terminal_payment_${intentId}`,finalizationStatus:'pending',failureReason:null,
     };
     const transactionResult=await db.runTransaction(async transaction=>{
       const current=await transaction.get(ref);
@@ -266,4 +279,4 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
   return{getSetup,saveTerminal,archiveTerminal,createPayment,dispatchPayment,getPaymentStatus,cancelPayment,refundPayment,claimFinalization,acknowledgeFinalization,activePayment,publicIntent};
 }
 
-module.exports={ACTIVE_STATUSES,FINAL_STATUSES,PAYMENT_METHODS,normalizeSaleDraft,validatePaymentInput,publicIntent,saleStatusForPayment,terminalPaymentService};
+module.exports={ACTIVE_STATUSES,FINAL_STATUSES,PAYMENT_METHODS,RESERVED_SPACE_IDS,normalizeSaleDraft,validatePaymentInput,publicIntent,saleStatusForPayment,terminalPaymentService};

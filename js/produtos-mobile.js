@@ -203,6 +203,8 @@
     const current = productStock(product),
       info = statusInfo(product),
       type = status(product);
+    if (product.itemKind === "service")
+      return `<div class="mobile-product-stock sem-controle service"><strong>Serviço</strong><em>${icon("briefcase-business")}Sem estoque físico</em></div>`;
     if (product.productType === "recurring" && type === "sem-controle")
       return `<div class="mobile-product-stock sem-controle recurring"><strong>Venda com renovação</strong><em>${icon("calendar-clock")}${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</em></div>`;
     return `<div class="mobile-product-stock ${type}"><strong>${type === "sem-controle" ? "Sem controle" : `${current} un.`}</strong><em>${info.label}</em></div>`;
@@ -218,7 +220,9 @@
         ) % 6,
       variable = window.ProductVariations?.isVariable(product),
       controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
-      ariaStatus = product.productType === "recurring" && !controlsStock
+      ariaStatus = product.itemKind === "service"
+        ? "Serviço sem estoque físico"
+        : product.productType === "recurring" && !controlsStock
         ? `Venda com renovação, ${window.getProductRenewalPeriod?.(product) || "30 dias"}`
         : statusInfo(product).label;
     return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${esc(ariaStatus)}"><div class="mobile-product-avatar color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show ${product.favorito ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${product.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(product.favorito)}">${icon("star")}</button></div><div class="mobile-product-copy"><h3 title="${esc(product.nome)}">${esc(product.nome)}</h3>${variable ? `<span class="product-variation-badge">${Number(product.activeVariationCount || 0)} variações</span>` : `<p>${esc(product.categoria) || "Sem categoria"}${product.codigo ? ` <b>·</b> ${esc(product.codigo)}` : ""}</p>`}${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong>${priceLabel(product)}</strong></div>${stock(product)}<button class="mobile-product-more" type="button" data-product-menu="${product.id}" aria-label="Mais ações de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button></article></div>`;
@@ -251,16 +255,16 @@
     if (!state.menuId) return "";
     const product = Produtos.obter(state.menuId);
     if (!product) return "";
-    const controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
-      summary = product.productType === "recurring" && !controlsStock ? window.getProductRenewalPeriod?.(product) || "30 dias" : statusInfo(product).label;
-    return `<section class="product-action-sheet open"><div class="sheet-handle"></div><header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${money(product.preco)} · ${esc(summary)}</p></div><button data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header><div class="product-sheet-actions">${controlsStock?`<button data-product-entry="${product.id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button data-product-adjust="${product.id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button>`:""}<button data-product-history="${product.id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button><button data-product-edit="${product.id}">${icon("pencil")}<span><b>Editar produto</b><small>Alterar dados e preços</small></span></button><button class="danger" data-product-delete="${product.id}">${icon("trash-2")}<span><b>Excluir produto</b><small>Esta ação exige confirmação</small></span></button></div></section>`;
+    const controlsStock = window.productControlsStock?.(product) ?? (product.itemKind !== "service" && !product.semControleEstoque && product.controlaEstoque !== false),
+      summary = product.itemKind === "service" ? "Serviço" : product.productType === "recurring" && !controlsStock ? window.getProductRenewalPeriod?.(product) || "30 dias" : statusInfo(product).label;
+    return `<section class="product-action-sheet open"><div class="sheet-handle"></div><header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${money(product.preco)} · ${esc(summary)}</p></div><button data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header><div class="product-sheet-actions">${controlsStock?`<button data-product-entry="${product.id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button data-product-adjust="${product.id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button><button data-product-history="${product.id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button>`:""}<button data-product-edit="${product.id}">${icon("pencil")}<span><b>Editar item</b><small>Alterar dados, preço e disponibilidade</small></span></button><button class="danger" data-product-delete="${product.id}">${icon("trash-2")}<span><b>Excluir item</b><small>Esta ação exige confirmação</small></span></button></div></section>`;
   }
   function render() {
     dataCache = null;
     const c = counts(),
       list = filtered(),
       shown = list.slice(0, state.limit);
-    return `<section class="products-mobile-page"><div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto" aria-label="Buscar produto por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar produtos">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Em estoque", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
+    return `<section class="products-mobile-page"><div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto ou serviço" aria-label="Buscar produto ou serviço por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar itens">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Disponíveis", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
   }
   function refresh(reset = false) {
     dataCache = null;
@@ -300,10 +304,12 @@
   }
   function chooseProductType() {
     const root = $("#modal");
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-type-picker"><header class="modal-head"><h3>Que tipo de produto deseja criar?</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body product-type-options"><button data-product-type="simple">${icon("package")}<b>Produto simples</b><small>Um preço e um estoque.</small></button><button data-product-type="variable">${icon("boxes")}<b>Produto com variações</b><small>Sabores, cores, tamanhos ou combinações.</small></button><button data-product-type="recurring">${icon("calendar-sync")}<b>Venda com renovação</b><small>Produtos ou serviços que vencem após um período e precisam ser renovados.</small></button></div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-type-picker"><header class="modal-head"><h3>O que deseja criar?</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body product-type-options"><button data-product-type="simple">${icon("package")}<b>Produto simples</b><small>Um preço e um estoque.</small></button><button data-product-type="service">${icon("briefcase-business")}<b>Serviço</b><small>Um item vendido sem movimentar estoque.</small></button><button data-product-type="variable">${icon("boxes")}<b>Produto com variações</b><small>Sabores, cores, tamanhos ou combinações.</small></button><button data-product-type="recurring">${icon("calendar-sync")}<b>Venda com renovação</b><small>Produtos ou serviços que vencem após um período e precisam ser renovados.</small></button></div></section></div>`;
     $(".close", root).onclick = Modais.fechar;
     $('[data-product-type="simple"]', root).onclick = () =>
       ProductImages.openForm(null);
+    $('[data-product-type="service"]', root).onclick = () =>
+      ProductImages.openForm(null, { itemKind: "service", productType: "simple" });
     $('[data-product-type="variable"]', root).onclick = () => variableWizard();
     $('[data-product-type="recurring"]', root).onclick = () => ProductImages.openForm(null, { productType: "recurring" });
     window.lucide?.createIcons();
@@ -316,6 +322,11 @@
           nome: "",
           categoria: "",
           observacao: "",
+          itemKind: "product",
+          spaceAccessMode: "all_spaces",
+          allowedSpaceIds: [],
+          defaultSpaceId: null,
+          spaceScopeVersion: 1,
           semControleEstoque: false,
           controlaEstoque: true,
           ativo: true,
@@ -326,6 +337,17 @@
       },
       root = $("#modal"),
       imageDraft = ProductImages.createDraft(null);
+    const cleanupSpaceLifecycle = () =>
+      removeEventListener("veconi-spaces-ready", syncSpaceFields),
+      syncSpaceFields = () => {
+        if (!root.querySelector(".variable-wizard")) {
+          cleanupSpaceLifecycle();
+          return;
+        }
+        if (draft.step !== 1) return;
+        collect();
+        paint();
+      };
     const syncCombinations = () => {
       const existing = new Map(
         draft.variants.map((item) => [
@@ -354,7 +376,7 @@
     };
     const stepBody = () =>
       draft.step === 1
-        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div><div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label><label class="check"><input name="controlaEstoque" type="checkbox" ${draft.product.semControleEstoque ? "" : "checked"}> Controlar estoque deste produto</label>${ProductImages.editorMarkup(imageDraft)}`
+        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${draft.product.itemKind !== "service" ? "selected" : ""}>Produto</option><option value="service" ${draft.product.itemKind === "service" ? "selected" : ""}>Serviço</option></select></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div><div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label><label class="check"><input name="controlaEstoque" type="checkbox" ${draft.product.semControleEstoque ? "" : "checked"}> Controlar estoque deste produto</label>${window.SpaceContext?.availabilityFields?.(draft.product) || ""}${ProductImages.editorMarkup(imageDraft)}`
         : draft.step === 2
           ? `<p>Cadastre um ou dois atributos. Separe os valores por vírgula.</p>${draft.attributes.map((attribute, index) => `<section class="wizard-attribute"><div class="field"><label>Atributo ${index + 1}</label><input name="attributeName:${index}" value="${esc(attribute.name)}" placeholder="Ex.: Sabor"></div><div class="field"><label>Valores</label><input name="attributeValues:${index}" value="${esc(attribute.values.join(", "))}" placeholder="Ferrero, Nutella, Prestígio"></div>${index ? `<button type="button" data-remove-attribute="${index}">${icon("trash-2")} Remover atributo</button>` : ""}</section>`).join("")}<button type="button" class="btn btn-light" data-add-attribute ${draft.attributes.length >= 2 ? "disabled" : ""}>${icon("plus")} Adicionar outro atributo</button>`
           : draft.step === 3
@@ -364,10 +386,10 @@
                   .filter((v) => v.active !== false)
                   .map(
                     (variant, index) =>
-                      `<article><h4>${esc(variant.displayName)}</h4><div class="wizard-variant-fields"><label>Preço<input name="price:${index}" inputmode="decimal" value="${variant.price}"></label><label>Custo<input name="cost:${index}" inputmode="decimal" value="${variant.cost ?? ""}"></label><label>Estoque<input name="stock:${index}" inputmode="numeric" value="${variant.stock}"></label><label>Mínimo<input name="minStock:${index}" inputmode="numeric" value="${variant.minStock}"></label><label>SKU<input name="sku:${index}" value="${esc(variant.sku)}"></label><label>Código<input name="barcode:${index}" inputmode="numeric" value="${esc(variant.barcode)}"></label></div></article>`,
+                      `<article><h4>${esc(variant.displayName)}</h4><div class="wizard-variant-fields"><label>Preço<input name="price:${index}" inputmode="decimal" value="${variant.price}"></label><label>Custo<input name="cost:${index}" inputmode="decimal" value="${variant.cost ?? ""}"></label>${draft.product.itemKind === "service" ? "" : `<label>Estoque<input name="stock:${index}" inputmode="numeric" value="${variant.stock}"></label><label>Mínimo<input name="minStock:${index}" inputmode="numeric" value="${variant.minStock}"></label>`}<label>SKU<input name="sku:${index}" value="${esc(variant.sku)}"></label><label>Código<input name="barcode:${index}" inputmode="numeric" value="${esc(variant.barcode)}"></label></div></article>`,
                   )
                   .join("")}</div>`
-              : `<section class="variable-review"><h3>${esc(draft.product.nome)}</h3><p>${draft.variants.filter((v) => v.active !== false).length} variações</p><div><span>Estoque total<b>${draft.variants.filter((v) => v.active !== false).reduce((sum, v) => sum + Number(v.stock || 0), 0)} un.</b></span><span>Faixa de preço<b>${money(Math.min(...draft.variants.filter((v) => v.active !== false).map((v) => Number(v.price || 0))))} – ${money(Math.max(...draft.variants.filter((v) => v.active !== false).map((v) => Number(v.price || 0))))}</b></span></div>${draft.variants
+              : `<section class="variable-review"><h3>${esc(draft.product.nome)}</h3><p>${draft.variants.filter((v) => v.active !== false).length} variações</p><div><span>${draft.product.itemKind === "service" ? "Tipo" : "Estoque total"}<b>${draft.product.itemKind === "service" ? "Serviço" : `${draft.variants.filter((v) => v.active !== false).reduce((sum, v) => sum + Number(v.stock || 0), 0)} un.`}</b></span><span>Faixa de preço<b>${money(Math.min(...draft.variants.filter((v) => v.active !== false).map((v) => Number(v.price || 0))))} – ${money(Math.max(...draft.variants.filter((v) => v.active !== false).map((v) => Number(v.price || 0))))}</b></span></div>${draft.variants
                   .filter((v) => v.active !== false)
                   .map(
                     (v) =>
@@ -383,9 +405,11 @@
           nome: String(fd.get("nome") || "").trim(),
           categoria: String(fd.get("categoria") || "").trim(),
           observacao: String(fd.get("observacao") || "").trim(),
+          itemKind: fd.get("itemKind") === "service" ? "service" : "product",
           favorito: fd.has("favorito"),
-          semControleEstoque: !fd.has("controlaEstoque"),
-          controlaEstoque: fd.has("controlaEstoque"),
+          semControleEstoque: fd.get("itemKind") === "service" || !fd.has("controlaEstoque"),
+          controlaEstoque: fd.get("itemKind") !== "service" && fd.has("controlaEstoque"),
+          ...(window.SpaceContext?.productAccessFromForm?.(fd, draft.product) || {}),
         };
       if (draft.step === 2) {
         draft.attributes = draft.attributes
@@ -428,6 +452,7 @@
       root.innerHTML = `<div class="modal-bg variable-wizard-bg"><section class="modal-box variable-wizard"><header class="modal-head"><div><small>Novo produto com variações</small><h3>Etapa ${draft.step} de 5</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="wizard-progress">${[1, 2, 3, 4, 5].map((step) => `<i class="${step <= draft.step ? "active" : ""}">${step}</i>`).join("")}</div><form><div class="modal-body">${stepBody()}</div><footer class="modal-foot">${draft.step > 1 ? '<button type="button" class="btn btn-light" data-wizard-back>Voltar</button>' : '<button type="button" class="btn btn-light close">Cancelar</button>'}<button class="btn btn-primary">${draft.step === 5 ? "Salvar produto" : "Continuar"}</button></footer></form></section></div>`;
       $$(".close", root).forEach((button) =>
         (button.onclick = () => {
+          cleanupSpaceLifecycle();
           ProductImages.cleanupDraft(imageDraft);
           Modais.fechar();
         }),
@@ -467,6 +492,7 @@
         paint();
       });
       ProductImages.bindEditor(root, imageDraft);
+      window.SpaceContext?.bindProductAvailability?.(root);
       $("form", root).onsubmit = async (event) => {
         event.preventDefault();
         const submit = event.submitter,
@@ -500,6 +526,7 @@
             attributes: draft.attributes,
             variants: draft.variants.filter((v) => v.active !== false),
           });
+          cleanupSpaceLifecycle();
           Modais.fechar();
           ProductImages.cleanupDraft(imageDraft);
           refresh(true);
@@ -514,6 +541,7 @@
       };
       window.lucide?.createIcons();
     };
+    addEventListener("veconi-spaces-ready", syncSpaceFields);
     paint();
   }
   function editVariant(parentId, variantId = null) {
@@ -570,10 +598,13 @@
       variants = await ProductVariations.ensure(id),
       moves = Produtos.historico(id),
       controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
+      service = product.itemKind === "service",
       recurringNoStock = product.productType === "recurring" && !controlsStock,
-      renewalPeriod = window.getProductRenewalPeriod?.(product) || "30 dias";
+      renewalPeriod = window.getProductRenewalPeriod?.(product) || "30 dias",
+      operationalLabel = controlsStock ? "Estoque" : service ? "Tipo" : recurringNoStock ? "Renovação" : "Controle",
+      operationalValue = controlsStock ? `${Number(product.totalStock || 0)} un.` : service ? "Serviço" : recurringNoStock ? renewalPeriod : "Sem estoque";
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>Produto com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>${recurringNoStock ? "Renovação" : "Estoque"}</small><b>${controlsStock ? `${Number(product.totalStock || 0)} un.` : esc(renewalPeriod)}</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section><div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div><div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}">${ProductImages.markup(product, { variant, className: "variation-row-photo" })}<div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${controlsStock ? `${Number(variant.stock)} un.` : esc(window.getProductRenewalPeriod?.({...product,durationValue:variant.durationValue ?? product.durationValue,durationUnit:variant.durationUnit || product.durationUnit}) || renewalPeriod)}</small></span><button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button>${controlsStock ? `<button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button>` : ""}<button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button></article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div>${controlsStock ? `<p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p>` : ""}</div></section></div>`;
+      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>${service ? "Serviço" : "Produto"} com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>${operationalLabel}</small><b>${esc(operationalValue)}</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section><div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div><div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}">${ProductImages.markup(product, { variant, className: "variation-row-photo" })}<div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${controlsStock ? `${Number(variant.stock)} un.` : service ? "Serviço" : recurringNoStock ? esc(window.getProductRenewalPeriod?.({...product,durationValue:variant.durationValue ?? product.durationValue,durationUnit:variant.durationUnit || product.durationUnit}) || renewalPeriod) : "Sem estoque"}</small></span><button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button>${controlsStock ? `<button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button>` : ""}<button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button></article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div>${controlsStock ? `<p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p>` : ""}</div></section></div>`;
     $(".close", $("#modal")).onclick = Modais.fechar;
     $("[data-edit-parent]", $("#modal")).onclick = () =>
       ProductImages.openForm(id);
@@ -696,12 +727,13 @@
     if (window.ProductVariations?.isVariable(product))
       return variableDetails(id);
     const controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
+      service = product.itemKind === "service",
       recurringNoStock = product.productType === "recurring" && !controlsStock,
       moves = Produtos.historico(id),
       entry = moves.find((m) => m.tipo === "entrada"),
       exit = moves.find((m) => m.tipo === "saida_venda");
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do produto</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span><span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span></div></section>`}<section><h4>Financeiro</h4><div class="product-detail-grid"><span><small>Preço</small><b>${money(product.preco)}</b></span><span><small>Custo</small><b>${product.custo === null ? "—" : money(product.custo)}</b></span></div></section><section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section></div><footer class="modal-foot"><button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button><button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button></footer></section></div>`;
+      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do ${service ? "serviço" : "produto"}</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${service ? "Serviço" : recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${service ? `<section><h4>Serviço</h4><div class="product-detail-grid"><span><small>Tipo de item</small><b>Serviço</b></span><span><small>Controle de estoque</small><b>Não utiliza estoque físico</b></span></div></section>` : recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : controlsStock ? `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span><span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span></div></section>` : `<section><h4>Estoque</h4><p>Controle de estoque desativado para este item.</p></section>`}<section><h4>Financeiro</h4><div class="product-detail-grid"><span><small>Preço</small><b>${money(product.preco)}</b></span><span><small>Custo</small><b>${product.custo === null ? "—" : money(product.custo)}</b></span></div></section><section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section></div><footer class="modal-foot"><button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button><button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button></footer></section></div>`;
     $("#modal .close").onclick = Modais.fechar;
     $("[data-detail-history]").onclick = () => history(id);
     $("[data-detail-edit]").onclick = () => productForm(id);

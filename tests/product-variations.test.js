@@ -18,7 +18,17 @@ function runtime(){
 test('produtos antigos continuam simples',()=>{
   const {context}=runtime(),product=context.Produtos.salvar({nome:'Brownie',preco:8,custo:3,estoqueAtual:10});
   assert.equal(product.productType,'simple');
+  assert.equal(product.spaceAccessMode,'all_spaces');
   assert.equal(context.getProductStockStatus(product),'disponivel');
+});
+
+test('edição de disponibilidade preserva o productId e não duplica o cadastro',()=>{
+  const {context,data}=runtime(),product=context.Produtos.salvar({nome:'Coca-Cola',preco:8,estoqueAtual:10});
+  const edited=context.Produtos.salvar({...product,spaceAccessMode:'single_space',allowedSpaceIds:['adi'],defaultSpaceId:'adi'});
+  assert.equal(edited.id,product.id);
+  assert.equal(data.produtos.length,1);
+  assert.equal(edited.spaceAccessMode,'single_space');
+  assert.deepEqual(Array.from(edited.allowedSpaceIds),['adi']);
 });
 
 test('gera combinações e mantém agregados no produto pai',()=>{
@@ -68,16 +78,28 @@ test('produto sem controle não movimenta estoque em venda simples ou variável'
   context.Vendas.registrar({operationId:'sale-untracked-simple',clienteId:'c1',status:'pago',itens:[{produtoId:simple.id,nome:'IPTV',quantidade:2,precoOriginal:25.9,precoFinalUnitario:25.9,custoUnitario:0}]});
   assert.equal(context.Produtos.obter(simple.id).estoqueAtual,0);
   assert.equal(data.movimentacoesEstoque.filter(item=>item.produtoId===simple.id).length,0);
-  const parent=context.ProductVariations.createProduct({product:{nome:'Serviço variável',semControleEstoque:true,controlaEstoque:false},attributes:[{id:'plano',name:'Plano',values:['A']}],variants:[{displayName:'A',attributeValues:{plano:'A'},price:10,stock:0}] }),variant=context.ProductVariations.active(parent.id)[0];
+  const parent=context.ProductVariations.createProduct({product:{nome:'Serviço variável',itemKind:'service',semControleEstoque:false,controlaEstoque:true},attributes:[{id:'plano',name:'Plano',values:['A']}],variants:[{displayName:'A',attributeValues:{plano:'A'},price:10,stock:0}] }),variant=context.ProductVariations.active(parent.id)[0];
+  assert.equal(parent.itemKind,'service');
+  assert.equal(parent.semControleEstoque,true);
+  assert.equal(parent.controlaEstoque,false);
+  assert.equal(parent.hasAvailableStock,true);
   const item=context.ProductVariations.saleItem(parent,variant,1);
+  assert.equal(item.itemKind,'service');
   context.Vendas.registrar({operationId:'sale-untracked-variable',clienteId:'c1',status:'pago',itens:[item]});
   assert.equal(context.ProductVariations.get(variant.id).stock,0);
+  assert.equal(data.movimentacoesEstoque.filter(entry=>entry.variantId===variant.id).length,0);
+  parent.semControleEstoque=false;
+  parent.controlaEstoque=true;
+  context.ProductVariations.save({...variant,parentProductId:parent.id,stock:9,minStock:2,allowNegativeStock:true});
+  assert.equal(context.ProductVariations.get(variant.id).stock,0);
+  assert.equal(context.ProductVariations.get(variant.id).minStock,0);
+  assert.equal(context.ProductVariations.get(variant.id).allowNegativeStock,false);
   assert.equal(data.movimentacoesEstoque.filter(entry=>entry.variantId===variant.id).length,0);
   assert.throws(()=>context.ProductVariations.stockChange({parentProductId:parent.id,variantId:variant.id,quantity:1}),/não usa controle/);
 });
 
 test('integrações usam variação sem listeners por card',()=>{
-  const checkout=fs.readFileSync('js/checkout.js','utf8'),sync=fs.readFileSync('js/firebase/sync.js','utf8'),catalog=fs.readFileSync('js/catalogo-admin.js','utf8'),portal=fs.readFileSync('js/catalogo-publico.js','utf8'),rules=fs.readFileSync('firestore.rules','utf8');
+  const checkout=fs.readFileSync('js/checkout.js','utf8'),desktopSales=fs.readFileSync('js/desktop-sales.js','utf8'),sync=fs.readFileSync('js/firebase/sync.js','utf8'),catalog=fs.readFileSync('js/catalogo-admin.js','utf8'),portal=fs.readFileSync('js/catalogo-publico.js','utf8'),rules=fs.readFileSync('firestore.rules','utf8');
   assert.match(checkout,/openVariantPicker|variablePicker/);
   assert.match(sync,/productVariants\s*:\s*\{\s*key\s*:\s*["']variacoesProdutos["']/);
   const bootstrapPull=sync.slice(sync.indexOf('const DEFAULT_PULL_NAMES'),sync.indexOf('const AUDIT_NAMES'));
@@ -86,5 +108,7 @@ test('integrações usam variação sem listeners por card',()=>{
   assert.match(catalog,/variants/);
   assert.match(portal,/variantId/);
   assert.match(rules,/match \/productVariants\/\{variantId\}/);
+  assert.match(desktopSales,/product\.itemKind === "service"/);
+  assert.match(desktopSales,/Serviço · sem estoque físico/);
   assert.doesNotMatch(checkout,/onSnapshot/);
 });

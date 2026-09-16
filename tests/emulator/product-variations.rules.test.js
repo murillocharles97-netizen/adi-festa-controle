@@ -7,6 +7,7 @@ const {collection,doc,getDoc,getDocs,limit,onSnapshot,orderBy,query,runTransacti
 let env;
 const projectId='adi-festa-variations-test';
 const businessA='empresa_emulador_a',businessB='empresa_emulador_b',businessExpired='empresa_expirada';
+const salesSpaceA=`business_${businessA}`;
 
 test.before(async()=>{
   env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});
@@ -20,6 +21,7 @@ test.before(async()=>{
     await setDoc(doc(db,'users','owner-expired'),{uid:'owner-expired',businessId:businessExpired,role:'owner',active:true});
     await setDoc(doc(db,'users','manager-crm'),{uid:'manager-crm',businessId:businessA,role:'manager',active:true,permissions:{viewCRM:true,manageCustomerSegments:true}});
     await setDoc(doc(db,'users','cashier-no-crm'),{uid:'cashier-no-crm',businessId:businessA,role:'cashier',active:true,permissions:{}});
+    await setDoc(doc(db,'financialSpaces',salesSpaceA),{id:salesSpaceA,name:'Empresa A',type:'business',linkedBusinessId:businessA,ownerUid:'owner-a',createdBy:'owner-a',active:true});
     await setDoc(doc(db,'businesses',businessA,'products','parent-1'),{id:'parent-1',businessId:businessA,nome:'Cone',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessB,'products','parent-2'),{id:'parent-2',businessId:businessB,nome:'Gloss',productType:'variable',active:true});
     await setDoc(doc(db,'businesses',businessExpired,'clients','existing-client'),{id:'existing-client',businessId:businessExpired,nome:'Cliente existente',active:true});
@@ -194,7 +196,7 @@ test('duas sessoes da mesma empresa compartilham produtos, clientes, vendas e pa
   await assertSucceeds(updateDoc(doc(sessionB,'businesses',businessA,'clients','sync-client'),{saldo:-15,updatedAt:new Date()}));
   assert.equal((await assertSucceeds(getDoc(clientRef))).data().saldo,-15);
 
-  await assertSucceeds(setDoc(saleRef,{id:'sync-sale',businessId:businessA,ownerId:'owner-a',clienteId:'sync-client',valorFinal:12,status:'fiado',data:new Date(),updatedAt:new Date()}));
+  await assertSucceeds(setDoc(saleRef,{id:'sync-sale',businessId:businessA,ownerId:'owner-a',spaceId:salesSpaceA,financialSpaceId:salesSpaceA,clienteId:'sync-client',valorFinal:12,status:'fiado',data:new Date(),updatedAt:new Date()}));
   assert.equal((await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'sales','sync-sale')))).data().valorFinal,12);
   await assertSucceeds(setDoc(paymentRef,{id:'sync-payment',businessId:businessA,ownerId:'owner-a',clienteId:'sync-client',valor:5,data:new Date(),updatedAt:new Date()}));
   assert.equal((await assertSucceeds(getDoc(doc(sessionB,'businesses',businessA,'payments','sync-payment')))).data().valor,5);
@@ -277,7 +279,7 @@ test('venda fiado aplica saldo e movimento uma única vez em retries',async()=>{
   const apply=()=>runTransaction(db,async transaction=>{
     const marker=await transaction.get(markerRef);if(marker.exists())return;
     const client=await transaction.get(clientRef),effect=await transaction.get(effectRef);if(effect.exists())return;
-    transaction.set(saleRef,{id:saleId,operationId,businessId:businessA,ownerId:'owner-a',clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),financialAppliedAt:new Date(),financialOperationId:effectId,updatedAt:new Date(),schemaVersion:3},{merge:true});
+    transaction.set(saleRef,{id:saleId,operationId,businessId:businessA,ownerId:'owner-a',spaceId:salesSpaceA,financialSpaceId:salesSpaceA,clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),financialAppliedAt:new Date(),financialOperationId:effectId,updatedAt:new Date(),schemaVersion:3},{merge:true});
     transaction.set(effectRef,{id:effectId,operationId,idempotencyKey:effectId,businessId:businessA,ownerId:'owner-a',customerId:clientId,clientId,type:'credit_sale',direction:'debit',amount:25,balanceDelta:-25,status:'applied',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
     transaction.set(clientRef,{saldo:Number(client.data().saldo)-25,openBalance:25,financialRevision:operationId,updatedAt:new Date()},{merge:true});
     transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId:'owner-a',status:'processed',eventKind:'sale',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
@@ -293,7 +295,7 @@ test('reparação de venda existente cria só o efeito ausente e é idempotente'
     clientRef=doc(db,'businesses',businessA,'clients',clientId),saleRef=doc(db,'businesses',businessA,'sales',saleId),
     effectRef=doc(db,'businesses',businessA,'balanceEvents',effectId),markerRef=doc(db,'businesses',businessA,'processedOperations',reconciliationId);
   await setDoc(clientRef,{id:clientId,businessId:businessA,ownerId:'owner-a',nome:'Cliente reparo',saldo:0,active:true,updatedAt:new Date()});
-  await setDoc(saleRef,{id:saleId,operationId:'orphan-operation',businessId:businessA,ownerId:'owner-a',clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),updatedAt:new Date()});
+  await env.withSecurityRulesDisabled(async context=>setDoc(doc(context.firestore(),'businesses',businessA,'sales',saleId),{id:saleId,operationId:'orphan-operation',businessId:businessA,ownerId:'owner-a',clienteId:clientId,valorFinal:25,status:'fiado',saldoAnterior:0,saldoAtual:-25,data:new Date(),updatedAt:new Date()}));
   const repair=()=>runTransaction(db,async transaction=>{
     const marker=await transaction.get(markerRef);if(marker.exists())return;
     const client=await transaction.get(clientRef),effect=await transaction.get(effectRef),sale=await transaction.get(saleRef);assert.equal(sale.exists(),true);
