@@ -103,6 +103,7 @@ window.Checkout = (() => {
   };
   const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
   function view() {
+    restoreDraft();
     rebuildSoldIndex();
     const ps = products()
         .list()
@@ -135,7 +136,7 @@ window.Checkout = (() => {
         recentProducts,
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><button class="btn btn-primary" id="finish-sale"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false"><i data-lucide="shopping-bag"></i><span id="pos-bag-label">Nenhum item selecionado</span><b id="pos-bag-total">${dinheiro(0)}</b><i data-lucide="chevron-up"></i></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -480,9 +481,108 @@ window.Checkout = (() => {
     discountKind = null,
     manual = false,
     finishing = false,
+    activeAttempt = null,
+    restoredDraftKey = "",
+    draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" },
     pendingClient = null,
     pendingRenewal = null,
     selectedCampaignIds = new Set();
+  const DRAFT_PREFIX = "veconi:sale-draft:v1";
+  function traceSale(stage, detail = {}) {
+    if (window.__VECONI_DEV__ !== true) return;
+    console.debug(stage, detail);
+    dispatchEvent(new CustomEvent("veconi-sale-debug", { detail: { stage, ...detail } }));
+  }
+  function draftKey() {
+    const businessId = String(DB.getBusinessId?.() || window.FirebaseSession?.businessId || "").trim(),
+      spaceId = selectedSalesSpaceId();
+    return businessId && spaceId ? `${DRAFT_PREFIX}:${businessId}:${spaceId}` : "";
+  }
+  function captureDraftDetails() {
+    draftDetails = {
+      clientId: document.querySelector("#sale-client")?.value || draftDetails.clientId || "",
+      paymentMethod: document.querySelector("#sale-payment-method")?.value || draftDetails.paymentMethod || "pix",
+      note: document.querySelector("#sale-note")?.value ?? draftDetails.note ?? "",
+      discountValue: document.querySelector("#discount-value")?.value ?? draftDetails.discountValue ?? "0",
+      discountPercent: document.querySelector("#discount-percent")?.value ?? draftDetails.discountPercent ?? "0",
+    };
+    return draftDetails;
+  }
+  function saveDraft() {
+    const key = draftKey();
+    if (!key) return;
+    try {
+      if (!cart.length) return sessionStorage.removeItem(key);
+      sessionStorage.setItem(key, JSON.stringify({
+        version: 1,
+        businessId: String(DB.getBusinessId?.() || ""),
+        spaceId: selectedSalesSpaceId(),
+        cart,
+        discountKind,
+        manual,
+        selectedCampaignIds: [...selectedCampaignIds],
+        details: captureDraftDetails(),
+        savedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      traceSale("[CART] draft persistence unavailable", { code: error?.name || "unknown" });
+    }
+  }
+  function clearDraft() {
+    const key = draftKey(), keys = new Set([key, restoredDraftKey].filter(Boolean));
+    for (const candidate of keys) try { sessionStorage.removeItem(candidate); } catch {}
+    restoredDraftKey = key;
+  }
+  function restoreDraft() {
+    const key = draftKey();
+    if (!key || restoredDraftKey === key || cart.length) return;
+    restoredDraftKey = key;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || "null");
+      if (!saved || saved.spaceId !== selectedSalesSpaceId() || !Array.isArray(saved.cart)) return;
+      cart = saved.cart.filter((item) => {
+        const product = products().getById(item?.produtoId || item?.productId);
+        return product && productAvailableHere(product) && Number(item.quantidade) > 0;
+      });
+      discountKind = saved.discountKind || null;
+      manual = Boolean(saved.manual);
+      selectedCampaignIds = new Set(saved.selectedCampaignIds || []);
+      draftDetails = { ...draftDetails, ...(saved.details || {}) };
+      if (cart.length) traceSale("[CART] draft restored", { items: cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0) });
+    } catch (error) {
+      try { sessionStorage.removeItem(key); } catch {}
+      traceSale("[CART] invalid draft discarded", { code: error?.name || "unknown" });
+    }
+  }
+  function applyDraftDetails() {
+    const client = document.querySelector("#sale-client"), payment = document.querySelector("#sale-payment-method"),
+      status = document.querySelector("#sale-status"), note = document.querySelector("#sale-note"),
+      discountValue = document.querySelector("#discount-value"), discountPercent = document.querySelector("#discount-percent");
+    if (client && [...client.options].some((option) => option.value === draftDetails.clientId)) client.value = draftDetails.clientId;
+    if (payment) payment.value = draftDetails.paymentMethod || "pix";
+    if (status) status.value = payment?.value === "fiado" ? "fiado" : "pago";
+    if (note) note.value = draftDetails.note || "";
+    if (discountValue) discountValue.value = draftDetails.discountValue || "0";
+    if (discountPercent) discountPercent.value = draftDetails.discountPercent || "0";
+    window.CheckoutPaymentMethod = payment?.value || "pix";
+  }
+  function invalidateAttempt() { if (!finishing) activeAttempt = null; }
+  function setSubmissionState(state, message = "") {
+    const button = document.querySelector("#finish-sale"), feedback = document.querySelector("#sale-submit-feedback"),
+      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente' };
+    if (button) {
+      button.dataset.saleState = state;
+      button.disabled = state === "processing" || state === "success";
+      button.innerHTML = labels[state] || labels.normal;
+    }
+    if (feedback) {
+      feedback.hidden = !message;
+      feedback.textContent = message;
+      feedback.classList.toggle("error", state === "error");
+      feedback.classList.toggle("success", state === "success");
+    }
+    window.lucide?.createIcons();
+  }
   const totals = (items = cart) => {
     const original = items.reduce(
         (s, i) => s + i.quantidade * i.precoOriginal,
@@ -498,6 +598,7 @@ window.Checkout = (() => {
       profit: final - cost,
     };
   };
+  const cartCount = () => cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
   function drawCart() {
     const host = document.querySelector("#cart");
     if (!host) return;
@@ -514,8 +615,9 @@ window.Checkout = (() => {
       : cart.length
         ? cart
           .map((i) => {
-            const key = cartKey(i);
-            return `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(key)}"><i data-lucide="trash-2"></i></button></div>`;
+            const key = cartKey(i), product = products().getById(i.produtoId), variant = i.variantId ? window.ProductVariations?.get?.(i.variantId) : null,
+              image = window.ProductImages?.markup?.(product, { variant, className: "sale-cart-photo" }) || `<span class="sale-cart-photo placeholder">${initials(i.nome)}</span>`;
+            return `<div class="cart-item editable-cart">${image}<div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(key)}" aria-label="Remover ${escapar(i.nome)}"><i data-lucide="trash-2"></i></button></div>`;
           })
           .join("")
         : '<div class="empty">Adicione produtos</div>';
@@ -524,6 +626,7 @@ window.Checkout = (() => {
     document.querySelector("#manual-total").value = t.final.toFixed(2);
     drawCampaignBenefits();
     refresh();
+    saveDraft();
     window.lucide?.createIcons();
   }
 
@@ -554,6 +657,7 @@ window.Checkout = (() => {
         }
         selectedCampaignIds.add(id);
       }
+      invalidateAttempt();
       drawCart();
     };
   }
@@ -577,6 +681,7 @@ window.Checkout = (() => {
       before = current ? Number(current.quantidade || 0) : 0;
     if (current) current.quantidade += Number(item.quantidade || 1);
     else cart.push(item);
+    invalidateAttempt();
     drawCart();
     dispatchEvent(new CustomEvent("sale-item-added", { detail: { item, before, after: before + Number(item.quantidade || 1), first: before === 0, source: options.source || null, variable: Boolean(item.variantId) } }));
     return true;
@@ -721,12 +826,15 @@ window.Checkout = (() => {
     document.querySelector("#open-client-picker").onclick = () => picker();
     document.querySelector("#sale-client").onchange = () => {
       selectedCampaignIds.clear();
+      invalidateAttempt();
+      traceSale("[CART] customer selected", { clientId: document.querySelector("#sale-client").value || null });
       drawCart();
     };
     document.querySelector("#sale-status").onchange = drawCart;
     document.querySelector("#sale-payment-method")?.addEventListener("change", event => {
       window.CheckoutPaymentMethod = event.target.value;
       document.querySelector("#sale-status").value = event.target.value === "fiado" ? "fiado" : "pago";
+      invalidateAttempt();
       drawCart();
     });
     document.querySelector("#selected-client-card").onclick = (e) => {
@@ -754,6 +862,7 @@ window.Checkout = (() => {
         selectedCampaignIds.clear();
         discountKind = "item";
       }
+      invalidateAttempt();
       drawCart();
     };
     document.querySelector("#cart").onclick = (e) => {
@@ -767,12 +876,14 @@ window.Checkout = (() => {
           item.quantidade += Number(step.dataset.cartStep || 0);
           if (item.quantidade <= 0)
             cart = cart.filter((entry) => entry !== item);
+          invalidateAttempt();
           drawCart();
         }
         return;
       }
       if (b) {
         cart = cart.filter((i) => cartKey(i) !== b.dataset.remove);
+        invalidateAttempt();
         drawCart();
       }
     };
@@ -782,6 +893,7 @@ window.Checkout = (() => {
       manual = false;
       selectedCampaignIds.clear();
       document.querySelector("#discount-percent").value = "0";
+      invalidateAttempt();
       drawCart();
     };
     document.querySelector("#discount-percent").onchange = (e) => {
@@ -791,6 +903,7 @@ window.Checkout = (() => {
       manual = false;
       selectedCampaignIds.clear();
       document.querySelector("#discount-value").value = "0";
+      invalidateAttempt();
       drawCart();
     };
     document.querySelector("#manual-total").onchange = (e) => {
@@ -798,41 +911,54 @@ window.Checkout = (() => {
       discountKind = "valor_final_manual";
       manual = true;
       selectedCampaignIds.clear();
+      invalidateAttempt();
       drawCart();
     };
+    document.querySelector("#sale-note")?.addEventListener("input", () => { invalidateAttempt(); saveDraft(); });
     document.querySelector("#finish-sale").onclick = async () => {
-      if (finishing) return;
-      if (!cart.length) return toast("Adicione ao menos um produto", true);
+      traceSale("[SALE] submit clicked", { finishing, items: cartCount() });
+      if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
+      const validationError = (message) => {
+        setSubmissionState("error", message);
+        toast(message, true);
+        return false;
+      };
+      if (!cart.length) return validationError("Adicione ao menos um produto.");
       let spaceId;
       try {
         spaceId = window.SpaceContext?.requireSalesSpace?.() || "";
         if (!spaceId || spaceId === "all_spaces") throw Error("Selecione o espaço desta venda.");
       } catch (error) {
-        return toast(error.message || "Selecione o espaço desta venda.", true);
+        return validationError(error.message || "Selecione o espaço desta venda.");
       }
-      const clienteId = document.querySelector("#sale-client").value || null,
+      const businessId = String(DB.getBusinessId?.() || window.FirebaseSession?.businessId || "").trim(),
+        clienteId = document.querySelector("#sale-client").value || null,
         paymentMethod = document.querySelector("#sale-payment-method")?.value || window.CheckoutPaymentMethod || "pix",
         status = paymentMethod === "fiado" ? "fiado" : document.querySelector("#sale-status").value;
+      if (!businessId) return validationError("Não foi possível identificar a empresa desta venda. Entre novamente e tente de novo.");
       if (status === "fiado" && !clienteId)
-        return toast("Selecione um cliente para vender fiado", true);
+        return validationError("Selecione um cliente para vender fiado.");
       if (cart.some((item) => item.productType === "recurring") && !clienteId)
-        return toast("Venda com renovação exige um cliente", true);
+        return validationError("Venda com renovação exige um cliente.");
       if (cart.some((item) => item.productType === "recurring" && item.recurringActivation?.clientIdSnapshot !== clienteId))
-        return toast("Revise as renovações: o cliente da sacola foi alterado.", true);
-      const client = clienteId ? clients().getById(clienteId) : null,
-        operationId = crypto.randomUUID(),
-        saleId = crypto.randomUUID(),
+        return validationError("Revise as renovações: o cliente da sacola foi alterado.");
+      traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
+      const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
+        attempt = activeAttempt?.fingerprint === fingerprint ? activeAttempt : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
+        client = clienteId ? clients().getById(clienteId) : null,
         proceed = async () => {
-          if (finishing) return;
+          if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
+          activeAttempt = attempt;
           finishing = true;
-          document.querySelector("#finish-sale").disabled = true;
+          setSubmissionState("processing", navigator.onLine === false ? "Salvando neste aparelho. A sincronização ocorrerá quando a conexão voltar." : "Concluindo a venda…");
           const saleDraft = {
-            id: saleId,
+            id: attempt.saleId,
+            businessId,
             spaceId,
             financialSpaceId: spaceId,
             clienteId,
             status,
-            operationId,
+            operationId: attempt.operationId,
             formaPagamento: paymentMethod,
             observacao: document.querySelector("#sale-note").value,
             itens: cart,
@@ -840,30 +966,51 @@ window.Checkout = (() => {
             descontoTipo: discountKind,
             appliedCampaignIds: [...selectedCampaignIds],
           };
+          traceSale("[SALE] operation created", { operationId: attempt.operationId, saleId: attempt.saleId });
           if (paymentMethod === "cartao_presencial") {
             try {
-              await window.TerminalPayments.beginCheckout({
+              const started = await window.TerminalPayments.beginCheckout({
                 saleDraft,
                 amountCents: Math.round(Number(document.querySelector("#manual-total")?.value || 0) * 100),
               });
+              if (started === false) {
+                finishing = false;
+                setSubmissionState("error", navigator.onLine === false ? "Sem conexão. O carrinho foi preservado; conecte-se e tente novamente." : "A cobrança não foi iniciada. O carrinho permanece pronto para tentar novamente.");
+              }
             } catch (error) {
               finishing = false;
-              document.querySelector("#finish-sale").disabled = false;
-              toast(error.message || "Não foi possível iniciar a cobrança.", true);
+              const message = error.message || "Não foi possível iniciar a cobrança. Tente novamente.";
+              setSubmissionState("error", message);
+              toast(message, true);
             }
             return;
           }
+          let sale;
           try {
-            const sale = Repositories.saleRepository().create(saleDraft);
-            cart = [];
-            closeCartSurface();
-            Recibos.mostrar(sale, client);
+            traceSale("[SALE] local write started", { operationId: attempt.operationId });
+            sale = Repositories.saleRepository().create(saleDraft);
           } catch (error) {
             finishing = false;
-            const button = document.querySelector("#finish-sale");
-            if (button) button.disabled = false;
-            toast(error.message || "Não foi possível registrar a venda.", true);
+            const message = error.message || "Não foi possível concluir a venda. Seu carrinho foi preservado.";
+            setSubmissionState("error", `${message} Toque em “Tentar novamente”.`);
+            saveDraft();
+            traceSale("[SALE] failed", { operationId: attempt.operationId, code: error?.code || error?.name || "unknown" });
+            toast(message, true);
+            return;
           }
+          cart = [];
+          selectedCampaignIds.clear();
+          manual = false;
+          discountKind = null;
+          draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
+          clearDraft();
+          activeAttempt = null;
+          finishing = false;
+          setSubmissionState("success", navigator.onLine === false ? "Venda concluída neste aparelho. Sincronização pendente." : "Venda concluída com sucesso.");
+          closeCartSurface({ immediate: true });
+          traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId });
+          try { Recibos.mostrar(sale, client); }
+          catch { toast("Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.", true); }
         };
       const missing = Vendas.estoqueInsuficiente(cart);
       if (
@@ -882,9 +1029,12 @@ window.Checkout = (() => {
         if (!confirm("Limpar todos os itens do carrinho?")) return;
         cart = [];
         selectedCampaignIds.clear();
+        activeAttempt = null;
+        clearDraft();
         drawCart();
       },
     );
+    applyDraftDetails();
     drawCart();
     if (pendingClient) {
       const select = document.querySelector("#sale-client");
@@ -923,16 +1073,20 @@ window.Checkout = (() => {
     return true;
   }
   function resetSession() {
+    clearDraft();
     cart = [];
     discountKind = null;
     manual = false;
     finishing = false;
+    activeAttempt = null;
+    draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
     pendingClient = null;
     pendingRenewal = null;
     selectedCampaignIds.clear();
   }
 
   function openCartSurface() {
+    traceSale("[CART] checkout opened", { items: cartCount(), spaceId: selectedSalesSpaceId() });
     if (window.DesktopSales?.isDesktop?.())
       return window.DesktopSales.openCart?.();
     if (window.CheckoutMobile?.openSummary)
@@ -953,11 +1107,11 @@ window.Checkout = (() => {
     return true;
   }
 
-  function closeCartSurface() {
+  function closeCartSurface(options = {}) {
     if (window.DesktopSales?.isDesktop?.())
       return window.DesktopSales.closeCart?.();
     if (window.CheckoutMobile?.closeSummary)
-      return window.CheckoutMobile.closeSummary();
+      return window.CheckoutMobile.closeSummary(options);
     const summary = document.querySelector("#pos-summary"),
       overlay = document.querySelector("[data-sale-cart-overlay]"),
       trigger = document.querySelector("#open-sale-summary");
@@ -1001,10 +1155,14 @@ window.Checkout = (() => {
     selectedCampaignIds.clear();
     manual = false;
     discountKind = null;
-    finishing = true;
+    finishing = false;
+    activeAttempt = null;
+    draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
+    clearDraft();
     window.CheckoutPaymentMethod = "cartao_presencial";
     const client = sale.clienteId ? clients().getById(sale.clienteId) : null;
-    closeCartSurface();
+    closeCartSurface({ immediate: true });
+    traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId, terminal: true });
     Recibos.mostrar(sale, client);
     return sale;
   }
@@ -1027,8 +1185,7 @@ window.Checkout = (() => {
   addEventListener("firebase-session-cleared", resetSession);
   addEventListener("terminal-payment-retry-ready", () => {
     finishing = false;
-    const button = document.querySelector("#finish-sale");
-    if (button) button.disabled = false;
+    setSubmissionState("error", "A cobrança não foi concluída. Revise os dados e tente novamente.");
   });
   return {
     view,
@@ -1046,7 +1203,7 @@ window.Checkout = (() => {
     refreshProducts,
     refreshClients,
     finalizeTerminalPayment,
-    cartCount: () =>
-      cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),
+    cartCount,
+    state: () => ({ finishing, items: cartCount(), activeOperationId: activeAttempt?.operationId || null, draftKey: draftKey() }),
   };
 })();

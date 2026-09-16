@@ -325,7 +325,7 @@ async function main() {
       cdp,
       `(()=>{const summary=document.querySelector('#pos-summary'),bag=document.querySelector('#open-sale-summary'),grid=getComputedStyle(document.querySelector('#pos-grid')),bagRect=bag?.getBoundingClientRect();return{width:innerWidth,desktop:Boolean(document.querySelector('[data-desktop-sales]')),mobile:Boolean(document.querySelector('.pos-page')),appClass:document.querySelector('#app')?.firstElementChild?.className||'',html:document.querySelector('#app')?.innerHTML.slice(0,120)||'',overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),errors:window.__desktopAuditErrors,summaryHidden:Boolean(summary?.hidden),summaryDisplay:summary&&getComputedStyle(summary).display,bagWidth:bagRect?.width||0,columns:grid.gridTemplateColumns.split(' ').length}})()`,
     );
-    if (mobile.desktop || !mobile.mobile || mobile.overflow > 1 || mobile.errors.length || !mobile.summaryHidden || mobile.summaryDisplay !== "none" || mobile.bagWidth < 280 || mobile.columns !== 2)
+    if (mobile.desktop || !mobile.mobile || mobile.overflow > 1 || mobile.errors.length || !mobile.summaryHidden || mobile.summaryDisplay !== "none" || mobile.bagWidth < 52 || mobile.bagWidth > 70 || mobile.columns !== 2)
       throw Error(`Regressão mobile: ${JSON.stringify(mobile)}`);
     await shot(cdp, "vender-mobile-390x844-regressao.png");
     await evaluate(cdp, `document.querySelector('[data-add="p1"]').click()`);

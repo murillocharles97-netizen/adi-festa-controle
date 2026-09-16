@@ -252,10 +252,12 @@
     ensureContext();
     const isHome = kind === "home", spaces = isHome ? homeSpaces() : salesSpaces(), selected = isHome ? state.homeId : state.salesId,
       showManagement = canManage(),
-      label = isHome ? "Visão da Home" : "Espaço atual";
+      label = isHome ? "Espaço" : "Espaço atual",
+      managementIcon = isHome ? "sliders-horizontal" : "settings-2",
+      managementLabel = isHome ? "Filtros" : "Gerenciar";
     if (!isHome && spaces.length === 1)
       return `<section class="space-context-bar is-single" data-space-context="sales"><span><i data-lucide="map-pin"></i>${label}</span><strong>${esc(spaces[0].name)}</strong>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i></button>' : ""}</section>`;
-    return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="${isHome ? "layers-3" : "map-pin"}"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${isHome ? `<option value="${ALL_SPACES}" ${selected === ALL_SPACES ? "selected" : ""}>Todos os espaços</option>` : ""}${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? '<button type="button" data-space-manage><i data-lucide="settings-2"></i><span>Gerenciar</span></button>' : ""}</section>`;
+    return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="${isHome ? "layers-3" : "map-pin"}"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${isHome ? `<option value="${ALL_SPACES}" ${selected === ALL_SPACES ? "selected" : ""}>Todos os espaços</option>` : ""}${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? `<button type="button" data-space-manage aria-label="${managementLabel}"><i data-lucide="${managementIcon}"></i><span>${managementLabel}</span></button>` : ""}</section>`;
   }
   function contextualData(db, kind = "home") {
     ensureContext();
@@ -409,7 +411,7 @@
         const kind = select.dataset.spaceSelect;
         try {
           if (kind === "sales") {
-            if (window.Checkout?.cartCount?.() && !confirm("Trocar o espaço limpará a venda atual. Deseja continuar?")) {
+            if (window.Checkout?.cartCount?.() && !confirm("Você possui itens no carrinho deste espaço. Pressione Cancelar para continuar aqui ou OK para limpar o carrinho e trocar.")) {
               select.value = state.salesId;
               return;
             }

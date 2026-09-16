@@ -39,6 +39,8 @@ window.Vendas = (() => {
     const explicitSpaceId = String(d.spaceId || "").trim();
     if (!explicitSpaceId && typeof document !== "undefined")
       throw Error("Informe explicitamente o espaço desta venda.");
+    const businessId = String(d.businessId || DB.getBusinessId?.() || "").trim();
+    if (!businessId) throw Error("Não foi possível identificar a empresa desta venda.");
     const operationId = d.operationId || Utils.uuid(),
       existente = DB.carregar().vendas.find(
         (v) => v.operationId === operationId,
@@ -73,7 +75,10 @@ window.Vendas = (() => {
         "registrar novas vendas",
       );
     let criada;
-    DB.alterar((db) => {
+    const nextData = typeof structuredClone === "function"
+      ? structuredClone(currentData)
+      : JSON.parse(JSON.stringify(currentData));
+    ((db) => {
       const cliente = db.clientes.find((c) => c.id === d.clienteId),
         data = new Date().toISOString();
       const itensComCampanha =
@@ -183,7 +188,7 @@ window.Vendas = (() => {
         clienteId: d.clienteId || null,
         clientId: d.clienteId || null,
         customerId: d.clienteId || null,
-        businessId: DB.getBusinessId?.() || null,
+        businessId,
         spaceId,
         financialSpaceId,
         clienteNome: cliente?.nome || "Venda avulsa",
@@ -333,6 +338,11 @@ window.Vendas = (() => {
         window.CustomerSubscriptions?.applySaleInData?.(db, criada) || [];
       criada.campaignUpdates =
         window.Campanhas?.aplicarVendaNoBanco(db, criada) || [];
+    })(nextData);
+    if (typeof DB.salvar === "function") DB.salvar(nextData);
+    else DB.alterar((db) => {
+      for (const key of Object.keys(db)) delete db[key];
+      Object.assign(db, nextData);
     });
     return criada;
   };
