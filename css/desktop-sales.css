@@ -1150,3 +1150,174 @@
     transition: none;
   }
 }
+
+/* PDV: o catálogo permanece livre e o checkout só aparece no carrinho. */
+@media (min-width: 768px) {
+  .desktop-sales-layout {
+    display: block;
+  }
+
+  .desktop-sales-product-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    max-height: calc(100dvh - 330px);
+  }
+
+  .desktop-sales-cart[hidden],
+  .desktop-sales-cart-overlay[hidden] {
+    display: none;
+  }
+
+  .desktop-sales-cart-overlay {
+    background: rgba(12, 24, 42, 0.52);
+    inset: 0;
+    opacity: 0;
+    position: fixed;
+    transition: opacity 0.2s ease;
+    visibility: hidden;
+    z-index: 70;
+  }
+
+  .desktop-sales-cart-overlay.is-open {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .desktop-sales-cart {
+    border: 0;
+    border-left: 1px solid #dce4ec;
+    border-radius: 18px 0 0 18px;
+    bottom: 0;
+    box-shadow: -18px 0 48px rgba(17, 31, 51, 0.22);
+    display: flex;
+    max-height: none;
+    overflow: hidden;
+    padding: 16px;
+    position: fixed;
+    right: 0;
+    top: 0;
+    transform: translateX(102%);
+    transition: transform 0.22s ease;
+    width: min(520px, calc(100vw - 24px));
+    z-index: 71;
+  }
+
+  .desktop-sales-cart.is-open {
+    transform: translateX(0);
+  }
+
+  .desktop-sales-cart > header {
+    border-bottom: 1px solid #e5eaf0;
+    margin: -2px 0 12px;
+    padding-bottom: 11px;
+  }
+
+  .desktop-sales-cart > header > div:first-child {
+    min-width: 0;
+  }
+
+  .desktop-sales-cart > header > div:first-child small {
+    color: #758297;
+    display: block;
+    font-size: 0.68rem;
+    margin-top: 3px;
+  }
+
+  .desktop-sales-cart > header > div:last-child {
+    align-items: center;
+    display: flex;
+    gap: 4px;
+  }
+
+  .desktop-sales-cart > header .desktop-close-cart {
+    align-items: center;
+    background: #f2f5f8;
+    border-radius: 50%;
+    color: #26354c;
+    display: flex;
+    height: 36px;
+    justify-content: center;
+    width: 36px;
+  }
+
+  .desktop-sales-cart > header .desktop-close-cart svg {
+    width: 18px;
+  }
+
+  .desktop-cart-list {
+    min-height: 110px;
+  }
+
+  .desktop-sales .desktop-cart-fab {
+    align-items: center;
+    background: linear-gradient(110deg, #17263e, #243852);
+    border: 0;
+    border-radius: 18px;
+    bottom: 24px;
+    box-shadow: 0 12px 30px rgba(17, 31, 51, 0.28);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    gap: 10px;
+    left: auto;
+    min-height: 60px;
+    padding: 10px 16px;
+    position: fixed;
+    right: 24px;
+    width: min(330px, calc(100vw - 48px));
+    z-index: 55;
+  }
+
+  .desktop-cart-fab-icon {
+    color: #53e3bc;
+    display: grid;
+    place-items: center;
+    position: relative;
+  }
+
+  .desktop-cart-fab-icon svg {
+    width: 23px;
+  }
+
+  .desktop-cart-fab-icon em {
+    background: #0eb88d;
+    border: 2px solid #20324b;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.58rem;
+    font-style: normal;
+    font-weight: 900;
+    left: 15px;
+    min-width: 21px;
+    padding: 2px 4px;
+    position: absolute;
+    text-align: center;
+    top: -10px;
+  }
+
+  .desktop-sales .desktop-cart-fab > span:nth-child(2) {
+    flex: 1;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-align: left;
+  }
+
+  .desktop-sales .desktop-cart-fab > b {
+    color: #56e6c0;
+    font-size: 0.86rem;
+  }
+
+  .desktop-sales .desktop-cart-fab > svg:last-child {
+    width: 17px;
+  }
+
+  .sales-cart-open {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (min-width: 768px) {
+  .desktop-sales-cart,
+  .desktop-sales-cart-overlay {
+    transition: none;
+  }
+}

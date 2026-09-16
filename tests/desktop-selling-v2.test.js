@@ -28,7 +28,7 @@ test("PDV desktop V2 usa o checkout único sem tocar o renderer mobile", () => {
   assert.doesNotMatch(css, /!important/);
 });
 
-test("PDV desktop V2 mantém estoque, variações e painel sticky responsivo", () => {
+test("PDV desktop mantém estoque, variações e checkout em drawer separado", () => {
   const desktop = read("js/desktop-sales.js"),
     css = read("css/desktop-sales.css"),
     fixture = read("tests/desktop-shell-content.fixture.html");
@@ -37,8 +37,15 @@ test("PDV desktop V2 mantém estoque, variações e painel sticky responsivo", (
   assert.match(desktop, /ProductVariations\?\.isVariable/);
   assert.match(desktop, /data-cart-step/);
   assert.match(desktop, /desktop-discount-trigger/);
-  assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1\.7fr\) minmax\(370px,\s*1fr\)/);
-  assert.match(css, /position:\s*sticky/);
+  assert.match(desktop, /desktop-sales-cart-overlay/);
+  assert.match(desktop, /desktop-cart-fab pos-bag/);
+  assert.match(desktop, /role="dialog" aria-modal="true"/);
+  assert.match(desktop, /function openCart\(\)/);
+  assert.match(desktop, /function closeCart/);
+  assert.match(css, /\.desktop-sales-cart\.is-open/);
+  assert.match(css, /transform:\s*translateX\(102%\)/);
+  assert.match(css, /position:\s*fixed/);
+  assert.match(css, /\.desktop-sales-layout\s*\{\s*display:\s*block/);
   for (const width of [1280, 1040, 900])
     assert.match(css, new RegExp(`max-width: ${width}px`));
   assert.match(fixture, /customer-subscriptions\.js/);

@@ -9,6 +9,7 @@ const OUTPUT = path.join(ROOT, "artifacts", "desktop-selling-v2");
 const FIXTURE = "/tests/desktop-shell-content.fixture.html";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const viewports = [
+  [768, 1024],
   [1024, 768],
   [1280, 720],
   [1366, 768],
@@ -139,8 +140,8 @@ async function audit(cdp, label) {
   const report = await evaluate(
     cdp,
     `(() => {
-      const root=document.querySelector('[data-desktop-sales]'), layout=root?.querySelector('.desktop-sales-layout'), products=root?.querySelector('.desktop-sales-products'), cart=root?.querySelector('.desktop-sales-cart'), cartList=root?.querySelector('.desktop-cart-list'), cta=root?.querySelector('.desktop-continue-sale'), productCards=[...root?.querySelectorAll('.desktop-sale-product')||[]], style=cart&&getComputedStyle(cart), rect=node=>{const r=node?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}:null};
-      return {exists:Boolean(root),errors:window.__desktopAuditErrors,viewportHeight:innerHeight,overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),cartOverflow:cartList?Math.max(0,cartList.scrollWidth-cartList.clientWidth):0,root:rect(root),layout:rect(layout),products:rect(products),cart:rect(cart),cta:rect(cta),sticky:style?.position,maxHeight:style?.maxHeight,productCards:productCards.length,visibleCards:productCards.filter(card=>!card.hidden).length,images:root?.querySelectorAll('.desktop-sale-product-image').length||0,recurring:Boolean(root?.querySelector('[data-add="p4"] .renewal')),outDisabled:Boolean(root?.querySelector('[data-add="p5"] .desktop-sale-add:disabled')),search:Boolean(root?.querySelector('#product-search')),scanner:Boolean(root?.querySelector('[data-scan-sale]')),client:Boolean(root?.querySelector('#open-client-picker')),cartItems:root?.querySelectorAll('.desktop-cart-item').length||0};
+      const root=document.querySelector('[data-desktop-sales]'), layout=root?.querySelector('.desktop-sales-layout'), products=root?.querySelector('.desktop-sales-products'), cart=root?.querySelector('.desktop-sales-cart'), overlay=root?.querySelector('.desktop-sales-cart-overlay'), bag=root?.querySelector('#open-sale-summary'), cartList=root?.querySelector('.desktop-cart-list'), cta=root?.querySelector('.desktop-continue-sale'), productCards=[...root?.querySelectorAll('.desktop-sale-product')||[]], style=cart&&getComputedStyle(cart), rect=node=>{const r=node?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}:null};
+      return {exists:Boolean(root),errors:window.__desktopAuditErrors,viewportHeight:innerHeight,overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),cartOverflow:cartList?Math.max(0,cartList.scrollWidth-cartList.clientWidth):0,root:rect(root),layout:rect(layout),products:rect(products),cart:rect(cart),bag:rect(bag),cta:rect(cta),drawerPosition:style?.position,cartHidden:Boolean(cart?.hidden),cartOpen:Boolean(cart?.classList.contains('is-open')),overlayHidden:Boolean(overlay?.hidden),productCards:productCards.length,visibleCards:productCards.filter(card=>!card.hidden).length,images:root?.querySelectorAll('.desktop-sale-product-image').length||0,recurring:Boolean(root?.querySelector('[data-add="p4"] .renewal')),outDisabled:Boolean(root?.querySelector('[data-add="p5"] .desktop-sale-add:disabled')),search:Boolean(root?.querySelector('#product-search')),scanner:Boolean(root?.querySelector('[data-scan-sale]')),client:Boolean(root?.querySelector('#open-client-picker')),cartItems:root?.querySelectorAll('.desktop-cart-item').length||0};
     })()`,
   );
   if (!report.exists || report.errors.length)
@@ -149,18 +150,22 @@ async function audit(cdp, label) {
     throw Error(`${label}: overflow horizontal ${report.overflow}px`);
   if (report.cartOverflow > 1)
     throw Error(`${label}: overflow horizontal no carrinho ${report.cartOverflow}px`);
-  if (report.cta && report.cta.bottom > report.viewportHeight + 1)
+  if (!report.cartHidden && report.cta && report.cta.bottom > report.viewportHeight + 1)
     throw Error(`${label}: CTA fora do viewport (${report.cta.bottom}px) ${JSON.stringify(report)}`);
-  if (report.cta && report.cart && report.cta.bottom > report.cart.bottom + 1)
+  if (!report.cartHidden && report.cta && report.cart && report.cta.bottom > report.cart.bottom + 1)
     throw Error(`${label}: CTA recortado pelo painel ${JSON.stringify(report)}`);
   if (!report.productCards || !report.search || !report.scanner || !report.client)
     throw Error(`${label}: controles essenciais ausentes`);
   if (!report.recurring || !report.outDisabled)
     throw Error(`${label}: estados recurring/esgotado inválidos`);
-  if (report.layout.width >= 1150) {
+  if (report.cartHidden && (!report.bag || report.bag.bottom > report.viewportHeight + 1))
+    throw Error(`${label}: botão do carrinho fora do viewport`);
+  if (report.cartHidden && !report.overlayHidden)
+    throw Error(`${label}: overlay visível com carrinho fechado`);
+  if (report.layout.width >= 900) {
     const ratio = report.products.width / report.layout.width;
-    if (ratio < 0.57 || ratio > 0.72)
-      throw Error(`${label}: divisão produtos/carrinho inválida ${ratio}`);
+    if (ratio < 0.96)
+      throw Error(`${label}: catálogo ainda dividido com carrinho inline ${ratio}`);
   }
   return report;
 }
@@ -223,8 +228,18 @@ async function main() {
     await openFixture(cdp, base);
     await evaluate(cdp, `document.querySelector('[data-add="p1"]').click()`);
     await waitFor(cdp, "document.querySelectorAll('.desktop-cart-item').length===1");
+    await evaluate(cdp, `document.querySelector('#open-sale-summary').click()`);
+    await waitFor(cdp, "document.querySelector('.desktop-sales-cart').classList.contains('is-open') && !document.querySelector('.desktop-sales-cart').hidden");
+    await waitFor(cdp, "document.querySelector('.desktop-sales-cart').getBoundingClientRect().right <= innerWidth + 1");
+    const openCartLayout = await evaluate(cdp, `(() => { const panel=document.querySelector('.desktop-sales-cart'), list=document.querySelector('.desktop-cart-list'), row=document.querySelector('.desktop-cart-item'), rect=panel.getBoundingClientRect(); return {width:rect.width,right:rect.right,panelOverflow:panel.scrollWidth-panel.clientWidth,listOverflow:list.scrollWidth-list.clientWidth,rowOverflow:row.scrollWidth-row.clientWidth}; })()`);
+    if (openCartLayout.right > 1367 || openCartLayout.panelOverflow > 1 || openCartLayout.listOverflow > 1 || openCartLayout.rowOverflow > 1)
+      throw Error(`Carrinho aberto com conteúdo recortado: ${JSON.stringify(openCartLayout)}`);
     await evaluate(cdp, `document.querySelector('[data-cart-step="1"]').click()`);
     await waitFor(cdp, "document.querySelector('[data-item-qty]').value==='2'");
+    await evaluate(cdp, `document.querySelector('[data-add="p3"]').click()`);
+    await waitFor(cdp, "document.querySelectorAll('.desktop-cart-item').length===2");
+    await evaluate(cdp, `document.querySelector('[data-remove="p3"]').click()`);
+    await waitFor(cdp, "document.querySelectorAll('.desktop-cart-item').length===1");
     await shot(cdp, "vender-1366x768-carrinho.png");
 
     await evaluate(cdp, `document.querySelector('#open-client-picker').click()`);
@@ -239,6 +254,7 @@ async function main() {
     await evaluate(cdp, `document.querySelector('#desktop-discount-trigger').click()`);
     await waitFor(cdp, "!document.querySelector('#desktop-discount-fields').hidden");
     await evaluate(cdp, `(() => { const input=document.querySelector('#discount-value'); input.value='2'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+    await waitFor(cdp, "document.querySelector('.total-row b').textContent.includes('22,00')");
     await shot(cdp, "vender-1366x768-desconto.png");
 
     await evaluate(cdp, `document.querySelector('[data-add="p2"]').click()`);
@@ -269,6 +285,8 @@ async function main() {
     await shot(cdp, "vender-1366x768-pagamento.png");
     await evaluate(cdp, `document.querySelector('#desktop-back-to-cart').click()`);
     await waitFor(cdp, "document.querySelector('#desktop-checkout-fields').hidden && !document.querySelector('#desktop-continue-sale').hidden");
+    await evaluate(cdp, `document.querySelector('#close-sale-summary').click()`);
+    await waitFor(cdp, "document.querySelector('.desktop-sales-cart').hidden");
 
     await evaluate(cdp, `(() => { const input=document.querySelector('#product-search'); input.value='IPTV'; input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await sleep(180);
@@ -280,6 +298,15 @@ async function main() {
     const finalState = await audit(cdp, "interações finais");
     if (finalState.cartItems !== 2)
       throw Error(`Carrinho perdeu itens: ${finalState.cartItems}`);
+    await evaluate(cdp, `document.querySelector('#open-sale-summary').click()`);
+    await waitFor(cdp, "document.querySelector('.desktop-sales-cart').classList.contains('is-open')");
+    await evaluate(cdp, `document.querySelector('#desktop-continue-sale').click()`);
+    await waitFor(cdp, "!document.querySelector('#desktop-checkout-fields').hidden");
+    await evaluate(cdp, `(() => { const payment=document.querySelector('#sale-payment-method'); payment.value='dinheiro'; payment.dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#sale-note').value='Venda QA PDV'; document.querySelector('#finish-sale').click(); })()`);
+    await waitFor(cdp, "DB.carregar().vendas.length===2");
+    const completion = await evaluate(cdp, `(() => { const data=DB.carregar(),sale=data.vendas.at(-1),product=data.produtos.find(item=>item.id==='p1'),variant=data.variacoesProdutos.find(item=>item.id==='v1'); return {spaceId:sale.spaceId,financialSpaceId:sale.financialSpaceId,payment:sale.formaPagamento,note:sale.observacao,itemCount:sale.itens.length,productStock:product.estoqueAtual,variantStock:variant.stock,cartClosed:document.querySelector('.desktop-sales-cart')?.getAttribute('aria-hidden')==='true'}; })()`);
+    if (completion.spaceId !== 'fixture-space' || completion.financialSpaceId !== 'fixture-space' || completion.payment !== 'dinheiro' || completion.note !== 'Venda QA PDV' || completion.itemCount !== 2 || completion.productStock !== 16 || completion.variantStock !== 2 || !completion.cartClosed)
+      throw Error(`Conclusão da venda inválida: ${JSON.stringify(completion)}`);
 
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: 390,
@@ -293,13 +320,24 @@ async function main() {
       url: `${base}${FIXTURE}?visual=vender&mobile-regression=1#/vender`,
     });
     await waitFor(cdp, "document.body?.dataset.visualReady==='vender'");
+    await waitFor(cdp, "document.querySelector('.mobile-sale-page')");
     const mobile = await evaluate(
       cdp,
-      `({width:innerWidth,desktop:Boolean(document.querySelector('[data-desktop-sales]')),mobile:Boolean(document.querySelector('.pos-page')),appClass:document.querySelector('#app')?.firstElementChild?.className||'',html:document.querySelector('#app')?.innerHTML.slice(0,120)||'',overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),errors:window.__desktopAuditErrors})`,
+      `(()=>{const summary=document.querySelector('#pos-summary'),bag=document.querySelector('#open-sale-summary'),grid=getComputedStyle(document.querySelector('#pos-grid')),bagRect=bag?.getBoundingClientRect();return{width:innerWidth,desktop:Boolean(document.querySelector('[data-desktop-sales]')),mobile:Boolean(document.querySelector('.pos-page')),appClass:document.querySelector('#app')?.firstElementChild?.className||'',html:document.querySelector('#app')?.innerHTML.slice(0,120)||'',overflow:Math.max(0,document.documentElement.scrollWidth-innerWidth),errors:window.__desktopAuditErrors,summaryHidden:Boolean(summary?.hidden),summaryDisplay:summary&&getComputedStyle(summary).display,bagWidth:bagRect?.width||0,columns:grid.gridTemplateColumns.split(' ').length}})()`,
     );
-    if (mobile.desktop || !mobile.mobile || mobile.overflow > 1 || mobile.errors.length)
+    if (mobile.desktop || !mobile.mobile || mobile.overflow > 1 || mobile.errors.length || !mobile.summaryHidden || mobile.summaryDisplay !== "none" || mobile.bagWidth < 280 || mobile.columns !== 2)
       throw Error(`Regressão mobile: ${JSON.stringify(mobile)}`);
     await shot(cdp, "vender-mobile-390x844-regressao.png");
+    await evaluate(cdp, `document.querySelector('[data-add="p1"]').click()`);
+    await waitFor(cdp, "document.querySelectorAll('#cart .editable-cart').length===1");
+    await evaluate(cdp, `document.querySelector('#open-sale-summary').click()`);
+    await waitFor(cdp, "document.querySelector('#pos-summary').classList.contains('mobile-open') && !document.querySelector('#pos-summary').hidden");
+    const mobileCart = await evaluate(cdp, `(()=>{const summary=document.querySelector('#pos-summary'),rect=summary.getBoundingClientRect();return{open:summary.classList.contains('mobile-open'),top:rect.top,bottom:rect.bottom,overlay:document.querySelector('[data-sale-cart-overlay]')?.classList.contains('open'),quantity:Boolean(summary.querySelector('[data-item-qty]')),remove:Boolean(summary.querySelector('[data-remove]')),discount:Boolean(summary.querySelector('#discount-value')&&summary.querySelector('#discount-percent')),client:Boolean(summary.querySelector('#sale-client')),payment:Boolean(summary.querySelector('#sale-payment-method')),note:Boolean(summary.querySelector('#sale-note')),finish:Boolean(summary.querySelector('#finish-sale'))}})()`);
+    if (!Object.values(mobileCart).every(Boolean) || mobileCart.bottom > 845)
+      throw Error(`Carrinho mobile incompleto: ${JSON.stringify(mobileCart)}`);
+    await shot(cdp, "vender-mobile-390x844-carrinho.png");
+    await evaluate(cdp, `document.querySelector('#close-sale-summary').click()`);
+    await waitFor(cdp, "document.querySelector('#pos-summary').hidden");
     console.log(
       JSON.stringify(
         {
@@ -309,14 +347,18 @@ async function main() {
           report,
           interactions: {
             cart: true,
+            openCartLayout,
             quantity: true,
+            remove: true,
             client: true,
             discount: true,
             variation: true,
             recurring: true,
             outOfStock: true,
+            completion,
           },
           mobile,
+          mobileCart,
         },
         null,
         2,
