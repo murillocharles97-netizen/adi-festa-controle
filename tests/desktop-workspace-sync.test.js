@@ -78,15 +78,15 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
 
   assert.match(index, /desktop-sales\.js\?v=140/);
   assert.match(index, /desktop-settings\.js\?v=138/);
-  assert.match(index, /app\.js\?v=141/);
-  assert.match(index, /build-info\.js\?v=142/);
+  assert.match(index, /app\.js\?v=143/);
+  assert.match(index, /build-info\.js\?v=143/);
   assert.match(index, /desktop-sales\.css\?v=140/);
   assert.match(index, /checkout\.js\?v=142/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /veconi-v\d+-/);
-  assert.match(worker, /release:'142'/);
-  assert.match(build, /release: "142"/);
+  assert.match(worker, /release:'143'/);
+  assert.match(build, /release: "143"/);
   assert.match(index, /firebase-ui\.js\?v=137/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[VECONI\] Build/);

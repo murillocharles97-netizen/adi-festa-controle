@@ -4,10 +4,10 @@ const path = require("node:path");
 const puppeteer = require("puppeteer");
 
 const ROOT = process.cwd();
-const OUTPUT = path.join(ROOT, "docs", "screenshots", "global-spaces-v139");
+const OUTPUT = path.join(ROOT, "docs", "screenshots", "global-spaces-v143");
 const MOBILE = [[320, 640], [360, 800], [375, 812], [390, 844], [412, 915], [430, 932]];
 const DESKTOP = [[768, 900], [1366, 768]];
-const STATES = ["home-all", "home-adi", "home-iptv", "sales-adi", "sales-iptv", "goal-adi", "manager", "availability"];
+const STATES = ["home-all", "home-picker", "home-adi", "home-iptv", "sales-adi", "sales-iptv", "goal-adi", "manager", "availability"];
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2" };
 const server = http.createServer((request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
@@ -18,11 +18,11 @@ const server = http.createServer((request, response) => {
 });
 
 function screenshotName(width, state) {
-  const labels = { "home-all": "home-todos", "home-adi": "home-adi-festa", "home-iptv": "home-iptv", "sales-adi": "vender-adi-festa", "sales-iptv": "vender-iptv", "goal-adi": "meta-adi-festa", manager: "gerenciar-espacos", availability: "disponibilidade-produto" };
+  const labels = { "home-all": "home-todos", "home-picker": "home-seletor-bottom-sheet", "home-adi": "home-adi-festa", "home-iptv": "home-iptv", "sales-adi": "vender-adi-festa", "sales-iptv": "vender-iptv", "goal-adi": "meta-adi-festa", manager: "gerenciar-espacos", availability: "disponibilidade-produto" };
   return `${width}-${labels[state]}.png`;
 }
 function shouldScreenshot(width, state) {
-  if (width < 768) return state === "home-all" || (width === 390 && state !== "home-all");
+  if (width < 768) return ["home-all", "home-picker"].includes(state) || (width === 390 && !["home-all", "home-picker"].includes(state));
   if (width === 768) return ["home-all", "sales-adi", "manager"].includes(state);
   return ["home-all", "home-iptv", "sales-adi", "manager", "availability"].includes(state);
 }
@@ -49,7 +49,7 @@ async function inspect(page, expectedState, expectedWidth) {
     const modeLabels = [...document.querySelectorAll("#modal .product-space-availability>label:not(.product-space-single)")].filter(visible).map(bounds);
     const managerRows = [...document.querySelectorAll("#modal .space-manager-list article")].map(bounds);
     const clippedValues = [...document.querySelectorAll(".qa-kpi strong,.qa-product small")].filter(visible).filter(element => element.scrollWidth > element.clientWidth + 1).map(element => element.textContent.trim());
-    const select = context?.querySelector("select"), manage = context?.querySelector(":scope>button"), main = document.querySelector(".qa-main"), mainRect = bounds(main), dialogRect = bounds(dialog);
+    const select = context?.querySelector("select"), picker = context?.querySelector('[data-space-picker="home"]'), manage = context?.querySelector(":scope>button:last-child"), main = document.querySelector(".qa-main"), mainRect = bounds(main), dialogRect = bounds(dialog);
     const problems = [];
     if (document.documentElement.scrollWidth > innerWidth + 1 || document.body.scrollWidth > innerWidth + 1) problems.push("overflow horizontal");
     if (!pageRoot || !visible(pageRoot)) problems.push("conteúdo principal ausente");
@@ -62,13 +62,19 @@ async function inspect(page, expectedState, expectedWidth) {
     if (dialog && (dialogRect.left < -1 || dialogRect.right > width + 1 || dialogRect.top < -1 || dialogRect.bottom > innerHeight + 1)) problems.push("modal fora da viewport");
     if (dialog && dialog.scrollWidth > dialog.clientWidth + 1) problems.push("modal com overflow horizontal interno");
     if (clippedValues.length) problems.push("valor essencial truncado");
-    const expectedSelection = { "home-all": "all_spaces", "home-adi": "business_adi-festa", "home-iptv": "76dea1f8-22de-472f-9b53-0fd608c5cd54", "sales-adi": "business_adi-festa", "sales-iptv": "76dea1f8-22de-472f-9b53-0fd608c5cd54" }[state];
+    const expectedSelection = { "sales-adi": "business_adi-festa", "sales-iptv": "76dea1f8-22de-472f-9b53-0fd608c5cd54" }[state],
+      expectedHomeLabel = { "home-all": "Todos os espaços", "home-picker": "Todos os espaços", "home-adi": "Adi Festa", "home-iptv": "IPTV" }[state];
     if (expectedSelection && select?.value !== expectedSelection) problems.push("seleção visual incorreta");
+    if (expectedHomeLabel && !picker?.textContent.includes(expectedHomeLabel)) problems.push("seleção Home incorreta");
     if (state !== "availability" && !context) problems.push("barra de espaço ausente");
     if (state.startsWith("sales") && [...(select?.options || [])].some(option => option.value === "all_spaces")) problems.push("Vender oferece Todos os espaços");
     const productCount = document.querySelectorAll(".qa-product").length;
     if (state.startsWith("sales") && productCount !== 2) problems.push("catálogo não filtrado por espaço");
-    if (state === "home-all" && (!select || !/3 vendas antigas sem espaço/.test(pageRoot.textContent))) problems.push("fallback legado agregado ausente");
+    if (state === "home-all" && (!picker || context.querySelector('select[data-space-select="home"]') || !/3 vendas antigas sem espaço/.test(pageRoot.textContent))) problems.push("seletor customizado ou fallback legado ausente");
+    if (state === "home-picker") {
+      const options = [...document.querySelectorAll(".space-picker-option")], selectedOptions = options.filter(option => option.getAttribute("aria-checked") === "true");
+      if (!dialog?.classList.contains("space-picker-modal") || options.length !== 5 || selectedOptions.length !== 1 || !/Todos os espaços/.test(selectedOptions[0]?.textContent || "") || !dialog.querySelector("[data-space-picker-manage]")) problems.push("bottom sheet de espaços incompleto");
+    }
     if (state === "home-adi" && (!/Adi Festa/.test(pageRoot.textContent) || !/R\$\s*445,00/.test(pageRoot.textContent))) problems.push("Home Adi Festa inconsistente");
     if (state === "home-iptv" && (!/IPTV/.test(pageRoot.textContent) || !/R\$\s*120,00/.test(pageRoot.textContent))) problems.push("Home IPTV inconsistente");
     if (state === "goal-adi" && (!/Meta diária · Adi Festa/.test(dialog?.textContent || "") || !/somente para o espaço/i.test(dialog?.textContent || "") || dialog?.querySelector('input[name="goal"]')?.value !== "450")) problems.push("meta específica incorreta");
@@ -77,7 +83,7 @@ async function inspect(page, expectedState, expectedWidth) {
     if (availability && (availability.radios !== 3 || availability.spaces !== 3 || availability.checked !== 2 || !availability.checksVisible || availability.singleVisible)) problems.push("disponibilidade por espaço incorreta");
     const nav = document.querySelector(".qa-bottom-nav"), navHeight = visible(nav) ? bounds(nav).height : 0, mainBottomPadding = parseFloat(getComputedStyle(main).paddingBottom) || 0;
     if (width < 768 && (!visible(nav) || mainBottomPadding + 1 < navHeight)) problems.push("navegação móvel pode cobrir conteúdo");
-    return { state, width: innerWidth, viewportHeight: innerHeight, horizontalOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth, context: bounds(context), contextValue: select?.value || null, contextControls: contextControls.map(bounds), main: mainRect, dialog: dialogRect, dialogScroll: dialog ? { clientHeight: dialog.clientHeight, scrollHeight: dialog.scrollHeight, clientWidth: dialog.clientWidth, scrollWidth: dialog.scrollWidth } : null, footerButtons: footerButtons.map(bounds), undersized, clippedValues, modeLabels, managerRows: managerRows.length, productCount, availability, navHeight, mainBottomPadding, problems };
+    return { state, width: innerWidth, viewportHeight: innerHeight, horizontalOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth, context: bounds(context), contextValue: select?.value || picker?.textContent.trim().replace(/\s+/g, " ") || null, contextControls: contextControls.map(bounds), main: mainRect, dialog: dialogRect, dialogScroll: dialog ? { clientHeight: dialog.clientHeight, scrollHeight: dialog.scrollHeight, clientWidth: dialog.clientWidth, scrollWidth: dialog.scrollWidth } : null, footerButtons: footerButtons.map(bounds), undersized, clippedValues, modeLabels, managerRows: managerRows.length, productCount, availability, navHeight, mainBottomPadding, problems };
   }, { state: expectedState, width: expectedWidth });
 }
 
@@ -94,7 +100,7 @@ async function main() {
       for (const state of STATES) {
         await page.goto(`http://127.0.0.1:${server.address().port}/tests/global-spaces.fixture.html?state=${state}`, { waitUntil: "domcontentloaded", timeout: 30000 });
         await page.waitForFunction(expected => document.body.dataset.fixtureReady === "true" && window.__globalSpacesFixture?.state === expected, { timeout: 10000 }, state);
-        if (["goal-adi", "manager", "availability"].includes(state)) await new Promise(resolve => setTimeout(resolve, 240));
+        if (["home-picker", "goal-adi", "manager", "availability"].includes(state)) await new Promise(resolve => setTimeout(resolve, 240));
         const result = await inspect(page, state, width);
         if (result.problems.length) throw Error(`${width}x${height} ${state}: ${JSON.stringify(result)}`);
         results.push(result);
@@ -106,7 +112,7 @@ async function main() {
       }
     }
     if (pageErrors.length) throw Error(`Erros de página: ${JSON.stringify(pageErrors)}`);
-    const report = { ok: true, release: 139, mobileWidths: MOBILE.map(([width]) => width), desktopWidths: DESKTOP.map(([width]) => width), states: STATES, checks: results.length, screenshots, pageErrors, results };
+    const report = { ok: true, release: 143, mobileWidths: MOBILE.map(([width]) => width), desktopWidths: DESKTOP.map(([width]) => width), states: STATES, checks: results.length, screenshots, pageErrors, results };
     fs.writeFileSync(path.join(OUTPUT, "browser-results.json"), `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify({ ok: report.ok, release: report.release, checks: report.checks, mobileWidths: report.mobileWidths, desktopWidths: report.desktopWidths, screenshots: report.screenshots.length, pageErrors: report.pageErrors, output: OUTPUT }, null, 2));
   } finally {

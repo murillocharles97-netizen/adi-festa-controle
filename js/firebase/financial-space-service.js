@@ -28,6 +28,8 @@ const Engine = window.FinancialEngine;
 if (!Engine) throw new Error("FinancialEngine precisa ser carregado antes do serviço.");
 
 const storage = getStorage(app),
+  // Mantido somente para ler uma instalação V1 ainda sem o cache global.
+  // A partir da V143, nomes e capabilities nunca são persistidos neste cache legado.
   SPACE_CACHE_PREFIX = "adiFesta:financial-spaces:v1:",
   LAST_SPACE_PREFIX = "adiFesta:lastFinancialSpaceId:v1:",
   CONSOLIDATED_PREFIX = "adiFesta:financial-consolidated:v1:",
@@ -116,17 +118,48 @@ const childCollection = (spaceId, collectionName) => collection(
   String(spaceId),
   String(collectionName),
 );
+const canonicalFinancialSpace = (raw = {}) => {
+  const normalized = window.SpaceEngine?.normalizeSpace?.(raw) || raw,
+    operationalType = String(normalized.operationalType || normalized.type || "other"),
+    legacyType = String(normalized.legacyFinancialType || (
+      ["business", "personal", "other"].includes(raw.type) ? raw.type
+        : ["unit", "operation"].includes(operationalType) ? "business" : operationalType
+    ) || "other");
+  return {
+    ...raw,
+    ...normalized,
+    type: ["business", "personal", "other"].includes(legacyType) ? legacyType : "other",
+    operationalType,
+  };
+};
+const canonicalFinancialSpaces = () => {
+  const spaces = window.SpaceContext?.list?.() || [];
+  return spaces.map(canonicalFinancialSpace).filter((space) =>
+    space.id && space.active !== false && space.status !== "archived" && space.capabilities?.finance === true,
+  );
+};
 const rememberSpaces = (spaces) => {
-  state.spaces = spaces.map((item) => structuredClone(item));
+  const unique = new Map();
+  for (const raw of spaces) {
+    const space = canonicalFinancialSpace(raw);
+    if (space.id && space.active !== false && space.status !== "archived" && space.capabilities?.finance === true)
+      unique.set(space.id, space);
+  }
+  state.spaces = [...unique.values()].sort((left, right) =>
+    Number(right.type === "business") - Number(left.type === "business") || left.name.localeCompare(right.name, "pt-BR"),
+  ).map((item) => structuredClone(item));
   state.loadedForUid = auth.currentUser?.uid || "";
-  try { localStorage.setItem(cacheKey(), JSON.stringify(state.spaces)); } catch {}
+  // Remove a cópia que causava divergência de nome entre Home e Financeiro.
+  try { localStorage.removeItem(cacheKey()); } catch {}
   return listCachedSpaces();
 };
 const listCachedSpaces = () => state.spaces.map((item) => structuredClone(item));
 const loadCachedSpaces = () => {
+  const canonical = canonicalFinancialSpaces();
+  if (canonical.length || window.SpaceContext?.snapshot?.().loaded) return rememberSpaces(canonical);
   try {
     const parsed = JSON.parse(localStorage.getItem(cacheKey()) || "[]");
-    if (Array.isArray(parsed)) state.spaces = parsed;
+    if (Array.isArray(parsed)) state.spaces = parsed.map(canonicalFinancialSpace).filter((space) => space.capabilities?.finance !== false);
   } catch {}
   return listCachedSpaces();
 };
@@ -193,64 +226,28 @@ const cashAccountDelta = (entry = {}) => entry.status === "paid" && entry.cashFl
   : 0;
 
 async function listSpaces(options = {}) {
-  const currentUid = uid(), currentBusinessId = businessId();
+  const currentUid = uid();
   if (state.loadedForUid !== currentUid) loadCachedSpaces();
-  if (!options.force && state.loadedForUid === currentUid && state.spaces.length && Date.now() - state.spacesLoadedAt < 60_000)
-    return listCachedSpaces();
+  if (!options.cacheOnly && window.SpaceService?.load)
+    await window.SpaceService.load({ force: options.force === true });
+  const canonical = canonicalFinancialSpaces();
+  if (canonical.length || window.SpaceContext?.snapshot?.().loaded) {
+    state.lastReadStats = { operation: "listSpacesFromGlobalContext", documents: 0, queries: 0, at: now() };
+    state.spacesLoadedAt = Date.now();
+    return rememberSpaces(canonical);
+  }
   if (options.cacheOnly || !navigator.onLine) return listCachedSpaces();
   state.loading = true;
   try {
-    const spacesCollection = collection(db, "financialSpaces"), queries = [
-      getDocs(query(
-        spacesCollection,
-        where("ownerUid", "==", currentUid),
-        where("type", "==", "business"),
-        where("active", "==", true),
-        limit(100),
-      )),
-      getDocs(query(
-        spacesCollection,
-        where("ownerUid", "==", currentUid),
-        where("type", "==", "personal"),
-        where("active", "==", true),
-        limit(100),
-      )),
-      getDocs(query(
-        spacesCollection,
-        where("ownerUid", "==", currentUid),
-        where("type", "==", "other"),
-        where("active", "==", true),
-        limit(100),
-      )),
-    ];
-    if (currentBusinessId)
-      queries.push(getDocs(query(
-        spacesCollection,
-        where("linkedBusinessId", "==", currentBusinessId),
-        where("type", "==", "business"),
-        where("active", "==", true),
-        limit(20),
-      )));
-    const snapshots = await Promise.all(queries), map = new Map();
-    for (const snapshot of snapshots)
-      for (const item of snapshot.docs) {
-        const value = convert(item);
-        if (value && value.active !== false) map.set(value.id, value);
-      }
-    const spaces = [...map.values()].sort((left, right) =>
-      Number(right.type === "business") - Number(left.type === "business") || left.name.localeCompare(right.name, "pt-BR"),
-    );
-    state.lastReadStats = { operation: "listSpaces", documents: snapshots.reduce((sum, item) => sum + item.size, 0), at: now() };
-    state.spacesLoadedAt = Date.now();
-    return rememberSpaces(spaces);
+    throw Object.assign(new Error("O catálogo global de espaços ainda não está disponível."), { code: "global-space-context-unavailable" });
   } catch (error) {
     if (state.spaces.length) return listCachedSpaces();
     const context = {
       operation: "list",
       path: "financialSpaces",
       uidPresent: Boolean(auth.currentUser?.uid),
-      businessId: currentBusinessId || null,
-      query: "active space by owner/type or current linkedBusinessId/type",
+      businessId: businessId() || null,
+      query: "canonical SpaceContext filtered by capabilities.finance",
       code: error?.code || "unknown",
     };
     console.error("[FINANCIAL_PERMISSION_ERROR]", context);
@@ -410,44 +407,40 @@ async function rememberFinancialView(viewId) {
 }
 
 async function createSpace(input = {}) {
-  const normalized = Engine.normalizeSpace(input), currentUid = uid(), currentBusinessId = businessId();
+  const normalized = Engine.normalizeSpace(input), currentBusinessId = businessId(), service = window.SpaceService;
+  if (!service?.create || !service?.update) throw new Error("O serviço global de espaços ainda está carregando.");
   if (normalized.type === "business" && normalized.linkedBusinessId !== currentBusinessId)
     throw new Error("A empresa vinculada não corresponde ao contexto atual.");
-  const id = normalized.type === "business"
-      ? `business_${normalized.linkedBusinessId}`
-      : String(input.id || crypto.randomUUID()),
-    existing = state.spaces.find((item) => item.id === id || (
-      normalized.type === "business" && item.linkedBusinessId === normalized.linkedBusinessId && item.active !== false
-    ));
-  if (existing) return selectSpace(existing.id);
-  const createdAt = now(), value = {
-    id,
-    ...normalized,
-    ownerUid: currentUid,
-    createdBy: currentUid,
-    automation: {
-      enabled: normalized.type === "business",
-      linkedBusinessId: normalized.type === "business" ? normalized.linkedBusinessId : null,
-      activatedAt: normalized.type === "business" ? createdAt : null,
-      autoIncome: {
-        sales: normalized.type === "business",
-        customerPayments: normalized.type === "business",
-        onlineOrders: normalized.type === "business",
+  const allGlobalSpaces = window.SpaceContext?.list?.() || [], existing = normalized.type === "business"
+    ? allGlobalSpaces.find((space) => space.active !== false && (
+      space.businessId === currentBusinessId || space.linkedBusinessId === currentBusinessId
+    ))
+    : null;
+  let value;
+  if (existing) {
+    value = existing.capabilities?.finance === true ? existing : await service.update(existing.id, {
+      capabilities: { ...existing.capabilities, finance: true },
+    });
+  } else {
+    const operationalType = normalized.type === "business" ? "unit" : normalized.type,
+      operational = normalized.type === "business";
+    value = await service.create({
+      id: input.id,
+      name: normalized.name,
+      operationalType,
+      capabilities: {
+        finance: true,
+        sales: operational,
+        products: operational,
+        inventory: operational,
+        goals: operational,
       },
-    },
-    autoIncomeSince: normalized.type === "business" ? createdAt : null,
-    autoEntryFromPaymentsSince: normalized.type === "business" ? createdAt : null,
-    autoEntryFromSalesSince: normalized.type === "business" ? createdAt : null,
-    currency: "BRL",
-    createdAt,
-    updatedAt: createdAt,
-    schemaVersion: 1,
-  };
-  await setDoc(spaceRef(id), { ...clean(value), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-  rememberSpaces([...state.spaces.filter((item) => item.id !== id), value]);
-  selectSpace(id);
-  emit("financial-data-changed", { entity: "space", id });
-  return structuredClone(value);
+    });
+  }
+  rememberSpaces(window.SpaceContext.list());
+  selectSpace(value.id);
+  emit("financial-data-changed", { entity: "space", id: value.id, action: existing ? "finance-enabled" : "created" });
+  return structuredClone(assertSpace(value.id));
 }
 
 async function updateAutomation(spaceId, input = {}) {
@@ -475,6 +468,12 @@ async function updateAutomation(spaceId, input = {}) {
   }
   await updateDoc(spaceRef(space.id), { automation: clean(automation), autoIncomeSince: activatedAt, updatedAt: serverTimestamp() });
   rememberSpaces(state.spaces.map((item) => item.id === space.id ? { ...item, automation, autoIncomeSince: activatedAt, updatedAt: now() } : item));
+  if (window.SpaceContext?.setSpaces) {
+    const snapshot = window.SpaceContext.snapshot();
+    window.SpaceContext.setSpaces(snapshot.spaces.map((item) => item.id === space.id
+      ? { ...item, automation, autoIncomeSince: activatedAt, updatedAt: now() }
+      : item), { loaded: snapshot.loaded, migrationReport: snapshot.migrationReport });
+  }
   state.reconciliation.delete(space.id);
   emit("financial-data-changed", { entity: "space", id: space.id, action: "automation-updated" });
   return structuredClone(automation);
@@ -502,8 +501,9 @@ async function reconcileBusinessIncome(spaceId, options = {}) {
 
 async function archiveSpace(spaceId) {
   const space = assertSpace(spaceId);
-  await updateDoc(spaceRef(space.id), { active: false, archivedAt: serverTimestamp(), updatedAt: serverTimestamp() });
-  rememberSpaces(state.spaces.filter((item) => item.id !== space.id));
+  if (!window.SpaceService?.archive) throw new Error("O serviço global de espaços ainda está carregando.");
+  await window.SpaceService.archive(space.id);
+  rememberSpaces(window.SpaceContext.list());
   state.selectedId = selectedSpaceId();
   emit("financial-data-changed", { entity: "space", id: space.id, action: "archived" });
 }
@@ -2866,6 +2866,15 @@ const FinancialSpaceService = {
 };
 
 window.FinancialSpaceService = FinancialSpaceService;
+addEventListener("veconi-spaces-ready", (event) => {
+  if (!auth.currentUser?.uid) return;
+  const before = JSON.stringify(state.spaces.map((space) => [space.id, space.name, space.status, space.capabilities?.finance])),
+    source = Array.isArray(event.detail?.spaces) ? event.detail.spaces : window.SpaceContext?.list?.() || [];
+  rememberSpaces(source);
+  state.viewProfile = state.viewProfile ? normalizeViewProfile(state.viewProfile) : null;
+  const after = JSON.stringify(state.spaces.map((space) => [space.id, space.name, space.status, space.capabilities?.finance]));
+  if (before !== after) emit("financial-space-metadata-changed", { spaces: listCachedSpaces() });
+});
 addEventListener("firebase-auth-ready", async () => {
   if (window.Router?.atual?.() !== "financeiro") return;
   try {

@@ -119,9 +119,11 @@ test("próximas obrigações incluem faturas, não compras de cartão", () => {
   assert.match(service, /pendingAccountsCents/);
 });
 
-test("privacidade continua por owner e membership financeira sem consulta global", () => {
-  assert.match(service, /where\("ownerUid", "==", currentUid\)/);
-  assert.match(service, /where\("linkedBusinessId", "==", currentBusinessId\)/);
+test("privacidade usa o catálogo global já autorizado sem nova consulta de espaços", () => {
+  const listBody = service.slice(service.indexOf("async function listSpaces"), service.indexOf("function selectedSpaceId"));
+  assert.match(listBody, /window\.SpaceService\.load/);
+  assert.match(service, /space\.capabilities\?\.finance === true/);
+  assert.doesNotMatch(listBody, /getDocs|collection\(db, "financialSpaces"\)/);
   assert.doesNotMatch(service, /onSnapshot/);
   assert.match(rules, /match \/financialAccounts\/\{accountId\}/);
   assert.match(rules, /canReadFinancialSpace\(spaceId\)/);

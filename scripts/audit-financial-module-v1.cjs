@@ -135,10 +135,10 @@ async function main() {
   if (!["Fatura C6 Carbon", "Total da fatura", "R$ 488,00", "R$ 250,00 deste espaço", "Compras", "Espaços", "Categorias", "Parcelas", "Pagar total", "Ajustar valor"].every((text) => invoiceDetail.includes(text))) throw Error(`Fatura consolidada incompleta: ${invoiceDetail}`);
   await click('[data-invoice-tab="spaces"]');
   const spacesBreakdown = await page.evaluate(() => document.querySelector('[data-invoice-panel="spaces"]')?.innerText || '');
-  if (!["Casa", "238,00", "Carro", "250,00"].every((text) => spacesBreakdown.includes(text))) throw Error(`Breakdown por espaço incompleto: ${spacesBreakdown}`);
+  if (!["Casa", "238,00", "Táxi", "250,00"].every((text) => spacesBreakdown.includes(text)) || spacesBreakdown.includes("Carro")) throw Error(`Breakdown por espaço não usa o nome canônico: ${spacesBreakdown}`);
   await shot("19-mobile-fatura-c6.png"); await click('[data-invoice-tab="purchases"]');
   const purchaseDetail = await page.evaluate(() => document.querySelector('[data-invoice-panel="purchases"]')?.innerText || '');
-  if (!["Mercado", "Casa", "Combustível", "Carro"].every((text) => purchaseDetail.includes(text))) throw Error(`Compras multi-espaço incompletas: ${purchaseDetail}`);
+  if (!["Mercado", "Casa", "Combustível", "Táxi"].every((text) => purchaseDetail.includes(text)) || purchaseDetail.includes("Carro")) throw Error(`Compras multi-espaço não usam o nome canônico: ${purchaseDetail}`);
   await shot("19b-mobile-fatura-compras-por-espaco.png"); await close();
   await click('[data-financial-edit-card="card-c6"]'); await click('[data-card-next]'); await click('[data-card-next]');
   const cardAccess = await page.evaluate(() => document.querySelector('.financial-sheet')?.innerText || '');

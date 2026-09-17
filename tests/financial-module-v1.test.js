@@ -11,7 +11,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
   assert.doesNotMatch(html, /<script[^>]+financial-space-service\.js/);
-  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=135"\)/);
+  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=143"\)/);
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -45,10 +45,12 @@ test("contas abrem detalhes e diferenciam ocorrência, série e desfazer pagamen
   assert.match(service, /async function cancelRecurrenceFrom/);
 });
 
-test("listagem inicial satisfaz as Rules sem depender de filtro implícito", () => {
-  assert.match(service, /where\("ownerUid", "==", currentUid\)[\s\S]*where\("type", "==", "personal"\)[\s\S]*where\("active", "==", true\)/);
-  assert.match(service, /where\("ownerUid", "==", currentUid\)[\s\S]*where\("type", "==", "other"\)[\s\S]*where\("active", "==", true\)/);
-  assert.match(service, /where\("linkedBusinessId", "==", currentBusinessId\)[\s\S]*where\("type", "==", "business"\)[\s\S]*where\("active", "==", true\)/);
+test("listagem inicial reutiliza o catálogo global autorizado e filtra finance", () => {
+  const listBody = service.slice(service.indexOf("async function listSpaces"), service.indexOf("function selectedSpaceId"));
+  assert.match(listBody, /window\.SpaceService\.load/);
+  assert.match(listBody, /canonicalFinancialSpaces\(\)/);
+  assert.doesNotMatch(listBody, /getDocs|collection\(db, "financialSpaces"\)/);
+  assert.match(service, /space\.capabilities\?\.finance === true/);
   assert.match(read("js/financial-ui.js"), /Não foi possível acessar este espaço financeiro\./);
   assert.doesNotMatch(read("js/financial-ui.js"), /state\.error = error\.message/);
 });
@@ -107,8 +109,8 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
 });
 
 test("release 136 mantém recursos financeiros globais no cache PWA", () => {
-  assert.match(read("js/build-info.js"), /release: "142"/);
-  assert.match(sw, /veconi-v142-home-cart-reliability/);
+  assert.match(read("js/build-info.js"), /release: "143"/);
+  assert.match(sw, /veconi-v143-global-spaces-hotfix/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

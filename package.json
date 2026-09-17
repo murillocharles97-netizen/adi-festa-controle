@@ -22,6 +22,7 @@
     "test:terminal-payments-browser": "node scripts/audit-terminal-payments-v138.cjs",
     "test:global-spaces": "node --test tests/global-spaces-v1.test.js tests/global-space-persistence-v139.test.js tests/home-spaces-context.test.js",
     "test:global-spaces-browser": "node scripts/audit-global-spaces-v139.cjs",
+    "test:global-space-name-browser": "node scripts/audit-global-space-canonical-name-v143.cjs",
     "migrate:global-spaces:dry-run": "node scripts/migrate-global-spaces-v139.cjs",
     "test:mobile-structural": "node scripts/audit-mobile-structural.cjs",
     "test:emulator": "firebase emulators:exec --only firestore,auth,storage --project adi-festa-variations-test \"node --test --test-concurrency=1 tests/emulator/*.rules.test.js\"",
