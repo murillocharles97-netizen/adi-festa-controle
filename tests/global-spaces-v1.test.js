@@ -153,11 +153,12 @@ test("RBAC de espaços e metas falha fechado para perfis sem gestão", () => {
   window.SpaceContext.setSpaces(fixtures());
   window.FirebaseSession.profile.role = "cashier";
   assert.equal(window.SpaceContext.canManage(), false);
-  assert.doesNotMatch(window.SpaceContext.renderBar("home"), /data-space-manage/);
+  assert.match(window.SpaceContext.renderBar("home"), /data-space-picker="home"/);
+  assert.doesNotMatch(window.SpaceContext.renderBar("home"), /<select[^>]+data-space-select="home"/);
   assert.throws(() => window.SpaceContext.saveGoal(500, "adi"), /não pode alterar metas/);
   window.FirebaseSession.profile.role = "manager";
   assert.equal(window.SpaceContext.canManage(), true);
-  assert.match(window.SpaceContext.renderBar("home"), /data-space-manage/);
+  assert.match(window.SpaceContext.renderBar("home"), /aria-haspopup="dialog"/);
 });
 
 test("venda legada só usa financialSpaceId explícito; valor agregado nunca vira ID real", () => {
@@ -202,7 +203,7 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /validProductSpaceScope/);
   assert.match(financial, /business_\$\{businessId\}/);
-  assert.match(index, /spaces\.js\?v=142/);
-  assert.match(index, /firebase\/space-service\.js\?v=139/);
-  assert.match(worker, /veconi-v142-home-cart-reliability/);
+  assert.match(index, /spaces\.js\?v=143/);
+  assert.match(index, /firebase\/space-service\.js\?v=143/);
+  assert.match(worker, /veconi-v143-global-spaces-hotfix/);
 });

@@ -1,4 +1,4 @@
-/* Espaços VECONI V1 — contexto global compartilhado pela Home, Vender e cadastros. */
+/* Espaços VECONI V2 — identidade global e seletor compartilhado pela Home, Vender e cadastros. */
 .space-context-bar {
   --space-accent: #078d70;
   display: grid;
@@ -58,6 +58,66 @@
   border-color: var(--space-accent);
 }
 
+.space-selector-trigger {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px !important;
+  width: min(100%, 390px);
+  min-width: 0;
+  min-height: 48px !important;
+  border-color: #cfe0da !important;
+  padding: 5px 11px 5px 6px !important;
+  text-align: left;
+}
+
+.space-selector-icon,
+.space-picker-option-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #e5f8f3;
+  color: var(--space-accent);
+}
+
+.space-selector-icon svg,
+.space-picker-option-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.space-selector-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.space-selector-copy small {
+  color: #748195;
+  font-size: 0.66rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.space-selector-copy strong {
+  overflow: hidden;
+  color: #17233b;
+  font-size: 0.84rem;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-selector-chevron {
+  width: 17px !important;
+  height: 17px !important;
+  color: #68778c;
+}
+
 .space-context-bar > button {
   display: inline-flex;
   align-items: center;
@@ -84,6 +144,108 @@
 .space-context-bar > button svg {
   width: 17px;
   height: 17px;
+}
+
+.space-picker-modal {
+  width: min(520px, 100%);
+  max-height: min(720px, calc(100dvh - 24px));
+  overflow: hidden;
+}
+
+.space-picker-modal .modal-head {
+  align-items: flex-start;
+}
+
+.space-picker-modal .modal-head > div {
+  min-width: 0;
+}
+
+.space-picker-modal .modal-head h3,
+.space-picker-modal .modal-head p {
+  margin: 0;
+}
+
+.space-picker-modal .modal-head p {
+  margin-top: 4px;
+  color: #718095;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.space-picker-list {
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+}
+
+.space-picker-option {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 62px;
+  border: 1px solid #dde6e3;
+  border-radius: 15px;
+  background: #fff;
+  padding: 9px 11px;
+  color: #1c2940;
+  text-align: left;
+}
+
+.space-picker-option:hover {
+  border-color: #a8dcd0;
+  background: #f4fbf9;
+}
+
+.space-picker-option:focus-visible {
+  outline: 3px solid rgba(8, 169, 130, 0.18);
+  outline-offset: 1px;
+}
+
+.space-picker-option.is-selected {
+  border-color: #78cdbb;
+  background: #eaf9f5;
+  box-shadow: inset 3px 0 #0aa581;
+}
+
+.space-picker-option > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.space-picker-option b,
+.space-picker-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-picker-option b {
+  font-size: 0.88rem;
+}
+
+.space-picker-option small {
+  color: #6e7d91;
+  font-size: 0.72rem;
+}
+
+.space-picker-check {
+  width: 19px;
+  height: 19px;
+  color: #9aa6b5;
+}
+
+.space-picker-option.is-selected .space-picker-check {
+  color: #078d70;
+  stroke-width: 3;
+}
+
+.space-picker-manage {
+  min-height: 44px;
 }
 
 .space-context-bar.is-single {
@@ -539,8 +701,45 @@ button.desktop-space-goal {
     padding: 0;
   }
 
-  .space-context-bar > button span {
+  .space-context-bar > button:not(.space-selector-trigger) > span {
     display: none;
+  }
+
+  .space-context-bar.is-home {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .space-selector-trigger {
+    width: 100% !important;
+    height: 48px !important;
+    padding: 5px 10px 5px 5px !important;
+  }
+
+  .space-selector-trigger .space-selector-icon,
+  .space-selector-trigger .space-selector-copy {
+    display: grid;
+  }
+
+  .space-picker-modal {
+    width: min(100%, calc(100vw - 16px));
+    max-height: calc(100dvh - 16px);
+    border-radius: 22px 22px 8px 8px;
+  }
+
+  .space-picker-modal .modal-head {
+    padding: 16px 17px 14px;
+  }
+
+  .space-picker-modal .modal-body {
+    padding: 12px;
+  }
+
+  .space-picker-modal .modal-foot {
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .space-picker-option {
+    min-height: 64px;
   }
 
   .space-context-bar.is-single {
@@ -607,6 +806,7 @@ button.desktop-space-goal {
 
   .space-manager-modal .icon-btn,
   .space-form-modal .icon-btn,
+  .space-picker-modal .icon-btn,
   .home-goal-modal .icon-btn {
     width: 44px;
     min-width: 44px;
@@ -643,6 +843,16 @@ button.desktop-space-goal {
   .space-context-bar select {
     padding-left: 9px;
     font-size: 0.75rem;
+  }
+
+  .space-selector-trigger {
+    grid-template-columns: 36px minmax(0, 1fr) 16px;
+    gap: 7px !important;
+  }
+
+  .space-selector-icon {
+    width: 36px;
+    height: 36px;
   }
 
   .space-manager-list article small {

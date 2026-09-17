@@ -1,0 +1,4796 @@
+{
+  "ok": true,
+  "release": 143,
+  "mobileWidths": [
+    320,
+    360,
+    375,
+    390,
+    412,
+    430
+  ],
+  "desktopWidths": [
+    768,
+    1366
+  ],
+  "states": [
+    "home-all",
+    "home-picker",
+    "home-adi",
+    "home-iptv",
+    "sales-adi",
+    "sales-iptv",
+    "goal-adi",
+    "manager",
+    "availability"
+  ],
+  "checks": 72,
+  "screenshots": [
+    "320-home-todos.png",
+    "320-home-seletor-bottom-sheet.png",
+    "360-home-todos.png",
+    "360-home-seletor-bottom-sheet.png",
+    "375-home-todos.png",
+    "375-home-seletor-bottom-sheet.png",
+    "390-home-todos.png",
+    "390-home-seletor-bottom-sheet.png",
+    "390-home-adi-festa.png",
+    "390-home-iptv.png",
+    "390-vender-adi-festa.png",
+    "390-vender-iptv.png",
+    "390-meta-adi-festa.png",
+    "390-gerenciar-espacos.png",
+    "390-disponibilidade-produto.png",
+    "412-home-todos.png",
+    "412-home-seletor-bottom-sheet.png",
+    "430-home-todos.png",
+    "430-home-seletor-bottom-sheet.png",
+    "768-home-todos.png",
+    "768-vender-adi-festa.png",
+    "768-gerenciar-espacos.png",
+    "1366-home-todos.png",
+    "1366-home-iptv.png",
+    "1366-vender-adi-festa.png",
+    "1366-gerenciar-espacos.png",
+    "1366-disponibilidade-produto.png"
+  ],
+  "pageErrors": [],
+  "results": [
+    {
+      "state": "home-all",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1139.3,
+        "width": 320,
+        "height": 1071.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1139.3,
+        "width": 320,
+        "height": 1071.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 312,
+        "top": 96.2,
+        "bottom": 632,
+        "width": 304,
+        "height": 535.8
+      },
+      "dialogScroll": {
+        "clientHeight": 536,
+        "scrollHeight": 536,
+        "clientWidth": 304,
+        "scrollWidth": 304
+      },
+      "footerButtons": [
+        {
+          "left": 114.2,
+          "right": 298,
+          "top": 572,
+          "bottom": 620,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1094,
+        "width": 320,
+        "height": 1026
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1079,
+        "width": 320,
+        "height": 1011
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 226,
+        "width": 300,
+        "height": 84
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 173,
+          "bottom": 217,
+          "width": 230,
+          "height": 44
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 162,
+          "bottom": 206,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 847,
+        "width": 320,
+        "height": 779
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 226,
+        "width": 300,
+        "height": 84
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 173,
+          "bottom": 217,
+          "width": 230,
+          "height": 44
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 162,
+          "bottom": 206,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 847,
+        "width": 320,
+        "height": 779
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1094,
+        "width": 320,
+        "height": 1026
+      },
+      "dialog": {
+        "left": 8,
+        "right": 312,
+        "top": 269,
+        "bottom": 632,
+        "width": 304,
+        "height": 363
+      },
+      "dialogScroll": {
+        "clientHeight": 363,
+        "scrollHeight": 363,
+        "clientWidth": 304,
+        "scrollWidth": 304
+      },
+      "footerButtons": [
+        {
+          "left": 73.4,
+          "right": 165.9,
+          "top": 570,
+          "bottom": 614,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 175.9,
+          "right": 291,
+          "top": 570,
+          "bottom": 614,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 10,
+        "right": 310,
+        "top": 142,
+        "bottom": 208,
+        "width": 300,
+        "height": 66
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 19,
+          "right": 249,
+          "top": 151,
+          "bottom": 199,
+          "width": 230,
+          "height": 48
+        },
+        {
+          "left": 257,
+          "right": 301,
+          "top": 153,
+          "bottom": 197,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 1094,
+        "width": 320,
+        "height": 1026
+      },
+      "dialog": {
+        "left": 8,
+        "right": 312,
+        "top": 46.4,
+        "bottom": 632,
+        "width": 304,
+        "height": 585.6
+      },
+      "dialogScroll": {
+        "clientHeight": 586,
+        "scrollHeight": 586,
+        "clientWidth": 304,
+        "scrollWidth": 304
+      },
+      "footerButtons": [
+        {
+          "left": 57.7,
+          "right": 136.7,
+          "top": 572,
+          "bottom": 616,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 146.7,
+          "right": 291,
+          "top": 570,
+          "bottom": 618,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 320,
+      "viewportHeight": 640,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 320,
+        "top": 68,
+        "bottom": 619.1,
+        "width": 320,
+        "height": 551.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 312,
+        "top": 8,
+        "bottom": 632,
+        "width": 304,
+        "height": 624
+      },
+      "dialogScroll": {
+        "clientHeight": 624,
+        "scrollHeight": 676,
+        "clientWidth": 304,
+        "scrollWidth": 304
+      },
+      "footerButtons": [
+        {
+          "left": 29,
+          "right": 121.5,
+          "top": 617,
+          "bottom": 661,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 131.5,
+          "right": 291,
+          "top": 608,
+          "bottom": 670,
+          "width": 159.5,
+          "height": 62
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 291,
+          "top": 210.9,
+          "bottom": 279,
+          "width": 262,
+          "height": 68.1
+        },
+        {
+          "left": 29,
+          "right": 291,
+          "top": 288,
+          "bottom": 343,
+          "width": 262,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 291,
+          "top": 352,
+          "bottom": 420,
+          "width": 262,
+          "height": 68.1
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 360,
+        "height": 901.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 360,
+        "height": 901.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 352,
+        "top": 256.2,
+        "bottom": 792,
+        "width": 344,
+        "height": 535.8
+      },
+      "dialogScroll": {
+        "clientHeight": 536,
+        "scrollHeight": 536,
+        "clientWidth": 344,
+        "scrollWidth": 344
+      },
+      "footerButtons": [
+        {
+          "left": 154.2,
+          "right": 338,
+          "top": 732,
+          "bottom": 780,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 925,
+        "width": 360,
+        "height": 857
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 925,
+        "width": 360,
+        "height": 857
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 228,
+        "width": 334,
+        "height": 86
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 174,
+          "bottom": 218,
+          "width": 262,
+          "height": 44
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 774,
+        "width": 360,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 228,
+        "width": 334,
+        "height": 86
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 174,
+          "bottom": 218,
+          "width": 262,
+          "height": 44
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 774,
+        "width": 360,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 925,
+        "width": 360,
+        "height": 857
+      },
+      "dialog": {
+        "left": 8,
+        "right": 352,
+        "top": 429,
+        "bottom": 792,
+        "width": 344,
+        "height": 363
+      },
+      "dialogScroll": {
+        "clientHeight": 363,
+        "scrollHeight": 363,
+        "clientWidth": 344,
+        "scrollWidth": 344
+      },
+      "footerButtons": [
+        {
+          "left": 113.4,
+          "right": 205.9,
+          "top": 730,
+          "bottom": 774,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 215.9,
+          "right": 331,
+          "top": 730,
+          "bottom": 774,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 347,
+        "top": 142,
+        "bottom": 210,
+        "width": 334,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 285,
+          "top": 152,
+          "bottom": 200,
+          "width": 262,
+          "height": 48
+        },
+        {
+          "left": 293,
+          "right": 337,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 925,
+        "width": 360,
+        "height": 857
+      },
+      "dialog": {
+        "left": 8,
+        "right": 352,
+        "top": 201,
+        "bottom": 792,
+        "width": 344,
+        "height": 591
+      },
+      "dialogScroll": {
+        "clientHeight": 591,
+        "scrollHeight": 591,
+        "clientWidth": 344,
+        "scrollWidth": 344
+      },
+      "footerButtons": [
+        {
+          "left": 97.7,
+          "right": 176.7,
+          "top": 732,
+          "bottom": 776,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 186.7,
+          "right": 331,
+          "top": 730,
+          "bottom": 778,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 360,
+      "viewportHeight": 800,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 360,
+        "top": 68,
+        "bottom": 600.1,
+        "width": 360,
+        "height": 532.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 352,
+        "top": 147,
+        "bottom": 792,
+        "width": 344,
+        "height": 645
+      },
+      "dialogScroll": {
+        "clientHeight": 645,
+        "scrollHeight": 645,
+        "clientWidth": 344,
+        "scrollWidth": 344
+      },
+      "footerButtons": [
+        {
+          "left": 41.7,
+          "right": 134.1,
+          "top": 734,
+          "bottom": 778,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 144.1,
+          "right": 331,
+          "top": 734,
+          "bottom": 778,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 331,
+          "top": 349.9,
+          "bottom": 417.9,
+          "width": 302,
+          "height": 68.1
+        },
+        {
+          "left": 29,
+          "right": 331,
+          "top": 426.9,
+          "bottom": 482,
+          "width": 302,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 331,
+          "top": 491,
+          "bottom": 546,
+          "width": 302,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 375,
+        "height": 901.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 375,
+        "height": 901.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 367,
+        "top": 268.2,
+        "bottom": 804,
+        "width": 359,
+        "height": 535.8
+      },
+      "dialogScroll": {
+        "clientHeight": 536,
+        "scrollHeight": 536,
+        "clientWidth": 359,
+        "scrollWidth": 359
+      },
+      "footerButtons": [
+        {
+          "left": 169.2,
+          "right": 353,
+          "top": 744,
+          "bottom": 792,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 909,
+        "width": 375,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 909,
+        "width": 375,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 228,
+        "width": 349,
+        "height": 86
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 174,
+          "bottom": 218,
+          "width": 277,
+          "height": 44
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 774,
+        "width": 375,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 228,
+        "width": 349,
+        "height": 86
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 174,
+          "bottom": 218,
+          "width": 277,
+          "height": 44
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 774,
+        "width": 375,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 909,
+        "width": 375,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 367,
+        "top": 460,
+        "bottom": 804,
+        "width": 359,
+        "height": 344
+      },
+      "dialogScroll": {
+        "clientHeight": 344,
+        "scrollHeight": 344,
+        "clientWidth": 359,
+        "scrollWidth": 359
+      },
+      "footerButtons": [
+        {
+          "left": 128.4,
+          "right": 220.9,
+          "top": 742,
+          "bottom": 786,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 230.9,
+          "right": 346,
+          "top": 742,
+          "bottom": 786,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 362,
+        "top": 142,
+        "bottom": 210,
+        "width": 349,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 300,
+          "top": 152,
+          "bottom": 200,
+          "width": 277,
+          "height": 48
+        },
+        {
+          "left": 308,
+          "right": 352,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 909,
+        "width": 375,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 367,
+        "top": 213,
+        "bottom": 804,
+        "width": 359,
+        "height": 591
+      },
+      "dialogScroll": {
+        "clientHeight": 591,
+        "scrollHeight": 591,
+        "clientWidth": 359,
+        "scrollWidth": 359
+      },
+      "footerButtons": [
+        {
+          "left": 112.7,
+          "right": 191.7,
+          "top": 744,
+          "bottom": 788,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 201.7,
+          "right": 346,
+          "top": 742,
+          "bottom": 790,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 375,
+      "viewportHeight": 812,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 375,
+        "top": 68,
+        "bottom": 587.1,
+        "width": 375,
+        "height": 519.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 367,
+        "top": 172,
+        "bottom": 804,
+        "width": 359,
+        "height": 632
+      },
+      "dialogScroll": {
+        "clientHeight": 632,
+        "scrollHeight": 632,
+        "clientWidth": 359,
+        "scrollWidth": 359
+      },
+      "footerButtons": [
+        {
+          "left": 56.7,
+          "right": 149.1,
+          "top": 746,
+          "bottom": 790,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 159.1,
+          "right": 346,
+          "top": 746,
+          "bottom": 790,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 346,
+          "top": 374.9,
+          "bottom": 429.9,
+          "width": 317,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 346,
+          "top": 438.9,
+          "bottom": 494,
+          "width": 317,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 346,
+          "top": 503,
+          "bottom": 558,
+          "width": 317,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 390,
+        "height": 901.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 390,
+        "height": 901.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 300.2,
+        "bottom": 836,
+        "width": 374,
+        "height": 535.8
+      },
+      "dialogScroll": {
+        "clientHeight": 536,
+        "scrollHeight": 536,
+        "clientWidth": 374,
+        "scrollWidth": 374
+      },
+      "footerButtons": [
+        {
+          "left": 184.2,
+          "right": 368,
+          "top": 776,
+          "bottom": 824,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 909,
+        "width": 390,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 909,
+        "width": 390,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 228,
+        "width": 364,
+        "height": 86
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 174,
+          "bottom": 218,
+          "width": 292,
+          "height": 44
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 774,
+        "width": 390,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 228,
+        "width": 364,
+        "height": 86
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 174,
+          "bottom": 218,
+          "width": 292,
+          "height": 44
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 774,
+        "width": 390,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 909,
+        "width": 390,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 492,
+        "bottom": 836,
+        "width": 374,
+        "height": 344
+      },
+      "dialogScroll": {
+        "clientHeight": 344,
+        "scrollHeight": 344,
+        "clientWidth": 374,
+        "scrollWidth": 374
+      },
+      "footerButtons": [
+        {
+          "left": 143.4,
+          "right": 235.9,
+          "top": 774,
+          "bottom": 818,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 245.9,
+          "right": 361,
+          "top": 774,
+          "bottom": 818,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 377,
+        "top": 142,
+        "bottom": 210,
+        "width": 364,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 315,
+          "top": 152,
+          "bottom": 200,
+          "width": 292,
+          "height": 48
+        },
+        {
+          "left": 323,
+          "right": 367,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 909,
+        "width": 390,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 245,
+        "bottom": 836,
+        "width": 374,
+        "height": 591
+      },
+      "dialogScroll": {
+        "clientHeight": 591,
+        "scrollHeight": 591,
+        "clientWidth": 374,
+        "scrollWidth": 374
+      },
+      "footerButtons": [
+        {
+          "left": 127.7,
+          "right": 206.7,
+          "top": 776,
+          "bottom": 820,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 216.7,
+          "right": 361,
+          "top": 774,
+          "bottom": 822,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 390,
+      "viewportHeight": 844,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 390,
+        "top": 68,
+        "bottom": 587.1,
+        "width": 390,
+        "height": 519.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 382,
+        "top": 204,
+        "bottom": 836,
+        "width": 374,
+        "height": 632
+      },
+      "dialogScroll": {
+        "clientHeight": 632,
+        "scrollHeight": 632,
+        "clientWidth": 374,
+        "scrollWidth": 374
+      },
+      "footerButtons": [
+        {
+          "left": 71.7,
+          "right": 164.1,
+          "top": 778,
+          "bottom": 822,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 174.1,
+          "right": 361,
+          "top": 778,
+          "bottom": 822,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 361,
+          "top": 406.9,
+          "bottom": 461.9,
+          "width": 332,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 361,
+          "top": 470.9,
+          "bottom": 526,
+          "width": 332,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 361,
+          "top": 535,
+          "bottom": 590,
+          "width": 332,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 412,
+        "height": 901.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 412,
+        "height": 901.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 404,
+        "top": 383,
+        "bottom": 907,
+        "width": 396,
+        "height": 524
+      },
+      "dialogScroll": {
+        "clientHeight": 524,
+        "scrollHeight": 524,
+        "clientWidth": 396,
+        "scrollWidth": 396
+      },
+      "footerButtons": [
+        {
+          "left": 206.2,
+          "right": 390,
+          "top": 847,
+          "bottom": 895,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 909,
+        "width": 412,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 909,
+        "width": 412,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 228,
+        "width": 386,
+        "height": 86
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 174,
+          "bottom": 218,
+          "width": 314,
+          "height": 44
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 774,
+        "width": 412,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 228,
+        "width": 386,
+        "height": 86
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 174,
+          "bottom": 218,
+          "width": 314,
+          "height": 44
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 774,
+        "width": 412,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 909,
+        "width": 412,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 404,
+        "top": 563,
+        "bottom": 907,
+        "width": 396,
+        "height": 344
+      },
+      "dialogScroll": {
+        "clientHeight": 344,
+        "scrollHeight": 344,
+        "clientWidth": 396,
+        "scrollWidth": 396
+      },
+      "footerButtons": [
+        {
+          "left": 165.4,
+          "right": 257.9,
+          "top": 845,
+          "bottom": 889,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 267.9,
+          "right": 383,
+          "top": 845,
+          "bottom": 889,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 399,
+        "top": 142,
+        "bottom": 210,
+        "width": 386,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 337,
+          "top": 152,
+          "bottom": 200,
+          "width": 314,
+          "height": 48
+        },
+        {
+          "left": 345,
+          "right": 389,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 909,
+        "width": 412,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 404,
+        "top": 331.8,
+        "bottom": 907,
+        "width": 396,
+        "height": 575.2
+      },
+      "dialogScroll": {
+        "clientHeight": 575,
+        "scrollHeight": 575,
+        "clientWidth": 396,
+        "scrollWidth": 396
+      },
+      "footerButtons": [
+        {
+          "left": 149.7,
+          "right": 228.7,
+          "top": 847,
+          "bottom": 891,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 238.7,
+          "right": 383,
+          "top": 845,
+          "bottom": 893,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 412,
+      "viewportHeight": 915,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 412,
+        "top": 68,
+        "bottom": 587.1,
+        "width": 412,
+        "height": 519.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 404,
+        "top": 295.3,
+        "bottom": 907,
+        "width": 396,
+        "height": 611.7
+      },
+      "dialogScroll": {
+        "clientHeight": 612,
+        "scrollHeight": 612,
+        "clientWidth": 396,
+        "scrollWidth": 396
+      },
+      "footerButtons": [
+        {
+          "left": 93.7,
+          "right": 186.1,
+          "top": 849,
+          "bottom": 893,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 196.1,
+          "right": 383,
+          "top": 849,
+          "bottom": 893,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 383,
+          "top": 477.9,
+          "bottom": 532.9,
+          "width": 354,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 383,
+          "top": 541.9,
+          "bottom": 597,
+          "width": 354,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 383,
+          "top": 606,
+          "bottom": 661,
+          "width": 354,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 430,
+        "height": 901.3
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 969.3,
+        "width": 430,
+        "height": 901.3
+      },
+      "dialog": {
+        "left": 8,
+        "right": 422,
+        "top": 400,
+        "bottom": 924,
+        "width": 414,
+        "height": 524
+      },
+      "dialogScroll": {
+        "clientHeight": 524,
+        "scrollHeight": 524,
+        "clientWidth": 414,
+        "scrollWidth": 414
+      },
+      "footerButtons": [
+        {
+          "left": 224.2,
+          "right": 408,
+          "top": 864,
+          "bottom": 912,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 909,
+        "width": 430,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 909,
+        "width": 430,
+        "height": 841
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 228,
+        "width": 404,
+        "height": 86
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 174,
+          "bottom": 218,
+          "width": 332,
+          "height": 44
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 774,
+        "width": 430,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 228,
+        "width": 404,
+        "height": 86
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 174,
+          "bottom": 218,
+          "width": 332,
+          "height": 44
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 163,
+          "bottom": 207,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 774,
+        "width": 430,
+        "height": 706
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 909,
+        "width": 430,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 422,
+        "top": 580,
+        "bottom": 924,
+        "width": 414,
+        "height": 344
+      },
+      "dialogScroll": {
+        "clientHeight": 344,
+        "scrollHeight": 344,
+        "clientWidth": 414,
+        "scrollWidth": 414
+      },
+      "footerButtons": [
+        {
+          "left": 183.4,
+          "right": 275.9,
+          "top": 862,
+          "bottom": 906,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 285.9,
+          "right": 401,
+          "top": 862,
+          "bottom": 906,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 13,
+        "right": 417,
+        "top": 142,
+        "bottom": 210,
+        "width": 404,
+        "height": 68
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 23,
+          "right": 355,
+          "top": 152,
+          "bottom": 200,
+          "width": 332,
+          "height": 48
+        },
+        {
+          "left": 363,
+          "right": 407,
+          "top": 154,
+          "bottom": 198,
+          "width": 44,
+          "height": 44
+        }
+      ],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 909,
+        "width": 430,
+        "height": 841
+      },
+      "dialog": {
+        "left": 8,
+        "right": 422,
+        "top": 353.1,
+        "bottom": 924,
+        "width": 414,
+        "height": 570.9
+      },
+      "dialogScroll": {
+        "clientHeight": 571,
+        "scrollHeight": 571,
+        "clientWidth": 414,
+        "scrollWidth": 414
+      },
+      "footerButtons": [
+        {
+          "left": 167.7,
+          "right": 246.7,
+          "top": 864,
+          "bottom": 908,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 256.7,
+          "right": 401,
+          "top": 862,
+          "bottom": 910,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 430,
+      "viewportHeight": 932,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 0,
+        "right": 430,
+        "top": 68,
+        "bottom": 587.1,
+        "width": 430,
+        "height": 519.1
+      },
+      "dialog": {
+        "left": 8,
+        "right": 422,
+        "top": 312.3,
+        "bottom": 924,
+        "width": 414,
+        "height": 611.7
+      },
+      "dialogScroll": {
+        "clientHeight": 612,
+        "scrollHeight": 612,
+        "clientWidth": 414,
+        "scrollWidth": 414
+      },
+      "footerButtons": [
+        {
+          "left": 111.7,
+          "right": 204.1,
+          "top": 866,
+          "bottom": 910,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 214.1,
+          "right": 401,
+          "top": 866,
+          "bottom": 910,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 29,
+          "right": 401,
+          "top": 494.9,
+          "bottom": 549.9,
+          "width": 372,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 401,
+          "top": 558.9,
+          "bottom": 614,
+          "width": 372,
+          "height": 55
+        },
+        {
+          "left": 29,
+          "right": 401,
+          "top": 623,
+          "bottom": 678,
+          "width": 372,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 72,
+      "mainBottomPadding": 96,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 1062,
+        "width": 568,
+        "height": 990
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 1062,
+        "width": 568,
+        "height": 990
+      },
+      "dialog": {
+        "left": 124,
+        "right": 644,
+        "top": 359.1,
+        "bottom": 892,
+        "width": 520,
+        "height": 532.9
+      },
+      "dialogScroll": {
+        "clientHeight": 533,
+        "scrollHeight": 533,
+        "clientWidth": 520,
+        "scrollWidth": 520
+      },
+      "footerButtons": [
+        {
+          "left": 439.2,
+          "right": 623,
+          "top": 826,
+          "bottom": 874,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 996,
+        "width": 568,
+        "height": 924
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 996,
+        "width": 568,
+        "height": 924
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 224,
+        "width": 532,
+        "height": 64
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 329.4,
+          "right": 625.5,
+          "top": 172,
+          "bottom": 212,
+          "width": 296.2,
+          "height": 40
+        },
+        {
+          "left": 637.5,
+          "right": 736,
+          "top": 172,
+          "bottom": 212,
+          "width": 98.5,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 722,
+        "width": 568,
+        "height": 650
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 224,
+        "width": 532,
+        "height": 64
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 329.4,
+          "right": 625.5,
+          "top": 172,
+          "bottom": 212,
+          "width": 296.2,
+          "height": 40
+        },
+        {
+          "left": 637.5,
+          "right": 736,
+          "top": 172,
+          "bottom": 212,
+          "width": 98.5,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 722,
+        "width": 568,
+        "height": 650
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 996,
+        "width": 568,
+        "height": 924
+      },
+      "dialog": {
+        "left": 59,
+        "right": 709,
+        "top": 552,
+        "bottom": 892,
+        "width": 650,
+        "height": 340
+      },
+      "dialogScroll": {
+        "clientHeight": 340,
+        "scrollHeight": 340,
+        "clientWidth": 650,
+        "scrollWidth": 650
+      },
+      "footerButtons": [
+        {
+          "left": 470.4,
+          "right": 562.9,
+          "top": 830,
+          "bottom": 874,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 572.9,
+          "right": 688,
+          "top": 830,
+          "bottom": 874,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 218,
+        "right": 750,
+        "top": 160,
+        "bottom": 234,
+        "width": 532,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 232,
+          "right": 622,
+          "top": 172,
+          "bottom": 222,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 654.2,
+          "right": 736,
+          "top": 177,
+          "bottom": 217,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 996,
+        "width": 568,
+        "height": 924
+      },
+      "dialog": {
+        "left": 44,
+        "right": 724,
+        "top": 319.1,
+        "bottom": 892,
+        "width": 680,
+        "height": 572.9
+      },
+      "dialogScroll": {
+        "clientHeight": 573,
+        "scrollHeight": 573,
+        "clientWidth": 680,
+        "scrollWidth": 680
+      },
+      "footerButtons": [
+        {
+          "left": 469.7,
+          "right": 548.7,
+          "top": 828,
+          "bottom": 872,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 558.7,
+          "right": 703,
+          "top": 826,
+          "bottom": 874,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 768,
+      "viewportHeight": 900,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 200,
+        "right": 768,
+        "top": 72,
+        "bottom": 529.1,
+        "width": 568,
+        "height": 457.1
+      },
+      "dialog": {
+        "left": 44,
+        "right": 724,
+        "top": 338.6,
+        "bottom": 892,
+        "width": 680,
+        "height": 553.4
+      },
+      "dialogScroll": {
+        "clientHeight": 553,
+        "scrollHeight": 553,
+        "clientWidth": 680,
+        "scrollWidth": 680
+      },
+      "footerButtons": [
+        {
+          "left": 413.7,
+          "right": 506.1,
+          "top": 830,
+          "bottom": 874,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 516.1,
+          "right": 703,
+          "top": 830,
+          "bottom": 874,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 65,
+          "right": 703,
+          "top": 500.9,
+          "bottom": 555.9,
+          "width": 638,
+          "height": 55
+        },
+        {
+          "left": 65,
+          "right": 703,
+          "top": 564.9,
+          "bottom": 620,
+          "width": 638,
+          "height": 55
+        },
+        {
+          "left": 65,
+          "right": 703,
+          "top": 629,
+          "bottom": 684,
+          "width": 638,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 0,
+      "mainBottomPadding": 18,
+      "problems": []
+    },
+    {
+      "state": "home-all",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 793,
+        "width": 1128,
+        "height": 721
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "home-picker",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoTodos os espaços",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 793,
+        "width": 1128,
+        "height": 721
+      },
+      "dialog": {
+        "left": 423,
+        "right": 943,
+        "top": 117.5,
+        "bottom": 650.4,
+        "width": 520,
+        "height": 532.9
+      },
+      "dialogScroll": {
+        "clientHeight": 533,
+        "scrollHeight": 533,
+        "clientWidth": 520,
+        "scrollWidth": 520
+      },
+      "footerButtons": [
+        {
+          "left": 738.2,
+          "right": 922,
+          "top": 584.4,
+          "bottom": 632.4,
+          "width": 183.8,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "home-adi",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 727,
+        "width": 1128,
+        "height": 655
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "home-iptv",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoIPTV",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 727,
+        "width": 1128,
+        "height": 655
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "sales-adi",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 228,
+        "width": 1084,
+        "height": 64
+      },
+      "contextValue": "business_adi-festa",
+      "contextControls": [
+        {
+          "left": 371.4,
+          "right": 711.4,
+          "top": 176,
+          "bottom": 216,
+          "width": 340,
+          "height": 40
+        },
+        {
+          "left": 1231.5,
+          "right": 1330,
+          "top": 176,
+          "bottom": 216,
+          "width": 98.5,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 571,
+        "width": 1128,
+        "height": 499
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "sales-iptv",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 228,
+        "width": 1084,
+        "height": 64
+      },
+      "contextValue": "76dea1f8-22de-472f-9b53-0fd608c5cd54",
+      "contextControls": [
+        {
+          "left": 371.4,
+          "right": 711.4,
+          "top": 176,
+          "bottom": 216,
+          "width": 340,
+          "height": 40
+        },
+        {
+          "left": 1231.5,
+          "right": 1330,
+          "top": 176,
+          "bottom": 216,
+          "width": 98.5,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 571,
+        "width": 1128,
+        "height": 499
+      },
+      "dialog": null,
+      "dialogScroll": null,
+      "footerButtons": [],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 2,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "goal-adi",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 727,
+        "width": 1128,
+        "height": 655
+      },
+      "dialog": {
+        "left": 358,
+        "right": 1008,
+        "top": 214,
+        "bottom": 554,
+        "width": 650,
+        "height": 340
+      },
+      "dialogScroll": {
+        "clientHeight": 340,
+        "scrollHeight": 340,
+        "clientWidth": 650,
+        "scrollWidth": 650
+      },
+      "footerButtons": [
+        {
+          "left": 769.4,
+          "right": 861.9,
+          "top": 492,
+          "bottom": 536,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 871.9,
+          "right": 987,
+          "top": 492,
+          "bottom": 536,
+          "width": 115.1,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "manager",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": {
+        "left": 260,
+        "right": 1344,
+        "top": 164,
+        "bottom": 238,
+        "width": 1084,
+        "height": 74
+      },
+      "contextValue": "EspaçoAdi Festa",
+      "contextControls": [
+        {
+          "left": 274,
+          "right": 664,
+          "top": 176,
+          "bottom": 226,
+          "width": 390,
+          "height": 50
+        },
+        {
+          "left": 1248.2,
+          "right": 1330,
+          "top": 181,
+          "bottom": 221,
+          "width": 81.8,
+          "height": 40
+        }
+      ],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 727,
+        "width": 1128,
+        "height": 655
+      },
+      "dialog": {
+        "left": 343,
+        "right": 1023,
+        "top": 97.6,
+        "bottom": 670.4,
+        "width": 680,
+        "height": 572.9
+      },
+      "dialogScroll": {
+        "clientHeight": 573,
+        "scrollHeight": 573,
+        "clientWidth": 680,
+        "scrollWidth": 680
+      },
+      "footerButtons": [
+        {
+          "left": 768.7,
+          "right": 847.7,
+          "top": 606.4,
+          "bottom": 650.4,
+          "width": 79,
+          "height": 44
+        },
+        {
+          "left": 857.7,
+          "right": 1002,
+          "top": 604.4,
+          "bottom": 652.4,
+          "width": 144.3,
+          "height": 48
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [],
+      "managerRows": 4,
+      "productCount": 0,
+      "availability": null,
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    },
+    {
+      "state": "availability",
+      "width": 1366,
+      "viewportHeight": 768,
+      "horizontalOverflow": 0,
+      "context": null,
+      "contextValue": null,
+      "contextControls": [],
+      "main": {
+        "left": 238,
+        "right": 1366,
+        "top": 72,
+        "bottom": 537.1,
+        "width": 1128,
+        "height": 465.1
+      },
+      "dialog": {
+        "left": 343,
+        "right": 1023,
+        "top": 107.3,
+        "bottom": 660.7,
+        "width": 680,
+        "height": 553.4
+      },
+      "dialogScroll": {
+        "clientHeight": 553,
+        "scrollHeight": 553,
+        "clientWidth": 680,
+        "scrollWidth": 680
+      },
+      "footerButtons": [
+        {
+          "left": 712.7,
+          "right": 805.1,
+          "top": 598.7,
+          "bottom": 642.7,
+          "width": 92.5,
+          "height": 44
+        },
+        {
+          "left": 815.1,
+          "right": 1002,
+          "top": 598.7,
+          "bottom": 642.7,
+          "width": 186.9,
+          "height": 44
+        }
+      ],
+      "undersized": [],
+      "clippedValues": [],
+      "modeLabels": [
+        {
+          "left": 364,
+          "right": 1002,
+          "top": 269.6,
+          "bottom": 324.6,
+          "width": 638,
+          "height": 55
+        },
+        {
+          "left": 364,
+          "right": 1002,
+          "top": 333.6,
+          "bottom": 388.7,
+          "width": 638,
+          "height": 55
+        },
+        {
+          "left": 364,
+          "right": 1002,
+          "top": 397.7,
+          "bottom": 452.7,
+          "width": 638,
+          "height": 55
+        }
+      ],
+      "managerRows": 0,
+      "productCount": 0,
+      "availability": {
+        "radios": 3,
+        "spaces": 3,
+        "checked": 2,
+        "checksVisible": true,
+        "singleVisible": false
+      },
+      "navHeight": 0,
+      "mainBottomPadding": 22,
+      "problems": []
+    }
+  ]
+}

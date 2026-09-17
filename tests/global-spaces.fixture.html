@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>QA visual — Espaços VECONI V1</title>
+  <title>QA visual — Espaços VECONI V143</title>
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/visual.css">
   <link rel="stylesheet" href="/css/home-mobile.css">
@@ -17,7 +17,7 @@
 </head>
 <body>
   <div class="qa-layout">
-    <aside class="qa-sidebar"><div class="qa-brand"><span>V</span><div><b>Adi Festa</b><small>Gestão integrada</small></div></div><nav class="qa-nav"><span class="active"><i data-lucide="layout-dashboard"></i> Início</span><span><i data-lucide="shopping-bag"></i> Vender</span><span><i data-lucide="users"></i> Clientes</span><span><i data-lucide="package"></i> Produtos</span><span><i data-lucide="wallet-cards"></i> Financeiro</span></nav><footer>Ambiente visual · V139</footer></aside>
+    <aside class="qa-sidebar"><div class="qa-brand"><span>V</span><div><b>Adi Festa</b><small>Gestão integrada</small></div></div><nav class="qa-nav"><span class="active"><i data-lucide="layout-dashboard"></i> Início</span><span><i data-lucide="shopping-bag"></i> Vender</span><span><i data-lucide="users"></i> Clientes</span><span><i data-lucide="package"></i> Produtos</span><span><i data-lucide="wallet-cards"></i> Financeiro</span></nav><footer>Ambiente visual · V143</footer></aside>
     <div class="qa-shell">
       <header class="qa-topbar"><button class="qa-menu" type="button" aria-label="Abrir menu"><i data-lucide="menu"></i></button><div class="qa-title"><h1 data-qa-title>Início</h1><p>terça-feira, 15 de setembro</p></div><span class="qa-cloud">Sincronizado</span><span class="qa-avatar">M</span></header>
       <main class="qa-main" id="app"></main>
@@ -53,7 +53,7 @@
     SpaceContext.setSpaces(spaces,{loaded:true});
     SpaceContext.setAdapter({async create(){},async update(){}});
     const stateSpace=fixtureState.includes('iptv')?ids.iptv:ids.adi;
-    if(fixtureState==='home-all')SpaceContext.selectHome(SpaceContext.ALL_SPACES);
+    if(fixtureState==='home-all'||fixtureState==='home-picker')SpaceContext.selectHome(SpaceContext.ALL_SPACES);
     else if(fixtureState.startsWith('home')||fixtureState.startsWith('goal'))SpaceContext.selectHome(stateSpace);
     else if(fixtureState.startsWith('sales'))SpaceContext.selectSales(stateSpace);
     const money=value=>Number(value).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -65,7 +65,7 @@
     function renderSales(){const spaceId=SpaceContext.salesId(),available=products.filter(product=>SpaceEngine.productAllowsSpace(product,spaceId)),space=SpaceContext.selectionLabel('sales');return `<section class="qa-page qa-sales" data-qa-page="sales"><header class="qa-page-heading"><div><h2>Nova venda</h2><p>Catálogo e venda vinculados ao espaço escolhido.</p></div><small>Caixa aberto</small></header>${SpaceContext.renderBar('sales')}<section class="qa-context-summary">${icon('shield-check')}<span><b>Venda vinculada a ${space}</b><small>O espaço será gravado junto com a venda.</small></span></section><section class="qa-sale-layout"><article class="qa-catalog"><header><h3>Produtos disponíveis</h3><span>${available.length} itens neste espaço</span></header><div class="qa-product-grid">${available.map(product=>`<button class="qa-product" type="button">${icon(product.itemKind==='service'?'wifi':'package')}<b>${product.nome}</b><small>${money(product.preco)}</small></button>`).join('')}</div></article><aside class="qa-cart"><header><h3>Resumo</h3><span class="badge badge-paid">${space}</span></header><div class="qa-cart-row"><span><b>${available[0].nome}</b><small>1 unidade</small></span><strong>${money(available[0].preco)}</strong></div><div class="qa-total"><span>Total</span><strong>${money(available[0].preco)}</strong></div><button class="qa-finish" type="button">Continuar venda</button></aside></section></section>`}
     function renderAvailability(){const product={spaceAccessMode:'selected_spaces',allowedSpaceIds:[ids.adi,ids.iptv],defaultSpaceId:ids.adi};document.querySelector('#app').innerHTML=`<section class="qa-page qa-product-editor" data-qa-page="availability"><header><h2>Cadastro de produto</h2><p>Defina onde o item ficará disponível sem duplicá-lo.</p></header><article class="qa-editor-card"><div class="field"><label>Nome</label><input value="Kit festa completo" readonly></div>${SpaceContext.availabilityFields(product)}</article></section>`;document.querySelector('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box space-form-modal qa-availability-modal"><header class="modal-head"><div><small>Catálogo por espaço</small><h3>Disponibilidade do item</h3></div><button class="icon-btn" type="button" data-space-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p>O produto continua único e mantém o mesmo histórico. Escolha apenas onde ele aparece para vender.</p>${SpaceContext.availabilityFields(product)}</div><footer class="modal-foot"><button class="btn btn-light" type="button">Cancelar</button><button class="btn btn-primary" type="button">Salvar disponibilidade</button></footer></section></div>`;SpaceContext.bindProductAvailability(document)}
     function activateNav(kind){document.querySelectorAll('[data-nav]').forEach(item=>item.classList.toggle('active',item.dataset.nav===kind));document.querySelector('[data-qa-title]').textContent=kind==='sales'?'Vender':fixtureState==='availability'?'Produto':'Início'}
-    if(fixtureState==='availability'){renderAvailability();activateNav('home')}else if(fixtureState.startsWith('sales')){document.querySelector('#app').innerHTML=renderSales();activateNav('sales')}else{document.querySelector('#app').innerHTML=renderHome();activateNav('home');SpaceContext.bind(document.querySelector('#app'));if(fixtureState==='goal-adi')SpaceContext.openGoalEditor();if(fixtureState==='manager')SpaceContext.openManager()}
+    if(fixtureState==='availability'){renderAvailability();activateNav('home')}else if(fixtureState.startsWith('sales')){document.querySelector('#app').innerHTML=renderSales();activateNav('sales')}else{document.querySelector('#app').innerHTML=renderHome();activateNav('home');SpaceContext.bind(document.querySelector('#app'));if(fixtureState==='home-picker')SpaceContext.openPicker('home');if(fixtureState==='goal-adi')SpaceContext.openGoalEditor();if(fixtureState==='manager')SpaceContext.openManager()}
     SpaceContext.bind(document);
     lucide.createIcons();
     requestAnimationFrame(()=>requestAnimationFrame(()=>{document.body.dataset.fixtureReady='true';window.__globalSpacesFixture={ready:true,state:fixtureState,ids,productCount:document.querySelectorAll('.qa-product').length}}));

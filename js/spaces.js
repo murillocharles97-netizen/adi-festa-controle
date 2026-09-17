@@ -136,6 +136,12 @@
   const recordBelongsTo = (record, selectionId) =>
     selectionId === ALL_SPACES || resolveSaleSpaceId(record) === String(selectionId || "");
   const typeLabel = (type) => ({ unit: "Unidade / filial", operation: "Espaço / operação", personal: "Pessoal", other: "Outro" })[type] || "Outro";
+  const spaceIcon = (space = {}) => ({
+    unit: "store",
+    operation: "briefcase-business",
+    personal: "home",
+    other: "wallet-cards",
+  })[space.type] || String(space.icon || "map-pin");
 
   const contextKey = (kind) => `veconi:space-context:v1:${state.uid || "anonymous"}:${state.businessId || "unknown"}:${kind}`;
   const spacesKey = () => `veconi:spaces:v1:${state.uid || "anonymous"}:${state.businessId || "unknown"}`;
@@ -251,13 +257,40 @@
   function renderBar(kind = "home") {
     ensureContext();
     const isHome = kind === "home", spaces = isHome ? homeSpaces() : salesSpaces(), selected = isHome ? state.homeId : state.salesId,
-      showManagement = canManage(),
-      label = isHome ? "Espaço" : "Espaço atual",
-      managementIcon = isHome ? "sliders-horizontal" : "settings-2",
-      managementLabel = isHome ? "Filtros" : "Gerenciar";
+      showManagement = canManage(), label = isHome ? "Espaço" : "Espaço atual";
+    if (isHome) {
+      const current = selectedHome(), icon = current ? spaceIcon(current) : "layers-3";
+      return `<section class="space-context-bar is-home" data-space-context="home"><button class="space-selector-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Escolher espaço. Selecionado: ${esc(selectionLabel("home"))}"><span class="space-selector-icon"><i data-lucide="${icon}"></i></span><span class="space-selector-copy"><small>${label}</small><strong>${esc(selectionLabel("home"))}</strong></span><i class="space-selector-chevron" data-lucide="chevron-down"></i></button><button class="space-filter-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Filtrar a Home por espaço"><i data-lucide="sliders-horizontal"></i><span>Filtros</span></button></section>`;
+    }
     if (!isHome && spaces.length === 1)
       return `<section class="space-context-bar is-single" data-space-context="sales"><span><i data-lucide="map-pin"></i>${label}</span><strong>${esc(spaces[0].name)}</strong>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i></button>' : ""}</section>`;
-    return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="${isHome ? "layers-3" : "map-pin"}"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${isHome ? `<option value="${ALL_SPACES}" ${selected === ALL_SPACES ? "selected" : ""}>Todos os espaços</option>` : ""}${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? `<button type="button" data-space-manage aria-label="${managementLabel}"><i data-lucide="${managementIcon}"></i><span>${managementLabel}</span></button>` : ""}</section>`;
+    return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="map-pin"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i><span>Gerenciar</span></button>' : ""}</section>`;
+  }
+
+  function openPicker(kind = "home") {
+    ensureContext();
+    if (kind !== "home") return;
+    const root = document.querySelector("#modal"), spaces = homeSpaces(), selected = state.homeId,
+      row = (id, name, description, icon) => {
+        const active = selected === id;
+        return `<button class="space-picker-option ${active ? "is-selected" : ""}" type="button" data-space-choice="${esc(id)}" role="radio" aria-checked="${active}"><span class="space-picker-option-icon"><i data-lucide="${icon}"></i></span><span><b>${esc(name)}</b><small>${esc(description)}</small></span><i class="space-picker-check" data-lucide="${active ? "check" : "circle"}"></i></button>`;
+      };
+    root.innerHTML = `<div class="modal-bg space-picker-backdrop"><section class="modal-box space-picker-modal" role="dialog" aria-modal="true" aria-labelledby="space-picker-title"><header class="modal-head"><div><h3 id="space-picker-title">Escolher espaço</h3><p>Veja os dados de uma operação específica ou de todas juntas.</p></div><button class="icon-btn" type="button" data-space-picker-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body space-picker-list" role="radiogroup" aria-label="Espaços disponíveis">${row(ALL_SPACES, "Todos os espaços", "Visão consolidada", "layers-3")}${spaces.map((space) => row(space.id, space.name, typeLabel(space.type), spaceIcon(space))).join("")}</div>${canManage() ? '<footer class="modal-foot"><button class="btn btn-light space-picker-manage" type="button" data-space-picker-manage><i data-lucide="building-2"></i> Gerenciar espaços</button></footer>' : ""}</section></div>`;
+    const close = () => { root.innerHTML = ""; };
+    root.querySelectorAll("[data-space-picker-close]").forEach((button) => button.onclick = close);
+    root.querySelector(".space-picker-backdrop").onclick = (event) => { if (event.target === event.currentTarget) close(); };
+    root.querySelectorAll("[data-space-choice]").forEach((button) => button.onclick = () => {
+      try {
+        selectHome(button.dataset.spaceChoice);
+        close();
+        window.AppPageRuntime?.mount?.(window.Router?.atual?.() || "inicio");
+      } catch (error) {
+        window.Utils?.toast?.(error.message, true);
+      }
+    });
+    root.querySelector("[data-space-picker-manage]")?.addEventListener("click", openManager);
+    window.lucide?.createIcons();
+    queueMicrotask(() => root.querySelector('.space-picker-option[aria-checked="true"]')?.focus());
   }
   function contextualData(db, kind = "home") {
     ensureContext();
@@ -404,6 +437,11 @@
     }, fallback);
   }
   function bind(root = document) {
+    root.querySelectorAll("[data-space-picker]").forEach((button) => {
+      if (button.dataset.bound) return;
+      button.dataset.bound = "true";
+      button.onclick = () => openPicker(button.dataset.spacePicker);
+    });
     root.querySelectorAll("[data-space-select]").forEach((select) => {
       if (select.dataset.bound) return;
       select.dataset.bound = "true";
@@ -475,6 +513,7 @@
     goalFor,
     saveGoal,
     openGoalEditor,
+    openPicker,
     openManager,
     availabilityFields,
     bindProductAvailability,
