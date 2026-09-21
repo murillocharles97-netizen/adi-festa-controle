@@ -1,5 +1,25 @@
 window.Vendas = (() => {
   const listar = () => DB.carregar().vendas;
+  const cents = (value) => Math.round(Number(value || 0) * 100);
+  const getCurrentCustomerBalance = (customerId, data = DB.carregar()) => {
+    const client = data.clientes.find((item) => item.id === customerId);
+    if (!client) throw Error("Cliente não encontrado para a venda fiado.");
+    const clientTime = Math.max(
+      Date.parse(client.updatedAt || "") || 0,
+      Date.parse(client.atualizadoEm || "") || 0,
+    );
+    const latestSale = (data.vendas || [])
+      .filter((sale) => sale.clienteId === customerId && !sale.deletedAt && sale.active !== false &&
+        (sale.formaPagamento === "fiado" || sale.status === "fiado") &&
+        Number.isFinite(Number(sale.saldoAtual)))
+      .sort((left, right) => String(right.data || right.createdAt || "").localeCompare(String(left.data || left.createdAt || "")))[0];
+    const saleTime = Date.parse(latestSale?.data || latestSale?.createdAt || "") || 0;
+    if (latestSale && saleTime > clientTime &&
+      (cents(latestSale.saldoAtual) !== cents(client.saldo) ||
+        Number(latestSale.financialVersionAnterior || 0) + 1 > Number(client.financialVersion || 0)))
+      throw Error("O saldo local voltou para antes da última venda fiado. Compare este aparelho com a nuvem antes de outra venda; a venda anterior foi preservada.");
+    return { saldo: Number(client.saldo || 0), financialVersion: Math.max(0, Number(client.financialVersion || 0)) };
+  };
   const requiredSalesSpace = (requestedId = "") => {
     if (window.SpaceContext?.requireSalesSpace)
       return window.SpaceContext.requireSalesSpace(requestedId);
@@ -52,6 +72,7 @@ window.Vendas = (() => {
         String(existente.spaceId) !== explicitSpaceId
       )
         throw Error("Esta operação já pertence a outro espaço.");
+      window.SyncFirebase?.assertSaleTracked?.(existente);
       return existente;
     }
     const currentData = DB.carregar(),
@@ -59,6 +80,11 @@ window.Vendas = (() => {
       requestedFinancialSpaceId = String(d.financialSpaceId || "").trim(),
       financialSpaceId = spaceId,
       hasRecurringItem = (d.itens || []).some((item) => item.productType === "recurring" || item.recurringActivation || currentData.produtos.some((product) => product.id === item.produtoId && product.productType === "recurring"));
+    if ((window.SyncFirebase || window.FirebaseSession?.user) &&
+      (!window.SyncFirebase?.isReady?.() || DB.__firebaseSyncWrapped !== true))
+      throw Error("A sincronização ainda não está pronta. Aguarde e tente a venda novamente.");
+    const customerBalance = d.status === "fiado"
+      ? getCurrentCustomerBalance(d.clienteId, currentData) : null;
     if (requestedFinancialSpaceId && requestedFinancialSpaceId !== spaceId)
       throw Error("O espaço financeiro legado deve corresponder ao espaço da venda.");
     const unavailableItem = (d.itens || []).find((item) => {
@@ -171,10 +197,9 @@ window.Vendas = (() => {
         descontoTotal = subtotalOriginal - valorFinal,
         custoTotal = itens.reduce((s, i) => s + i.custoTotal, 0),
         lucro = valorFinal - custoTotal,
-        saldoAnterior = cliente ? Number(cliente.saldo || 0) : 0,
-        financialVersionAnterior = cliente
-          ? Math.max(0, Number(cliente.financialVersion || 0))
-          : 0,
+        saldoAnterior = customerBalance?.saldo ?? (cliente ? Number(cliente.saldo || 0) : 0),
+        financialVersionAnterior = customerBalance?.financialVersion ??
+          (cliente ? Math.max(0, Number(cliente.financialVersion || 0)) : 0),
         saldoAtual =
           d.status === "fiado" ? saldoAnterior - valorFinal : saldoAnterior;
       if (cliente && d.status === "fiado" && cliente.legacyBalance === undefined) {
@@ -345,6 +370,7 @@ window.Vendas = (() => {
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, nextData);
     });
+    window.SyncFirebase?.assertSaleTracked?.(criada);
     return criada;
   };
   const ultima = () => {
@@ -489,6 +515,7 @@ window.Vendas = (() => {
   return {
     listar,
     registrar,
+    getCurrentCustomerBalance,
     ultima,
     podeDesfazer,
     desfazerUltima,

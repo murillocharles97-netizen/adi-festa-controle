@@ -290,6 +290,37 @@ test('venda fiado aplica saldo e movimento uma única vez em retries',async()=>{
   assert.equal((await getDocs(collection(db,'businesses',businessA,'sales'))).docs.filter(item=>item.id===saleId).length,1);
 });
 
+test('duas vendas consecutivas em sessões distintas mantêm saldo, versão e marcadores idempotentes',async()=>{
+  const mobile=env.authenticatedContext('owner-a').firestore(),desktop=env.authenticatedContext('manager-crm').firestore(),clientId='consecutive-credit-client',
+    clientRef=doc(mobile,'businesses',businessA,'clients',clientId);
+  await assertSucceeds(setDoc(clientRef,{id:clientId,businessId:businessA,ownerId:'owner-a',nome:'Cliente consecutivo',saldo:-312.84,financialVersion:10,active:true,updatedAt:new Date()}));
+  const apply=(database,saleId,operationId,amount,ownerId)=>runTransaction(database,async transaction=>{
+    const saleRef=doc(database,'businesses',businessA,'sales',saleId),effectId=`credit_sale:${saleId}`,
+      effectRef=doc(database,'businesses',businessA,'balanceEvents',effectId),
+      markerRef=doc(database,'businesses',businessA,'processedOperations',operationId),
+      currentRef=doc(database,'businesses',businessA,'clients',clientId);
+    if((await transaction.get(markerRef)).exists())return;
+    const client=(await transaction.get(currentRef)).data(),effect=await transaction.get(effectRef);
+    if(effect.exists())return;
+    const before=Number(client.saldo),after=Math.round((before-amount)*100)/100,version=Number(client.financialVersion||0);
+    transaction.set(saleRef,{id:saleId,operationId,businessId:businessA,ownerId,spaceId:salesSpaceA,financialSpaceId:salesSpaceA,clienteId:clientId,valorFinal:amount,status:'fiado',saldoAnterior:before,saldoAtual:after,financialVersionAnterior:version,data:new Date(),financialAppliedAt:new Date(),financialOperationId:effectId,updatedAt:new Date(),schemaVersion:3},{merge:true});
+    transaction.set(effectRef,{id:effectId,operationId,idempotencyKey:effectId,businessId:businessA,ownerId,customerId:clientId,clientId,type:'credit_sale',direction:'debit',amount,balanceDelta:-amount,status:'applied',createdAt:new Date(),updatedAt:new Date(),schemaVersion:3});
+    transaction.set(currentRef,{saldo:after,financialVersion:version+1,updatedAt:new Date()},{merge:true});
+    transaction.set(markerRef,{id:operationId,idempotencyKey:operationId,businessId:businessA,ownerId,status:'processed',eventKind:'sale',processedAt:new Date(),createdAtLocal:new Date(),schemaVersion:3});
+  });
+  await assertSucceeds(apply(mobile,'consecutive-14','consecutive-op-14',14,'owner-a'));
+  await assertSucceeds(apply(desktop,'consecutive-25','consecutive-op-25',25,'manager-crm'));
+  await assertSucceeds(apply(mobile,'consecutive-14','consecutive-op-14',14,'owner-a'));
+  await assertSucceeds(apply(desktop,'consecutive-25','consecutive-op-25',25,'manager-crm'));
+  const final=await assertSucceeds(getDoc(clientRef));
+  assert.equal(final.data().saldo,-351.84);
+  assert.equal(final.data().financialVersion,12);
+  const second=await assertSucceeds(getDoc(doc(desktop,'businesses',businessA,'sales','consecutive-25')));
+  assert.equal(second.data().saldoAnterior,-326.84);
+  assert.equal(second.data().saldoAtual,-351.84);
+  assert.equal(second.data().financialVersionAnterior,11);
+});
+
 test('reparação de venda existente cria só o efeito ausente e é idempotente',async()=>{
   const db=env.authenticatedContext('owner-a').firestore(),clientId='repaired-client',saleId='orphan-credit-sale',effectId=`credit_sale:${saleId}`,reconciliationId='balance-reconcile:test',
     clientRef=doc(db,'businesses',businessA,'clients',clientId),saleRef=doc(db,'businesses',businessA,'sales',saleId),

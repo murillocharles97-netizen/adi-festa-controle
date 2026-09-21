@@ -1,6 +1,6 @@
 'use strict';
 
-// Diagnóstico direcionado, somente leitura. Nunca imprime token nem dados de contato.
+// Diagnóstico de cliente, somente leitura. Nunca imprime token nem dados de contato.
 const { createRequire } = require('node:module');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
@@ -8,6 +8,8 @@ const path = require('node:path');
 const projectId = 'adi-festa-controle';
 const customerName = process.argv.slice(2).find((argument) => !argument.startsWith('--')) || 'Anderson Chilli';
 const auditWholeBusiness = process.argv.includes('--business-wide');
+const requestedAmount = Number(process.argv.find((argument) => argument.startsWith('--amount='))?.split('=')[1] || 13);
+const since = process.argv.find((argument) => argument.startsWith('--since='))?.split('=')[1] || '';
 const globalRoot = (process.platform === 'win32'
   ? execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm root -g'], { encoding: 'utf8' })
   : execFileSync('npm', ['root', '-g'], { encoding: 'utf8' })).trim();
@@ -131,7 +133,7 @@ async function main() {
   const clients = (await Promise.all(businesses.map((business) => scoped(business.id, 'clients', equal('nome', customerName))))).flat();
   const candidateSales = [];
   for (const business of businesses) {
-    for (const [field, filter] of [['valorFinal', equalNumber('valorFinal', 13)], ['clienteNome', equal('clienteNome', customerName)]]) {
+    for (const [field, filter] of [['valorFinal', equalNumber('valorFinal', requestedAmount)], ['clienteNome', equal('clienteNome', customerName)]]) {
       const rows = await scoped(business.id, 'sales', filter);
       for (const row of rows) candidateSales.push({ businessId: business.id, matchedField: field, row });
     }
@@ -181,15 +183,23 @@ async function main() {
     .map(({ businessId, row }) => [`${businessId}/${row.id}`, { businessId, id: row.id,
       clienteId: row.clienteId || row.customerId || null, valorFinal: row.valorFinal ?? null,
       status: row.status || null, operationId: row.operationId || null,
+      financialVersionAnterior: row.financialVersionAnterior ?? null,
+      sourceDeviceId: row.sourceDeviceId || null, createdBy: row.createdBy || null,
       data: row.data || row.createdAt || null, financialAppliedAt: row.financialAppliedAt || null }])).values()];
+  const recentAmountSales = since ? candidateSales.filter(({ matchedField, row }) =>
+    matchedField === 'valorFinal' && String(row.data || row.createdAt || '') >= since)
+    .map(({ businessId, row }) => ({ businessId, id: row.id,
+      clienteId: row.clienteId || row.customerId || null,
+      operationId: row.operationId || null, data: row.data || row.createdAt || null })) : null;
   const businessAudit = auditWholeBusiness ? await businessWideBalanceAudit('adi-festa') : null;
-  process.stdout.write(`${JSON.stringify({ mode: 'read-only', projectId, customerName,
+  process.stdout.write(`${JSON.stringify({ mode: 'read-only', projectId, customerName, requestedAmount,
     businessesChecked: businesses.length,
     matchingSales,
     salesAtRequestedAmountInOtherCustomers: [...new Set(candidateSales
       .filter(({ matchedField }) => matchedField === 'valorFinal')
-      .map(({ businessId, row }) => `${businessId}/${row.id}`))].length - matchingSales.filter((row) => Number(row.valorFinal) === 13).length,
-    matches: report, ...(businessAudit ? { businessAudit } : {}) }, null, 2)}\n`);
+      .map(({ businessId, row }) => `${businessId}/${row.id}`))].length - matchingSales.filter((row) => Number(row.valorFinal) === requestedAmount).length,
+    matches: report, ...(recentAmountSales ? { recentAmountSales } : {}),
+    ...(businessAudit ? { businessAudit } : {}) }, null, 2)}\n`);
 }
 
 main().catch((error) => { console.error(`[balance-audit] ${error.message}`); process.exitCode = 1; });
