@@ -339,8 +339,9 @@ window.Vendas = (() => {
       criada.campaignUpdates =
         window.Campanhas?.aplicarVendaNoBanco(db, criada) || [];
     })(nextData);
-    if (typeof DB.salvar === "function") DB.salvar(nextData);
-    else DB.alterar((db) => {
+    // A validação inteira acontece na cópia. A publicação passa por alterar,
+    // ponto único que captura o delta para a fila transacional do Firebase.
+    DB.alterar((db) => {
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, nextData);
     });
