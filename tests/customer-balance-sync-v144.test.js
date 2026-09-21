@@ -101,6 +101,30 @@ test('Anderson: venda fiado de R$ 13 entra no capturador com saldo -12 → -25 e
   assert.equal(effectContext.effect.id, 'credit_sale:sale-13');
 });
 
+test('Nat: capturador real enfileira duas vendas consecutivas sem reutilizar saldo ou versão', () => {
+  const { context, data, queue, counts } = saleHarness();
+  data.clientes[0].saldo = -312.84;
+  data.clientes[0].financialVersion = 10;
+  const sale = (id, amount) => context.Vendas.registrar({ id, operationId: `op-${id}`,
+    spaceId: 'loja', clienteId: 'anderson', status: 'fiado',
+    itens: [{ produtoId: 'item', nome: 'Produto', quantidade: 1,
+      precoOriginal: amount, precoFinalUnitario: amount }] });
+  const first = sale('nat-14', 14);
+  const second = sale('nat-25', 25);
+  assert.equal(first.saldoAtual, -326.84);
+  assert.equal(second.saldoAnterior, -326.84);
+  assert.equal(second.saldoAtual, -351.84);
+  assert.equal(second.financialVersionAnterior, 11);
+  assert.equal(data.clientes[0].financialVersion, 12);
+  assert.equal(queue.length, 2);
+  assert.deepEqual(queue.map((item) => item.eventKind), ['sale', 'sale']);
+  assert.deepEqual(queue.map((item) => item.writes.find((write) =>
+    write.entityType === 'clients').data.saldo), [-326.84, -351.84]);
+  assert.deepEqual(counts(), { directSave: 0, mutations: 2 });
+  assert.equal(sale('nat-25', 25).id, second.id);
+  assert.equal(queue.length, 2);
+});
+
 test('normalização local preserva financialVersion e metadados financeiros no reload', () => {
   const memory = new Map();
   const localStorage = {

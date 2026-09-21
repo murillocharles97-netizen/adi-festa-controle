@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   increment,
   runTransaction,
@@ -282,6 +283,16 @@ const roundedMoney = (value) => {
 };
 const financialVersionOf = (client = {}) =>
   Math.max(0, Number(client.financialVersion || 0));
+function canonicalCreditSaleData(saleData, effect, remoteClient, localClient = {}) {
+  const client = remoteClient || localClient,
+    balanceBefore = roundedMoney(client.saldo || 0);
+  return {
+    ...saleData,
+    saldoAnterior: balanceBefore,
+    saldoAtual: roundedMoney(balanceBefore + Number(effect.balanceDelta)),
+    financialVersionAnterior: financialVersionOf(client),
+  };
+}
 const sameFinancialMoney = (left, right) =>
   Math.abs(roundedMoney(left) - roundedMoney(right)) < 0.005;
 const evaluatePaymentConcurrency = (input) => {
@@ -1859,6 +1870,11 @@ async function commitQueueItem(item) {
       );
       return;
     }
+    const creditClientWrite = financialEffect?.type === "credit_sale"
+      ? writes.find((write) => write.entityType === "clients" &&
+        String(write.entityId) === String(financialEffect.customerId)) : null,
+      creditClientSnapshot = creditClientWrite
+        ? snapshots.get(`clients:${creditClientWrite.entityId}`) : null;
     for (const write of writes) {
       currentPath = `businesses/${businessId}/${write.entityType}/${write.entityId}`;
       const reference = doc(
@@ -1869,6 +1885,12 @@ async function commitQueueItem(item) {
         String(write.entityId),
       );
       let data = write.data;
+      if (financialEffect?.type === "credit_sale" &&
+        write.entityType === "sales" && write.operation === "create" &&
+        String(write.entityId) === String(financialEffect.sourceDocumentId))
+        data = canonicalCreditSaleData(data, financialEffect,
+          creditClientSnapshot?.exists() ? creditClientSnapshot.data() : null,
+          creditClientWrite?.before || {});
       if (
         transactional &&
         (write.before || write.entityType === "campaignProgress") &&
@@ -1893,6 +1915,8 @@ async function commitQueueItem(item) {
             merged[field] =
               Number(base[field] ?? write.before?.[field] ?? 0) +
               (Number(data[field]) - Number(write.before?.[field] ?? 0));
+        if (write.entityType === "clients" && Number.isFinite(merged.saldo))
+          merged.saldo = roundedMoney(merged.saldo);
         if (
           write.entityType === "clients" &&
           financialEffect &&
@@ -2226,6 +2250,7 @@ async function processSyncQueue(options = {}) {
       });
       try {
         const outcome = await commitQueueItem(live[position]);
+        markLocalCreditSaleConfirmed(live[position]);
         const after = readQueue().filter(
           (item) => item.queueId !== queued.queueId,
         );
@@ -2346,6 +2371,114 @@ function pendingIds(name) {
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
   return ids;
+}
+function markLocalCreditSaleConfirmed(item, confirmedAt = now()) {
+  const write = (item.payload?.writes || []).find((entry) =>
+    entry.entityType === "sales" && entry.operation === "create" &&
+    (entry.data?.formaPagamento === "fiado" || entry.data?.status === "fiado"));
+  if (!write || !originalAlter) return;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      const sale = (data.vendas || []).find((entry) => String(entry.id) === String(write.entityId));
+      if (!sale) return;
+      sale.financialAppliedAt = confirmedAt;
+      sale.financialOperationId = `credit_sale:${write.entityId}`;
+    });
+  } finally {
+    applyingCloud = false;
+  }
+}
+function assertSaleTracked(sale) {
+  if (sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") return;
+  if (sale.financialAppliedAt) return;
+  const writes = readQueue().filter((item) =>
+    String(item.operationId) === String(sale.operationId) ||
+    String(item.operationId).startsWith(`${sale.operationId}:`))
+    .flatMap((item) => item.payload?.writes || []);
+  const queued = writes.some((write) => write.entityType === "sales" &&
+      write.operation === "create" && String(write.entityId) === String(sale.id) &&
+      String(write.data?.operationId || "") === String(sale.operationId || "")) &&
+    writes.some((write) => write.entityType === "clients" &&
+      String(write.entityId) === String(sale.clienteId));
+  if (!queued) throw Error("A venda fiado ficou sem confirmação nem fila de sincronização. Ela foi preservada neste aparelho; exporte o diagnóstico antes de repetir.");
+}
+async function prepareCustomerForSale(customerId) {
+  const id = String(customerId || "");
+  if (!id || !currentUser || !DB.__firebaseSyncWrapped || readOnlyMode)
+    throw Error("A sincronização financeira não está pronta para esta venda.");
+  const localData = DB.carregar(),
+    localClient = (localData.clientes || []).find((entry) => String(entry.id) === id),
+    clientVersion = financialVersionOf(localClient || {}),
+    clientTime = Math.max(Date.parse(localClient?.updatedAt || "") || 0,
+      Date.parse(localClient?.atualizadoEm || "") || 0),
+    queue = readQueue(),
+    queuedSaleIds = new Set(queue.flatMap((item) => (item.payload?.writes || [])
+      .filter((write) => write.entityType === "sales")
+      .map((write) => String(write.entityId)))),
+    customerQueue = queue.filter((item) => (item.payload?.writes || []).some(
+      (write) => write.entityType === "clients" && String(write.entityId) === id,
+    )),
+    recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000,
+    recentSales = (localData.vendas || []).filter((sale) =>
+      String(sale.clienteId) === id && !sale.deletedAt && sale.active !== false &&
+      (sale.formaPagamento === "fiado" || sale.status === "fiado") &&
+      !sale.financialAppliedAt && !queuedSaleIds.has(String(sale.id)) &&
+      (Date.parse(sale.data || sale.createdAt || "") || 0) >= recentCutoff)
+      .sort((left, right) => String(right.data || right.createdAt || "")
+        .localeCompare(String(left.data || left.createdAt || ""))),
+    unconfirmed = recentSales.filter((sale, index) => index === 0 ||
+      Number(sale.financialVersionAnterior || 0) + 1 > clientVersion ||
+      (Date.parse(sale.data || sale.createdAt || "") || 0) > clientTime);
+  if (customerQueue.some((item) => item.status === "error"))
+    throw Error("Há uma venda anterior com erro de sincronização para este cliente. Revise a fila antes de outra venda fiado.");
+  if (!navigator.onLine) {
+    if (unconfirmed.length)
+      throw Error("Há venda fiado recente neste aparelho sem confirmação nem fila. Conecte-se e compare com a nuvem antes de outra venda.");
+    return { source: "local-offline" };
+  }
+  if (unconfirmed.length > 10)
+    throw Error("Há muitas vendas recentes sem confirmação neste aparelho. Exporte o diagnóstico antes de outra venda fiado.");
+  for (const localSale of unconfirmed) {
+    const remote = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id)));
+    const confirmed = remote.exists() ? cleanCloudItem({ id: remote.id, ...remote.data() }) : null;
+    if (!confirmed?.financialAppliedAt ||
+      String(confirmed.operationId || "") !== String(localSale.operationId || ""))
+      throw Error("Uma venda fiado recente existe somente neste aparelho ou não foi aplicada na nuvem. Compare e recupere a operação antes de outra venda.");
+    markLocalCreditSaleConfirmed({ payload: { writes: [{ entityType: "sales", operation: "create",
+      entityId: localSale.id, data: { formaPagamento: "fiado" } }] } }, confirmed.financialAppliedAt);
+  }
+  // Primeiro confirme operações deste aparelho. Enquanto houver pendências,
+  // a projeção local já inclui os deltas e não pode ser substituída pela nuvem.
+  if (pendingIds("clients").has(id)) await processSyncQueue({ force: true });
+  const pending = readQueue().filter((item) => (item.payload?.writes || []).some(
+    (write) => write.entityType === "clients" && String(write.entityId) === id,
+  ));
+  if (pending.some((item) => item.status === "error"))
+    throw Error("Há uma venda anterior com erro de sincronização para este cliente. Revise a fila antes de outra venda fiado.");
+  if (pending.length)
+    throw Error("A operação anterior deste cliente ainda está sincronizando. Aguarde a confirmação ou use o modo offline antes de outra venda fiado.");
+  // Leitura pontual do servidor: nunca varre a coleção de clientes no checkout.
+  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id));
+  if (!snapshot.exists()) throw Error("Cliente não encontrado na empresa atual da nuvem.");
+  applyCloudCollection("clients", [{ id, ...snapshot.data() }], { authoritative: true });
+  return { source: "server", financialVersion: financialVersionOf(snapshot.data()) };
+}
+async function confirmCreditSale(sale) {
+  if ((sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") || !navigator.onLine) return sale;
+  if (!currentUser || readOnlyMode)
+    throw Error("A sincronização financeira não está pronta para confirmar a venda.");
+  await processSyncQueue({ force: true });
+  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id)));
+  const confirmed = snapshot.exists() ? cleanCloudItem({ id: snapshot.id, ...snapshot.data() }) : null;
+  if (!confirmed?.financialAppliedAt ||
+    String(confirmed.operationId || "") !== String(sale.operationId || ""))
+    throw Error("Venda preservada neste aparelho, mas ainda sem confirmação financeira na nuvem. Não repita com outra operação; revise a sincronização.");
+  applyCloudCollection("sales", [confirmed], { authoritative: true });
+  const clientSnapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId)));
+  if (clientSnapshot.exists())
+    applyCloudCollection("clients", [{ id: sale.clienteId, ...clientSnapshot.data() }], { authoritative: true });
+  return { ...sale, ...confirmed, status: "fiado", formaPagamento: "fiado" };
 }
 function cleanCloudItem(item) {
   const clean = normalizeFirestoreData(item);
@@ -4787,6 +4920,9 @@ window.SyncFirebase = {
   describeResult: describeSyncResult,
   migrateQueueCompatibility: migrateScopedQueueCompatibility,
   processSyncQueue,
+  assertSaleTracked,
+  prepareCustomerForSale,
+  confirmCreditSale,
   synchronizeNow,
   syncAll: synchronizeNow,
   pushPendingOperations: processSyncQueue,

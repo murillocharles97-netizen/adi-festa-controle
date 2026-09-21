@@ -945,7 +945,6 @@ window.Checkout = (() => {
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint ? activeAttempt : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
-        client = clienteId ? clients().getById(clienteId) : null,
         proceed = async () => {
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           activeAttempt = attempt;
@@ -987,8 +986,14 @@ window.Checkout = (() => {
           }
           let sale;
           try {
+            if (status === "fiado")
+              await window.SyncFirebase?.prepareCustomerForSale?.(clienteId);
             traceSale("[SALE] local write started", { operationId: attempt.operationId });
             sale = Repositories.saleRepository().create(saleDraft);
+            if (status === "fiado" && navigator.onLine !== false)
+              sale = await window.SyncFirebase.confirmCreditSale(sale);
+            if (status === "fiado" && sale.status !== "fiado")
+              sale = { ...sale, status: "fiado", formaPagamento: "fiado" };
           } catch (error) {
             finishing = false;
             const message = error.message || "Não foi possível concluir a venda. Seu carrinho foi preservado.";
@@ -1007,9 +1012,10 @@ window.Checkout = (() => {
           activeAttempt = null;
           finishing = false;
           setSubmissionState("success", navigator.onLine === false ? "Venda concluída neste aparelho. Sincronização pendente." : "Venda concluída com sucesso.");
+          refreshClients();
           closeCartSurface({ immediate: true });
           traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId });
-          try { Recibos.mostrar(sale, client); }
+          try { Recibos.mostrar(sale, clienteId ? clients().getById(clienteId) : null); }
           catch { toast("Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.", true); }
         };
       const missing = Vendas.estoqueInsuficiente(cart);
