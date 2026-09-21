@@ -137,5 +137,6 @@ test("hotfix mantém tentativa idempotente, recuperável e nunca deixa finaliza�
   assert.match(checkout, /restoreDraft\(\)/);
   assert.match(checkout, /businessId,[\s\S]*spaceId,/);
   assert.match(sales, /const nextData =/);
-  assert.match(sales, /DB\.salvar\(nextData\)/);
+  assert.match(sales, /DB\.alterar\(\(db\) => \{/);
+  assert.doesNotMatch(sales, /DB\.salvar\(nextData\)/);
 });
