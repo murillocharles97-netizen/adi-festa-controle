@@ -24,7 +24,14 @@ window.Fiados = (() => {
     let pagamento;
     const operationId = String(options.operationId || Utils.uuid()),
       paymentMode = options.paymentMode === "total" ? "total" : "partial";
-    DB.alterar((db) => {
+    const existing = DB.carregar().pagamentos.find((entry) => String(entry.operationId || entry.id) === operationId);
+    if (existing) {
+      window.SyncFirebase?.assertPaymentTracked?.(existing);
+      return existing;
+    }
+    const before = DB.carregar(),
+      nextData = typeof structuredClone === "function" ? structuredClone(before) : JSON.parse(JSON.stringify(before));
+    ((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
       const debt = Math.abs(Math.min(0, Number(client.saldo || 0)));
@@ -58,6 +65,8 @@ window.Fiados = (() => {
       pagamento = {
         id: operationId,
         operationId,
+        idempotencyKey: operationId,
+        syncPipelineVersion: 2,
         businessId: DB.getBusinessId?.() || null,
         schemaVersion: 3,
         clienteId,
@@ -130,6 +139,14 @@ window.Fiados = (() => {
 
       db.pagamentos.push(pagamento);
       db.movimentacoes.push({ ...pagamento });
+    })(nextData);
+    if (window.SyncFirebase?.createPaymentOperation)
+      window.SyncFirebase.createPaymentOperation(before, nextData, pagamento);
+    else if (typeof document !== "undefined")
+      throw Error("O pipeline de recebimentos não está pronto. Nenhum pagamento foi salvo.");
+    else DB.alterar((db) => {
+      for (const key of Object.keys(db)) delete db[key];
+      Object.assign(db, nextData);
     });
     return pagamento;
   }

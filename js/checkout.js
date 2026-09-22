@@ -569,7 +569,7 @@ window.Checkout = (() => {
   function invalidateAttempt() { if (!finishing) activeAttempt = null; }
   function setSubmissionState(state, message = "") {
     const button = document.querySelector("#finish-sale"), feedback = document.querySelector("#sale-submit-feedback"),
-      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente' };
+      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente' };
     if (button) {
       button.dataset.saleState = state;
       button.disabled = state === "processing" || state === "success";
@@ -1011,7 +1011,10 @@ window.Checkout = (() => {
           clearDraft();
           activeAttempt = null;
           finishing = false;
-          setSubmissionState("success", navigator.onLine === false ? "Venda concluída neste aparelho. Sincronização pendente." : "Venda concluída com sucesso.");
+          const pendingSync = navigator.onLine === false || window.SyncFirebase?.isSalePending?.(sale);
+          setSubmissionState("success", pendingSync
+            ? "Venda salva no aparelho e aguardando sincronização."
+            : "Venda concluída com sucesso.");
           refreshClients();
           closeCartSurface({ immediate: true });
           traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId });

@@ -210,6 +210,8 @@ window.Vendas = (() => {
       criada = {
         id: d.id || Utils.uuid(),
         operationId,
+        idempotencyKey: operationId,
+        syncPipelineVersion: 2,
         clienteId: d.clienteId || null,
         clientId: d.clienteId || null,
         customerId: d.clienteId || null,
@@ -364,9 +366,13 @@ window.Vendas = (() => {
       criada.campaignUpdates =
         window.Campanhas?.aplicarVendaNoBanco(db, criada) || [];
     })(nextData);
-    // A validação inteira acontece na cópia. A publicação passa por alterar,
-    // ponto único que captura o delta para a fila transacional do Firebase.
-    DB.alterar((db) => {
+    // A operação canônica prepara a fila antes de publicar a projeção local.
+    // O fallback sem DOM existe apenas para os testes legados em VM.
+    if (window.SyncFirebase?.createSaleOperation)
+      window.SyncFirebase.createSaleOperation(currentData, nextData, criada);
+    else if (typeof document !== "undefined")
+      throw Error("O pipeline de vendas não está pronto. Nenhuma venda foi salva.");
+    else DB.alterar((db) => {
       for (const key of Object.keys(db)) delete db[key];
       Object.assign(db, nextData);
     });
