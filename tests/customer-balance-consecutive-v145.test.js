@@ -129,6 +129,7 @@ test('checkout atualiza pontualmente o cliente remoto, mas bloqueia venda online
     DB: { __firebaseSyncWrapped: true, carregar: () => ({ vendas: [] }) }, navigator: { onLine: true },
     pendingIds: () => new Set(queue.flatMap((item) => item.payload.writes.map((write) => write.entityId))),
     readQueue: () => queue,
+    readKnownOrphanIds: () => new Set(), isOrphanReviewed: () => false,
     processSyncQueue: async () => ({ sent: 0 }),
     getDocFromServer: async () => ({ exists: () => true, data: () => ({ saldo: -120, financialVersion: 11 }) }),
     doc: (...parts) => parts.join('/'), db: {}, activeBusinessId: () => 'adi-festa',
@@ -165,6 +166,7 @@ test('venda local recente fora da fila bloqueia novo fiado até confirmação id
     originalAlter: (mutator) => mutator(data), now: () => new Date().toISOString(),
     DB: { __firebaseSyncWrapped: true, carregar: () => data }, navigator: { onLine: true },
     readQueue: () => [], pendingIds: () => new Set(), processSyncQueue: async () => {},
+    readKnownOrphanIds: () => new Set(), isOrphanReviewed: () => false,
     getDocFromServer: async (path) => {
       if (path.endsWith('/sales/sale-a'))
         return { id: 'sale-a', exists: () => Boolean(remoteSale), data: () => remoteSale };
@@ -181,7 +183,7 @@ test('venda local recente fora da fila bloqueia novo fiado até confirmação id
   await assert.rejects(context.prepareCustomerForSale('nat'), /somente neste aparelho/);
   assert.equal(clientReads, 0);
   context.navigator.onLine = false;
-  await assert.rejects(context.prepareCustomerForSale('nat'), /sem confirmação nem fila/);
+  await assert.rejects(context.prepareCustomerForSale('nat'), /somente neste aparelho/);
   context.navigator.onLine = true;
   remoteSale = { operationId: 'op-a', financialAppliedAt: new Date().toISOString() };
   assert.equal((await context.prepareCustomerForSale('nat')).source, 'server');

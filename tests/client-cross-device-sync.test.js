@@ -192,19 +192,19 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
 });
 
 test("a cadeia de módulos mantém versões explícitas na release 130", () => {
-  assert.match(authSource, /import ['"]\.\/sync\.js\?v=146['"]/);
+  assert.match(authSource, /import ['"]\.\/sync\.js\?v=147['"]/);
   assert.match(authSource, /from ['"]\.\/business-context\.js\?v=123['"]/);
-  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=146['"]/);
+  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=147['"]/);
   assert.match(
     syncSource,
     /from ['"]\.\/firestore-repository\.js\?v=100['"]/,
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=146[\s\S]*js\/firebase\/firebase-ui\.js\?v=146/,
+    /js\/firebase\/auth\.js\?v=147[\s\S]*js\/firebase\/firebase-ui\.js\?v=147/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /veconi-v146-financial-write-ahead/);
+  assert.match(serviceWorkerSource, /veconi-v147-only-local-review/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

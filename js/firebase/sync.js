@@ -438,6 +438,25 @@ const queueCounts = () => {
     total: queue.length,
   };
 };
+const knownOrphanKey = () => `veconi:known-only-local-sales:${activeBusinessId()}:${deviceId()}`;
+const orphanReviewKey = () => `veconi:reviewed-only-local-sales:${activeBusinessId()}:${deviceId()}`;
+function readKnownOrphanIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(knownOrphanKey()) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch { return new Set(); }
+}
+function readOrphanReviews() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(orphanReviewKey()) || "{}");
+    return parsed && !Array.isArray(parsed) && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+function isOrphanReviewed(sale) {
+  const review = readOrphanReviews()[String(sale?.id || "")];
+  return Boolean(review && review.operationId === String(sale.operationId || "") &&
+    review.checksum === checksumValue(sale) && review.decision === "historical_reconciled");
+}
 function saleIntegrityDiagnostics() {
   if (!currentUser) return { count: 0, localWithoutQueue: [], queueWithoutLocal: [],
     onlyLocalAfterComparison: [], overdue: [], comparedAt: "" };
@@ -2226,6 +2245,33 @@ async function commitQueueItem(item) {
   });
   return transactionOutcome;
 }
+async function verifySaleQueueCommit(item) {
+  const saleWrite = (item.payload?.writes || []).find((write) =>
+    write.entityType === "sales" && write.operation === "create");
+  if (!saleWrite) return;
+  const saleId = String(saleWrite.entityId),
+    operationId = String(saleWrite.data?.operationId || item.operationId || ""),
+    businessId = activeBusinessId(),
+    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)),
+    remote = snapshot.exists() ? snapshot.data() : null;
+  if (!remote || String(remote.operationId || "") !== operationId)
+    throw Object.assign(new Error("A venda não foi confirmada na nuvem. A fila foi preservada para revisão."),
+      { code: "sale-remote-ack-missing", saleId, operationId });
+  const credit = saleWrite.data?.status === "fiado" || saleWrite.data?.formaPagamento === "fiado";
+  if (!credit) return;
+  const effect = await getDocFromServer(doc(db, "businesses", businessId,
+    "balanceEvents", balanceEffectId("credit_sale", saleId)));
+  const clientId = String(saleWrite.data?.clienteId || saleWrite.data?.customerId || ""),
+    amount = roundedMoney(saleWrite.data?.valorFinal ?? saleWrite.data?.valorTotal),
+    remoteEffect = effect.exists() ? effect.data() : null;
+  if (!remote.financialAppliedAt || !effect.exists() ||
+    String(remoteEffect?.operationId || "") !== operationId ||
+    String(remoteEffect?.sourceDocumentId || "") !== saleId ||
+    String(remoteEffect?.customerId || remoteEffect?.clientId || "") !== clientId ||
+    !sameFinancialMoney(remoteEffect?.balanceDelta, -amount))
+    throw Object.assign(new Error("A venda fiado está sem confirmação financeira. A fila foi preservada."),
+      { code: "sale-financial-ack-missing", saleId, operationId });
+}
 function rollbackPaymentConflict(item, conflict, options = {}) {
   if (!originalAlter || !conflict?.paymentId) return;
   const paymentStatus = options.status || "conflict",
@@ -2467,6 +2513,7 @@ async function processSyncQueue(options = {}) {
       });
       try {
         const outcome = await commitQueueItem(live[position]);
+        await verifySaleQueueCommit(live[position]);
         markLocalSaleConfirmed(live[position]);
         if (!["financial_conflict", "financial_payment_adjustment_required",
           "financial_payment_applied_adjusted"].includes(outcome?.status))
@@ -2684,9 +2731,6 @@ async function prepareCustomerForSale(customerId) {
   if (typeof resumePreparedSales === "function") resumePreparedSales();
   const localData = DB.carregar(),
     localClient = (localData.clientes || []).find((entry) => String(entry.id) === id),
-    clientVersion = financialVersionOf(localClient || {}),
-    clientTime = Math.max(Date.parse(localClient?.updatedAt || "") || 0,
-      Date.parse(localClient?.atualizadoEm || "") || 0),
     queue = readQueue(),
     queuedSaleIds = new Set(queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "sales")
@@ -2694,22 +2738,28 @@ async function prepareCustomerForSale(customerId) {
     customerQueue = queue.filter((item) => (item.payload?.writes || []).some(
       (write) => write.entityType === "clients" && String(write.entityId) === id,
     )),
+    knownOrphans = readKnownOrphanIds(),
     recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000,
     recentSales = (localData.vendas || []).filter((sale) =>
       String(sale.clienteId) === id && !sale.deletedAt && sale.active !== false &&
       (sale.formaPagamento === "fiado" || sale.status === "fiado") &&
       !sale.financialAppliedAt && !queuedSaleIds.has(String(sale.id)) &&
-      (Date.parse(sale.data || sale.createdAt || "") || 0) >= recentCutoff)
+      !isOrphanReviewed(sale) &&
+      ((Date.parse(sale.data || sale.createdAt || "") || 0) >= recentCutoff ||
+        knownOrphans.has(String(sale.id))))
       .sort((left, right) => String(right.data || right.createdAt || "")
         .localeCompare(String(left.data || left.createdAt || ""))),
-    unconfirmed = recentSales.filter((sale, index) => index === 0 ||
-      Number(sale.financialVersionAnterior || 0) + 1 > clientVersion ||
-      (Date.parse(sale.data || sale.createdAt || "") || 0) > clientTime);
+    unconfirmed = recentSales;
+  const orphanError = (sale) => Object.assign(
+    Error(`Existe uma venda fiado ${localClient?.nome ? `de ${localClient.nome}` : "deste cliente"} somente neste aparelho ou ainda não confirmada na nuvem. Resolva a operação antes de outra venda fiado.`),
+    { code: "customer-credit-orphan", customerId: id, customerName: localClient?.nome || "",
+      saleId: String(sale?.id || ""), operationId: String(sale?.operationId || "") },
+  );
   if (customerQueue.some((item) => item.status === "error"))
     throw Error("Há uma venda anterior com erro de sincronização para este cliente. Revise a fila antes de outra venda fiado.");
   if (!navigator.onLine) {
     if (unconfirmed.length)
-      throw Error("Há venda fiado recente neste aparelho sem confirmação nem fila. Conecte-se e compare com a nuvem antes de outra venda.");
+      throw orphanError(unconfirmed[0]);
     return { source: "local-offline" };
   }
   if (unconfirmed.length > 10)
@@ -2719,7 +2769,7 @@ async function prepareCustomerForSale(customerId) {
     const confirmed = remote.exists() ? cleanCloudItem({ id: remote.id, ...remote.data() }) : null;
     if (!confirmed?.financialAppliedAt ||
       String(confirmed.operationId || "") !== String(localSale.operationId || ""))
-      throw Error("Uma venda fiado recente existe somente neste aparelho ou não foi aplicada na nuvem. Compare e recupere a operação antes de outra venda.");
+      throw orphanError(localSale);
     markLocalCreditSaleConfirmed({ payload: { writes: [{ entityType: "sales", operation: "create",
       entityId: localSale.id, data: { formaPagamento: "fiado" } }] } }, confirmed.financialAppliedAt);
   }
@@ -3824,6 +3874,10 @@ async function compareDeviceWithCloud() {
     remoteFinancialEffects,
     report,
   };
+  try {
+    localStorage.setItem(knownOrphanKey(), JSON.stringify(
+      report.collections.sales.onlyLocal.map((item) => String(item.documentId))));
+  } catch (error) { console.warn("[Only-local audit cache]", error?.message || error); }
   emit({ dataAudit: report });
   updateQueueState();
   return report;
@@ -3917,6 +3971,134 @@ const currentAuditOrThrow = () => {
     );
   return lastDataAuditRaw;
 };
+const orphanSaleSignature = (sale = {}) => JSON.stringify({
+  clientId: String(sale.clienteId || sale.customerId || ""),
+  amount: roundedMoney(sale.valorFinal ?? sale.valorTotal ?? 0),
+  items: (sale.itens || []).map((item) => [String(item.produtoId || item.productId || ""),
+    Number(item.quantidade || 0), roundedMoney(item.precoFinalUnitario ?? item.precoUnitario ?? 0)]).sort(),
+});
+function onlyLocalSaleReport() {
+  const audit = currentAuditOrThrow(),
+    local = DB.carregar(),
+    sales = audit.raw.sales.remoteItems || [],
+    clients = new Map((local.clientes || []).map((client) => [String(client.id), client])),
+    remoteClients = new Map((audit.raw.clients.remoteItems || []).map((client) => [String(client.id), client])),
+    remoteEffects = new Map((audit.remoteFinancialEffects || []).map((effect) => [String(effect.id), effect])),
+    products = new Map((local.produtos || []).map((product) => [String(product.id), product])),
+    ids = audit.report.collections.sales.onlyLocal.map((item) => String(item.documentId));
+  return ids.map((saleId) => {
+    const sale = (local.vendas || []).find((item) => String(item.id) === saleId);
+    if (!sale) return { saleId, classification: "E", recoveryMode: "", reason: "Venda não encontrada no armazenamento local." };
+    const operationId = String(sale.operationId || ""),
+      clientId = String(sale.clienteId || sale.customerId || ""),
+      client = clients.get(clientId), remoteClient = remoteClients.get(clientId),
+      review = readOrphanReviews()[saleId],
+      amount = roundedMoney(sale.valorFinal ?? sale.valorTotal),
+      credit = sale.formaPagamento === "fiado" || sale.status === "fiado",
+      effect = remoteEffects.get(balanceEffectId("credit_sale", saleId)),
+      effectMatches = Boolean(effect && String(effect.operationId || "") === operationId &&
+        String(effect.sourceDocumentId || "") === saleId &&
+        String(effect.customerId || effect.clientId || "") === clientId &&
+        sameFinancialMoney(effect.balanceDelta, -amount)),
+      alternate = sales.find((item) => String(item.id) !== saleId && operationId &&
+        String(item.operationId || "") === operationId),
+      duplicate = sales.find((item) => String(item.id) !== saleId &&
+        String(item.clienteId || item.customerId || "") === clientId &&
+        Math.abs((Date.parse(item.data || item.createdAt || "") || 0) -
+          (Date.parse(sale.data || sale.createdAt || "") || 0)) <= 120000 &&
+        orphanSaleSignature(item) === orphanSaleSignature(sale)),
+      stockMovements = (local.movimentacoesEstoque || []).filter((item) => String(item.vendaId) === saleId),
+      stockIndependent = Array.isArray(sale.itens) && sale.itens.length > 0 && sale.itens.every((item) => {
+        const product = products.get(String(item.produtoId || ""));
+        return item.itemKind === "service" || product?.itemKind === "service" ||
+          product?.semControleEstoque === true || product?.controlaEstoque === false;
+      }),
+      laterFinancialOperations = [...(local.vendas || []), ...(local.pagamentos || []),
+        ...(local.movimentacoes || []).filter((item) => item.tipo === "ajuste_saldo")]
+        .filter((item) => String(item.id) !== saleId &&
+          String(item.clienteId || item.customerId || "") === clientId &&
+          (Date.parse(item.data || item.createdAt || "") || 0) >
+            (Date.parse(sale.data || sale.createdAt || "") || 0)),
+      selfContained = !stockMovements.length && stockIndependent && !laterFinancialOperations.length &&
+        !(sale.appliedCampaignIds || []).length &&
+        !(sale.campaignUpdates || []).length && !(sale.subscriptionUpdates || []).length,
+      snapshotsMatch = Number.isFinite(Number(sale.saldoAnterior)) &&
+        Number.isFinite(Number(sale.saldoAtual)) && Number.isFinite(amount) && amount > 0 &&
+        sameFinancialMoney(sale.saldoAtual, Number(sale.saldoAnterior) - amount),
+      modern = Number(sale.syncPipelineVersion || 0) >= 2;
+    let classification = "E", recoveryMode = "", reason = "Impacto financeiro ou estoque sem prova suficiente; revisão manual.";
+    if (sale.deletedAt || sale.active === false) {
+      classification = "C"; reason = "Venda cancelada ou estornada; revisar antes de qualquer publicação.";
+    } else if (alternate) {
+      classification = "B"; reason = `Mesmo operationId já representado pela venda ${alternate.id}.`;
+    } else if (duplicate) {
+      classification = "D"; reason = `Possível duplicata da venda ${duplicate.id}.`;
+    } else if (effect && !effectMatches) {
+      reason = "Evento financeiro remoto incompatível com esta venda.";
+    } else if (operationId && remoteClient && selfContained && snapshotsMatch && effectMatches) {
+      classification = "A"; recoveryMode = "publish_only";
+      reason = "Efeito financeiro comprovado; publicar somente a venda, sem novo débito.";
+    } else if (operationId && selfContained && snapshotsMatch && credit && modern &&
+      !effect && remoteClient &&
+      sameFinancialMoney(remoteClient.saldo, sale.saldoAnterior) &&
+      financialVersionOf(remoteClient) === Number(sale.financialVersionAnterior)) {
+      classification = "A"; recoveryMode = "apply_financial";
+      reason = "Saldo e versão remotos ainda são exatamente os anteriores; transação idempotente possível.";
+    } else if (operationId && selfContained && !credit && modern && !effect) {
+      classification = "A"; recoveryMode = "sale_only";
+      reason = "Venda paga sem efeitos financeiros ou de estoque pendentes.";
+    }
+    return { saleId, operationId, customerId: clientId, customer: client?.nome || sale.clienteNome || "",
+      amount, date: sale.data || sale.createdAt || "", paymentMethod: sale.formaPagamento || sale.status || "",
+      status: sale.status || "", businessId: sale.businessId || "", spaceId: sale.spaceId || "",
+      createdAt: sale.createdAt || "", updatedAt: sale.updatedAt || sale.atualizadoEm || "",
+      items: (sale.itens || []).map((item) => ({ productId: item.produtoId || "",
+        name: item.nome || "", quantity: Number(item.quantidade || 0),
+        unitPrice: roundedMoney(item.precoFinalUnitario ?? item.precoUnitario ?? 0) })),
+      saldoAnterior: sale.saldoAnterior ?? null, saldoAtual: sale.saldoAtual ?? null,
+      financialVersionAnterior: sale.financialVersionAnterior ?? null,
+      syncConfirmedAt: sale.syncConfirmedAt || null, financialAppliedAt: sale.financialAppliedAt || null,
+      localCurrentBalance: client?.saldo ?? null, remoteCurrentBalance: remoteClient?.saldo ?? null,
+      remoteFinancialVersion: remoteClient?.financialVersion ?? null,
+      localExists: true, cloudExists: false, financialEffectExists: Boolean(effect),
+      financialEffectMatches: effectMatches, localStockMovementCount: stockMovements.length,
+      laterFinancialOperationCount: laterFinancialOperations.length,
+      alternateRemoteSaleId: alternate?.id || "", possibleDuplicateSaleId: duplicate?.id || "",
+      classification, recoveryMode, reason,
+      reviewed: isOrphanReviewed(sale), reviewedAt: review?.reviewedAt || "",
+      reviewReason: isOrphanReviewed(sale) ? review.reason : "" };
+  });
+}
+async function reviewOnlyLocalSale(saleId, reason) {
+  if (!currentUser || !["owner", "admin"].includes(String(state.userProfile?.role || "")) ||
+    readOnlyMode || !navigator.onLine)
+    throw Error("A revisão exige owner/admin e conexão com a nuvem.");
+  const explanation = String(reason || "").trim();
+  if (explanation.length < 20)
+    throw Error("Descreva a evidência da conciliação em pelo menos 20 caracteres.");
+  await compareDeviceWithCloud();
+  const preview = onlyLocalSaleReport().find((item) => item.saleId === String(saleId));
+  if (!preview || preview.classification === "A")
+    throw Error("A venda não está classificada para revisão histórica. Refaça a comparação.");
+  if (preview.localCurrentBalance === null || preview.remoteCurrentBalance === null ||
+    !Number.isFinite(Number(preview.localCurrentBalance)) ||
+    !Number.isFinite(Number(preview.remoteCurrentBalance)) ||
+    !sameFinancialMoney(preview.localCurrentBalance, preview.remoteCurrentBalance))
+    throw Error("Saldos local e remoto ainda diferem. Não é possível atestar ausência de impacto financeiro.");
+  const sale = (DB.carregar().vendas || []).find((item) => String(item.id) === String(saleId));
+  if (!sale) throw Error("A venda local não foi encontrada.");
+  const reviews = readOrphanReviews();
+  reviews[String(saleId)] = {
+    saleId: String(saleId), operationId: String(sale.operationId || ""),
+    checksum: checksumValue(sale), decision: "historical_reconciled", reason: explanation,
+    reviewedAt: now(), reviewedBy: currentUser.uid,
+    localBalanceAtReview: preview.localCurrentBalance,
+    remoteBalanceAtReview: preview.remoteCurrentBalance,
+    remoteFinancialVersionAtReview: preview.remoteFinancialVersion,
+  };
+  localStorage.setItem(orphanReviewKey(), JSON.stringify(reviews));
+  return { saleId: String(saleId), reviewedAt: reviews[String(saleId)].reviewedAt };
+}
 async function recoverMissingNonFinancial() {
   const audit = currentAuditOrThrow(),
     businessId = activeBusinessId(),
@@ -3967,94 +4149,126 @@ async function recoverMissingNonFinancial() {
   const comparison = await compareDeviceWithCloud();
   return { backupCreated: true, queued: queued.length, sync, comparison };
 }
-const financialDelta = (name, item) => {
-  if (name === "sales")
-    return item.status === "fiado"
-      ? -Math.abs(Number(item.valorFinal ?? item.valorTotal ?? 0))
-      : 0;
-  if (name === "payments") return Math.abs(Number(item.valor || 0));
-  if (name === "balanceAdjustments")
-    return Number(item.saldoNovo || 0) - Number(item.saldoAnterior || 0);
-  return Number.NaN;
-};
 async function recoverMissingFinancialMovements() {
+  throw Object.assign(new Error("A recuperação financeira em lote foi desativada. Revise cada venda individualmente."),
+    { code: "bulk-financial-recovery-disabled" });
+}
+async function recoverOnlyLocalSale(saleId) {
+  if (!currentUser || readOnlyMode || !navigator.onLine ||
+    !["owner", "admin"].includes(String(state.userProfile?.role || "")))
+    throw Error("A recuperação individual exige owner/admin, acesso de escrita e conexão com a nuvem.");
+  const id = String(saleId || "");
+  if (!id) throw Error("Selecione uma venda para recuperar.");
+  await compareDeviceWithCloud();
   const audit = currentAuditOrThrow(),
-    businessId = activeBusinessId(),
-    names = ["sales", "payments", "balanceAdjustments"],
-    queued = [],
-    blocked = [];
-  if (audit.report.products.onlyLocal || audit.report.clients.onlyLocal)
-    throw Object.assign(
-      new Error("Recupere e confirme produtos e clientes antes do financeiro."),
-      { code: "non-financial-recovery-required" },
-    );
-  automaticRecoveryBackup();
-  const remoteClientIds = new Set(
-    audit.raw.clients.remoteItems.map((item) => String(item.id)),
-  );
-  for (const name of names) {
-    const missingOperations = new Set(
-      audit.report.collections[name].onlyLocal.map(
-        (item) => item.operationId || item.documentId,
-      ),
-    );
-    for (const item of audit.raw[name].localItems) {
-      const operationId = financialKey(item),
-        clientId = String(item.clienteId || item.customerId || ""),
-        delta = financialDelta(name, item);
-      if (!missingOperations.has(operationId)) continue;
-      if (!operationId || !clientId || !Number.isFinite(delta) || !remoteClientIds.has(clientId)) {
-        blocked.push({ entityType: name, documentId: String(item.id), operationId });
-        continue;
-      }
-      const eventKind =
-          name === "sales"
-            ? "sale"
-            : name === "payments"
-              ? "payment"
-              : "balance_adjustment",
-        writes = [
-          {
-            entityType: name,
-            entityId: String(item.id),
-            operation: "create",
-            before: null,
-            data: {
-              ...item,
-              operationId,
-              businessId,
-              customerId: clientId,
-              type: item.type || item.tipo || eventKind,
-              amount: Number(item.amount ?? item.valor ?? item.valorFinal ?? item.valorTotal ?? 0),
-              createdBy: item.createdBy || currentUser.uid,
-              sourceDeviceId: item.sourceDeviceId || deviceId(),
-              appliedAt: item.appliedAt || item.data || item.createdAt || now(),
-              schemaVersion: 3,
-              source: "recovery_local_orphan",
-              recoveryChecksum: checksumValue(item),
-            },
-          },
-        ];
-      if (delta)
-        writes.push({
-          entityType: "clients",
-          entityId: clientId,
-          operation: "update",
-          before: { saldo: 0 },
-          data: { saldo: delta },
-        });
-      queueWrites(writes, operationId, eventKind, {
-        source: "recovery_local_orphan",
-      });
-      queued.push({ entityType: name, documentId: String(item.id), operationId, delta });
+    local = (DB.carregar().vendas || []).find((sale) => String(sale.id) === id),
+    remote = (audit.raw.sales.remoteItems || []).find((sale) => String(sale.id) === id);
+  if (!local || (local.businessId && String(local.businessId) !== activeBusinessId()))
+    throw Error("A venda não pertence a este aparelho/negócio.");
+  if (remote) {
+    if (String(remote.operationId || "") !== String(local.operationId || ""))
+      throw Error("O saleId já pertence a outra operação na nuvem. Revisão manual obrigatória.");
+    if (local.formaPagamento === "fiado" || local.status === "fiado") {
+      const effect = (audit.remoteFinancialEffects || []).find((item) =>
+        String(item.id) === balanceEffectId("credit_sale", id));
+      if (!remote.financialAppliedAt || !effect ||
+        String(effect.operationId || "") !== String(local.operationId || "") ||
+        String(effect.sourceDocumentId || "") !== id)
+        throw Error("A venda existe na nuvem, mas a confirmação financeira está incompleta. Revisão manual obrigatória.");
     }
+    return { saleId: id, operationId: local.operationId, idempotent: true, recovered: false };
   }
-  const sync = queued.length
-    ? await processSyncQueue({ force: true })
-    : { sent: 0, pending: queueCounts().total, errors: queueCounts().errors };
-  if (sync.sent) await safePublishSyncSignal([...names, "clients"], sync.errors ? "error" : "ok");
-  const comparison = await compareDeviceWithCloud();
-  return { backupCreated: true, queued: queued.length, blocked, sync, comparison };
+  const preview = onlyLocalSaleReport().find((sale) => sale.saleId === id);
+  if (preview?.classification !== "A" || !preview.recoveryMode)
+    throw Error(`Esta venda exige revisão manual. ${preview?.reason || "Não há evidência suficiente."}`);
+  const businessId = activeBusinessId(), operationId = String(local.operationId),
+    clientId = String(local.clienteId || local.customerId || ""),
+    credit = local.formaPagamento === "fiado" || local.status === "fiado",
+    amount = roundedMoney(local.valorFinal ?? local.valorTotal),
+    saleRef = doc(db, "businesses", businessId, "sales", id),
+    effectId = balanceEffectId("credit_sale", id),
+    effectRef = doc(db, "businesses", businessId, "balanceEvents", effectId),
+    markerRef = doc(db, "businesses", businessId, "processedOperations", operationId),
+    clientRef = clientId ? doc(db, "businesses", businessId, "clients", clientId) : null;
+  automaticRecoveryBackup();
+  const transactionResult = await runTransaction(db, async (transaction) => {
+    const saleSnapshot = await transaction.get(saleRef),
+      markerSnapshot = await transaction.get(markerRef),
+      effectSnapshot = credit ? await transaction.get(effectRef) : null,
+      clientSnapshot = credit && clientRef ? await transaction.get(clientRef) : null,
+      effect = effectSnapshot?.exists() ? effectSnapshot.data() : null,
+      client = clientSnapshot?.exists() ? clientSnapshot.data() : null;
+    if (saleSnapshot.exists()) {
+      if (String(saleSnapshot.data()?.operationId || "") !== operationId)
+        throw Error("O saleId foi usado por outra operação durante a recuperação.");
+      return { idempotent: true };
+    }
+    if (preview.recoveryMode === "publish_only") {
+      if (!effect || String(effect.operationId || "") !== operationId ||
+        String(effect.sourceDocumentId || "") !== id ||
+        String(effect.customerId || effect.clientId || "") !== clientId ||
+        !sameFinancialMoney(effect.balanceDelta, -amount))
+        throw Error("O efeito financeiro mudou. Refaça a auditoria antes de recuperar.");
+    } else {
+      if (markerSnapshot.exists() || effect)
+        throw Error("A operação já tem marcador ou efeito remoto. Revisão manual obrigatória.");
+      if (preview.recoveryMode === "apply_financial" && (!client ||
+        !sameFinancialMoney(client.saldo, local.saldoAnterior) ||
+        financialVersionOf(client) !== Number(local.financialVersionAnterior) ||
+        !sameFinancialMoney(local.saldoAtual, Number(local.saldoAnterior) - amount)))
+        throw Error("O saldo ou a versão do cliente mudou. Nenhum débito foi aplicado.");
+    }
+    const appliedAt = preview.recoveryMode === "publish_only"
+      ? effect.appliedAt || serverTimestamp() : serverTimestamp(),
+      saleData = { ...local, operationId, idempotencyKey: operationId,
+        recoverySource: "reviewed_only_local_sale", recoveryMode: preview.recoveryMode,
+        recoveryChecksum: checksumValue(local), recoveredAt: serverTimestamp(),
+        syncConfirmedAt: serverTimestamp(),
+        ...(credit ? { status: "applied", applicationStatus: "applied",
+          financialAppliedAt: appliedAt, financialOperationId: effectId } : {}) };
+    transaction.set(saleRef, cloudPayload("sales", id, saleData, true));
+    if (preview.recoveryMode === "apply_financial") {
+      transaction.set(clientRef, {
+        saldo: roundedMoney(Number(client.saldo) - amount),
+        financialVersion: financialVersionOf(client) + 1,
+        totalComprado: roundedMoney(Number(client.totalComprado || 0) + amount),
+        quantidadeVendas: Number(client.quantidadeVendas || 0) + 1,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      transaction.set(effectRef, sanitizeForFirestore({
+        id: effectId, operationId, idempotencyKey: effectId, businessId,
+        ownerId: currentUser.uid, sourceDeviceId: deviceId(),
+        customerId: clientId, clientId, saleId: id,
+        sourceCollection: "sales", sourceDocumentId: id,
+        type: "credit_sale", direction: "debit", amount, balanceDelta: -amount,
+        eventKind: "sale", status: "applied", appliedAt: serverTimestamp(),
+        sourceCreatedAt: local.data || local.createdAt || now(),
+        createdAt: local.data || local.createdAt || serverTimestamp(),
+        updatedAt: serverTimestamp(), schemaVersion: 3,
+      }));
+    }
+    if (!markerSnapshot.exists()) transaction.set(markerRef, sanitizeForFirestore({
+      id: operationId, idempotencyKey: operationId, businessId, ownerId: currentUser.uid,
+      eventKind: "sale", status: "processed", createdAtLocal: local.data || local.createdAt || now(),
+      processedAt: serverTimestamp(), schemaVersion: 3,
+    }));
+    return { idempotent: false };
+  });
+  const confirmedSaleSnapshot = await getDocFromServer(saleRef),
+    confirmedSale = confirmedSaleSnapshot.exists()
+      ? cleanCloudItem({ id, ...confirmedSaleSnapshot.data() }) : null;
+  if (!confirmedSale || String(confirmedSale.operationId || "") !== operationId ||
+    (credit && !confirmedSale.financialAppliedAt))
+    throw Error("A transação foi enviada, mas a confirmação remota não foi verificada. Não repita com outro ID.");
+  applyCloudCollection("sales", [confirmedSale], { authoritative: true });
+  if (credit && clientRef) {
+    const confirmedClient = await getDocFromServer(clientRef);
+    if (confirmedClient.exists())
+      applyCloudCollection("clients", [{ id: clientId, ...confirmedClient.data() }], { authoritative: true });
+  }
+  await compareDeviceWithCloud();
+  return { saleId: id, operationId, idempotent: transactionResult.idempotent,
+    recovered: !transactionResult.idempotent, recoveryMode: preview.recoveryMode };
 }
 async function reconcileFinancialBalances() {
   await compareDeviceWithCloud();
@@ -5226,6 +5440,9 @@ window.SyncFirebase = {
   compareDeviceWithCloud,
   exportLocalDiagnostic,
   downloadJsonFile,
+  onlyLocalSaleReport,
+  recoverOnlyLocalSale,
+  reviewOnlyLocalSale,
   recoverMissingNonFinancial,
   recoverMissingFinancialMovements,
   reconcileFinancialBalances,
