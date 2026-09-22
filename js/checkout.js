@@ -482,6 +482,7 @@ window.Checkout = (() => {
     manual = false,
     finishing = false,
     activeAttempt = null,
+    activeConflict = null,
     restoredDraftKey = "",
     draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" },
     pendingClient = null,
@@ -569,7 +570,7 @@ window.Checkout = (() => {
   function invalidateAttempt() { if (!finishing) activeAttempt = null; }
   function setSubmissionState(state, message = "") {
     const button = document.querySelector("#finish-sale"), feedback = document.querySelector("#sale-submit-feedback"),
-      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente' };
+      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente', conflict: '<i data-lucide="cloud-search"></i> Comparar com a nuvem' };
     if (button) {
       button.dataset.saleState = state;
       button.disabled = state === "processing" || state === "success";
@@ -577,8 +578,16 @@ window.Checkout = (() => {
     }
     if (feedback) {
       feedback.hidden = !message;
-      feedback.textContent = message;
-      feedback.classList.toggle("error", state === "error");
+      if (state === "conflict") {
+        feedback.innerHTML = `<span>${escapar(message)}</span><div class="sale-conflict-actions"><button type="button" data-resolve-sale>Resolver agora</button><button type="button" data-close-sale-conflict>Fechar</button></div>`;
+        feedback.querySelector("[data-resolve-sale]").onclick = () =>
+          dispatchEvent(new CustomEvent("resolve-sale-conflict", { detail: activeConflict || {} }));
+        feedback.querySelector("[data-close-sale-conflict]").onclick = () => {
+          activeConflict = null;
+          setSubmissionState("normal");
+        };
+      } else feedback.textContent = message;
+      feedback.classList.toggle("error", state === "error" || state === "conflict");
       feedback.classList.toggle("success", state === "success");
     }
     window.lucide?.createIcons();
@@ -827,6 +836,7 @@ window.Checkout = (() => {
     document.querySelector("#sale-client").onchange = () => {
       selectedCampaignIds.clear();
       invalidateAttempt();
+      if (activeConflict) { activeConflict = null; setSubmissionState("normal"); }
       traceSale("[CART] customer selected", { clientId: document.querySelector("#sale-client").value || null });
       drawCart();
     };
@@ -835,6 +845,7 @@ window.Checkout = (() => {
       window.CheckoutPaymentMethod = event.target.value;
       document.querySelector("#sale-status").value = event.target.value === "fiado" ? "fiado" : "pago";
       invalidateAttempt();
+      if (activeConflict && event.target.value !== "fiado") { activeConflict = null; setSubmissionState("normal"); }
       drawCart();
     });
     document.querySelector("#selected-client-card").onclick = (e) => {
@@ -917,6 +928,11 @@ window.Checkout = (() => {
     document.querySelector("#sale-note")?.addEventListener("input", () => { invalidateAttempt(); saveDraft(); });
     document.querySelector("#finish-sale").onclick = async () => {
       traceSale("[SALE] submit clicked", { finishing, items: cartCount() });
+      if (activeConflict && document.querySelector("#sale-payment-method")?.value === "fiado" &&
+        document.querySelector("#sale-client")?.value === activeConflict.customerId) {
+        dispatchEvent(new CustomEvent("resolve-sale-conflict", { detail: activeConflict }));
+        return;
+      }
       if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
       const validationError = (message) => {
         setSubmissionState("error", message);
@@ -997,12 +1013,17 @@ window.Checkout = (() => {
           } catch (error) {
             finishing = false;
             const message = error.message || "Não foi possível concluir a venda. Seu carrinho foi preservado.";
-            setSubmissionState("error", `${message} Toque em “Tentar novamente”.`);
+            if (error.code === "customer-credit-orphan") {
+              activeConflict = { customerId: error.customerId || clienteId,
+                saleId: error.saleId || "", operationId: error.operationId || "" };
+              setSubmissionState("conflict", message);
+            } else setSubmissionState("error", `${message} Toque em “Tentar novamente”.`);
             saveDraft();
             traceSale("[SALE] failed", { operationId: attempt.operationId, code: error?.code || error?.name || "unknown" });
-            toast(message, true);
+            if (error.code !== "customer-credit-orphan") toast(message, true);
             return;
           }
+          activeConflict = null;
           cart = [];
           selectedCampaignIds.clear();
           manual = false;

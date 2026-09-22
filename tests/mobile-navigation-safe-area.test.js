@@ -64,6 +64,6 @@ test("infraestrutura global publica safe areas e preserva botão existente", () 
   assert.match(navigation, /\[data-swipe-client\]/);
   assert.match(navigation, /\[data-product-shell\]/);
   assert.match(navigation, /#modal > \*/);
-  assert.match(serviceWorker, /veconi-v146-financial-write-ahead/);
+  assert.match(serviceWorker, /veconi-v147-only-local-review/);
   assert.match(serviceWorker, /mobile-navigation-gesture\.js/);
 });

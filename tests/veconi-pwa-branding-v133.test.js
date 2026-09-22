@@ -68,8 +68,8 @@ test("metadata externa aponta para assets físicos novos e para VECONI", () => {
 
 test("service worker V135 migra apenas caches do app e preserva os assets V133", () => {
   const worker = read("service-worker.js");
-  assert.match(worker, /veconi-v146-financial-write-ahead/);
-  assert.match(worker, /release:'146'/);
+  assert.match(worker, /veconi-v147-only-local-review/);
+  assert.match(worker, /release:'147'/);
   assert.match(worker, /OBSOLETE_CACHE_PREFIXES=\['veconi-','adi-festa-'\]/);
   assert.match(worker, /OBSOLETE_CACHE_PREFIXES\.some\(prefix=>key\.startsWith\(prefix\)\)/);
   for (const file of expectedPngs.keys()) assert.match(worker, new RegExp(path.basename(file).replaceAll(".", "\\.")));
