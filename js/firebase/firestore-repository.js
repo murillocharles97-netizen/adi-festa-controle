@@ -426,7 +426,10 @@ export function createFirestoreRepository(collectionName) {
           });
           first = false;
           lastReadMetadata = snapshotMetadata(snapshot, "listener");
-          callback(snapshot.docs.map((item) => convert(item)), lastReadMetadata);
+          callback(snapshot.docs.map((item) => convert(item)), lastReadMetadata, {
+            cursor: snapshot.docs.at(-1) || null,
+            hasMore: snapshot.size === max,
+          });
         },
         (error) => {
           recordFirestoreOperation("listen", {

@@ -25,6 +25,7 @@ const {normalizeManualCardPayment}=require('./services/manual-card-service');
 const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-service');
 const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-state-service');
 const {financialIncomeService}=require('./services/financial-income-service');
+const {activityEventService}=require('./services/activity-event-service');
 const {terminalPaymentService}=require('./terminal-payments/terminal-payment-service');
 
 initializeApp();
@@ -65,6 +66,7 @@ const providerStore=()=>firestoreSubscriptionService(db);
 const coupons=()=>couponFirestoreService(db);
 const pixBilling=()=>pixBillingService(db);
 const financialIncome=()=>financialIncomeService(db);
+const activityEvents=()=>activityEventService(db,{FieldValue,Timestamp});
 const terminalPayments=()=>terminalPaymentService(db,{permissionService,simulatorEnabled:()=>process.env.TERMINAL_PAYMENT_SIMULATOR_ENABLED==='true'});
 const iso=()=>new Date().toISOString();
 async function latestCardPaymentDiagnostic(subscriptionId){
@@ -461,6 +463,34 @@ exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'busin
   const result=await financialIncome().projectPayment(event.params.businessId,event.params.paymentId,source);
   logger.info('[FINANCIAL_INCOME_PAYMENT]',{businessId:event.params.businessId,paymentId:event.params.paymentId,created:result?.created===true,skipped:result?.skipped||null});
   return result;
+});
+
+const ACTIVITY_TRIGGER_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
+const projectActivity=(sourceCollection,idParam)=>async event=>{
+  const result=await activityEvents().project({businessId:event.params.businessId,sourceCollection,sourceDocumentId:event.params[idParam],before:event.data?.before,after:event.data?.after});
+  logger.info('[BUSINESS_ACTIVITY_PROJECTED]',{businessId:event.params.businessId,sourceCollection,sourceDocumentId:event.params[idParam],eventId:result?.eventId||null,skipped:result?.skipped===true});
+  return result;
+};
+
+exports.projectSaleActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/sales/{saleId}'},projectActivity('sales','saleId'));
+exports.projectPaymentActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/payments/{paymentId}'},projectActivity('payments','paymentId'));
+exports.projectBalanceAdjustmentActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/balanceAdjustments/{adjustmentId}'},projectActivity('balanceAdjustments','adjustmentId'));
+exports.projectStockMovementActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/stockMovements/{movementId}'},projectActivity('stockMovements','movementId'));
+exports.projectCampaignActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/campaignEvents/{eventId}'},projectActivity('campaignEvents','eventId'));
+exports.projectCustomerSubscriptionActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/customerSubscriptionEvents/{eventId}'},projectActivity('customerSubscriptionEvents','eventId'));
+exports.projectCatalogOrderActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/catalogOrders/{orderId}'},projectActivity('catalogOrders','orderId'));
+
+exports.reconcileBusinessActivityEvents=onCall({region:REGION,memory:'256MiB',timeoutSeconds:120,maxInstances:2},async request=>{
+  const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId,{ownerOnly:false});
+  if(!['owner','admin'].includes(String(context.profile?.role||'')))throw new HttpsError('permission-denied','Somente proprietário ou administrador pode reconciliar o histórico.');
+  try{
+    const result=await activityEvents().reconcileBusiness(businessId,{limit:request.data?.limit});
+    logger.info('[BUSINESS_ACTIVITY_RECONCILED]',{actorUid:context.uid,...result});
+    return result;
+  }catch(error){
+    logger.error('[BUSINESS_ACTIVITY_RECONCILIATION_FAILED]',{businessId,actorUid:context.uid,code:error?.code||'unknown'});
+    throw new HttpsError('internal','Não foi possível reconciliar o histórico agora.');
+  }
 });
 
 exports.reconcileBusinessFinancialIncome=onCall({region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:10},async request=>{
