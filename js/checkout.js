@@ -1208,6 +1208,18 @@ window.Checkout = (() => {
     }
     return true;
   }
+  function resumeAfterReconciliation(customerId) {
+    const selectedId = String(document.querySelector("#sale-client")?.value || "");
+    if (!selectedId || selectedId !== String(customerId || "")) return false;
+    activeConflict = null;
+    finishing = false;
+    activeAttempt = null;
+    refreshClients();
+    setSubmissionState("normal");
+    drawCart();
+    saveDraft();
+    return true;
+  }
   function mount() {
     if (Router.atual() !== "vender") return false;
     return window.AppPageRuntime?.mount?.("vender") || false;
@@ -1232,6 +1244,7 @@ window.Checkout = (() => {
     filterProducts: filter,
     refreshProducts,
     refreshClients,
+    resumeAfterReconciliation,
     finalizeTerminalPayment,
     cartCount,
     state: () => ({ finishing, items: cartCount(), activeOperationId: activeAttempt?.operationId || null, draftKey: draftKey() }),
