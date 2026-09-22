@@ -306,6 +306,8 @@ const evaluatePaymentConcurrency = (input) => {
 };
 const balanceEffectId = (type, sourceId) =>
   `${type}:${String(sourceId || "").replaceAll("/", "_")}`;
+const legacyReconciliationOperationId = (saleId) =>
+  `legacy_reconciliation:${String(saleId || "").replaceAll("/", "_")}`;
 function financialEffectFromWrites(
   writes = [],
   businessId,
@@ -454,8 +456,17 @@ function readOrphanReviews() {
 }
 function isOrphanReviewed(sale) {
   const review = readOrphanReviews()[String(sale?.id || "")];
-  return Boolean(review && review.operationId === String(sale.operationId || "") &&
-    review.checksum === checksumValue(sale) && review.decision === "historical_reconciled");
+  if (review && review.operationId === String(sale.operationId || "") &&
+    review.checksum === checksumValue(sale) &&
+    ["historical_reconciled", "resolved_by_reconciliation"].includes(review.decision))
+    return true;
+  const resolutionId = legacyReconciliationOperationId(sale?.id),
+    resolution = (DB.carregar().movimentacoes || []).find((item) =>
+      String(item.id) === resolutionId &&
+      item.resolutionStatus === "resolved_by_reconciliation" &&
+      String(item.resolvedSaleId || "") === String(sale?.id || "") &&
+      String(item.resolvedOperationId || "") === String(sale?.operationId || ""));
+  return Boolean(resolution);
 }
 function saleIntegrityDiagnostics() {
   if (!currentUser) return { count: 0, localWithoutQueue: [], queueWithoutLocal: [],
@@ -1725,6 +1736,15 @@ async function commitQueueItem(item) {
   await runTransaction(db, async (transaction) => {
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
+    for (const write of writes.filter((entry) =>
+      entry.entityType === "sales" && entry.operation === "create")) {
+      const resolution = await transaction.get(doc(db, "businesses", businessId,
+        "balanceAdjustments", legacyReconciliationOperationId(write.entityId)));
+      if (resolution.exists() &&
+        resolution.data()?.resolutionStatus === "resolved_by_reconciliation")
+        throw Object.assign(new Error("Esta operação já foi conciliada manualmente e não será sincronizada."),
+          { code: "sale-resolved-by-reconciliation", saleId: String(write.entityId) });
+    }
     const snapshots = new Map();
     for (const write of writes)
       if (
@@ -3984,6 +4004,9 @@ function onlyLocalSaleReport() {
     clients = new Map((local.clientes || []).map((client) => [String(client.id), client])),
     remoteClients = new Map((audit.raw.clients.remoteItems || []).map((client) => [String(client.id), client])),
     remoteEffects = new Map((audit.remoteFinancialEffects || []).map((effect) => [String(effect.id), effect])),
+    remoteResolutions = new Map((audit.raw.balanceAdjustments?.remoteItems || [])
+      .filter((item) => item.resolutionStatus === "resolved_by_reconciliation" && item.resolvedSaleId)
+      .map((item) => [String(item.resolvedSaleId), item])),
     products = new Map((local.produtos || []).map((product) => [String(product.id), product])),
     ids = audit.report.collections.sales.onlyLocal.map((item) => String(item.documentId));
   return ids.map((saleId) => {
@@ -3993,6 +4016,7 @@ function onlyLocalSaleReport() {
       clientId = String(sale.clienteId || sale.customerId || ""),
       client = clients.get(clientId), remoteClient = remoteClients.get(clientId),
       review = readOrphanReviews()[saleId],
+      resolution = remoteResolutions.get(saleId),
       amount = roundedMoney(sale.valorFinal ?? sale.valorTotal),
       credit = sale.formaPagamento === "fiado" || sale.status === "fiado",
       effect = remoteEffects.get(balanceEffectId("credit_sale", saleId)),
@@ -4048,6 +4072,13 @@ function onlyLocalSaleReport() {
       classification = "A"; recoveryMode = "sale_only";
       reason = "Venda paga sem efeitos financeiros ou de estoque pendentes.";
     }
+    if (resolution && String(resolution.resolvedOperationId || "") !== operationId) {
+      classification = "E"; recoveryMode = "";
+      reason = "Existe uma reconciliação remota incompatível com a operação local; revisão técnica obrigatória.";
+    } else if (resolution) {
+      classification = "E"; recoveryMode = "";
+      reason = "Operação antiga conciliada manualmente; não será sincronizada nem cobrada novamente.";
+    }
     return { saleId, operationId, customerId: clientId, customer: client?.nome || sale.clienteNome || "",
       amount, date: sale.data || sale.createdAt || "", paymentMethod: sale.formaPagamento || sale.status || "",
       status: sale.status || "", businessId: sale.businessId || "", spaceId: sale.spaceId || "",
@@ -4064,7 +4095,11 @@ function onlyLocalSaleReport() {
       financialEffectMatches: effectMatches, localStockMovementCount: stockMovements.length,
       laterFinancialOperationCount: laterFinancialOperations.length,
       alternateRemoteSaleId: alternate?.id || "", possibleDuplicateSaleId: duplicate?.id || "",
-      classification, recoveryMode, reason,
+      classification, recoveryMode, reason, resolved: Boolean(resolution),
+      resolutionId: resolution?.id || "", resolutionStatus: resolution?.resolutionStatus || "",
+      reconciledBalanceBefore: resolution?.saldoAnterior ?? null,
+      reconciledBalanceAfter: resolution?.saldoNovo ?? null,
+      reconciledAt: resolution?.resolvedAt || resolution?.createdAt || "",
       reviewed: isOrphanReviewed(sale), reviewedAt: review?.reviewedAt || "",
       reviewReason: isOrphanReviewed(sale) ? review.reason : "" };
   });
@@ -4098,6 +4133,159 @@ async function reviewOnlyLocalSale(saleId, reason) {
   };
   localStorage.setItem(orphanReviewKey(), JSON.stringify(reviews));
   return { saleId: String(saleId), reviewedAt: reviews[String(saleId)].reviewedAt };
+}
+function archiveResolvedSaleQueue(saleId, operationId, resolutionId) {
+  const queue = readQueueStrict(), removed = queue.filter((item) =>
+      String(item.operationId || "") === String(operationId || "") ||
+      (item.payload?.writes || []).some((write) => write.entityType === "sales" &&
+        String(write.entityId) === String(saleId))),
+    remaining = queue.filter((item) => !removed.includes(item));
+  if (!removed.length) return 0;
+  localStorage.setItem(`adiFestaSyncQueueResolvedArchive_${Date.now()}`, JSON.stringify({
+    reason: "resolved_by_reconciliation", resolutionId, saleId, operationId,
+    archivedAt: now(), businessId: activeBusinessId(), userId: currentUser?.uid || "",
+    queue: removed,
+  }));
+  saveQueue(remaining);
+  return removed.length;
+}
+async function reconcileOnlyLocalSaleBalance(saleId, correctOpenDebt, reason) {
+  if (!currentUser || readOnlyMode || !navigator.onLine ||
+    !["owner", "admin"].includes(String(state.userProfile?.role || "")))
+    throw Error("A reconciliação exige owner/admin, acesso de escrita e conexão com a nuvem.");
+  const id = String(saleId || ""), debt = roundedMoney(correctOpenDebt),
+    explanation = String(reason || "").trim();
+  if (!id || !Number.isFinite(debt) || debt < 0 || debt > 999999999)
+    throw Error("Informe um saldo correto em aberto.");
+  if (explanation.length < 5)
+    throw Error("Informe o motivo da reconciliação.");
+  await compareDeviceWithCloud();
+  const preview = onlyLocalSaleReport().find((item) => item.saleId === id),
+    local = (DB.carregar().vendas || []).find((sale) => String(sale.id) === id);
+  if (!preview || !local) throw Error("A venda antiga não foi encontrada após comparar com a nuvem.");
+  const businessId = activeBusinessId(), clientId = String(local.clienteId || local.customerId || ""),
+    originalOperationId = String(local.operationId || "");
+  if (!clientId || !originalOperationId)
+    throw Error("A operação antiga não possui cliente ou identificador suficientes para uma reconciliação segura.");
+  const operationId = legacyReconciliationOperationId(id),
+    targetBalance = debt === 0 ? 0 : -debt,
+    requestedAt = now(),
+    adjustmentRef = doc(db, "businesses", businessId, "balanceAdjustments", operationId),
+    markerRef = doc(db, "businesses", businessId, "processedOperations", operationId),
+    clientRef = doc(db, "businesses", businessId, "clients", clientId),
+    saleRef = doc(db, "businesses", businessId, "sales", id),
+    originalEffectRef = doc(db, "businesses", businessId, "balanceEvents",
+      balanceEffectId("credit_sale", id)),
+    adjustmentEffectId = balanceEffectId("balance_adjustment", operationId),
+    adjustmentEffectRef = doc(db, "businesses", businessId, "balanceEvents", adjustmentEffectId);
+  automaticRecoveryBackup();
+  let outcome;
+  await runTransaction(db, async (transaction) => {
+    const [adjustmentSnapshot, markerSnapshot, clientSnapshot, saleSnapshot,
+      originalEffectSnapshot, adjustmentEffectSnapshot] = await Promise.all([
+      transaction.get(adjustmentRef), transaction.get(markerRef), transaction.get(clientRef),
+      transaction.get(saleRef), transaction.get(originalEffectRef), transaction.get(adjustmentEffectRef),
+    ]);
+    if (adjustmentSnapshot.exists()) {
+      const existing = adjustmentSnapshot.data() || {};
+      if (existing.resolutionStatus !== "resolved_by_reconciliation" ||
+        String(existing.resolvedSaleId || "") !== id ||
+        String(existing.resolvedOperationId || "") !== originalOperationId)
+        throw Error("Existe outra operação usando o identificador desta reconciliação.");
+      outcome = { idempotent: true, operationId, clientId,
+        clientName: existing.clienteNome || preview.customer,
+        balanceBefore: roundedMoney(existing.saldoAnterior),
+        balanceAfter: roundedMoney(existing.saldoNovo),
+        financialVersionAfter: Number(existing.financialVersionAfter || 0),
+        adjustmentId: operationId };
+      return;
+    }
+    if (markerSnapshot.exists() || adjustmentEffectSnapshot.exists())
+      throw Error("A reconciliação possui estado remoto incompleto. Revise antes de repetir.");
+    if (saleSnapshot.exists() || originalEffectSnapshot.exists())
+      throw Error("A venda original ou seu efeito financeiro já apareceu na nuvem. Refaça a auditoria.");
+    if (!clientSnapshot.exists()) throw Error("Cliente não encontrado na nuvem.");
+    const client = clientSnapshot.data() || {}, currentBalance = roundedMoney(client.saldo || 0),
+      currentVersion = financialVersionOf(client), delta = roundedMoney(targetBalance - currentBalance);
+    if (!sameFinancialMoney(currentBalance, preview.remoteCurrentBalance) ||
+      currentVersion !== Number(preview.remoteFinancialVersion || 0))
+      throw Error("O saldo do cliente mudou depois da prévia. Compare novamente antes de confirmar.");
+    const nextVersion = currentVersion + (sameFinancialMoney(delta, 0) ? 0 : 1),
+      adjustment = sanitizeForFirestore({
+        id: operationId, operationId, idempotencyKey: operationId,
+        businessId, ownerId: currentUser.uid, actorUid: currentUser.uid,
+        clienteId: clientId, clientId, clienteNome: client.nome || preview.customer || "",
+        tipo: "ajuste_saldo", subtipo: "reconciliacao_operacao_legada",
+        adjustmentType: "reconciliation", reasonCode: "legacy_sale_not_synced",
+        source: "owner_manual_reconciliation", motivo: explanation,
+        saldoAnterior: currentBalance, saldoNovo: targetBalance, valor: delta,
+        expectedFinancialVersion: currentVersion, financialVersionAfter: nextVersion,
+        resolvedSaleId: id, resolvedOperationId: originalOperationId,
+        resolvedCustomerId: clientId, resolvedSaleAmount: preview.amount,
+        resolvedSaleDate: preview.date || null, resolvedSaleStatus: preview.status || "",
+        resolutionStatus: "resolved_by_reconciliation", resolvedAt: serverTimestamp(),
+        data: requestedAt, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        schemaVersion: 3, version: 1,
+      });
+    if (!sameFinancialMoney(delta, 0))
+      transaction.set(clientRef, {
+        businessId, ownerId: currentUser.uid, saldo: targetBalance,
+        openBalance: Math.abs(Math.min(0, targetBalance)),
+        financialVersion: nextVersion, financialRevision: operationId,
+        financialReconciledAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        version: increment(1),
+      }, { merge: true });
+    transaction.set(adjustmentRef, adjustment);
+    if (!sameFinancialMoney(delta, 0)) transaction.set(adjustmentEffectRef,
+      sanitizeForFirestore({
+        id: adjustmentEffectId, operationId, idempotencyKey: adjustmentEffectId,
+        businessId, ownerId: currentUser.uid, customerId: clientId, clientId,
+        sourceCollection: "balanceAdjustments", sourceDocumentId: operationId,
+        type: "balance_adjustment", direction: delta < 0 ? "debit" : "credit",
+        amount: Math.abs(delta), balanceDelta: delta, eventKind: "balance_reconciliation",
+        reasonCode: "legacy_sale_not_synced", source: "owner_manual_reconciliation",
+        status: "applied", sourceCreatedAt: requestedAt, appliedAt: serverTimestamp(),
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 3,
+      }));
+    transaction.set(markerRef, sanitizeForFirestore({
+      id: operationId, idempotencyKey: operationId, businessId,
+      ownerId: currentUser.uid, status: "processed", eventKind: "balance_reconciliation",
+      processedAt: serverTimestamp(), createdAtLocal: requestedAt, schemaVersion: 3,
+    }));
+    outcome = { idempotent: false, operationId, clientId,
+      clientName: client.nome || preview.customer || "", balanceBefore: currentBalance,
+      balanceAfter: targetBalance, financialVersionAfter: nextVersion,
+      adjustmentId: operationId };
+  });
+  const [confirmedClientSnapshot, confirmedAdjustmentSnapshot] = await Promise.all([
+    getDocFromServer(clientRef), getDocFromServer(adjustmentRef),
+  ]), confirmedClient = confirmedClientSnapshot.exists()
+      ? cleanCloudItem({ id: clientId, ...confirmedClientSnapshot.data() }) : null,
+    confirmedAdjustment = confirmedAdjustmentSnapshot.exists()
+      ? cleanCloudItem({ id: operationId, ...confirmedAdjustmentSnapshot.data() }) : null;
+  if (!confirmedClient || !confirmedAdjustment ||
+    confirmedAdjustment.resolutionStatus !== "resolved_by_reconciliation" ||
+    String(confirmedAdjustment.resolvedSaleId || "") !== id ||
+    !sameFinancialMoney(confirmedClient.saldo, outcome.balanceAfter))
+    throw Error("A reconciliação foi enviada, mas a confirmação remota não pôde ser validada.");
+  applyCloudCollectionBatch([
+    { name: "clients", documents: [confirmedClient], options: { authoritative: true } },
+    { name: "balanceAdjustments", documents: [confirmedAdjustment], options: { authoritative: true } },
+  ]);
+  const reviews = readOrphanReviews();
+  reviews[id] = { saleId: id, operationId: originalOperationId,
+    checksum: checksumValue(local), decision: "resolved_by_reconciliation",
+    reason: explanation, reviewedAt: requestedAt, reviewedBy: currentUser.uid,
+    resolutionId: operationId, localBalanceAtReview: outcome.balanceAfter,
+    remoteBalanceAtReview: outcome.balanceAfter };
+  localStorage.setItem(orphanReviewKey(), JSON.stringify(reviews));
+  archiveResolvedSaleQueue(id, originalOperationId, operationId);
+  dispatchEvent(new CustomEvent("financial-state-updated", {
+    detail: { collection: "clients", clientId, operationId, source: "owner_manual_reconciliation" },
+  }));
+  await safePublishSyncSignal(["clients", "balanceAdjustments"]);
+  return { ...outcome, saleId: id, originalOperationId,
+    correctOpenDebt: Math.abs(Math.min(0, Number(outcome.balanceAfter || 0))) };
 }
 async function recoverMissingNonFinancial() {
   const audit = currentAuditOrThrow(),
@@ -4179,6 +4367,8 @@ async function recoverOnlyLocalSale(saleId) {
     return { saleId: id, operationId: local.operationId, idempotent: true, recovered: false };
   }
   const preview = onlyLocalSaleReport().find((sale) => sale.saleId === id);
+  if (preview?.resolved)
+    throw Error("Esta operação já foi conciliada manualmente.");
   if (preview?.classification !== "A" || !preview.recoveryMode)
     throw Error(`Esta venda exige revisão manual. ${preview?.reason || "Não há evidência suficiente."}`);
   const businessId = activeBusinessId(), operationId = String(local.operationId),
@@ -4188,6 +4378,8 @@ async function recoverOnlyLocalSale(saleId) {
     saleRef = doc(db, "businesses", businessId, "sales", id),
     effectId = balanceEffectId("credit_sale", id),
     effectRef = doc(db, "businesses", businessId, "balanceEvents", effectId),
+    resolutionRef = doc(db, "businesses", businessId, "balanceAdjustments",
+      legacyReconciliationOperationId(id)),
     markerRef = doc(db, "businesses", businessId, "processedOperations", operationId),
     clientRef = clientId ? doc(db, "businesses", businessId, "clients", clientId) : null;
   automaticRecoveryBackup();
@@ -4195,9 +4387,13 @@ async function recoverOnlyLocalSale(saleId) {
     const saleSnapshot = await transaction.get(saleRef),
       markerSnapshot = await transaction.get(markerRef),
       effectSnapshot = credit ? await transaction.get(effectRef) : null,
+      resolutionSnapshot = await transaction.get(resolutionRef),
       clientSnapshot = credit && clientRef ? await transaction.get(clientRef) : null,
       effect = effectSnapshot?.exists() ? effectSnapshot.data() : null,
       client = clientSnapshot?.exists() ? clientSnapshot.data() : null;
+    if (resolutionSnapshot.exists() &&
+      resolutionSnapshot.data()?.resolutionStatus === "resolved_by_reconciliation")
+      throw Error("Esta operação já foi conciliada manualmente.");
     if (saleSnapshot.exists()) {
       if (String(saleSnapshot.data()?.operationId || "") !== operationId)
         throw Error("O saleId foi usado por outra operação durante a recuperação.");
@@ -5442,6 +5638,7 @@ window.SyncFirebase = {
   downloadJsonFile,
   onlyLocalSaleReport,
   recoverOnlyLocalSale,
+  reconcileOnlyLocalSaleBalance,
   reviewOnlyLocalSale,
   recoverMissingNonFinancial,
   recoverMissingFinancialMovements,

@@ -86,6 +86,7 @@ function recoveryHarness(mode = 'apply_financial') {
     sameFinancialMoney: moneyEqual,
     financialVersionOf: (client) => Number(client.financialVersion || 0),
     balanceEffectId: (type, id) => `${type}:${id}`,
+    legacyReconciliationOperationId: (id) => `legacy_reconciliation:${id}`,
     checksumValue: () => 'checksum', deviceId: () => 'device-a',
     now: () => '2026-09-22T12:02:00.000Z',
     cleanCloudItem: (value) => value,
