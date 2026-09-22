@@ -10,7 +10,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=100";
+import { createFirestoreRepository } from "./firestore-repository.js?v=149";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -142,6 +142,7 @@ const repositories = Object.fromEntries(
     CLOUD_NAMES.map((name) => [name, createFirestoreRepository(name)]),
   ),
   financialEffectsRepository = createFirestoreRepository("balanceEvents"),
+  activityEventsRepository = createFirestoreRepository("activityEvents"),
   syncSignalRepository = createFirestoreRepository("syncMetadata"),
   syncSessionId = crypto.randomUUID();
 let currentUser = null,
@@ -164,7 +165,9 @@ let currentUser = null,
   signalCollections = new Set(),
   signalVersions = new Map(),
   listenerRegistry = new Map(),
-  lastDataAuditRaw = null;
+  lastDataAuditRaw = null,
+  activityEventsCursor = null,
+  activityEventsHasMore = false;
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -5579,6 +5582,76 @@ function setUser(user, profile = null, business = null) {
   startAutoSync();
   updateQueueState();
 }
+
+function pendingActivityEvents() {
+  const prefixes = {
+      sales: "sale",
+      payments: "payment",
+      balanceAdjustments: "balance",
+      stockMovements: "stock",
+      campaignEvents: "campaign",
+      customerSubscriptionEvents: "renewal",
+      catalogOrders: "order",
+    },
+    events = new Map();
+  for (const queued of readQueue()) {
+    for (const write of queued.payload?.writes || []) {
+      const prefix = prefixes[write.entityType],
+        entityId = String(write.entityId || "");
+      if (!prefix || !entityId) continue;
+      const eventId = `${prefix}:${entityId}`,
+        failed = queued.status === "error";
+      events.set(eventId, {
+        eventId,
+        operationId: String(
+          write.data?.operationId || queued.operationId || "",
+        ),
+        status: failed ? "error" : "pending",
+      });
+    }
+  }
+  return [...events.values()];
+}
+
+function subscribeRecentActivityEvents(callback, onError, max = 100) {
+  activityEventsCursor = null;
+  activityEventsHasMore = false;
+  let additionalPages = 0,
+    received = false;
+  const stop = activityEventsRepository.subscribeRecent(
+    (items, metadata, page) => {
+      if (!received || additionalPages === 0) {
+        activityEventsCursor = page?.cursor || null;
+        activityEventsHasMore = Boolean(page?.hasMore);
+      }
+      received = true;
+      callback?.(items, metadata, {
+        hasMore: activityEventsHasMore,
+        initialLimit: Math.max(1, Number(max) || 100),
+      });
+    },
+    onError,
+    Math.max(1, Math.min(100, Number(max) || 100)),
+  );
+  const wrapped = () => {
+    stop?.();
+    activityEventsCursor = null;
+    activityEventsHasMore = false;
+  };
+  wrapped.loadMore = async (pageSize = 50) => {
+    if (!activityEventsHasMore || !activityEventsCursor)
+      return { items: [], hasMore: false };
+    const page = await activityEventsRepository.listPage(
+      activityEventsCursor,
+      Math.max(1, Math.min(100, Number(pageSize) || 50)),
+    );
+    activityEventsCursor = page.cursor;
+    activityEventsHasMore = page.hasMore;
+    additionalPages++;
+    return { items: page.items, hasMore: page.hasMore };
+  };
+  return wrapped;
+}
 addEventListener("online", () => {
   emit({ status: "waiting", message: "Conexão recuperada. Sincronizando…" });
   scheduleImmediate();
@@ -5632,6 +5705,8 @@ window.SyncFirebase = {
   queryCustomerSubscriptions,
   loadProductVariants,
   findProductVariantByBarcode,
+  pendingActivityEvents,
+  subscribeRecentActivityEvents,
   compare: compareLocalAndCloud,
   compareDeviceWithCloud,
   exportLocalDiagnostic,

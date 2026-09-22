@@ -26,6 +26,11 @@
       types: [],
     },
   };
+  let cloudEvents = [],
+    cloudHasMore = false,
+    cloudLoading = false,
+    cloudBusinessId = "",
+    stopCloudSubscription = null;
   const TYPE_META = {
     sale: { label: "Venda", icon: "shopping-cart", tone: "green" },
     payment: { label: "Pagamento", icon: "wallet-cards", tone: "green" },
@@ -60,7 +65,8 @@
     fallback ||
     db.produtos?.find((item) => String(item.id) === String(id))?.nome ||
     "";
-  const campaignName = (db, id) =>
+  const campaignName = (db, id, fallback = "") =>
+    fallback ||
     db.campanhas?.find((item) => String(item.id) === String(id))?.nome ||
     "Campanha";
   const valueOf = (item) =>
@@ -202,7 +208,7 @@
         expired: "Benefício expirado",
       },
       transition = String(item.transition || item.status || "atualizado"),
-      name = campaignName(db, item.campaignId),
+      name = campaignName(db, item.campaignId, item.campaignName),
       client = clientName(db, item.clientId);
     return {
       id: `campaign:${item.id}`,
@@ -246,7 +252,7 @@
       product = productName(
         db,
         item.productId,
-        item.next?.label || item.previous?.label || "",
+        item.productName || item.next?.label || item.previous?.label || "",
       );
     return {
       id: `renewal:${item.id}`,
@@ -308,24 +314,213 @@
       raw: item,
     };
   }
-  function events() {
+  function saleEvent(item) {
+    return movementEvent({}, {
+      ...item,
+      id: item.id,
+      tipo: "venda",
+      vendaId: item.id,
+      clienteId: item.clienteId || item.clientId,
+      clienteNome: item.clienteNome || item.clientName || item.customerName,
+      valor: item.valorFinal ?? item.valorTotal ?? item.total ?? item.amount,
+      status:
+        item.status === "fiado" || item.formaPagamento === "fiado"
+          ? "fiado"
+          : item.status,
+      data: item.data || item.createdAt,
+    });
+  }
+  function paymentEvent(item) {
+    return movementEvent({}, {
+      ...item,
+      id: item.id,
+      tipo: "pagamento",
+      clienteId: item.clienteId || item.clientId,
+      clienteNome: item.clienteNome || item.clientName || item.customerName,
+      valor: item.valor ?? item.total ?? item.amount,
+      data: item.data || item.createdAt,
+    });
+  }
+  function canonicalEvent(db, event) {
+    const summary = event.summary || {},
+      base = {
+        id: event.entityId || event.sourceDocumentId,
+        operationId: event.operationId,
+        clienteId: summary.customerId,
+        clientId: summary.customerId,
+        clienteNome: summary.customerName,
+        customerName: summary.customerName,
+        createdAt: event.createdAt,
+        data: event.createdAt,
+        status: event.status,
+        formaPagamento: summary.paymentMethod,
+        paymentMethod: summary.paymentMethod,
+        amount: summary.amount,
+      };
+    let item = null;
+    if (event.type === "sale") item = saleEvent(base);
+    if (event.type === "payment")
+      item = paymentEvent({
+        ...base,
+        observacao: summary.paymentMethod
+          ? `Recebido via ${summary.paymentMethod}`
+          : "Saldo atualizado",
+      });
+    if (event.type === "balance")
+      item = movementEvent(db, {
+        ...base,
+        tipo: "ajuste_saldo",
+        saldoAnterior: summary.balanceBefore,
+        saldoNovo: summary.balanceAfter,
+        motivo: summary.reason,
+      });
+    if (event.type === "stock")
+      item = stockEvent(db, {
+        ...base,
+        tipo: event.subtype,
+        produtoId: summary.productId,
+        produtoNome: summary.productName,
+        variantName: summary.variantName,
+        quantidade: summary.quantity,
+        observacao: summary.note,
+      });
+    if (event.type === "campaign")
+      item = campaignEvent(db, {
+        ...base,
+        campaignId: summary.campaignId,
+        campaignName: summary.campaignName,
+        transition: summary.transition || event.subtype,
+      });
+    if (event.type === "renewal")
+      item = renewalEvent(db, {
+        ...base,
+        subscriptionId: summary.subscriptionId,
+        productId: summary.productId,
+        productName: summary.productName,
+        transition: summary.transition || event.subtype,
+      });
+    if (event.type === "order")
+      item = orderEvent({
+        ...base,
+        publicOrderNumber: summary.publicOrderNumber,
+        orderStatus: summary.orderStatus || event.subtype,
+        total: summary.amount,
+      });
+    if (!item) return null;
+    item.id = event.eventId || event.id;
+    item.operationId = event.operationId || "";
+    item.date = event.createdAt;
+    item.raw = event;
+    if (event.status === "cancelled" || event.status === "source_deleted") {
+      item.status = "Cancelada";
+      item.statusTone = "danger";
+    }
+    return item;
+  }
+  function pendingLocalEvents(db, cloudIds) {
+    const pending = new Map(
+        (window.SyncFirebase?.pendingActivityEvents?.() || []).map((item) => [
+          item.eventId,
+          item,
+        ]),
+      ),
+      bridgeDeadline = Date.now() - 10 * 60 * 1000,
+      bridge = (item) =>
+        !cloudIds.has(item.eventId) &&
+        item.confirmedAt &&
+        at(item.confirmedAt).getTime() >= bridgeDeadline,
+      withStatus = (item, queue) => {
+        if (!item) return null;
+        item.id = queue.eventId;
+        item.operationId = queue.operationId || item.operationId || "";
+        item.status =
+          queue.status === "error"
+            ? "Erro de sincronização"
+            : queue.status === "confirming"
+              ? "Confirmando histórico"
+              : "Aguardando sincronização";
+        item.statusTone = queue.status === "error" ? "danger" : "warning";
+        return item;
+      },
+      local = [];
+    const add = (eventId, factory, operationId, confirmedAt = "") => {
+      const queue = pending.get(eventId),
+        state = queue ||
+          (confirmedAt
+            ? { eventId, operationId, status: "confirming", confirmedAt }
+            : null);
+      if (!state || cloudIds.has(eventId)) return;
+      state.confirmedAt = confirmedAt;
+      if (!queue && !bridge(state)) return;
+      const item = withStatus(factory(), state);
+      if (item) local.push(item);
+    };
+    recent(db.vendas).forEach((item) =>
+      add(
+        `sale:${item.id}`,
+        () => saleEvent(item),
+        item.operationId,
+        item.syncConfirmedAt,
+      ),
+    );
+    recent(db.pagamentos).forEach((item) =>
+      add(
+        `payment:${item.id}`,
+        () => paymentEvent(item),
+        item.operationId,
+        item.syncConfirmedAt,
+      ),
+    );
+    recent(db.movimentacoes)
+      .filter((item) => item.tipo === "ajuste_saldo")
+      .forEach((item) =>
+        add(`balance:${item.id}`, () => movementEvent(db, item), item.operationId),
+      );
+    recent(db.movimentacoesEstoque).forEach((item) =>
+      add(`stock:${item.id}`, () => stockEvent(db, item), item.operationId),
+    );
+    recent(db.eventosCampanha).forEach((item) =>
+      add(
+        `campaign:${item.id}`,
+        () => campaignEvent(db, item),
+        item.operationId,
+      ),
+    );
+    recent(db.customerSubscriptionEvents).forEach((item) =>
+      add(
+        `renewal:${item.id}`,
+        () => renewalEvent(db, item),
+        item.operationId,
+      ),
+    );
+    recent(db.catalogOrders)
+      .filter((item) => !item.deletedAt)
+      .forEach((item) =>
+        add(`order:${item.id}`, () => orderEvent(item), item.operationId),
+      );
+    return local;
+  }
+  function events(cloudOverride = cloudEvents) {
     const db = window.DB?.carregar?.() || {},
-      merged = [
-        ...recent(db.movimentacoes).map((item) => movementEvent(db, item)),
-        ...recent(db.movimentacoesEstoque).map((item) => stockEvent(db, item)),
-        ...recent(db.eventosCampanha).map((item) => campaignEvent(db, item)),
-        ...recent(db.customerSubscriptionEvents).map((item) =>
-          renewalEvent(db, item),
-        ),
-        ...recent(db.catalogOrders)
-          .filter((item) => !item.deletedAt)
-          .map(orderEvent),
-      ].filter(Boolean),
-      seen = new Set();
+      canonical = (cloudOverride || [])
+        .map((item) => canonicalEvent(db, item))
+        .filter(Boolean),
+      cloudIds = new Set(canonical.map((item) => item.id)),
+      merged = [...canonical, ...pendingLocalEvents(db, cloudIds)],
+      seenIds = new Set(),
+      seenOperations = new Set();
     return merged
       .filter((item) => {
-        if (seen.has(item.id)) return false;
-        seen.add(item.id);
+        const operationKey = item.operationId
+          ? `${item.type}:${item.operationId}`
+          : "";
+        if (
+          seenIds.has(item.id) ||
+          (operationKey && seenOperations.has(operationKey))
+        )
+          return false;
+        seenIds.add(item.id);
+        if (operationKey) seenOperations.add(operationKey);
         return true;
       })
       .sort((a, b) => at(b.date) - at(a.date));
@@ -424,7 +619,61 @@
       )
       .join(
         "",
-      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length ? `<button class="activity-load-more" type="button" data-history-more>Carregar mais ${Math.min(PAGE_SIZE, list.length - shown.length)} ações</button>` : ""}</section>`;
+      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || cloudHasMore ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
+  }
+  function closeCloudSubscription() {
+    stopCloudSubscription?.();
+    stopCloudSubscription = null;
+    cloudBusinessId = "";
+    cloudEvents = [];
+    cloudHasMore = false;
+    cloudLoading = false;
+  }
+  function mergeCloudEvents(items) {
+    const seen = new Set(),
+      operations = new Set();
+    cloudEvents = [...(items || []), ...cloudEvents].filter((item) => {
+      const id = String(item.eventId || item.id || ""),
+        operation = item.operationId
+          ? `${item.type}:${item.operationId}`
+          : "";
+      if (!id || seen.has(id) || (operation && operations.has(operation)))
+        return false;
+      seen.add(id);
+      if (operation) operations.add(operation);
+      return true;
+    });
+  }
+  function ensureCloudSubscription() {
+    const businessId = String(
+      window.BusinessContext?.get?.().businessId ||
+        window.FirebaseSession?.profile?.businessId ||
+        "",
+    );
+    if (
+      !businessId ||
+      typeof window.SyncFirebase?.subscribeRecentActivityEvents !== "function"
+    )
+      return;
+    if (stopCloudSubscription && cloudBusinessId === businessId) return;
+    closeCloudSubscription();
+    cloudBusinessId = businessId;
+    stopCloudSubscription = window.SyncFirebase.subscribeRecentActivityEvents(
+      (items, _metadata, page) => {
+        if (cloudBusinessId !== businessId) return;
+        mergeCloudEvents(items);
+        cloudHasMore = Boolean(page?.hasMore);
+        rerender();
+      },
+      (error) => {
+        console.warn("[Activity history listener]", {
+          code: error?.code || "unknown",
+        });
+        cloudHasMore = false;
+        rerender();
+      },
+      100,
+    );
   }
   function rerender() {
     const root = $("[data-activity-root]");
@@ -569,6 +818,7 @@
   function bind() {
     const root = $("[data-activity-root]");
     if (!root) return;
+    ensureCloudSubscription();
     let timer;
     $("#activity-search", root)?.addEventListener("input", (event) => {
       clearTimeout(timer);
@@ -597,14 +847,44 @@
       state.page = 1;
       rerender();
     });
-    $("[data-history-more]", root)?.addEventListener("click", () => {
-      state.page++;
+    $("[data-history-more]", root)?.addEventListener("click", async () => {
+      const loaded = filtered(),
+        visible = state.page * PAGE_SIZE;
+      if (visible < loaded.length) {
+        state.page++;
+        rerender();
+        return;
+      }
+      if (!cloudHasMore || cloudLoading || !stopCloudSubscription?.loadMore)
+        return;
+      cloudLoading = true;
       rerender();
+      try {
+        const page = await stopCloudSubscription.loadMore(50);
+        mergeCloudEvents(page.items);
+        cloudHasMore = Boolean(page.hasMore);
+        state.page++;
+      } catch (error) {
+        console.warn("[Activity history pagination]", {
+          code: error?.code || "unknown",
+        });
+      } finally {
+        cloudLoading = false;
+        rerender();
+      }
     });
     $$("[data-activity-id]", root).forEach(
       (button) =>
         (button.onclick = () => openDetail(button.dataset.activityId)),
     );
   }
+  window.addEventListener?.("hashchange", () =>
+    setTimeout(() => {
+      if (!$("[data-activity-root]")) closeCloudSubscription();
+    }),
+  );
+  window.addEventListener?.("business-context-changed", (event) => {
+    if (!event.detail?.businessId) closeCloudSubscription();
+  });
   window.ActivityCenter = { render, bind, events, state };
 })();

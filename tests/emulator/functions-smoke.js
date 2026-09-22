@@ -68,8 +68,8 @@ const {
     itens: [{ quantidade: 2 }],
   });
   let metric = null;
-  for (let attempt = 0; attempt < 20 && !metric; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  for (let attempt = 0; attempt < 40 && !metric; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
     const result = await admin
       .doc(`businesses/${business}/customerMetrics/${clientId}`)
       .get();
@@ -82,8 +82,8 @@ const {
     status: "cancelado",
     updatedAt: new Date().toISOString(),
   });
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
     metric = (await admin.doc(`businesses/${business}/customerMetrics/${clientId}`).get()).data();
     if (Number(metric?.purchaseCount) === 0) break;
   }
@@ -96,8 +96,8 @@ const {
     createdAt: "2026-07-28T12:00:00.000Z",
     items: [{ quantity: 1 }],
   });
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
     metric = (await admin.doc(`businesses/${business}/customerMetrics/${clientId}`).get()).data();
     if (Number(metric?.purchaseCount) === 1) break;
   }

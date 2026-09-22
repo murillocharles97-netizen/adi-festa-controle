@@ -735,6 +735,10 @@ service cloud.firestore {
           && request.resource.data.transition in ['activation', 'renewal', 'paused', 'reactivated', 'expired', 'cancelled', 'sale_reversed', 'price_changed', 'plan_changed'];
         allow update, delete: if false;
       }
+      match /activityEvents/{eventId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create, update, delete: if false;
+      }
       match /products/{productId} {
         allow read: if belongsToBusiness(businessId);
         allow create: if canWriteCollection(businessId, 'products')
@@ -771,10 +775,10 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /{collectionName}/{documentId} {
-        allow read: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow read: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents', 'activityEvents'])
           && belongsToBusiness(businessId)
           && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || hasPermission(businessId, 'viewCRM'));
-        allow create: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow create: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents', 'activityEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && request.resource.data.businessId == businessId
           && (collectionName != 'customerSegments' || hasPermission(businessId, 'manageCustomerSegments'))
@@ -783,7 +787,7 @@ service cloud.firestore {
             || documentId != 'operation'
             || hasPermission(businessId, 'manageOperationSettings')
           );
-        allow update: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents'])
+        allow update: if !(collectionName in ['products', 'sales', 'productVariants', 'processedOperations', 'billingCheckoutAttempts', 'subscriptionIntents', 'paymentIntents', 'paymentTerminals', 'paymentProviderConfigs', 'paymentReceivables', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptionEvents', 'activityEvents'])
           && (canWriteCollection(businessId, collectionName) || (collectionName == 'settings' && documentId == 'operation' && hasPermission(businessId, 'manageOperationSettings')))
           && (
             resource.data.businessId == businessId

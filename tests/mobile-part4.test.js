@@ -36,7 +36,7 @@ function activitySandbox(data) {
   return sandbox;
 }
 
-test("centro de atividades combina somente fontes reais e evita duplicar saída de venda", () => {
+test("centro de atividades usa eventos canônicos e evita duplicar saída de venda", () => {
   const date = new Date().toISOString();
   const sandbox = activitySandbox({
     clientes: [{ id: "c1", nome: "Maria" }],
@@ -103,7 +103,15 @@ test("centro de atividades combina somente fontes reais e evita duplicar saída 
       },
     ],
   });
-  const events = sandbox.ActivityCenter.events();
+  const canonical = [
+    { eventId: "sale:v1", type: "sale", entityId: "v1", createdAt: date, operationId: "op-v1", status: "confirmed", summary: { customerId: "c1", customerName: "Maria", amount: 50 } },
+    { eventId: "payment:p1", type: "payment", entityId: "p1", createdAt: date, operationId: "op-p1", status: "confirmed", summary: { customerId: "c1", customerName: "Maria", amount: 20 } },
+    { eventId: "stock:s2", type: "stock", entityId: "s2", subtype: "entrada", createdAt: date, status: "confirmed", summary: { productId: "p1", productName: "Painel", quantity: 3 } },
+    { eventId: "campaign:e1", type: "campaign", entityId: "e1", createdAt: date, status: "confirmed", summary: { campaignId: "cp1", customerId: "c1", transition: "redeemed" } },
+    { eventId: "renewal:r1", type: "renewal", entityId: "r1", createdAt: date, status: "confirmed", summary: { productId: "p1", customerId: "c1", transition: "renewal" } },
+    { eventId: "order:o1", type: "order", entityId: "o1", createdAt: date, status: "confirmed", summary: { publicOrderNumber: "9", customerName: "Maria", orderStatus: "recebido", amount: 40 } },
+  ];
+  const events = sandbox.ActivityCenter.events(canonical);
   assert.deepEqual([...new Set(events.map((item) => item.type))].sort(), [
     "campaign",
     "order",
@@ -123,10 +131,10 @@ test("centro de atividades combina somente fontes reais e evita duplicar saída 
   );
 });
 
-test("histórico limita renderização inicial a 20 cards e não adiciona leitura Firebase", () => {
-  const movements = Array.from({ length: 35 }, (_, index) => ({
-    id: `m${index}`,
-    tipo: "pagamento",
+test("histórico limita renderização inicial a 20 pendências locais e não consulta por tecla", () => {
+  const payments = Array.from({ length: 35 }, (_, index) => ({
+    id: `p${index}`,
+    operationId: `op${index}`,
     clienteNome: `Cliente ${index}`,
     valor: index + 1,
     data: new Date(Date.now() - index * 1000).toISOString(),
@@ -135,12 +143,21 @@ test("histórico limita renderização inicial a 20 cards e não adiciona leitur
     clientes: [],
     produtos: [],
     campanhas: [],
-    movimentacoes: movements,
+    movimentacoes: [],
+    vendas: [],
+    pagamentos: payments,
     movimentacoesEstoque: [],
     eventosCampanha: [],
     customerSubscriptionEvents: [],
     catalogOrders: [],
   });
+  sandbox.SyncFirebase = {
+    pendingActivityEvents: () => payments.map((item) => ({
+      eventId: `payment:${item.id}`,
+      operationId: item.operationId,
+      status: "pending",
+    })),
+  };
   const html = sandbox.ActivityCenter.render();
   assert.equal((html.match(/data-activity-id=/g) || []).length, 20);
   assert.match(html, /Carregar mais 15 ações/);
