@@ -413,11 +413,24 @@ const readQueue = () => {
     return [];
   }
 };
+const readQueueStrict = () => {
+  const raw = localStorage.getItem(queueKey());
+  if (!raw) return [];
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { /* keep the original data untouched */ }
+  if (!Array.isArray(parsed))
+    throw Error("A fila local está corrompida. Exporte o diagnóstico; nenhuma nova venda foi salva.");
+  return parsed;
+};
 const saveQueue = (queue) => {
+  readQueueStrict();
   localStorage.setItem(queueKey(), JSON.stringify(queue));
   updateQueueState();
 };
 const queueCounts = () => {
+  try { readQueueStrict(); } catch {
+    return { pending: 0, errors: 1, total: 1, corrupt: true };
+  }
   const queue = readQueue();
   return {
     pending: queue.filter((item) => item.status !== "error").length,
@@ -425,6 +438,66 @@ const queueCounts = () => {
     total: queue.length,
   };
 };
+function saleIntegrityDiagnostics() {
+  if (!currentUser) return { count: 0, localWithoutQueue: [], queueWithoutLocal: [],
+    onlyLocalAfterComparison: [], overdue: [], comparedAt: "" };
+  const sales = DB.carregar().vendas || [],
+    queue = readQueue(),
+    byId = new Map(sales.map((sale) => [String(sale.id), sale])),
+    queued = new Set(queue.flatMap((item) => (item.payload?.writes || [])
+      .filter((write) => write.entityType === "sales" && write.operation === "create")
+      .map((write) => String(write.entityId)))),
+    localWithoutQueue = sales.filter((sale) => Number(sale.syncPipelineVersion || 0) >= 2 &&
+      !sale.deletedAt && sale.active !== false && !sale.syncConfirmedAt &&
+      !sale.financialAppliedAt && !queued.has(String(sale.id)))
+      .map((sale) => ({ saleId: String(sale.id), operationId: String(sale.operationId || "") })),
+    queueWithoutLocal = queue.flatMap((item) => (item.payload?.writes || [])
+      .filter((write) => write.entityType === "sales" && write.operation === "create" &&
+        !byId.has(String(write.entityId)))
+      .map((write) => ({ saleId: String(write.entityId), operationId: String(item.operationId),
+        status: item.status }))),
+    onlyLocalAfterComparison = (state.dataAudit?.collections?.sales?.onlyLocal || [])
+      .filter((item) => item.classification === "B" &&
+        !byId.get(String(item.documentId))?.syncConfirmedAt &&
+        !byId.get(String(item.documentId))?.financialAppliedAt)
+      .map((item) => ({ saleId: String(item.documentId), operationId: String(item.operationId || "") })),
+    overdue = queue.filter((item) => item.payload?.eventKind === "sale" &&
+      Date.now() - (Date.parse(item.createdAtLocal || item.createdAt || "") || Date.now()) > 15 * 60 * 1000)
+      .map((item) => ({ operationId: String(item.operationId), status: item.status }));
+  return { count: new Set([...localWithoutQueue, ...queueWithoutLocal,
+    ...onlyLocalAfterComparison].map((item) => item.saleId)).size,
+    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue,
+    comparedAt: state.dataAudit?.generatedAt || "" };
+}
+function paymentIntegrityDiagnostics() {
+  if (!currentUser) return { count: 0, localWithoutQueue: [], queueWithoutLocal: [],
+    onlyLocalAfterComparison: [], overdue: [] };
+  const payments = DB.carregar().pagamentos || [],
+    queue = readQueue(),
+    byId = new Set(payments.map((payment) => String(payment.id))),
+    queued = new Set(queue.flatMap((item) => (item.payload?.writes || [])
+      .filter((write) => write.entityType === "payments" && write.operation === "create")
+      .map((write) => String(write.entityId)))),
+    localWithoutQueue = payments.filter((payment) => Number(payment.syncPipelineVersion || 0) >= 2 &&
+      !payment.syncConfirmedAt && payment.applicationStatus !== "applied" &&
+      !queued.has(String(payment.id)))
+      .map((payment) => ({ paymentId: String(payment.id), operationId: String(payment.operationId || "") })),
+    queueWithoutLocal = queue.flatMap((item) => (item.payload?.writes || [])
+      .filter((write) => write.entityType === "payments" && write.operation === "create" &&
+        !byId.has(String(write.entityId)))
+      .map((write) => ({ paymentId: String(write.entityId), operationId: String(item.operationId),
+        status: item.status }))),
+    onlyLocalAfterComparison = (state.dataAudit?.collections?.payments?.onlyLocal || [])
+      .filter((item) => item.classification === "B" &&
+        !(payments.find((payment) => String(payment.id) === String(item.documentId))?.syncConfirmedAt))
+      .map((item) => ({ paymentId: String(item.documentId), operationId: String(item.operationId || "") })),
+    overdue = queue.filter((item) => item.payload?.eventKind === "payment" &&
+      Date.now() - (Date.parse(item.createdAtLocal || item.createdAt || "") || Date.now()) > 15 * 60 * 1000)
+      .map((item) => ({ operationId: String(item.operationId), status: item.status }));
+  return { count: new Set([...localWithoutQueue, ...queueWithoutLocal,
+    ...onlyLocalAfterComparison].map((item) => item.paymentId)).size,
+    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue };
+}
 const queueErrorBreakdown = () => {
   const errors = readQueue().filter((item) => item.status === "error");
   return {
@@ -801,6 +874,8 @@ async function indexedDbInventory() {
 }
 const diagnostic = () => {
   const q = queueCounts(),
+    saleIntegrity = saleIntegrityDiagnostics(),
+    paymentIntegrity = paymentIntegrityDiagnostics(),
     local = localSummary(),
     profile = state.userProfile || {},
     usage = usageSnapshot();
@@ -834,6 +909,10 @@ const diagnostic = () => {
     pendingOperations: q.total,
     pending: q.pending,
     syncErrors: q.errors,
+    queueStorageCorrupt: Boolean(q.corrupt),
+    orphanOperations: saleIntegrity.count + paymentIntegrity.count,
+    saleIntegrity,
+    paymentIntegrity,
     processingOperations: readQueue().filter((item) => item.status === "syncing")
       .length,
     lastAttemptAt: state.lastAttempt,
@@ -877,19 +956,30 @@ const emit = (patch) => {
       queueTotal: counts.total,
       details: diagnostic(),
     };
+  snapshot.orphanOperations = snapshot.details.orphanOperations ||
+    (state.dataAudit ? 0 : "Não verificado");
   subscribers.forEach((callback) => callback(snapshot));
   dispatchEvent(new CustomEvent("firebase-sync-status", { detail: snapshot }));
 };
 function updateQueueState() {
   const q = queueCounts();
   if (!currentUser) return;
+  if (q.corrupt) {
+    emit({ status: "error", message: "Fila local ilegível. Exporte o diagnóstico; a sincronização foi bloqueada." });
+    return;
+  }
+  const orphanCount = saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count;
   if (!navigator.onLine)
     emit({
       status: "offline",
-      message: q.total
+      message: orphanCount
+        ? `Offline — ${orphanCount} operação(ões) somente locais para revisão`
+        : q.total
         ? `Offline — ${q.total} alteração(ões) pendente(s)`
         : "Offline — salvo no aparelho",
     });
+  else if (orphanCount && state.status !== "syncing")
+    emit({ status: "error", message: `${orphanCount} operação(ões) somente locais sem confirmação na última análise. Revise o diagnóstico.` });
   else if (q.total && state.status !== "syncing")
     emit({
       status: q.errors ? "error" : "waiting",
@@ -1182,7 +1272,7 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
-  const queue = readQueue(),
+  const queue = readQueueStrict(),
     businessId = activeBusinessId(),
     stableOperationId = String(operationId || crypto.randomUUID()),
     existingOperationIds = new Set(
@@ -1224,7 +1314,7 @@ function queueWrites(
       createdAtLocal: createdAt,
       retryCount: 0,
       attempts: 0,
-      status: "pending",
+      status: options.status || "pending",
       lastAttemptAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -1235,8 +1325,131 @@ function queueWrites(
     queuedWrites += part.length;
   }
   saveQueue(queue);
-  if (queuedWrites) scheduleImmediate();
+  if (queuedWrites && options.schedule !== false) scheduleImmediate();
   return queuedWrites;
+}
+function resumePreparedSales(operationId = "") {
+  const queue = readQueueStrict(),
+    prepared = queue.filter((item) => item.status === "local_preparing" &&
+      ["sale-write-ahead", "payment-write-ahead"].includes(item.source) &&
+      (!operationId || String(item.operationId) === String(operationId)));
+  if (!prepared.length) return 0;
+  const data = DB.carregar();
+  let promoted = 0;
+  for (const item of prepared) {
+    if (item.source === "payment-write-ahead") {
+      const paymentWrite = (item.payload?.writes || []).find((entry) =>
+          entry.entityType === "payments" && entry.operation === "create"),
+        payment = (data.pagamentos || []).find((entry) =>
+          String(entry.id) === String(paymentWrite?.entityId) &&
+          String(entry.operationId) === String(item.operationId)),
+        client = (data.clientes || []).find((entry) =>
+          String(entry.id) === String(payment?.clienteId));
+      if (payment && client && financialVersionOf(client) >=
+        Number(payment.expectedFinancialVersion || 0) + 1) {
+        item.status = "pending";
+        promoted++;
+      } else {
+        item.status = "error";
+        item.lastErrorCode = "local-operation-missing";
+        item.lastErrorMessage = "A fila foi preparada, mas o recebimento local não foi confirmado.";
+      }
+      continue;
+    }
+    const write = (item.payload?.writes || []).find((entry) =>
+      entry.entityType === "sales" && entry.operation === "create"),
+      sale = (data.vendas || []).find((entry) => String(entry.id) === String(write?.entityId) &&
+        String(entry.operationId) === String(item.operationId)),
+      client = (data.clientes || []).find((entry) => String(entry.id) === String(sale?.clienteId)),
+      credit = sale?.formaPagamento === "fiado" || sale?.status === "fiado";
+    if (sale && (!credit || (client &&
+      financialVersionOf(client) >= Number(sale.financialVersionAnterior || 0) + 1))) {
+      item.status = "pending";
+      promoted++;
+    } else {
+      item.status = "error";
+      item.lastErrorCode = "local-operation-missing";
+      item.lastErrorMessage = "A fila foi preparada, mas a venda local não foi confirmada. Revisão técnica necessária.";
+    }
+  }
+  saveQueue(queue);
+  if (promoted) scheduleImmediate();
+  return promoted;
+}
+function createPaymentOperation(before, after, payment) {
+  if (!currentUser || readOnlyMode || !DB.__firebaseSyncWrapped)
+    throw Error("A sincronização financeira não está pronta. Nenhum pagamento foi salvo.");
+  if (!payment?.operationId || !payment?.id || payment.idempotencyKey !== payment.operationId)
+    throw Error("O recebimento precisa de identificador idempotente.");
+  const writes = diffWrites(before, after),
+    paymentWrites = writes.filter((write) => write.entityType === "payments" && write.operation === "create"),
+    clientWrite = writes.find((write) => write.entityType === "clients" &&
+      String(write.entityId) === String(payment.clienteId));
+  if (writes.length > MAX_WRITES || paymentWrites.length !== 1 ||
+    String(paymentWrites[0].entityId) !== String(payment.id) ||
+    String(paymentWrites[0].data?.operationId) !== String(payment.operationId) ||
+    !clientWrite || !Number.isFinite(Number(clientWrite.data?.saldo)) ||
+    Number(clientWrite.data.financialVersion) !== Number(payment.expectedFinancialVersion) + 1)
+    throw Error("Recebimento e saldo não formam uma operação financeira única. Nenhum pagamento foi salvo.");
+  const existing = readQueueStrict().filter((item) => String(item.operationId) === String(payment.operationId));
+  if (existing.length) {
+    const localPayment = (DB.carregar().pagamentos || []).some((entry) =>
+      String(entry.operationId) === String(payment.operationId));
+    if (localPayment || existing.some((item) => item.source !== "payment-write-ahead" ||
+      !["error", "local_preparing"].includes(item.status)))
+      throw Error("Este recebimento já existe na fila. Revise a sincronização antes de repetir.");
+    saveQueue(readQueueStrict().filter((item) => String(item.operationId) !== String(payment.operationId)));
+  }
+  const queued = queueWrites(writes, payment.operationId, "payment",
+    { status: "local_preparing", schedule: false, source: "payment-write-ahead" });
+  if (queued !== writes.length)
+    throw Error("A fila do recebimento não foi criada por completo. Nenhum pagamento foi salvo.");
+  DB.salvar(after);
+  resumePreparedSales(payment.operationId);
+  assertPaymentTracked(payment);
+  dispatchEvent(new CustomEvent("financial-state-updated", {
+    detail: { collection: "clients", clientId: payment.clienteId, operationId: payment.operationId },
+  }));
+  return payment;
+}
+function createSaleOperation(before, after, sale) {
+  if (!currentUser || readOnlyMode || !DB.__firebaseSyncWrapped)
+    throw Error("A sincronização de vendas não está pronta. Nenhuma venda foi salva.");
+  if (!sale?.operationId || !sale?.id || sale.idempotencyKey !== sale.operationId)
+    throw Error("A venda precisa de identificador idempotente antes de ser salva.");
+  const writes = diffWrites(before, after),
+    saleWrites = writes.filter((write) => write.entityType === "sales" && write.operation === "create"),
+    credit = sale.status === "fiado" || sale.formaPagamento === "fiado",
+    clientWrite = writes.find((write) => write.entityType === "clients" &&
+      String(write.entityId) === String(sale.clienteId));
+  if (writes.length > MAX_WRITES || saleWrites.length !== 1 ||
+    String(saleWrites[0].entityId) !== String(sale.id) ||
+    String(saleWrites[0].data?.operationId) !== String(sale.operationId) ||
+    (credit && (!clientWrite || !Number.isFinite(Number(clientWrite.data?.saldo)) ||
+      Number(clientWrite.data.financialVersion) !== Number(sale.financialVersionAnterior) + 1)))
+    throw Error("Venda e saldo não formam uma operação financeira única. Nenhuma venda foi salva.");
+  const existing = readQueueStrict().filter((item) => String(item.operationId) === String(sale.operationId));
+  if (existing.length) {
+    const localSale = (DB.carregar().vendas || []).some((entry) =>
+      String(entry.operationId) === String(sale.operationId));
+    if (localSale || existing.some((item) => item.source !== "sale-write-ahead" ||
+      !["error", "local_preparing"].includes(item.status)))
+      throw Error("Esta operação já existe na fila. Revise a sincronização antes de repetir.");
+    saveQueue(readQueueStrict().filter((item) => String(item.operationId) !== String(sale.operationId)));
+  }
+  const queued = queueWrites(writes, sale.operationId, "sale",
+    { status: "local_preparing", schedule: false, source: "sale-write-ahead" });
+  if (queued !== writes.length)
+    throw Error("A fila da venda não foi criada por completo. Nenhuma venda foi salva.");
+  // localStorage não oferece transação entre chaves: a entrada write-ahead é
+  // durável antes do único write que publica venda, saldo e estoque locais.
+  DB.salvar(after);
+  resumePreparedSales(sale.operationId);
+  assertSaleTracked(sale);
+  dispatchEvent(new CustomEvent("financial-state-updated", {
+    detail: { collection: "clients", clientId: sale.clienteId, operationId: sale.operationId },
+  }));
+  return sale;
 }
 function changedFields(previous, item) {
   const patch = {};
@@ -2159,6 +2372,8 @@ function resolveLocalPaymentAdjustment(
 }
 async function processSyncQueue(options = {}) {
   if (processingPromise) return processingPromise;
+  if (queueCounts().corrupt)
+    throw Error("A fila local está corrompida. Exporte o diagnóstico antes de sincronizar.");
   if (readOnlyMode)
     return {
       sent: 0,
@@ -2195,6 +2410,8 @@ async function processSyncQueue(options = {}) {
       queue = readQueue(),
       changedCollections = new Set();
     for (const queued of [...queue]) {
+      // A preparação nunca pode chegar ao Firestore antes da venda local.
+      if (queued.status === "local_preparing") continue;
       if (
         queued.businessId !== activeBusinessId() ||
         queued.userId !== currentUser.uid
@@ -2250,7 +2467,10 @@ async function processSyncQueue(options = {}) {
       });
       try {
         const outcome = await commitQueueItem(live[position]);
-        markLocalCreditSaleConfirmed(live[position]);
+        markLocalSaleConfirmed(live[position]);
+        if (!["financial_conflict", "financial_payment_adjustment_required",
+          "financial_payment_applied_adjusted"].includes(outcome?.status))
+          markLocalPaymentConfirmed(live[position]);
         const after = readQueue().filter(
           (item) => item.queueId !== queued.queueId,
         );
@@ -2382,6 +2602,7 @@ function markLocalCreditSaleConfirmed(item, confirmedAt = now()) {
     originalAlter((data) => {
       const sale = (data.vendas || []).find((entry) => String(entry.id) === String(write.entityId));
       if (!sale) return;
+      sale.syncConfirmedAt = confirmedAt;
       sale.financialAppliedAt = confirmedAt;
       sale.financialOperationId = `credit_sale:${write.entityId}`;
     });
@@ -2389,24 +2610,78 @@ function markLocalCreditSaleConfirmed(item, confirmedAt = now()) {
     applyingCloud = false;
   }
 }
+function markLocalSaleConfirmed(item, confirmedAt = now()) {
+  const writes = item.payload?.writes || [],
+    credit = writes.some((entry) => entry.entityType === "sales" && entry.operation === "create" &&
+      (entry.data?.formaPagamento === "fiado" || entry.data?.status === "fiado"));
+  if (credit) return markLocalCreditSaleConfirmed(item, confirmedAt);
+  const write = writes.find((entry) => entry.entityType === "sales" && entry.operation === "create");
+  if (!write || !originalAlter) return;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      const sale = (data.vendas || []).find((entry) => String(entry.id) === String(write.entityId));
+      if (sale) sale.syncConfirmedAt = confirmedAt;
+    });
+  } finally {
+    applyingCloud = false;
+  }
+}
+function markLocalPaymentConfirmed(item, confirmedAt = now()) {
+  const write = (item.payload?.writes || []).find((entry) =>
+    entry.entityType === "payments" && entry.operation === "create");
+  if (!write || !originalAlter) return;
+  applyingCloud = true;
+  try {
+    originalAlter((data) => {
+      for (const key of ["pagamentos", "movimentacoes"]) {
+        const entry = (data[key] || []).find((value) => String(value.id) === String(write.entityId));
+        if (entry) Object.assign(entry, { status: "applied", applicationStatus: "applied",
+          syncConfirmedAt: confirmedAt });
+      }
+    });
+  } finally {
+    applyingCloud = false;
+  }
+}
 function assertSaleTracked(sale) {
-  if (sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") return;
-  if (sale.financialAppliedAt) return;
+  const credit = sale?.status === "fiado" || sale?.formaPagamento === "fiado";
+  if (!credit && Number(sale?.syncPipelineVersion || 0) < 2) return;
+  if (sale.financialAppliedAt || sale.syncConfirmedAt) return;
+  if (typeof resumePreparedSales === "function") resumePreparedSales(sale.operationId);
   const writes = readQueue().filter((item) =>
-    String(item.operationId) === String(sale.operationId) ||
-    String(item.operationId).startsWith(`${sale.operationId}:`))
+    item.status !== "local_preparing" &&
+    (String(item.operationId) === String(sale.operationId) ||
+      String(item.operationId).startsWith(`${sale.operationId}:`)))
     .flatMap((item) => item.payload?.writes || []);
   const queued = writes.some((write) => write.entityType === "sales" &&
       write.operation === "create" && String(write.entityId) === String(sale.id) &&
       String(write.data?.operationId || "") === String(sale.operationId || "")) &&
-    writes.some((write) => write.entityType === "clients" &&
-      String(write.entityId) === String(sale.clienteId));
-  if (!queued) throw Error("A venda fiado ficou sem confirmação nem fila de sincronização. Ela foi preservada neste aparelho; exporte o diagnóstico antes de repetir.");
+    (!credit || writes.some((write) => write.entityType === "clients" &&
+      String(write.entityId) === String(sale.clienteId)));
+  if (!queued) throw Error("A venda ficou sem confirmação nem fila de sincronização. Ela foi preservada neste aparelho; exporte o diagnóstico antes de repetir.");
+}
+function assertPaymentTracked(payment) {
+  if (payment?.applicationStatus === "applied" || payment?.syncConfirmedAt) return;
+  resumePreparedSales(payment.operationId);
+  const queued = readQueue().some((item) => item.status !== "local_preparing" &&
+    String(item.operationId) === String(payment.operationId) &&
+    (item.payload?.writes || []).some((write) => write.entityType === "payments" &&
+      write.operation === "create" && String(write.entityId) === String(payment.id)) &&
+    (item.payload?.writes || []).some((write) => write.entityType === "clients" &&
+      String(write.entityId) === String(payment.clienteId)));
+  if (!queued) throw Error("O recebimento ficou sem confirmação nem fila de sincronização. Exporte o diagnóstico antes de repetir.");
+}
+function isSalePending(sale) {
+  return readQueue().some((item) => String(item.operationId) === String(sale?.operationId) &&
+    (item.payload?.writes || []).some((write) => write.entityType === "sales" &&
+      String(write.entityId) === String(sale?.id)));
 }
 async function prepareCustomerForSale(customerId) {
   const id = String(customerId || "");
   if (!id || !currentUser || !DB.__firebaseSyncWrapped || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para esta venda.");
+  if (typeof resumePreparedSales === "function") resumePreparedSales();
   const localData = DB.carregar(),
     localClient = (localData.clientes || []).find((entry) => String(entry.id) === id),
     clientVersion = financialVersionOf(localClient || {}),
@@ -3313,7 +3588,8 @@ function financialLedgerEntry(name, item = {}) {
     amount = 0,
     before = Number.NaN,
     after = Number.NaN;
-  if (name === "sales" && String(item.status || "") === "fiado") {
+  if (name === "sales" && (String(item.status || "") === "fiado" ||
+    String(item.formaPagamento || "") === "fiado")) {
     type = "credit_sale";
     amount = Math.abs(
       roundedMoney(item.valorFinal ?? item.valorTotal ?? item.amount),
@@ -3549,6 +3825,7 @@ async function compareDeviceWithCloud() {
     report,
   };
   emit({ dataAudit: report });
+  updateQueueState();
   return report;
 }
 async function exportLocalDiagnostic() {
@@ -3563,7 +3840,7 @@ async function exportLocalDiagnostic() {
       auditRecord(item, "local", name),
     );
   return {
-    diagnosticVersion: 1,
+    diagnosticVersion: 2,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     projectId: PROJECT_ID,
@@ -3579,6 +3856,9 @@ async function exportLocalDiagnostic() {
       Object.entries(entities).map(([name, items]) => [name, items.length]),
     ),
     queueCounts: queueCounts(),
+    orphanOperations: saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count,
+    saleIntegrity: saleIntegrityDiagnostics(),
+    paymentIntegrity: paymentIntegrityDiagnostics(),
     queue: queue.map((item) => ({
       operationId: String(item.operationId || item.queueId || ""),
       entityType: item.entityType || "unknown",
@@ -4882,6 +5162,8 @@ function setUser(user, profile = null, business = null) {
   migrateScopedQueueCompatibility();
   validateQueueOwnership();
   installOfflineFirstStorage();
+  try { resumePreparedSales(); }
+  catch (error) { reportError(error, "Prepared financial queue"); }
   emit({ hydrated: false, listenerConnected: false });
   startCloudSubscriptions();
   startAutoSync();
@@ -4903,11 +5185,13 @@ window.SyncFirebase = {
   stop: () => setUser(null),
   subscribe: (callback) => {
     subscribers.add(callback);
+    const details = diagnostic();
     callback({
       ...state,
       ...queueCounts(),
       queueTotal: queueCounts().total,
-      details: diagnostic(),
+      orphanOperations: details.orphanOperations || (state.dataAudit ? 0 : "Não verificado"),
+      details,
     });
     return () => subscribers.delete(callback);
   },
@@ -4920,7 +5204,11 @@ window.SyncFirebase = {
   describeResult: describeSyncResult,
   migrateQueueCompatibility: migrateScopedQueueCompatibility,
   processSyncQueue,
+  createSaleOperation,
+  createPaymentOperation,
   assertSaleTracked,
+  assertPaymentTracked,
+  isSalePending,
   prepareCustomerForSale,
   confirmCreditSale,
   synchronizeNow,

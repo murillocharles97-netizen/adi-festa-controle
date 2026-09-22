@@ -23,6 +23,12 @@ function salesSandbox({browser=false}={}){
   };
   if(browser){
     sandbox.document={};
+    sandbox.DB.__firebaseSyncWrapped=true;
+    sandbox.SyncFirebase={
+      isReady:()=>true,
+      createSaleOperation:(_before,after)=>{for(const key of Object.keys(data))delete data[key];Object.assign(data,after)},
+      assertSaleTracked:()=>{},
+    };
     sandbox.SpaceContext={requireSalesSpace:id=>{
       if(id==='space-a')return id;
       throw Error('Selecione o espaço desta venda.');

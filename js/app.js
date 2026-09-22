@@ -1364,6 +1364,20 @@
     }, 220);
   }
   addEventListener("cloud-data-updated", scheduleCloudRender);
+  addEventListener("financial-state-updated", () => {
+    if (Router.atual() === "clientes") {
+      if (!document.querySelector("#modal")?.children.length)
+        window.ClientesPage?.refresh?.();
+      return;
+    }
+    scheduleCloudRender();
+  });
+  const financialModal = document.querySelector("#modal");
+  if (financialModal)
+    new MutationObserver(() => {
+      if (cloudRenderPending && !financialModal.children.length)
+        scheduleCloudRender();
+    }).observe(financialModal, { childList: true });
   addEventListener("veconi-spaces-ready", () => {
     const route = Router.atual();
     if (!["inicio", "vender"].includes(route) || document.querySelector("#modal")?.children.length) return;
