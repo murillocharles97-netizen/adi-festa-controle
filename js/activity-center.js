@@ -356,6 +356,9 @@
         formaPagamento: summary.paymentMethod,
         paymentMethod: summary.paymentMethod,
         amount: summary.amount,
+        actorUid: event.actorUid || null,
+        actorNameSnapshot: event.actorNameSnapshot || null,
+        actorRoleSnapshot: event.actorRoleSnapshot || null,
       };
     let item = null;
     if (event.type === "sale") item = saleEvent(base);
@@ -411,6 +414,10 @@
     item.operationId = event.operationId || "";
     item.date = event.createdAt;
     item.raw = event;
+    item.actorUid = event.actorUid || null;
+    item.actorNameSnapshot = event.actorNameSnapshot || null;
+    if (event.actorNameSnapshot)
+      item.subtitle = `${item.subtitle || ""}${item.subtitle ? " · " : ""}${event.type === "sale" ? "Realizada" : "Registrado"} por ${event.actorNameSnapshot}`;
     if (event.status === "cancelled" || event.status === "source_deleted") {
       item.status = "Cancelada";
       item.statusTone = "danger";
@@ -507,9 +514,12 @@
         .filter(Boolean),
       cloudIds = new Set(canonical.map((item) => item.id)),
       merged = [...canonical, ...pendingLocalEvents(db, cloudIds)],
+      canViewAll = window.TeamAccess?.has?.("sales.viewAll") ?? true,
+      actorUid = window.FirebaseSession?.user?.uid || "",
       seenIds = new Set(),
       seenOperations = new Set();
     return merged
+      .filter((item) => canViewAll || String(item.actorUid || item.raw?.actorUid || "") === actorUid)
       .filter((item) => {
         const operationKey = item.operationId
           ? `${item.type}:${item.operationId}`

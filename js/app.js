@@ -121,7 +121,15 @@
         window.OperationMode?.can?.("viewCRM") !== false
           ? CRMDashboard.render()
           : `<section class="panel empty-state"><h2>CRM indisponível</h2><p>O módulo está desativado ou seu perfil não possui permissão para visualizar dados de relacionamento.</p><button class="btn btn-primary" data-go="clientes">Voltar para Clientes</button></section>`,
-      texto: `Fechamento do dia - ${new Date().toLocaleDateString("pt-BR")}\nTotal vendido: ${dinheiro(vendido)}\nTotal recebido: ${dinheiro(recebido)}\nTotal fiado: ${dinheiro(fiado)}\nLucro estimado: ${dinheiro(lucro)}\nVendas: ${vendas.length}\nClientes atendidos: ${clientes}`,
+      texto: [
+        `Fechamento do dia - ${new Date().toLocaleDateString("pt-BR")}`,
+        `Total vendido: ${dinheiro(vendido)}`,
+        window.TeamAccess?.has?.("financial.view") ? `Total recebido: ${dinheiro(recebido)}` : null,
+        window.TeamAccess?.has?.("financial.view") ? `Total fiado: ${dinheiro(fiado)}` : null,
+        window.TeamAccess?.has?.("profit.view") ? `Lucro estimado: ${dinheiro(lucro)}` : null,
+        `Vendas: ${vendas.length}`,
+        `Clientes atendidos: ${clientes}`,
+      ].filter(Boolean).join("\n"),
     };
   }
   function resumoEstoque() {
@@ -172,10 +180,14 @@
         .filter((p) => Utils.mesAtual(p.data))
         .reduce((s, p) => s + p.valor, 0),
       f = resumoFechamento(),
-      ultima = Vendas.ultima();
+      ultima = Vendas.ultima(),
+      profitMetrics = window.TeamAccess?.has?.("profit.view") ? metric("Lucro hoje", dinheiro(lucroHoje), "privado", "trending-up") : "",
+      financialMetrics = window.TeamAccess?.has?.("financial.view") ? `${metric("Fiado em aberto", dinheiro(fiado), "saldo de clientes", "hand-coins")}${metric("Recebido no mês", dinheiro(recebido), "pagamentos", "wallet-cards")}` : "",
+      closingFinancial = window.TeamAccess?.has?.("financial.view") ? `${metric("Recebido", dinheiro(f.recebido), "pagamentos", "wallet-cards")}${metric("Fiado", dinheiro(f.fiado), "novas contas", "hand-coins")}` : "",
+      closingProfit = window.TeamAccess?.has?.("profit.view") ? metric("Lucro estimado", dinheiro(f.lucro), "privado", "trending-up") : "";
     return (
       cabecalho("Olá! Vamos vender?", "Seu resumo rápido do seu negócio.") +
-      `<section class="metrics">${metric("Vendas hoje", hoje.length, "registros", "shopping-cart")}${metric("Vendido hoje", dinheiro(valorHoje), "valor final", "circle-dollar-sign")}${metric("Lucro hoje", dinheiro(lucroHoje), "somente para você", "trending-up")}${metric("Fiado em aberto", dinheiro(fiado), "saldo de clientes", "hand-coins")}${metric("Recebido no mês", dinheiro(recebido), "pagamentos", "wallet-cards")}${metric("Clientes", d.clientes.length, "cadastrados", "users")}${metric("Produtos", d.produtos.length, "cadastrados", "candy")}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon("plus")}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button><button class="quick-card" data-go="fiados"><span>${icon("banknote-arrow-down")}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button></section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric("Vendido", dinheiro(f.vendido), "hoje", "circle-dollar-sign")}${metric("Recebido", dinheiro(f.recebido), "pagamentos", "wallet-cards")}${metric("Fiado", dinheiro(f.fiado), "novas contas", "hand-coins")}${metric("Lucro estimado", dinheiro(f.lucro), "privado", "trending-up")}${metric("Vendas", f.vendas, "realizadas", "shopping-cart")}${metric("Clientes", f.clientes, "atendidos", "users")}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon("copy")} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon("message-circle")} Compartilhar no WhatsApp</button>${ultima ? `<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer() ? "" : "disabled"}>${icon("undo-2")} Desfazer última venda</button>` : ""}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0, 5), "Vendas recentes")}`
+      `<section class="metrics">${metric("Vendas hoje", hoje.length, "registros", "shopping-cart")}${metric("Vendido hoje", dinheiro(valorHoje), "valor final", "circle-dollar-sign")}${profitMetrics}${financialMetrics}${metric("Clientes", d.clientes.length, "cadastrados", "users")}${metric("Produtos", d.produtos.length, "cadastrados", "candy")}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon("plus")}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button>${window.TeamAccess?.has?.("customers.receiveDebt") ? `<button class="quick-card" data-go="fiados"><span>${icon("banknote-arrow-down")}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button>` : ""}</section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric("Vendido", dinheiro(f.vendido), "hoje", "circle-dollar-sign")}${closingFinancial}${closingProfit}${metric("Vendas", f.vendas, "realizadas", "shopping-cart")}${metric("Clientes", f.clientes, "atendidos", "users")}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon("copy")} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon("message-circle")} Compartilhar no WhatsApp</button>${ultima && window.TeamAccess?.has?.("sales.cancel") ? `<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer() ? "" : "disabled"}>${icon("undo-2")} Desfazer última venda</button>` : ""}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0, 5), "Vendas recentes")}`
     );
   }
   function clienteCard(c) {
@@ -286,7 +298,7 @@
     return (
       cabecalho(
         "Produtos",
-        "Preços, custos e estoque dos seus doces.",
+        window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.",
         `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button>`,
       ) +
       `<section class="desktop-products-page"><div class="desktop-product-toolbar"><input class="search" id="search" value="${escapar(desktopProductState.query)}" placeholder="Buscar produto por nome ou código..."><button class="desktop-product-filter-toggle" data-focus-product-filters aria-label="Ir para filtros">${icon("sliders-horizontal")}</button><button class="btn btn-light" data-scan-stock>${icon("package-plus")} Entrada por código</button></div><div class="desktop-product-filters" id="desktop-product-filters">${desktopProductFilter("Todos", "todos", counts.todos, false)}${desktopProductFilter("Em estoque", "disponivel", counts.disponivel)}${desktopProductFilter("Estoque baixo", "baixo", counts.baixo)}${desktopProductFilter("Esgotados", "esgotado", counts.esgotado)}${desktopProductFilter("Sem controle", "sem-controle", counts["sem-controle"])}</div><section class="desktop-product-grid" id="desktop-product-grid">${desktopProductGrid()}</section></section>`
@@ -320,7 +332,7 @@
           ? carrinho
               .map(
                 (i) =>
-                  `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(cartKey(i))}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(cartKey(i))}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(cartKey(i))}">${icon("trash-2")}</button></div>`,
+                  `<div class="cart-item editable-cart"><div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)}${window.TeamAccess?.has?.("cost.view") ? ` · Custo: ${dinheiro(i.custoUnitario)}` : ""}</small></div><label>Qtd.<input data-item-qty="${escapar(cartKey(i))}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(cartKey(i))}" type="number" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(cartKey(i))}">${icon("trash-2")}</button></div>`,
               )
               .join("")
           : vazio("Adicione produtos");
@@ -361,7 +373,7 @@
       );
     return (
       cabecalho("Desempenho", "Análises detalhadas do seu negócio.") +
-      `<section class="metrics">${metric("Faturamento", dinheiro(faturamento), `${d.vendas.length} vendas`, "circle-dollar-sign")}${metric("Custo total", dinheiro(custo), "produtos vendidos", "package")}${metric("Lucro estimado", dinheiro(lucro), "não aparece no recibo", "trending-up")}${metric("Fiado aberto", dinheiro(fiado), "a receber", "hand-coins")}${metric("Ticket médio", dinheiro(d.vendas.length ? faturamento / d.vendas.length : 0), "por venda", "chart-line")}</section>`
+      `<section class="metrics">${metric("Faturamento", dinheiro(faturamento), `${d.vendas.length} vendas`, "circle-dollar-sign")}${window.TeamAccess?.has?.("cost.view") ? metric("Custo total", dinheiro(custo), "produtos vendidos", "package") : ""}${window.TeamAccess?.has?.("profit.view") ? metric("Lucro estimado", dinheiro(lucro), "não aparece no recibo", "trending-up") : ""}${window.TeamAccess?.has?.("financial.view") ? metric("Fiado aberto", dinheiro(fiado), "a receber", "hand-coins") : ""}${metric("Ticket médio", dinheiro(d.vendas.length ? faturamento / d.vendas.length : 0), "por venda", "chart-line")}</section>`
     );
   }
   function cobrancaCard(c) {
@@ -433,6 +445,7 @@
       cobrancas,
       fiados,
       produtos,
+      equipe: () => window.TeamPage?.render?.() || vazio("Equipe indisponível"),
       campanhas: () => CampanhasUI.render(),
       financeiro: () => FinanceiroUI.render(),
       catalogo: () => CatalogoUI.render(),
@@ -451,6 +464,7 @@
       cobrancas: "Cobranças",
       fiados: "Fiados",
       produtos: "Produtos",
+      equipe: "Equipe",
       campanhas: "Campanhas",
       financeiro: "Financeiro",
       catalogo: "Catálogo online",
@@ -476,11 +490,12 @@
     window.ProdutosMobile?.productForm(id);
   }
   function formularioEntradaEstoque(id) {
-    const p = Produtos.obter(id);
+    const p = Produtos.obter(id),
+      costField = window.TeamAccess?.has?.("cost.view") ? `<div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" min="0" step=".01" value="${p.custo ?? ""}"></div>` : "";
     if (p?.productType === "variable") return ProdutosMobile.stockEntry(id);
     abrirFormulario(
       "Adicionar entrada",
-      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div><div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" min="0" step=".01" value="${p.custo ?? ""}"></div><div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (f) => {
         Produtos.entrada(
           id,
@@ -1186,6 +1201,7 @@
   function render(route) {
     window.AppBootDiagnostics?.count?.("routeRenderCount", { route });
     const renderStartedAt = performance.now();
+    const deniedRoute = typeof window.TeamAccess?.canRoute === "function" && !window.TeamAccess.canRoute(route);
     if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
@@ -1194,7 +1210,7 @@
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
     document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
-    root.innerHTML = views[route]();
+    root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]();
     const mobileTitle = matchMedia("(max-width:767px)").matches
       ? { crm: "CRM", catalogo: "Catálogo", pedidos: "Pedidos" }[route]
       : "";
@@ -1205,7 +1221,7 @@
         : route === "clientes"
         ? "Contas, compras e contato em um só lugar."
         : route === "produtos" && matchMedia("(max-width:767px)").matches
-          ? "Preços, custos e estoque dos seus doces."
+          ? (window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.")
           : route === "campanhas"
             ? "Fidelização, pontos e recompensas."
             : route === "financeiro"
@@ -1236,6 +1252,7 @@
     fecharMenu();
     aplicarInputModes($("#app"));
     bind(route);
+    if (route === "equipe" && !deniedRoute) window.TeamPage?.bind?.();
     if (route === "catalogo") CatalogoUI.bind();
     if (route === "pedidos") VisitasUI.bindOrdersPage();
     if (route === "campanhas") CampanhasUI.bind();
@@ -1244,6 +1261,7 @@
     if (route === "planos") window.PlansUI.bind($("#app"));
     if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
+    window.TeamAccess?.syncNavigation?.();
     window.lucide?.createIcons();
     window.AppBootDiagnostics?.phase?.("route rendered", {
       route,

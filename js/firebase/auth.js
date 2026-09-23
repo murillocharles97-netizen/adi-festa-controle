@@ -5,12 +5,13 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=149';
+import './sync.js?v=150';
 
-const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000;
+const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
 const NON_TERMINAL_STATES=new Set(['initializing','loading_profile','loading_business','migration_required','loading_access']);
 let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0,bootstrapStartedAt=0,bootstrapTimeline=[];
+let invitePreviewCache=null,invitePreviewPromise=null;
 const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
@@ -46,12 +47,34 @@ function withTimeout(promise,token){
 function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapSequence)throw Object.assign(new Error('Bootstrap substituído por uma nova tentativa.'),{code:'bootstrap/cancelled'})}
 
 function login(message='',presetEmail=''){
-  screen(`<section class="auth-card auth-entry-card">${brandMarkup()}<h1>Bem-vindo</h1><p>Vendas, estoque, clientes, CRM e financeiro em um só lugar.</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha"><i data-lucide="eye"></i></button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar</button><button class="btn btn-light" type="button" id="show-register">Criar minha conta</button><button class="auth-link" type="button" data-show-plans>Ver planos</button></form></section>`);
+  const invited=Boolean(INVITE_TOKEN),preview=invitePreviewCache;
+  screen(`<section class="auth-card auth-entry-card">${brandMarkup()}<h1>${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Vendas, estoque, clientes, CRM e financeiro em um só lugar.'}</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha"><i data-lucide="eye"></i></button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar${invited?' e aceitar convite':''}</button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link" type="button" data-show-plans>Ver planos</button>'}</form></section>`);
   const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
   document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('[name=password]'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}"></i>`;window.lucide?.createIcons()};
-  document.querySelector('#show-register').onclick=()=>{registerState.step=1;register()};
-  document.querySelector('[data-show-plans]').onclick=()=>plansScreen(false);
+  document.querySelector('#show-register').onclick=()=>{if(invited)return inviteRegister();registerState.step=1;register()};
+  document.querySelector('[data-show-plans]')?.addEventListener('click',()=>plansScreen(false));
   document.querySelector('#login-form').onsubmit=async event=>{event.preventDefault();const button=document.querySelector('#login-submit'),form=new FormData(event.currentTarget);setButtonLoading(button,true,'Entrando…');try{await signInWithEmailAndPassword(auth,String(form.get('email')).trim(),form.get('password'))}catch(error){login(friendly(error.code))}};
+}
+
+async function loadInvitePreview(){
+  if(!INVITE_TOKEN)return null;
+  if(invitePreviewCache)return invitePreviewCache;
+  invitePreviewPromise||=window.FirebaseCallable('getTeamInvitePreview',{token:INVITE_TOKEN}).then(response=>invitePreviewCache=response.data);
+  try{return await invitePreviewPromise}catch(error){login('Este convite é inválido ou expirou.');throw error}
+}
+function clearInviteToken(){if(!INVITE_TOKEN)return;const url=new URL(location.href);url.searchParams.delete('teamInvite');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`)}
+async function inviteRegister(message=''){
+  let preview;
+  try{preview=await loadInvitePreview()}catch{return}
+  screen(`<section class="auth-card auth-register-card">${brandMarkup()}<h1>Crie seu acesso</h1><p>Você entrará em <b>${esc(preview.businessName)}</b> como ${esc(window.TeamAccess?.ROLE_LABELS?.[preview.role]||preview.role)}.</p><form id="invite-register-form"><label>Nome<input name="name" required autocomplete="name" value="${esc(preview.name||'')}"></label><label>E-mail<input name="email" type="email" readonly value="${esc(preview.email)}"></label><label>Senha<input name="password" type="password" minlength="6" required autocomplete="new-password"></label><label>Confirmar senha<input name="confirm" type="password" minlength="6" required autocomplete="new-password"></label><p class="auth-error">${esc(message)}</p><div class="auth-form-actions"><button class="btn btn-light" type="button" data-invite-login>Já tenho conta</button><button class="btn btn-primary" data-invite-create>Criar acesso</button></div></form></section>`);
+  document.querySelector('[data-invite-login]').onclick=()=>login('',preview.email);
+  document.querySelector('#invite-register-form').onsubmit=async event=>{
+    event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget));
+    if(data.password!==data.confirm)return inviteRegister('As senhas não são iguais.');
+    const button=document.querySelector('[data-invite-create]');setButtonLoading(button,true,'Criando acesso…');
+    try{await createUserWithEmailAndPassword(auth,preview.email,data.password);await window.FirebaseCallable('acceptTeamInvite',{token:INVITE_TOKEN});clearInviteToken();location.reload()}
+    catch(error){if(error.code==='auth/email-already-in-use')return login('Este e-mail já possui uma conta. Entre com sua senha para aceitar o convite.',preview.email);inviteRegister(friendly(error.code))}
+  };
 }
 
 function collectRegister(form){
@@ -217,14 +240,17 @@ function syncSubscriptionShell(context){
   showSubscriptionBanner(context.access);
 }
 addEventListener('business-context-changed',event=>syncSubscriptionShell(event.detail));
-function allowed(user,profile,business){
+function allowed(user,profile,business,member){
   bootstrapLog('preparing business context');
-  const context=BusinessContext.set({business,userProfile:profile});
-  DB.useBusiness(profile.businessId,{migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID});
+  const context=BusinessContext.set({business,userProfile:profile,member});
+  const permissionSignature=context.permissions.slice().sort().join('|').split('').reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(36);
+  DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
+  window.TeamAccess?.sanitizePrivateCache?.(DB.carregar());
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   bootstrapLog('local environment loaded');
-  window.FirebaseSession={user,profile,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
-  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset};
+  profile=context.userProfile;
+  window.FirebaseSession={user,profile,member,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
+  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset,handleAccessRevoked:()=>{void bootstrapLogout()}};
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
@@ -243,7 +269,7 @@ function allowed(user,profile,business){
   setBootstrapState('ready',{businessId:profile.businessId});
   gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   window.lucide?.createIcons();
-  const readyDetail={uid:user.uid,businessId:profile.businessId,business,access:context.access};
+  const readyDetail={uid:user.uid,businessId:profile.businessId,business,member,access:context.access};
   bootstrapLog('environment ready',{businessId:profile.businessId});
   setTimeout(()=>{
     if(auth.currentUser?.uid!==user.uid||bootstrapState!=='ready')return;
@@ -262,7 +288,7 @@ async function updateBusinessDetails(values={}){
   if(!patch.name)throw Error('Informe o nome do negócio.');
   await setDoc(doc(db,'businesses',session.businessId),patch,{merge:true});
   const business={...session.business,...patch,updatedAt:new Date().toISOString()};
-  BusinessContext.set({business,userProfile:session.profile});
+  BusinessContext.set({business,userProfile:session.profile,member:session.member});
   DB.alterar(data=>{data.config.nome=patch.name;data.config.telefone=patch.phone});
   window.SyncFirebase?.notifyRemoteChange?.(['businessProfile']).catch(()=>{});
   return business;
@@ -274,7 +300,7 @@ async function updateProfileDetails(values={}){
   if(!patch.name)throw Error('Informe seu nome.');
   await setDoc(doc(db,'users',session.user.uid),patch,{merge:true});
   const profile={...session.profile,...patch,updatedAt:new Date().toISOString()};
-  BusinessContext.set({business:session.business,userProfile:profile});
+  BusinessContext.set({business:session.business,userProfile:profile,member:session.member});
   document.querySelector('.avatar').textContent=(profile.name||session.user.email||'A')[0].toUpperCase();
   window.SyncFirebase?.notifyRemoteChange?.(['userProfile']).catch(()=>{});
   return profile;
@@ -318,6 +344,7 @@ async function bootstrapCore(user,token,mode){
   bootstrapLog('profile loading');
   screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Validando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
+  if(INVITE_TOKEN){await window.FirebaseCallable('acceptTeamInvite',{token:INVITE_TOKEN});clearInviteToken()}
   const profileRef=doc(db,'users',user.uid),profileSnapshot=await getDoc(profileRef);
   assertCurrentRun(token);
   if(!profileSnapshot.exists()){
@@ -342,7 +369,7 @@ async function bootstrapCore(user,token,mode){
   let business={id:businessSnapshot.id,...businessSnapshot.data()};
   bootstrapLog('business loaded',{businessId:business.id});
   const businessAccess=validateAuthenticatedBusiness({authUser:user,profile,businessId:businessSnapshot.id,business});
-  if(profile.businessId===LEGACY_BUSINESS_ID){
+  if(profile.businessId===LEGACY_BUSINESS_ID&&profileAccess.isLegacyAdiFestaOwnerCandidate){
     if(!profileAccess.isLegacyAdiFestaOwnerCandidate||!businessAccess.isLegacyAdiFestaOwner){
       throw Object.assign(new Error('A conta não atende aos critérios seguros da migração legada.'),{code:'permission-denied'});
     }
@@ -352,9 +379,12 @@ async function bootstrapCore(user,token,mode){
     ({profile,business}=await migrateLegacy(user,profile,business,mode));
     assertCurrentRun(token);
   }
+  const membershipResponse=await window.FirebaseCallable('ensureCurrentMembership',{businessId:profile.businessId}),memberSnapshot=await getDoc(doc(db,'businesses',profile.businessId,'members',user.uid)),member=memberSnapshot.exists()?{uid:memberSnapshot.id,...memberSnapshot.data()}:membershipResponse.data?.member;
+  if(!member||member.status!=='active')throw Object.assign(new Error('Seu acesso a esta empresa foi desativado.'),{code:'permission-denied'});
+  if(member.role==='owner'&&Number(business.sensitiveDataVersion||0)<1){await window.FirebaseCallable('migrateSensitiveTeamData',{businessId:profile.businessId});const refreshedBusiness=await getDoc(doc(db,'businesses',profile.businessId));if(refreshedBusiness.exists())business={id:refreshedBusiness.id,...refreshedBusiness.data()}}
   bootstrapLog('migration checked',{businessId:profile.businessId});
   setBootstrapState('loading_access',{businessId:profile.businessId});
-  allowed(user,profile,business);
+  allowed(user,profile,business,member);
   bootstrapLog('subscription resolved',{planId:window.FirebaseSession?.subscription?.planId||'fallback',status:window.FirebaseSession?.subscription?.status||'fallback'});
   bootstrapLog('permissions resolved',{role:profile.role});
   if(bootstrapState==='ready')readyUid=user.uid;
@@ -437,7 +467,7 @@ onAuthStateChanged(auth,user=>{
   if(!user){
     bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;readyUid='';
     automaticBootstrapAttempts.clear();
-    setBootstrapState('unauthenticated');return login();
+    setBootstrapState('unauthenticated');if(INVITE_TOKEN){void loadInvitePreview().then(preview=>login('',preview?.email||''));return}return login();
   }
   startBootstrap(user,{mode:'automatic'});
 });

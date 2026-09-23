@@ -64,7 +64,7 @@ assert.match(legacyMigration,/LEGACY_MIGRATION_VERSION=1/);
 assert.match(auth,/DB\.useBusiness\(profile\.businessId/);
 
 const rules=read('firestore.rules');
-assert.match(rules,/currentBusinessId\(\) == businessId/);
+assert.match(rules,/activeMember\(businessId\) \|\| legacyMember\(businessId\)/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);
 assert.match(rules,/request\.resource\.data\.limits == resource\.data\.limits/);
 assert.match(rules,/O primeiro perfil é criado apenas pela completeBusinessOnboarding[\s\S]*allow create: if false/);

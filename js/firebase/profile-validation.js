@@ -41,9 +41,6 @@ export function validateAuthenticatedProfile({authUser,profileSnapshotId,profile
     && profile.active===true
     && ['admin','owner'].includes(profile.role)
     && normalizeProfileEmail(profile.email)===normalizeProfileEmail(authUser?.email);
-  if(profile.businessId==='adi-festa'&&!['admin','owner'].includes(profile.role)){
-    throw validationError('profile/role-mismatch','O papel deste usuário não permite administrar a empresa legada.',details);
-  }
   return{isLegacyAdiFestaOwnerCandidate,uidMissing,needsLegacyMigration:isLegacyAdiFestaOwnerCandidate&&(uidMissing||profile.role==='admin')};
 }
 
@@ -52,6 +49,8 @@ export function validateAuthenticatedBusiness({authUser,profile,businessId,busin
   if(businessId!==profile.businessId)throw validationError('business/id-mismatch','A empresa carregada não corresponde à empresa do perfil.',details);
   if(business.active!==true)throw validationError('business/inactive','A empresa vinculada está inativa.',details);
   if(businessId!=='adi-festa')return{isLegacyAdiFestaOwner:false,needsLegacyMigration:false};
+  const ownerCandidate=['admin','owner'].includes(profile?.role);
+  if(!ownerCandidate)return{isLegacyAdiFestaOwner:false,needsLegacyMigration:false};
   if(business.ownerId!==authUser?.uid){
     throw validationError('business/owner-mismatch','O proprietário registrado na empresa não corresponde à conta autenticada.',details);
   }

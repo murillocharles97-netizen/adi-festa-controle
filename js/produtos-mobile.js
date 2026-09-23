@@ -659,10 +659,11 @@
   }
   function variantStockEntry(parentId, variantId) {
     const product = Produtos.obter(parentId),
-      variant = ProductVariations.get(variantId);
+      variant = ProductVariations.get(variantId),
+      costField = window.TeamAccess?.has?.("cost.view") ? `<div class="field"><label>Custo unitário</label><input name="custo" inputmode="decimal" value="${variant.cost ?? ""}"></div>` : "";
     modal(
       "Adicionar entrada",
-      `<p><b>${esc(product.nome)} — ${esc(ProductVariations.displayName(variant))}</b></p><p>Estoque atual: <b>${Number(variant.stock || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" required></div><div class="field"><label>Custo unitário</label><input name="custo" inputmode="decimal" value="${variant.cost ?? ""}"></div><div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${esc(product.nome)} — ${esc(ProductVariations.displayName(variant))}</b></p><p>Estoque atual: <b>${Number(variant.stock || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (form) =>
         ProductVariations.stockChange({
           parentProductId: parentId,
@@ -676,7 +677,8 @@
     );
   }
   function stockEntry(id) {
-    const product = Produtos.obter(id);
+    const product = Produtos.obter(id),
+      costField = window.TeamAccess?.has?.("cost.view") ? `<div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${product.custo ?? ""}"></div>` : "";
     if (window.ProductVariations?.isVariable(product)) {
       const variants = ProductVariations.active(id);
       $("#modal").innerHTML =
@@ -692,7 +694,7 @@
     }
     modal(
       "Adicionar entrada",
-      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="decimal" min="1" step="1" required></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${product.custo ?? ""}"></div><div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="decimal" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (form) =>
         Produtos.entrada(
           id,
@@ -731,9 +733,10 @@
       recurringNoStock = product.productType === "recurring" && !controlsStock,
       moves = Produtos.historico(id),
       entry = moves.find((m) => m.tipo === "entrada"),
-      exit = moves.find((m) => m.tipo === "saida_venda");
+      exit = moves.find((m) => m.tipo === "saida_venda"),
+      financial = `<section><h4>Preço</h4><div class="product-detail-grid"><span><small>Preço de venda</small><b>${money(product.preco)}</b></span>${window.TeamAccess?.has?.("cost.view") ? `<span><small>Custo</small><b>${product.custo === null ? "—" : money(product.custo)}</b></span>` : ""}</div></section>`;
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do ${service ? "serviço" : "produto"}</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${service ? "Serviço" : recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${service ? `<section><h4>Serviço</h4><div class="product-detail-grid"><span><small>Tipo de item</small><b>Serviço</b></span><span><small>Controle de estoque</small><b>Não utiliza estoque físico</b></span></div></section>` : recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : controlsStock ? `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span><span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span></div></section>` : `<section><h4>Estoque</h4><p>Controle de estoque desativado para este item.</p></section>`}<section><h4>Financeiro</h4><div class="product-detail-grid"><span><small>Preço</small><b>${money(product.preco)}</b></span><span><small>Custo</small><b>${product.custo === null ? "—" : money(product.custo)}</b></span></div></section><section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section></div><footer class="modal-foot"><button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button><button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button></footer></section></div>`;
+      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do ${service ? "serviço" : "produto"}</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${service ? "Serviço" : recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${service ? `<section><h4>Serviço</h4><div class="product-detail-grid"><span><small>Tipo de item</small><b>Serviço</b></span><span><small>Controle de estoque</small><b>Não utiliza estoque físico</b></span></div></section>` : recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : controlsStock ? `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span><span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span></div></section>` : `<section><h4>Estoque</h4><p>Controle de estoque desativado para este item.</p></section>`}${financial}<section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section></div><footer class="modal-foot"><button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button><button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button></footer></section></div>`;
     $("#modal .close").onclick = Modais.fechar;
     $("[data-detail-history]").onclick = () => history(id);
     $("[data-detail-edit]").onclick = () => productForm(id);

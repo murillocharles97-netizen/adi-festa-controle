@@ -35,9 +35,14 @@
       businessName: String(context.business?.name || session.business?.name || window.DB?.carregar?.().config?.nome || "Meu negócio").trim(),
     };
   };
-  const canManage = () => MANAGER_ROLES.has(String(
+  const canManage = () => window.TeamAccess?.has?.("spaces.manage") ?? MANAGER_ROLES.has(String(
     window.BusinessContext?.get?.().role || window.FirebaseSession?.profile?.role || "viewer",
   ));
+  const unrestrictedSpaces = () => {
+    const context = window.BusinessContext?.get?.();
+    return !context || !("spaceAccess" in context) || context.spaceAccess === "all";
+  };
+  const allowedSpaceIds = () => new Set(window.BusinessContext?.get?.().allowedSpaceIds || []);
   const defaultCapabilities = (legacyType, raw = {}) => {
     const business = legacyType === "business",
       source = raw.capabilities && typeof raw.capabilities === "object" ? raw.capabilities : {};
@@ -154,8 +159,8 @@
   function scopedSpaces(spaces = state.spaces) {
     return spaces.filter((space) => {
       if (!space.id || RESERVED_SPACE_IDS.has(space.id) || space.status !== "active") return false;
-      if (space.businessId === state.businessId) return true;
-      return !space.businessId && Boolean(state.uid) && space.ownerUid === state.uid;
+       if (space.businessId === state.businessId) return unrestrictedSpaces() || allowedSpaceIds().has(space.id);
+       return unrestrictedSpaces() && !space.businessId && Boolean(state.uid) && space.ownerUid === state.uid && (window.TeamAccess?.has?.("financial.view") ?? true);
     });
   }
   const homeSpaces = () => scopedSpaces().sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.name.localeCompare(right.name, "pt-BR"));
@@ -164,7 +169,8 @@
     const homeIds = new Set(homeSpaces().map((space) => space.id)), sales = salesSpaces(), salesIds = new Set(sales.map((space) => space.id)),
       rememberedHome = state.homeId || read(contextKey("home"), ALL_SPACES),
       rememberedSales = state.salesId || read(contextKey("sales"), "");
-    state.homeId = rememberedHome === ALL_SPACES || homeIds.has(rememberedHome) ? rememberedHome : ALL_SPACES;
+    const allowAggregate = unrestrictedSpaces() || homeIds.size > 1;
+    state.homeId = allowAggregate && rememberedHome === ALL_SPACES ? ALL_SPACES : homeIds.has(rememberedHome) ? rememberedHome : allowAggregate ? ALL_SPACES : homeSpaces()[0]?.id || ALL_SPACES;
     state.salesId = salesIds.has(rememberedSales) ? rememberedSales : sales.find((space) => space.isDefault)?.id || sales[0]?.id || "";
     write(contextKey("home"), state.homeId);
     if (state.salesId) write(contextKey("sales"), state.salesId);
@@ -215,6 +221,7 @@
   function selectHome(id) {
     ensureContext();
     const value = String(id || ALL_SPACES), available = new Set(homeSpaces().map((space) => space.id));
+    if (value === ALL_SPACES && !unrestrictedSpaces() && available.size <= 1) throw Error("Este perfil possui somente um espaço autorizado.");
     if (value !== ALL_SPACES && !available.has(value)) throw Error("Este espaço não está disponível na Home.");
     state.homeId = value;
     write(contextKey("home"), value);
@@ -258,6 +265,8 @@
     ensureContext();
     const isHome = kind === "home", spaces = isHome ? homeSpaces() : salesSpaces(), selected = isHome ? state.homeId : state.salesId,
       showManagement = canManage(), label = isHome ? "Espaço" : "Espaço atual";
+    if (isHome && spaces.length === 1 && !unrestrictedSpaces())
+      return `<section class="space-context-bar is-single" data-space-context="home"><span><i data-lucide="map-pin"></i>${label}</span><strong>${esc(spaces[0].name)}</strong></section>`;
     if (isHome) {
       const current = selectedHome(), icon = current ? spaceIcon(current) : "layers-3";
       return `<section class="space-context-bar is-home" data-space-context="home"><button class="space-selector-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Escolher espaço. Selecionado: ${esc(selectionLabel("home"))}"><span class="space-selector-icon"><i data-lucide="${icon}"></i></span><span class="space-selector-copy"><small>${label}</small><strong>${esc(selectionLabel("home"))}</strong></span><i class="space-selector-chevron" data-lucide="chevron-down"></i></button><button class="space-filter-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Filtrar a Home por espaço"><i data-lucide="sliders-horizontal"></i><span>Filtros</span></button></section>`;
@@ -275,7 +284,7 @@
         const active = selected === id;
         return `<button class="space-picker-option ${active ? "is-selected" : ""}" type="button" data-space-choice="${esc(id)}" role="radio" aria-checked="${active}"><span class="space-picker-option-icon"><i data-lucide="${icon}"></i></span><span><b>${esc(name)}</b><small>${esc(description)}</small></span><i class="space-picker-check" data-lucide="${active ? "check" : "circle"}"></i></button>`;
       };
-    root.innerHTML = `<div class="modal-bg space-picker-backdrop"><section class="modal-box space-picker-modal" role="dialog" aria-modal="true" aria-labelledby="space-picker-title"><header class="modal-head"><div><h3 id="space-picker-title">Escolher espaço</h3><p>Veja os dados de uma operação específica ou de todas juntas.</p></div><button class="icon-btn" type="button" data-space-picker-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body space-picker-list" role="radiogroup" aria-label="Espaços disponíveis">${row(ALL_SPACES, "Todos os espaços", "Visão consolidada", "layers-3")}${spaces.map((space) => row(space.id, space.name, typeLabel(space.type), spaceIcon(space))).join("")}</div>${canManage() ? '<footer class="modal-foot"><button class="btn btn-light space-picker-manage" type="button" data-space-picker-manage><i data-lucide="building-2"></i> Gerenciar espaços</button></footer>' : ""}</section></div>`;
+    root.innerHTML = `<div class="modal-bg space-picker-backdrop"><section class="modal-box space-picker-modal" role="dialog" aria-modal="true" aria-labelledby="space-picker-title"><header class="modal-head"><div><h3 id="space-picker-title">Escolher espaço</h3><p>Veja somente os espaços autorizados para esta conta.</p></div><button class="icon-btn" type="button" data-space-picker-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body space-picker-list" role="radiogroup" aria-label="Espaços disponíveis">${unrestrictedSpaces()||spaces.length>1?row(ALL_SPACES, "Todos os espaços", "Visão consolidada dos espaços permitidos", "layers-3"):""}${spaces.map((space) => row(space.id, space.name, typeLabel(space.type), spaceIcon(space))).join("")}</div>${canManage() ? '<footer class="modal-foot"><button class="btn btn-light space-picker-manage" type="button" data-space-picker-manage><i data-lucide="building-2"></i> Gerenciar espaços</button></footer>' : ""}</section></div>`;
     const close = () => { root.innerHTML = ""; };
     root.querySelectorAll("[data-space-picker-close]").forEach((button) => button.onclick = close);
     root.querySelector(".space-picker-backdrop").onclick = (event) => { if (event.target === event.currentTarget) close(); };
@@ -297,8 +306,8 @@
     const selectionId = kind === "sales" ? state.salesId : state.homeId,
       knownIds = new Set(state.spaces.map((space) => space.id)),
       allSales = Array.isArray(db?.vendas) ? db.vendas : [],
-      sales = allSales.filter((sale) => saleBelongsTo(sale, selectionId, knownIds)),
-      products = (Array.isArray(db?.produtos) ? db.produtos : []).filter((product) => selectionId === ALL_SPACES || productAllowsSpace(product, selectionId)),
+      sales = allSales.filter((sale) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || knownIds.has(resolveSaleSpaceId(sale))) : saleBelongsTo(sale, selectionId, knownIds)),
+      products = (Array.isArray(db?.produtos) ? db.produtos : []).filter((product) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || [...knownIds].some((id) => productAllowsSpace(product,id))) : productAllowsSpace(product, selectionId)),
       clientIds = new Set(sales.map((sale) => sale.clienteId || sale.clientId).filter(Boolean)),
       clients = (Array.isArray(db?.clientes) ? db.clientes : []).filter((client) => selectionId === ALL_SPACES || clientIds.has(client.id)),
       payments = (Array.isArray(db?.pagamentos) ? db.pagamentos : []).filter((payment) => recordBelongsTo(payment, selectionId)),

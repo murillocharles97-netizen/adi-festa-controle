@@ -1,6 +1,7 @@
 import { auth, db, PROJECT_ID } from "./firebase-config.js";
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocFromServer,
@@ -10,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=149";
+import { createFirestoreRepository } from "./firestore-repository.js?v=150";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -28,14 +29,18 @@ const LEGACY_QUEUE_KEY = "adiFestaFirestoreQueue_v1",
 const SOURCES = {
   clients: { key: "clientes" },
   products: { key: "produtos" },
+  productFinancials: { key: "productFinancials" },
   productVariants: { key: "variacoesProdutos" },
+  variantFinancials: { key: "variantFinancials" },
   sales: { key: "vendas" },
+  saleFinancials: { key: "saleFinancials" },
   payments: { key: "pagamentos" },
   balanceAdjustments: {
     key: "movimentacoes",
     filter: (item) => item.tipo === "ajuste_saldo",
   },
   stockMovements: { key: "movimentacoesEstoque" },
+  stockMovementFinancials: { key: "stockMovementFinancials" },
   campaigns: { key: "campanhas" },
   campaignProgress: { key: "progressosCampanha" },
   rewards: { key: "recompensas" },
@@ -75,7 +80,7 @@ const QUEUE_ENTITY_ALIASES = {
 // Produtos continuam em tempo real porque participam diretamente do caixa.
 // Clientes usam o sinal central e pull incremental por updatedAt, preservando
 // a atualização entre aparelhos sem escutar a coleção inteira.
-const REALTIME_NAMES = new Set(["products", "settings"]);
+const REALTIME_NAMES = new Set(["products", "productFinancials", "settings"]);
 const IDEMPOTENT_EVENT_NAMES = new Set([
   "sales",
   "payments",
@@ -92,12 +97,34 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
 ]);
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
+function canPullSource(name) {
+  const has = window.TeamAccess?.has;
+  if (typeof has !== "function") return true;
+  if (["products", "productVariants"].includes(name)) return has("products.view");
+  if (name === "clients") return has("customers.view");
+  if (name === "sales") return has("sales.create") || has("sales.viewAll");
+  if (name === "stockMovements") return has("inventory.view");
+  if (["productFinancials", "variantFinancials", "stockMovementFinancials"].includes(name))
+    return has("cost.view");
+  if (name === "saleFinancials") return has("cost.view") || has("profit.view");
+  if (["payments", "balanceAdjustments", "charges"].includes(name))
+    return has("financial.view") || has("customers.receiveDebt") || has("customers.adjustBalance");
+  if (["campaigns", "campaignProgress", "rewards", "campaignEvents", "campaignRedemptions", "paymentAllocations", "customerSubscriptions", "customerSubscriptionEvents", "messageHistory", "messageTemplates", "messageSequences", "clientContacts", "catalogOrders"].includes(name))
+    return has("sales.create") || has("reports.view");
+  if (["customerSegments", "visits", "customerMetrics", "customerMonthlyMetrics"].includes(name))
+    return has("reports.view");
+  return name === "settings";
+}
 // O boot precisa apenas dos dados que alimentam o dashboard. As demais
 // coleções continuam chegando pelo sinal incremental ou por sincronização
 // manual, sem varrer todo o histórico de uma conta nova no dispositivo.
 const DEFAULT_PULL_NAMES = [
     "clients",
     "sales",
+    "productFinancials",
+    "variantFinancials",
+    "saleFinancials",
+    "stockMovementFinancials",
     "payments",
     "campaigns",
     "campaignProgress",
@@ -229,8 +256,17 @@ const friendlyError = (error) =>
     "financial-reconciliation-required":
       "Venda sincronizada, mas o saldo do cliente precisa de correção.",
   })[errorCode(error)] || "Não foi possível sincronizar agora.";
-const namespace = () =>
-  String(state.userProfile?.businessId || "__signed_out__");
+const permissionSignature = () => {
+  const context = window.BusinessContext?.get?.() || {}, permissions = [...(context.permissions || [])].sort().join("|");
+  let hash = 2166136261;
+  for (const char of permissions) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  return (hash >>> 0).toString(36);
+};
+const namespace = () => [
+  state.userProfile?.businessId || "__signed_out__",
+  currentUser?.uid || "anonymous",
+  permissionSignature(),
+].join(":");
 const queueKey = () => `adiFesta:${namespace()}:syncQueue`;
 const pullStateKey = () => `adiFesta:${namespace()}:incrementalPull`;
 const lastSyncKey = () => `adiFesta:${namespace()}:lastSync`;
@@ -1089,8 +1125,16 @@ function enrich(name, item) {
 }
 function cloudPayload(name, id, data, creating = false) {
   const clean = enrich(name, data),
-    businessId = activeBusinessId();
+    businessId = activeBusinessId(), actor = window.TeamAccess?.actor?.() || {};
   delete clean.version;
+  if (["sales", "payments", "balanceAdjustments", "stockMovements", "clients", "products", "productVariants", "settings"].includes(name)) {
+    clean.updatedByUid = actor.actorUid || currentUser.uid;
+    if (creating || ["sales", "payments", "balanceAdjustments", "stockMovements"].includes(name)) {
+      clean.actorUid ||= actor.actorUid || currentUser.uid;
+      clean.actorNameSnapshot ||= actor.actorNameSnapshot || null;
+      clean.actorRoleSnapshot ||= actor.actorRoleSnapshot || null;
+    }
+  }
   if (IDEMPOTENT_EVENT_NAMES.has(name)) {
     clean.operationId ||= String(id);
     clean.idempotencyKey ||= clean.operationId;
@@ -1360,6 +1404,13 @@ function queueWrites(
   saveQueue(queue);
   if (queuedWrites && options.schedule !== false) scheduleImmediate();
   return queuedWrites;
+}
+function migrateOwnerBusinessQueue() {
+  if (window.BusinessContext?.get?.().role !== "owner" || localStorage.getItem(queueKey())) return;
+  const oldKey = `adiFesta:${activeBusinessId()}:syncQueue`, raw = localStorage.getItem(oldKey);
+  if (!raw) return;
+  localStorage.setItem(`${queueKey()}:ownerMigrationBackup:${Date.now()}`, raw);
+  localStorage.setItem(queueKey(), raw);
 }
 function resumePreparedSales(operationId = "") {
   const queue = readQueueStrict(),
@@ -2193,16 +2244,90 @@ async function commitQueueItem(item) {
         }
         data = merged;
       }
-      transaction.set(
-        reference,
-        cloudPayload(
-          write.entityType,
-          write.entityId,
-          data,
-          write.operation === "create",
-        ),
-        { merge: true },
-      );
+      const creating = write.operation === "create",
+        payload = cloudPayload(write.entityType, write.entityId, data, creating),
+        canWriteCosts = window.TeamAccess?.has?.("cost.view") === true;
+      if (write.entityType === "products") {
+        const hasCost = Object.prototype.hasOwnProperty.call(data || {}, "custo") ||
+          Object.prototype.hasOwnProperty.call(data || {}, "cost");
+        if (hasCost && canWriteCosts) {
+          const cost = Number(data.custo ?? data.cost ?? 0);
+          transaction.set(doc(db, "businesses", businessId, "productFinancials", String(write.entityId)),
+            sanitizeForFirestore({
+              id: String(write.entityId), productId: String(write.entityId), businessId,
+              custo: Number.isFinite(cost) ? cost : 0, ownerId: currentUser.uid,
+              updatedByUid: currentUser.uid, updatedAt: serverTimestamp(), schemaVersion: 1,
+            }), { merge: true });
+        }
+        payload.custo = deleteField();
+        payload.cost = deleteField();
+      }
+      if (write.entityType === "productVariants") {
+        const hasCost = Object.prototype.hasOwnProperty.call(data || {}, "cost") ||
+          Object.prototype.hasOwnProperty.call(data || {}, "custo");
+        if (hasCost && canWriteCosts) {
+          const cost = Number(data.cost ?? data.custo ?? 0);
+          transaction.set(doc(db, "businesses", businessId, "variantFinancials", String(write.entityId)),
+            sanitizeForFirestore({
+              id: String(write.entityId), variantId: String(write.entityId), businessId,
+              cost: Number.isFinite(cost) ? cost : 0, ownerId: currentUser.uid,
+              updatedByUid: currentUser.uid, updatedAt: serverTimestamp(), schemaVersion: 1,
+            }), { merge: true });
+        }
+        payload.cost = deleteField();
+        payload.custo = deleteField();
+      }
+      if (write.entityType === "sales") {
+        const items = Array.isArray(data?.itens) ? data.itens : null,
+          itemCosts = (items || []).map((saleItem, index) => ({
+            index,
+            productId: saleItem.produtoId || saleItem.productId || null,
+            variantId: saleItem.variantId || null,
+            custoUnitario: Number(saleItem.custoUnitario ?? saleItem.costSnapshot ?? 0) || 0,
+          })),
+          hasItemCosts = (items || []).some((saleItem) =>
+            Object.prototype.hasOwnProperty.call(saleItem || {}, "custoUnitario") ||
+            Object.prototype.hasOwnProperty.call(saleItem || {}, "costSnapshot") ||
+            Object.prototype.hasOwnProperty.call(saleItem || {}, "custo") ||
+            Object.prototype.hasOwnProperty.call(saleItem || {}, "cost")),
+          hasFinancialData = hasItemCosts ||
+            Object.prototype.hasOwnProperty.call(data || {}, "custoTotal") ||
+            Object.prototype.hasOwnProperty.call(data || {}, "lucro");
+        if (hasFinancialData && canWriteCosts) {
+          transaction.set(doc(db, "businesses", businessId, "saleFinancials", String(write.entityId)),
+            sanitizeForFirestore({
+              id: String(write.entityId), saleId: String(write.entityId), businessId,
+              custoTotal: Number(data.custoTotal ?? 0) || 0,
+              lucro: Number(data.lucro ?? 0) || 0,
+              itemCosts, ownerId: currentUser.uid, updatedByUid: currentUser.uid,
+              updatedAt: serverTimestamp(), schemaVersion: 1,
+            }), { merge: true });
+        }
+        if (items) payload.itens = items.map((saleItem) => {
+          const operationalItem = { ...saleItem };
+          for (const field of ["custoUnitario", "costSnapshot", "custo", "cost", "custoTotal", "lucro"])
+            delete operationalItem[field];
+          return operationalItem;
+        });
+        payload.custoTotal = deleteField();
+        payload.lucro = deleteField();
+      }
+      if (write.entityType === "stockMovements") {
+        const hasCost = Object.prototype.hasOwnProperty.call(data || {}, "custoUnitario") ||
+          Object.prototype.hasOwnProperty.call(data || {}, "costUnit");
+        if (hasCost && canWriteCosts) {
+          const cost = Number(data.custoUnitario ?? data.costUnit ?? 0);
+          transaction.set(doc(db, "businesses", businessId, "stockMovementFinancials", String(write.entityId)),
+            sanitizeForFirestore({
+              id: String(write.entityId), stockMovementId: String(write.entityId), businessId,
+              custoUnitario: Number.isFinite(cost) ? cost : 0, ownerId: currentUser.uid,
+              updatedByUid: currentUser.uid, updatedAt: serverTimestamp(), schemaVersion: 1,
+            }), { merge: true });
+        }
+        payload.custoUnitario = deleteField();
+        payload.costUnit = deleteField();
+      }
+      transaction.set(reference, payload, { merge: true });
     }
     if (financialEffectReference && !financialEffectSnapshot?.exists()) {
       currentPath = `businesses/${businessId}/balanceEvents/${financialEffect.id}`;
@@ -2948,7 +3073,21 @@ function mergeCloudCollectionIntoData(data, name, documents, options = {}) {
     data[source.key] = next;
     changed = Math.max(1, Math.abs(next.length - current.length));
   }
+  applyProtectedMetadata(data);
   return changed;
+}
+function applyProtectedMetadata(data) {
+  const canCost=window.TeamAccess?.has?.("cost.view")??true,canProfit=window.TeamAccess?.has?.("profit.view")??true;
+  window.TeamAccess?.sanitizePrivateCache?.(data);
+  if(!canCost&&!canProfit)return;
+  const productFinancials=new Map((data.productFinancials||[]).map(item=>[String(item.productId||item.id),item]));
+  const variantFinancials=new Map((data.variantFinancials||[]).map(item=>[String(item.variantId||item.id),item]));
+  if(canCost)for(const product of data.produtos||[]){const metadata=productFinancials.get(String(product.id));if(metadata&&'custo' in metadata)product.custo=metadata.custo}
+  if(canCost)for(const variant of data.variacoesProdutos||[]){const metadata=variantFinancials.get(String(variant.id));if(metadata&&'cost' in metadata)variant.cost=metadata.cost}
+  const saleFinancials=new Map((data.saleFinancials||[]).map(item=>[String(item.saleId||item.id),item]));
+  for(const sale of data.vendas||[]){const metadata=saleFinancials.get(String(sale.id));if(!metadata)continue;if(canCost&&'custoTotal' in metadata)sale.custoTotal=metadata.custoTotal;if(canProfit&&'lucro' in metadata)sale.lucro=metadata.lucro;const costs=new Map((metadata.itemCosts||[]).map(item=>[Number(item.index),item]));(sale.itens||[]).forEach((item,index)=>{const cost=costs.get(index);if(!cost)return;if(canCost){item.custoUnitario=cost.custoUnitario;item.costSnapshot=cost.custoUnitario;item.custoTotal=cost.custoTotal}if(canProfit)item.lucro=cost.lucro})}
+  const stockFinancials=new Map((data.stockMovementFinancials||[]).map(item=>[String(item.stockMovementId||item.id),item]));
+  if(canCost)for(const movement of data.movimentacoesEstoque||[]){const metadata=stockFinancials.get(String(movement.id));if(metadata&&'custoUnitario' in metadata)movement.custoUnitario=metadata.custoUnitario}
 }
 function notifyCloudCollectionChange(name, changed) {
   if (changed)
@@ -3039,7 +3178,8 @@ function registerRealtimeCollection(name, mode = "all") {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
-  registerRealtimeCollection("products");
+  if(canPullSource("products"))registerRealtimeCollection("products");
+  if(canPullSource("productFinancials"))registerRealtimeCollection("productFinancials");
   registerRealtimeCollection("settings", "document");
   const unsubscribe = syncSignalRepository.subscribeById(
     "last-sync",
@@ -3259,8 +3399,8 @@ async function pullCloudCollections(options = {}) {
     ]),
     names = (options.names || (full ? CLOUD_NAMES : DEFAULT_PULL_NAMES)).filter(
       (name) =>
-        !crmSources.has(name) ||
-        window.OperationMode?.can?.("viewCRM") !== false,
+        (!crmSources.has(name) || window.OperationMode?.can?.("viewCRM") !== false) &&
+        canPullSource(name),
     );
   if (!force && !full && Date.now() - lastPullAt < PULL_TTL_MS) return 0;
   let received = 0;
@@ -5571,6 +5711,7 @@ function setUser(user, profile = null, business = null) {
     });
     return;
   }
+  migrateOwnerBusinessQueue();
   migrateLegacyQueue();
   migrateScopedQueueCompatibility();
   validateQueueOwnership();
