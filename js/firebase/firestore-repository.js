@@ -31,8 +31,15 @@ import {
 
 const queryCache = new Map(),
   CACHE_TTL_MS = 60000;
-const cacheKey = (businessId, collectionName, variant) =>
-  `${businessId}:${collectionName}:${variant}`;
+const cacheKey = (businessId, collectionName, variant) => {
+  const uid=auth.currentUser?.uid||"anonymous",
+    permissionSignature=window.BusinessContext?.get?.().permissionSignature||"none";
+  return `${businessId}:${uid}:${permissionSignature}:${collectionName}:${variant}`;
+};
+const visibilityConstraints = (collectionName) =>
+  ["sales", "activityEvents"].includes(collectionName) && window.TeamAccess?.has?.("sales.viewAll") === false
+    ? [where("actorUid", "==", requireUser().uid)]
+    : [];
 const cached = (key) => {
   const item = queryCache.get(key);
   return item && Date.now() - item.at < CACHE_TTL_MS
@@ -142,7 +149,7 @@ export function createFirestoreRepository(collectionName) {
     },
     async countFromServer() {
       const snapshot = await timed("read", `${collectionName}:count`, async () => {
-        const aggregate = await getCountFromServer(collectionRef());
+        const aggregate = await getCountFromServer(query(collectionRef(), ...visibilityConstraints(collectionName)));
         return { size: 1, data: () => aggregate.data() };
       });
       lastReadMetadata = {
@@ -160,7 +167,7 @@ export function createFirestoreRepository(collectionName) {
         hit = !options.force && cached(key);
       if (hit) return hit;
       const snapshot = await timed("read", collectionName, () =>
-        getDocs(collectionRef()),
+        getDocs(query(collectionRef(), ...visibilityConstraints(collectionName))),
       );
       return cachePut(
         key,
@@ -180,7 +187,7 @@ export function createFirestoreRepository(collectionName) {
       const hit = !options.force && cached(key);
       if (hit) return hit;
       const snapshot = await timed("read", collectionName, () =>
-        getDocs(query(collectionRef(), where(field, "==", value), limit(max))),
+        getDocs(query(collectionRef(), ...visibilityConstraints(collectionName), where(field, "==", value), limit(max))),
       );
       return cachePut(
         key,
@@ -235,7 +242,7 @@ export function createFirestoreRepository(collectionName) {
       if (hit) return hit;
       const snapshot = rememberMetadata(await timed("read", collectionName, () =>
         getDocsFromServer(
-          query(collectionRef(), orderBy("createdAt", "desc"), limit(max)),
+          query(collectionRef(), ...visibilityConstraints(collectionName), orderBy("createdAt", "desc"), limit(max)),
         ),
       ), "server");
       return cachePut(
@@ -251,6 +258,7 @@ export function createFirestoreRepository(collectionName) {
         getDocsFromServer(
           query(
             collectionRef(),
+            ...visibilityConstraints(collectionName),
             where("updatedAt", ">", Timestamp.fromDate(new Date(since))),
             orderBy("updatedAt", "asc"),
             limit(max),
@@ -260,7 +268,7 @@ export function createFirestoreRepository(collectionName) {
       return snapshot.docs.map((item) => convert(item));
     },
     async listPage(cursor = null, max = 50) {
-      const constraints = [orderBy("createdAt", "desc")];
+      const constraints = [...visibilityConstraints(collectionName), orderBy("createdAt", "desc")];
       if (cursor) constraints.push(startAfter(cursor));
       constraints.push(limit(max));
       const snapshot = rememberMetadata(
@@ -322,7 +330,7 @@ export function createFirestoreRepository(collectionName) {
       let cursor = null,
         hasMore = true;
       while (hasMore) {
-        const constraints = [orderBy(documentId())];
+        const constraints = [...visibilityConstraints(collectionName), orderBy(documentId())];
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(max));
         const snapshot = rememberMetadata(
@@ -342,7 +350,7 @@ export function createFirestoreRepository(collectionName) {
         opened = true;
       listenerOpened(collectionName);
       const stop = onSnapshot(
-        collectionRef(),
+        query(collectionRef(), ...visibilityConstraints(collectionName)),
         (snapshot) => {
           recordFirestoreOperation("listen", {
             collection: collectionName,
@@ -417,7 +425,7 @@ export function createFirestoreRepository(collectionName) {
         opened = true;
       listenerOpened(collectionName);
       const stop = onSnapshot(
-        query(collectionRef(), orderBy("createdAt", "desc"), limit(max)),
+        query(collectionRef(), ...visibilityConstraints(collectionName), orderBy("createdAt", "desc"), limit(max)),
         (snapshot) => {
           recordFirestoreOperation("listen", {
             collection: collectionName,

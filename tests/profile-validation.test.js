@@ -46,6 +46,18 @@ const legacyBusiness={id:'adi-festa',ownerId:authUser.uid,active:true};
   assert.equal(result.needsLegacyMigration,true);
 }
 
+{
+  const staffUser={uid:'seller-auth-123',email:'seller@adifesta.com'},staffProfile={
+    uid:staffUser.uid,email:staffUser.email,businessId:'adi-festa',active:true,role:'seller'
+  };
+  const profileResult=validation.validateAuthenticatedProfile({authUser:staffUser,profileSnapshotId:staffUser.uid,profile:staffProfile});
+  const businessResult=validation.validateAuthenticatedBusiness({authUser:staffUser,profile:staffProfile,businessId:'adi-festa',business:legacyBusiness});
+  assert.equal(profileResult.isLegacyAdiFestaOwnerCandidate,false);
+  assert.equal(profileResult.needsLegacyMigration,false);
+  assert.equal(businessResult.isLegacyAdiFestaOwner,false);
+  assert.equal(businessResult.needsLegacyMigration,false);
+}
+
 assert.throws(
   ()=>validation.validateAuthenticatedProfile({
     authUser,

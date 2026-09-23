@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Equipe V150 QA</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/design-system/veconi-theme.css">
+  <link rel="stylesheet" href="../css/team.css">
+  <style>
+    body{margin:0;background:#f6f8fb;color:#0f172a}.fixture-shell{min-height:100dvh}.fixture-nav{display:flex;gap:8px;overflow:auto;padding:10px 14px;background:#07141b}.fixture-nav a{flex:0 0 auto;padding:9px 12px;border-radius:10px;color:#fff;text-decoration:none}.fixture-main{padding:20px}.seller-workspace{display:grid;gap:14px;max-width:720px;margin:auto}.seller-workspace article{padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#fff}.seller-workspace h1,.seller-workspace h2,.seller-workspace p{margin:0}.seller-workspace .seller-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.seller-workspace button{min-height:48px}.seller-workspace [data-private-cost]{display:none}
+    @media(min-width:900px){.fixture-main{padding:32px 44px}}
+  </style>
+</head>
+<body>
+  <div class="fixture-shell">
+    <nav class="fixture-nav" aria-label="Rotas por permissão">
+      <a href="#" data-route="vender">Vender</a>
+      <a href="#" data-route="produtos">Produtos</a>
+      <a href="#" data-route="equipe">Equipe</a>
+      <a href="#" data-route="financeiro">Financeiro</a>
+      <a href="#" data-route="configuracoes">Configurações</a>
+      <a href="#" data-route="planos">Planos</a>
+    </nav>
+    <main class="fixture-main" id="app"></main>
+  </div>
+  <div id="modal"></div>
+  <script>
+    const mode=new URLSearchParams(location.search).get('mode')||'owner';
+    const ownerPermissions=['sales.create','sales.cancel','sales.viewAll','customers.view','customers.edit','customers.receiveDebt','customers.adjustBalance','products.view','products.edit','inventory.view','inventory.adjust','financial.view','reports.view','profit.view','cost.view','team.view','team.manage','settings.manage','billing.manage','spaces.manage'];
+    const sellerPermissions=['sales.create','customers.view','products.view','inventory.view'];
+    const context=mode==='seller'?{businessId:'qa-business',role:'seller',permissions:sellerPermissions,member:{uid:'seller-qa',name:'Bruna Silva',role:'seller'}}:{businessId:'qa-business',role:'owner',permissions:ownerPermissions,member:{uid:'owner-qa',name:'Murillo',role:'owner'}};
+    window.BusinessContext={get:()=>context};
+    window.FirebaseSession={user:{uid:context.member.uid},profile:{name:context.member.name,role:context.role}};
+    window.SpaceContext={list:()=>[{id:'loja',name:'Loja principal'},{id:'deposito',name:'Depósito'}],homeSpaces:()=>[{id:'loja',name:'Loja principal'},{id:'deposito',name:'Depósito'}]};
+    window.Utils={escapar:value=>String(value).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])),toast:()=>{}};
+    window.lucide={createIcons:()=>{}};
+    window.TeamService={
+      listMembers:async()=>[
+        {uid:'owner-qa',name:'Murillo Charles',email:'owner@example.test',role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[]},
+        {uid:'seller-qa',name:'Bruna Silva Danki',email:'bruna@example.test',role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:['loja']},
+        {uid:'stock-qa',name:'Equipe do Estoque',email:'estoque@example.test',role:'stock',status:'disabled',spaceAccess:'selected',allowedSpaceIds:['deposito']},
+      ],
+      listInvites:async()=>[{id:'invite-qa',name:'Caixa da Tarde',email:'caixa@example.test',role:'seller',status:'pending',spaceAccess:'selected',allowedSpaceIds:['loja'],expiresAt:new Date(Date.now()+86400000).toISOString()}],
+      createInvite:async()=>({inviteUrl:'https://example.test/?teamInvite=qa'}),updateMember:async()=>({}),
+    };
+  </script>
+  <script src="../js/team-access.js"></script>
+  <script src="../js/team-page.js"></script>
+  <script>
+    TeamAccess.syncNavigation();
+    if(mode==='seller'){
+      document.documentElement.dataset.canViewCost=String(TeamAccess.has('cost.view'));
+      app.innerHTML=`<section class="seller-workspace" data-seller-workspace><h1>Nova venda</h1><p>Acesso operacional da vendedora no celular.</p><article><h2>Bala colorida</h2><p>R$ 14,00 · estoque disponível</p><small data-private-cost>Custo R$ 4,00</small></article><div class="seller-actions"><button class="btn btn-light">Adicionar item</button><button class="btn btn-primary">Finalizar venda</button></div></section>`;
+    }else{
+      app.innerHTML=TeamPage.render();
+      TeamPage.bind();
+    }
+    window.__teamAccessFixtureReady=true;
+  </script>
+</body>
+</html>

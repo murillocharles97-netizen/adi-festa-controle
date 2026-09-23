@@ -15,7 +15,7 @@ const lifecycle = read('js/firebase/session-lifecycle.js');
 const worker = read('service-worker.js');
 const rules = read('firestore.rules');
 
-assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "settings"\]\)/);
+assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "productFinancials", "settings"\]\)/);
 assert.match(sync, /PULL_TTL_MS\s*=\s*300000/);
 assert.match(sync, /listChangedSince\(since,\s*500\)/);
 assert.match(sync, /listAllPaged\(200\)/);
@@ -54,14 +54,14 @@ assert.doesNotMatch(worker, /addAll\(ARQUIVOS\)\)\.then\(\(\)=>self\.skipWaiting
 assert.match(worker, /event\.data==='SKIP_WAITING'\)self\.skipWaiting/);
 assert.match(worker, /fetch\(event\.request,\{cache:'no-store'\}\)/);
 
-assert.match(firebaseConfig,/persistentLocalCache/);
+assert.match(firebaseConfig,/memoryLocalCache/);
 assert.doesNotMatch(firebaseConfig,/enableIndexedDbPersistence/);
 assert.match(auth,/cleanupCurrentSession\(\)/);
 assert.match(lifecycle,/export function registerCleanup/);
 assert.match(lifecycle,/export function cleanupCurrentSession/);
 
 assert.match(rules, /match \/businesses\/\{businessId\}/);
-assert.match(rules, /currentBusinessId\(\) == businessId/);
+assert.match(rules, /activeMember\(businessId\) \|\| legacyMember\(businessId\)/);
 assert.match(rules, /match \/publicCatalogs\/\{visitToken\} \{[\s\S]*allow get: if true;[\s\S]*allow list: if false;/);
 
 console.log('hardening.test.js: OK');

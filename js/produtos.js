@@ -26,7 +26,7 @@ window.Produtos=(()=>{
   const listar=()=>DB.carregar().produtos;
   const obter=id=>listar().find(p=>p.id===id);
   const status=p=>getProductStockStatus(p);
-  const salvar=d=>{if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateProduct(),'criar novos produtos');const existente=d.id?obter(d.id):null,barcode=window.normalizeBarcode?.(d.barcode!==undefined?d.barcode:existente?.barcode)||'',barcodeType=barcode?(d.barcodeType||existente?.barcodeType||window.BarcodeIndex?.inferType?.(barcode)||null):null;window.BarcodeIndex?.assertAvailable?.(barcode,d.id);let salvo;DB.alterar(db=>{
+  const salvar=d=>{if(window.TeamAccess&&!window.TeamAccess.has('products.edit'))throw Error('Você não tem permissão para editar produtos.');if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateProduct(),'criar novos produtos');const existente=d.id?obter(d.id):null,barcode=window.normalizeBarcode?.(d.barcode!==undefined?d.barcode:existente?.barcode)||'',barcodeType=barcode?(d.barcodeType||existente?.barcodeType||window.BarcodeIndex?.inferType?.(barcode)||null):null;window.BarcodeIndex?.assertAvailable?.(barcode,d.id);let salvo;DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString(),barcodeChanged=String(atual?.barcode||'')!==barcode;
     const estoque=d.estoqueAtual??d.estoque;
     const imageField=(name,fallback=null)=>d[name]!==undefined?d[name]:(atual?.[name]??fallback);
@@ -37,22 +37,22 @@ window.Produtos=(()=>{
     if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{const result=DB.alterar(db=>{db.produtos=db.produtos.filter(p=>p.id!==id);db.variacoesProdutos=(db.variacoesProdutos||[]).filter(v=>v.parentProductId!==id)});window.BarcodeIndex?.invalidate?.();return result};
-  const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
+  const entrada=(produtoId,quantidade,custoUnitario,observacao)=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
     const anterior=Number(p.estoqueAtual||0),novo=anterior+q,agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     if(custoUnitario!==''&&custoUnitario!==null&&custoUnitario!==undefined)p.custo=Number(custoUnitario);
-    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora};
+    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);
   });return mov};
-  const ajustarEstoque=(produtoId,novoEstoque,motivo)=>{let mov;const operationId=Utils.uuid();DB.alterar(db=>{
+  const ajustarEstoque=(produtoId,novoEstoque,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
-    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora};
+    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);
   });return mov};
   const historico=produtoId=>DB.carregar().movimentacoesEstoque.filter(m=>m.produtoId===produtoId).sort((a,b)=>new Date(b.data)-new Date(a.data));

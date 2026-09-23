@@ -56,6 +56,7 @@ window.Vendas = (() => {
       })
       .filter(Boolean);
   const registrar = (d) => {
+    if (window.TeamAccess && !window.TeamAccess.has("sales.create")) throw Error("Você não tem permissão para criar vendas.");
     const explicitSpaceId = String(d.spaceId || "").trim();
     if (!explicitSpaceId && typeof document !== "undefined")
       throw Error("Informe explicitamente o espaço desta venda.");
@@ -106,7 +107,7 @@ window.Vendas = (() => {
       : JSON.parse(JSON.stringify(currentData));
     ((db) => {
       const cliente = db.clientes.find((c) => c.id === d.clienteId),
-        data = new Date().toISOString();
+        data = new Date().toISOString(), actor = window.TeamAccess?.actor?.() || {};
       const itensComCampanha =
         window.Campanhas?.aplicarBeneficios?.(d.itens, d.clienteId, {
           manualAdjustment: Boolean(d.ajusteManual),
@@ -218,6 +219,10 @@ window.Vendas = (() => {
         businessId,
         spaceId,
         financialSpaceId,
+        ...actor,
+        sellerUid: actor.actorUid || null,
+        sellerNameSnapshot: actor.actorNameSnapshot || null,
+        terminalId: d.terminalId || null,
         clienteNome: cliente?.nome || "Venda avulsa",
         itens,
         subtotalOriginal,
@@ -297,6 +302,7 @@ window.Vendas = (() => {
             estoqueNovo: novo,
             observacao: `Venda para ${criada.clienteNome}`,
             data,
+            ...actor,
           });
           ProductVariations.recomputeInData(db, p.id);
           return;
@@ -318,6 +324,7 @@ window.Vendas = (() => {
           estoqueNovo: novo,
           observacao: `Venda para ${criada.clienteNome}`,
           data,
+          ...actor,
         });
       });
       if (cliente) {
@@ -339,6 +346,7 @@ window.Vendas = (() => {
         valor: valorFinal,
         status: d.status,
         data: criada.data,
+        ...actor,
       });
       if (descontoTotal !== 0)
         db.movimentacoes.push({
@@ -390,10 +398,11 @@ window.Vendas = (() => {
     );
   };
   const desfazerUltima = (options = {}) => {
+    if (window.TeamAccess && !window.TeamAccess.has("sales.cancel")) throw Error("Você não tem permissão para cancelar vendas.");
     let removida;
     const operationId = Utils.uuid();
     DB.alterar((db) => {
-      const venda = db.vendas[db.vendas.length - 1];
+      const venda = db.vendas[db.vendas.length - 1], actor = window.TeamAccess?.actor?.() || {};
       if (!venda) throw Error("Nenhuma venda para desfazer");
       if (Date.now() - new Date(venda.data).getTime() > 5 * 60 * 1000)
         throw Error("O prazo de 5 minutos para desfazer terminou");
@@ -437,6 +446,7 @@ window.Vendas = (() => {
             estoqueNovo: novo,
             observacao: "Estoque da variação restaurado ao desfazer venda",
             data: agora,
+            ...actor,
           });
           ProductVariations.recomputeInData(db, p.id);
           return;
@@ -458,6 +468,7 @@ window.Vendas = (() => {
           estoqueNovo: novo,
           observacao: "Estoque restaurado ao desfazer venda",
           data: agora,
+          ...actor,
         });
       });
       const cliente = db.clientes.find((c) => c.id === venda.clienteId);
@@ -499,6 +510,7 @@ window.Vendas = (() => {
         vendaId: venda.id,
         valor: Number(venda.valorFinal ?? venda.valorTotal),
         data: agora,
+        ...actor,
       });
       const campaignReversal = window.Campanhas?.reverterVendaNoBanco(db, venda, options);
       window.CustomerSubscriptions?.reverseSaleInData?.(db, venda);

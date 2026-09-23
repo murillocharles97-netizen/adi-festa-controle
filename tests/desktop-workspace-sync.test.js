@@ -43,7 +43,7 @@ test("sincronização combina listeners compartilhados e reconciliação canôni
     repository = read("js/firebase/firestore-repository.js"),
     app = read("js/app.js");
 
-  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "settings"\]\)/);
+  assert.match(sync, /REALTIME_NAMES\s*=\s*new Set\(\["products", "productFinancials", "settings"\]\)/);
   assert.match(sync, /listenerRegistry\s*=\s*new Map/);
   assert.doesNotMatch(sync, /registerRealtimeCollection\("clients"\)/);
   assert.match(sync, /queryClientsPage/);
@@ -78,16 +78,16 @@ test("publica os arquivos desktop e o identificador do build em cache novo", () 
 
   assert.match(index, /desktop-sales\.js\?v=140/);
   assert.match(index, /desktop-settings\.js\?v=138/);
-  assert.match(index, /app\.js\?v=146/);
-  assert.match(index, /build-info\.js\?v=149/);
+  assert.match(index, /app\.js\?v=150/);
+  assert.match(index, /build-info\.js\?v=150/);
   assert.match(index, /desktop-sales\.css\?v=140/);
-  assert.match(index, /checkout\.js\?v=148/);
+  assert.match(index, /checkout\.js\?v=150/);
   assert.match(index, /name="adi-festa-build" content="[0-9a-f]{40}"/);
   assert.match(index, /name="adi-festa-build-time" content="\d{4}-\d{2}-\d{2}T/);
   assert.match(worker, /veconi-v\d+-/);
-  assert.match(worker, /release:'149'/);
-  assert.match(build, /release: "149"/);
-  assert.match(index, /firebase-ui\.js\?v=149/);
+  assert.match(worker, /release:'150'/);
+  assert.match(build, /release: "150"/);
+  assert.match(index, /firebase-ui\.js\?v=150/);
   assert.match(worker, /build-info\.js/);
   assert.match(build, /\[VECONI\] Build/);
   assert.match(build, /__adiFestaBuildLogged/);

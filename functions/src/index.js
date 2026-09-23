@@ -26,6 +26,8 @@ const {publicCardPaymentDiagnostic}=require('./services/card-payment-diagnostic-
 const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-state-service');
 const {financialIncomeService}=require('./services/financial-income-service');
 const {activityEventService}=require('./services/activity-event-service');
+const {teamAccessService}=require('./services/team-access-service');
+const {saleCostService}=require('./services/sale-cost-service');
 const {terminalPaymentService}=require('./terminal-payments/terminal-payment-service');
 
 initializeApp();
@@ -67,6 +69,8 @@ const coupons=()=>couponFirestoreService(db);
 const pixBilling=()=>pixBillingService(db);
 const financialIncome=()=>financialIncomeService(db);
 const activityEvents=()=>activityEventService(db,{FieldValue,Timestamp});
+const teamAccess=()=>teamAccessService(db,{FieldValue,Timestamp,appUrl:APP_URL.value()});
+const saleCosts=()=>saleCostService(db,{FieldValue});
 const terminalPayments=()=>terminalPaymentService(db,{permissionService,simulatorEnabled:()=>process.env.TERMINAL_PAYMENT_SIMULATOR_ENABLED==='true'});
 const iso=()=>new Date().toISOString();
 async function latestCardPaymentDiagnostic(subscriptionId){
@@ -453,9 +457,12 @@ exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{bu
 
 exports.projectSaleFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
   const source=event.data?.after?.exists?event.data.after.data():{...(event.data?.before?.data?.()||{}),deletedAt:new Date().toISOString()};
-  const result=await financialIncome().projectSale(event.params.businessId,event.params.saleId,source);
-  logger.info('[FINANCIAL_INCOME_SALE]',{businessId:event.params.businessId,saleId:event.params.saleId,created:result?.created===true,skipped:result?.skipped||null});
-  return result;
+  const [incomeResult,costResult]=await Promise.all([
+    financialIncome().projectSale(event.params.businessId,event.params.saleId,source),
+    event.data?.after?.exists?saleCosts().project(event.params.businessId,event.params.saleId,source):Promise.resolve({created:false,skipped:'source-deleted'}),
+  ]);
+  logger.info('[FINANCIAL_INCOME_SALE]',{businessId:event.params.businessId,saleId:event.params.saleId,created:incomeResult?.created===true,skipped:incomeResult?.skipped||null,costSnapshotCreated:costResult?.created===true,costSnapshotSkipped:costResult?.skipped||null});
+  return{income:incomeResult,cost:costResult};
 });
 
 exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/payments/{paymentId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
@@ -464,6 +471,13 @@ exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'busin
   logger.info('[FINANCIAL_INCOME_PAYMENT]',{businessId:event.params.businessId,paymentId:event.params.paymentId,created:result?.created===true,skipped:result?.skipped||null});
   return result;
 });
+
+exports.ensureCurrentMembership=onCall(ONBOARDING_OPTIONS,request=>teamAccess().ensureCurrentMembership(request));
+exports.getTeamInvitePreview=onCall(ONBOARDING_OPTIONS,request=>teamAccess().invitePreview(request));
+exports.createTeamInvite=onCall(ONBOARDING_OPTIONS,request=>teamAccess().createInvite(request));
+exports.acceptTeamInvite=onCall(ONBOARDING_OPTIONS,request=>teamAccess().acceptInvite(request));
+exports.updateTeamMember=onCall(ONBOARDING_OPTIONS,request=>teamAccess().updateMember(request));
+exports.migrateSensitiveTeamData=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:2},request=>teamAccess().migrateSensitiveData(request));
 
 const ACTIVITY_TRIGGER_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
 const projectActivity=(sourceCollection,idParam)=>async event=>{

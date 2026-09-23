@@ -21,6 +21,7 @@ window.Fiados = (() => {
   }
 
   function createPayment(clienteId, valor, observacao, options = {}) {
+    if (window.TeamAccess && !window.TeamAccess.has("customers.receiveDebt")) throw Error("Você não tem permissão para receber pagamentos de fiado.");
     let pagamento;
     const operationId = String(options.operationId || Utils.uuid()),
       paymentMode = options.paymentMode === "total" ? "total" : "partial";
@@ -60,7 +61,7 @@ window.Fiados = (() => {
       }
       client.saldo = Number((previousBalance + received).toFixed(2));
       client.financialVersion = expected.expectedFinancialVersion + 1;
-      const at = new Date().toISOString();
+      const at = new Date().toISOString(), actor = window.TeamAccess?.actor?.() || {};
       client.atualizadoEm = at;
       pagamento = {
         id: operationId,
@@ -69,6 +70,7 @@ window.Fiados = (() => {
         syncPipelineVersion: 2,
         businessId: DB.getBusinessId?.() || null,
         schemaVersion: 3,
+        ...actor,
         clienteId,
         clientId: clienteId,
         clienteNome: client.nome,

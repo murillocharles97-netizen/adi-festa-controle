@@ -2,6 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   query,
@@ -94,6 +95,13 @@ async function commitMigrationPatches(rows) {
 }
 
 async function readRemoteSpaces(context) {
+  const access=window.BusinessContext?.get?.()||{},restricted=access.spaceAccess!=="all",allowedIds=[...new Set(access.allowedSpaceIds||[])];
+  if(restricted){
+    const settled=await Promise.allSettled(allowedIds.map(id=>getDoc(spaceRef(id)))),spaces=[],errors=[];
+    settled.forEach((result,index)=>{if(result.status==='rejected'){errors.push({query:`allowed:${allowedIds[index]}`,code:result.reason?.code||'unknown',message:result.reason?.message||String(result.reason)});return}if(result.value.exists()){const value=firestoreSpace(result.value);if(value.active!==false&&String(value.businessId||value.linkedBusinessId||'')===context.businessId)spaces.push(value)}});
+    state.lastReadStats={at:now(),operation:'listAuthorizedSpaces',documents:spaces.length,uniqueDocuments:spaces.length,queries:allowedIds.length,querySizes:{authorized:spaces.length},errors:clone(errors)};
+    return{spaces,errors,complete:errors.length===0,querySizes:{authorized:spaces.length}};
+  }
   const source = collection(db, "financialSpaces"), requests = [
     {
       name: "business",
