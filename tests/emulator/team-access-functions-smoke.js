@@ -47,11 +47,7 @@ const ownerPermissions = enabled(
       id: businessId, ownerId: ownerUid, name: "Equipe Smoke", active: true, maxTeamMembers: null,
       subscription: { planId: "internal", status: "active" },
     }),
-    admin.doc(`users/${ownerUid}`).set({ uid: ownerUid, name: "Proprietário Smoke", email: ownerEmail, businessId, role: "owner", active: true }),
-    admin.doc(`businesses/${businessId}/members/${ownerUid}`).set({
-      uid: ownerUid, name: "Proprietário Smoke", email: ownerEmail, role: "owner", status: "active",
-      spaceAccess: "all", allowedSpaceIds: [], permissions: ownerPermissions,
-    }),
+    admin.doc(`users/${ownerUid}`).set({ uid: ownerUid, name: "Proprietário Smoke", email: ownerEmail, businessId, active: true }),
     admin.doc(`financialSpaces/${spaceId}`).set({
       id: spaceId, name: "Loja Smoke", type: "business", businessId, linkedBusinessId: businessId,
       ownerUid, active: true, status: "active",
@@ -63,6 +59,35 @@ const ownerPermissions = enabled(
       id: "operational-product", businessId, productId: "operational-product", custo: 9,
     }),
   ]);
+
+  const recoveredOwner = await call("ensureCurrentMembership", { businessId });
+  assert.equal(recoveredOwner.data.created, true);
+  assert.equal(recoveredOwner.data.member.role, "owner");
+  assert.equal(recoveredOwner.data.member.status, "active");
+  const ownerRecoveryAudit = await admin.doc(`businesses/${businessId}/auditLogs/owner_membership_evidence_${ownerUid}`).get();
+  assert.equal(ownerRecoveryAudit.data().type, "owner_membership_recovered");
+  const ownerRetry = await call("ensureCurrentMembership", { businessId });
+  assert.equal(ownerRetry.data.created, false);
+  assert.equal((await admin.collection(`businesses/${businessId}/auditLogs`).where("targetUid", "==", ownerUid).get()).size, 1);
+  await admin.doc(`businesses/${businessId}/members/${ownerUid}`).update({
+    role: adminSdk.firestore.FieldValue.delete(), status: adminSdk.firestore.FieldValue.delete(),
+    spaceAccess: adminSdk.firestore.FieldValue.delete(), allowedSpaceIds: adminSdk.firestore.FieldValue.delete(),
+    permissions: adminSdk.firestore.FieldValue.delete(),
+  });
+  const repairedLegacyOwner = await call("ensureCurrentMembership", { businessId });
+  assert.equal(repairedLegacyOwner.data.member.role, "owner");
+  assert.equal(repairedLegacyOwner.data.member.spaceAccess, "all");
+  assert.equal(repairedLegacyOwner.data.member.permissions["billing.manage"], true);
+
+  await signOut(auth);
+  const orphanCredential = await createUserWithEmailAndPassword(auth, `team-orphan-${suffix}@example.test`, password);
+  await admin.doc(`users/${orphanCredential.user.uid}`).set({ uid: orphanCredential.user.uid, email: orphanCredential.user.email, businessId, role: "seller", active: true });
+  await assert.rejects(
+    call("ensureCurrentMembership", { businessId }),
+    (error) => String(error.code).includes("failed-precondition") && error.details?.reason === "membership-missing",
+  );
+  await signOut(auth);
+  await signInWithEmailAndPassword(auth, ownerEmail, password);
 
   const inviteResult = await call("createTeamInvite", {
     businessId,
@@ -150,6 +175,14 @@ const ownerPermissions = enabled(
   await call("updateTeamMember", { businessId, uid: sellerUid, status: "disabled" });
   assert.equal((await admin.doc(`businesses/${businessId}/members/${sellerUid}`).get()).data().status, "disabled");
   assert.equal((await admin.doc(`users/${sellerUid}`).get()).data().active, false);
+  await signOut(auth);
+  await signInWithEmailAndPassword(auth, sellerEmail, password);
+  await assert.rejects(
+    call("ensureCurrentMembership", { businessId }),
+    (error) => String(error.code).includes("permission-denied") && error.details?.reason === "access-disabled",
+  );
+  await signOut(auth);
+  await signInWithEmailAndPassword(auth, ownerEmail, password);
   await call("updateTeamMember", {
     businessId, uid: sellerUid, status: "active", role: "seller", name: "Vendedora Reativada",
     spaceAccess: "selected", allowedSpaceIds: [spaceId],
@@ -185,7 +218,7 @@ const ownerPermissions = enabled(
   assert.equal(migratedSaleFinancial.data().lucro, 13);
   assert.equal((await call("migrateSensitiveTeamData", { businessId })).data.alreadyApplied, true);
 
-  console.log("Team Access Functions V150: convite, aceite, escopo, desativação, último owner e migração sensível validados.");
+  console.log("Team Access Functions V151: owner legado, convite, escopo, desativação, último owner e migração sensível validados.");
   process.exit(0);
 })().catch((error) => {
   console.error(error);

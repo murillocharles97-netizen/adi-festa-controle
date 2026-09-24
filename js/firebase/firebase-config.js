@@ -17,4 +17,7 @@ export const functions=getFunctions(app,'southamerica-east1');
 window.FirebaseCallable=(name,data)=>httpsCallable(functions,name)(data);
 window.FirebaseBusinessReader=async businessId=>{const snapshot=await getDoc(doc(db,'businesses',businessId));return snapshot.exists()?{id:snapshot.id,...snapshot.data()}:null};
 window.FirebaseDocumentListener=(segments,onValue,onError)=>onSnapshot(doc(db,...segments),snapshot=>onValue(snapshot.exists()?{id:snapshot.id,...snapshot.data()}:null),onError);
-setPersistence(auth,browserLocalPersistence).catch(error=>console.error('[Firebase Auth persistence]',{code:error.code,message:error.message}));
+export const authPersistenceReady=setPersistence(auth,browserLocalPersistence)
+  .then(()=>true)
+  .catch(error=>{console.error('[Firebase Auth persistence]',{code:error.code,message:error.message});return false});
+window.FirebaseAuthPersistenceReady=authPersistenceReady;

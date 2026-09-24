@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>VECONI V151 — Login recovery QA</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/firebase.css">
+  <link rel="stylesheet" href="../css/design-system/veconi-theme.css">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f5f8fa;color:#102631;font-family:Inter,system-ui,sans-serif}.qa-app{min-height:100dvh}.qa-gate{min-height:100dvh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 8%,rgba(27,202,181,.2),transparent 34%),linear-gradient(145deg,#061016,#09232c 72%,#06383a)}.qa-gate .auth-card{width:min(100%,390px)}.qa-brand{display:grid;place-items:center;gap:8px;margin-bottom:22px}.qa-brand img{width:66px;height:66px}.qa-brand b{color:#fff;font-size:27px;letter-spacing:.08em}.qa-brand small{color:#b8cbd1}.qa-loading{color:#dcebed;text-align:center}.qa-spinner{width:40px;height:40px;margin:10px auto 22px;border:4px solid rgba(255,255,255,.18);border-top-color:#1ed2bd;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.qa-home{min-height:100dvh;background:#f4f7f8}.qa-home header{padding:calc(24px + env(safe-area-inset-top)) 20px 28px;border-radius:0 0 26px 26px;background:linear-gradient(135deg,#071821,#0b4650);color:#fff}.qa-home header small,.qa-home header p{color:#b9cbd1}.qa-home header h1{margin:7px 0 3px;font-size:25px}.qa-home main{display:grid;gap:14px;padding:18px}.qa-kpis{display:grid;grid-template-columns:1fr 1fr;gap:12px}.qa-card{padding:17px;border:1px solid #dbe4e7;border-radius:17px;background:#fff;box-shadow:0 8px 24px rgba(10,35,45,.07)}.qa-card small,.qa-card span{display:block;color:#667983}.qa-card b{display:block;margin-top:8px;font-size:21px}.qa-status{display:flex!important;align-items:center;gap:8px;margin-top:10px;color:#087f75!important;font-weight:800}.qa-dot{width:9px;height:9px;border-radius:50%;background:#16b99e}.qa-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.qa-actions button{min-height:72px;border:1px solid #dbe4e7;border-radius:15px;background:#fff;color:#17313c;font-weight:800}.qa-restored{margin-top:12px;padding:9px 12px;border-radius:12px;background:#ddf8f0;color:#08785c;font-size:12px;font-weight:800}.auth-error{min-height:20px}.auth-card input{width:100%}
+  </style>
+</head>
+<body><div id="qa-root" class="qa-app"></div>
+<script type="module">
+  import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
+  import {browserLocalPersistence,connectAuthEmulator,getAuth,onAuthStateChanged,setPersistence,signInWithEmailAndPassword} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
+  const root=document.querySelector('#qa-root'),params=new URLSearchParams(location.search),hold=params.get('hold')==='1';
+  const app=initializeApp({apiKey:'emulator-key',projectId:'adi-festa-variations-test'},'v151-login-recovery'),auth=getAuth(app);
+  connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
+  const brand=()=>'<div class="qa-brand"><img src="../assets/veconi-symbol.svg" alt="VECONI"><b>VECONI</b><small>Seu negócio mais completo.</small></div>';
+  function login(message=''){document.body.dataset.state='login';root.innerHTML=`<section class="qa-gate"><article class="auth-card auth-entry-card">${brand()}<h1>Bem-vindo</h1><p>Vendas, estoque, clientes, CRM e financeiro em um só lugar.</p><form id="qa-login"><label>E-mail<input name="email" type="email" autocomplete="email" value="owner-v151@example.test" required></label><label>Senha<input name="password" type="password" autocomplete="current-password" value="Recovery123!" required></label><p class="auth-error">${message}</p><button class="btn btn-primary" id="qa-submit">Entrar</button></form></article></section>`;document.querySelector('#qa-login').onsubmit=async event=>{event.preventDefault();const button=document.querySelector('#qa-submit');button.disabled=true;button.textContent='Entrando…';const data=new FormData(event.currentTarget);try{await signInWithEmailAndPassword(auth,data.get('email'),data.get('password'))}catch(error){login(error.code)}}}
+  function preparing(){document.body.dataset.state='preparing';root.innerHTML=`<section class="qa-gate"><article class="auth-card qa-loading">${brand()}<div class="qa-spinner"></div><h1>Preparando seu ambiente…</h1><p>Sessão autenticada. Validando empresa e vínculo de equipe.</p></article></section>`}
+  function home(restored=false){document.body.dataset.state=restored?'reload':'home';root.innerHTML=`<section class="qa-home"><header><small>Bom dia, Murillo</small><h1>Adi Festa</h1><p>Visão geral do seu negócio</p>${restored?'<div class="qa-restored">Sessão restaurada após recarregar</div>':''}</header><main><div class="qa-kpis"><article class="qa-card"><small>Vendas hoje</small><b>R$ 0,00</b><span class="qa-status"><i class="qa-dot"></i>Nuvem conectada</span></article><article class="qa-card"><small>Clientes</small><b>139</b><span>Base sincronizada</span></article></div><article class="qa-card"><small>Acesso</small><b>Proprietário</b><span>Todos os espaços e permissões disponíveis.</span></article><div class="qa-actions"><button>Vender</button><button>Produtos</button><button>Clientes</button></div></main></section>`}
+  window.finishBootstrap=()=>home(false);
+  await setPersistence(auth,browserLocalPersistence);
+  let first=true;
+  onAuthStateChanged(auth,user=>{if(!user)return login();const restored=sessionStorage.getItem('v151-ready')==='1';preparing();sessionStorage.setItem('v151-ready','1');if(!hold||restored)setTimeout(()=>home(restored),220);first=false});
+  window.__qa={auth,state:()=>document.body.dataset.state,first:()=>first};
+</script></body></html>
