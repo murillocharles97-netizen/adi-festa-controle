@@ -113,7 +113,9 @@ function migrationModule(){
   assert.match(auth,/BOOTSTRAP_TIMEOUT_MS=15000/);
   assert.match(auth,/profileSnapshot=await getDoc\(profileRef\)/);
   assert.match(auth,/automaticBootstrapAttempts/);
-  assert.match(auth,/new Set\(\['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error'\]\)/);
+  assert.match(auth,/membership_missing/);
+  assert.match(auth,/access_disabled/);
+  assert.match(auth,/authorized/);
   assert.match(auth,/O serviço de nuvem atingiu temporariamente o limite de uso/);
   assert.match(auth,/finally\(\(\)=>\{/);
   assert.match(auth,/window\.LegacyMigrationAdmin=/);

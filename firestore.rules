@@ -924,8 +924,12 @@ service cloud.firestore {
         allow update, delete: if false;
       }
       match /members/{memberUid} {
-        allow read: if belongsToBusiness(businessId)
-          && (request.auth.uid == memberUid || hasPermission(businessId, 'team.view'));
+        // O próprio usuário pode ler somente o seu vínculo, inclusive quando
+        // desativado, para que a interface explique o bloqueio sem encerrar a
+        // sessão do Firebase. O acesso ao restante da empresa continua
+        // condicionado a belongsToBusiness/activeMember.
+        allow read: if (signedIn() && request.auth.uid == memberUid)
+          || (belongsToBusiness(businessId) && hasPermission(businessId, 'team.view'));
         allow create, update, delete: if false;
       }
       match /teamInvites/{inviteId} {

@@ -99,6 +99,9 @@ test("manager sem financeiro e stock seguem apenas as permissões concedidas", a
 });
 
 test("membro desativado e usuário externo não acessam o business", async () => {
+  const disabledDb = env.authenticatedContext("disabled-team").firestore();
+  await assertSucceeds(getDoc(doc(disabledDb, "businesses", businessId, "members", "disabled-team")));
+  await assertFails(getDoc(doc(disabledDb, "businesses", businessId, "members", "owner-team")));
   for (const uid of ["disabled-team", "owner-foreign"]) {
     const db = env.authenticatedContext(uid).firestore();
     await assertFails(getDoc(doc(db, "businesses", businessId, "products", "operational-product")));

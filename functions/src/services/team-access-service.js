@@ -70,19 +70,33 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
   async function ensureCurrentMembership(request){
     const uid=request.auth?.uid,businessId=text(request.data?.businessId,128);
     if(!uid||!businessId)throw new HttpsError('unauthenticated','Entre novamente para validar seu acesso.');
-    const ref=memberRef(businessId,uid),profileRef=db.doc(`users/${uid}`),business=businessRef(businessId);
+    const ref=memberRef(businessId,uid),profileRef=db.doc(`users/${uid}`),business=businessRef(businessId),auditRef=db.doc(`businesses/${businessId}/auditLogs/owner_membership_evidence_${uid}`),membershipRef=db.doc(`memberships/${businessId}_${uid}`);
     return db.runTransaction(async transaction=>{
-      const [memberSnapshot,profileSnapshot,businessSnapshot]=await Promise.all([transaction.get(ref),transaction.get(profileRef),transaction.get(business)]);
-      if(!businessSnapshot.exists||!profileSnapshot.exists)throw new HttpsError('permission-denied','Perfil empresarial não encontrado.');
-      if(memberSnapshot.exists){const member=memberSnapshot.data();if(member.status!=='active')throw new HttpsError('permission-denied','Seu acesso foi desativado.');return{member:publicMember(uid,member),created:false}}
+      const [memberSnapshot,profileSnapshot,businessSnapshot,auditSnapshot,membershipSnapshot]=await Promise.all([transaction.get(ref),transaction.get(profileRef),transaction.get(business),transaction.get(auditRef),transaction.get(membershipRef)]);
+      if(!businessSnapshot.exists||!profileSnapshot.exists)throw new HttpsError('permission-denied','Perfil empresarial não encontrado.',{reason:'business-profile-missing',businessId});
       const profile=profileSnapshot.data(),company=businessSnapshot.data();
-      if(profile.active!==true||profile.businessId!==businessId||company.ownerId!==uid||!['owner','admin'].includes(profile.role))
-        throw new HttpsError('permission-denied','O vínculo desta conta precisa de um convite válido.');
+      if(company.active!==true)throw new HttpsError('permission-denied','A empresa vinculada está inativa.',{reason:'access-disabled',businessId});
+      const ownerRoleCompatible=!profile.role||['owner','admin'].includes(profile.role),strictOwnerEvidence=profile.active===true&&profile.businessId===businessId&&company.ownerId===uid&&ownerRoleCompatible&&email(profile.email)===email(request.auth.token?.email);
+      if(memberSnapshot.exists){
+        const storedMember=memberSnapshot.data(),legacyOwnerShape=strictOwnerEvidence&&(!storedMember.role||!storedMember.status||!storedMember.spaceAccess||!storedMember.permissions),member=legacyOwnerShape?{...storedMember,uid,role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[],permissions:ROLE_PRESETS.owner}:storedMember;
+        if(member.status!=='active')throw new HttpsError('permission-denied','Seu acesso foi desativado.',{reason:'access-disabled',businessId});
+        const ownerEvidence=member.role==='owner'&&strictOwnerEvidence;
+        if(legacyOwnerShape)transaction.set(ref,{uid,role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[],permissions:ROLE_PRESETS.owner,updatedAt:FieldValue.serverTimestamp(),schemaVersion:1},{merge:true});
+        if(ownerEvidence){
+          const now=FieldValue.serverTimestamp(),membership=membershipSnapshot.data()||{};
+          if(!membershipSnapshot.exists||membership.role!=='owner'||membership.status!=='active'||membership.active!==true)transaction.set(membershipRef,{id:`${businessId}_${uid}`,businessId,uid,email:email(profile.email||request.auth.token?.email),role:'owner',active:true,status:'active',updatedAt:now},{merge:true});
+          if(!auditSnapshot.exists)transaction.set(auditRef,{id:auditRef.id,businessId,type:'owner_membership_evidence_recorded',actorUid:uid,targetUid:uid,memberRole:'owner',memberStatus:'active',evidence:{profileBusinessMatch:true,businessOwnerMatch:true,authEmailMatch:true,legacyRoleCompatible:true},memberCreated:false,createdAt:now,schemaVersion:1},{merge:false});
+        }
+        return{member:publicMember(uid,member),created:false,ownerEvidenceRecorded:ownerEvidence&&!auditSnapshot.exists};
+      }
+      if(!strictOwnerEvidence)
+        throw new HttpsError('failed-precondition','Nenhum vínculo de equipe ativo foi encontrado para esta conta.',{reason:'membership-missing',businessId});
       const now=FieldValue.serverTimestamp(),value={uid,name:text(profile.name||request.auth.token?.name,120)||email(request.auth.token?.email),email:email(profile.email||request.auth.token?.email),role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[],permissions:ROLE_PRESETS.owner,createdAt:profile.createdAt||now,createdBy:uid,updatedAt:now,schemaVersion:1};
       transaction.set(ref,value,{merge:true});
-      transaction.set(db.doc(`memberships/${businessId}_${uid}`),{id:`${businessId}_${uid}`,businessId,uid,email:value.email,role:'owner',active:true,status:'active',updatedAt:now},{merge:true});
+      transaction.set(membershipRef,{id:`${businessId}_${uid}`,businessId,uid,email:value.email,role:'owner',active:true,status:'active',updatedAt:now},{merge:true});
       transaction.set(business,{maxTeamMembers:company.maxTeamMembers??company.limits?.maxTeamMembers??null,teamSchemaVersion:1,updatedAt:now},{merge:true});
-      return{member:publicMember(uid,value),created:true};
+      transaction.set(auditRef,{id:auditRef.id,businessId,type:'owner_membership_recovered',actorUid:uid,targetUid:uid,memberRole:'owner',memberStatus:'active',evidence:{profileBusinessMatch:true,businessOwnerMatch:true,authEmailMatch:true,legacyRoleCompatible:true},memberCreated:true,createdAt:now,schemaVersion:1},{merge:false});
+      return{member:publicMember(uid,value),created:true,ownerEvidenceRecorded:true};
     });
   }
   async function invitePreview(request){

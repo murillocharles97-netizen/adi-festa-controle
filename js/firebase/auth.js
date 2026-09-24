@@ -5,11 +5,11 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=150';
+import './sync.js?v=151';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
-const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','loading_profile','loading_business','migration_required','loading_access','ready','onboarding_required','subscription_warning','subscription_blocked','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
-const NON_TERMINAL_STATES=new Set(['initializing','loading_profile','loading_business','migration_required','loading_access']);
+const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
+const NON_TERMINAL_STATES=new Set(['initializing','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access']);
 let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0,bootstrapStartedAt=0,bootstrapTimeline=[];
 let invitePreviewCache=null,invitePreviewPromise=null;
 const automaticBootstrapAttempts=new Set();
@@ -25,7 +25,7 @@ function setButtonLoading(button,loading,text){if(!button)return;button.disabled
 function setBootstrapState(state,details={}){
   if(!BOOTSTRAP_STATES.has(state))throw Error(`Estado de bootstrap inválido: ${state}`);
   bootstrapState=state;
-  window.FirebaseBootstrap={state,details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION,timings:[...bootstrapTimeline]},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout(),completeLegacyMigration:()=>completeLegacyMigrationManually()};
+  window.FirebaseBootstrap={state,authenticated:Boolean(auth.currentUser),details:{...details,migrationVersion:LEGACY_MIGRATION_VERSION,timings:[...bootstrapTimeline]},retry:()=>retryBootstrap(),logout:()=>bootstrapLogout('bootstrap_screen'),completeLegacyMigration:()=>completeLegacyMigrationManually()};
   dispatchEvent(new CustomEvent('firebase-bootstrap-state',{detail:{state,...details}}));
 }
 function normalizedCode(error){return String(error?.code||'').replace(/^(firestore|functions)\//,'')}
@@ -33,10 +33,10 @@ function isDevelopment(){
   return ['localhost','127.0.0.1'].includes(location.hostname)||localStorage.getItem('adiFestaDevMetrics')==='1';
 }
 function bootstrapLog(message,details){
-  const elapsedMs=Math.max(0,Math.round(performance.now()-(bootstrapStartedAt||performance.now()))),entry={step:message,elapsedMs};
+  const elapsedMs=Math.max(0,Math.round(performance.now()-(bootstrapStartedAt||performance.now()))),entry={step:message,state:bootstrapState,elapsedMs};
   bootstrapTimeline.push(entry);if(bootstrapTimeline.length>30)bootstrapTimeline.shift();
   if(window.FirebaseBootstrap?.details)window.FirebaseBootstrap.details.timings=[...bootstrapTimeline];
-  if(isDevelopment())console.info(`[BOOT] ${message} +${elapsedMs}ms`,details||'');
+  if(isDevelopment())console.info(`[BOOT] ${message} +${elapsedMs}ms`,{state:bootstrapState,...(details||{})});
 }
 function timeoutError(){return Object.assign(new Error('O bootstrap excedeu 15 segundos.'),{code:'bootstrap/timeout'})}
 function withTimeout(promise,token){
@@ -173,16 +173,26 @@ function bootstrapTechnicalDetails(details={}){
   if(!rows.length)return'';
   return `<details class="auth-technical-details"><summary>Detalhes técnicos</summary><div class="auth-review">${rows.map(([label,value])=>`<span><small>${esc(label)}</small><b>${esc(label==='Código'?value:abbreviateTechnicalId(value))}</b></span>`).join('')}</div><p><small>Por segurança, um UID divergente nunca é corrigido automaticamente. Confirme no Firebase Authentication e em users/{UID} qual conta é a proprietária, ou encaminhe estes identificadores abreviados ao administrador.</small></p></details>`;
 }
-function bootstrapErrorScreen(user,state,message,{manual=false,title='',details={}}={}){
+function suspendRuntimeForAccessCheck(reason){
+  readyUid='';
+  try{window.SyncFirebase?.stop?.()}catch{}
+  try{badgeSubscription?.()}catch{}badgeSubscription=null;
+  bootstrapLog('runtime suspended',{reason});
+}
+function bootstrapErrorScreen(user,state,message,{manual=false,title='',details={},suspendRuntime=false}={}){
+  if(suspendRuntime)suspendRuntimeForAccessCheck(details.code||state);
   setBootstrapState(state,{code:details.code||state});
-  const heading=title||(state==='temporary_unavailable'?'Configuração temporariamente indisponível':state==='permission_error'?'Permissão necessária':'Não foi possível abrir o aplicativo');
+  const headings={network_error:'Conexão temporariamente indisponível',temporary_unavailable:'Configuração temporariamente indisponível',membership_missing:'Vínculo de equipe não encontrado',access_disabled:'Acesso desativado',access_denied:'Acesso não autorizado',permission_error:'Permissão necessária'};
+  const heading=title||headings[state]||'Não foi possível abrir o aplicativo';
   screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-retry').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Tentando…';await retryBootstrap(user)};
   document.querySelector('#bootstrap-manual-migration')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Executando…';await completeLegacyMigrationManually()});
   document.querySelector('#bootstrap-logout').onclick=bootstrapLogout;
 }
-async function bootstrapLogout(){
+async function bootstrapLogout(reason='user_request'){
+  const logoutReason=typeof reason==='string'?reason:'user_request';
   const signingOutUid=auth.currentUser?.uid;
+  if(isDevelopment())console.info('[AUTH] explicit sign-out',{reason:logoutReason,authenticated:Boolean(signingOutUid),bootstrapState});
   bootstrapSequence++;
   if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;
   bootstrapRun=null;readyUid='';
@@ -250,7 +260,7 @@ function allowed(user,profile,business,member){
   bootstrapLog('local environment loaded');
   profile=context.userProfile;
   window.FirebaseSession={user,profile,member,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
-  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset,handleAccessRevoked:()=>{void bootstrapLogout()}};
+  window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset,handleMembershipChange:change=>{void handleMembershipChange(change)},handleAccessRevoked:()=>{void handleMembershipChange({kind:'access-check-failed',code:'ACCESS_CHECK_FAILED'})}};
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
@@ -266,19 +276,32 @@ function allowed(user,profile,business,member){
     window.FirebaseBootstrap.details={...(window.FirebaseBootstrap.details||{}),warning:'SYNC_UNAVAILABLE'};
     bootstrapLog('sync prepared',{degraded:true});
   }
-  setBootstrapState('ready',{businessId:profile.businessId});
+  setBootstrapState('authorized',{businessId:profile.businessId,role:context.role});
   gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   window.lucide?.createIcons();
   const readyDetail={uid:user.uid,businessId:profile.businessId,business,member,access:context.access};
   bootstrapLog('environment ready',{businessId:profile.businessId});
   setTimeout(()=>{
-    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='ready')return;
+    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='authorized')return;
     const mountStartedAt=performance.now();
     dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:readyDetail}));
     const mountMs=Math.max(0,Math.round(performance.now()-mountStartedAt));
     bootstrapLog('ui listeners completed',{durationMs:mountMs});
     dispatchEvent(new CustomEvent('firebase-ui-mounted',{detail:{durationMs:mountMs}}));
   },0);
+}
+async function handleMembershipChange(change={}){
+  const user=auth.currentUser,kind=String(change.kind||'access-check-failed'),code=String(change.code||kind).toUpperCase().replace(/[^A-Z0-9_-]/g,'_');
+  if(!user)return;
+  bootstrapLog('membership listener changed',{kind,code});
+  if(kind==='permissions-changed'){
+    readyUid='';
+    return startBootstrap(user,{mode:'membership-change'});
+  }
+  if(kind==='network-error')return bootstrapErrorScreen(user,'network_error','A sessão continua autenticada, mas não foi possível confirmar o vínculo agora. Verifique sua conexão e tente novamente.',{details:{code},suspendRuntime:true});
+  if(kind==='access-disabled')return bootstrapErrorScreen(user,'access_disabled','Seu acesso a esta empresa foi desativado. Entre em contato com o proprietário da conta.',{details:{code},suspendRuntime:true});
+  if(kind==='membership-missing')return bootstrapErrorScreen(user,'membership_missing','Sua conta está autenticada, mas não possui um vínculo ativo com esta empresa. Peça um novo convite ao proprietário.',{details:{code},suspendRuntime:true});
+  return bootstrapErrorScreen(user,'access_denied','A sessão continua autenticada, mas a validação de acesso foi recusada. Tente novamente ou fale com o proprietário da conta.',{details:{code},suspendRuntime:true});
 }
 async function updateBusinessDetails(values={}){
   const session=window.FirebaseSession;
@@ -358,6 +381,15 @@ async function bootstrapCore(user,token,mode){
   if(isDevelopment())console.info('[Profile Validation]',validation);
   const profileAccess=validateAuthenticatedProfile({authUser:user,profileSnapshotId:profileSnapshot.id,profile});
   if(!profile.uid&&profile.businessId!==LEGACY_BUSINESS_ID)profile={...profile,uid:user.uid};
+  setBootstrapState('loading_access',{businessId:profile.businessId});
+  screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Preparando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>`);
+  document.querySelector('#bootstrap-loading-logout').onclick=()=>bootstrapLogout('bootstrap_loading');
+  bootstrapLog('membership validation started',{businessId:profile.businessId});
+  const membershipResponse=await window.FirebaseCallable('ensureCurrentMembership',{businessId:profile.businessId});
+  assertCurrentRun(token);
+  const member=membershipResponse.data?.member;
+  if(!member||member.status!=='active')throw Object.assign(new Error('Seu vínculo de equipe não está ativo.'),{code:'failed-precondition',details:{reason:member?'access-disabled':'membership-missing',businessId:profile.businessId}});
+  bootstrapLog('membership validated',{businessId:profile.businessId,role:member.role,created:membershipResponse.data?.created===true});
   setBootstrapState('loading_business',{businessId:profile.businessId});
   bootstrapLog('business loading',{businessId:profile.businessId});
   const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
@@ -379,18 +411,24 @@ async function bootstrapCore(user,token,mode){
     ({profile,business}=await migrateLegacy(user,profile,business,mode));
     assertCurrentRun(token);
   }
-  const membershipResponse=await window.FirebaseCallable('ensureCurrentMembership',{businessId:profile.businessId}),memberSnapshot=await getDoc(doc(db,'businesses',profile.businessId,'members',user.uid)),member=memberSnapshot.exists()?{uid:memberSnapshot.id,...memberSnapshot.data()}:membershipResponse.data?.member;
-  if(!member||member.status!=='active')throw Object.assign(new Error('Seu acesso a esta empresa foi desativado.'),{code:'permission-denied'});
-  if(member.role==='owner'&&Number(business.sensitiveDataVersion||0)<1){await window.FirebaseCallable('migrateSensitiveTeamData',{businessId:profile.businessId});const refreshedBusiness=await getDoc(doc(db,'businesses',profile.businessId));if(refreshedBusiness.exists())business={id:refreshedBusiness.id,...refreshedBusiness.data()}}
+  if(member.role==='owner'&&Number(business.sensitiveDataVersion||0)<1){
+    bootstrapLog('sensitive migration started',{businessId:profile.businessId});
+    const migrationResponse=await window.FirebaseCallable('migrateSensitiveTeamData',{businessId:profile.businessId});
+    assertCurrentRun(token);
+    const refreshedBusiness=await getDoc(doc(db,'businesses',profile.businessId));
+    if(refreshedBusiness.exists())business={id:refreshedBusiness.id,...refreshedBusiness.data()};
+    business={...business,sensitiveDataVersion:Math.max(1,Number(business.sensitiveDataVersion||0))};
+    bootstrapLog('sensitive migration completed',{alreadyApplied:migrationResponse.data?.alreadyApplied===true});
+  }
   bootstrapLog('migration checked',{businessId:profile.businessId});
   setBootstrapState('loading_access',{businessId:profile.businessId});
   allowed(user,profile,business,member);
   bootstrapLog('subscription resolved',{planId:window.FirebaseSession?.subscription?.planId||'fallback',status:window.FirebaseSession?.subscription?.status||'fallback'});
   bootstrapLog('permissions resolved',{role:profile.role});
-  if(bootstrapState==='ready')readyUid=user.uid;
+  if(bootstrapState==='authorized')readyUid=user.uid;
 }
 function handleBootstrapError(user,error){
-  const code=normalizedCode(error);
+  const code=normalizedCode(error),reason=String(error?.details?.reason||'');
   if(code==='bootstrap/cancelled')return;
   try{BusinessContext.fail(error)}catch(contextError){console.warn('[Bootstrap optional module]',{module:'business-context-error-state',code:normalizedCode(contextError)||'STATE_ERROR'})}
   console.error('[Bootstrap] failed',{step:bootstrapState,code:code||'unknown',message:error?.message,stack:isDevelopment()?error?.stack:undefined});
@@ -398,10 +436,12 @@ function handleBootstrapError(user,error){
     return bootstrapErrorScreen(user,'temporary_unavailable','O serviço de nuvem atingiu temporariamente o limite de uso. Seus dados locais continuam preservados.',{details:{code:'QUOTA_EXCEEDED'}});
   }
   if(['bootstrap/timeout','unavailable','deadline-exceeded','network-request-failed'].includes(code)){
-    return bootstrapErrorScreen(user,'temporary_unavailable',code==='bootstrap/timeout'?'A validação ultrapassou o limite de 15 segundos. Verifique sua conexão e tente novamente. Nenhum dado foi perdido.':'Não foi possível conectar ao Firebase agora. Tente novamente em alguns instantes. Nenhum dado foi perdido.',{details:{code:code==='bootstrap/timeout'?'BOOTSTRAP_TIMEOUT':'SYNC_UNAVAILABLE'}});
+    return bootstrapErrorScreen(user,'network_error',code==='bootstrap/timeout'?'A validação ultrapassou o limite de 15 segundos. Sua sessão continua autenticada; verifique a conexão e tente novamente.':'Não foi possível conectar ao Firebase agora. Sua sessão continua autenticada; tente novamente em alguns instantes.',{details:{code:code==='bootstrap/timeout'?'BOOTSTRAP_TIMEOUT':'SYNC_UNAVAILABLE'}});
   }
+  if(reason==='access-disabled')return bootstrapErrorScreen(user,'access_disabled','Seu acesso a esta empresa foi desativado. Entre em contato com o proprietário da conta.',{details:{...error.details,code:'ACCESS_DISABLED'}});
+  if(reason==='membership-missing')return bootstrapErrorScreen(user,'membership_missing','Sua conta está autenticada, mas não possui um vínculo ativo com esta empresa. Peça um convite válido ao proprietário.',{details:{...error.details,code:'MEMBERSHIP_MISSING'}});
   if(['permission-denied','unauthenticated'].includes(code)){
-    return bootstrapErrorScreen(user,'permission_error',error.message||'Sua conta não possui permissão para concluir esta configuração.',{title:'Permissão negada',manual:Boolean(error.allowManual),details:{...error.details,code}});
+    return bootstrapErrorScreen(user,'access_denied',error.message||'Sua conta está autenticada, mas não possui permissão para concluir esta configuração.',{title:'Acesso não autorizado',manual:Boolean(error.allowManual),details:{...error.details,code}});
   }
   const specific={
     'profile/document-mismatch':['UID divergente','O documento do perfil não corresponde à conta autenticada.'],
@@ -410,15 +450,15 @@ function handleBootstrapError(user,error){
     'profile/email-mismatch':['E-mail divergente','O e-mail do perfil não corresponde ao e-mail autenticado.'],
     'profile/business-mismatch':['Empresa divergente','O perfil não possui a empresa esperada.'],
     'profile/role-mismatch':['Permissão divergente','A função cadastrada não permite administrar a empresa legada.'],
-    'profile/inactive':['Usuário inativo','Este usuário está inativo e não pode acessar a empresa.'],
+    'profile/inactive':['Acesso desativado','Este usuário está inativo. Entre em contato com o proprietário da conta.'],
     'business/id-mismatch':['Empresa divergente','A empresa carregada não corresponde à empresa do perfil.'],
     'business/not-found':['Empresa divergente','A empresa vinculada ao perfil não foi encontrada.'],
-    'business/inactive':['Empresa inativa','A empresa vinculada está inativa.'],
+    'business/inactive':['Acesso desativado','A empresa vinculada está inativa.'],
     'business/owner-mismatch':['Proprietário divergente','O proprietário registrado na empresa não corresponde à conta autenticada.'],
     'business/subscription-mismatch':['Configuração divergente','A assinatura interna existente possui dados incompatíveis e não será substituída automaticamente.']
   }[code];
   if(specific){
-    const state=code.startsWith('profile/')?'profile_error':code.startsWith('business/')?'business_error':'permission_error';
+    const state=['profile/inactive','business/inactive'].includes(code)?'access_disabled':code.startsWith('profile/')?'profile_error':code.startsWith('business/')?'business_error':'access_denied';
     return bootstrapErrorScreen(user,state,specific[1],{title:specific[0],manual:Boolean(error.allowManual)&&['migration/required','migration/failed'].includes(code),details:{...error.details,code}});
   }
   if(code==='migration/already-attempted'||code==='migration/failed')return bootstrapErrorScreen(user,'migration_required','A migração não foi concluída nesta sessão. Seus dados permanecem preservados.',{manual:true,title:'Migração pendente',details:{...error.details,code:'MIGRATION_FAILED'}});
@@ -427,13 +467,13 @@ function handleBootstrapError(user,error){
 function startBootstrap(user,{mode='automatic'}={}){
   window.AppBootDiagnostics?.count?.('bootstrapCount',{mode,authenticated:Boolean(user)});
   if(!user){setBootstrapState('unauthenticated');login();return Promise.resolve()}
-  if(readyUid===user.uid&&bootstrapState==='ready')return Promise.resolve(window.FirebaseSession);
+  if(readyUid===user.uid&&bootstrapState==='authorized')return Promise.resolve(window.FirebaseSession);
   if(bootstrapRun?.uid===user.uid)return bootstrapRun.promise;
   if(mode==='automatic'&&automaticBootstrapAttempts.has(user.uid))return Promise.resolve();
   if(mode==='automatic')automaticBootstrapAttempts.add(user.uid);
   const token={sequence:++bootstrapSequence,cancelled:false},run={uid:user.uid,token,promise:null};
   bootstrapStartedAt=performance.now();bootstrapTimeline=[];
-  setBootstrapState('initializing',{mode});
+  setBootstrapState('bootstrapping',{mode});
   bootstrapLog('started',{mode});
   bootstrapLog('auth resolved',{authenticated:Boolean(user)});
   run.promise=withTimeout(bootstrapCore(user,token,mode),token)
@@ -462,12 +502,15 @@ window.LegacyMigrationAdmin={
 };
 screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Verificando acesso…</p></section>`);
 window.FirebaseRuntimeMetrics={...(window.FirebaseRuntimeMetrics||{}),activeAuthObservers:1};
-onAuthStateChanged(auth,user=>{
+const observeAuthState=()=>onAuthStateChanged(auth,user=>{
   try{window.SyncFirebase.setAuthReady(true)}catch(error){console.warn('[Bootstrap optional module]',{module:'sync-auth-ready',code:normalizedCode(error)||'SYNC_UNAVAILABLE'})}
   if(!user){
     bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;readyUid='';
     automaticBootstrapAttempts.clear();
     setBootstrapState('unauthenticated');if(INVITE_TOKEN){void loadInvitePreview().then(preview=>login('',preview?.email||''));return}return login();
   }
+  setBootstrapState('authenticated',{persistence:'local'});
+  bootstrapLog('auth observer resolved',{authenticated:true,persistence:'local'});
   startBootstrap(user,{mode:'automatic'});
 });
+Promise.resolve(window.FirebaseAuthPersistenceReady).then(observeAuthState,observeAuthState);

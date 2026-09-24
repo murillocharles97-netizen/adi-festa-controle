@@ -23,22 +23,33 @@ const createInvite = (input) => callable("createTeamInvite", { businessId: busin
 const updateMember = (uid, input) => callable("updateTeamMember", { businessId: businessId(), uid, ...input });
 const disableMember = (uid) => updateMember(uid, { status: "disabled" });
 const enableMember = (uid) => updateMember(uid, { status: "active" });
-function watchCurrentMember(onDisabled) {
+const canonicalAccess = (value = {}) => JSON.stringify({
+  role: value.role || "",
+  status: value.status || "",
+  spaceAccess: value.spaceAccess || "",
+  allowedSpaceIds: [...new Set((value.allowedSpaceIds || []).map(String))].sort(),
+  permissions: Object.fromEntries(Object.entries(value.permissions || {}).sort(([left], [right]) => left.localeCompare(right))),
+});
+function watchCurrentMember(onChange) {
   memberStop?.(); memberStop = null;
   const id = businessId(), uid = auth.currentUser?.uid;
   if (!id || !uid) return () => {};
   memberStop = onSnapshot(doc(db, "businesses", id, "members", uid), (snapshot) => {
-    if (!snapshot.exists() || snapshot.data()?.status !== "active") return onDisabled?.();
-    const remote = snapshot.data(), current = window.BusinessContext?.get?.().member || {},
-      access = (value) => JSON.stringify({ role: value.role, status: value.status, spaceAccess: value.spaceAccess, allowedSpaceIds: value.allowedSpaceIds || [], permissions: value.permissions || {} });
-    if (current.uid && access(remote) !== access(current)) onDisabled?.();
+    if (!snapshot.exists()) {
+      if (!snapshot.metadata?.fromCache) onChange?.({ kind: "membership-missing", code: "MEMBERSHIP_MISSING" });
+      return;
+    }
+    const remote = snapshot.data(), current = window.BusinessContext?.get?.().member || {};
+    if (remote?.status !== "active") return onChange?.({ kind: "access-disabled", code: "ACCESS_DISABLED" });
+    if (current.uid && canonicalAccess(remote) !== canonicalAccess(current)) onChange?.({ kind: "permissions-changed", code: "MEMBERSHIP_CHANGED" });
   }, (error) => {
-    if (["permission-denied", "unauthenticated"].includes(String(error?.code || "").replace("firestore/", ""))) onDisabled?.();
+    const code = String(error?.code || "").replace("firestore/", "");
+    onChange?.({ kind: ["unavailable", "deadline-exceeded", "network-request-failed"].includes(code) ? "network-error" : "access-check-failed", code: code || "MEMBERSHIP_LISTENER_FAILED" });
   });
   return () => { memberStop?.(); memberStop = null; };
 }
 addEventListener("firebase-session-cleared", () => { memberStop?.(); memberStop = null; });
-addEventListener("firebase-auth-ready", () => watchCurrentMember(() => window.FirebaseAuthActions?.handleAccessRevoked?.()));
+addEventListener("firebase-auth-ready", () => watchCurrentMember((change) => window.FirebaseAuthActions?.handleMembershipChange?.(change)));
 
 window.TeamService = Object.freeze({ listMembers, listInvites, createInvite, updateMember, disableMember, enableMember, watchCurrentMember });
 export { listMembers, listInvites, createInvite, updateMember, disableMember, enableMember, watchCurrentMember };
