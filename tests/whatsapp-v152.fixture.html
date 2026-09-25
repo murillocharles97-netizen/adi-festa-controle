@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/mensagens-mobile.css">
+<div id="title"></div><div id="date"></div><main id="app"></main><div id="modal"></div><div id="toasts"></div>
+<script>
+  (() => {
+    let uuid = 0;
+    const initialClients = [
+      {id:'c1',nome:'Nat Stanley',telefone:'(17) 99999-1111',saldo:-351.84,ativo:true},
+      {id:'c2',nome:'Bruna Silva',telefone:'(17) 99999-2222',saldo:-28,ativo:true},
+      {id:'c3',nome:'Carla Souza',telefone:'(17) 99999-3333',saldo:-42,ativo:true},
+      {id:'c4',nome:'Sem Telefone',telefone:'123',saldo:-10,ativo:true},
+    ];
+    const state = window.__whatsappAudit = {
+      data:{config:{nome:'VECONI Teste'},clientes:structuredClone(initialClients),cobrancas:[],movimentacoes:[],messageHistory:[],messageTemplates:[],messageSequences:[]},
+      opened:[],toasts:[],confirmCalls:0,throwAlter:false,resumes:[],logs:[],
+    };
+    const originalInfo=console.info.bind(console),originalError=console.error.bind(console);
+    console.info=(...args)=>{state.logs.push(args.join(' '));originalInfo(...args)};
+    console.error=(...args)=>{state.logs.push(args.map(String).join(' '));originalError(...args)};
+    window.confirm=()=>{state.confirmCalls++;return true};
+    window.open=url=>{state.opened.push(url);return{opener:window}};
+    window.scrollTo=()=>{};
+    window.lucide={createIcons(){}};
+    window.Utils={
+      uuid:()=>`uuid-${++uuid}`,
+      escapar:value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])),
+      dinheiro:value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),
+      telefoneWhatsApp:value=>{const digits=String(value||'').replace(/\D/g,'');return digits.startsWith('55')?digits:`55${digits}`},
+      toast:(message,error=false)=>{state.toasts.push({message,error});const item=document.createElement('div');item.textContent=message;item.dataset.error=String(error);document.querySelector('#toasts').append(item)},
+    };
+    window.DB={carregar:()=>state.data,alterar:mutator=>{if(state.throwAlter)throw Error('Falha de persistência simulada');mutator(state.data);return state.data},getBusinessId:()=> 'adi-festa'};
+    window.Clientes={obter:id=>state.data.clientes.find(item=>item.id===id)};
+    window.TeamAccess={has:()=>true,actor:()=>({actorUid:'owner-real-test',actorNameSnapshot:'Owner Teste',actorRoleSnapshot:'owner'})};
+    window.BusinessContext={get:()=>({businessId:'adi-festa',role:'owner',spaceAccess:'all',allowedSpaceIds:[]})};
+    window.SpaceContext={homeId:()=> 'all_spaces'};
+    window.Router={ir:route=>state.route=route};
+    window.ClientesPage={whatsapp:id=>{state.desktopFallback=id}};
+    window.OperationMode={enabled:()=>true};
+    window.Checkout={};window.CRMClienteUI={};window.Modais={confirmar(){}};
+    window.ClientesMobile={refresh:()=>{state.clientRefreshes=(state.clientRefreshes||0)+1}};
+    window.AppLifecycle={onResume:callback=>state.resumes.push(callback)};
+    window.__resetWhatsappAudit=()=>{state.data={config:{nome:'VECONI Teste'},clientes:structuredClone(initialClients),cobrancas:[],movimentacoes:[],messageHistory:[],messageTemplates:[],messageSequences:[]};state.opened=[];state.toasts=[];state.confirmCalls=0;state.throwAlter=false;state.logs=[];sessionStorage.clear();document.querySelector('#modal').innerHTML='';document.querySelector('#app').innerHTML='';};
+  })();
+</script>
+<script src="../js/phone.js"></script>
+<script src="../js/mensagens.js"></script>
+<script src="../js/mensagens-mobile.js"></script>
+<script src="../js/client-actions.js"></script>
