@@ -77,8 +77,13 @@
     if (action === "adjust") return page?.adjust?.(clientId);
     if (action === "charge") {
       if (digits(client.telefone).length < 10) return Utils.toast("Cadastre um telefone válido para enviar a cobrança.", true);
-      if (typeof window.MobileMessages?.openComposer === "function")
+      if (matchMedia("(max-width: 767px)").matches && typeof window.MobileMessages?.openComposer === "function")
         return window.MobileMessages.openComposer(clientId, { type: "charge", source: "individual" });
+      try {
+        await window.Mensagens?.refreshCanonicalClient?.(clientId);
+      } catch (error) {
+        return Utils.toast(error.message || "Não foi possível atualizar o saldo do cliente.", true);
+      }
       return page?.whatsapp?.(clientId);
     }
     if (action === "promise") return page?.promise?.(clientId);

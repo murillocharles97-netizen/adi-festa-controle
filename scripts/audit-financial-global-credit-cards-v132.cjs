@@ -119,7 +119,7 @@ async function main() {
     text: document.querySelector('[data-invoice-panel="spaces"]')?.innerText || "",
     overflow: Math.max(0, document.documentElement.scrollWidth - innerWidth),
   }));
-  assert(/Casa/.test(invoice.text) && /Carro/.test(invoice.text), `Detalhe da fatura sem distribuição: ${JSON.stringify(invoice)}`);
+  assert(/Casa/.test(invoice.text) && /Táxi/.test(invoice.text), `Detalhe da fatura sem distribuição canônica: ${JSON.stringify(invoice)}`);
   assert(invoice.overflow <= 1, `Detalhe da fatura tem overflow: ${invoice.overflow}px`);
   await shot("08-distribuicao-da-fatura-por-espaco.png", true);
 
