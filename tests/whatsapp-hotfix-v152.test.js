@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-function harness({ allowed = true } = {}) {
+function harness({ allowed = true, canonicalClient = null, canonicalError = null } = {}) {
   let sequence = 0;
   const data = {
     config: { nome: "VECONI Teste" },
@@ -36,6 +36,16 @@ function harness({ allowed = true } = {}) {
     },
     BusinessContext: { get: () => ({ businessId: "adi-festa", role: "owner" }) },
     SpaceContext: { homeId: () => "all_spaces" },
+    SyncFirebase: {
+      isReady: () => true,
+      readCanonicalClient: async (id) => {
+        if (canonicalError) throw canonicalError;
+        const current = data.clientes.find((item) => item.id === id);
+        if (!current) throw Object.assign(Error("Cliente não encontrado."), { code: "not-found" });
+        if (canonicalClient) Object.assign(current, structuredClone(canonicalClient));
+        return { client: current, confirmation: { source: "server-document", fromCache: false } };
+      },
+    },
     open: () => ({ opener: {} }),
   };
   context.window = context;
@@ -96,6 +106,49 @@ test("popup bloqueado no desktop não é tratado como cobrança aberta", () => {
   context.open = () => null;
   const result = context.Mensagens.openWhatsApp("https://wa.me/5517999991234?text=Oi", { mobile: false });
   assert.deepEqual({ ...result }, { opened: false, method: "blocked" });
+});
+
+test("cobrança usa o documento canônico selecionado sem varrer a coleção", async () => {
+  const { context, data } = harness({
+    canonicalClient: { id: "nat", nome: "Nat Stanley", telefone: "(17) 99999-1234", saldo: -550 },
+  });
+  const client = await context.Mensagens.refreshCanonicalClient("nat");
+  assert.equal(client.saldo, -550);
+  assert.equal(data.clientes[0].saldo, -550);
+  const messages = fs.readFileSync("js/mensagens.js", "utf8");
+  assert.match(messages, /SyncFirebase\.readCanonicalClient\(id\)/);
+  assert.doesNotMatch(messages, /pullCloudCollections/);
+});
+
+test("falhas cloud preservam código técnico e exibem mensagem coerente", async () => {
+  const denied = harness({
+    canonicalError: Object.assign(Error("Missing or insufficient permissions"), {
+      code: "permission-denied",
+      stage: "client-document-read",
+    }),
+  });
+  await assert.rejects(
+    denied.context.Mensagens.refreshCanonicalClient("nat"),
+    /acesso não permite confirmar o saldo/i,
+  );
+  const offline = harness({
+    canonicalError: Object.assign(Error("Sem snapshot confirmado"), {
+      code: "offline-unconfirmed",
+      stage: "offline",
+    }),
+  });
+  await assert.rejects(
+    offline.context.Mensagens.refreshCanonicalClient("nat"),
+    /Conecte-se à internet para enviar a cobrança/i,
+  );
+});
+
+test("leitor canônico aponta para o cliente e aceita somente snapshot recente de servidor", () => {
+  const sync = fs.readFileSync("js/firebase/sync.js", "utf8");
+  assert.match(sync, /getDocFromServer\(doc\(db, "businesses", businessId, "clients", id\)\)/);
+  assert.match(sync, /metadata\.fromCache \|\| metadata\.source !== "server"/);
+  assert.match(sync, /CANONICAL_CLIENT_TTL_MS = 120000/);
+  assert.match(sync, /pending-client-write/);
 });
 
 test("UI instrumenta os dois fluxos e não usa confirm nativo", () => {

@@ -25,19 +25,25 @@ window.Mensagens=(()=>{
   function chargeBand(client,data=null){const value=latestCharge(client,data)?.date;if(!value)return'charge-never';const today=new Date();today.setHours(0,0,0,0);const date=new Date(value);date.setHours(0,0,0,0);const days=Math.max(0,Math.round((today-date)/86400000));return days===0?'charge-today':days<=7?'charge-week':days<=15?'charge-fortnight':'charge-old'}
   function variables(client){const db=DB.carregar(),charge=latestCharge(client);return{nome:client.nome||'',primeiro_nome:String(client.nome||'').trim().split(/\s+/)[0]||'',saldo:Utils.dinheiro(Math.abs(Number(client.saldo||0))),ultima_cobranca:formatLastChargeDate(charge?.date),nome_negocio:db.config?.nome||'Seu negócio',pix:db.config?.pix||'',data_atual:new Date().toLocaleDateString('pt-BR')}}
   function resolve(text,client){const values=variables(client);return String(text||'').replace(/{{\s*([a-z_]+)\s*}}/gi,(_,key)=>values[key]??'').replace(/\n{3,}/g,'\n\n').trim()}
-  function canSend(){return typeof window.TeamAccess?.has!=='function'||window.TeamAccess.has('customers.edit')}
+  function canSend(){return typeof window.TeamAccess?.has!=='function'||window.TeamAccess.has('customers.view')&&window.TeamAccess.has('customers.edit')}
   function normalizedPhone(client){return window.PhoneUtils?.normalizeBrazilianPhone?.(client?.telefone)||Utils.telefoneWhatsApp(client?.telefone)}
   function validPhone(client){const phone=normalizedPhone(client);return typeof window.PhoneUtils?.isValidBrazilianPhone==='function'?window.PhoneUtils.isValidBrazilianPhone(phone):/^55[1-9]\d\d{8,9}$/.test(phone)}
   function whatsappUrl(client,message){if(!validPhone(client))throw Error('Telefone inválido. Revise o DDD e o número do cliente.');return`https://wa.me/${normalizedPhone(client)}?text=${encodeURIComponent(message)}`}
   function activeSpaceId(){const value=window.SpaceContext?.homeId?.()||'';return value&&value!=='all_spaces'?value:null}
+  function canonicalBalanceErrorMessage(error){const code=String(error?.code||'').replace(/^firestore\//,'');if(['offline-unconfirmed','unavailable','deadline-exceeded','network-request-failed'].includes(code))return'Não foi possível confirmar o saldo atualizado. Conecte-se à internet para enviar a cobrança.';if(code==='permission-denied')return'Seu acesso não permite confirmar o saldo deste cliente.';if(code==='not-found')return'Cliente não encontrado na nuvem. Atualize a lista de clientes e tente novamente.';if(code==='pending-client-write')return'Este cliente possui alterações aguardando sincronização. Sincronize antes de enviar a cobrança.';if(code==='business-mismatch')return'O cliente não pertence à empresa atual. Atualize a sessão e tente novamente.';if(code==='canonical-balance-missing')return'O saldo canônico deste cliente está indisponível. Atualize o cadastro antes de cobrar.';if(code==='unauthenticated')return'Sua sessão precisa ser renovada antes de enviar a cobrança.';return'Não foi possível confirmar o saldo canônico deste cliente. Tente novamente.'}
   async function refreshCanonicalClient(clientId){
-    if(navigator.onLine!==false&&window.SyncFirebase?.isReady?.()&&typeof window.SyncFirebase.pullCloudCollections==='function'){
-      try{await window.SyncFirebase.pullCloudCollections({force:true,names:['clients']})}
-      catch(error){console.error('[WHATSAPP] canonical customer refresh failed',error);throw Error('Não foi possível confirmar o saldo atual na nuvem. Verifique a conexão e tente novamente.')}
-    }
-    const client=window.Clientes?.obter?.(clientId)||DB.carregar().clientes.find(item=>item.id===clientId);
-    if(!client)throw Error('Cliente não encontrado.');
-    return client;
+    const id=String(clientId||''),businessId=DB.getBusinessId?.()||window.BusinessContext?.get?.().businessId||'',local=window.Clientes?.obter?.(id)||DB.carregar().clientes.find(item=>String(item.id)===id);
+    console.info('[CHARGE] customerId',id);
+    console.info('[CHARGE] local balance',Number(local?.saldo));
+    console.info('[CHARGE] requesting canonical balance');
+    if(!local)throw Error('Cliente não encontrado.');
+    try{
+      if(!window.SyncFirebase?.isReady?.()||typeof window.SyncFirebase.readCanonicalClient!=='function')throw Object.assign(Error('Leitor canônico indisponível.'),{code:'failed-precondition',stage:'canonical-reader'});
+      const result=await window.SyncFirebase.readCanonicalClient(id),client=result?.client;
+      if(!client||!Number.isFinite(Number(client.saldo)))throw Object.assign(Error('Resposta canônica sem saldo válido.'),{code:'canonical-balance-missing',stage:'canonical-response'});
+      console.info('[CHARGE] confirmed balance',Number(client.saldo));
+      return client;
+    }catch(error){const code=String(error?.code||'unknown').replace(/^firestore\//,'');console.error('[CHARGE ERROR]',{code,message:String(error?.message||'Falha desconhecida.'),stage:error?.stage||'canonical-client-read',businessId,customerId:id});const visible=Error(canonicalBalanceErrorMessage(error));visible.code=code;visible.stage=error?.stage||'canonical-client-read';throw visible}
   }
   function openWhatsApp(url,options={}){
     if(!/^https:\/\/wa\.me\//i.test(String(url||'')))return{opened:false,method:'invalid_url'};

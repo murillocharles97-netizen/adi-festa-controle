@@ -38,6 +38,7 @@ test.before(async () => {
     for (const id of [spaceA, spaceB])
       await setDoc(doc(db, "financialSpaces", id), { id, name: id, type: "business", linkedBusinessId: businessId, businessId, ownerUid: "owner-team", active: true, status: "active", capabilities: { finance: true, sales: true, products: true, inventory: true, goals: true } });
     await setDoc(doc(db, "businesses", businessId, "products", "operational-product"), { id: "operational-product", businessId, nome: "Produto", preco: 25, estoqueAtual: 10, active: true });
+    await setDoc(doc(db, "businesses", businessId, "clients", "charge-customer"), { id: "charge-customer", businessId, nome: "Cliente Cobrança", saldo: -550, financialVersion: 7, active: true });
     await setDoc(doc(db, "businesses", businessId, "productFinancials", "operational-product"), { id: "operational-product", productId: "operational-product", businessId, custo: 9 });
     await setDoc(doc(db, "financialSpaces", spaceA, "entries", "private-entry"), { id: "private-entry", financialSpaceId: spaceA, ownerUid: "owner-team", amountCents: 2500 });
     await setDoc(doc(db, "businesses", businessId, "sales", "owner-sale"), { id: "owner-sale", businessId, spaceId: spaceA, actorUid: "owner-team", valorFinal: 40 });
@@ -52,6 +53,22 @@ test("owner lê equipe, custo, financeiro e todas as vendas", async () => {
   await assertSucceeds(getDoc(doc(db, "businesses", businessId, "productFinancials", "operational-product")));
   await assertSucceeds(getDoc(doc(db, "financialSpaces", spaceA, "entries", "private-entry")));
   await assertSucceeds(getDoc(doc(db, "businesses", businessId, "sales", "owner-sale")));
+});
+
+test("owner e membros com customers.view leem o saldo canônico do cliente", async () => {
+  for (const uid of ["owner-team", "manager-team", "seller-team"]) {
+    const db = env.authenticatedContext(uid).firestore();
+    const snapshot = await assertSucceeds(
+      getDoc(doc(db, "businesses", businessId, "clients", "charge-customer")),
+    );
+    assert.equal(snapshot.data().saldo, -550);
+  }
+  for (const uid of ["stock-team", "disabled-team", "owner-foreign"]) {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertFails(
+      getDoc(doc(db, "businesses", businessId, "clients", "charge-customer")),
+    );
+  }
 });
 
 test("seller vê somente o espaço permitido e dados operacionais sem custo ou Financeiro", async () => {

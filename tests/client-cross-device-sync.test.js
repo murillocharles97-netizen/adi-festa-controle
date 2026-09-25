@@ -192,19 +192,19 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
 });
 
 test("a cadeia de módulos mantém versões explícitas na release 130", () => {
-  assert.match(authSource, /import ['"]\.\/sync\.js\?v=151['"]/);
+  assert.match(authSource, /import ['"]\.\/sync\.js\?v=153['"]/);
   assert.match(authSource, /from ['"]\.\/business-context\.js\?v=123['"]/);
-  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=151['"]/);
+  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=153['"]/);
   assert.match(
     syncSource,
     /from ['"]\.\/firestore-repository\.js\?v=151['"]/,
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=151[\s\S]*js\/firebase\/firebase-ui\.js\?v=151/,
+    /js\/firebase\/auth\.js\?v=153[\s\S]*js\/firebase\/firebase-ui\.js\?v=153/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /veconi-v152-whatsapp-charge-recovery/);
+  assert.match(serviceWorkerSource, /veconi-v153-whatsapp-canonical-balance/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

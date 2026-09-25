@@ -63,7 +63,43 @@ async function main(){
     assert(snapshot.fallback==="c1",`entry point desktop não chegou ao compositor ${JSON.stringify(snapshot)}`);
     snapshot=await evaluate(cdp,"(()=>{const c=Clientes.obter('c1'),message=Mensagens.resolve(Mensagens.defaultTemplate('charge').content,c),url=Mensagens.whatsappUrl(c,message),opened=Mensagens.openWhatsApp(url,{mobile:false});const record=opened.opened?Mensagens.registerOpened({clientId:c.id,type:'charge',source:'desktop_test',finalMessage:message,operationId:'desktop:1'}):null;return{opened:opened.opened,method:opened.method,url:__whatsappAudit.opened.at(-1),history:__whatsappAudit.data.messageHistory.length,record:Boolean(record)}})()");
     assert(snapshot.opened&&snapshot.method==="popup"&&/wa\.me\/5517999991111/.test(snapshot.url)&&snapshot.history===1&&snapshot.record,`WhatsApp Web desktop inválido ${JSON.stringify(snapshot)}`);
-    console.log(JSON.stringify({ok:true,individual:{opened:1,idempotent:true,cancelledWithoutRecord:true,amountAtSend:351.84},sequence:{customers:3,status:"completed",preservedPosition:true},invalidPhone:true,owner:true,instrumentation:true,desktop:{entryPoint:true,whatsappWeb:true}},null,2));
+    await cdp.send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true,screenWidth:390,screenHeight:844});
+    await cdp.send("Page.navigate",{url:`http://127.0.0.1:${port}/tests/whatsapp-v152.fixture.html?canonical=1`});for(let i=0;i<100;i++){if(await evaluate(cdp,"Boolean(window.MobileMessages&&window.Mensagens)"))break;await sleep(50)}
+    const canonicalCases=[['mae','Mãe',550],['joao','João Adidas',125.5],['kami','Kami Adidas',89.9]];
+    const canonicalResults=[];
+    for(const [id,name,amount] of canonicalCases){
+      await evaluate(cdp,"__resetWhatsappAudit()");
+      await evaluate(cdp,`MobileMessages.openComposer(${JSON.stringify(id)})`);
+      snapshot=await evaluate(cdp,"({name:document.querySelector('.message-client-summary h3')?.textContent,shown:document.querySelector('.message-client-summary strong')?.textContent,preview:document.querySelector('#message-preview')?.textContent,reads:__whatsappAudit.canonicalReads.slice(),balance:__whatsappAudit.data.clientes.find(item=>item.id==='"+id+"')?.saldo,logs:__whatsappAudit.logs.slice()})");
+      assert(snapshot.name===name&&snapshot.reads.length===1&&snapshot.reads[0]===id&&Math.abs(snapshot.balance)===amount,`saldo canônico de ${name} inválido ${JSON.stringify(snapshot)}`);
+      assert(snapshot.preview.includes(name.split(' ')[0])&&snapshot.preview.replace(/\s/g,' ').includes(amount.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})),`mensagem canônica de ${name} inválida ${JSON.stringify(snapshot)}`);
+      assert(snapshot.logs.some(item=>item.includes('[CHARGE] requesting canonical balance'))&&snapshot.logs.some(item=>item.includes('[CHARGE] confirmed balance')),`instrumentação de ${name} ausente ${JSON.stringify(snapshot)}`);
+      await evaluate(cdp,"document.querySelector('#message-send').click();document.querySelector('[data-charge-send-continue]').click()");
+      snapshot=await evaluate(cdp,"({opened:__whatsappAudit.opened.length,history:__whatsappAudit.data.messageHistory.length,amount:__whatsappAudit.data.messageHistory[0]?.amountAtSend,balance:__whatsappAudit.data.clientes.find(item=>item.id==='"+id+"')?.saldo,url:__whatsappAudit.opened[0]})");
+      assert(snapshot.opened===1&&snapshot.history===1&&snapshot.amount===amount&&snapshot.balance===-amount,`envio canônico de ${name} inválido ${JSON.stringify(snapshot)}`);
+      canonicalResults.push({name,cardBalance:amount,confirmedBalance:amount,messageBalance:amount});
+    }
+
+    await evaluate(cdp,"__resetWhatsappAudit();MobileMessages.openComposer('zero')");
+    snapshot=await evaluate(cdp,"({composer:Boolean(document.querySelector('.individual-message-sheet')),toast:__whatsappAudit.toasts.at(-1)?.message,opened:__whatsappAudit.opened.length,history:__whatsappAudit.data.messageHistory.length})");
+    assert(!snapshot.composer&&/não possui saldo em aberto/i.test(snapshot.toast)&&snapshot.opened===0&&snapshot.history===0,`cliente sem débito gerou cobrança ${JSON.stringify(snapshot)}`);
+
+    await evaluate(cdp,"__resetWhatsappAudit();__whatsappAudit.canonicalError=Object.assign(Error('Missing or insufficient permissions'),{code:'permission-denied',stage:'client-document-read'});MobileMessages.openComposer('mae')");await sleep(20);
+    snapshot=await evaluate(cdp,"({toast:__whatsappAudit.toasts.at(-1)?.message,logs:__whatsappAudit.logs,opened:__whatsappAudit.opened.length})");
+    assert(/acesso não permite confirmar/i.test(snapshot.toast)&&snapshot.logs.some(item=>item.includes('[CHARGE ERROR]')&&item.includes('permission-denied')&&item.includes('client-document-read'))&&snapshot.opened===0,`permission-denied foi mascarado ${JSON.stringify(snapshot)}`);
+
+    await evaluate(cdp,"__resetWhatsappAudit();__whatsappAudit.canonicalError=Object.assign(Error('Sem snapshot confirmado'),{code:'offline-unconfirmed',stage:'offline'});MobileMessages.openComposer('mae')");await sleep(20);
+    snapshot=await evaluate(cdp,"({toast:__whatsappAudit.toasts.at(-1)?.message,opened:__whatsappAudit.opened.length})");
+    assert(/Conecte-se à internet para enviar a cobrança/i.test(snapshot.toast)&&snapshot.opened===0,`offline permitiu cobrança ${JSON.stringify(snapshot)}`);
+
+    await evaluate(cdp,"__resetWhatsappAudit();__setWhatsappRole('seller');MobileMessages.openComposer('mae')");
+    snapshot=await evaluate(cdp,"({toast:__whatsappAudit.toasts.at(-1)?.message,reads:__whatsappAudit.canonicalReads.length,composer:Boolean(document.querySelector('.individual-message-sheet'))})");
+    assert(/acesso não permite enviar cobranças/i.test(snapshot.toast)&&snapshot.reads===0&&!snapshot.composer,`seller sem permissão não foi bloqueado ${JSON.stringify(snapshot)}`);
+    await evaluate(cdp,"__resetWhatsappAudit();__setWhatsappRole('manager');MobileMessages.openComposer('mae')");
+    snapshot=await evaluate(cdp,"({composer:Boolean(document.querySelector('.individual-message-sheet')),reads:__whatsappAudit.canonicalReads.length,role:__whatsappAudit.role})");
+    assert(snapshot.composer&&snapshot.reads===1&&snapshot.role==='manager',`manager permitido foi bloqueado ${JSON.stringify(snapshot)}`);
+
+    console.log(JSON.stringify({ok:true,individual:{opened:1,idempotent:true,cancelledWithoutRecord:true,amountAtSend:351.84},canonical:{clients:canonicalResults,zeroDebtBlocked:true,offlineBlocked:true,permissionErrorExposed:true,noFinancialMutation:true},sequence:{customers:3,status:"completed",preservedPosition:true},invalidPhone:true,permissions:{owner:true,manager:true,sellerWithoutCharge:false},instrumentation:true,mobilePwaEquivalent:true,desktop:{entryPoint:true,whatsappWeb:true}},null,2));
   }finally{cdp?.close();chrome.kill();staticServer.close();await sleep(150);try{fs.rmSync(profile,{recursive:true,force:true})}catch{}}
 }
 main().catch(error=>{console.error(error.stack||error.message);process.exitCode=1});
