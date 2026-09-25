@@ -76,6 +76,7 @@
     if (action === "receive") return page?.receive?.(clientId);
     if (action === "adjust") return page?.adjust?.(clientId);
     if (action === "charge") {
+      console.info("[CHARGE] whatsapp clicked");
       if (digits(client.telefone).length < 10) return Utils.toast("Cadastre um telefone válido para enviar a cobrança.", true);
       if (matchMedia("(max-width: 767px)").matches && typeof window.MobileMessages?.openComposer === "function")
         return window.MobileMessages.openComposer(clientId, { type: "charge", source: "individual" });

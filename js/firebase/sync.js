@@ -21,6 +21,7 @@ import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 const LEGACY_QUEUE_KEY = "adiFestaFirestoreQueue_v1",
   PULL_TTL_MS = 300000,
   PROFILE_TTL_MS = 300000,
+  CANONICAL_CLIENT_TTL_MS = 120000,
   CLIENT_PROJECTION_EPOCH = 2,
   CLIENT_PROJECTION_CHECK_TTL_MS = 24 * 60 * 60 * 1000,
   MAX_WRITES = 350,
@@ -191,6 +192,7 @@ let currentUser = null,
   signalPullTimer = null,
   signalCollections = new Set(),
   signalVersions = new Map(),
+  canonicalClientSnapshots = new Map(),
   listenerRegistry = new Map(),
   lastDataAuditRaw = null,
   activityEventsCursor = null,
@@ -695,6 +697,41 @@ const rememberSnapshotMetadata = (name, metadata) => {
     readAt: metadata.readAt || now(),
   };
 };
+const canonicalClientSnapshotKey = (businessId, clientId) =>
+  `${currentUser?.uid || "anonymous"}:${businessId}:${String(clientId || "")}`;
+function rememberCanonicalClients(documents, metadata = {}) {
+  if (metadata.fromCache || metadata.source !== "server") return;
+  const businessId = activeBusinessId(),
+    readAt = metadata.readAt || now();
+  for (const client of documents || []) {
+    const clientId = String(client?.id || "").trim(),
+      balance = Number(client?.saldo);
+    if (!clientId || !Number.isFinite(balance) || client.deletedAt) continue;
+    canonicalClientSnapshots.set(canonicalClientSnapshotKey(businessId, clientId), {
+      businessId,
+      clientId,
+      balance: roundedMoney(balance),
+      financialVersion: Math.max(0, Number(client.financialVersion || 0)),
+      updatedAt: client.updatedAt || client.atualizadoEm || "",
+      readAt,
+      source: metadata.source,
+    });
+  }
+}
+function recentCanonicalClientSnapshot(businessId, clientId, localClient) {
+  const snapshot = canonicalClientSnapshots.get(
+    canonicalClientSnapshotKey(businessId, clientId),
+  );
+  if (!snapshot || Date.now() - new Date(snapshot.readAt).getTime() > CANONICAL_CLIENT_TTL_MS)
+    return null;
+  if (
+    !Number.isFinite(Number(localClient?.saldo)) ||
+    !sameFinancialMoney(localClient.saldo, snapshot.balance) ||
+    financialVersionOf(localClient) !== snapshot.financialVersion
+  )
+    return null;
+  return snapshot;
+}
 const newestTimestamp = (documents) =>
   documents.reduce((latest, item) => {
     const value =
@@ -3420,7 +3457,9 @@ async function pullCloudCollections(options = {}) {
               INITIAL_RECENT_LIMITS[name] || 100,
               { force: true },
             );
-    rememberSnapshotMetadata(name, repositories[name].getLastReadMetadata?.());
+    const metadata = repositories[name].getLastReadMetadata?.();
+    rememberSnapshotMetadata(name, metadata);
+    if (name === "clients") rememberCanonicalClients(documents, metadata);
     if (!since) initialCollections++;
     documentsRead += documents.length;
     if (!since)
@@ -3549,10 +3588,9 @@ async function ensureClientProjection(options = {}) {
     projectedCount = expectedLocalCount;
   if (needsRepair) {
     documents = await repositories.clients.listAllPaged(200);
-    rememberSnapshotMetadata(
-      "clients",
-      repositories.clients.getLastReadMetadata?.(),
-    );
+    const metadata = repositories.clients.getLastReadMetadata?.();
+    rememberSnapshotMetadata("clients", metadata);
+    rememberCanonicalClients(documents, metadata);
     changed = applyCloudCollection("clients", documents, {
       authoritative: true,
     });
@@ -3598,6 +3636,141 @@ async function ensureClientProjection(options = {}) {
   });
   return result;
 }
+async function readCanonicalClient(clientId) {
+  const id = String(clientId || "").trim();
+  if (!id)
+    throw Object.assign(new Error("CustomerId não informado."), {
+      code: "invalid-argument",
+      stage: "customer-id",
+    });
+  if (!currentUser)
+    throw Object.assign(new Error("Usuário não autenticado."), {
+      code: "unauthenticated",
+      stage: "session",
+    });
+  if (!canPullSource("clients"))
+    throw Object.assign(new Error("Sem permissão para ler clientes."), {
+      code: "permission-denied",
+      stage: "permission",
+    });
+  const businessId = activeBusinessId(),
+    path = `businesses/${businessId}/clients/${id}`,
+    localClient = (DB.carregar().clientes || []).find(
+      (item) => String(item.id) === id,
+    );
+  if (pendingIds("clients").has(id))
+    throw Object.assign(
+      new Error("O cliente possui uma alteração local aguardando sincronização."),
+      { code: "pending-client-write", stage: "pending-write", path, businessId, customerId: id },
+    );
+  const confirmed = recentCanonicalClientSnapshot(businessId, id, localClient);
+  if (confirmed) {
+    console.info("[CHARGE] cloud path/query", {
+      businessId,
+      customerId: id,
+      path,
+      query: "recent-server-snapshot",
+    });
+    console.info("[CHARGE] response", {
+      exists: true,
+      source: "recent-server-snapshot",
+      fromCache: false,
+    });
+    return {
+      client: localClient,
+      confirmation: { ...confirmed, path, fromCache: false },
+    };
+  }
+  if (!navigator.onLine)
+    throw Object.assign(
+      new Error("Não há snapshot recente confirmado pelo servidor."),
+      { code: "offline-unconfirmed", stage: "offline", path, businessId, customerId: id },
+    );
+  console.info("[CHARGE] cloud path/query", {
+    businessId,
+    customerId: id,
+    path,
+    query: "getDocFromServer",
+  });
+  try {
+    await validateUser();
+  } catch (error) {
+    error.stage ||= "session-validation";
+    error.path ||= path;
+    error.businessId ||= businessId;
+    error.customerId ||= id;
+    throw error;
+  }
+  let snapshot;
+  try {
+    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "clients", id));
+  } catch (error) {
+    error.stage ||= "client-document-read";
+    error.path ||= path;
+    error.businessId ||= businessId;
+    error.customerId ||= id;
+    throw error;
+  }
+  console.info("[CHARGE] response", {
+    exists: snapshot.exists(),
+    source: "server-document",
+    fromCache: Boolean(snapshot.metadata?.fromCache),
+  });
+  if (!snapshot.exists())
+    throw Object.assign(new Error("Cliente não encontrado na nuvem."), {
+      code: "not-found",
+      stage: "client-document-read",
+      path,
+      businessId,
+      customerId: id,
+    });
+  const remote = normalizeFirestoreData({ id: snapshot.id, ...snapshot.data() }),
+    balance = Number(remote.saldo);
+  if (remote.businessId && String(remote.businessId) !== businessId)
+    throw Object.assign(new Error("BusinessId do cliente não corresponde à empresa atual."), {
+      code: "business-mismatch",
+      stage: "client-document-validate",
+      path,
+      businessId,
+      customerId: id,
+    });
+  if (!Number.isFinite(balance))
+    throw Object.assign(new Error("O cliente não possui saldo canônico válido."), {
+      code: "canonical-balance-missing",
+      stage: "client-document-validate",
+      path,
+      businessId,
+      customerId: id,
+    });
+  const metadata = {
+    collection: "clients",
+    source: "server",
+    fromCache: Boolean(snapshot.metadata?.fromCache),
+    hasPendingWrites: Boolean(snapshot.metadata?.hasPendingWrites),
+    documents: 1,
+    readAt: now(),
+  };
+  rememberSnapshotMetadata("clients:charge-confirmation", metadata);
+  rememberCanonicalClients([remote], metadata);
+  applyCloudCollection("clients", [remote], { authoritative: true });
+  const canonical = (DB.carregar().clientes || []).find(
+    (item) => String(item.id) === id,
+  );
+  return {
+    client: canonical || remote,
+    confirmation: {
+      businessId,
+      clientId: id,
+      balance: roundedMoney(balance),
+      financialVersion: financialVersionOf(remote),
+      updatedAt: remote.updatedAt || remote.atualizadoEm || "",
+      readAt: metadata.readAt,
+      source: "server-document",
+      path,
+      fromCache: false,
+    },
+  };
+}
 async function queryClientsPage(options = {}) {
   await validateUser();
   const max = Math.min(50, Math.max(1, Number(options.limit || 20))),
@@ -3627,6 +3800,7 @@ async function queryClientsPage(options = {}) {
       cursor: options.cursor || null,
       max,
     });
+    rememberCanonicalClients(result.items, result.metadata);
     applyCloudCollection("clients", result.items, {
       authoritative: true,
       notify: false,
@@ -3661,6 +3835,7 @@ async function queryClientsPage(options = {}) {
     cursor: options.cursor || null,
     max,
   });
+  rememberCanonicalClients(result.items, result.metadata);
   applyCloudCollection("clients", result.items, {
     authoritative: true,
     notify: false,
@@ -5661,6 +5836,7 @@ async function clearLocalDevice(options = {}) {
 }
 function setUser(user, profile = null, business = null) {
   currentUser = user || null;
+  canonicalClientSnapshots.clear();
   lastDataAuditRaw = null;
   cloudPaused = false;
   readOnlyMode = Boolean(
@@ -5839,6 +6015,7 @@ window.SyncFirebase = {
   syncAll: synchronizeNow,
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
+  readCanonicalClient,
   ensureClientProjection,
   queryClientsPage,
   queryAllClientsForAction,

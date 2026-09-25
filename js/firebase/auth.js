@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=151';
+import './sync.js?v=153';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
