@@ -40,7 +40,11 @@
     window.Clientes={obter:id=>state.data.clientes.find(item=>item.id===id)};
     window.TeamAccess={has:permission=>state.role==='owner'||state.role==='manager'&&['customers.view','customers.edit'].includes(permission)||state.role==='seller'&&permission==='customers.view',actor:()=>({actorUid:`${state.role}-real-test`,actorNameSnapshot:`${state.role} Teste`,actorRoleSnapshot:state.role})};
     window.BusinessContext={get:()=>({businessId:'adi-festa',role:state.role,spaceAccess:state.role==='owner'?'all':'selected',allowedSpaceIds:state.role==='owner'?[]:['loja']})};
-    window.SyncFirebase={isReady:()=>true,readCanonicalClient:async id=>{state.canonicalReads.push(id);if(state.canonicalError)throw state.canonicalError;const remote=canonicalClients.find(item=>item.id===id);console.info('[CHARGE] cloud path/query',{businessId:'adi-festa',customerId:id,path:`businesses/adi-festa/clients/${id}`,query:'getDocFromServer'});console.info('[CHARGE] response',{exists:Boolean(remote),source:'server-document',fromCache:false});if(!remote)throw Object.assign(Error('Cliente não encontrado na nuvem.'),{code:'not-found',stage:'client-document-read'});const local=state.data.clientes.find(item=>item.id===id);Object.assign(local,structuredClone(remote));return{client:local,confirmation:{businessId:'adi-festa',clientId:id,balance:remote.saldo,source:'server-document',path:`businesses/adi-festa/clients/${id}`}}}};
+    window.SyncFirebase={isReady:()=>true,readCanonicalClient:async (id,options)=>{state.canonicalReads.push(id);state.readOptions=options;if(state.canonicalError)throw state.canonicalError;const remote=canonicalClients.find(item=>item.id===id);console.info('[CHARGE] cloud path/query',{businessId:'adi-festa',customerId:id,path:`businesses/adi-festa/clients/${id}`,query:'getDocFromServer'});console.info('[CHARGE] response',{exists:Boolean(remote),source:'server-document',fromCache:false});if(!remote)throw Object.assign(Error('Cliente não encontrado na nuvem.'),{code:'not-found',stage:'client-document-read'});const local=state.data.clientes.find(item=>item.id===id);if(options?.persistProjection!==false)Object.assign(local,structuredClone(remote));return{client:options?.persistProjection===false?structuredClone(remote):local,confirmation:{businessId:'adi-festa',clientId:id,balance:remote.saldo,source:'server-document',path:`businesses/adi-festa/clients/${id}`}}}};
+    state.published=[];
+    SyncFirebase.publishConfirmedMessage=async event=>{if(state.syncError)throw Object.assign(Error('Falha simulada'),{code:'unavailable'});if(!state.published.some(item=>item.id===event.id))state.published.push(event)};
+    window.__makeSequenceClients=count=>{const clients=Array.from({length:count},(_,i)=>({id:'client-'+i,nome:'Cliente '+i,telefone:'(17) 99999-1111',saldo:-(i+1)*10,ativo:true}));state.data.clientes=clients;canonicalClients.splice(0,canonicalClients.length,...structuredClone(clients));};
+    window.__canonicalClients=canonicalClients;
     window.SpaceContext={homeId:()=> 'all_spaces'};
     window.Router={ir:route=>state.route=route};
     window.ClientesPage={whatsapp:id=>{state.desktopFallback=id}};
@@ -48,6 +52,15 @@
     window.Checkout={};window.CRMClienteUI={};window.Modais={confirmar(){}};
     window.ClientesMobile={refresh:()=>{state.clientRefreshes=(state.clientRefreshes||0)+1}};
     window.AppLifecycle={onResume:callback=>state.resumes.push(callback)};
+    if(new URLSearchParams(location.search).has('legacy')){
+      state.data.vendas=[{id:'preserve-sale',valorFinal:99}];state.data.pagamentos=[{id:'preserve-payment',valor:5}];
+      state.data.messageSequences=[{id:'legacy-sequence',type:'charge',clientIds:['c1'],currentIndex:0,pendingReturn:true,status:'active',updatedAt:new Date().toISOString(),baseMessage:'Olá {{nome}}',completedIds:[],skippedIds:[]}];
+      state.data.messageHistory=[{id:'legacy-event',operationId:'legacy-operation',sequenceId:'legacy-sequence',clientId:'c1',customerId:'c1',clientName:'Nat Stanley',type:'charge',status:'opened_whatsapp',phone:'5517999991111',finalMessage:'Olá',amountAtSend:351.84}];
+      state.data.cobrancas=[{id:'legacy-charge',messageId:'legacy-event'}];
+      DB.compactMessageSequences=ids=>{state.data.messageSequences=state.data.messageSequences.filter(item=>!ids.includes(item.id));state.compacted=ids};
+      sessionStorage.setItem('adiFestaMessagePendingReturn_v1',JSON.stringify({sequenceId:'legacy-sequence'}));
+      localStorage.setItem('critical-sync-queue','preserve');
+    }
     window.__setWhatsappRole=role=>{state.role=role};
     window.__resetWhatsappAudit=()=>{state.data={config:{nome:'VECONI Teste'},clientes:structuredClone(initialClients),cobrancas:[],movimentacoes:[],messageHistory:[],messageTemplates:[],messageSequences:[]};state.opened=[];state.toasts=[];state.confirmCalls=0;state.throwAlter=false;state.logs=[];state.canonicalReads=[];state.canonicalError=null;state.role='owner';sessionStorage.clear();document.querySelector('#modal').innerHTML='';document.querySelector('#app').innerHTML='';};
   })();

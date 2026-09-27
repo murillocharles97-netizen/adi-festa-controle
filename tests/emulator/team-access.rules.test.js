@@ -2,7 +2,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require("@firebase/rules-unit-testing");
-const { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } = require("firebase/firestore");
+const { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, runTransaction } = require("firebase/firestore");
 
 const projectId = "adi-festa-variations-test";
 const businessId = "team-access-v150";
@@ -33,6 +33,8 @@ test.before(async () => {
     await setDoc(doc(db, "businesses", businessId, "members", "manager-team"), member("manager-team", "manager", permissions("sales.create", "sales.cancel", "sales.viewAll", "customers.view", "customers.edit", "products.view", "products.edit", "inventory.view", "inventory.adjust", "reports.view", "team.view"), [spaceA, spaceB]));
     await setDoc(doc(db, "businesses", businessId, "members", "seller-team"), member("seller-team", "seller", permissions("sales.create", "customers.view", "products.view", "inventory.view")));
     await setDoc(doc(db, "businesses", businessId, "members", "stock-team"), member("stock-team", "stock", permissions("products.view", "inventory.view", "inventory.adjust")));
+    await setDoc(doc(db, 'users', 'customer-editor'), {uid:'customer-editor', businessId, role:'manager',active:true});
+    await setDoc(doc(db, 'businesses', businessId, 'members', 'customer-editor'), member('customer-editor','manager',permissions('customers.view','customers.edit')));
     await setDoc(doc(db, "businesses", businessId, "members", "disabled-team"), member("disabled-team", "seller", permissions("sales.create", "customers.view", "products.view"), [spaceA], "disabled"));
     await setDoc(doc(db, "businesses", foreignBusinessId, "members", "owner-foreign"), member("owner-foreign", "owner", ownerPermissions, []));
     for (const id of [spaceA, spaceB])
@@ -124,4 +126,34 @@ test("membro desativado e usuário externo não acessam o business", async () =>
     await assertFails(getDoc(doc(db, "businesses", businessId, "products", "operational-product")));
     await assertFails(getDoc(doc(db, "financialSpaces", spaceA)));
   }
+});
+
+test('V154 confirma envio uma vez com owner, manager e editor autorizado, sem alterar saldo',async()=>{
+  const text=fs.readFileSync('js/firebase/sync.js','utf8');
+  const source=text.slice(text.indexOf('async function publishConfirmedMessage('),text.indexOf('async function queryClientsPage('));
+  for(const uid of ['owner-team','manager-team','customer-editor']){
+    const db=env.authenticatedContext(uid).firestore();
+    const context={db,doc,runTransaction,Date,Number,Error,activeBusinessId:()=>businessId,currentUser:{uid},validateUser:async()=>({user:{uid}}),
+      window:{Mensagens:{canSend:()=>true}},sanitizeForFirestore:x=>x,normalizeFirestoreData:x=>x,safePublishSyncSignal:async()=>true};
+    context.publish=Function(...Object.keys(context),source+';return publishConfirmedMessage')(...Object.values(context));
+    const event={id:'confirmed-'+uid,operationId:'confirmed-'+uid,sequenceId:'sequence-'+uid,businessId,actorUid:uid,customerId:'charge-customer',clientId:'charge-customer',clientName:'Cliente Cobrança',type:'charge',status:'sent_confirmed',confirmedByUser:true,sentAt:'2026-09-26T12:00:00Z',amountAtSend:550,finalMessage:'Teste'};
+    await assertSucceeds(Promise.all([context.publish(event),context.publish(event)]));
+    const message=await assertSucceeds(getDoc(doc(db,'businesses',businessId,'messageHistory',event.id)));
+    assert.equal(message.data().status,'sent_confirmed');
+    const customer=await getDoc(doc(db,'businesses',businessId,'clients','charge-customer'));
+    assert.equal(customer.data().saldo,-550);assert.equal(customer.data().financialVersion,7);
+    assert.equal(customer.data().lastChargeAt,event.sentAt);
+  }
+  const owner=env.authenticatedContext('owner-team').firestore();
+  const charges=await getDocs(collection(owner,'businesses',businessId,'charges'));
+  assert.equal(charges.docs.filter(item=>item.id.startsWith('confirmed-')).length,3);
+});
+
+test('V154 mensagem permanece isolada por business, permissão e membership ativo',async()=>{
+  for(const uid of ['seller-team','stock-team','disabled-team','owner-foreign']){
+    const db=env.authenticatedContext(uid).firestore();
+    await assertFails(setDoc(doc(db,'businesses',businessId,'messageHistory','denied-'+uid),{id:'denied-'+uid,businessId,actorUid:uid,status:'sent_confirmed'}));
+  }
+  const outsider=env.authenticatedContext('owner-foreign').firestore();
+  await assertFails(getDoc(doc(outsider,'businesses',businessId,'messageHistory','confirmed-owner-team')));
 });

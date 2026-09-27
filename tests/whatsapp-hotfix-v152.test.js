@@ -116,7 +116,7 @@ test("cobrança usa o documento canônico selecionado sem varrer a coleção", a
   assert.equal(client.saldo, -550);
   assert.equal(data.clientes[0].saldo, -550);
   const messages = fs.readFileSync("js/mensagens.js", "utf8");
-  assert.match(messages, /SyncFirebase\.readCanonicalClient\(id\)/);
+  assert.match(messages, /SyncFirebase\.readCanonicalClient\(id,options\)/);
   assert.doesNotMatch(messages, /pullCloudCollections/);
 });
 
@@ -152,7 +152,7 @@ test("leitor canônico aponta para o cliente e aceita somente snapshot recente d
 });
 
 test("UI instrumenta os dois fluxos e não usa confirm nativo", () => {
-  const mobile = fs.readFileSync("js/mensagens-mobile.js", "utf8");
+  const mobile = fs.readFileSync("js/mensagens-mobile.js", "utf8") + fs.readFileSync("js/message-sequence-ui.js", "utf8");
   const actions = fs.readFileSync("js/client-actions.js", "utf8");
   for (const event of ["action clicked", "customer validated", "phone validated", "message generated", "charge confirmation accepted", "start clicked", "selected customers", "current index", "customer prepared", "whatsapp opened", "waiting for next"])
     assert.match(mobile, new RegExp(event));
