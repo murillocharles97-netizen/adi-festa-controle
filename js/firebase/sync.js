@@ -179,6 +179,7 @@ let currentUser = null,
   applyingCloud = false,
   processingPromise = null,
   automaticSyncPromise = null,
+  manualSyncPromise = null,
   autoTimer = null,
   quickTimer = null,
   unsubscribers = [],
@@ -225,7 +226,45 @@ const state = {
   snapshotMetadata: {},
   clientProjection: null,
   dataAudit: null,
+  syncFailure: null,
+  syncTrace: [],
+  integrityStatus: "not_checked",
+  integrityFailure: null,
 };
+
+// Bounded diagnostics: never include document payloads, emails or credentials.
+function traceSync(stage, detail = {}) {
+  const entry = { stage, at: new Date().toISOString(), ...detail };
+  state.syncTrace = [...state.syncTrace.slice(-39), entry];
+  if (window.__VECONI_DEV__ || ["localhost", "127.0.0.1"].includes(location.hostname)) console.info("[SYNC]", entry);
+}
+async function syncStep(stage, operation, detail = {}) {
+  traceSync(stage, detail);
+  try {
+    const result = await operation();
+    traceSync(`${stage}:completed`, detail);
+    return result;
+  } catch (error) {
+    if (!error.syncDetail) error.syncDetail = {
+      stage, ...detail, code: error.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error) || error.name || "unknown",
+      message: String(error.message || "Falha sem mensagem").slice(0, 600),
+      exception: error.name || "Error", at: new Date().toISOString(),
+      ...(error.storageDetail ? {storage: error.storageDetail} : {}),
+    };
+    throw error;
+  }
+}
+function writeSyncTime(key, value) {
+  try { localStorage.setItem(key, value); }
+  catch (error) {
+    // Status metadata is not business data; don't fail a completed transfer for it.
+    traceSync("status_timestamp_not_persisted", { service: "localStorage", code: error.name || "storage-error" });
+  }
+}
+function readSyncTime(key, legacyKey = "") {
+  try { return localStorage.getItem(key) || (legacyKey ? localStorage.getItem(legacyKey) : "") || ""; }
+  catch { return ""; }
+}
 
 const now = () => new Date().toISOString();
 const activeBusinessId = () => {
@@ -244,6 +283,7 @@ const errorCode = (error) =>
   String(error?.code || "").replace("firestore/", "");
 const friendlyError = (error) =>
   ({
+    "local-storage-quota": "O armazenamento deste aparelho está cheio. Os dados locais foram preservados; veja os detalhes da sincronização.",
     "permission-denied": "Seu usuário não possui permissão.",
     unavailable: "A nuvem está temporariamente indisponível.",
     "deadline-exceeded": "A nuvem demorou demais para responder.",
@@ -258,7 +298,7 @@ const friendlyError = (error) =>
       "Venda sincronizada, mas o saldo do cliente precisa de correção.",
     "financial-reconciliation-required":
       "Venda sincronizada, mas o saldo do cliente precisa de correção.",
-  })[errorCode(error)] || "Não foi possível sincronizar agora.";
+  })[error?.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error)] || "Não foi possível sincronizar agora. Veja os detalhes técnicos no painel da nuvem.";
 const permissionSignature = () => {
   const context = window.BusinessContext?.get?.() || {}, permissions = [...(context.permissions || [])].sort().join("|");
   let hash = 2166136261;
@@ -1033,6 +1073,10 @@ const diagnostic = () => {
     deviceId: deviceId(),
     lastErrorCode,
     lastErrorMessage: lastError,
+    syncFailure: state.syncFailure,
+    syncTrace: state.syncTrace,
+    integrityStatus: state.integrityStatus,
+    integrityFailure: state.integrityFailure,
     localClients: local.clientes,
     cloudClients: state.cloudCounts.clients ?? "—",
     localProducts: local.produtos,
@@ -1097,7 +1141,11 @@ function updateQueueState() {
 }
 function reportError(error, context = "Firebase", extra = {}) {
   lastError = friendlyError(error);
-  lastErrorCode = errorCode(error) || "unknown";
+  lastErrorCode = error.syncDetail?.code || (error.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error)) || "unknown";
+  state.syncFailure = error.syncDetail || {stage: context, code: lastErrorCode,
+    message: String(error.message || "Falha sem mensagem").slice(0,600),
+    collection: extra.collection || "", path: extra.path || currentPath || "", at: now()};
+  console.error("[SYNC ERROR]", state.syncFailure);
   console.error(`[${context}]`, {
     ...extra,
     code: error?.code,
@@ -1709,7 +1757,7 @@ async function validateUser() {
       profile: state.userProfile,
       businessId: state.userProfile.businessId,
     };
-  const snapshot = await getDoc(doc(db, "users", user.uid));
+  const snapshot = await syncStep("auth_profile", () => getDoc(doc(db, "users", user.uid)), {service: "Firestore", collection: "users", request: "getDoc"});
   if (!snapshot.exists())
     throw Object.assign(new Error("Perfil não encontrado."), {
       code: "permission-denied",
@@ -1732,7 +1780,7 @@ async function validateUser() {
 async function ensureBusinessDocument() {
   const { user, businessId } = await validateUser(),
     reference = doc(db, "businesses", businessId),
-    snapshot = await getDoc(reference);
+    snapshot = await syncStep("business_validation", () => getDoc(reference), {service: "Firestore", collection: "businesses", businessId, request: "getDoc"});
   if (!snapshot.exists())
     throw Object.assign(
       new Error("O negócio vinculado ao perfil não existe."),
@@ -3287,7 +3335,7 @@ function startCloudSubscriptions() {
             await refreshBusinessContext();
           if (changed.includes("userProfile")) await refreshUserContext();
           const time = now();
-          localStorage.setItem(lastSyncKey(), time);
+          writeSyncTime(lastSyncKey(), time);
           saveSignalVersions({ ...readSignalVersions(), ...versions });
           emit({
             status: "success",
@@ -3450,14 +3498,14 @@ async function pullCloudCollections(options = {}) {
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
       since = full ? "" : pullState[markerKey] || "",
-      documents = since
+      documents = await syncStep("downloading_changes", async () => since
         ? await repositories[name].listChangedSince(since, 500)
         : full || INITIAL_FULL_NAMES.has(name)
           ? await repositories[name].listAllPaged(200)
           : await repositories[name].listRecent(
               INITIAL_RECENT_LIMITS[name] || 100,
               { force: true },
-            );
+            ), { service: "Firestore", collection: name, businessId, request: since ? "listChangedSince" : full || INITIAL_FULL_NAMES.has(name) ? "listAllPaged" : "listRecent" });
     const metadata = repositories[name].getLastReadMetadata?.();
     rememberSnapshotMetadata(name, metadata);
     if (name === "clients") rememberCanonicalClients(documents, metadata);
@@ -3491,7 +3539,7 @@ async function pullCloudCollections(options = {}) {
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
-  received = applyCloudCollectionBatch(pendingApplications);
+  received = await syncStep("persisting_cloud_snapshot", () => applyCloudCollectionBatch(pendingApplications), { service: "localStorage", collections: names, documents: documentsRead });
   if (full && names.includes("clients")) {
     const clientDocuments =
         pendingApplications.find((entry) => entry.name === "clients")
@@ -3521,7 +3569,7 @@ async function pullCloudCollections(options = {}) {
       collections: initialCollections,
       documents: documentsRead,
     });
-  writePullState(pullState);
+  await syncStep("saving_pull_cursor", () => writePullState(pullState), { service: "localStorage" });
   lastPullAt = Date.now();
   emit({
     cloudCounts: { ...state.cloudCounts },
@@ -4174,6 +4222,20 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
   };
 }
 async function compareDeviceWithCloud() {
+  state.integrityStatus = "checking";
+  state.integrityFailure = null;
+  try {
+    const result = await syncStep("orphan_comparison", performDeviceComparison, {service: "Firestore"});
+    emit({integrityStatus: "completed", integrityFailure: null});
+    return result;
+  } catch (error) {
+    console.error("[SYNC INTEGRITY ERROR]", error.syncDetail);
+    // The optional audit must not rewrite the result/timestamp of data transfer.
+    emit({integrityStatus: "failed", integrityFailure: error.syncDetail});
+    throw error;
+  }
+}
+async function performDeviceComparison() {
   await validateUser();
   if (!navigator.onLine)
     throw Object.assign(new Error("A comparação precisa de conexão com a internet."), {
@@ -4186,7 +4248,7 @@ async function compareDeviceWithCloud() {
     raw = {};
   for (const name of AUDIT_NAMES) {
     const localItems = sourceItems(data, name),
-      remoteItems = await repositories[name].listAllPaged(200);
+      remoteItems = await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"});
     raw[name] = { localItems, remoteItems };
     collections[name] = classifyCollectionAudit(
       name,
@@ -4196,7 +4258,7 @@ async function compareDeviceWithCloud() {
     );
   }
   const remoteFinancialEffects =
-      await financialEffectsRepository.listAllPaged(200),
+      await syncStep("orphan_comparison", () => financialEffectsRepository.listAllPaged(200), {service: "Firestore", collection: "balanceEvents", businessId, request: "listAllPaged"}),
     balanceAudit = buildFinancialBalanceAudit(raw, remoteFinancialEffects);
   const localBalance = (data.clientes || []).reduce(
       (total, client) => total + Number(client.saldo || 0),
@@ -4283,7 +4345,7 @@ async function exportLocalDiagnostic() {
       auditRecord(item, "local", name),
     );
   return {
-    diagnosticVersion: 2,
+    diagnosticVersion: 3,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     projectId: PROJECT_ID,
@@ -4299,6 +4361,10 @@ async function exportLocalDiagnostic() {
       Object.entries(entities).map(([name, items]) => [name, items.length]),
     ),
     queueCounts: queueCounts(),
+    syncFailure: state.syncFailure,
+    syncTrace: state.syncTrace,
+    integrityStatus: state.integrityStatus,
+    integrityFailure: state.integrityFailure,
     orphanOperations: saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count,
     saleIntegrity: saleIntegrityDiagnostics(),
     paymentIntegrity: paymentIntegrityDiagnostics(),
@@ -5108,6 +5174,8 @@ function describeSyncResult(result = {}) {
     errors = Number(result.errors || 0),
     sent = Number(result.sent || 0);
   if (result.complete) return "Todos os dados estão sincronizados.";
+  if (result.dataSynced && result.comparison && !result.comparison.ok)
+    return "Dados atualizados. A comparação de integridade identificou diferenças; veja os detalhes antes de qualquer correção.";
   if (sent && result.errorBreakdown?.permission)
     return `${sent} operação(ões) sincronizada(s). ${result.errorBreakdown.permission} continuam bloqueadas por permissão.`;
   if (!sent && result.errorBreakdown?.invalid)
@@ -5120,9 +5188,21 @@ function describeSyncResult(result = {}) {
     return "Sincronização incompleta: os dados locais e da nuvem ainda divergem.";
   return "Sincronização incompleta. Tente novamente ou veja os detalhes.";
 }
-async function synchronizeNow() {
+function synchronizeNow() {
+  if (manualSyncPromise) return manualSyncPromise;
+  manualSyncPromise = (async () => {
+    if (automaticSyncPromise) await automaticSyncPromise;
+    state.syncFailure = null;
+    state.syncTrace = [];
+    traceSync("manual_sync_started", {authenticated: Boolean(auth.currentUser), online: navigator.onLine});
+    try { return await syncStep("manual_sync", runManualSync); }
+    catch(error) { reportError(error, "Manual sync"); throw error; }
+  })().finally(() => { manualSyncPromise = null; });
+  return manualSyncPromise;
+}
+async function runManualSync() {
   const attemptTime = now();
-  localStorage.setItem(lastAttemptKey(), attemptTime);
+  writeSyncTime(lastAttemptKey(), attemptTime);
   emit({ lastAttempt: attemptTime });
   if (!navigator.onLine) {
     updateQueueState();
@@ -5138,11 +5218,15 @@ async function synchronizeNow() {
     };
   }
   cloudPaused = false;
-  await validateUser();
+  emit({status: "syncing", message: "Sincronizando dados…"});
+  await syncStep("auth_state", validateUser);
+  const context = window.BusinessContext?.get?.() || {};
+  traceSync("member_state", {businessId: activeBusinessId(), role: context.role || "unknown", status: context.member?.status || "unknown", spaceAccess: context.member?.spaceAccess || "unknown"});
   if (!state.testPassed) await testFirestoreConnection();
-  const migration = migrateScopedQueueCompatibility();
-  validateQueueOwnership();
-  const push = await processSyncQueue({ force: true });
+  const migration = await syncStep("queue_migration", migrateScopedQueueCompatibility, {service: "localStorage"});
+  await syncStep("queue_ownership", validateQueueOwnership);
+  traceSync("queue_state", queueCounts());
+  const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true }), {service: "Firestore"});
   if (push.paused && push.reason !== "subscription_read_only") {
       const counts = queueCounts(),
       result = {
@@ -5158,7 +5242,7 @@ async function synchronizeNow() {
     emit({ status: "error", message: describeSyncResult(result) });
     return result;
   }
-  const received = await pullCloudCollections({ force: true, full: true }),
+  const received = await syncStep("downloading_changes", () => pullCloudCollections({ force: true, full: true })),
     comparison = await compareLocalAndCloud(),
     counts = queueCounts(),
     complete = counts.total === 0 && counts.errors === 0 && comparison.ok,
@@ -5172,18 +5256,19 @@ async function synchronizeNow() {
       errors: counts.errors,
       queueTotal: counts.total,
       complete,
+      dataSynced: counts.total === 0 && counts.errors === 0,
       attemptedAt: attemptTime,
     };
   if (push.sent || counts.errors)
     await safePublishSyncSignal(push.collections, counts.errors ? "error" : "ok");
-  if (complete) {
-    localStorage.setItem(lastSyncKey(), time);
-    localStorage.setItem(lastCompleteKey(), time);
-  }
+  if (result.dataSynced) writeSyncTime(lastSyncKey(), time);
+  if (complete) writeSyncTime(lastCompleteKey(), time);
+  lastError = ""; lastErrorCode = "";
+  traceSync("completed", {dataSynced: result.dataSynced, integrityMatches: comparison.ok, sent: push.sent, received});
   emit({
     status: complete ? "success" : "error",
     message: describeSyncResult(result),
-    lastSync: complete ? time : state.lastSync,
+    lastSync: result.dataSynced ? time : state.lastSync,
     lastCompleteSync: complete ? time : state.lastCompleteSync,
     lastAttempt: attemptTime,
     progress: 100,
@@ -5194,15 +5279,15 @@ async function synchronizeNow() {
 }
 async function runAutomaticSync() {
   quickTimer = null;
-  if (!currentUser || !navigator.onLine || processingPromise || cloudPaused)
+  if (!currentUser || !navigator.onLine || processingPromise || manualSyncPromise || cloudPaused)
     return;
   window.AppBootDiagnostics?.count?.("initialSyncCount");
   try {
     if (!state.testPassed) await testFirestoreConnection();
-    const push = await processSyncQueue(),
+    const push = await syncStep("automatic_upload", () => processSyncQueue()),
       projection =
         document.visibilityState === "visible"
-          ? await ensureClientProjection()
+          ? await syncStep("client_projection", () => ensureClientProjection())
           : null,
       received =
         document.visibilityState === "visible"
@@ -5218,10 +5303,10 @@ async function runAutomaticSync() {
       const time = now(),
         counts = queueCounts(),
         complete = counts.total === 0 && counts.errors === 0;
-      localStorage.setItem(lastAttemptKey(), time);
+      writeSyncTime(lastAttemptKey(), time);
       if (complete) {
-        localStorage.setItem(lastSyncKey(), time);
-        localStorage.setItem(lastCompleteKey(), time);
+        writeSyncTime(lastSyncKey(), time);
+        writeSyncTime(lastCompleteKey(), time);
       }
       emit({
         status: complete ? "success" : counts.errors ? "error" : "waiting",
@@ -5243,7 +5328,7 @@ async function runAutomaticSync() {
     } else updateQueueState();
   } catch (error) {
     if (errorCode(error) === "resource-exhausted") cloudPaused = true;
-    if (state.status !== "error") reportError(error, "Automatic sync");
+    reportError(error, "Automatic sync");
   }
 }
 function automaticSync() {
@@ -5887,6 +5972,7 @@ async function clearLocalDevice(options = {}) {
 }
 function setUser(user, profile = null, business = null) {
   currentUser = user || null;
+  state.userProfile = profile || null;
   canonicalClientSnapshots.clear();
   lastDataAuditRaw = null;
   cloudPaused = false;
@@ -5908,19 +5994,20 @@ function setUser(user, profile = null, business = null) {
     ownerMatches: Boolean(user && business?.ownerId === user.uid),
     testPassed: trustedBootstrap,
     dataAudit: null,
+    syncFailure: null,
+    syncTrace: [],
+    integrityStatus: "not_checked",
+    integrityFailure: null,
     snapshotMetadata: {},
     clientProjection: null,
     lastSync: profile?.businessId
-      ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) || ""
+      ? readSyncTime(lastSyncKey(), `adiFesta:${profile.businessId}:lastSync`)
       : "",
     lastAttempt: profile?.businessId
-      ? localStorage.getItem(`adiFesta:${profile.businessId}:lastSyncAttempt`) ||
-        ""
+      ? readSyncTime(lastAttemptKey(), `adiFesta:${profile.businessId}:lastSyncAttempt`)
       : "",
     lastCompleteSync: profile?.businessId
-      ? localStorage.getItem(`adiFesta:${profile.businessId}:lastCompleteSync`) ||
-        localStorage.getItem(`adiFesta:${profile.businessId}:lastSync`) ||
-        ""
+      ? readSyncTime(lastCompleteKey(), `adiFesta:${profile.businessId}:lastCompleteSync`)
       : "",
   });
   if (!user) {
@@ -6053,6 +6140,7 @@ window.SyncFirebase = {
   getFirebaseDiagnostic: diagnostic,
   getQueueDiagnostics: queueDiagnostics,
   describeResult: describeSyncResult,
+  describeError: friendlyError,
   migrateQueueCompatibility: migrateScopedQueueCompatibility,
   processSyncQueue,
   createSaleOperation,

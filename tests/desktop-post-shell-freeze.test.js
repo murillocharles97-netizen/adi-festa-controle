@@ -41,7 +41,8 @@ test("sync automático não faz varredura completa de todas as coleções", () =
 test("sincronização completa permanece disponível apenas em ações explícitas", () => {
   assert.match(sync, /pullCloudCollections\(\{ force: true, full: true \}\)/);
   assert.match(sync, /repositories\[name\]\.listAllPaged\(200\)/);
-  assert.match(sync, /async function synchronizeNow\(\)/);
+  assert.match(sync, /function synchronizeNow\(\)/);
+  assert.match(sync, /if \(manualSyncPromise\) return manualSyncPromise/);
 });
 
 test("diagnóstico é carregado antes do app e cache PWA publica a correção", () => {
@@ -49,7 +50,7 @@ test("diagnóstico é carregado antes do app e cache PWA publica a correção", 
     index.indexOf("runtime-diagnostics.js") < index.indexOf("app.js?v=151"),
   );
   assert.match(index, /lifecycle-manager\.js\?v=83/);
-  assert.match(worker, /veconi-v154-message-sequence/);
+  assert.match(worker, /veconi-v155-sync-team/);
   assert.match(worker, /runtime-diagnostics\.js/);
   assert.match(worker, /lifecycle-manager\.js/);
 });
