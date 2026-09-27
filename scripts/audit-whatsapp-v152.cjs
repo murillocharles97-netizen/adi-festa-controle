@@ -33,28 +33,10 @@ async function main(){
     assert(snapshot.amount===351.84&&snapshot.role==="owner"&&/wa\.me\/5517999991111/.test(snapshot.url),`dados individuais incorretos ${JSON.stringify(snapshot)}`);
     await evaluate(cdp,"MobileMessages.showReturn();document.querySelector('[data-return-next]')?.click()");
 
-    await cdp.send("Page.navigate",{url:`http://127.0.0.1:${port}/tests/whatsapp-v152.fixture.html?sequence=1`});for(let i=0;i<100;i++){if(await evaluate(cdp,"Boolean(window.MobileMessages&&window.Mensagens)"))break;await sleep(50)}
-    await evaluate(cdp,"__resetWhatsappAudit()");
-    await evaluate(cdp,"MobileMessages.openCenter();document.querySelector('[data-center-start]').click()");await sleep(40);
-    snapshot=await evaluate(cdp,"({position:document.querySelector('.individual-message-sheet header small')?.textContent,toast:__whatsappAudit.toasts.at(-1)?.message,sequenceCount:__whatsappAudit.data.messageSequences.length})");
-    assert(snapshot.position==="Enviando para 1 de 3"&&/1 de 3/.test(snapshot.toast)&&snapshot.sequenceCount===1,`sequência não iniciou ${JSON.stringify(snapshot)}`);
-    for(let index=1;index<=3;index++){
-      await evaluate(cdp,"document.querySelector('#message-send').click();document.querySelector('[data-charge-send-continue]').click();MobileMessages.showReturn()");
-      snapshot=await evaluate(cdp,"({returnVisible:Boolean(document.querySelector('[data-return-next]')),opened:__whatsappAudit.opened.length,history:__whatsappAudit.data.messageHistory.length})");
-      assert(snapshot.returnVisible&&snapshot.opened===index&&snapshot.history===index,`retorno ${index} inválido ${JSON.stringify(snapshot)}`);
-      await evaluate(cdp,"document.querySelector('[data-return-next]').click()");await sleep(30);
-      if(index<3){const position=await evaluate(cdp,"document.querySelector('.individual-message-sheet header small')?.textContent");assert(position===`Enviando para ${index+1} de 3`,`posição ${index+1} perdida: ${position}`)}
-    }
-    snapshot=await evaluate(cdp,"({finished:Boolean(document.querySelector('.message-finish-sheet')),sequence:__whatsappAudit.data.messageSequences[0],logs:__whatsappAudit.logs})");
-    assert(snapshot.finished&&snapshot.sequence.status==="completed"&&snapshot.sequence.completedIds.length===3,`sequência incompleta ${JSON.stringify(snapshot)}`);
-
+    // Sequence/storage/lifecycle scenarios now run in audit-message-sequence-v154.cjs.
     await evaluate(cdp,"__resetWhatsappAudit();MobileMessages.openComposer('c4')");await sleep(20);
     snapshot=await evaluate(cdp,"({disabled:document.querySelector('#message-send')?.disabled,error:document.querySelector('.message-phone-error')?.textContent})");
     assert(snapshot.disabled&&/telefone válido/i.test(snapshot.error),`telefone inválido não foi isolado ${JSON.stringify(snapshot)}`);
-
-    await evaluate(cdp,"__resetWhatsappAudit();MobileMessages.openCenter();__whatsappAudit.throwAlter=true;document.querySelector('[data-center-start]').click()");
-    snapshot=await evaluate(cdp,"({toast:__whatsappAudit.toasts.at(-1),composer:Boolean(document.querySelector('.individual-message-sheet')),logs:__whatsappAudit.logs})");
-    assert(snapshot.toast?.error&&!snapshot.composer&&snapshot.logs.some(item=>item.includes('[SEQUENCE] start failed')),`erro silencioso na sequência ${JSON.stringify(snapshot)}`);
 
     await cdp.send("Emulation.setDeviceMetricsOverride",{width:1280,height:900,deviceScaleFactor:1,mobile:false,screenWidth:1280,screenHeight:900});
     await cdp.send("Page.navigate",{url:`http://127.0.0.1:${port}/tests/whatsapp-v152.fixture.html?desktop=1`});for(let i=0;i<100;i++){if(await evaluate(cdp,"Boolean(window.ClientActions&&window.Mensagens)"))break;await sleep(50)}
@@ -99,7 +81,7 @@ async function main(){
     snapshot=await evaluate(cdp,"({composer:Boolean(document.querySelector('.individual-message-sheet')),reads:__whatsappAudit.canonicalReads.length,role:__whatsappAudit.role})");
     assert(snapshot.composer&&snapshot.reads===1&&snapshot.role==='manager',`manager permitido foi bloqueado ${JSON.stringify(snapshot)}`);
 
-    console.log(JSON.stringify({ok:true,individual:{opened:1,idempotent:true,cancelledWithoutRecord:true,amountAtSend:351.84},canonical:{clients:canonicalResults,zeroDebtBlocked:true,offlineBlocked:true,permissionErrorExposed:true,noFinancialMutation:true},sequence:{customers:3,status:"completed",preservedPosition:true},invalidPhone:true,permissions:{owner:true,manager:true,sellerWithoutCharge:false},instrumentation:true,mobilePwaEquivalent:true,desktop:{entryPoint:true,whatsappWeb:true}},null,2));
+    console.log(JSON.stringify({ok:true,individual:{opened:1,idempotent:true,cancelledWithoutRecord:true,amountAtSend:351.84},canonical:{clients:canonicalResults,zeroDebtBlocked:true,offlineBlocked:true,permissionErrorExposed:true,noFinancialMutation:true},sequence:"covered by audit-message-sequence-v154.cjs",invalidPhone:true,permissions:{owner:true,manager:true,sellerWithoutCharge:false},instrumentation:true,mobilePwaEquivalent:true,desktop:{entryPoint:true,whatsappWeb:true}},null,2));
   }finally{cdp?.close();chrome.kill();staticServer.close();await sleep(150);try{fs.rmSync(profile,{recursive:true,force:true})}catch{}}
 }
 main().catch(error=>{console.error(error.stack||error.message);process.exitCode=1});

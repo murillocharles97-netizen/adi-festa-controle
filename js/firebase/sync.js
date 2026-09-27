@@ -103,6 +103,7 @@ function canPullSource(name) {
   if (typeof has !== "function") return true;
   if (["products", "productVariants"].includes(name)) return has("products.view");
   if (name === "clients") return has("customers.view");
+  if (name === "messageHistory" && has("customers.view") && has("customers.edit")) return true;
   if (name === "sales") return has("sales.create") || has("sales.viewAll");
   if (name === "stockMovements") return has("inventory.view");
   if (["productFinancials", "variantFinancials", "stockMovementFinancials"].includes(name))
@@ -3636,7 +3637,7 @@ async function ensureClientProjection(options = {}) {
   });
   return result;
 }
-async function readCanonicalClient(clientId) {
+async function readCanonicalClient(clientId, options = {}) {
   const id = String(clientId || "").trim();
   if (!id)
     throw Object.assign(new Error("CustomerId não informado."), {
@@ -3663,7 +3664,7 @@ async function readCanonicalClient(clientId) {
       new Error("O cliente possui uma alteração local aguardando sincronização."),
       { code: "pending-client-write", stage: "pending-write", path, businessId, customerId: id },
     );
-  const confirmed = recentCanonicalClientSnapshot(businessId, id, localClient);
+  const confirmed = !options.force && recentCanonicalClientSnapshot(businessId, id, localClient);
   if (confirmed) {
     console.info("[CHARGE] cloud path/query", {
       businessId,
@@ -3750,14 +3751,18 @@ async function readCanonicalClient(clientId) {
     documents: 1,
     readAt: now(),
   };
+  if (activeBusinessId() !== businessId || !canPullSource("clients") || pendingIds("clients").has(id))
+    throw Object.assign(new Error("A sessão ou o cliente mudou durante a confirmação."), { code: "pending-client-write", stage: "canonical-read-race" });
+  if (metadata.fromCache || metadata.hasPendingWrites)
+    throw Object.assign(new Error("O servidor não confirmou este saldo."), { code: "offline-unconfirmed", stage: "canonical-metadata" });
   rememberSnapshotMetadata("clients:charge-confirmation", metadata);
   rememberCanonicalClients([remote], metadata);
-  applyCloudCollection("clients", [remote], { authoritative: true });
+  if (options.persistProjection !== false) applyCloudCollection("clients", [remote], { authoritative: true });
   const canonical = (DB.carregar().clientes || []).find(
     (item) => String(item.id) === id,
   );
   return {
-    client: canonical || remote,
+    client: options.persistProjection === false ? remote : canonical || remote,
     confirmation: {
       businessId,
       clientId: id,
@@ -3770,6 +3775,52 @@ async function readCanonicalClient(clientId) {
       fromCache: false,
     },
   };
+}
+// Operational progress stays in IndexedDB. Only explicit confirmations reach Firestore.
+async function publishConfirmedMessage(event) {
+  const session = await validateUser(), businessId = activeBusinessId();
+  const assertAccess = () => {
+    if (event.businessId !== businessId || activeBusinessId() !== businessId ||
+        event.actorUid !== session.user.uid || currentUser?.uid !== session.user.uid)
+      throw Object.assign(new Error("A conta da sequência mudou."), { code: "permission-denied" });
+    if (!window.Mensagens?.canSend?.())
+      throw Object.assign(new Error("Seu acesso não permite registrar mensagens."), { code: "permission-denied" });
+  };
+  assertAccess();
+  if (event.status !== "sent_confirmed" || event.confirmedByUser !== true || !event.sequenceId ||
+      !event.id || !event.operationId || !event.customerId || !Number.isFinite(Date.parse(event.sentAt)))
+    throw Object.assign(new Error("Confirmação de envio inválida."), { code: "invalid-argument" });
+  const reference = doc(db, "businesses", businessId, "messageHistory", event.id);
+  const clientRef = doc(db, "businesses", businessId, "clients", event.customerId);
+  await runTransaction(db, async transaction => {
+    assertAccess();
+    const prior = await transaction.get(reference);
+    if (prior.exists()) {
+      if (prior.data().operationId !== event.operationId || prior.data().customerId !== event.customerId)
+        throw Object.assign(new Error("Identificador de envio já utilizado."), { code: "already-exists" });
+      if (prior.data().status === 'sent_confirmed') return;
+      if (event.legacyEventId !== event.id || prior.data().status !== 'opened_whatsapp' || prior.data().sequenceId !== event.sequenceId)
+        throw Object.assign(new Error("Este evento não pode ser confirmado pela sequência."), { code: "failed-precondition" });
+    }
+    const clientSnapshot = event.type === "charge" ? await transaction.get(clientRef) : null;
+    assertAccess();
+    if (clientSnapshot && !clientSnapshot.exists())
+      throw Object.assign(new Error("Cliente não encontrado na nuvem."), { code: "not-found" });
+    transaction.set(reference, sanitizeForFirestore(event));
+    if (clientSnapshot) {
+      // Never write saldo, sales, payments, or updatedAt of the financial projection.
+      const previous = normalizeFirestoreData(clientSnapshot.data());
+      if (!previous.lastChargeAt || Date.parse(previous.lastChargeAt) <= Date.parse(event.sentAt))
+        transaction.update(clientRef, { businessId, lastChargeAt: event.sentAt, lastChargeMessageId: event.id });
+      transaction.set(doc(db, "businesses", businessId, "charges", event.legacyChargeId || event.id), sanitizeForFirestore({
+        ...event, id: event.legacyChargeId || event.id, messageId: event.id, clienteId: event.customerId, clienteNome: event.clientName,
+        valorCobrado: event.amountAtSend, mensagem: event.finalMessage, data: event.sentAt
+      }));
+    }
+  });
+  if (activeBusinessId() === businessId && currentUser?.uid === session.user.uid)
+    await safePublishSyncSignal(event.type === 'charge' ? ['messageHistory', 'charges', 'clients'] : ['messageHistory']);
+  return { id: event.id };
 }
 async function queryClientsPage(options = {}) {
   await validateUser();
@@ -6016,6 +6067,7 @@ window.SyncFirebase = {
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
   readCanonicalClient,
+  publishConfirmedMessage,
   ensureClientProjection,
   queryClientsPage,
   queryAllClientsForAction,

@@ -35,6 +35,8 @@
   <link rel="stylesheet" href="../css/design-system/desktop.css">
   <script>
     window.__desktopAuditErrors = [];
+    // This fixture represents an active owner, including Equipe V1 permissions.
+    window.BusinessContext = {get:()=>({businessId:'desktop-shell-fixture',role:'owner',status:'active',spaceAccess:'all',permissions:['*']})};
     window.__fixtureLoadCount = Number(sessionStorage.getItem("desktopFixtureLoads") || 0) + 1;
     sessionStorage.setItem("desktopFixtureLoads", String(window.__fixtureLoadCount));
     addEventListener("error", event => window.__desktopAuditErrors.push({ type: "error", message: event.message, stack: event.error?.stack || "" }));
@@ -55,6 +57,7 @@
   <script src="../js/runtime-diagnostics.js"></script>
   <script src="../js/utils.js"></script>
   <script src="../js/phone.js"></script>
+  <script src="../js/team-access.js"></script>
   <script src="../js/storage.js"></script>
   <script src="../js/operation-mode.js"></script>
   <script src="../js/backup.js"></script>

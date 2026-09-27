@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/mensagens-mobile.css">
+<div id="title"></div><div id="date"></div><main id="app"></main><div id="modal"></div><div id="toasts"></div>
+<script>
+  (() => {
+    let uuid = 0;
+    const canonicalMode=new URLSearchParams(location.search).has('canonical'),initialClients=canonicalMode?[
+      {id:'mae',nome:'Mãe',telefone:'(17) 99999-1111',saldo:-550,financialVersion:7,ativo:true},
+      {id:'joao',nome:'João QA Sintetico 090',telefone:'(17) 99999-2222',saldo:-125.5,financialVersion:3,ativo:true},
+      {id:'kami',nome:'Kami QA Sintetico 092',telefone:'(17) 99999-3333',saldo:-89.9,financialVersion:5,ativo:true},
+      {id:'zero',nome:'Cliente Quitado',telefone:'(17) 99999-4444',saldo:0,financialVersion:2,ativo:true},
+    ]:[
+      {id:'c1',nome:'Nat QA Sintetico 098',telefone:'(17) 99999-1111',saldo:-351.84,ativo:true},
+      {id:'c2',nome:'Bruna Silva',telefone:'(17) 99999-2222',saldo:-28,ativo:true},
+      {id:'c3',nome:'Carla Souza',telefone:'(17) 99999-3333',saldo:-42,ativo:true},
+      {id:'c4',nome:'Sem Telefone',telefone:'123',saldo:-10,ativo:true},
+    ],canonicalClients=structuredClone(initialClients);
+    const state = window.__whatsappAudit = {
+      data:{config:{nome:'VECONI Teste'},clientes:structuredClone(initialClients),cobrancas:[],movimentacoes:[],messageHistory:[],messageTemplates:[],messageSequences:[]},
+      opened:[],toasts:[],confirmCalls:0,throwAlter:false,resumes:[],logs:[],canonicalReads:[],canonicalError:null,role:'owner',
+    };
+    const originalInfo=console.info.bind(console),originalError=console.error.bind(console),logValue=value=>value&&typeof value==='object'?JSON.stringify(value):String(value);
+    console.info=(...args)=>{state.logs.push(args.map(logValue).join(' '));originalInfo(...args)};
+    console.error=(...args)=>{state.logs.push(args.map(logValue).join(' '));originalError(...args)};
+    window.confirm=()=>{state.confirmCalls++;return true};
+    window.open=url=>{state.opened.push(url);return{opener:window}};
+    window.scrollTo=()=>{};
+    window.lucide={createIcons(){}};
+    window.Utils={
+      uuid:()=>`uuid-${++uuid}`,
+      escapar:value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])),
+      dinheiro:value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),
+      telefoneWhatsApp:value=>{const digits=String(value||'').replace(/\D/g,'');return digits.startsWith('55')?digits:`55${digits}`},
+      toast:(message,error=false)=>{state.toasts.push({message,error});const item=document.createElement('div');item.textContent=message;item.dataset.error=String(error);document.querySelector('#toasts').append(item)},
+    };
+    window.DB={carregar:()=>state.data,alterar:mutator=>{if(state.throwAlter)throw Error('Falha de persistência simulada');mutator(state.data);return state.data},getBusinessId:()=> 'adi-festa'};
+    window.Clientes={obter:id=>state.data.clientes.find(item=>item.id===id)};
+    window.TeamAccess={has:permission=>state.role==='owner'||state.role==='manager'&&['customers.view','customers.edit'].includes(permission)||state.role==='seller'&&permission==='customers.view',actor:()=>({actorUid:`${state.role}-real-test`,actorNameSnapshot:`${state.role} Teste`,actorRoleSnapshot:state.role})};
+    window.BusinessContext={get:()=>({businessId:'adi-festa',role:state.role,spaceAccess:state.role==='owner'?'all':'selected',allowedSpaceIds:state.role==='owner'?[]:['loja']})};
+    window.SyncFirebase={isReady:()=>true,readCanonicalClient:async (id,options)=>{state.canonicalReads.push(id);state.readOptions=options;if(state.canonicalError)throw state.canonicalError;const remote=canonicalClients.find(item=>item.id===id);console.info('[CHARGE] cloud path/query',{businessId:'adi-festa',customerId:id,path:`businesses/adi-festa/clients/${id}`,query:'getDocFromServer'});console.info('[CHARGE] response',{exists:Boolean(remote),source:'server-document',fromCache:false});if(!remote)throw Object.assign(Error('Cliente não encontrado na nuvem.'),{code:'not-found',stage:'client-document-read'});const local=state.data.clientes.find(item=>item.id===id);if(options?.persistProjection!==false)Object.assign(local,structuredClone(remote));return{client:options?.persistProjection===false?structuredClone(remote):local,confirmation:{businessId:'adi-festa',clientId:id,balance:remote.saldo,source:'server-document',path:`businesses/adi-festa/clients/${id}`}}}};
+    state.published=[];
+    SyncFirebase.publishConfirmedMessage=async event=>{if(state.syncError)throw Object.assign(Error('Falha simulada'),{code:'unavailable'});if(!state.published.some(item=>item.id===event.id))state.published.push(event)};
+    window.__makeSequenceClients=count=>{const clients=Array.from({length:count},(_,i)=>({id:'client-'+i,nome:'Cliente '+i,telefone:'(17) 99999-1111',saldo:-(i+1)*10,ativo:true}));state.data.clientes=clients;canonicalClients.splice(0,canonicalClients.length,...structuredClone(clients));};
+    window.__canonicalClients=canonicalClients;
+    window.SpaceContext={homeId:()=> 'all_spaces'};
+    window.Router={ir:route=>state.route=route};
+    window.ClientesPage={whatsapp:id=>{state.desktopFallback=id}};
+    window.OperationMode={enabled:()=>true};
+    window.Checkout={};window.CRMClienteUI={};window.Modais={confirmar(){}};
+    window.ClientesMobile={refresh:()=>{state.clientRefreshes=(state.clientRefreshes||0)+1}};
+    window.AppLifecycle={onResume:callback=>state.resumes.push(callback)};
+    if(new URLSearchParams(location.search).has('legacy')){
+      state.data.vendas=[{id:'preserve-sale',valorFinal:99}];state.data.pagamentos=[{id:'preserve-payment',valor:5}];
+      state.data.messageSequences=[{id:'legacy-sequence',type:'charge',clientIds:['c1'],currentIndex:0,pendingReturn:true,status:'active',updatedAt:new Date().toISOString(),baseMessage:'Olá {{nome}}',completedIds:[],skippedIds:[]}];
+      state.data.messageHistory=[{id:'legacy-event',operationId:'legacy-operation',sequenceId:'legacy-sequence',clientId:'c1',customerId:'c1',clientName:'Nat QA Sintetico 098',type:'charge',status:'opened_whatsapp',phone:'5517999991111',finalMessage:'Olá',amountAtSend:351.84}];
+      state.data.cobrancas=[{id:'legacy-charge',messageId:'legacy-event'}];
+      DB.compactMessageSequences=ids=>{state.data.messageSequences=state.data.messageSequences.filter(item=>!ids.includes(item.id));state.compacted=ids};
+      sessionStorage.setItem('adiFestaMessagePendingReturn_v1',JSON.stringify({sequenceId:'legacy-sequence'}));
+      localStorage.setItem('critical-sync-queue','preserve');
+    }
+    window.__setWhatsappRole=role=>{state.role=role};
+    window.__resetWhatsappAudit=()=>{state.data={config:{nome:'VECONI Teste'},clientes:structuredClone(initialClients),cobrancas:[],movimentacoes:[],messageHistory:[],messageTemplates:[],messageSequences:[]};state.opened=[];state.toasts=[];state.confirmCalls=0;state.throwAlter=false;state.logs=[];state.canonicalReads=[];state.canonicalError=null;state.role='owner';sessionStorage.clear();document.querySelector('#modal').innerHTML='';document.querySelector('#app').innerHTML='';};
+  })();
+</script>
+<script src="../js/phone.js"></script>
+<script src="../js/mensagens.js"></script>
+<script src="../js/local-records.js"></script>
+<script src="../js/message-sequence.js"></script>
+<script src="../js/message-sequence-ui.js"></script>
+<script src="../js/mensagens-mobile.js"></script>
+<script src="../js/client-actions.js"></script>

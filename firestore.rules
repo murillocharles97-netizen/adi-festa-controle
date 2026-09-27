@@ -1093,7 +1093,8 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /messageHistory/{documentId} {
-        allow read: if canReadCollection(businessId, 'messageHistory');
+        allow read: if canReadCollection(businessId, 'messageHistory')
+          || (belongsToBusiness(businessId) && permissionGranted(businessId, 'customers.view') && permissionGranted(businessId, 'customers.edit'));
         allow create: if canCreateGenericDocument(businessId, 'messageHistory', documentId);
         allow update: if canUpdateGenericDocument(businessId, 'messageHistory', documentId);
         allow delete: if false;
