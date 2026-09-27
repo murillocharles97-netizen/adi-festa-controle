@@ -4,7 +4,7 @@ const path = require("node:path");
 const puppeteer = require("puppeteer");
 
 const root = process.cwd();
-const output = path.join(root, "artifacts", "team-access-v150");
+const output = path.join(root, "artifacts", "team-access-v155");
 const mobileSizes = [[320, 760], [360, 800], [375, 812], [390, 844], [412, 915], [430, 932]];
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" };
 const server = http.createServer((request, response) => {
@@ -62,12 +62,54 @@ async function main() {
       let data = await layout(page, "owner", `${width}x${height}`);
       if (data.problems.length) throw Error(JSON.stringify(data));
       report.push(data);
+      if(width===390){
+        await page.screenshot({path:path.join(output,'equipe-mobile.png'),fullPage:true});
+        const reads=await page.evaluate(()=>window.__teamCalls.members);
+        await page.click('[data-team-filter="pending"]');
+        await page.waitForFunction(()=>document.querySelectorAll('.team-member-card').length===1);
+        await page.screenshot({path:path.join(output,'convite-pendente.png'),fullPage:true});
+        await page.click('[data-team-filter="active"]');
+        await page.waitForFunction(()=>document.querySelectorAll('.team-member-card').length===2);
+        await page.screenshot({path:path.join(output,'funcionario-ativo.png'),fullPage:true});
+        await page.click('[data-team-filter="all"]');
+        if(await page.evaluate(()=>window.__teamCalls.members)!==reads)throw Error('Filtros causaram novas leituras');
+        if(await page.$('.team-page [data-cloud-status],.team-page #cloud-panel-sync'))throw Error('Sync incluído na Equipe');
+        await page.click('[data-team-edit="owner-qa"]');
+        await page.click('[data-team-menu-edit="name"]');
+        if(!await page.$eval('[name="role"]',node=>node.disabled)||!await page.$eval('[name="status"]',node=>node.disabled))throw Error('Owner atual pode desativar o próprio acesso');
+        await page.click('.modal-foot [data-team-close]');
+      }
       await page.click("[data-team-add]");
       await page.waitForSelector(".team-modal");
       data = await layout(page, "owner-modal", `${width}x${height}`);
       if (data.problems.length) throw Error(JSON.stringify(data));
       report.push(data);
-      if (width === 390) await page.screenshot({ path: path.join(output, "390-owner-modal.png"), fullPage: false });
+      if (width === 390) {
+        await page.click('[name="allowedSpaceIds"][value="loja"]');
+        await page.screenshot({ path: path.join(output, "modal-adicionar-funcionario.png"), fullPage: false });
+        await page.type('[name="name"]','Funcionário QA');
+        await page.type('[name="email"]','employee@example.test');
+        await page.click('[data-team-submit]',{clickCount:2});
+        await page.waitForSelector('[data-team-invite-url]');
+        const calls=await page.evaluate(()=>window.__teamCalls);
+        if(calls.create!==1||calls.inputs[0].role!=='seller'||calls.inputs[0].allowedSpaceIds.join(',')!=='loja')throw Error('Convite duplicado ou fora do escopo');
+        if(calls.inputs[0].permissions['financial.view'])throw Error('Seller recebeu Financeiro');
+        await page.click('[data-team-close]');
+        await page.click('[data-team-add]');
+        await page.click('.modal-foot [data-team-close]');
+        await page.click('[data-team-add]');
+        if(await page.$eval('[name="name"]',node=>node.value)!=='')throw Error('Formulário novo preservou dados antigos');
+        await page.select('[name="role"]','stock');
+        const stock=await page.$eval('[name="permission:sales.create"]',node=>node.checked);
+        if(stock)throw Error('Preset de estoque ganhou vendas');
+        await page.select('[name="role"]','seller');
+        await page.click('[data-team-quick="customers.view"]');
+        if(await page.$eval('[name="permission:customers.view"]',node=>node.checked))throw Error('Permissão rápida não alterou campo granular');
+        await page.setViewport({width:390,height:450,isMobile:true,hasTouch:true});
+        const keyboard=await layout(page,'owner-modal-keyboard','390x450');
+        if(keyboard.problems.length)throw Error(JSON.stringify(keyboard));
+        report.push(keyboard);
+      }
       await page.goto(`${base}?mode=seller`, { waitUntil: "networkidle0" });
       data = await layout(page, "seller", `${width}x${height}`);
       if (data.problems.length) throw Error(JSON.stringify(data));

@@ -36,17 +36,18 @@
     window.FirebaseSession={user:{uid:context.member.uid},profile:{name:context.member.name,role:context.role}};
     window.SpaceContext={list:()=>[{id:'loja',name:'Loja principal'},{id:'deposito',name:'Depósito'}],homeSpaces:()=>[{id:'loja',name:'Loja principal'},{id:'deposito',name:'Depósito'}]};
     window.Utils={escapar:value=>String(value).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])),toast:()=>{}};
-    window.lucide={createIcons:()=>{}};
+    window.__teamCalls={members:0,invites:0,create:0,inputs:[]};
     window.TeamService={
-      listMembers:async()=>[
+      listMembers:async()=>{window.__teamCalls.members++;return [
         {uid:'owner-qa',name:'Murillo Charles',email:'owner@example.test',role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[]},
         {uid:'seller-qa',name:'Bruna Silva Danki',email:'bruna@example.test',role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:['loja']},
         {uid:'stock-qa',name:'Equipe do Estoque',email:'estoque@example.test',role:'stock',status:'disabled',spaceAccess:'selected',allowedSpaceIds:['deposito']},
-      ],
+      ];},
       listInvites:async()=>[{id:'invite-qa',name:'Caixa da Tarde',email:'caixa@example.test',role:'seller',status:'pending',spaceAccess:'selected',allowedSpaceIds:['loja'],expiresAt:new Date(Date.now()+86400000).toISOString()}],
-      createInvite:async()=>({inviteUrl:'https://example.test/?teamInvite=qa'}),updateMember:async()=>({}),
+      createInvite:async(input)=>{window.__teamCalls.create++;window.__teamCalls.inputs.push(input);await new Promise(resolve=>setTimeout(resolve,80));return {inviteUrl:'https://example.test/?teamInvite=qa'};},updateMember:async()=>({}),
     };
   </script>
+  <script src="../assets/lucide.min.js"></script>
   <script src="../js/team-access.js"></script>
   <script src="../js/team-page.js"></script>
   <script>

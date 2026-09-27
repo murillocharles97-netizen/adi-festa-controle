@@ -109,8 +109,8 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
 });
 
 test("release 136 mantém recursos financeiros globais no cache PWA", () => {
-  assert.match(read("js/build-info.js"), /release: "154"/);
-  assert.match(sw, /veconi-v154-message-sequence/);
+  assert.match(read("js/build-info.js"), /release: "155"/);
+  assert.match(sw, /veconi-v155-sync-team/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

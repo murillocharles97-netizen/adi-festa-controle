@@ -11,7 +11,7 @@ test("sucesso só é emitido após fila vazia, pull completo e comparação", ()
   assert.match(sync, /counts\.total === 0 && counts\.errors === 0 && comparison\.ok/);
   assert.match(sync, /pullCloudCollections\(\{ force: true, full: true \}\)/);
   assert.match(sync, /status: complete \? "success" : "error"/);
-  assert.match(sync, /localStorage\.setItem\(lastCompleteKey\(\), time\)/);
+  assert.match(sync, /if \(complete\) writeSyncTime\(lastCompleteKey\(\), time\)/);
   assert.match(desktop, /SyncFirebase\.describeResult/);
   assert.match(mobile, /SyncFirebase\.describeResult/);
   assert.match(ui, /SyncFirebase\.describeResult/);

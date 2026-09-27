@@ -89,7 +89,7 @@ const ownerPermissions = enabled(
   await signOut(auth);
   await signInWithEmailAndPassword(auth, ownerEmail, password);
 
-  const inviteResult = await call("createTeamInvite", {
+  let inviteResult = await call("createTeamInvite", {
     businessId,
     name: "Vendedora Smoke",
     email: sellerEmail,
@@ -98,6 +98,17 @@ const ownerPermissions = enabled(
     allowedSpaceIds: [spaceId],
     permissions: enabled("sales.create", "customers.view", "products.view", "inventory.view"),
   });
+  const firstInvite=inviteResult.data;
+  await assert.rejects(call('createTeamInvite',{businessId,name:'Duplicada',email:sellerEmail,role:'seller',spaceAccess:'selected',allowedSpaceIds:[spaceId]}),error=>String(error.code).includes('already-exists'));
+  const resendInput={businessId,name:'Vendedora Smoke',email:sellerEmail,role:'seller',spaceAccess:'selected',allowedSpaceIds:[spaceId],replaceInviteId:firstInvite.invite.id};
+  const resend=await Promise.allSettled([call('createTeamInvite',resendInput),call('createTeamInvite',resendInput)]);
+  assert.equal(resend.filter(item=>item.status==='fulfilled').length,1,'reenviar concorrente não duplica');
+  inviteResult=resend.find(item=>item.status==='fulfilled').value;
+  assert.equal((await admin.doc(`businesses/${businessId}/teamInvites/${firstInvite.invite.id}`).get()).data().status,'replaced');
+  const oldPreview=await call('getTeamInvitePreview',{token:new URL(firstInvite.inviteUrl).searchParams.get('teamInvite')});
+  assert.equal(oldPreview.data.status,'replaced');
+  const pendingInvites=await admin.collection(`businesses/${businessId}/teamInvites`).where('status','==','pending').get();
+  assert.equal(pendingInvites.size,1);
   const inviteUrl = new URL(inviteResult.data.inviteUrl);
   const token = inviteUrl.searchParams.get("teamInvite");
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
@@ -112,6 +123,7 @@ const ownerPermissions = enabled(
 
   const sellerCredential = await createUserWithEmailAndPassword(auth, sellerEmail, password);
   const sellerUid = sellerCredential.user.uid;
+  await assert.rejects(call('acceptTeamInvite',{token:new URL(firstInvite.inviteUrl).searchParams.get('teamInvite')}),error=>String(error.code).includes('failed-precondition'));
   const accepted = await call("acceptTeamInvite", { token });
   assert.equal(accepted.data.businessId, businessId);
   assert.equal(accepted.data.member.uid, sellerUid);

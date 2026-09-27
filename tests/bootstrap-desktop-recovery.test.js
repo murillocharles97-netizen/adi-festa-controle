@@ -49,5 +49,5 @@ test("leituras locais não migram nem gravam toda a base repetidamente", () => {
 test("pull inicial aplica coleções em um único lote local", () => {
   assert.match(sync, /function applyCloudCollectionBatch\(entries\)/);
   assert.match(sync, /pendingApplications\.push\(/);
-  assert.match(sync, /received = applyCloudCollectionBatch\(pendingApplications\)/);
+  assert.match(sync, /syncStep\("persisting_cloud_snapshot", \(\) => applyCloudCollectionBatch\(pendingApplications\)/);
 });

@@ -111,23 +111,32 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
   }
   async function createInvite(request){
     const businessId=text(request.data?.businessId,128),context=await actorContext(request,businessId),role=text(request.data?.role,40).toLowerCase(),inviteEmail=email(request.data?.email),name=text(request.data?.name,120),spaceAccess=request.data?.spaceAccess==='all'?'all':'selected';
-    if(!VALID_ROLES.has(role)||!inviteEmail||!name)throw new HttpsError('invalid-argument','Preencha nome, e-mail e cargo.');
+    if(!VALID_ROLES.has(role)||!/^\S+@\S+\.\S+$/.test(inviteEmail)||!name)throw new HttpsError('invalid-argument','Preencha nome, e-mail válido e cargo.');
     if(role==='owner'&&context.member.role!=='owner')throw new HttpsError('permission-denied','Somente um proprietário pode convidar outro proprietário.');
     const allowedSpaceIds=await validateSpaces(businessId,spaceAccess,request.data?.allowedSpaceIds),permissions=normalizedPermissions(role,request.data?.permissions),raw=crypto.randomBytes(32).toString('base64url'),hash=tokenHash(raw),inviteId=hash.slice(0,28),now=Timestamp.now(),expiresAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000),ref=db.doc(`businesses/${businessId}/teamInvites/${inviteId}`);
     if(context.member.role!=='owner'&&PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key)))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
-    const duplicate=await db.collection(`businesses/${businessId}/members`).where('email','==',inviteEmail).where('status','==','active').limit(1).get();
+    const replaceInviteId=text(request.data?.replaceInviteId,128);
+    if(replaceInviteId&& !/^[a-zA-Z0-9_-]+$/.test(replaceInviteId))throw new HttpsError('invalid-argument','Convite inválido.');
+    await db.runTransaction(async transaction=>{
+    const duplicate=await transaction.get(db.collection(`businesses/${businessId}/members`).where('email','==',inviteEmail).where('status','==','active').limit(1));
     if(!duplicate.empty)throw new HttpsError('already-exists','Este e-mail já pertence à equipe ativa.');
     const [activeMembers,pendingInvites]=await Promise.all([
-      db.collection(`businesses/${businessId}/members`).where('status','==','active').get(),
-      db.collection(`businesses/${businessId}/teamInvites`).where('status','==','pending').get(),
+      transaction.get(db.collection(`businesses/${businessId}/members`).where('status','==','active')),
+      transaction.get(db.collection(`businesses/${businessId}/teamInvites`).where('status','==','pending')),
     ]),configuredLimit=context.business.maxTeamMembers??context.business.limits?.maxTeamMembers,
       limit=configuredLimit===null||configuredLimit===undefined||configuredLimit===''?null:Number(configuredLimit);
-    if(Number.isFinite(limit)&&limit>=0&&activeMembers.size+pendingInvites.size>=limit)throw new HttpsError('resource-exhausted',`Seu plano permite até ${limit} membro(s) de equipe.`);
-    const batch=db.batch();
+    const replacing=replaceInviteId?pendingInvites.docs.find(item=>item.id===replaceInviteId&&email(item.data().email)===inviteEmail):null;
+    if(replaceInviteId&&!replacing)throw new HttpsError('failed-precondition','O convite já foi utilizado ou substituído. Atualize a equipe.');
+    const liveInvites=pendingInvites.docs.filter(item=>item.data().expiresAt?.toMillis?.()>now.toMillis());
+    if(liveInvites.some(item=>email(item.data().email)===inviteEmail&&item.id!==replaceInviteId))throw new HttpsError('already-exists','Já existe um convite pendente para este e-mail. Use Reenviar convite.');
+    const seats=activeMembers.size+liveInvites.filter(item=>item.id!==replaceInviteId).length;
+    if(Number.isFinite(limit)&&limit>=0&&seats>=limit)throw new HttpsError('resource-exhausted',`Seu plano permite até ${limit} membro(s) de equipe.`);
+    const batch=transaction;
+    if(replacing)batch.update(replacing.ref,{status:'replaced',replacedBy:inviteId,updatedAt:now});
     batch.set(ref,{id:inviteId,businessId,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,permissions,tokenHash:hash,expiresAt,createdAt:now,createdBy:context.uid,updatedAt:now,schemaVersion:1});
     batch.set(db.doc(`teamInviteTokens/${hash}`),{businessId,inviteId,expiresAt,createdAt:now},{merge:false});
     batch.set(db.doc(`businesses/${businessId}/auditLogs/team_invite_${inviteId}`),{id:`team_invite_${inviteId}`,businessId,type:'team_invite_created',actorUid:context.uid,inviteId,emailHash:tokenHash(inviteEmail).slice(0,16),createdAt:now,schemaVersion:1});
-    await batch.commit();
+    });
     const base=String(appUrl||'').replace(/\/$/,'');
     return{invite:{id:inviteId,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,expiresAt:expiresAt.toDate().toISOString()},inviteUrl:`${base}/?teamInvite=${encodeURIComponent(raw)}`};
   }
