@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=155';
+import './sync.js?v=156';
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
@@ -250,11 +250,11 @@ function syncSubscriptionShell(context){
   showSubscriptionBanner(context.access);
 }
 addEventListener('business-context-changed',event=>syncSubscriptionShell(event.detail));
-function allowed(user,profile,business,member){
+async function allowed(user,profile,business,member){
   bootstrapLog('preparing business context');
   const context=BusinessContext.set({business,userProfile:profile,member});
   const permissionSignature=context.permissions.slice().sort().join('|').split('').reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(36);
-  DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
+  await DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
   window.TeamAccess?.sanitizePrivateCache?.(DB.carregar());
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   bootstrapLog('local environment loaded');
@@ -422,7 +422,7 @@ async function bootstrapCore(user,token,mode){
   }
   bootstrapLog('migration checked',{businessId:profile.businessId});
   setBootstrapState('loading_access',{businessId:profile.businessId});
-  allowed(user,profile,business,member);
+  await allowed(user,profile,business,member);
   bootstrapLog('subscription resolved',{planId:window.FirebaseSession?.subscription?.planId||'fallback',status:window.FirebaseSession?.subscription?.status||'fallback'});
   bootstrapLog('permissions resolved',{role:profile.role});
   if(bootstrapState==='authorized')readyUid=user.uid;

@@ -81,6 +81,7 @@ function storageSandbox(data) {
   sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: "storage.js" });
+  require("./helpers/memory-business-cache.cjs")(sandbox);
   return { DB: sandbox.DB, writes, key, raw: memory.get(key) };
 }
 
@@ -100,7 +101,7 @@ test("leituras repetidas reutilizam a base em memória sem regravar localStorage
   );
 });
 
-test("alteração persiste uma vez e troca de empresa invalida o cache", () => {
+test("alteração persiste uma vez e troca de empresa invalida o cache", async () => {
   const environment = storageSandbox(fixture(20, 40));
   environment.DB.carregar();
   environment.DB.alterar((data) => {
@@ -108,9 +109,9 @@ test("alteração persiste uma vez e troca de empresa invalida o cache", () => {
   });
   assert.equal(environment.writes.filter((key) => key === environment.key).length, 1);
 
-  environment.DB.useBusiness("biz_other_company");
+  await environment.DB.useBusiness("biz_other_company");
   assert.equal(environment.DB.carregar().clientes.length, 0);
-  environment.DB.useBusiness("biz_boot_perf");
+  await environment.DB.useBusiness("biz_boot_perf");
   assert.equal(environment.DB.carregar().clientes.length, 20);
   assert.equal(environment.DB.carregar().config.telefone, "17999999999");
 });

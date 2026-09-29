@@ -59,6 +59,8 @@
   <script src="../js/phone.js"></script>
   <script src="../js/team-access.js"></script>
   <script src="../js/storage.js"></script>
+  <script src="../js/local-records.js"></script>
+  <script src="../js/business-cache.js"></script>
   <script src="../js/operation-mode.js"></script>
   <script src="../js/backup.js"></script>
   <script src="../js/clientes.js"></script>
@@ -97,8 +99,9 @@
   <script src="../js/desktop-sales.js"></script>
   <script src="../js/desktop-settings.js"></script>
   <script>
+    window.__fixtureReady = (async () => {
     const now = Date.now(), iso = days => new Date(now - days * 86400000).toISOString();
-    DB.useBusiness("desktop-shell-fixture");
+    await DB.useBusiness("desktop-shell-fixture");
     DB.alterar(data => {
       data.config.nome = "Empresa fixture";
       data.config.operation = { operationMode: "physical_store", creditMode: "enabled", operationOnboardingCompleted: true, modules: { inventory: true, crm: true, creditSales: true } };
@@ -136,6 +139,8 @@
       setScreen() {}, subscribe() { return () => {}; },
     };
     window.FirebaseAuthActions = { signOut() {} };
+    await DB.flush();
+    })();
   </script>
   <script src="../js/app.js"></script>
   <script src="../js/client-cloud-pagination.js"></script>
@@ -151,6 +156,7 @@
       return { route, actualRoute: app.dataset.route || null, width: innerWidth, dataCounts: { clients: db.clientes?.length || 0, products: db.produtos?.length || 0, sales: db.vendas?.length || 0 }, appChildren: app.children.length, appHtmlLength: app.innerHTML.length, appDisplay: style.display, appVisibility: style.visibility, appOpacity: style.opacity, appPointerEvents: style.pointerEvents, appRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, dashboard: Boolean(dashboard), dashboardDisplay: dashboard ? getComputedStyle(dashboard).display : null, recovery: Boolean(app.querySelector('.boot-recovery')), centerElement: center ? `${center.tagName.toLowerCase()}${center.id ? `#${center.id}` : ""}.${[...center.classList].join(".")}` : null, pageInstance: app.dataset.pageInstance || null };
     }
     async function runAudit() {
+      await window.__fixtureReady;
       window.Checkout?.mount?.();
       dispatchEvent(new CustomEvent("firebase-auth-ready", { detail: { uid: "fixture-owner", businessId: "desktop-shell-fixture" } }));
       await delay(120);

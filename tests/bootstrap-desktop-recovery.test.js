@@ -42,12 +42,13 @@ test("leituras locais não migram nem gravam toda a base repetidamente", () => {
     storage.indexOf("const useBusiness="),
   );
   assert.match(storage, /memoryData&&memoryStorageKey===key/);
-  assert.match(storage, /if\(!bruto\|\|versaoAnterior<VERSAO\)localStorage\.setItem/);
+  assert.doesNotMatch(loadFunction, /localStorage\.setItem/);
+  assert.match(storage, /DB\.businessCache\.stage/);
   assert.doesNotMatch(loadFunction, /return salvar\(dados\)/);
 });
 
 test("pull inicial aplica coleções em um único lote local", () => {
   assert.match(sync, /function applyCloudCollectionBatch\(entries\)/);
   assert.match(sync, /pendingApplications\.push\(/);
-  assert.match(sync, /syncStep\("persisting_cloud_snapshot", \(\) => applyCloudCollectionBatch\(pendingApplications\)/);
+  assert.match(sync, /syncStep\("persisting_cloud_snapshot", async \(\) => \{ const result = applyCloudCollectionBatch\(pendingApplications\); await DB\.flush/);
 });

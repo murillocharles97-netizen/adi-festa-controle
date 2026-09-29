@@ -303,7 +303,7 @@ async function main() {
     await evaluate(cdp, `document.querySelector('#desktop-continue-sale').click()`);
     await waitFor(cdp, "!document.querySelector('#desktop-checkout-fields').hidden");
     await evaluate(cdp, `(() => { const payment=document.querySelector('#sale-payment-method'); payment.value='dinheiro'; payment.dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#sale-note').value='Venda QA PDV'; document.querySelector('#finish-sale').click(); })()`);
-    await waitFor(cdp, "DB.carregar().vendas.length===2");
+    await waitFor(cdp, "DB.carregar().vendas.length===2 && !DB.businessCache.pending() && document.querySelector('.desktop-sales-cart')?.getAttribute('aria-hidden')==='true'");
     const completion = await evaluate(cdp, `(() => { const data=DB.carregar(),sale=data.vendas.at(-1),product=data.produtos.find(item=>item.id==='p1'),variant=data.variacoesProdutos.find(item=>item.id==='v1'); return {spaceId:sale.spaceId,financialSpaceId:sale.financialSpaceId,payment:sale.formaPagamento,note:sale.observacao,itemCount:sale.itens.length,productStock:product.estoqueAtual,variantStock:variant.stock,cartClosed:document.querySelector('.desktop-sales-cart')?.getAttribute('aria-hidden')==='true'}; })()`);
     if (completion.spaceId !== 'fixture-space' || completion.financialSpaceId !== 'fixture-space' || completion.payment !== 'dinheiro' || completion.note !== 'Venda QA PDV' || completion.itemCount !== 2 || completion.productStock !== 16 || completion.variantStock !== 2 || !completion.cartClosed)
       throw Error(`Conclusão da venda inválida: ${JSON.stringify(completion)}`);

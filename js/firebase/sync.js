@@ -18,6 +18,11 @@ import {
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 
+// Compatibility API for synchronous domain code; backed by structured IDB rows.
+// All durable boundaries below await DB.flush before upload/success/cursor advance.
+const localStorage = window.DB.businessCache.keyValue;
+let lastFullPullForAudit = null;
+
 const LEGACY_QUEUE_KEY = "adiFestaFirestoreQueue_v1",
   PULL_TTL_MS = 300000,
   PROFILE_TTL_MS = 300000,
@@ -246,8 +251,8 @@ async function syncStep(stage, operation, detail = {}) {
     return result;
   } catch (error) {
     if (!error.syncDetail) error.syncDetail = {
-      stage, ...detail, code: error.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error) || error.name || "unknown",
-      message: String(error.message || "Falha sem mensagem").slice(0, 600),
+      stage, ...detail, code: error.code || (error.name === "QuotaExceededError" ? (detail.service === "IndexedDB" ? "indexeddb-quota" : "local-storage-quota") : errorCode(error) || error.name || "unknown"),
+      message: String(error.technicalMessage || error.message || "Falha sem mensagem").slice(0, 600),
       exception: error.name || "Error", at: new Date().toISOString(),
       ...(error.storageDetail ? {storage: error.storageDetail} : {}),
     };
@@ -258,7 +263,7 @@ function writeSyncTime(key, value) {
   try { localStorage.setItem(key, value); }
   catch (error) {
     // Status metadata is not business data; don't fail a completed transfer for it.
-    traceSync("status_timestamp_not_persisted", { service: "localStorage", code: error.name || "storage-error" });
+    traceSync("status_timestamp_not_persisted", { service: "IndexedDB", code: error.code || error.name || "storage-error" });
   }
 }
 function readSyncTime(key, legacyKey = "") {
@@ -283,7 +288,10 @@ const errorCode = (error) =>
   String(error?.code || "").replace("firestore/", "");
 const friendlyError = (error) =>
   ({
-    "local-storage-quota": "O armazenamento deste aparelho está cheio. Os dados locais foram preservados; veja os detalhes da sincronização.",
+    "local-storage-quota": "Não foi possível atualizar o armazenamento local da VECONI. Veja os detalhes da sincronização.",
+    "indexeddb-quota": "Não foi possível atualizar o armazenamento local da VECONI. Os dados já salvos foram preservados.",
+    "indexeddb-write-failed": "Não foi possível atualizar o armazenamento local da VECONI. Tente novamente sem fechar o aplicativo.",
+    "local-cache-conflict": "Os dados locais mudaram em outra aba. Feche a outra aba e reabra a VECONI antes de continuar.",
     "permission-denied": "Seu usuário não possui permissão.",
     unavailable: "A nuvem está temporariamente indisponível.",
     "deadline-exceeded": "A nuvem demorou demais para responder.",
@@ -298,7 +306,7 @@ const friendlyError = (error) =>
       "Venda sincronizada, mas o saldo do cliente precisa de correção.",
     "financial-reconciliation-required":
       "Venda sincronizada, mas o saldo do cliente precisa de correção.",
-  })[error?.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error)] || "Não foi possível sincronizar agora. Veja os detalhes técnicos no painel da nuvem.";
+  })[error.code || (error?.name === "QuotaExceededError" ? "local-storage-quota" : errorCode(error))] || "Não foi possível sincronizar agora. Veja os detalhes técnicos no painel da nuvem.";
 const permissionSignature = () => {
   const context = window.BusinessContext?.get?.() || {}, permissions = [...(context.permissions || [])].sort().join("|");
   let hash = 2166136261;
@@ -1611,8 +1619,8 @@ function createSaleOperation(before, after, sale) {
     { status: "local_preparing", schedule: false, source: "sale-write-ahead" });
   if (queued !== writes.length)
     throw Error("A fila da venda não foi criada por completo. Nenhuma venda foi salva.");
-  // localStorage não oferece transação entre chaves: a entrada write-ahead é
-  // durável antes do único write que publica venda, saldo e estoque locais.
+  // Queue, sale, balance and stock are staged in the same turn, then committed
+  // atomically by IndexedDB. Checkout and the uploader await DB.flush().
   DB.salvar(after);
   resumePreparedSales(sale.operationId);
   assertSaleTracked(sale);
@@ -1728,11 +1736,13 @@ function installOfflineFirstStorage() {
   if (originalAlter) return;
   originalAlter = DB.alterar.bind(DB);
   DB.alterar = function (mutator) {
-    const before = structuredClone(DB.carregar()),
-      result = originalAlter(mutator),
-      after = structuredClone(result);
+    const before = structuredClone(DB.carregar()), next = structuredClone(before);
+    mutator(next);
+    const after = DB.prepare ? DB.prepare(next) : next;
+    // Validate/stage the queue before publishing the new memory projection.
+    // Both sets of records reach the same IDB transaction at the turn boundary.
     captureChanges(before, after);
-    return result;
+    return DB.salvar(after);
   };
   DB.__firebaseSyncWrapped = true;
 }
@@ -2665,6 +2675,7 @@ async function processSyncQueue(options = {}) {
     };
   const force = Boolean(options.force);
   processingPromise = (async () => {
+    await DB.flush?.();
     if (!currentUser)
       return { sent: 0, pending: readQueue().length, errors: 0 };
     if (!navigator.onLine) {
@@ -2740,6 +2751,7 @@ async function processSyncQueue(options = {}) {
         lastAttemptAt: now(),
       };
       saveQueue(live);
+      await DB.flush?.();
       emit({
         status: "syncing",
         message: `Sincronizando ${index + 1} de ${queue.length}…`,
@@ -2847,6 +2859,7 @@ async function processSyncQueue(options = {}) {
       }
       index++;
     }
+    await DB.flush?.();
     const counts = queueCounts();
     return {
       sent,
@@ -3337,6 +3350,7 @@ function startCloudSubscriptions() {
           const time = now();
           writeSyncTime(lastSyncKey(), time);
           saveSignalVersions({ ...readSignalVersions(), ...versions });
+          await DB.flush?.();
           emit({
             status: "success",
             message: "Alterações recebidas de outro dispositivo.",
@@ -3539,7 +3553,7 @@ async function pullCloudCollections(options = {}) {
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
   }
-  received = await syncStep("persisting_cloud_snapshot", () => applyCloudCollectionBatch(pendingApplications), { service: "localStorage", collections: names, documents: documentsRead });
+  received = await syncStep("persisting_cloud_snapshot", async () => { const result = applyCloudCollectionBatch(pendingApplications); await DB.flush?.(); return result; }, { service: "IndexedDB", database: "veconi-local-records", store: "records", collections: names, documents: documentsRead });
   if (full && names.includes("clients")) {
     const clientDocuments =
         pendingApplications.find((entry) => entry.name === "clients")
@@ -3569,7 +3583,8 @@ async function pullCloudCollections(options = {}) {
       collections: initialCollections,
       documents: documentsRead,
     });
-  await syncStep("saving_pull_cursor", () => writePullState(pullState), { service: "localStorage" });
+  await syncStep("saving_pull_cursor", async () => { writePullState(pullState); await DB.flush?.(); }, { service: "IndexedDB" });
+  if (full) lastFullPullForAudit = {businessId, entries: pendingApplications};
   lastPullAt = Date.now();
   emit({
     cloudCounts: { ...state.cloudCounts },
@@ -4221,11 +4236,12 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
     unsafe,
   };
 }
-async function compareDeviceWithCloud() {
+async function compareDeviceWithCloud(options = {}) {
   state.integrityStatus = "checking";
   state.integrityFailure = null;
   try {
-    const result = await syncStep("orphan_comparison", performDeviceComparison, {service: "Firestore"});
+    const result = await syncStep("orphan_comparison", () => performDeviceComparison(options), {service: "Firestore"});
+    await DB.flush?.();
     emit({integrityStatus: "completed", integrityFailure: null});
     return result;
   } catch (error) {
@@ -4235,7 +4251,7 @@ async function compareDeviceWithCloud() {
     throw error;
   }
 }
-async function performDeviceComparison() {
+async function performDeviceComparison(options = {}) {
   await validateUser();
   if (!navigator.onLine)
     throw Object.assign(new Error("A comparação precisa de conexão com a internet."), {
@@ -4248,7 +4264,9 @@ async function performDeviceComparison() {
     raw = {};
   for (const name of AUDIT_NAMES) {
     const localItems = sourceItems(data, name),
-      remoteItems = await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"});
+      remoteItems = options.prefetched?.businessId === businessId && options.prefetched.entries.some(entry => entry.name === name)
+        ? options.prefetched.entries.find(entry => entry.name === name).documents
+        : await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"});
     raw[name] = { localItems, remoteItems };
     collections[name] = classifyCollectionAudit(
       name,
@@ -4345,7 +4363,7 @@ async function exportLocalDiagnostic() {
       auditRecord(item, "local", name),
     );
   return {
-    diagnosticVersion: 3,
+    diagnosticVersion: 4,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     projectId: PROJECT_ID,
@@ -4354,9 +4372,12 @@ async function exportLocalDiagnostic() {
       ? `${currentUser.uid.slice(0, 6)}…${currentUser.uid.slice(-4)}`
       : "—",
     role: profile.role || "",
+    auth: {authenticated: Boolean(currentUser), profileActive: profile.active === true},
     schemaVersion: 3,
     deviceId: deviceId(),
     indexedDb: await indexedDbInventory(),
+    storage: await DB.businessCache?.diagnostic?.(),
+    member: {status: window.BusinessContext?.get?.().member?.status || "unknown", spaceAccess: window.BusinessContext?.get?.().member?.spaceAccess || "unknown"},
     localCounts: Object.fromEntries(
       Object.entries(entities).map(([name, items]) => [name, items.length]),
     ),
@@ -5223,7 +5244,8 @@ async function runManualSync() {
   const context = window.BusinessContext?.get?.() || {};
   traceSync("member_state", {businessId: activeBusinessId(), role: context.role || "unknown", status: context.member?.status || "unknown", spaceAccess: context.member?.spaceAccess || "unknown"});
   if (!state.testPassed) await testFirestoreConnection();
-  const migration = await syncStep("queue_migration", migrateScopedQueueCompatibility, {service: "localStorage"});
+  await DB.flush?.();
+  const migration = await syncStep("queue_migration", migrateScopedQueueCompatibility, {service: "IndexedDB"});
   await syncStep("queue_ownership", validateQueueOwnership);
   traceSync("queue_state", queueCounts());
   const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true }), {service: "Firestore"});
@@ -5263,6 +5285,7 @@ async function runManualSync() {
     await safePublishSyncSignal(push.collections, counts.errors ? "error" : "ok");
   if (result.dataSynced) writeSyncTime(lastSyncKey(), time);
   if (complete) writeSyncTime(lastCompleteKey(), time);
+  await DB.flush?.();
   lastError = ""; lastErrorCode = "";
   traceSync("completed", {dataSynced: result.dataSynced, integrityMatches: comparison.ok, sent: push.sent, received});
   emit({
@@ -5275,6 +5298,18 @@ async function runManualSync() {
     sent: push.sent,
     received,
   });
+  // Manual audit only. Reuse this pull's server documents; never add a listener
+  // or an automatic full financial audit on each background sync.
+  if (result.dataSynced) {
+    try {
+      await compareDeviceWithCloud({prefetched: lastFullPullForAudit});
+      result.integrityStatus = "completed";
+    } catch {
+      result.integrityStatus = "failed";
+      emit({message: "Dados sincronizados. Não foi possível concluir a verificação de integridade; veja os detalhes."});
+    }
+    traceSync("completed", {dataSynced: true, integrityStatus: result.integrityStatus});
+  }
   return result;
 }
 async function runAutomaticSync() {
@@ -5308,6 +5343,7 @@ async function runAutomaticSync() {
         writeSyncTime(lastSyncKey(), time);
         writeSyncTime(lastCompleteKey(), time);
       }
+      await DB.flush?.();
       emit({
         status: complete ? "success" : counts.errors ? "error" : "waiting",
         message: complete
