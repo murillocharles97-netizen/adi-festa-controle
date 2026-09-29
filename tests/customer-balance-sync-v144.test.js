@@ -125,7 +125,7 @@ test('Nat: capturador real enfileira duas vendas consecutivas sem reutilizar sal
   assert.equal(queue.length, 2);
 });
 
-test('normalização local preserva financialVersion e metadados financeiros no reload', () => {
+test('normalização local preserva financialVersion e metadados financeiros no reload', async () => {
   const memory = new Map();
   const localStorage = {
     getItem: (key) => memory.get(key) ?? null,
@@ -142,7 +142,8 @@ test('normalização local preserva financialVersion e metadados financeiros no 
   context.window = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/storage.js', 'utf8'), context, { filename: 'storage.js' });
-  context.DB.useBusiness('adi-festa');
+  require('./helpers/memory-business-cache.cjs')(context);
+  await context.DB.useBusiness('adi-festa');
   context.DB.salvar({ config: {}, clientes: [{ id: 'anderson', nome: 'Anderson Chilli', saldo: -25, financialVersion: 3, legacyBalance: 12, financialRevision: 'op-13' }] });
   context.DB.alterar((data) => { data.clientes[0].observacoes = 'teste'; });
   const client = context.DB.carregar().clientes[0];

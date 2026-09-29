@@ -110,7 +110,7 @@
         };
       });
       assertContext(ctx);
-      if (copiedIds.length) DB.compactMessageSequences?.(copiedIds);
+      if (copiedIds.length) await DB.compactMessageSequences?.(copiedIds);
       // These keys contain only obsolete Central state, never carts or the sync queue.
       for (const storage of [localStorage, sessionStorage]) {
         for (const key of ['adiFestaMessageCenterState_v2', 'adiFestaActiveMessageSequence_v2']) storage.removeItem(key);

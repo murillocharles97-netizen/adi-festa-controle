@@ -38,15 +38,19 @@
     root
       .querySelectorAll(".close,.cancel")
       .forEach((b) => (b.onclick = Modais.fechar));
-    root.querySelector("form").onsubmit = (e) => {
+    root.querySelector("form").onsubmit = async (e) => {
       e.preventDefault();
+      const form = e.target;
+      if (form.dataset.saving) return;
+      form.dataset.saving = "1";
       try {
-        salvar(new FormData(e.target));
+        await salvar(new FormData(form));
+        await DB.flush?.();
         Modais.fechar();
         mountRoute(Router.atual());
       } catch (err) {
         toast(err.message, true);
-      }
+      } finally { delete form.dataset.saving; }
     };
     aplicarInputModes(root);
     window.lucide?.createIcons();
@@ -768,7 +772,7 @@
             abrirFormulario(
               `Receber de ${escapar(c.nome)}`,
               `<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div><div class="field"><label>Forma de pagamento</label><select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Informação opcional"></div>`,
-              (f) => {
+              async (f) => {
                 const amount = Number(f.get("valor"));
                 Fiados.receber(c.id, amount, f.get("observacao"), {
                   paymentMode:
@@ -777,6 +781,7 @@
                       : "partial",
                   paymentMethod: String(f.get("paymentMethod") || "other"),
                 });
+                await DB.flush?.();
                 toast("Pagamento registrado");
               },
               "Confirmar recebimento",
@@ -1001,7 +1006,8 @@
       if (status === "fiado" && !clienteId)
         return toast("Selecione um cliente para vender fiado", true);
       const cliente = clienteId ? Clientes.obter(clienteId) : null,
-        seguir = () => {
+        seguir = async () => {
+          try {
           const venda = Vendas.registrar({
             spaceId: activeSalesSpaceId(),
             clienteId,
@@ -1012,8 +1018,10 @@
             descontoTipo,
             appliedCampaignIds: [...appliedCampaignIds],
           });
+          await DB.flush?.();
           carrinho = [];
           Recibos.mostrar(venda, cliente);
+          } catch(error) { toast(error.message, true); }
         },
         faltas = Vendas.estoqueInsuficiente(carrinho);
       if (faltas.length) return confirmarEstoqueInsuficiente(faltas, seguir);

@@ -218,7 +218,7 @@
       if(claim.completed){stopWatching();window.Utils?.toast?.('Este pagamento já finalizou a venda.');close();return;}
       if(!claim.claimed){showFinalizationBusy(intent);return;}
       if(typeof window.Checkout?.finalizeTerminalPayment!=='function')throw new Error('O checkout ainda não está pronto para finalizar esta venda.');
-      const sale=window.Checkout.finalizeTerminalPayment(claim.intent||intent);
+      const sale=await window.Checkout.finalizeTerminalPayment(claim.intent||intent);
        await call('acknowledgeTerminalPaymentSale',{intentId:intent.id,claimToken:token,saleId:sale.id});
        claimTokens.delete(`${intent.businessId}:${intent.id}`);
       stopWatching();current=null;

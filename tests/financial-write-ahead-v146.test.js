@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const syncSource = fs.readFileSync('js/firebase/sync.js', 'utf8');
 const sourcePart = (start, end) => syncSource.slice(syncSource.indexOf(start), syncSource.indexOf(end, syncSource.indexOf(start)));
 
-function harness() {
+async function harness() {
   const memory = new Map();
   let sequence = 0;
   let failWrite = null;
@@ -68,7 +68,8 @@ function harness() {
   context.window = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/storage.js', 'utf8'), context);
-  context.DB.useBusiness('test-business');
+  require('./helpers/memory-business-cache.cjs')(context);
+  await context.DB.useBusiness('test-business');
   context.DB.salvar({ config: {}, clientes: [{ id: 'client', nome: 'Cliente', saldo: -100,
     financialVersion: 10, atualizadoEm: '2026-09-20T00:00:00.000Z' }],
   produtos: [{ id: 'product', nome: 'Serviço', preco: 20, custo: 0,
@@ -92,8 +93,8 @@ function harness() {
   return { context, memory, sale, queue, setFailure: (predicate) => { failWrite = predicate; } };
 }
 
-test('aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total aberto', () => {
-  const { context, sale, queue } = harness();
+test('aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total aberto', async () => {
+  const { context, sale, queue } = await harness();
   sale('a', 20);
   const second = sale('b', 30);
   assert.deepEqual([second.saldoAnterior, second.saldoAtual], [-120, -150]);
@@ -113,8 +114,8 @@ test('aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total abe
   assert.match(app, /window\.ClientesPage\?\.refresh\?\.\(\)/);
 });
 
-test('duas e três vendas offline mantêm snapshots, versões e uma fila por operação; recebimento mantém 110', () => {
-  const { context, sale, queue } = harness();
+test('duas e três vendas offline mantêm snapshots, versões e uma fila por operação; recebimento mantém 110', async () => {
+  const { context, sale, queue } = await harness();
   const first = sale('first', 20), second = sale('second', 30), third = sale('third', 40);
   assert.deepEqual([first.saldoAnterior, second.saldoAnterior, third.saldoAnterior], [-100, -120, -150]);
   assert.equal(context.DB.carregar().clientes[0].saldo, -190);
@@ -129,8 +130,8 @@ test('duas e três vendas offline mantêm snapshots, versões e uma fila por ope
   assert.equal(queue().length, 4);
 });
 
-test('falha ao gravar fila impede venda e saldo locais', () => {
-  const { context, sale, queue, setFailure } = harness();
+test('falha ao gravar fila impede venda e saldo locais', async () => {
+  const { context, sale, queue, setFailure } = await harness();
   setFailure((key) => key === 'test-sync-queue');
   assert.throws(() => sale('blocked', 20), /simulated storage failure/);
   assert.equal(context.DB.carregar().vendas.length, 0);
@@ -138,8 +139,8 @@ test('falha ao gravar fila impede venda e saldo locais', () => {
   assert.equal(queue().length, 0);
 });
 
-test('falha ao gravar fila impede também recebimento e preserva o saldo da venda', () => {
-  const { context, sale, queue, setFailure } = harness();
+test('falha ao gravar fila impede também recebimento e preserva o saldo da venda', async () => {
+  const { context, sale, queue, setFailure } = await harness();
   sale('credit', 20);
   setFailure((key) => key === 'test-sync-queue');
   assert.throws(() => context.Fiados.receber('client', 10, 'Parcial',
@@ -149,8 +150,8 @@ test('falha ao gravar fila impede também recebimento e preserva o saldo da vend
   assert.equal(queue().length, 1);
 });
 
-test('falha após preparar fila preserva operação para diagnóstico, sem enviar venda inexistente', () => {
-  const { context, memory, sale, queue, setFailure } = harness();
+test('falha após preparar fila preserva operação para diagnóstico, sem enviar venda inexistente', async () => {
+  const { context, memory, sale, queue, setFailure } = await harness();
   const dataKey = [...memory.keys()].find((key) => key.includes('DB') && key !== 'test-sync-queue');
   assert.ok(dataKey);
   setFailure((key) => key === dataKey);
@@ -166,8 +167,8 @@ test('falha após preparar fila preserva operação para diagnóstico, sem envia
   assert.equal(context.DB.carregar().clientes[0].saldo, -120);
 });
 
-test('queda entre persistir dados e ativar fila retoma a operação existente sem duplicar', () => {
-  const { context, sale, queue, setFailure } = harness();
+test('queda entre persistir dados e ativar fila retoma a operação existente sem duplicar', async () => {
+  const { context, sale, queue, setFailure } = await harness();
   let queueWrites = 0;
   setFailure((key) => key === 'test-sync-queue' && ++queueWrites === 2);
   assert.throws(() => sale('restart', 20), /simulated storage failure/);
@@ -180,8 +181,8 @@ test('queda entre persistir dados e ativar fila retoma a operação existente se
   assert.equal(context.DB.carregar().vendas.length, 1);
 });
 
-test('fila ilegível bloqueia nova venda sem sobrescrever o registro corrompido', () => {
-  const { context, memory, sale } = harness();
+test('fila ilegível bloqueia nova venda sem sobrescrever o registro corrompido', async () => {
+  const { context, memory, sale } = await harness();
   memory.set('test-sync-queue', '{broken');
   assert.throws(() => sale('corrupt', 20), /fila local está corrompida/);
   assert.equal(memory.get('test-sync-queue'), '{broken');
@@ -190,8 +191,8 @@ test('fila ilegível bloqueia nova venda sem sobrescrever o registro corrompido'
   assert.equal(vm.runInContext('queueCounts().total', context), 1);
 });
 
-test('detecção local assinala venda sem fila mesmo quando pendentes chega a zero', () => {
-  const { context, memory, sale } = harness();
+test('detecção local assinala venda sem fila mesmo quando pendentes chega a zero', async () => {
+  const { context, memory, sale } = await harness();
   sale('orphan', 20);
   memory.set('test-sync-queue', '[]');
   assert.equal(vm.runInContext('queueCounts().pending', context), 0);
@@ -200,7 +201,7 @@ test('detecção local assinala venda sem fila mesmo quando pendentes chega a ze
   assert.equal(integrity.localWithoutQueue[0].saleId, 'orphan');
 });
 
-test('envio ignora preparação e a tela diferencia órfãs de zero pendentes', () => {
+test('envio ignora preparação e a tela diferencia órfãs de zero pendentes', async () => {
   assert.match(syncSource, /if \(queued\.status === "local_preparing"\) continue/);
   assert.match(syncSource, /orphanOperations: saleIntegrity\.count \+ paymentIntegrity\.count/);
   const ui = fs.readFileSync('js/firebase/firebase-ui.js', 'utf8');

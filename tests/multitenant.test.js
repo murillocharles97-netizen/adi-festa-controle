@@ -1,3 +1,4 @@
+require('node:test')('multitenant isolation', async () => {
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
@@ -26,16 +27,17 @@ context.window=context;
 vm.createContext(context);
 vm.runInContext(storageSource,context,{filename:'storage.js'});
 
-context.DB.useBusiness('biz_empresa_a');
+require('./helpers/memory-business-cache.cjs')(context);
+await context.DB.useBusiness('biz_empresa_a');
 context.DB.alterar(data=>{
   data.config.nome='Empresa A';
   data.clientes.push({id:'cliente-a',nome:'Somente A',saldo:0});
 });
-context.DB.useBusiness('biz_empresa_b');
+await context.DB.useBusiness('biz_empresa_b');
 assert.equal(context.DB.carregar().clientes.length,0);
 assert.notEqual(context.DB.carregar().config.nome,'Empresa A');
 context.DB.alterar(data=>data.produtos.push({id:'produto-b',nome:'Somente B'}));
-context.DB.useBusiness('biz_empresa_a');
+await context.DB.useBusiness('biz_empresa_a');
 assert.equal(context.DB.carregar().clientes[0].id,'cliente-a');
 assert.equal(context.DB.carregar().produtos.length,0);
 assert.ok(memory.has('adiFestaDB_v1:biz_empresa_a'));
@@ -101,3 +103,5 @@ assert.equal(PLANS.internal.limits.clients,null);
 assert.equal(PLANS.internal.unlimited,true);
 
 console.log('multitenant.test.js: OK');
+
+});

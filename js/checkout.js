@@ -1006,6 +1006,7 @@ window.Checkout = (() => {
               await window.SyncFirebase?.prepareCustomerForSale?.(clienteId);
             traceSale("[SALE] local write started", { operationId: attempt.operationId });
             sale = Repositories.saleRepository().create(saleDraft);
+            await DB.flush?.();
             if (status === "fiado" && navigator.onLine !== false)
               sale = await window.SyncFirebase.confirmCreditSale(sale);
             if (status === "fiado" && sale.status !== "fiado")
@@ -1155,7 +1156,7 @@ window.Checkout = (() => {
     document.body.classList.remove("sale-sheet-open");
     return true;
   }
-  function finalizeTerminalPayment(intent) {
+  async function finalizeTerminalPayment(intent) {
     if (!intent?.saleDraft || intent.status !== "approved")
       throw Error("Pagamento ainda não foi aprovado.");
     const existing = Vendas.listar().find(
@@ -1181,6 +1182,7 @@ window.Checkout = (() => {
         providerOrderId: intent.providerOrderId || null,
       },
     });
+    await DB.flush?.();
     cart = [];
     selectedCampaignIds.clear();
     manual = false;

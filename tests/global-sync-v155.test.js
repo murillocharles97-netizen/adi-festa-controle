@@ -6,7 +6,7 @@ const source = fs.readFileSync('js/firebase/sync.js', 'utf8');
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
 function runtime(options={}) {
   const writes=[], reports=[], trace=[];
-  const context={console:{info(){},error(){}}, location:{hostname:'localhost'}, Date,
+  const context={DB:{flush:async()=>{}},lastFullPullForAudit:null,console:{info(){},error(){}}, location:{hostname:'localhost'}, Date,
     window:{BusinessContext:{get:()=>({role:'owner',member:{status:'active',spaceAccess:'all'}})}},
     navigator:{onLine:options.online!==false}, auth:{currentUser:{uid:'qa-owner'}},
     state:{testPassed:true,syncTrace:[],lastSync:'previous',lastCompleteSync:'previous'},

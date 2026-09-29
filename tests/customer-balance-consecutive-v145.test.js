@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 const syncSource = fs.readFileSync('js/firebase/sync.js', 'utf8');
 
-function harness(initialDebt = 100) {
+async function harness(initialDebt = 100) {
   const memory = new Map();
   const queue = [];
   let sequence = 0;
@@ -31,7 +31,8 @@ function harness(initialDebt = 100) {
   context.window = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/storage.js', 'utf8'), context);
-  context.DB.useBusiness('adi-festa');
+  require('./helpers/memory-business-cache.cjs')(context);
+  await context.DB.useBusiness('adi-festa');
   context.DB.salvar({ config: {}, clientes: [{ id: 'nat', nome: 'Nat Stanley', saldo: -initialDebt,
     financialVersion: 10, atualizadoEm: '2026-09-20T00:00:00.000Z' }],
   produtos: [{ id: 'item', nome: 'Produto', preco: 20, custo: 0, semControleEstoque: true, itemKind: 'service' }],
@@ -58,8 +59,8 @@ function harness(initialDebt = 100) {
   return { context, queue, sell };
 }
 
-test('sem reload: duas e três vendas partem do saldo produzido pela anterior, com versões N+1/N+2/N+3', () => {
-  const { context, queue, sell } = harness();
+test('sem reload: duas e três vendas partem do saldo produzido pela anterior, com versões N+1/N+2/N+3', async () => {
+  const { context, queue, sell } = await harness();
   const a = sell('a', 20);
   const b = sell('b', 30);
   const c = sell('c', 40);
@@ -74,8 +75,8 @@ test('sem reload: duas e três vendas partem do saldo produzido pela anterior, c
   assert.equal(queue.length, 3);
 });
 
-test('Nat: 312,84 + 14 + 25 = 351,84 no mesmo aparelho, WhatsApp usa os snapshots da segunda venda', () => {
-  const { context, sell } = harness(312.84);
+test('Nat: 312,84 + 14 + 25 = 351,84 no mesmo aparelho, WhatsApp usa os snapshots da segunda venda', async () => {
+  const { context, sell } = await harness(312.84);
   const a = sell('nat-a', 14);
   const b = sell('nat-b', 25);
   assert.equal(a.saldoAtual, -326.84);
@@ -90,8 +91,8 @@ test('Nat: 312,84 + 14 + 25 = 351,84 no mesmo aparelho, WhatsApp usa os snapshot
   assert.match(fs.readFileSync('js/recibos.js', 'utf8'), /Total em aberto agora:.*sale\.saldoAtual/);
 });
 
-test('offline: duas vendas mantêm projeção local e deltas distintos na fila até convergir', () => {
-  const { context, queue, sell } = harness();
+test('offline: duas vendas mantêm projeção local e deltas distintos na fila até convergir', async () => {
+  const { context, queue, sell } = await harness();
   context.navigator = { onLine: false };
   sell('offline-a', 20);
   const second = sell('offline-b', 30);
@@ -100,8 +101,8 @@ test('offline: duas vendas mantêm projeção local e deltas distintos na fila a
   assert.equal(queue.reduce((remoteCents, item) => remoteCents + item.delta, -10000), -15000);
 });
 
-test('projeção remota velha não permite segunda venda sobre saldo revertido; a primeira venda permanece', () => {
-  const { context, queue, sell } = harness(312.84);
+test('projeção remota velha não permite segunda venda sobre saldo revertido; a primeira venda permanece', async () => {
+  const { context, queue, sell } = await harness(312.84);
   sell('local-a', 14);
   context.DB.salvar({ ...context.DB.carregar(), clientes: [{ ...context.DB.carregar().clientes[0],
     saldo: -312.84, financialVersion: 10, atualizadoEm: '2026-09-20T00:00:00.000Z',
@@ -111,8 +112,8 @@ test('projeção remota velha não permite segunda venda sobre saldo revertido; 
   assert.equal(queue.length, 1);
 });
 
-test('sem interceptador de sync, venda não é considerada concluída localmente', () => {
-  const { context, sell } = harness();
+test('sem interceptador de sync, venda não é considerada concluída localmente', async () => {
+  const { context, sell } = await harness();
   context.DB.__firebaseSyncWrapped = false;
   assert.throws(() => sell('not-ready', 20), /sincronização ainda não está pronta/);
   assert.equal(context.DB.carregar().vendas.length, 0);
@@ -192,7 +193,7 @@ test('venda local recente fora da fila bloqueia novo fiado até confirmação id
   assert.doesNotThrow(() => context.assertSaleTracked(sale));
 });
 
-test('venda fiado repetida só é idempotente se a operação estiver na fila ou confirmada', () => {
+test('venda fiado repetida só é idempotente se a operação estiver na fila ou confirmada', async () => {
   const start = syncSource.indexOf('function assertSaleTracked(');
   const end = syncSource.indexOf('async function prepareCustomerForSale(', start);
   const queue = [];
@@ -242,7 +243,7 @@ test('checkout online só conclui com venda financeira confirmada e recibo usa s
   assert.equal(await context.confirmCreditSale(sale), sale);
 });
 
-test('transação corrige snapshots da venda quando outro dispositivo avançou a versão', () => {
+test('transação corrige snapshots da venda quando outro dispositivo avançou a versão', async () => {
   const start = syncSource.indexOf('function canonicalCreditSaleData(');
   const end = syncSource.indexOf('const sameFinancialMoney', start);
   const context = {
