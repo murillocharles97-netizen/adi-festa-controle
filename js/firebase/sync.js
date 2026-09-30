@@ -17,6 +17,7 @@ import {
   sanitizeForFirestore,
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
+import '../integrity.js?v=157';
 
 // Compatibility API for synchronous domain code; backed by structured IDB rows.
 // All durable boundaries below await DB.flush before upload/success/cursor advance.
@@ -701,6 +702,10 @@ const queuePreflight = (item) => {
     };
   if (!writes.length)
     return { ok: false, code: "empty-transaction", message: "A operação não possui gravações." };
+  if(writes.some(write=>{
+    const existing=window.DB?.carregar?.()?.[SOURCES[write.entityType]?.key]?.find(record=>String(record.id)===String(write.entityId));
+    return window.IntegrityAudit?.legacyFixtureIdentity(write.entityType,{...existing,...write.data,id:write.entityId},businessId);
+  }))return{ok:false,code:'legacy-fixture-upload-blocked',message:'Registro de demonstração legado: envio bloqueado. Revise somente o armazenamento local.'};
   const invalid = writes.find(
     (write) =>
       !CLOUD_NAMES.includes(write.entityType) ||
@@ -907,7 +912,7 @@ const duplicateOperationIds = (items = []) => {
     .filter(([, count]) => count > 1)
     .map(([operationId, count]) => ({ operationId, count }));
 };
-function classifyCollectionAudit(name, localItems, remoteItems, queue) {
+function classifyCollectionAudit(name, localItems, remoteItems, queue, projection = {}) {
   const localMap = new Map(),
     remoteMap = new Map(),
     queuedWrites = [];
@@ -931,6 +936,8 @@ function classifyCollectionAudit(name, localItems, remoteItems, queue) {
     onlyRemote: [],
     divergent: [],
     equal: [],
+    historicalTombstones: [],
+    representationOnly: [],
     possibleDuplicates: {
       local: duplicateOperationIds(localItems),
       remote: duplicateOperationIds(remoteItems),
@@ -953,6 +960,7 @@ function classifyCollectionAudit(name, localItems, remoteItems, queue) {
           : "";
       result.onlyLocal.push({
         ...metadata,
+        category: window.IntegrityAudit.confirmedLegacyFixture(name,item,metadata.checksum,activeBusinessId()) ? "confirmed_legacy_fixture" : "local_only",
         classification: queueMatch
           ? actualPath === canonicalPath
             ? "A"
@@ -971,10 +979,14 @@ function classifyCollectionAudit(name, localItems, remoteItems, queue) {
       continue;
     }
     const remoteMetadata = auditRecord(remote, "remote", name);
-    if (
-      metadata.checksum === remoteMetadata.checksum ||
-      String(remote.recoveryChecksum || "") === metadata.checksum
-    )
+    const semantic = window.IntegrityAudit.compare(name,item,remote,{
+      businessId: activeBusinessId(),
+      normalizePhone: window.PhoneUtils?.normalizeBrazilianPhone,
+      normalizeProductAccess: window.SpaceEngine?.normalizeProductAccess,
+      localFinancial: projection.localFinancial?.get(String(item.id)),
+      remoteFinancial: projection.remoteFinancial?.get(String(remote.id)),
+    });
+    if (semantic.equal)
       result.equal.push(metadata);
     else
       result.divergent.push({
@@ -984,11 +996,13 @@ function classifyCollectionAudit(name, localItems, remoteItems, queue) {
         local: metadata,
         remote: remoteMetadata,
         hasPendingLocal: Boolean(queueMatch),
+        fields: semantic.fields,
       });
+    if(semantic.equal&&metadata.checksum!==remoteMetadata.checksum)result.representationOnly.push({documentId:metadata.documentId,category:'representation_only',fields:semantic.representationFields});
   }
   for (const [key, item] of remoteMap)
     if (!localMap.has(key))
-      result.onlyRemote.push(auditRecord(item, "remote", name));
+      (item.deletedAt ? result.historicalTombstones : result.onlyRemote).push(auditRecord(item, "remote", name));
   return result;
 }
 async function indexedDbInventory() {
@@ -1443,6 +1457,8 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
+  if(writes.some(write=>window.IntegrityAudit?.legacyFixtureIdentity(write.entityType,write.data,activeBusinessId())))
+    throw Object.assign(Error('Registro de demonstração confirmado: envio à nuvem bloqueado.'),{code:'legacy-fixture-upload-blocked'});
   const queue = readQueueStrict(),
     businessId = activeBusinessId(),
     stableOperationId = String(operationId || crypto.randomUUID()),
@@ -4262,6 +4278,16 @@ async function performDeviceComparison(options = {}) {
     queue = readQueue(),
     collections = {},
     raw = {};
+  const protectedNames={products:'productFinancials',productVariants:'variantFinancials',sales:'saleFinancials'},projections={};
+  for(const [publicName,name] of Object.entries(protectedNames)){
+    if(!canPullSource(name))continue;
+    const prefetched=options.prefetched?.businessId===businessId?options.prefetched.entries.find(entry=>entry.name===name):null;
+    const remoteItems=prefetched?prefetched.documents:await syncStep('orphan_comparison',()=>repositories[name].listAllPaged(200),{service:'Firestore',collection:name,businessId,request:'listAllPaged'});
+    const localItems=sourceItems(data,name);
+    projections[publicName]={localFinancial:new Map(localItems.map(x=>[String(x.id),x])),remoteFinancial:new Map(remoteItems.map(x=>[String(x.id),x]))};
+    raw[name]={localItems,remoteItems};
+    collections[name]=classifyCollectionAudit(name,localItems,remoteItems,queue);
+  }
   for (const name of AUDIT_NAMES) {
     const localItems = sourceItems(data, name),
       remoteItems = options.prefetched?.businessId === businessId && options.prefetched.entries.some(entry => entry.name === name)
@@ -4273,6 +4299,7 @@ async function performDeviceComparison(options = {}) {
       localItems,
       remoteItems,
       queue,
+      projections[name],
     );
   }
   const remoteFinancialEffects =
@@ -4324,6 +4351,7 @@ async function performDeviceComparison(options = {}) {
         localBalance,
         remoteBalance,
         balanceDifference: Number((localBalance - remoteBalance).toFixed(2)),
+        balanceContributions: window.IntegrityAudit.balanceContributions(data.clientes,raw.clients.remoteItems),
         possibleDuplicates: [
           ...collections.sales.possibleDuplicates.local,
           ...collections.payments.possibleDuplicates.local,
@@ -4335,6 +4363,8 @@ async function performDeviceComparison(options = {}) {
         balanceAudit,
       },
       queue: queueCounts(),
+      integrity: window.IntegrityAudit.severity(collections,balanceAudit),
+      fixtureCleanup: data.localFixtureCleanup || null,
     };
   lastDataAuditRaw = {
     businessId,
@@ -4363,7 +4393,7 @@ async function exportLocalDiagnostic() {
       auditRecord(item, "local", name),
     );
   return {
-    diagnosticVersion: 4,
+    diagnosticVersion: 5,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     projectId: PROJECT_ID,
@@ -4752,7 +4782,7 @@ async function recoverMissingNonFinancial() {
   for (const name of names) {
     const missing = new Set(
       audit.report.collections[name].onlyLocal
-        .filter((item) => item.classification === "B")
+        .filter((item) => item.classification === "B" && item.category !== "confirmed_legacy_fixture")
         .map((item) => item.documentId),
     );
     for (const item of audit.raw[name].localItems) {
@@ -5162,6 +5192,25 @@ async function refreshSafelyFromServer() {
   const received = await pullCloudCollections({ force: true, full: true });
   return { received, comparison: await compareDeviceWithCloud() };
 }
+async function cleanupConfirmedLegacyFixtures(prefetched) {
+  if(window.BusinessContext?.get?.().role!=='owner'||!originalAlter||prefetched?.businessId!==activeBusinessId())return;
+  await DB.flush?.();
+  const remote=Object.fromEntries(prefetched.entries.map(entry=>[entry.name,entry.documents]));
+  const plan=window.IntegrityAudit.fixtureCleanupPlan(DB.carregar(),remote,readQueue(),checksumValue,activeBusinessId());
+  if(!plan.rows.length)return;
+  // Exact verified legacy demo only; bypass change capture, never queue deletes.
+  // Preserve originals and all message selections/history in the same IDB commit.
+  originalAlter(data=>{
+    data.localFixtureQuarantine ||= [];
+    for(const row of plan.rows){
+      data.localFixtureQuarantine.push({id:`${row.entityType}:${row.document.id}`,entityType:row.entityType,document:row.document,quarantinedAt:now(),reason:'verified_legacy_demo_v157'});
+      data[row.key]=data[row.key].filter(item=>item.id!==row.document.id);
+    }
+    data.localFixtureCleanup={version:157,at:now(),removed:plan.rows.map(row=>({entityType:row.entityType,documentId:row.document.id})),blocked:plan.blocked,cloudWrites:0,originalsPreserved:true,messageHistoryPreserved:true};
+  });
+  await DB.flush?.();
+  traceSync('legacy_fixture_quarantine',{removed:plan.rows.length,cloudWrites:0,service:'IndexedDB'});
+}
 async function compareLocalAndCloud() {
   const local = localSummary(),
     remote = {
@@ -5194,7 +5243,9 @@ function describeSyncResult(result = {}) {
   const pending = Number(result.pending || 0),
     errors = Number(result.errors || 0),
     sent = Number(result.sent || 0);
-  if (result.complete) return "Todos os dados estão sincronizados.";
+  if(result.dataSynced&&result.integrityStatus==='failed')return 'Dados sincronizados. Não foi possível concluir a verificação de integridade; veja os detalhes.';
+  if(result.dataSynced&&result.integrity?.actionable)return `Sincronizado com sucesso. ${result.integrity.level==='CRITICO'?'Integridade crítica':'Integridade requer atenção'}: veja os registros e motivos. Nenhum reparo financeiro foi aplicado.`;
+  if(result.complete)return result.integrity?.level==='INFORMATIVO'?'Sincronizado com sucesso. Alguns registros históricos foram analisados.':'Todos os dados estão sincronizados.';
   if (result.dataSynced && result.comparison && !result.comparison.ok)
     return "Dados atualizados. A comparação de integridade identificou diferenças; veja os detalhes antes de qualquer correção.";
   if (sent && result.errorBreakdown?.permission)
@@ -5264,10 +5315,12 @@ async function runManualSync() {
     emit({ status: "error", message: describeSyncResult(result) });
     return result;
   }
-  const received = await syncStep("downloading_changes", () => pullCloudCollections({ force: true, full: true })),
+  const received = await syncStep("downloading_changes", () => pullCloudCollections({ force: true, full: true }));
+  await cleanupConfirmedLegacyFixtures(lastFullPullForAudit);
+  const
     comparison = await compareLocalAndCloud(),
     counts = queueCounts(),
-    complete = counts.total === 0 && counts.errors === 0 && comparison.ok,
+    complete = counts.total === 0 && counts.errors === 0,
     time = now(),
     result = {
       ...push,
@@ -5287,7 +5340,7 @@ async function runManualSync() {
   if (complete) writeSyncTime(lastCompleteKey(), time);
   await DB.flush?.();
   lastError = ""; lastErrorCode = "";
-  traceSync("completed", {dataSynced: result.dataSynced, integrityMatches: comparison.ok, sent: push.sent, received});
+  traceSync("data_sync_completed", {dataSynced: result.dataSynced, countSummariesMatch: comparison.ok, sent: push.sent, received});
   emit({
     status: complete ? "success" : "error",
     message: describeSyncResult(result),
@@ -5302,13 +5355,14 @@ async function runManualSync() {
   // or an automatic full financial audit on each background sync.
   if (result.dataSynced) {
     try {
-      await compareDeviceWithCloud({prefetched: lastFullPullForAudit});
+      const audit=await compareDeviceWithCloud({prefetched: lastFullPullForAudit});
+      result.integrity=audit.integrity;
       result.integrityStatus = "completed";
     } catch {
       result.integrityStatus = "failed";
-      emit({message: "Dados sincronizados. Não foi possível concluir a verificação de integridade; veja os detalhes."});
     }
-    traceSync("completed", {dataSynced: true, integrityStatus: result.integrityStatus});
+    emit({status:result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
+    traceSync("completed", {dataSynced: true, integrityStatus: result.integrityStatus,integrityLevel:result.integrity?.level||'unknown',integrityMatches:result.integrity?!result.integrity.actionable:null});
   }
   return result;
 }

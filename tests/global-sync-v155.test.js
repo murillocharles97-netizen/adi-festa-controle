@@ -19,8 +19,9 @@ function runtime(options={}) {
     processSyncQueue:async()=>{trace.push('push');return {sent:0,collections:[]};},
     pullCloudCollections:async()=>{trace.push('pull');if(options.pullError)throw options.pullError;return 3;},
     compareLocalAndCloud:async()=>({ok:!options.divergent}),safePublishSyncSignal:async()=>{},
+    cleanupConfirmedLegacyFixtures:async()=>{},
     reportError:(error)=>{reports.push(error.syncDetail);context.state.syncFailure=error.syncDetail;},
-    performDeviceComparison:async()=>{throw Object.assign(Error('Missing permissions'),{code:'permission-denied'});},
+    performDeviceComparison:async()=>{if(options.auditError)throw Object.assign(Error('Missing permissions'),{code:'permission-denied'});return {integrity:{level:options.divergent?'ATENCAO':'OK',actionable:!!options.divergent}};},
     manualSyncPromise:null,automaticSyncPromise:null,cloudPaused:false,lastError:'',lastErrorCode:'',
   };
   vm.createContext(context);
@@ -54,15 +55,15 @@ test('erro interno de persistência não é reclassificado como falha de interne
   });
 });
 test('auditoria opcional falha sem invalidar sync concluído',async()=>{
-  const {context:c}=runtime();await c.synchronizeNow();const time=c.state.lastSync;
+  const {context:c}=runtime({auditError:true});await c.synchronizeNow();const time=c.state.lastSync;
   await assert.rejects(c.compareDeviceWithCloud());
   assert.equal(c.state.integrityStatus,'failed');assert.equal(c.state.status,'success');assert.equal(c.state.lastSync,time);
   assert.equal(c.state.syncFailure,null);
 });
 test('divergência não corrige finanças e separa dados recebidos da integridade',async()=>{
   const {context:c}=runtime({divergent:true});const result=await c.synchronizeNow();
-  assert.equal(result.dataSynced,true);assert.equal(result.complete,false);
-  assert.match(c.state.message,/integridade/);assert.notEqual(c.state.lastSync,'previous');assert.equal(c.state.lastCompleteSync,'previous');
+  assert.equal(result.dataSynced,true);assert.equal(result.complete,true);
+  assert.match(c.state.message,/Integridade/);assert.equal(result.integrity.level,'ATENCAO');assert.notEqual(c.state.lastSync,'previous');assert.notEqual(c.state.lastCompleteSync,'previous');
 });
 test('offline não inicia requests nem afirma sucesso',async()=>{
   const {context:c,trace}=runtime({online:false});assert.equal((await c.synchronizeNow()).offline,true);assert.deepEqual(trace,[]);
