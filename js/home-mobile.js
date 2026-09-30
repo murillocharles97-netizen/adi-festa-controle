@@ -38,10 +38,6 @@
     const visual=Math.min(100,Math.max(0,data.goalPercent)),reached=data.goalPercent>=100;
     return`<section class="home-goal-card ${reached?'reached':''}"><header><span>${icon('target')} ${data.isAllSpaces?'Meta geral do dia':'Meta deste espaço'}</span><strong>${data.goalPercent.toFixed(0)}%</strong></header><div class="goal-values"><strong>${money(data.sold)}</strong><span>/ ${money(data.goal)}</span></div><div class="goal-progress" aria-label="${data.goalPercent.toFixed(0)}% da meta"><span style="--goal:${visual}%"></span></div><div class="goal-footer"><p>${reached?`${icon('circle-check')} Meta atingida!`:`${icon('trending-up')} Faltam ${money(Math.max(0,data.goal-data.sold))} para bater a meta.`}</p><button type="button" data-home-goal>${reached?'Detalhes':'Editar'} ${icon('chevron-right')}</button></div></section>`
   }
-  function legacyNotice(data){
-    const count=data.unassignedLegacySales;if(!count)return'';
-    return`<aside class="space-data-notice" role="status">${icon('history')}<span><b>${count} venda${count===1?' antiga':'s antigas'} sem espaço</b><small>${data.isAllSpaces?(count===1?'Ela continua nesta visão agregada.':'Elas continuam nesta visão agregada.'):(count===1?'Ela ficou fora desta visão para não ser atribuída ao espaço errado.':'Elas ficaram fora desta visão para não serem atribuídas ao espaço errado.')}</small></span></aside>`;
-  }
   function chart(data){
     const width=640,height=150,padX=25,padTop=25,base=112,max=Math.max(...data.week.map(point=>point.value),1),step=(width-padX*2)/6;
     const points=data.week.map((point,index)=>({x:padX+step*index,y:base-(point.value/max)*(base-padTop),...point}));
@@ -50,20 +46,24 @@
   }
   function attentionItems(data){
     const list=[];
-    if(data.out.length||data.low.length)list.push({priority:data.out.length?1:4,icon:'triangle-alert',tone:data.out.length?'danger':'warning',title:'Estoque',detail:`${data.out.length?`${data.out.length} em falta`:''}${data.out.length&&data.low.length?' · ':''}${data.low.length?`${data.low.length} com estoque baixo`:''}`,action:'Ver estoque',target:'products-attention'});
-    if(data.renewals.dueToday||data.renewals.due7)list.push({priority:data.renewals.dueToday?2:4,icon:'refresh-cw',tone:data.renewals.dueToday?'danger':'blue',title:'Renovações',detail:`${data.renewals.dueToday?`${data.renewals.dueToday} vence${data.renewals.dueToday===1?'':'m'} hoje`:''}${data.renewals.dueToday&&data.renewals.due7?' · ':''}${data.renewals.due7?`${data.renewals.due7} nos próximos 7 dias`:''}`,meta:`${money(data.renewals.forecastValue)} previstos`,action:'Ver clientes',target:'clients-renewals'});
-    if(data.pendingOrders.length)list.push({priority:3,icon:'clipboard-list',tone:'blue',title:'Pedidos online',detail:`${data.pendingOrders.length} pedido${data.pendingOrders.length===1?'':'s'} aguardando`,action:'Ver pedidos',target:'orders'});
-    if(data.unassignedLegacySales)list.push({priority:3,icon:'history',tone:'warning',title:'Vendas antigas sem espaço',detail:`${data.unassignedLegacySales} venda${data.unassignedLegacySales===1?' precisa':'s precisam'} de revisão`,action:'Revisar',target:'goal'});
-    if(window.TeamAccess?.has?.('customers.receiveDebt')&&data.debtors.length)list.push({priority:4,icon:'hand-coins',tone:'danger',title:'Clientes devendo',detail:`${money(data.debt)} em aberto · ${data.debtors.length} cliente${data.debtors.length===1?'':'s'}`,action:'Cobrar',target:'clients-debt'});
-    return list.sort((a,b)=>a.priority-b.priority).slice(0,4);
+    const allowed=route=>window.TeamAccess?.canRoute?.(route)!==false;
+    if(allowed('produtos')&&data.out.length)list.push({priority:1,icon:'package-x',tone:'danger',title:'Produtos em falta',detail:`${data.out.length} produto${data.out.length===1?'':'s'} para repor`,action:'Ver estoque',target:'products-out'});
+    if(allowed('produtos')&&data.low.length)list.push({priority:4,icon:'triangle-alert',tone:'warning',title:'Estoque baixo',detail:`${data.low.length} produto${data.low.length===1?'':'s'} para revisar`,action:'Ver estoque',target:'products-low'});
+    if(allowed('clientes')&&(data.renewals.dueToday||data.renewals.due7))list.push({priority:data.renewals.dueToday?2:4,icon:'refresh-cw',tone:data.renewals.dueToday?'danger':'blue',title:'Renovações',detail:`${data.renewals.dueToday?`${data.renewals.dueToday} vence${data.renewals.dueToday===1?'':'m'} hoje`:''}${data.renewals.dueToday&&data.renewals.due7?' · ':''}${data.renewals.due7?`${data.renewals.due7} nos próximos 7 dias`:''}`,meta:`${money(data.renewals.forecastValue)} previstos`,action:'Ver clientes',target:'clients-renewals'});
+    if(allowed('pedidos')&&data.pendingOrders.length)list.push({priority:3,icon:'clipboard-list',tone:'blue',title:'Pedidos online',detail:`${data.pendingOrders.length} pedido${data.pendingOrders.length===1?'':'s'} aguardando`,action:'Ver pedidos',target:'orders'});
+    // Unassigned historical sales are not an operational task. Never point them
+    // at the goal editor or change their financial/space attribution here.
+    if(allowed('clientes')&&window.TeamAccess?.has?.('customers.receiveDebt')&&data.debtors.length)list.push({priority:4,icon:'hand-coins',tone:'danger',title:'Clientes devendo',detail:`${money(data.debt)} em aberto · ${data.debtors.length} cliente${data.debtors.length===1?'':'s'}`,action:'Cobrar',target:'clients-debt'});
+    return list.sort((a,b)=>a.priority-b.priority);
   }
   function render(){
     const data=model(),attentionList=attentionItems(data);
     const main=`<div class="home-main-metrics"><article class="sold">${icon('circle-dollar-sign')}<span><small>Vendido hoje</small><strong>${money(data.sold)}</strong>${comparison(data.sold,data.soldYesterday)}</span></article>${window.TeamAccess?.has?.('profit.view')?`<article class="profit">${icon('trending-up')}<span><small>Lucro hoje</small><strong>${money(data.profit)}</strong><em>${data.margin.toFixed(0)}% de margem</em></span></article>`:''}</div>`;
-    const secondary=`<div class="home-secondary-scroller"><article>${icon('shopping-cart')}<strong>${data.today.length}</strong><span>vendas</span></article><article>${icon('shopping-bag')}<strong>${data.items}</strong><span>itens</span></article><article>${icon('users')}<strong>${data.customers}</strong><span>clientes</span></article></div>`;
-    const attention=`<section class="home-attention"><header><h3>Atenção agora</h3>${attentionList.length?`<span>${attentionList.length}</span>`:''}</header><div>${attentionList.length?attentionList.map(item=>`<button type="button" data-home-target="${item.target}" aria-label="${esc(item.title)}: ${esc(item.detail)}"><i class="${item.tone}">${icon(item.icon)}</i><span><b>${esc(item.title)}</b><small>${esc(item.detail)}</small>${item.meta?`<em>${esc(item.meta)}</em>`:''}</span><strong><span>${esc(item.action)}</span>${icon('chevron-right')}</strong></button>`).join(''):`<p>${icon('circle-check')}<span><b>Tudo em dia por aqui.</b><small>Nenhuma ação urgente no momento.</small></span></p>`}</div></section>`;
+    const secondary=`<div class="home-secondary-scroller">${[['shopping-cart',data.today.length,'vendas'],['shopping-bag',data.items,'itens'],['users',data.customers,'clientes']].map(([symbol,value,label])=>`<article><button type="button" data-home-target="day-summary" aria-label="Ver resumo do dia: ${value} ${label}">${icon(symbol)}<strong>${value}</strong><span>${label}</span>${icon('chevron-right')}</button></article>`).join('')}</div>`;
+    const attention=`<section class="home-attention"><header><h3>Prioridades de hoje</h3>${attentionList.length?`<span>${attentionList.length}</span>`:''}</header><div>${attentionList.length?attentionList.map(item=>`<button type="button" data-home-target="${item.target}" aria-label="${esc(item.title)}: ${esc(item.detail)}"><i class="${item.tone}">${icon(item.icon)}</i><span><b>${esc(item.title)}</b><small>${esc(item.detail)}</small>${item.meta?`<em>${esc(item.meta)}</em>`:''}</span><strong><span>${esc(item.action)}</span>${icon('chevron-right')}</strong></button>`).join(''):`<p>${icon('circle-check')}<span><b>Tudo em dia por aqui.</b><small>Nenhuma prioridade disponível neste contexto.</small></span></p>`}</div></section>`;
+    const quick=`<section class="home-quick-summary"><h3>Resumo rápido</h3><div><button type="button" data-home-target="day-summary">${icon('chart-no-axes-column-increasing')}<span><small>Ticket médio do dia</small><strong>${data.today.length?money(data.sold/data.today.length):'—'}</strong></span>${icon('chevron-right')}</button><button type="button" data-home-target="week-summary">${icon('calendar-days')}<span><small>Últimos 7 dias</small><strong>${money(data.week.reduce((sum,day)=>sum+day.value,0))}</strong></span>${icon('chevron-right')}</button></div></section>`;
     const contextBar=window.SpaceContext?.renderBar?.('home')||'';
-    return`<section class="mobile-home-dashboard">${contextBar}${goalCard(data)}${main}${secondary}${attention}</section>`
+    return`<section class="mobile-home-dashboard">${contextBar}${goalCard(data)}${main}${secondary}${attention}${quick}</section>`
   }
   function goalModal(){
     if(window.SpaceContext?.openGoalEditor)return window.SpaceContext.openGoalEditor();
@@ -73,11 +73,20 @@
     window.lucide?.createIcons();
   }
   function navigateTarget(target){
+    if(target==='day-summary'||target==='week-summary')return summaryModal(target==='week-summary');
     if(target==='goal')return goalModal();
     if(target==='clients-debt'){window.ClientesMobile?.applyFilter('debito','maiorDebito');return Router.ir('clientes')}
     if(target==='clients-renewals'){window.ClientesMobile?.applyRenewalAttention?.();return Router.ir('clientes')}
     if(target==='orders')return Router.ir('pedidos');
     if(target.startsWith('products-')){const filter=target==='products-low'?'baixo':target==='products-out'?'esgotado':model().out.length?'esgotado':'baixo';window.ProdutosMobile?.applyFilter(filter,'menorEstoque');return Router.ir('produtos')}
+  }
+  function summaryModal(weekly=false){
+    const data=model(),root=$('#modal'),trigger=document.activeElement,label=window.SpaceContext?.selectionLabel?.('home')||'Espaço selecionado';
+    root.innerHTML=`<div class="modal-bg"><section class="modal-box home-summary-modal" role="dialog" aria-modal="true" aria-labelledby="home-summary-title"><header class="modal-head"><div><h3 id="home-summary-title">${weekly?'Últimos 7 dias':'Resumo de hoje'}</h3><small>${esc(label)}</small></div><button class="icon-btn" type="button" data-home-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body">${weekly?chart(data):`<dl class="home-summary-values"><dt>Vendido hoje</dt><dd>${money(data.sold)}</dd><dt>Vendas</dt><dd>${data.today.length}</dd><dt>Itens vendidos</dt><dd>${data.items}</dd><dt>Clientes identificados</dt><dd>${data.customers}</dd><dt>Ticket médio</dt><dd>${data.today.length?money(data.sold/data.today.length):'Sem vendas hoje'}</dd></dl><p>Resumo das vendas válidas de hoje no espaço selecionado. Vendas canceladas não entram nestes indicadores.</p>`}</div><footer class="modal-foot"><button class="btn btn-primary" type="button" data-home-close>Fechar</button></footer></section></div>`;
+    const close=()=>{root.innerHTML='';if(trigger?.isConnected)trigger.focus({preventScroll:true});};root.querySelectorAll('[data-home-close]').forEach(button=>button.onclick=close);
+    root.querySelector('.modal-bg').onclick=event=>{if(event.target===event.currentTarget)close()};
+    root.querySelector('.home-summary-modal').onkeydown=event=>{if(event.key==='Escape')close();if(event.key==='Tab'){const buttons=[...root.querySelectorAll('[data-home-close]')],first=buttons[0],last=buttons.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}};
+    root.querySelector('[data-home-close]').focus();window.lucide?.createIcons();
   }
   async function loadRenewalAttention(){
     if(!mq.matches||Router.atual()!=='inicio'||!window.CustomerSubscriptions?.loadHomeMetrics)return;
