@@ -76,7 +76,15 @@ async function main(){
     await page.waitForSelector('[data-team-add]');await page.click('[data-team-add]');await page.waitForSelector('.team-modal');await page.click('.team-modal [data-team-close]');await page.click('[data-team-add]');await page.waitForSelector('.team-modal');await page.click('.team-modal [data-team-close]');results.push('Financeiro / Histórico / Equipe / modal cancel-reopen');
     await page.evaluate(async()=>{await DB.flush()});await page.reload({waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.FirebaseBootstrap?.state==='authorized',{timeout:45000});
     assert.equal(await page.evaluate(()=>FirebaseSession.user.uid),uid);assert.equal(await page.evaluate(()=>DB.carregar().clientes.find(c=>c.id==='qa-c1').saldo),-104);results.push('reload session and financial cache preserved');
+    await page.evaluate(()=>SyncFirebase.synchronizeNow());
     const diagnostic=await page.evaluate(()=>SyncFirebase.exportLocalDiagnostic());assert.equal(diagnostic.storage.backend,'IndexedDB');
+    assert.equal(diagnostic.integrityStatus,'completed');
+    assert.equal(diagnostic.lastCloudComparison.integrity.actionable,false,JSON.stringify(diagnostic.lastCloudComparison.integrity.issues));
+    await page.evaluate(()=>document.querySelector('.local-badge').click());await page.waitForSelector('#cloud-panel-details');await page.click('#cloud-panel-details');
+    assert.doesNotMatch(await page.$eval('.sync-diagnostics-modal .modal-head',x=>x.textContent),/incompleta/i);
+    assert.ok(await page.$('.sync-data-state'));assert.equal(await page.$('[data-reconcile-balances]'),null);
+    await page.screenshot({path:'artifacts/v157-integrity-mobile.png',fullPage:true});
+    results.push('V157 integrity completed without false alert; no bulk financial repair button');
     assert.equal((await db.doc(`businesses/${businessId}/clients/qa-c1`).get()).data().saldo,-104);
     if(errors.length)throw Error(errors.join(' | '));
     console.log(JSON.stringify({ok:true,results,queue:diagnostic.queueCounts,storage:diagnostic.storage.backend,physicalAndroid:'pending user test',realWhatsApp:'not sent'},null,2));

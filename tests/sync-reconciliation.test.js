@@ -7,8 +7,9 @@ const desktop = fs.readFileSync("js/desktop-settings.js", "utf8");
 const mobile = fs.readFileSync("js/configuracoes-mobile.js", "utf8");
 const ui = fs.readFileSync("js/firebase/firebase-ui.js", "utf8");
 
-test("sucesso só é emitido após fila vazia, pull completo e comparação", () => {
-  assert.match(sync, /counts\.total === 0 && counts\.errors === 0 && comparison\.ok/);
+test("transferência concluída é separada da severidade da auditoria", () => {
+  assert.match(sync, /complete = counts\.total === 0 && counts\.errors === 0,/);
+  assert.match(sync, /result\.integrity=audit\.integrity/);
   assert.match(sync, /pullCloudCollections\(\{ force: true, full: true \}\)/);
   assert.match(sync, /status: complete \? "success" : "error"/);
   assert.match(sync, /if \(complete\) writeSyncTime\(lastCompleteKey\(\), time\)/);
@@ -104,7 +105,8 @@ test("reconciliação financeira usa cadeia de movimentos e prévia idempotente"
   assert.match(sync, /financial-preview-stale/);
   assert.match(sync, /reconcileFinancialBalances/);
   assert.match(sync, /balance_reconciliation/);
-  assert.match(ui, /Reconciliar saldos/);
+  assert.doesNotMatch(ui, />Reconciliar saldos<|>Corrigir tudo</);
+  assert.match(ui, /não reaplicar saldo/);
   assert.match(ui, /Aplicar somente as correções seguras/);
 });
 

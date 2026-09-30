@@ -4,8 +4,6 @@ window.DB=(()=>{
   const storageKey=()=>activePrincipal==='legacy'?`${LEGACY_KEY}:${activeBusinessId}`:`${LEGACY_KEY}:${activeBusinessId}:${activePrincipal}`;
   const legacyId=(tipo,valor)=>{let h=2166136261;for(const c of `${tipo}|${String(valor).trim().toLowerCase()}`){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return`${tipo}_${(h>>>0).toString(36)}`};
   const configBase=()=>({nome:'Adi Festa'});
-  const produtoDemo=(id,nome,preco,custo,estoqueAtual,estoqueMinimo,categoria)=>({id,nome,preco,custo,estoque:estoqueAtual,estoqueAtual,estoqueMinimo,categoria,ativo:true,criadoEm:agora(),atualizadoEm:agora()});
-  const exemplo=()=>({versao:VERSAO,config:configBase(),clientes:[{id:'c1',nome:'Mariana Silva',telefone:'(17) 99665-5784',telefone2:'',email:'',endereco:'Shopping Center',complemento:'Loja ao lado',documento:'',observacoes:'Cliente frequente',totalComprado:78,quantidadeVendas:3,saldo:-36,ultimaCompra:agora(),ativo:true,criadoEm:agora(),atualizadoEm:agora()},{id:'c2',nome:'Carlos Souza',telefone:'(17) 98888-4321',telefone2:'',email:'',endereco:'',complemento:'',documento:'',observacoes:'',totalComprado:20,quantidadeVendas:1,saldo:0,ultimaCompra:agora(),ativo:true,criadoEm:agora(),atualizadoEm:agora()}],produtos:[produtoDemo('p1','Brigadeiro gourmet',6,2.1,38,10,'Doces'),produtoDemo('p2','Brownie recheado',10,4,22,8,'Doces'),produtoDemo('p3','Bolo no pote',14,5.5,15,6,'Bolos')],vendas:[],pagamentos:[],movimentacoes:[],movimentacoesEstoque:[],cobrancas:[],messageHistory:[],messageTemplates:[],messageSequences:[]});
   const bloquearCargaAutomatica=config=>Object.assign(config,{demonstracaoRemovida:true,kyteImportacao:'Customers_20251012_20260705.csv',kyteSaldosImportacao:'Clientes.xlsx-v1',saldoCorrecoes:'confirmadas-v1',saldoNegativoEhDebito:true});
   const numero=v=>Number.isFinite(Number(v))?Number(v):0;
   const migrar=dados=>{
@@ -87,7 +85,8 @@ window.DB=(()=>{
   const restaurarBackup=d=>{validarBackup(d);return salvar(d)};
   const criarBackupCompleto=()=>{const d=criarBackup(),extra=['variacoesProdutos','contatosCliente','eventosCampanha','resgatesCampanha','alocacoesPagamento','customerSubscriptions','customerSubscriptionEvents','segmentosClientes','visitas','catalogOrders'];d.collections=[...new Set([...(d.collections||[]),...extra])];for(const key of extra)d[key]=(d[key]||[]).map(item=>({...item,operationId:item.operationId||item.id,createdAt:item.createdAt||item.criadoEm||item.data||null,updatedAt:item.updatedAt||item.atualizadoEm||item.data||null,schemaVersion:item.schemaVersion||VERSAO}));d.counts={...(d.counts||{}),variacoesProdutos:d.variacoesProdutos.length,contatos:d.contatosCliente.length,eventosCampanha:d.eventosCampanha.length,resgatesCampanha:d.resgatesCampanha.length,alocacoesPagamento:d.alocacoesPagamento.length,renovacoes:d.customerSubscriptions.length,eventosRenovacao:d.customerSubscriptionEvents.length,segmentos:d.segmentosClientes.length,visitas:d.visitas.length,pedidosOnline:d.catalogOrders.length};if(d.backupInfo)d.backupInfo.inclui=d.collections;return d};
   const limpar=()=>{invalidarCache();return salvar(vazio())};
-  const restaurar=()=>{const d=exemplo();bloquearCargaAutomatica(d.config);return salvar(d)};
+  // Demo datasets belong in isolated test fixtures, never in a production API.
+  const restaurar=()=>{throw Error('Carga de demonstração desativada. Use somente backup verificado.');};
   // IndexedDB commits use optimistic revision checks to reject stale-tab writes.
   return{prepare:normalizarParaMemoria,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,VERSAO};
 })();
