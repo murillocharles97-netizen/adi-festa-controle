@@ -6207,7 +6207,23 @@ window.AppLifecycle?.onResume?.(() => scheduleImmediate());
 window.FirestoreRepositories = repositories;
 window.dataRepository = repositories;
 window.getFirebaseDiagnostic = diagnostic;
+// A payment recovery checks the server before applying the canonical local sale.
+// Never replay stock/campaign effects when that operation already exists remotely.
+async function readIntegratedSale(intent, { flush = false } = {}) {
+  if (!currentUser || !navigator.onLine || intent.businessId !== activeBusinessId())
+    throw Error("Conecte-se à empresa do pagamento para concluir a venda.");
+  if (flush) await processSyncQueue({ force: true });
+  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", intent.saleId));
+  if (intent.businessId !== activeBusinessId()) throw Error("A empresa ativa mudou. Retome o pagamento na empresa original.");
+  if (!snapshot.exists()) return null;
+  const sale = cleanCloudItem({ id: snapshot.id, ...snapshot.data() });
+  if (sale.paymentIntentId !== intent.id || sale.operationId !== intent.finalizationOperationId)
+    throw Error("A venda existente não corresponde ao pagamento. Revisão necessária.");
+  applyCloudCollection("sales", [sale], { authoritative: true });
+  return sale;
+}
 window.SyncFirebase = {
+  readIntegratedSale,
   setUser,
   setAuthReady: (value) => emit({ authReady: Boolean(value) }),
   stop: () => setUser(null),

@@ -760,7 +760,10 @@ service cloud.firestore {
       }
       match /paymentIntents/{intentId} {
         allow get: if belongsToBusiness(businessId)
-          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'))
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view')
+            || (permissionGranted(businessId, 'sales.create')
+              && resource.data.createdByUid == request.auth.uid
+              && canAccessSpace(businessId, resource.data.spaceId)))
           && resource.data.businessId == businessId;
         allow list: if belongsToBusiness(businessId)
           && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'));
@@ -1006,6 +1009,16 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /sales/{saleId} {
+        function validIntegratedPayment(data) {
+          let integrated = data.get('formaPagamento', '') == 'cartao_presencial' || data.get('paymentIntentId', null) != null;
+          let intent = integrated ? get(/databases/$(database)/documents/businesses/$(businessId)/paymentIntents/$(data.paymentIntentId)).data : {};
+          return !integrated || (intent.businessId == businessId && intent.status == 'approved'
+            && intent.saleId == saleId && intent.spaceId == data.spaceId
+            && intent.createdByUid == data.actorUid && data.actorUid == request.auth.uid
+            && intent.finalizationOperationId == data.operationId
+            && data.status == 'pago' && data.paymentState == 'paid'
+            && math.round(data.valorFinal * 100) == intent.amountCents);
+        }
         allow read: if belongsToBusiness(businessId)
           && (
             resource == null
@@ -1016,11 +1029,15 @@ service cloud.firestore {
             )
           );
         allow create: if canWriteCollection(businessId, 'sales')
+          && validIntegratedPayment(request.resource.data)
           && request.resource.data.businessId == businessId
           && (!memberExists(businessId) || request.resource.data.get('actorUid', '') == request.auth.uid)
           && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
           && validSaleSpace(request.resource.data, businessId);
         allow update: if canWriteCollection(businessId, 'sales')
+          && resource.data.get('paymentIntentId', null) == null
+          && request.resource.data.get('paymentIntentId', null) == null
+          && request.resource.data.get('formaPagamento', '') != 'cartao_presencial'
           && (
             !memberExists(businessId)
             || (

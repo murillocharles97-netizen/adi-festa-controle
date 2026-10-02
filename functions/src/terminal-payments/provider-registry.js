@@ -3,9 +3,10 @@
 const {assertProviderContract}=require('./provider-contract');
 const {SimulatorProvider}=require('./providers/simulator-provider');
 const {CieloProvider}=require('./providers/cielo-provider');
+const {MockPaymentProvider}=require('./providers/mock-provider');
 
 class ProviderRegistry{
-  constructor(providers=[new SimulatorProvider(),new CieloProvider()]){
+  constructor(providers=[new MockPaymentProvider(),new SimulatorProvider(),new CieloProvider()]){
     this.providers=new Map(providers.map(provider=>[provider.id,assertProviderContract(provider)]));
   }
   get(id){

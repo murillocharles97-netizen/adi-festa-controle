@@ -756,6 +756,7 @@
           mercado_pago: "Mercado Pago",
           pagbank: "PagBank",
           simulator: "Simulador VECONI",
+          mock: "Terminal de teste VECONI — SIMULADOR",
         }[metadata.provider] || "Maquininha";
       const method =
         (metadata.method || metadata.paymentMethod) === "debit"

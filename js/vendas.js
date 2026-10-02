@@ -404,6 +404,8 @@ window.Vendas = (() => {
     DB.alterar((db) => {
       const venda = db.vendas[db.vendas.length - 1], actor = window.TeamAccess?.actor?.() || {};
       if (!venda) throw Error("Nenhuma venda para desfazer");
+      if (venda.paymentIntentId || venda.formaPagamento === "cartao_presencial")
+        throw Error("Pagamento integrado requer estorno. Estorno não disponível nesta V1.");
       if (Date.now() - new Date(venda.data).getTime() > 5 * 60 * 1000)
         throw Error("O prazo de 5 minutos para desfazer terminou");
       if (!options.administrativeResolution)

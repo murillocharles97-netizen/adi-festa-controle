@@ -23,7 +23,7 @@
   function paymentChips(summary){
     if($('.mobile-payment-chips',summary))return;
     const select=$('#sale-payment-method',summary),field=select?.closest('.field');
-    field?.insertAdjacentHTML('beforebegin',`<section class="mobile-payment"><h4>Forma de pagamento</h4><div class="mobile-payment-chips"><button class="active" data-payment="pix">${icon('diamond')} Pix</button><button data-payment="dinheiro">${icon('banknote')} Dinheiro</button><button data-payment="cartao">${icon('credit-card')} Cartão</button><button data-payment="cartao_presencial">${icon('contactless')} Maquininha</button><button data-payment="fiado">${icon('receipt-text')} Fiado</button></div><div class="mobile-payment-note">${icon('circle-check')}<span><b>Pagamento à vista</b><small>Valor será recebido agora.</small></span></div></section>`);
+    field?.insertAdjacentHTML('beforebegin',`<section class="mobile-payment"><h4>Forma de pagamento</h4><div class="mobile-payment-chips"><button class="active" data-payment="pix">${icon('diamond')} Pix</button><button data-payment="dinheiro">${icon('banknote')} Dinheiro</button><button data-payment="cartao">${icon('credit-card')} Cartão</button><button data-payment="cartao_presencial" hidden disabled>${icon('contactless')} Maquininha integrada</button><button data-payment="fiado">${icon('receipt-text')} Fiado</button></div><div class="mobile-payment-note">${icon('circle-check')}<span><b>Pagamento à vista</b><small>Valor será recebido agora.</small></span></div></section>`);
     field?.classList.add('mobile-hidden-payment-select');
   }
   function summaryTools(summary){

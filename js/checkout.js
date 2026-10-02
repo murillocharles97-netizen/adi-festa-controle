@@ -136,7 +136,7 @@ window.Checkout = (() => {
         recentProducts,
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial">Cartão na maquininha</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -522,6 +522,7 @@ window.Checkout = (() => {
         discountKind,
         manual,
         selectedCampaignIds: [...selectedCampaignIds],
+        paymentAttemptId: activeAttempt?.saleId || null,
         details: captureDraftDetails(),
         savedAt: new Date().toISOString(),
       }));
@@ -549,6 +550,7 @@ window.Checkout = (() => {
       manual = Boolean(saved.manual);
       selectedCampaignIds = new Set(saved.selectedCampaignIds || []);
       draftDetails = { ...draftDetails, ...(saved.details || {}) };
+      if (saved.paymentAttemptId) activeAttempt = { saleId: saved.paymentAttemptId, restored: true };
       if (cart.length) traceSale("[CART] draft restored", { items: cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0) });
     } catch (error) {
       try { sessionStorage.removeItem(key); } catch {}
@@ -940,6 +942,11 @@ window.Checkout = (() => {
         return false;
       };
       if (!cart.length) return validationError("Adicione ao menos um produto.");
+      const pendingTerminal = window.TerminalPayments?.getCurrent?.();
+      if (pendingTerminal && (window.TerminalPayments.ACTIVE_STATUSES.has(pendingTerminal.status) || pendingTerminal.status === "approved")) {
+        void window.TerminalPayments.recover();
+        return validationError("Existe um pagamento em andamento. Confirme o resultado antes de concluir outra venda.");
+      }
       let spaceId;
       try {
         spaceId = window.SpaceContext?.requireSalesSpace?.() || "";
@@ -960,10 +967,11 @@ window.Checkout = (() => {
         return validationError("Revise as renovações: o cliente da sacola foi alterado.");
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
-        attempt = activeAttempt?.fingerprint === fingerprint ? activeAttempt : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
+        attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           activeAttempt = attempt;
+          saveDraft();
           finishing = true;
           setSubmissionState("processing", navigator.onLine === false ? "Salvando neste aparelho. A sincronização ocorrerá quando a conexão voltar." : "Concluindo a venda…");
           const saleDraft = {
@@ -1117,6 +1125,7 @@ window.Checkout = (() => {
   }
 
   function openCartSurface() {
+    void window.TerminalPayments?.refreshAvailability?.(selectedSalesSpaceId());
     traceSale("[CART] checkout opened", { items: cartCount(), spaceId: selectedSalesSpaceId() });
     if (window.DesktopSales?.isDesktop?.())
       return window.DesktopSales.openCart?.();
@@ -1157,22 +1166,30 @@ window.Checkout = (() => {
     return true;
   }
   async function finalizeTerminalPayment(intent) {
+    const verified = await window.FirebaseCallable("getTerminalPaymentStatus", { businessId: intent.businessId, intentId: intent.id });
+    intent = verified?.data?.intent;
     if (!intent?.saleDraft || intent.status !== "approved")
       throw Error("Pagamento ainda não foi aprovado.");
-    const existing = Vendas.listar().find(
+    const remote = await window.SyncFirebase.readIntegratedSale(intent);
+    if (intent.businessId !== DB.getBusinessId() || intent.createdByUid !== window.FirebaseSession?.user?.uid)
+      throw Error("Retorne à empresa e ao usuário desta cobrança para finalizar.");
+    const existing = remote || Vendas.listar().find(
       (sale) => sale.operationId === intent.finalizationOperationId,
     );
     const sale = existing || Repositories.saleRepository().create({
       ...intent.saleDraft,
+      businessId: intent.businessId,
       id: intent.saleId,
       status: "pago",
       operationId: intent.finalizationOperationId,
       formaPagamento: "cartao_presencial",
       paymentIntentId: intent.id,
+      terminalId: intent.terminalId,
       paymentState: "paid",
       receivableStatus: "pending_settlement",
       paymentMetadata: {
         channel: "card_present",
+        isTest: intent.isTest === true,
         provider: intent.provider,
         terminalId: intent.terminalId,
         terminalNickname: intent.terminalNickname,
@@ -1183,6 +1200,14 @@ window.Checkout = (() => {
       },
     });
     await DB.flush?.();
+    const confirmed = await window.SyncFirebase.readIntegratedSale(intent, { flush: true });
+    if (!confirmed) throw Error("Venda aguardando confirmação na nuvem. Não cobre novamente.");
+    return confirmed;
+  }
+  function completeTerminalPayment(sale) {
+    // Clear only the cart that produced this attempt; recovery must not discard
+    // another cart assembled while a previous approved payment was pending.
+    if (activeAttempt?.saleId === sale.id || !cart.length) {
     cart = [];
     selectedCampaignIds.clear();
     manual = false;
@@ -1191,12 +1216,26 @@ window.Checkout = (() => {
     activeAttempt = null;
     draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
     clearDraft();
+    }
     window.CheckoutPaymentMethod = "cartao_presencial";
+    setSubmissionState("success", "Venda concluída com sucesso.");
+    refreshClients();
     const client = sale.clienteId ? clients().getById(sale.clienteId) : null;
     closeCartSurface({ immediate: true });
     traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId, terminal: true });
     Recibos.mostrar(sale, client);
     return sale;
+  }
+  function restoreTerminalDraft(intent) {
+    const draft = intent?.saleDraft;
+    if (!draft || cart.length || !draft.itens?.length) return;
+    cart = structuredClone(draft.itens);
+    manual = Boolean(draft.ajusteManual);
+    discountKind = draft.descontoTipo || null;
+    selectedCampaignIds = new Set(draft.appliedCampaignIds || []);
+    activeAttempt = { saleId: intent.saleId || draft.id, operationId: intent.finalizationOperationId, restored: true };
+    draftDetails = { ...draftDetails, clientId: draft.clienteId || "", paymentMethod: "cartao_presencial", note: draft.observacao || "" };
+    saveDraft();
   }
   function prepareRenewal(subscriptionId) {
     const subscription = CustomerSubscriptions.get(subscriptionId);
@@ -1248,6 +1287,8 @@ window.Checkout = (() => {
     refreshClients,
     resumeAfterReconciliation,
     finalizeTerminalPayment,
+    completeTerminalPayment,
+    restoreTerminalDraft,
     cartCount,
     state: () => ({ finishing, items: cartCount(), activeOperationId: activeAttempt?.operationId || null, draftKey: draftKey() }),
   };

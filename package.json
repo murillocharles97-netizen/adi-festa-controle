@@ -20,6 +20,7 @@
     "test:pwa-branding": "node scripts/audit-veconi-pwa-v133.cjs",
     "test:subscription-browser": "node scripts/audit-subscription-pix.cjs && node scripts/audit-subscription-card-monthly.cjs",
     "test:terminal-payments-browser": "node scripts/audit-terminal-payments-v138.cjs",
+    "test:payment-engine-v1": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/terminal-payment-functions-smoke.js && node scripts/audit-payment-engine-v1.cjs\"",
     "test:global-spaces": "node --test tests/global-spaces-v1.test.js tests/global-space-persistence-v139.test.js tests/home-spaces-context.test.js",
     "test:global-spaces-browser": "node scripts/audit-global-spaces-v139.cjs",
     "test:global-space-name-browser": "node scripts/audit-global-space-canonical-name-v143.cjs",

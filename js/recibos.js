@@ -38,7 +38,7 @@ window.Modais=(()=>{
   function terminalPaymentMarkup(sale){
     const payment=sale?.paymentMetadata;
     if(!payment||payment.channel!=='card_present')return'';
-    const provider=({cielo:'Cielo',mercado_pago:'Mercado Pago',pagbank:'PagBank',simulator:'Simulador VECONI'})[payment.provider]||payment.provider||'Maquininha',method=payment.method==='debit'?'Débito':'Crédito',installments=payment.method==='credit'?` · ${Number(payment.installments||1)}x`:'';
+    const provider=({cielo:'Cielo',mercado_pago:'Mercado Pago',pagbank:'PagBank',mock:'SIMULADOR VECONI',simulator:'Simulador VECONI'})[payment.provider]||payment.provider||'Maquininha',method=payment.method==='debit'?'Débito':'Crédito',installments=payment.method==='credit'?` · ${Number(payment.installments||1)}x`:'';
     return`<div class="sale-terminal-payment-meta"><span>${escapar(provider)} · ${escapar(payment.terminalNickname||'Terminal')}</span><small>${method}${installments}${payment.providerPaymentId?` · Transação ${escapar(payment.providerPaymentId)}`:''}</small></div>`;
   }
   function publicSaleNumber(sale){
@@ -116,7 +116,9 @@ window.Modais=(()=>{
     Utils.toast('Mensagem copiada');
   }
   function statusMarkup(sale){
-    const pending=!navigator.onLine||Number(window.SyncFirebaseState?.queueTotal||0)>0;
+    const pending=typeof window.SyncFirebase?.isSalePending==='function'
+      ? window.SyncFirebase.isSalePending(sale)
+      : !navigator.onLine||Number(window.SyncFirebaseState?.queueTotal||0)>0;
     const checks=[['circle-check','Venda registrada'],['package-check','Estoque atualizado'],sale.status==='fiado'?['wallet-cards','Saldo atualizado']:null,(sale.campaignUpdates||[]).length?['gift','Campanhas processadas']:null].filter(Boolean);
     return`<section class="sale-operation-status">${checks.map(([icon,label])=>`<span><i data-lucide="${icon}"></i>${label}</span>`).join('')}${pending?'<p><i data-lucide="cloud-off"></i> Venda salva neste aparelho e aguardando sincronização.</p>':''}</section>`;
   }
