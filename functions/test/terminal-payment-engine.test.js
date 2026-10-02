@@ -8,6 +8,36 @@ const {CieloProvider}=require('../src/terminal-payments/providers/cielo-provider
 const {ProviderRegistry}=require('../src/terminal-payments/provider-registry');
 const {normalizeSaleDraft,validatePaymentInput,publicIntent,saleStatusForPayment}=require('../src/terminal-payments/terminal-payment-service');
 const {isTerminalPaymentSale}=require('../src/services/financial-income-service');
+const {MockPaymentProvider,MOCK_CAPABILITIES}=require('../src/terminal-payments/providers/mock-provider');
+const {assertTransition}=require('../src/terminal-payments/payment-state-machine');
+
+test('mock waits for explicit action, normalizes outcomes and never implements settlement/refund',async()=>{
+  const mock=new MockPaymentProvider();assertProviderContract(mock);
+  assert.equal(new ProviderRegistry().get('mock').id,'mock');
+  assert.equal((await mock.dispatchPayment({})).status,'processing');
+  for(const [scenario,status] of Object.entries({approved:'approved',declined:'declined',timeout:'pending_confirmation',cancelled:'cancelled'}))assert.equal((await mock.dispatchPayment({scenario})).status,status);
+  await assert.rejects(mock.dispatchPayment({scenario:'network_error'}),{code:'simulated_network_error'});
+  await assert.rejects(mock.refundPayment(),/Estorno não implementado/);
+  assert.equal(MOCK_CAPABILITIES.supportsInstallments,false);assert.equal(MOCK_CAPABILITIES.supportsRefund,false);
+});
+test('explicit state machine rejects terminal-state resurrection and supports unknown recovery',()=>{
+  for(const pair of [['created','awaiting_terminal'],['awaiting_terminal','processing'],['processing','pending_confirmation'],['pending_confirmation','approved'],['approved','approved']])assert.doesNotThrow(()=>assertTransition(...pair));
+  for(const pair of [['declined','approved'],['cancelled','processing'],['approved','declined'],['created','approved']])assert.throws(()=>assertTransition(...pair));
+});
+
+test('production mock cannot be enabled by request data or a global simulator flag',async()=>{
+  const {terminalPaymentService}=require('../src/terminal-payments/terminal-payment-service');
+  const previous=process.env.FUNCTIONS_EMULATOR;delete process.env.FUNCTIONS_EMULATOR;
+  const value={uid:'owner',profile:{role:'owner'},member:{role:'owner',status:'active',spaceAccess:'all'},business:{active:true,subscription:{planId:'premium'}}};
+  const db={collection:()=>({get:async()=>({docs:[]})})};
+  const service=terminalPaymentService(db,{permissionService:()=>({authenticatedContext:async()=>value}),simulatorEnabled:()=>true});
+  try{
+    assert.equal((await service.getSetup({data:{businessId:'merchant-prod',mock:true,integratedPaymentsV1:true}})).simulatorAllowed,false);
+    await assert.rejects(service.saveTerminal({data:{businessId:'merchant-prod',terminal:{provider:'mock'}}}),error=>error.code==='permission-denied');
+    value.business.paymentFeatures={integratedPaymentsV1:true,mock:true};
+    assert.equal((await service.getSetup({data:{businessId:'merchant-prod'}})).simulatorAllowed,true);
+  }finally{if(previous===undefined)delete process.env.FUNCTIONS_EMULATOR;else process.env.FUNCTIONS_EMULATOR=previous;}
+});
 
 test('contrato comum cobre ciclo completo e providers registrados o implementam',()=>{
   assert.deepEqual(REQUIRED_METHODS,['createPayment','getPaymentStatus','cancelPayment','refundPayment','handleWebhook','pairTerminal','listTerminals','healthCheck']);

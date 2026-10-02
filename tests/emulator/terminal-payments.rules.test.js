@@ -55,3 +55,33 @@ test('configuração segura é visível só para admin da própria empresa',asyn
   await assertFails(getDoc(doc(cashier,'businesses',businessA,'paymentProviderConfigs','simulator')));
   await assertFails(getDoc(doc(other,'businesses',businessA,'paymentProviderConfigs','simulator')));
 });
+
+test('integrated sale requires server-approved matching intent and cannot be cancelled locally',async()=>{
+  const db=env.authenticatedContext('owner-a').firestore(),saleId='integrated-secure-sale',spaceId='space-terminal-a';
+  const sale={id:saleId,businessId:businessA,spaceId,financialSpaceId:spaceId,actorUid:'owner-a',operationId:'terminal_operation_safe',formaPagamento:'cartao_presencial',paymentIntentId:'approved-secure',status:'pago',paymentState:'paid',valorFinal:25};
+  await env.withSecurityRulesDisabled(async context=>{
+    const admin=context.firestore();
+    await setDoc(doc(admin,'financialSpaces',spaceId),{id:spaceId,businessId:businessA,linkedBusinessId:businessA,type:'business',active:true,status:'active',capabilities:{sales:true}});
+    await setDoc(doc(admin,'businesses',businessA,'paymentIntents','approved-secure'),{businessId:businessA,saleId,spaceId,createdByUid:'owner-a',status:'processing',amountCents:2500,finalizationOperationId:sale.operationId});
+  });
+  await assertFails(setDoc(doc(db,'businesses',businessA,'sales',saleId),sale));
+  await env.withSecurityRulesDisabled(context=>updateDoc(doc(context.firestore(),'businesses',businessA,'paymentIntents','approved-secure'),{status:'approved'}));
+  await assertFails(setDoc(doc(db,'businesses',businessA,'sales',saleId),{...sale,valorFinal:1}));
+  await assertFails(setDoc(doc(db,'businesses',businessA,'sales','different-sale'),{...sale,id:'different-sale'}));
+  await assertSucceeds(setDoc(doc(db,'businesses',businessA,'sales',saleId),sale));
+  await assertFails(updateDoc(doc(db,'businesses',businessA,'sales',saleId),{status:'cancelled'}));
+});
+
+test('Equipe seller can observe only own authorized current intent, never approve it',async()=>{
+  await env.withSecurityRulesDisabled(async context=>{
+    const db=context.firestore();
+    await setDoc(doc(db,'users','seller-payment'),{uid:'seller-payment',businessId:businessA,active:true,role:'seller'});
+    await setDoc(doc(db,'businesses',businessA,'members','seller-payment'),{uid:'seller-payment',businessId:businessA,role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:['shop-one'],permissions:{'sales.create':true}});
+    for(const [id,spaceId,createdByUid]of [['own','shop-one','seller-payment'],['other','shop-one','owner-a'],['wrong-space','shop-two','seller-payment']])await setDoc(doc(db,'businesses',businessA,'paymentIntents',id),{businessId:businessA,spaceId,createdByUid,status:'processing'});
+  });
+  const db=env.authenticatedContext('seller-payment').firestore();
+  await assertSucceeds(getDoc(doc(db,'businesses',businessA,'paymentIntents','own')));
+  for(const id of ['other','wrong-space'])await assertFails(getDoc(doc(db,'businesses',businessA,'paymentIntents',id)));
+  await assertFails(getDocs(collection(db,'businesses',businessA,'paymentIntents')));
+  await assertFails(updateDoc(doc(db,'businesses',businessA,'paymentIntents','own'),{status:'approved'}));
+});
