@@ -1,5 +1,5 @@
 import {db,functions} from './firebase/firebase-config.js';
-import {doc,getDoc,onSnapshot,serverTimestamp,setDoc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import {doc,getDoc,onSnapshot,serverTimestamp,setDoc as rawSetDoc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 import {httpsCallable} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js';
 import {formatBrazilianPhone,isValidBrazilianPhone,normalizeBrazilianPhone,sessionDocumentId,sessionStorageKey,trackPortalEvent} from './catalog-portal.js';
 
@@ -7,7 +7,8 @@ const root=document.querySelector('#catalog-app'),params=new URLSearchParams(loc
 let visitToken=queryToken||legacyPathToken||'';
 const cartKey=`adiFesta:catalogCart:${visitToken}`,legacyCartKey=`adiCatalogCart:${visitToken}`,ordersKey=`adiCatalogOrders:${visitToken}`,serviceModeKey=`adiFesta:catalogServiceMode:${visitToken}`;
 let catalog=null,view='catalog',category='Todos',query='',quickFilter='all',visibleLimit=12,serviceModeId='',productDetailsId=null,cart=read(cartKey,read(legacyCartKey,{})),orders=read(ordersKey,[]),identity=read(`adiFesta:portalIdentity:${visitToken}`,{}),portalSession=null,portalProfile=null,unsub=[],subscribedProfile='',subscribedOrderIds=new Set(),toastTimer=null,pendingOrderForm=null,submittingOrder=false,pendingOrderAttempt=null,pendingIdentityResult=null,variantPickerProductId=null;
-const identifyCustomer=httpsCallable(functions,'identifyCatalogCustomer'),submitCatalogOrder=httpsCallable(functions,'submitCatalogOrder');
+const identifyCustomer=payload=>httpsCallable(functions,'identifyCatalogCustomer')({...payload,workspaceGeneration:catalog?.workspaceGeneration??0}),submitCatalogOrder=httpsCallable(functions,'submitCatalogOrder');
+const setDoc=(reference,data)=>rawSetDoc(reference,{...data,workspaceGeneration:catalog?.workspaceGeneration??0,workspaceWriteId:crypto.randomUUID()});
 
 function read(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}}
 function save(){localStorage.setItem(cartKey,JSON.stringify(cart));localStorage.removeItem(legacyCartKey);localStorage.setItem(ordersKey,JSON.stringify(orders));localStorage.setItem(`adiFesta:portalIdentity:${visitToken}`,JSON.stringify(identity))}
@@ -160,6 +161,7 @@ async function submitOrderData(data){
   const payload={
     id:orderId,
     businessId:catalog.businessId,
+    workspaceGeneration:catalog.workspaceGeneration??0,
     catalogToken:visitToken,
     source:'online_catalog',
     orderStatus:'recebido',

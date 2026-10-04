@@ -10,7 +10,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "./workspace-firestore.js";
 import { createFirestoreRepository } from "./firestore-repository.js?v=151";
 import {
   normalizeFirestoreData,
@@ -318,6 +318,7 @@ const namespace = () => [
   state.userProfile?.businessId || "__signed_out__",
   currentUser?.uid || "anonymous",
   permissionSignature(),
+  ...(window.DB?.getWorkspaceGeneration?.()>0?[`generation:${window.DB.getWorkspaceGeneration()}`]:[]),
 ].join(":");
 const queueKey = () => `adiFesta:${namespace()}:syncQueue`;
 const pullStateKey = () => `adiFesta:${namespace()}:incrementalPull`;
@@ -686,6 +687,10 @@ const canAttempt = (item, force = false) =>
 const queuePreflight = (item) => {
   const businessId = activeBusinessId(),
     writes = Array.isArray(item.payload?.writes) ? item.payload.writes : [];
+  const generation=window.DB.getWorkspaceGeneration();
+  if((item.workspaceGeneration??0)!==generation||writes.some(write=>
+    write.data?.workspaceGeneration!==undefined&&write.data.workspaceGeneration!==generation))
+    return{ok:false,code:'workspace-generation-mismatch',message:'Operação de um ambiente anterior bloqueada. Ela não será reenviada após a restauração.'};
   if (!item.operationId)
     return { ok: false, code: "operation-id-missing", message: "OperationId ausente." };
   if (item.businessId !== businessId)
@@ -1457,6 +1462,7 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
+  const workspaceOrigin=window.WorkspaceRuntime.capture();
   if(writes.some(write=>window.IntegrityAudit?.legacyFixtureIdentity(write.entityType,write.data,activeBusinessId())))
     throw Object.assign(Error('Registro de demonstração confirmado: envio à nuvem bloqueado.'),{code:'legacy-fixture-upload-blocked'});
   const queue = readQueueStrict(),
@@ -1491,6 +1497,7 @@ function queueWrites(
       payload: { writes: part, eventKind },
       payloadVersion: PAYLOAD_VERSION,
       businessId,
+      workspaceGeneration:workspaceOrigin.workspaceGeneration,
       userId: currentUser.uid,
       deviceId: deviceId(),
       origin: matchMedia("(max-width:767px)").matches ? "mobile" : "desktop",
@@ -1752,6 +1759,8 @@ function installOfflineFirstStorage() {
   if (originalAlter) return;
   originalAlter = DB.alterar.bind(DB);
   DB.alterar = function (mutator) {
+    window.WorkspaceRuntime?.capture();
+    if (!currentUser) return originalAlter(mutator);
     const before = structuredClone(DB.carregar()), next = structuredClone(before);
     mutator(next);
     const after = DB.prepare ? DB.prepare(next) : next;
@@ -1841,6 +1850,9 @@ async function testFirestoreConnection() {
   }
 }
 async function commitQueueItem(item) {
+  window.WorkspaceRuntime.capture();
+  const preflight=queuePreflight(item);
+  if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code});
   const businessId = activeBusinessId(),
     operationId = stableLegacyOperationId(item),
     marker = doc(

@@ -18,7 +18,7 @@ import {
   startAt,
   Timestamp,
   where,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "./workspace-firestore.js";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,

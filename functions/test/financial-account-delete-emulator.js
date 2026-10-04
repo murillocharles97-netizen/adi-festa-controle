@@ -12,6 +12,7 @@ async function main(){
   connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});connectFunctionsEmulator(functions,'127.0.0.1',5001);
   const credential=await createUserWithEmailAndPassword(auth,`financial-account-${suffix}@example.test`,'Secure123!'),uid=credential.user.uid,businessId=`financial-account-business-${suffix}`,homeSpaceId=`financial-account-home-${suffix}`,accountCollection=db.collection(`financialSpaces/${homeSpaceId}/financialAccounts`),removeAccount=httpsCallable(functions,'deleteUnusedFinancialAccount');
   try{
+    await db.doc(`businesses/${businessId}`).set({active:true,ownerId:uid});
     await db.doc(`financialSpaces/${homeSpaceId}`).set({id:homeSpaceId,name:'Casa',type:'personal',ownerUid:uid,linkedBusinessId:businessId,active:true});
     await accountCollection.doc('unused-zero').set({id:'unused-zero',ownerUid:uid,financialSpaceId:homeSpaceId,name:'Sem uso',type:'bank_account',initialBalanceCents:0,currentBalanceCents:0,active:true});
     const deleted=(await removeAccount({homeSpaceId,accountId:'unused-zero'})).data;

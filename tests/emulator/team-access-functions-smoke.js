@@ -230,6 +230,16 @@ const ownerPermissions = enabled(
   assert.equal(migratedSaleFinancial.data().lucro, 13);
   assert.equal((await call("migrateSensitiveTeamData", { businessId })).data.alreadyApplied, true);
 
+  await admin.doc(`businesses/${businessId}`).update({workspaceGeneration:1,workspaceReset:{status:'FAILED'},legacyAccessDisabled:true});
+  const auditCount=(await admin.collection(`businesses/${businessId}/auditLogs`).get()).size;
+  assert.equal((await call('ensureCurrentMembership',{businessId})).data.resetInProgress,true);
+  assert.equal((await admin.collection(`businesses/${businessId}/auditLogs`).get()).size,auditCount);
+  await assert.rejects(call('updateTeamMember',{businessId,workspaceGeneration:1,uid:sellerUid,name:'Blocked'}),error=>error.details?.reason==='workspace-reset-locked');
+  await admin.doc(`businesses/${businessId}`).update({workspaceReset:{status:'COMPLETED'}});
+  await assert.rejects(call('updateTeamMember',{businessId,uid:sellerUid,name:'Old device'}),error=>error.details?.reason==='workspace-generation-mismatch');
+  await call('updateTeamMember',{businessId,workspaceGeneration:1,uid:sellerUid,name:'Current generation'});
+  assert.equal((await admin.doc(`businesses/${businessId}/members/${sellerUid}`).get()).data().name,'Current generation');
+
   console.log("Team Access Functions V151: owner legado, convite, escopo, desativação, último owner e migração sensível validados.");
   process.exit(0);
 })().catch((error) => {

@@ -61,6 +61,7 @@ const {
     saleId = "sale-1",
     clientId = "client-1",
     admin = adminSdk.firestore();
+  await admin.doc(`businesses/${business}`).set({active:true,ownerId:'crm-qa-owner'});
   await admin.doc(`businesses/${business}/sales/${saleId}`).set({
     clienteId: clientId,
     valorFinal: 42.5,

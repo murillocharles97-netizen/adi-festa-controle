@@ -3,15 +3,33 @@ service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
     function profile() { return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data; }
+    function business(businessId) { return firestore.get(/databases/(default)/documents/businesses/$(businessId)).data; }
+    function member(businessId) { return firestore.get(/databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data; }
+    function modernAccess(businessId) { return business(businessId).get('legacyAccessDisabled', false) == true; }
     function canAccess(businessId) {
       return signedIn()
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && profile().active == true
-        && profile().businessId == businessId;
+        && business(businessId).active == true
+        && (modernAccess(businessId)
+          ? member(businessId).status == 'active'
+          : firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+            && profile().active == true && profile().businessId == businessId);
+    }
+    function permitted(businessId, permission) {
+      return canAccess(businessId) && (modernAccess(businessId)
+        ? member(businessId).role == 'owner' || member(businessId).get('permissions', {}).get(permission, false) == true
+        : profile().role in ['owner', 'admin', 'manager']);
+    }
+    function workspaceWritable(businessId) {
+      let data = business(businessId);
+      let generation = data.get('workspaceGeneration', 0);
+      return data.get('workspaceReset', {}).get('status', 'COMPLETED') == 'COMPLETED'
+        && (generation == 0 || (request.resource != null
+          && request.resource.metadata.get('workspaceGeneration', '') == string(generation)
+          && request.resource.metadata.get('workspaceWriteId', '').size() >= 16
+          && (resource == null || request.resource.metadata.get('workspaceWriteId', '') != resource.metadata.get('workspaceWriteId', ''))));
     }
     function canManageProducts(businessId) {
-      return canAccess(businessId)
-        && profile().role in ['owner', 'admin', 'manager'];
+      return permitted(businessId, 'products.edit') && workspaceWritable(businessId);
     }
     function financialSpace(spaceId) {
       return firestore.get(/databases/(default)/documents/financialSpaces/$(spaceId)).data;
@@ -32,10 +50,13 @@ service firebase.storage {
         );
     }
     function canManageFinancialSpace(spaceId) {
+      let space = financialSpace(spaceId);
+      let scope = space.get('businessId', null) != null ? space.businessId : space.get('linkedBusinessId', null);
       return canAccessFinancialSpace(spaceId)
+        && (scope == null || (canAccess(scope) && workspaceWritable(scope)))
         && (
           financialSpace(spaceId).type in ['personal', 'other']
-          || profile().role in ['owner', 'admin', 'manager']
+          || permitted(financialSpace(spaceId).linkedBusinessId, 'financial.view')
         );
     }
     match /businesses/{businessId}/products/{productId}/{fileName} {

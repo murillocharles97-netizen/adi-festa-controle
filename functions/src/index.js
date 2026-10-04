@@ -28,6 +28,12 @@ const {financialIncomeService}=require('./services/financial-income-service');
 const {activityEventService}=require('./services/activity-event-service');
 const {teamAccessService}=require('./services/team-access-service');
 const {saleCostService}=require('./services/sale-cost-service');
+const {projectInWorkspace}=require('./services/workspace-projection');
+const {workspaceWriteFence}=require('./services/workspace-write-fence');
+const {assertWritable}=require('./services/workspace-reset-policy');
+const {getStorage}=require('firebase-admin/storage');
+const {workspaceAssetsService}=require('./services/workspace-assets-service');
+const {businessResetService}=require('./services/business-reset-service');
 const {terminalPaymentService}=require('./terminal-payments/terminal-payment-service');
 
 initializeApp();
@@ -36,11 +42,34 @@ const MP_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN');
 const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');
 const MP_WEBHOOK_SECRET=defineSecret('MERCADO_PAGO_WEBHOOK_SECRET');
 const MP_ENV=defineString('MERCADO_PAGO_ENV',{default:'production'});
+// Production remains disabled until the complete reset release is validated.
 const MP_PUBLIC_KEY=defineString('MERCADO_PAGO_PUBLIC_KEY',{default:''});
 const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles97-netizen.github.io/adi-festa-controle/'});
 const MP_WEBHOOK_URL=defineString('MERCADO_PAGO_WEBHOOK_URL',{default:'https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
 const TERMINAL_PAYMENT_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
+exports.deleteWorkspaceAsset=onCall({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:10},request=>workspaceAssetsService(db,getStorage().bucket()).remove(request));
+function resetEnabled(){return process.env.FUNCTIONS_EMULATOR==='true'||process.env.VECONI_WORKSPACE_RESET_ENABLED==='true';}
+function resetService(){return businessResetService(db,{bucket:getStorage().bucket(),autoDispatch:true,assertInfrastructureReady:()=>{if(!resetEnabled())throw new HttpsError('failed-precondition','A restauração está indisponível enquanto a validação de segurança é concluída.');}});}
+const RESET_OPTIONS={region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5};
+exports.getBusinessResetCapability=onCall(RESET_OPTIONS,async request=>{
+  const context=await permissions().authenticatedContext(request,request.data?.businessId);
+  return{enabled:resetEnabled(),businessId:context.business.id,workspaceReset:context.business.workspaceReset||null,realIntegratedPayments:context.business.workspaceHasRealIntegratedPayments===true};
+});
+exports.requestBusinessReset=onCall(RESET_OPTIONS,request=>resetService().request(request));
+exports.retryBusinessReset=onCall(RESET_OPTIONS,request=>resetService().retry(request));
+exports.processBusinessReset=onDocumentWritten({region:REGION,memory:'512MiB',timeoutSeconds:540,maxInstances:3,retry:true,document:'businesses/{businessId}/workspaceResetJobs/{operationId}'},async event=>{
+  const after=event.data?.after.data(),before=event.data?.before.data();
+  if(!after||after.autoDispatch!==true||after.status==='COMPLETED'||before&&before.requestEpoch===after.requestEpoch)return;
+  try{await resetService().run(event.params.businessId,event.params.operationId);}
+  catch(error){
+    logger.error('[BUSINESS RESET WORKER]',{businessId:event.params.businessId,operationId:event.params.operationId,code:error.code||'reset-failed'});
+    // An execution that already persisted FAILED waits for explicit owner retry.
+    // Lease contention must retry later (including after a killed worker).
+    const job=await db.doc(`businesses/${event.params.businessId}/workspaceResetJobs/${event.params.operationId}`).get();
+    if(!['FAILED','COMPLETED'].includes(job.data()?.status))throw error;
+  }
+});
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
 const ONBOARDING_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20};
 const validCatalogToken=value=>/^[A-Za-z0-9_-]{20,128}$/.test(String(value||''));
@@ -60,6 +89,31 @@ const effectiveSale=snapshot=>{
 async function enforcePublicRateLimit(request,catalogToken,action,limit){const ip=String(request.rawRequest?.ip||request.rawRequest?.headers?.['x-forwarded-for']||'unknown').split(',')[0].trim(),bucket=Math.floor(Date.now()/(15*60*1000)),ref=db.doc(`publicRateLimits/${sha(`${action}:${catalogToken}:${ip}:${bucket}`)}`);await db.runTransaction(async transaction=>{const snapshot=await transaction.get(ref),count=Number(snapshot.data()?.count||0);if(count>=limit)throw new HttpsError('resource-exhausted','Muitas tentativas. Aguarde alguns minutos.');transaction.set(ref,{action,catalogHash:sha(catalogToken).slice(0,16),count:count+1,expiresAt:Timestamp.fromMillis(Date.now()+30*60*1000),updatedAt:FieldValue.serverTimestamp()},{merge:true})})}
 async function publicCatalog(request){const catalogToken=String(request.data?.catalogToken||'').trim();if(!validCatalogToken(catalogToken))throw new HttpsError('invalid-argument','Catálogo inválido.');const ref=db.doc(`publicCatalogs/${catalogToken}`),snapshot=await ref.get();if(!snapshot.exists)throw new HttpsError('not-found','Catálogo não encontrado.');const catalog=snapshot.data()||{};if(catalog.legacyRedirect&&validCatalogToken(catalog.universalCatalogToken)){const redirectRef=db.doc(`publicCatalogs/${catalog.universalCatalogToken}`),redirect=await redirectRef.get();if(!redirect.exists)throw new HttpsError('not-found','Catálogo não encontrado.');return{catalogToken:catalog.universalCatalogToken,ref:redirectRef,catalog:redirect.data()}}if(catalog.active!==true||catalog.catalogVisible===false)throw new HttpsError('failed-precondition','Catálogo indisponível.');return{catalogToken,ref,catalog}}
 function withinCatalogHours(catalog,date=new Date()){if(catalog.acceptOutsideHours||catalog.scheduleMode!=='weekly')return true;const timezone=catalog.timezone||'America/Sao_Paulo',parts=new Intl.DateTimeFormat('en-US',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date),part=type=>parts.find(item=>item.type===type)?.value||'',day=part('weekday').toLowerCase(),entry=catalog.weeklyHours?.[day];if(!entry||entry.closed===true||!entry.open||!entry.close)return false;const current=`${part('hour')}:${part('minute')}`;return current>=entry.open&&current<=entry.close}
+
+async function catalogWrite(context,request,action){
+  const businessId=context.catalog.businessId,workspaceGeneration=request.data?.workspaceGeneration??0;
+  return workspaceWriteFence(db,{businessId,workspaceGeneration}).runTransaction(async transaction=>{
+    const current=await transaction.get(context.ref);
+    if(!current.exists||current.data().businessId!==businessId||(current.data().workspaceGeneration??0)!==workspaceGeneration)
+      throw new HttpsError('failed-precondition','Este catálogo mudou. Abra o link atualizado.');
+    return action(transaction,workspaceGeneration);
+  });
+}
+async function financialResourceWrite(request,spaceRef,expectedResource,patch=null){
+  return db.runTransaction(async transaction=>{
+    const spaceSnapshot=await transaction.get(spaceRef),space=spaceSnapshot.data(),current=await transaction.get(expectedResource.ref);
+    if(!space||space.ownerUid!==request.auth?.uid||!current.exists||!current.updateTime.isEqual(expectedResource.updateTime))
+      throw new HttpsError('failed-precondition','Os dados financeiros mudaram. Atualize antes de continuar.');
+    const businessId=space.businessId||space.linkedBusinessId;
+    if(businessId){
+      if(space.businessId&&space.linkedBusinessId&&space.businessId!==space.linkedBusinessId)throw new HttpsError('failed-precondition','Vínculo financeiro divergente.');
+      const business=await transaction.get(db.doc(`businesses/${businessId}`));
+      assertWritable(business.data(),request.data?.workspaceGeneration??0);
+    }
+    if(patch)transaction.update(expectedResource.ref,patch);
+    else transaction.delete(expectedResource.ref);
+  });
+}
 
 const token=()=>MP_ENV.value()==='test'?MP_TEST_TOKEN.value():MP_TOKEN.value();
 const mp=()=>mercadoPagoService({accessToken:token()});
@@ -444,14 +498,15 @@ exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{bu
   const before=effectiveSale(event.data?.before),after=effectiveSale(event.data?.after),businessId=event.params.businessId,eventId=event.id;
   if(!before&&!after)return;
   const targets=new Map();for(const [sale,sign] of [[before,-1],[after,1]])if(sale){const month=sale.date.slice(0,7),key=`${sale.clientId}:${month}`,row=targets.get(key)||{clientId:sale.clientId,month,spent:0,purchases:0,items:0,lastPurchaseAt:null};row.spent+=sign*sale.value;row.purchases+=sign;row.items+=sign*sale.items;if(sign>0)row.lastPurchaseAt=sale.date;targets.set(key,row)}
-  await db.runTransaction(async transaction=>{
+  const source=event.data?.after?.exists?event.data.after.data():event.data?.before?.data?.();
+  await projectInWorkspace(db,businessId,source,async transaction=>{
     const marker=db.doc(`businesses/${businessId}/metricEvents/${eventId}`),seen=await transaction.get(marker);if(seen.exists)return;
     for(const row of targets.values()){
       const metric=db.doc(`businesses/${businessId}/customerMetrics/${row.clientId}`),monthly=db.doc(`businesses/${businessId}/customerMonthlyMetrics/${row.clientId}__${row.month}`),metricData={id:row.clientId,businessId,totalSpent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),updatedAt:FieldValue.serverTimestamp(),schemaVersion:2},monthlyData={id:`${row.clientId}__${row.month}`,businessId,clientId:row.clientId,month:row.month,spent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),itemsCount:FieldValue.increment(row.items),updatedAt:FieldValue.serverTimestamp(),schemaVersion:2};
       if(row.lastPurchaseAt){metricData.lastPurchaseAt=row.lastPurchaseAt;metricData.lastPurchaseAtNeedsRebuild=false;monthlyData.lastPurchaseAt=row.lastPurchaseAt;monthlyData.lastPurchaseAtNeedsRebuild=false}else if(row.purchases<0){metricData.lastPurchaseAtNeedsRebuild=true;monthlyData.lastPurchaseAtNeedsRebuild=true}
-      transaction.set(metric,metricData,{merge:true});transaction.set(monthly,monthlyData,{merge:true});
+      transaction.set(metric,{...metricData,workspaceGeneration:source?.workspaceGeneration??0},{merge:true});transaction.set(monthly,{...monthlyData,workspaceGeneration:source?.workspaceGeneration??0},{merge:true});
     }
-    transaction.create(marker,{businessId,eventId,type:'sale_metrics_v2',createdAt:FieldValue.serverTimestamp()});
+    transaction.create(marker,{businessId,eventId,type:'sale_metrics_v2',workspaceGeneration:source?.workspaceGeneration??0,createdAt:FieldValue.serverTimestamp()});
   });
 });
 
@@ -482,7 +537,7 @@ exports.migrateSensitiveTeamData=onCall({region:REGION,memory:'512MiB',timeoutSe
 const ACTIVITY_TRIGGER_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
 const projectActivity=(sourceCollection,idParam)=>async event=>{
   const result=await activityEvents().project({businessId:event.params.businessId,sourceCollection,sourceDocumentId:event.params[idParam],before:event.data?.before,after:event.data?.after});
-  logger.info('[BUSINESS_ACTIVITY_PROJECTED]',{businessId:event.params.businessId,sourceCollection,sourceDocumentId:event.params[idParam],eventId:result?.eventId||null,skipped:result?.skipped===true});
+  logger.info('[BUSINESS_ACTIVITY_PROJECTED]',{businessId:event.params.businessId,sourceCollection,sourceDocumentId:event.params[idParam],eventId:result?.eventId||null,skipped:Boolean(result?.skipped),reason:typeof result?.skipped==='string'?result.skipped:null});
   return result;
 };
 
@@ -548,12 +603,12 @@ exports.deleteUnusedFinancialAccount=onCall({region:REGION,memory:'256MiB',timeo
   const automationReferences=ownerSpaces.docs.filter(doc=>String(doc.data()?.automation?.defaultIncomeFinancialAccountId||'')===accountId&&String(doc.data()?.automation?.defaultIncomeFinancialAccountHomeSpaceId||doc.id)===homeSpaceId).length,
     references=automationReferences+snapshots.reduce((sum,snapshot,index)=>sum+snapshot.docs.filter(doc=>belongsToAccount(doc,queryDescriptors[index])).length,0);
   if(references>0){
-    await accountRef.set({active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4},{merge:true});
+    await financialResourceWrite(request,spaceRef,accountSnapshot,{active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4});
     logger.info('[FINANCIAL_ACCOUNT_ARCHIVED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,accountId,references});
     return{deleted:false,archived:true,references};
   }
   if(accountBalance!==0)throw new HttpsError('failed-precondition','Zere ou transfira o saldo antes de excluir esta conta.');
-  await accountRef.delete();
+  await financialResourceWrite(request,spaceRef,accountSnapshot);
   logger.info('[FINANCIAL_ACCOUNT_DELETED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,accountId,references:0});
   return{deleted:true,archived:false,references:0};
 });
@@ -579,11 +634,11 @@ exports.deleteUnusedCreditCard=onCall({region:REGION,memory:'256MiB',timeoutSeco
     return explicitHome?explicitHome===homeSpaceId:descriptor.homeSpaceId===homeSpaceId;
   },references=snapshots.reduce((sum,snapshot,index)=>sum+snapshot.docs.filter(doc=>belongsToCard(doc,descriptors[index])).length,0),committedCents=Number(card.committedCents||0);
   if(references>0||committedCents!==0){
-    await cardRef.set({active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4},{merge:true});
+    await financialResourceWrite(request,spaceRef,cardSnapshot,{active:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),schemaVersion:4});
     logger.info('[FINANCIAL_CREDIT_CARD_ARCHIVED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,cardId,references,committedCents});
     return{deleted:false,archived:true,references};
   }
-  await cardRef.delete();
+  await financialResourceWrite(request,spaceRef,cardSnapshot);
   logger.info('[FINANCIAL_CREDIT_CARD_DELETED]',{uidHash:sha(uid).slice(0,12),homeSpaceId,cardId,references:0});
   return{deleted:true,archived:false,references:0};
 });
@@ -597,9 +652,9 @@ exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
     const clients=await db.collection(`businesses/${context.catalog.businessId}/clients`).where('normalizedPhone','==',phone).limit(2).get();
     if(clients.size!==1){await new Promise(resolve=>setTimeout(resolve,Math.max(0,350-(Date.now()-started))));return{found:false,conflict:clients.size>1}}
     const clientDoc=clients.docs[0],client=clientDoc.data();if(client.active===false||client.ativo===false)return{found:false};
-    let clientRefToken=String(client.portalRefToken||'');if(!/^[A-Za-z0-9_-]{20,128}$/.test(clientRefToken)){clientRefToken=crypto.randomBytes(24).toString('hex');await clientDoc.ref.set({portalRefToken:clientRefToken,updatedAt:FieldValue.serverTimestamp()},{merge:true})}
+    let clientRefToken=String(client.portalRefToken||'');if(!/^[A-Za-z0-9_-]{20,128}$/.test(clientRefToken)){clientRefToken=crypto.randomBytes(24).toString('hex');await catalogWrite(context,request,(transaction,workspaceGeneration)=>transaction.update(clientDoc.ref,{portalRefToken:clientRefToken,workspaceGeneration,updatedAt:FieldValue.serverTimestamp()}))}
     const sessionToken=crypto.randomBytes(32).toString('hex'),sessionHash=sha(sessionToken),expiresAt=new Date(Date.now()+30*864e5).toISOString(),profileRef=context.ref.collection('portalProfiles').doc(clientRefToken),profileSnapshot=await profileRef.get(),existing=profileSnapshot.data()||{},firstName=String(existing.displayName||client.name||client.nome||'Cliente').trim().split(/\s+/)[0],profile={displayName:firstName,maskedPhone:maskPublicPhone(phone),campaigns:Array.isArray(existing.campaigns)?existing.campaigns:[],orders:Array.isArray(existing.orders)?existing.orders:[],active:true};
-    await context.ref.collection('portalSessions').doc(sessionHash).set({clientRefToken,businessId:context.catalog.businessId,visitId:context.catalog.visitId||'catalog-universal',active:true,permissions:['view_campaign_progress','view_rewards','view_public_orders'],createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),lastAccessAt:FieldValue.serverTimestamp(),expiresAt});
+    await catalogWrite(context,request,(transaction,workspaceGeneration)=>transaction.set(context.ref.collection('portalSessions').doc(sessionHash),{clientRefToken,businessId:context.catalog.businessId,workspaceGeneration,visitId:context.catalog.visitId||'catalog-universal',active:true,permissions:['view_campaign_progress','view_rewards','view_public_orders'],createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),lastAccessAt:FieldValue.serverTimestamp(),expiresAt}));
     await new Promise(resolve=>setTimeout(resolve,Math.max(0,350-(Date.now()-started))));
     return{found:true,maskedName:maskPublicName(profile.displayName),maskedPhone:profile.maskedPhone,clientRefToken,sessionToken,sessionHash,expiresAt,profile};
   }catch(error){if(error instanceof HttpsError)throw error;logger.error('[Catalog identify]',{code:error?.code||'unknown'});throw new HttpsError('unavailable','Não foi possível identificar o cliente agora.')}
@@ -630,6 +685,6 @@ exports.submitCatalogOrder=onCall(CATALOG_OPTIONS,async request=>{
     let clientRefToken=null,portalSessionHash=null;const rawSession=String(data.customerSessionToken||'');if(rawSession){portalSessionHash=sha(rawSession);const session=await context.ref.collection('portalSessions').doc(portalSessionHash).get(),sessionData=session.data()||{};if(session.exists&&sessionData.active===true&&sessionData.businessId===context.catalog.businessId&&new Date(sessionData.expiresAt)>new Date())clientRefToken=sessionData.clientRefToken}
     const orderRef=context.ref.collection('orders').doc(orderId),existing=await orderRef.get();if(existing.exists){const prior=existing.data();if(prior.operationId===`catalog-order:${orderId}`)return{order:{...prior,createdAt:prior.createdAt?.toDate?.().toISOString?.()||prior.createdAt,updatedAt:prior.updatedAt?.toDate?.().toISOString?.()||prior.updatedAt},idempotent:true};throw new HttpsError('already-exists','Este pedido já existe.');}
     const createdAt=new Date().toISOString(),publicOrderNumber=`VC${Date.now().toString().slice(-6)}`,order={id:orderId,businessId:context.catalog.businessId,catalogToken:context.catalogToken,source:'online_catalog',orderStatus:'recebido',customerName,customerPhone,customerLocation,items,subtotal:total,discount:0,fee:0,total,paymentPreference,serviceModeId:selectedServiceMode?String(selectedServiceMode.id||selectedServiceMode.type):null,serviceModeType:selectedServiceMode?String(selectedServiceMode.type||selectedServiceMode.id):null,serviceModeLabel:selectedServiceMode?String(selectedServiceMode.label||selectedServiceMode.type||selectedServiceMode.id).slice(0,80):null,orderAccessToken:String(data.orderAccessToken||crypto.randomBytes(24).toString('hex')).slice(0,128),operationId:`catalog-order:${orderId}`,publicOrderNumber,visitId:context.catalog.visitId||'catalog-universal',clientRefToken,portalSessionHash,paymentStatus:'pendente',note,createdAt,updatedAt:createdAt};
-    await orderRef.create(order);logger.info('[Catalog order]',{businessId:context.catalog.businessId,orderId,itemCount:items.length,total});return{order};
+    await catalogWrite(context,request,(transaction,workspaceGeneration)=>transaction.create(orderRef,{...order,workspaceGeneration}));logger.info('[Catalog order]',{businessId:context.catalog.businessId,orderId,itemCount:items.length,total});return{order};
   }catch(error){if(error instanceof HttpsError)throw error;logger.error('[Catalog order]',{code:error?.code||'unknown'});throw new HttpsError('unavailable','Não foi possível registrar o pedido agora.')}
 });

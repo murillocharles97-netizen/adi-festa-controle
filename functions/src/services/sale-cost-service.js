@@ -1,5 +1,7 @@
 'use strict';
 
+const {projectInWorkspace}=require('./workspace-projection');
+
 const number=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
 const text=(value,max=160)=>String(value??'').trim().slice(0,max);
 
@@ -39,12 +41,12 @@ function saleCostService(db,{FieldValue}){
     [...descriptors.keys()].forEach((key,index)=>{const data=snapshots[index]?.data?.();if(snapshots[index]?.exists&&data)costs.set(key,{cost:number(data.cost??data.custo,0)});});
     const financial=buildSaleFinancialSnapshot(sale,costs);
     if(!financial)return{created:false,skipped:'sale-without-items'};
-    return db.runTransaction(async transaction=>{
+    return projectInWorkspace(db,businessId,sale,async transaction=>{
       const current=await transaction.get(target);
       if(current.exists)return{created:false,skipped:'financial-snapshot-exists'};
       transaction.create(target,{
         id:String(saleId),saleId:String(saleId),businessId:String(businessId),...financial,
-        actorUid:text(sale.actorUid)||null,source:'server_cost_projection_v1',schemaVersion:1,
+        actorUid:text(sale.actorUid)||null,source:'server_cost_projection_v1',schemaVersion:1,workspaceGeneration:sale.workspaceGeneration??0,
         createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),
       });
       return{created:true,missingCostItems:financial.missingCostItems};

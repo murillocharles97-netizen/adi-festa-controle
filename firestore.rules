@@ -26,7 +26,8 @@ service cloud.firestore {
       return memberExists(businessId) && teamMember(businessId).status == 'active';
     }
     function legacyMember(businessId) {
-      return !memberExists(businessId) && activeUser() && userProfile().businessId == businessId;
+      return !memberExists(businessId) && activeUser() && userProfile().businessId == businessId
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.get('legacyAccessDisabled', false) != true;
     }
     function roleForBusiness(businessId) {
       return memberExists(businessId) ? teamMember(businessId).role : userProfile().role;
@@ -130,8 +131,23 @@ service cloud.firestore {
       return !memberExists(businessId)
         && roleForBusiness(businessId) in ['owner', 'admin', 'manager'];
     }
+    function workspaceWriteAllowed(businessId) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let generation = business.get('workspaceGeneration', 0);
+      return business.get('workspaceReset', {}).get('status', 'COMPLETED') == 'COMPLETED'
+        && (generation == 0 || (
+          request.resource != null
+          && request.resource.data.get('workspaceGeneration', -1) == generation
+          && request.resource.data.get('workspaceWriteId', '') is string
+          && request.resource.data.get('workspaceWriteId', '').size() >= 16
+          && request.resource.data.get('workspaceWriteId', '').size() <= 100
+          // A merge from an old app must not inherit a current generation/nonce.
+          && (resource == null || request.resource.data.diff(resource.data).affectedKeys().hasAny(['workspaceWriteId']))
+        ));
+    }
     function canWriteCollection(businessId, collectionName) {
-      return subscriptionAllowsWrites(businessId)
+      return workspaceWriteAllowed(businessId)
+        && subscriptionAllowsWrites(businessId)
         && planAllowsCollection(businessId, collectionName)
         && (
           (legacyMember(businessId) && activeBusiness(businessId) && legacyCanWriteCollection(businessId, collectionName))
@@ -182,7 +198,7 @@ service cloud.firestore {
       );
     }
     function canRecordProcessedOperation(businessId) {
-      return subscriptionAllowsWrites(businessId)
+      return workspaceWriteAllowed(businessId) && subscriptionAllowsWrites(businessId)
         && activeBusiness(businessId)
         && (
           (
@@ -347,13 +363,13 @@ service cloud.firestore {
       return product.diff(persistedProduct).affectedKeys().hasOnly([
         'estoqueAtual', 'estoque', 'totalStock', 'hasAvailableStock',
         'updatedAt', 'updatedByUid', 'actorUid', 'actorNameSnapshot',
-        'actorRoleSnapshot', 'version'
+        'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
       ]);
     }
     function onlyOperationalVariantStockChanged(variant, persistedVariant) {
       return variant.diff(persistedVariant).affectedKeys().hasOnly([
         'stock', 'updatedAt', 'updatedByUid', 'actorUid',
-        'actorNameSnapshot', 'actorRoleSnapshot', 'version'
+        'actorNameSnapshot', 'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
       ]);
     }
     function preservesSaleActor(sale, persistedSale) {
@@ -430,7 +446,7 @@ service cloud.firestore {
     }
     function canManageFinancialSpace(spaceId) {
       let space = financialSpace(spaceId);
-      return signedIn() && space.active != false && (
+      return signedIn() && space.active != false && financialWorkspaceWritable(space) && (
         (
           space.type == 'business'
           && (ownsActiveBusiness(space.linkedBusinessId) || canAccessSpace(space.linkedBusinessId, spaceId))
@@ -442,6 +458,13 @@ service cloud.firestore {
           && space.ownerUid == request.auth.uid
         )
       );
+    }
+    function financialWorkspaceWritable(space) {
+      let businessId = space.get('businessId', null);
+      let linkedId = space.get('linkedBusinessId', null);
+      let scope = businessId != null ? businessId : linkedId;
+      return (businessId == null || linkedId == null || businessId == linkedId)
+        && (scope == null || workspaceWriteAllowed(scope));
     }
     function creditCardAt(homeSpaceId, cardId) {
       return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/creditCards/$(cardId)).data;
@@ -631,9 +654,15 @@ service cloud.firestore {
         && request.resource.data.favoriteViewIds is list
         && request.resource.data.favoriteViewIds.size() <= 50
         && request.resource.data.schemaVersion == 1
+        // A reset prunes only the removed business references and advances this
+        // revision. Old cached profiles may not overwrite that cleanup.
+        && (resource == null || resource.data.get('profileRevision', 0) == 0
+          || request.resource.data.get('profileRevision', -1) == resource.data.profileRevision + 1)
+        && request.resource.data.get('profileRevision', 0) is int
+        && request.resource.data.get('profileRevision', 0) >= 0
         && request.resource.data.keys().hasOnly([
           'ownerUid', 'customViews', 'favoriteViewIds', 'defaultViewId',
-          'lastViewId', 'schemaVersion', 'updatedAt'
+          'lastViewId', 'schemaVersion', 'updatedAt', 'profileRevision'
         ]);
       allow delete: if false;
     }
@@ -643,11 +672,13 @@ service cloud.firestore {
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.businessId is string
+        && workspaceWriteAllowed(request.resource.data.businessId)
         && belongsToBusiness(request.resource.data.businessId)
         && subscriptionAllowsWrites(request.resource.data.businessId)
         && get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
       allow update: if signedIn()
         && resource.data.businessId == request.resource.data.businessId
+        && workspaceWriteAllowed(resource.data.businessId)
         && belongsToBusiness(resource.data.businessId)
         && subscriptionAllowsWrites(resource.data.businessId)
         && get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
@@ -661,38 +692,44 @@ service cloud.firestore {
         // Cloud Function submitCatalogOrder. O Admin SDK ignora estas regras.
         allow create: if false;
         allow get: if true;
-        allow list, update: if signedIn() && belongsToBusiness(catalog().businessId);
+        allow list: if signedIn() && belongsToBusiness(catalog().businessId);
+        allow update: if signedIn() && belongsToBusiness(catalog().businessId) && workspaceWriteAllowed(catalog().businessId);
         allow delete: if false;
       }
 
       match /campaignProgress/{phoneHash} {
         allow get: if true;
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /phoneIndex/{phoneHash} {
         // A busca por telefone passa pela função com rate limit e resposta uniforme.
         allow get: if false;
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalProfiles/{clientRefToken} {
         allow get: if true;
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalSessions/{sessionHash} {
         allow get: if true;
         allow list: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow create: if false;
-        allow update: if belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow update: if belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /redemptionRequests/{requestId} {
         allow create: if request.resource.data.id == requestId
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && request.resource.data.status == 'solicitado'
           && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
           && request.resource.data.visitId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.visitId
@@ -702,16 +739,23 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.active == true
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.clientRefToken == request.resource.data.clientRefToken;
         allow get: if true;
-        allow list, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow list: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
     }
 
     match /businesses/{businessId} {
+      match /workspaceResetJobs/{operationId} {
+        allow read: if isOwner(businessId)
+          && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+        allow write: if false;
+      }
       // Empresas e trials iniciais são provisionados exclusivamente pelo backend.
       allow create: if false;
       allow read: if belongsToBusiness(businessId);
-      allow update: if (
+      allow update: if workspaceWriteAllowed(businessId) && ((
         isOwner(businessId)
           && request.resource.data.id == resource.data.id
           && request.resource.data.ownerId == resource.data.ownerId
@@ -721,7 +765,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'name', 'legalName', 'document', 'phone', 'email', 'businessType',
             'city', 'state', 'address', 'receiptName', 'active',
-            'onboardingCompleted', 'updatedAt'
+            'onboardingCompleted', 'updatedAt', 'workspaceWriteId'
           ])
         )
         || (
@@ -743,9 +787,9 @@ service cloud.firestore {
           )
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'slug', 'onboardingCompleted', 'businessType', 'subscription',
-            'limits', 'migrationVersion', 'migratedAt', 'updatedAt'
+            'limits', 'migrationVersion', 'migratedAt', 'updatedAt', 'workspaceWriteId'
           ])
-        );
+        ));
       allow delete: if false;
 
       match /billingCheckoutAttempts/{attemptId} {
@@ -799,16 +843,16 @@ service cloud.firestore {
       }
       match /invites/{inviteId} {
         allow read: if isAdmin(businessId);
-        allow create: if isOwner(businessId)
+        allow create: if workspaceWriteAllowed(businessId) && isOwner(businessId)
           && request.resource.data.businessId == businessId
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.status == 'pending';
-        allow update: if isOwner(businessId);
+        allow update: if workspaceWriteAllowed(businessId) && isOwner(businessId);
         allow delete: if false;
       }
       match /auditLogs/{logId} {
         allow read: if isOwner(businessId) || hasPermission(businessId, 'team.view');
-        allow create: if belongsToBusiness(businessId)
+        allow create: if workspaceWriteAllowed(businessId) && belongsToBusiness(businessId)
           && request.resource.data.businessId == businessId;
         allow update, delete: if false;
       }
@@ -839,7 +883,7 @@ service cloud.firestore {
               'imageThumbUrl', 'imageThumbStoragePath', 'imageUpdatedAt',
               'imageUploadStatus', 'imageOperationId',
               'createdAt', 'updatedAt', 'updatedByUid', 'actorUid',
-              'actorNameSnapshot', 'actorRoleSnapshot', 'schemaVersion', 'version'
+              'actorNameSnapshot', 'actorRoleSnapshot', 'schemaVersion', 'version', 'workspaceGeneration', 'workspaceWriteId'
             ]);
         }
         allow read: if hasPermission(businessId, 'products.view')
@@ -875,7 +919,7 @@ service cloud.firestore {
           && request.resource.data.schemaVersion == 3
           && request.resource.data.keys().hasOnly([
             'id', 'idempotencyKey', 'businessId', 'ownerId', 'status',
-            'eventKind', 'processedAt', 'createdAtLocal', 'schemaVersion'
+            'eventKind', 'processedAt', 'createdAtLocal', 'schemaVersion', 'workspaceGeneration', 'workspaceWriteId'
           ]);
         allow update, delete: if false;
       }
@@ -941,28 +985,28 @@ service cloud.firestore {
       }
       match /productFinancials/{productId} {
         allow read: if hasPermission(businessId, 'cost.view');
-        allow create, update: if hasPermission(businessId, 'cost.view')
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
           && request.resource.data.businessId == businessId
           && request.resource.data.productId == productId;
         allow delete: if false;
       }
       match /variantFinancials/{variantId} {
         allow read: if hasPermission(businessId, 'cost.view');
-        allow create, update: if hasPermission(businessId, 'cost.view')
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
           && request.resource.data.businessId == businessId
           && request.resource.data.variantId == variantId;
         allow delete: if false;
       }
       match /saleFinancials/{saleId} {
         allow read: if hasPermission(businessId, 'cost.view') || hasPermission(businessId, 'profit.view');
-        allow create, update: if hasPermission(businessId, 'cost.view')
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
           && request.resource.data.businessId == businessId
           && request.resource.data.saleId == saleId;
         allow delete: if false;
       }
       match /stockMovementFinancials/{movementId} {
         allow read: if hasPermission(businessId, 'cost.view');
-        allow create, update: if hasPermission(businessId, 'cost.view')
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
           && request.resource.data.businessId == businessId
           && request.resource.data.stockMovementId == movementId;
         allow delete: if false;
@@ -1003,8 +1047,8 @@ service cloud.firestore {
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductItemKind(request.resource.data)
           && (
-            validProductSpaceScope(request.resource.data, businessId)
-            || preservesProductSpaceScope(request.resource.data, resource.data)
+            preservesProductSpaceScope(request.resource.data, resource.data)
+            || validProductSpaceScope(request.resource.data, businessId)
           );
         allow delete: if false;
       }
@@ -1173,9 +1217,9 @@ service cloud.firestore {
       match /settings/{documentId} {
         allow read: if canReadCollection(businessId, 'settings');
         allow create: if canCreateGenericDocument(businessId, 'settings', documentId)
-          || (documentId == 'operation' && hasPermission(businessId, 'settings.manage') && request.resource.data.businessId == businessId);
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && request.resource.data.businessId == businessId);
         allow update: if canUpdateGenericDocument(businessId, 'settings', documentId)
-          || (documentId == 'operation' && hasPermission(businessId, 'settings.manage') && resource.data.businessId == businessId && request.resource.data.businessId == businessId);
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && resource.data.businessId == businessId && request.resource.data.businessId == businessId);
         allow delete: if false;
       }
       match /syncMetadata/{documentId} {
@@ -1201,6 +1245,7 @@ service cloud.firestore {
         )
       );
       allow create: if signedIn()
+        && financialWorkspaceWritable(request.resource.data)
         && !(spaceId in ['all', 'all_spaces'])
         && request.resource.data.id == spaceId
         && request.resource.data.ownerUid == request.auth.uid
@@ -1224,6 +1269,9 @@ service cloud.firestore {
           || (
             request.resource.data.type in ['personal', 'other']
             && request.resource.data.linkedBusinessId == null
+            && (request.resource.data.get('businessId', null) == null
+              || ownsActiveBusiness(request.resource.data.businessId)
+              || belongsToBusiness(request.resource.data.businessId))
           )
         )
         && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId));
@@ -1237,6 +1285,8 @@ service cloud.firestore {
         && request.resource.data.type == resource.data.type
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId
+        && (resource.data.get('businessId', null) == null
+          || request.resource.data.get('businessId', null) == resource.data.businessId)
         && (
           (
             !('globalSpaceSchemaVersion' in resource.data)
@@ -1514,7 +1564,7 @@ service cloud.firestore {
           && resource.data.status == 'posted'
           && request.resource.data.status == 'voided'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status', 'voidedAt', 'voidedByOperationId', 'updatedAt'
+            'status', 'voidedAt', 'voidedByOperationId', 'updatedAt', 'workspaceGeneration', 'workspaceWriteId'
           ]);
         allow delete: if false;
       }

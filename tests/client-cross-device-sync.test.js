@@ -192,19 +192,19 @@ test("leituras de projeção são do servidor, verificadas e limitadas por époc
 });
 
 test("a cadeia de módulos mantém versões explícitas na release 130", () => {
-  assert.match(authSource, /import ['"]\.\/sync\.js\?v=159['"]/);
+  assert.match(authSource, /import ['"]\.\/sync\.js\?v=160['"]/);
   assert.match(authSource, /from ['"]\.\/business-context\.js\?v=123['"]/);
-  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=159['"]/);
+  assert.match(firebaseUiSource, /import ['"]\.\/sync\.js\?v=160['"]/);
   assert.match(
     syncSource,
     /from ['"]\.\/firestore-repository\.js\?v=151['"]/,
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=159[\s\S]*js\/firebase\/firebase-ui\.js\?v=159/,
+    /js\/firebase\/auth\.js\?v=160[\s\S]*js\/firebase\/firebase-ui\.js\?v=160/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /veconi-v159-payment-engine/);
+  assert.match(serviceWorkerSource, /veconi-v160-workspace-reset/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

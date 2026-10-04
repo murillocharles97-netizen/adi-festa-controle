@@ -5,7 +5,7 @@ import {
   getStorage,
   ref,
   uploadBytesResumable,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
+} from "./workspace-storage.js";
 
 const storage = getStorage(app);
 const businessId = () =>

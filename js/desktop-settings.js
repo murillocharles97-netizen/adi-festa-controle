@@ -61,6 +61,7 @@
         ${card("settings", "Detalhes técnicos", "Identifique a versão e o ambiente deste aparelho.", `<details class="desktop-technical-details"><summary>Mostrar diagnóstico</summary><dl class="firebase-details" id="firebase-details"></dl></details>`, "desktop-settings-technical")}
       </div>
       <section id="firebase-cloud-panel" hidden aria-hidden="true"></section>
+      ${profile.role==='owner'?'<section class="workspace-danger"><small>Dados e segurança · Zona de risco</small><h3>Restaurar dados da empresa</h3><p>Apague os dados operacionais e recomece a configuração da VECONI.</p><button type="button" class="btn workspace-destructive" data-workspace-risk>Restaurar dados da empresa</button></section>':''}
     </section>`;
   }
 

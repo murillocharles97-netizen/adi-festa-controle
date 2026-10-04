@@ -1,11 +1,20 @@
 import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';
-import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
-import {doc,getDoc,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut,EmailAuthProvider,reauthenticateWithCredential} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';
+import {doc,getDoc,getDocFromServer,serverTimestamp,setDoc} from './workspace-firestore.js';
 import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=123';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
-import './sync.js?v=159';
+import './sync.js?v=160';
+import '../workspace-generation.js';
+import '../workspace-runtime.js';
+import '../business-reset-ui.js';
+
+window.WorkspaceResetAuth={reauthenticate:async password=>{
+  const user=auth.currentUser;if(!user?.email)throw Error('Confirme sua sessão antes de continuar.');
+  await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,password));
+  await user.getIdToken(true);
+}};
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
 const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
@@ -21,6 +30,24 @@ const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/e
 const businessIdFor=user=>`biz_${user.uid}`;
 const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
 function screen(html){gate.innerHTML=html;gate.hidden=false;document.documentElement.classList.add('auth-pending');window.lucide?.createIcons()}
+function workspaceBlockedScreen(detail={}){
+  readyUid='';
+  setBootstrapState('temporary_unavailable',{code:detail.code||'workspace-reset-locked',workspaceStatus:detail.status||null});
+  const running=detail.status&&detail.status!=='COMPLETED',failed=['FAILED','RECOVERY_REQUIRED'].includes(detail.status);
+  const title=failed?'Restauração precisa ser retomada':running?'Restaurando dados da empresa…':'O ambiente da empresa foi atualizado';
+  const message=running?'O uso operacional está bloqueado até a restauração terminar. Sua conta e assinatura continuam preservadas.':'Reabra a VECONI para carregar o ambiente atual. Dados de uma geração antiga não serão reenviados.';
+  screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${esc(title)}</h1><p>${esc(message)}</p><button class="btn btn-primary" id="workspace-reload" type="button">Verificar e reabrir</button><button class="btn btn-light" id="workspace-logout" type="button">Sair da conta</button></section>`);
+  document.querySelector('#workspace-reload').onclick=()=>location.reload();
+  document.querySelector('#workspace-logout').onclick=()=>bootstrapLogout('workspace_locked');
+  window.WorkspaceResetUI?.watch(detail);
+}
+function workspaceRuntime(){
+  return window.WorkspaceRuntime ||= window.WorkspaceRuntimeFactory.create({
+    protocol:window.WorkspaceGenerationProtocol,records:DB.localRecords,localStorage,sessionStorage,
+    stop:()=>{if(window.FirebaseSession?.user){cleanupCurrentSession();window.SyncFirebase?.stop?.();}},
+    retire:()=>DB.retireBusiness(),onBlocked:workspaceBlockedScreen
+  });
+}
 function setButtonLoading(button,loading,text){if(!button)return;button.disabled=loading;if(text)button.textContent=text}
 function setBootstrapState(state,details={}){
   if(!BOOTSTRAP_STATES.has(state))throw Error(`Estado de bootstrap inválido: ${state}`);
@@ -197,6 +224,7 @@ async function bootstrapLogout(reason='user_request'){
   if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;
   bootstrapRun=null;readyUid='';
   cleanupCurrentSession();
+  window.WorkspaceRuntime?.endSession();
   try{window.SyncFirebase?.stop?.()}catch{}
   try{window.BarcodeScanner?.stop?.();window.BarcodeScanner?.close?.()}catch{}
   try{window.CheckoutMobile?.reset?.()}catch{}
@@ -251,10 +279,12 @@ function syncSubscriptionShell(context){
 }
 addEventListener('business-context-changed',event=>syncSubscriptionShell(event.detail));
 async function allowed(user,profile,business,member){
+  const workspace=workspaceRuntime().capture();
   bootstrapLog('preparing business context');
   const context=BusinessContext.set({business,userProfile:profile,member});
   const permissionSignature=context.permissions.slice().sort().join('|').split('').reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(36);
-  await DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
+  await DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,workspaceGeneration:workspace.workspaceGeneration,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
+  workspaceRuntime().capture();
   window.TeamAccess?.sanitizePrivateCache?.(DB.carregar());
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
   bootstrapLog('local environment loaded');
@@ -282,7 +312,7 @@ async function allowed(user,profile,business,member){
   const readyDetail={uid:user.uid,businessId:profile.businessId,business,member,access:context.access};
   bootstrapLog('environment ready',{businessId:profile.businessId});
   setTimeout(()=>{
-    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='authorized')return;
+    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='authorized'||window.WorkspaceRuntime?.isBlocked())return;
     const mountStartedAt=performance.now();
     dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:readyDetail}));
     const mountMs=Math.max(0,Math.round(performance.now()-mountStartedAt));
@@ -392,7 +422,7 @@ async function bootstrapCore(user,token,mode){
   bootstrapLog('membership validated',{businessId:profile.businessId,role:member.role,created:membershipResponse.data?.created===true});
   setBootstrapState('loading_business',{businessId:profile.businessId});
   bootstrapLog('business loading',{businessId:profile.businessId});
-  const businessSnapshot=await getDoc(doc(db,'businesses',profile.businessId));
+  const businessSnapshot=await getDocFromServer(doc(db,'businesses',profile.businessId));
   assertCurrentRun(token);
   if(!businessSnapshot.exists()){
     setBootstrapState('onboarding_required',{businessId:profile.businessId});
@@ -401,7 +431,10 @@ async function bootstrapCore(user,token,mode){
   let business={id:businessSnapshot.id,...businessSnapshot.data()};
   bootstrapLog('business loaded',{businessId:business.id});
   const businessAccess=validateAuthenticatedBusiness({authUser:user,profile,businessId:businessSnapshot.id,business});
-  if(profile.businessId===LEGACY_BUSINESS_ID&&profileAccess.isLegacyAdiFestaOwnerCandidate){
+  try{await workspaceRuntime().prepare({business,uid:user.uid,confirmedByServer:true});}
+  catch(error){if(business.workspaceReset)error.workspaceReset={businessId:business.id,...business.workspaceReset};throw error;}
+  assertCurrentRun(token);
+  if((business.workspaceGeneration??0)===0&&profile.businessId===LEGACY_BUSINESS_ID&&profileAccess.isLegacyAdiFestaOwnerCandidate){
     if(!profileAccess.isLegacyAdiFestaOwnerCandidate||!businessAccess.isLegacyAdiFestaOwner){
       throw Object.assign(new Error('A conta não atende aos critérios seguros da migração legada.'),{code:'permission-denied'});
     }
@@ -413,7 +446,7 @@ async function bootstrapCore(user,token,mode){
   }
   if(member.role==='owner'&&Number(business.sensitiveDataVersion||0)<1){
     bootstrapLog('sensitive migration started',{businessId:profile.businessId});
-    const migrationResponse=await window.FirebaseCallable('migrateSensitiveTeamData',{businessId:profile.businessId});
+    const migrationResponse=await window.FirebaseCallable('migrateSensitiveTeamData',{businessId:profile.businessId,workspaceGeneration:business.workspaceGeneration??0});
     assertCurrentRun(token);
     const refreshedBusiness=await getDoc(doc(db,'businesses',profile.businessId));
     if(refreshedBusiness.exists())business={id:refreshedBusiness.id,...refreshedBusiness.data()};
@@ -430,6 +463,7 @@ async function bootstrapCore(user,token,mode){
 function handleBootstrapError(user,error){
   const code=normalizedCode(error),reason=String(error?.details?.reason||'');
   if(code==='bootstrap/cancelled')return;
+  if(['workspace-reset-locked','workspace-reload-required','workspace-generation-mismatch'].includes(code))return workspaceBlockedScreen({code,...error.workspaceReset});
   try{BusinessContext.fail(error)}catch(contextError){console.warn('[Bootstrap optional module]',{module:'business-context-error-state',code:normalizedCode(contextError)||'STATE_ERROR'})}
   console.error('[Bootstrap] failed',{step:bootstrapState,code:code||'unknown',message:error?.message,stack:isDevelopment()?error?.stack:undefined});
   if(code==='resource-exhausted'){

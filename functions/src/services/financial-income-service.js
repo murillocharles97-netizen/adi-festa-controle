@@ -1,6 +1,7 @@
 'use strict';
 
 const {FieldValue,Timestamp}=require('firebase-admin/firestore');
+const {projectInWorkspace}=require('./workspace-projection');
 
 const INVALID_STATUSES=new Set(['cancelado','cancelada','cancelled','canceled','desfeito','desfeita','venda_desfeita','estornado','estornada','reversed','refunded','conflict']);
 const PAID_SALE_STATUSES=new Set(['pago','paid','confirmed','completed','concluido','concluida','entregue']);
@@ -120,10 +121,10 @@ function financialIncomeService(db){
     updatedAt:FieldValue.serverTimestamp(),
   });
 
-  async function createOnce({space,businessId,eventKind,...input}){
-    let value=baseEntry({space,businessId,...input});
+  async function createOnce({space,businessId,eventKind,source={},...input}){
+    let value={...baseEntry({space,businessId,...input}),workspaceGeneration:source.workspaceGeneration??0};
     const ref=entryRef(space.id,value.id),event=eventRef(space.id,value.id);
-    return db.runTransaction(async transaction=>{
+    return projectInWorkspace(db,businessId,source,async transaction=>{
       const existing=await transaction.get(ref);
       if(existing.exists)return{created:false,entry:{id:existing.id,...existing.data()}};
       const accountHomeSpaceId=value.financialAccountId?text(value.financialAccountHomeSpaceId)||space.id:null,
@@ -150,6 +151,7 @@ function financialIncomeService(db){
         operationId:value.id,
         idempotencyKey:value.idempotencyKey,
         schemaVersion:2,
+        workspaceGeneration:source.workspaceGeneration??0,
         entryId:value.id,
         eventKind,
         transition:'created',
@@ -168,9 +170,9 @@ function financialIncomeService(db){
     return snapshot.exists&&lower(evidence.type)==='payment_received'&&APPLIED_BALANCE_EVENT_STATUSES.has(lower(evidence.status))&&text(evidence.sourceDocumentId)===text(paymentId)&&cents(evidence.amount)===amountCents&&(!paymentClientId||!evidenceClientId||paymentClientId===evidenceClientId);
   };
 
-  async function backfillProcessedPaymentEvidence(businessId,paymentId,space,expectedAmountCents){
+  async function backfillProcessedPaymentEvidence(businessId,paymentId,space,expectedAmountCents,source={}){
     const paymentRef=db.doc(`businesses/${businessId}/payments/${paymentId}`),evidenceRef=balanceEventRef(businessId,paymentId);
-    return db.runTransaction(async transaction=>{
+    return projectInWorkspace(db,businessId,source,async transaction=>{
       const paymentSnapshot=await transaction.get(paymentRef);
       if(!paymentSnapshot.exists)return{applied:false,reason:'payment-missing'};
       const payment={id:paymentSnapshot.id,...paymentSnapshot.data()},amountCents=cents(payment.effectiveAmount??payment.valor??payment.amount),clientId=text(payment.clienteId||payment.clientId||payment.customerId),operationId=text(payment.operationId),ownerId=text(payment.ownerId||payment.ownerUid),occurredAt=iso(firstDate(payment,['receivedAt','paidAt','data','createdAt']));
@@ -212,6 +214,7 @@ function financialIncomeService(db){
         createdAt:timestamp(occurredAt)||FieldValue.serverTimestamp(),
         updatedAt:FieldValue.serverTimestamp(),
         schemaVersion:3,
+        workspaceGeneration:source.workspaceGeneration??0,
       });
       transaction.set(paymentRef,{
         financialAppliedAt:FieldValue.serverTimestamp(),
@@ -233,7 +236,7 @@ function financialIncomeService(db){
     const orderMatch=text(sale.operationId).match(/^catalog-order:(.+)$/);
     if(INVALID_STATUSES.has(status)||sale.deletedAt||sale.active===false||sale.ativo===false){
       const reversedAt=firstDate(sale,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt','updatedAt'])||new Date();
-      return reverseSource(businessId,'sale',saleId,reversedAt);
+      return reverseSource(businessId,'sale',saleId,reversedAt,0,'full',sale);
     }
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.sales)return{skipped:'sales-disabled'};
@@ -244,7 +247,7 @@ function financialIncomeService(db){
     if(!PAID_SALE_STATUSES.has(status))return{skipped:'sale-not-paid'};
     if(isTerminalPaymentSale(sale))return{skipped:'terminal-payment-is-receivable'};
     const customerName=text(sale.clienteNome||sale.customerName)||'Venda avulsa';
-    return createOnce({space,businessId,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderMatch?.[1]||null,eventKind:'sale_receipt_recorded'});
+    return createOnce({space,businessId,source:sale,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderMatch?.[1]||null,eventKind:'sale_receipt_recorded'});
   }
 
   async function projectPayment(businessId,paymentId,payment={}){
@@ -254,7 +257,7 @@ function financialIncomeService(db){
     if(INVALID_STATUSES.has(status)||payment.reversedAt||payment.cancelledAt){
       const reversedAmountCents=cents(payment.reversedAmount??payment.reversalAmount??payment.effectiveReversalAmount)||amountCents,
         reversalKey=text(payment.reversalOperationId||payment.reversedByOperationId||payment.cancelOperationId)||'full';
-      return reverseSource(businessId,'customer_payment',paymentId,firstDate(payment,['reversedAt','cancelledAt','updatedAt'])||new Date(),reversedAmountCents,reversalKey);
+      return reverseSource(businessId,'customer_payment',paymentId,firstDate(payment,['reversedAt','cancelledAt','updatedAt'])||new Date(),reversedAmountCents,reversalKey,payment);
     }
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.customerPayments)return{skipped:'customer-payments-disabled'};
@@ -264,17 +267,17 @@ function financialIncomeService(db){
       const evidenceSnapshot=await balanceEventRef(businessId,paymentId).get();
       if(!paymentEvidenceMatches(evidenceSnapshot,paymentId,payment,amountCents)){
         if(evidenceSnapshot.exists)return{skipped:'payment-not-applied',evidence:'existing-evidence-mismatch'};
-        const backfill=await backfillProcessedPaymentEvidence(businessId,paymentId,space,amountCents);
+        const backfill=await backfillProcessedPaymentEvidence(businessId,paymentId,space,amountCents,payment);
         if(!backfill.applied)return{skipped:'payment-not-applied',evidence:backfill.reason};
       }
     }
     const directSaleId=text(payment.saleId||payment.relatedSaleId||payment.sourceSaleId);
     if(directSaleId&&(await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
     const allocations=Array.isArray(payment.allocations)?payment.allocations:[],saleIds=allocations.map(item=>item?.saleId),customerName=text(payment.clienteNome||payment.customerName)||'Cliente';
-    return createOnce({space,businessId,id:`credit_payment_${paymentId}`,sourceType:'customer_payment',sourceId:paymentId,amountCents,occurredAt,description:`Pagamento de ${customerName}`,paymentMethodId:paymentMethod(payment.paymentMethod||payment.formaPagamento||payment.observacao),customerId:payment.clienteId||payment.clientId||payment.customerId,relatedSaleIds:saleIds,legacyAmountCents:cents(payment.legacyAmount),allocatedAmountCents:cents(payment.allocatedAmount),eventKind:'customer_payment_recorded'});
+    return createOnce({space,businessId,source:payment,id:`credit_payment_${paymentId}`,sourceType:'customer_payment',sourceId:paymentId,amountCents,occurredAt,description:`Pagamento de ${customerName}`,paymentMethodId:paymentMethod(payment.paymentMethod||payment.formaPagamento||payment.observacao),customerId:payment.clienteId||payment.clientId||payment.customerId,relatedSaleIds:saleIds,legacyAmountCents:cents(payment.legacyAmount),allocatedAmountCents:cents(payment.allocatedAmount),eventKind:'customer_payment_recorded'});
   }
 
-  async function reverseSource(businessId,sourceType,sourceId,when=new Date(),requestedAmountCents=0,reversalKey='full'){
+  async function reverseSource(businessId,sourceType,sourceId,when=new Date(),requestedAmountCents=0,reversalKey='full',source={}){
     const linked=await linkedSpace(businessId,{requireEnabled:false});
     if(!linked)return{skipped:'automation-disabled'};
     const {space}=linked,originalId=sourceType==='sale'?`sale_${sourceId}`:`credit_payment_${sourceId}`,originalSnapshot=await entryRef(space.id,originalId).get();
@@ -283,8 +286,10 @@ function financialIncomeService(db){
     if(!amountCents)return{skipped:'zero-value'};
     const reversalType=sourceType==='sale'?'sale_reversal':'customer_payment_reversal',key=text(reversalKey).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,80)||'full',reversalId=`reversal_${sourceType}_${sourceId}_${key}`;
     if(key==='full'&&(original.reversalStatus==='reversed'||original.reversedByEntryId||original.reversalEntryId))return{skipped:'already-reversed'};
-    const result=await createOnce({space,businessId,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId,financialAccountId:original.financialAccountId||null,financialAccountHomeSpaceId:original.financialAccountHomeSpaceId||null});
-    if(result.created)await entryRef(space.id,originalId).set({reversalStatus:'reversed',reversalEntryId:reversalId,reversedAt:timestamp(occurredAt),updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    const result=await createOnce({space,businessId,source,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId,financialAccountId:original.financialAccountId||null,financialAccountHomeSpaceId:original.financialAccountHomeSpaceId||null});
+    if(result.created)await projectInWorkspace(db,businessId,source,async transaction=>{
+      transaction.update(entryRef(space.id,originalId),{reversalStatus:'reversed',reversalEntryId:reversalId,reversedAt:timestamp(occurredAt),updatedAt:FieldValue.serverTimestamp()});
+    });
     return result;
   }
 

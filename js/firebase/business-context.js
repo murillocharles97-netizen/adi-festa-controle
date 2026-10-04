@@ -54,8 +54,9 @@ function ensureBusinessWatcher(businessId){
   stopBusinessWatcher();
   if(typeof window.FirebaseDocumentListener!=='function')return;
   watchedBusinessId=businessId;
-  businessWatcherUnsubscribe=window.FirebaseDocumentListener(['businesses',businessId],business=>{
+  businessWatcherUnsubscribe=window.FirebaseDocumentListener(['businesses',businessId],(business,metadata)=>{
     if(!business||state.businessId!==businessId||!state.userProfile)return;
+    if(window.WorkspaceRuntime?.inspectRemote(business,metadata)===false)return;
     BusinessContext.set({business,userProfile:state.userProfile,member:state.member});
   },error=>console.warn('[Business subscription listener]',{code:error?.code||'unknown'}));
 }

@@ -1,5 +1,5 @@
 import { app } from "./firebase-config.js";
-import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
+import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from "./workspace-storage.js";
 
 const storage = getStorage(app);
 const businessId = () => window.BusinessContext?.getCurrentBusinessId?.() || window.FirebaseSession?.businessId || window.FirebaseSession?.profile?.businessId || "";

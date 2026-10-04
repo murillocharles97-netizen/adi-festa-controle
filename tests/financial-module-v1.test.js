@@ -67,7 +67,8 @@ test("venda, pagamento e estorno usam projeção server-side sem dupla fonte", (
 });
 
 test("operações automáticas e transferências têm IDs determinísticos", () => {
-  assert.match(backend, /runTransaction/);
+  assert.match(backend, /projectInWorkspace\(db,businessId,source,async transaction/);
+  assert.match(fs.readFileSync('functions/src/services/workspace-projection.js','utf8'), /\.runTransaction\(action\)/);
   assert.match(backend, /existing\.exists/);
   assert.match(backend, /`sale_\$\{saleId\}`/);
   assert.match(backend, /`credit_payment_\$\{paymentId\}`/);
@@ -109,8 +110,8 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
 });
 
 test("release 136 mantém recursos financeiros globais no cache PWA", () => {
-  assert.match(read("js/build-info.js"), /release: "159"/);
-  assert.match(sw, /veconi-v159-payment-engine/);
+  assert.match(read("js/build-info.js"), /release: "160"/);
+  assert.match(sw, /veconi-v160-workspace-reset/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });

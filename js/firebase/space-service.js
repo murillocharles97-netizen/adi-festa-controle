@@ -11,7 +11,7 @@ import {
   updateDoc,
   where,
   writeBatch,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "./workspace-firestore.js";
 import { normalizeFirestoreData, sanitizeForFirestore } from "./firestore-utils.js";
 
 const Engine = window.SpaceEngine;
@@ -54,6 +54,7 @@ function currentContext() {
   return {
     uid,
     businessId,
+    workspaceGeneration: businessContext.business?.workspaceGeneration ?? session.business?.workspaceGeneration ?? 0,
     role: String(session.profile?.role || businessContext.role || "viewer"),
     businessName: String(businessContext.business?.name || session.business?.name || "Meu negócio").trim().slice(0, 80),
   };
@@ -204,6 +205,7 @@ function hasOperationalSalesSpace(spaces, context) {
 }
 
 async function ensureDefaultSpace(spaces, context) {
+  if (context.workspaceGeneration > 0) return { spaces, created: false, reason: "post-reset-explicit-setup-required" };
   if (hasOperationalSalesSpace(spaces, context)) return { spaces, created: false, reason: "sales-space-exists" };
   if (context.role !== "owner") return { spaces, created: false, reason: "owner-provisioning-required" };
   const value = defaultSpaceValue(context), reference = spaceRef(value.id);

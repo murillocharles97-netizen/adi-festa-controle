@@ -86,6 +86,17 @@ const saleDraft=(id,businessId)=>({id,spaceId:`business_${businessId}`,financial
   await signOut(auth);const businessB=await createBusiness('b');
   await assert.rejects(()=>createPayment({...approvedPayload,businessId:businessB.businessId,idempotencyKey:'cross_business_000001',saleDraft:saleDraft('sale_cross_000001',businessA.businessId)}),error=>['functions/not-found','functions/permission-denied'].includes(error.code));
   assert.equal((await admin.collection(`businesses/${businessB.businessId}/paymentIntents`).get()).empty,true);
+  await admin.doc(`businesses/${businessB.businessId}`).update({workspaceGeneration:1,workspaceReset:{status:'FAILED'}});
+  await assert.rejects(()=>saveTerminal({businessId:businessB.businessId,workspaceGeneration:1,terminal:{provider:'mock',nickname:'Locked terminal'}}),error=>error.details?.reason==='workspace-reset-locked');
+  await admin.doc(`businesses/${businessB.businessId}`).update({workspaceReset:{status:'COMPLETED'}});
+  await assert.rejects(()=>saveTerminal({businessId:businessB.businessId,terminal:{provider:'mock',nickname:'Old device terminal'}}),error=>error.details?.reason==='workspace-generation-mismatch');
+  const freshTerminal=(await saveTerminal({businessId:businessB.businessId,workspaceGeneration:1,terminal:{provider:'mock',nickname:'New generation'}})).data.terminal;
+  assert.equal(freshTerminal.workspaceGeneration,1);
+  const freshIntent=(await createPayment({...approvedPayload,businessId:businessB.businessId,workspaceGeneration:1,terminalId:freshTerminal.id,idempotencyKey:'new_generation_attempt_001',saleDraft:saleDraft('new_generation_sale_001',businessB.businessId)})).data.intent;
+  assert.equal(freshIntent.workspaceGeneration,1);
+  await admin.doc(`businesses/${businessB.businessId}`).update({workspaceGeneration:2,workspaceReset:{status:'FAILED'}});
+  await assert.rejects(()=>dispatchPayment({businessId:businessB.businessId,workspaceGeneration:1,intentId:freshIntent.id,simulatorScenario:'approved'}),error=>error.details?.reason==='workspace-reset-locked');
+  assert.equal((await admin.doc(`businesses/${businessB.businessId}/paymentIntents/${freshIntent.id}`).get()).data().status,'awaiting_terminal');
   console.log('Terminal Payments Functions: aprovação, replay, timeout, cancelamento, recebível e isolamento validados.');
   process.exit(0);
 })().catch(error=>{console.error(error);process.exit(1)});

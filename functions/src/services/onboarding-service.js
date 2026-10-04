@@ -25,6 +25,7 @@ function onboardingService(db,{Timestamp,FieldValue,professionalLimits}){
       }
       if(businessSnapshot.exists&&(business.ownerId!==authUid||business.id&&business.id!==businessId))throw new HttpsError('permission-denied','A empresa encontrada pertence a outro proprietário.');
       if(businessSnapshot.exists&&business.active===false)throw new HttpsError('permission-denied','A empresa encontrada está inativa.');
+      if(businessSnapshot.exists&&(business.workspaceGeneration>0||business.workspaceReset))throw new HttpsError('failed-precondition','Esta empresa já passou por restauração. Reabra a VECONI para configurar o ambiente atual.',{reason:'onboarding-workspace-reset'});
       if(membershipSnapshot.exists&&(membership.uid!==authUid||membership.businessId!==businessId))throw new HttpsError('permission-denied','O vínculo empresarial encontrado é divergente.');
       const asTimestamp=value=>{if(!value)return null;if(typeof value.toMillis==='function')return value;const parsed=value instanceof Date?value:new Date(value);return Number.isNaN(parsed.getTime())?null:Timestamp.fromDate(parsed)},
         now=Timestamp.now(),createdAt=profile.createdAt||business.createdAt||onboarding.createdAt||now,

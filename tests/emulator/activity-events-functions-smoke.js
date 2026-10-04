@@ -15,6 +15,7 @@ const waitFor=async(read,predicate,label)=>{
 async function main(){
   const projectId=process.env.GCLOUD_PROJECT||'adi-festa-variations-test',app=adminSdk.initializeApp({projectId},`activity-events-${Date.now()}`),db=app.firestore(),businessId='activity-functions-a';
   try{
+    await db.doc(`businesses/${businessId}`).set({active:true,ownerId:'owner-a'});
     const saleRef=db.doc(`businesses/${businessId}/sales/sale-1`),eventRef=db.doc(`businesses/${businessId}/activityEvents/sale:sale-1`);
     await saleRef.set({id:'sale-1',businessId,operationId:'operation-1',clienteId:'client-1',clienteNome:'Bruna',valorFinal:25,formaPagamento:'fiado',spaceId:'store-1',createdByUid:'cashier-1',createdAt:new Date('2026-09-22T19:15:00.957Z')});
     const created=await waitFor(()=>eventRef.get(),snapshot=>snapshot.exists,'projeção da venda');
