@@ -48,6 +48,7 @@ const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles9
 const MP_WEBHOOK_URL=defineString('MERCADO_PAGO_WEBHOOK_URL',{default:'https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
 const TERMINAL_PAYMENT_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
+exports.getPerformancePage=onCall({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:10},request=>require('./services/performance-read-service').performanceReadService(db).page(request));
 exports.deleteWorkspaceAsset=onCall({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:10},request=>workspaceAssetsService(db,getStorage().bucket()).remove(request));
 function resetEnabled(){return process.env.FUNCTIONS_EMULATOR==='true'||process.env.VECONI_WORKSPACE_RESET_ENABLED==='true';}
 function resetService(){return businessResetService(db,{bucket:getStorage().bucket(),autoDispatch:true,assertInfrastructureReady:()=>{if(!resetEnabled())throw new HttpsError('failed-precondition','A restauração está indisponível enquanto a validação de segurança é concluída.');}});}

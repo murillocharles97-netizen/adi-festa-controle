@@ -362,23 +362,7 @@
     return window.ActivityCenter?.render?.() || vazio("Histórico indisponível");
   }
   function relatorios() {
-    if (matchMedia("(max-width:767px)").matches)
-      return `<section class="mobile-desempenho-notice">${icon("monitor-up")}<h2>Desempenho no desktop</h2><p>A área de Desempenho está disponível na versão desktop.</p><button class="btn btn-primary" data-go="inicio">${icon("arrow-left")} Voltar ao início</button></section>`;
-    const d = DB.carregar(),
-      faturamento = d.vendas.reduce(
-        (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
-        0,
-      ),
-      lucro = d.vendas.reduce((s, v) => s + Number(v.lucro || 0), 0),
-      custo = d.vendas.reduce((s, v) => s + Number(v.custoTotal || 0), 0),
-      fiado = d.clientes.reduce(
-        (s, c) => s + Math.abs(Math.min(c.saldo, 0)),
-        0,
-      );
-    return (
-      cabecalho("Desempenho", "Análises detalhadas do seu negócio.") +
-      `<section class="metrics">${metric("Faturamento", dinheiro(faturamento), `${d.vendas.length} vendas`, "circle-dollar-sign")}${window.TeamAccess?.has?.("cost.view") ? metric("Custo total", dinheiro(custo), "produtos vendidos", "package") : ""}${window.TeamAccess?.has?.("profit.view") ? metric("Lucro estimado", dinheiro(lucro), "não aparece no recibo", "trending-up") : ""}${window.TeamAccess?.has?.("financial.view") ? metric("Fiado aberto", dinheiro(fiado), "a receber", "hand-coins") : ""}${metric("Ticket médio", dinheiro(d.vendas.length ? faturamento / d.vendas.length : 0), "por venda", "chart-line")}</section>`
-    );
+    return window.PerformanceDashboard?.render?.() || vazio("Desempenho indisponível");
   }
   function cobrancaCard(c) {
     const tel = Utils.somenteNumeros(c.telefone),
@@ -1197,7 +1181,7 @@
   const mensagemCobranca = (c) =>
     `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${DB.carregar().config.nome || "nossa loja"} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
   function syncResponsiveNavigation() {
-    const mobile = matchMedia("(max-width:767px)").matches,
+    const mobile = !window.TeamAccess?.canRoute?.("relatorios"),
       link = $('[data-route="relatorios"]');
     if (!link) return;
     link.hidden = mobile;
@@ -1261,6 +1245,7 @@
     aplicarInputModes($("#app"));
     bind(route);
     if (route === "equipe" && !deniedRoute) window.TeamPage?.bind?.();
+    if (route === "relatorios" && !deniedRoute) window.PerformanceDashboard?.bind?.();
     if (route === "catalogo") CatalogoUI.bind();
     if (route === "pedidos") VisitasUI.bindOrdersPage();
     if (route === "campanhas") CampanhasUI.bind();
