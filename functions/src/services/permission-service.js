@@ -10,7 +10,7 @@ function permissionService(db){
     if(!profileSnapshot.exists)throw new HttpsError('permission-denied','Perfil não encontrado.');
     if(!businessSnapshot.exists)throw new HttpsError('not-found','Empresa não encontrada.');
     const profile=profileSnapshot.data(),business={id:businessSnapshot.id,...businessSnapshot.data()},member=memberSnapshot.exists?memberSnapshot.data():null,
-      legacyAccess=!member&&profile.active===true&&profile.businessId===businessId,
+      legacyAccess=!member&&business.legacyAccessDisabled!==true&&profile.active===true&&profile.businessId===businessId,
       effectiveProfile=member?{...profile,role:member.role,permissions:member.permissions,active:member.status==='active'}:profile;
     if(business.active!==true||(!legacyAccess&&(!member||member.status!=='active')))throw new HttpsError('permission-denied','Acesso à empresa negado.');
     if(ownerOnly&&effectiveProfile.role!=='owner')throw new HttpsError('permission-denied','Somente o proprietário pode gerenciar a assinatura.');

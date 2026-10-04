@@ -68,21 +68,24 @@
     return {data, values};
   }
   function report(error) {
+    const stale=error.code==='workspace-generation-mismatch';
     // DOMException.code is a read-only number (22 for quota), not our error code.
-    error = Object.assign(new Error(error.code === 'local-cache-conflict' ? error.message : 'Não foi possível atualizar o armazenamento local da VECONI. Os dados já salvos foram preservados.', {cause: error}), {name: error.name, technicalMessage: error.message,
+    error = Object.assign(new Error(stale || error.code === 'local-cache-conflict' ? error.message : 'Não foi possível atualizar o armazenamento local da VECONI. Os dados já salvos foram preservados.', {cause: error}), {name: error.name, technicalMessage: error.message,
       code: typeof error.code === 'string' ? error.code : error.name === 'QuotaExceededError' ? 'indexeddb-quota' : 'indexeddb-write-failed'});
     error.storageDetail = {backend: 'IndexedDB', database: DATABASE, store: STORE, kind: 'structured-business-records'};
     console.error('[STORAGE]', {code: error.code, exception: error.name, ...error.storageDetail});
     window.dispatchEvent(new CustomEvent('local-persistence-error', {detail: {code: error.code}}));
-    window.Utils?.toast?.('Não foi possível atualizar o armazenamento local da VECONI. Não feche o aplicativo; tente salvar novamente.', true);
+    window.Utils?.toast?.(stale?'O ambiente da empresa foi restaurado. Reabra a VECONI para continuar.':'Não foi possível atualizar o armazenamento local da VECONI. Não feche o aplicativo; tente salvar novamente.', true);
     return error;
   }
   function requireSession() {
     if (!session) throw failure('local-cache-not-ready', 'O armazenamento local ainda está sendo preparado.');
+    if (session.retired) throw failure('workspace-generation-mismatch', 'O ambiente da empresa mudou. Reabra a VECONI.');
     if (session.error) throw session.error;
     return session;
   }
   function schedule(current) {
+    if (current.retired) throw failure('workspace-generation-mismatch', 'O ambiente da empresa mudou. Reabra a VECONI.');
     current.dirty = true;
     if (!current.scheduled) {
       current.scheduled = true;
@@ -97,13 +100,18 @@
     const revision = current.revision + 1, meta = {key: current.metaKey, scope: current.scope, kind: 'meta',
       revision, updatedAt: new Date().toISOString(), migration: clone(current.migration), records: next.size};
     await DB.localRecords.transaction('readwrite', (store, done, fail) => {
-      const request = store.get(current.metaKey);
-      request.onsuccess = () => {
-        if (Number(request.result?.revision || 0) !== current.revision)
-          return fail(failure('local-cache-conflict', 'Os dados locais mudaram em outra aba. Reabra a VECONI antes de continuar.'));
-        changed.forEach(row => store.put(row));
-        removed.forEach(key => store.delete(key));
-        store.put(meta); done(true);
+      const epoch = store.get(`workspace-generation:${current.businessId}`);
+      epoch.onsuccess = () => {
+        if ((epoch.result?.workspaceGeneration ?? 0) !== current.workspaceGeneration || epoch.result?.cleanupPending === true)
+          return fail(failure('workspace-generation-mismatch', 'O ambiente da empresa foi restaurado. Operação antiga bloqueada.'));
+        const request = store.get(current.metaKey);
+        request.onsuccess = () => {
+          if (Number(request.result?.revision || 0) !== current.revision)
+            return fail(failure('local-cache-conflict', 'Os dados locais mudaram em outra aba. Reabra a VECONI antes de continuar.'));
+          changed.forEach(row => store.put(row));
+          removed.forEach(key => store.delete(key));
+          store.put(meta); done(true);
+        };
       };
     });
     current.baseline = new Map([...next].map(([key,row]) => [key, fingerprint(row)]));
@@ -114,6 +122,7 @@
   function flush(current = session) {
     if (!current) return Promise.resolve();
     if (current.running) return current.running.then(() => current.dirty ? flush(current) : undefined);
+    if (current.retired) return Promise.resolve();
     if (!current.dirty) return Promise.resolve();
     current.running = (async () => {
       try {
@@ -123,7 +132,8 @@
         }
         current.error = null;
       } catch (error) {
-        current.dirty = true;
+        current.retired = error.code === 'workspace-generation-mismatch';
+        current.dirty = !current.retired;
         current.error = report(error);
         throw current.error;
       } finally { current.running = null; }
@@ -163,11 +173,15 @@
     if (session?.key === key) { await flush(); return clone(session.data); }
     if (session) await flush();
     session = null;
+    const businessId=key.split(':')[1]||'adi-festa',workspaceGeneration=Number(key.match(/:generation:(\d+)$/)?.[1]||0);
+    const epoch=await DB.localRecords.read(`workspace-generation:${businessId}`);
+    if((epoch?.workspaceGeneration??0)!==workspaceGeneration||epoch?.cleanupPending===true)
+      throw failure('workspace-generation-mismatch','O cache pertence a uma configuração anterior. Reabra a empresa.');
     const scope = `business-cache:v156:${key}`, metaKey = JSON.stringify([scope, 'meta']);
     const rows = await DB.localRecords.list(scope), meta = rows.find(row => row.key === metaKey), loaded = decode(rows);
     if ((!meta && rows.length) || (meta && meta.records !== rows.length - 1))
       throw failure('local-cache-corrupt', 'A estrutura do cache local precisa de revisão. Nenhum dado foi apagado.');
-    const current = {key, scope, metaKey, data: meta ? loaded.data : empty(), values: loaded.values,
+    const current = {key, scope, metaKey, businessId, workspaceGeneration, data: meta ? loaded.data : empty(), values: loaded.values,
       revision: meta?.revision || 0, migration: meta?.migration || null,
       baseline: new Map(rows.filter(row => row.key !== metaKey).map(row => [row.key, fingerprint(row)])),
       dirty: false, metaDirty: false, error: null, running: null, scheduled: false, inventoryBefore: inventory()};
@@ -184,7 +198,9 @@
   }
   const keyValue = {
     getItem(key) {
+      if(session?.retired)throw failure('workspace-generation-mismatch','O ambiente da empresa mudou.');
       if (session?.values.has(key)) return session.values.get(key);
+      if(session?.workspaceGeneration>0&&ownedKey(key)&&key!=='adiFestaDeviceId')return null;
       // Old queue/metadata is imported lazily without deleting its recovery copy.
       const value = localStorage.getItem(key);
       if (value !== null && session && ownedKey(key)) { session.values.set(key, value); schedule(session); }
@@ -208,6 +224,12 @@
   DB.businessCache = {open, flush, keyValue, diagnostic, inventory,
     stage(data, key) { const current = requireSession(); if (key && key !== current.key) throw failure('local-cache-scope-changed', 'A empresa mudou durante a gravação. Tente novamente.'); current.data = clone(data); schedule(current); },
     async release() { await flush(); session = null; },
+    async retire() {
+      const current=session;
+      if(!current)return;
+      current.retired=true;current.dirty=false;
+      try{if(current.running)await current.running;}finally{if(session===current)session=null;}
+    },
     ready: () => Boolean(session), pending: () => Boolean(session?.dirty || session?.running)};
   DB.flush = () => flush();
   window.addEventListener('beforeunload', event => { if (DB.businessCache.pending()) {event.preventDefault(); event.returnValue = '';} });

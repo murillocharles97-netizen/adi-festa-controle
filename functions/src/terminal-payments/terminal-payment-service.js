@@ -7,6 +7,8 @@ const {ProviderRegistry}=require('./provider-registry');
 const {SIMULATOR_CAPABILITIES}=require('./providers/simulator-provider');
 const {MOCK_CAPABILITIES}=require('./providers/mock-provider');
 const {assertTransition}=require('./payment-state-machine');
+const {assertWritable}=require('../services/workspace-reset-policy');
+const {workspaceWriteFence}=require('../services/workspace-write-fence');
 const isMock=provider=>['mock','simulator'].includes(provider);
 const allowedSpace=(context,id)=>!context.member||context.member.role==='owner'||context.member.spaceAccess==='all'||context.member.allowedSpaceIds?.includes(id);
 const terminalAllows=(terminal,id)=>terminal.active!==false&&terminal.status==='connected'&&(terminal.spaceAccess!=='selected_spaces'||terminal.allowedSpaceIds?.includes(id));
@@ -89,6 +91,7 @@ function publicIntent(id,data={}){
   return{
     id,
     businessId:data.businessId,
+    workspaceGeneration:data.workspaceGeneration??0,
     spaceId:data.spaceId||data.saleDraft?.spaceId||null,
     saleId:data.saleId,
     terminalId:data.terminalId,
@@ -130,27 +133,41 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
   const businessPath=businessId=>`businesses/${businessId}`;
   const intentRef=(businessId,intentId)=>db.doc(`${businessPath(businessId)}/paymentIntents/${intentId}`);
   const terminalRef=(businessId,terminalId)=>db.doc(`${businessPath(businessId)}/paymentTerminals/${terminalId}`);
+  function inWorkspace(value,action){
+    return workspaceWriteFence(db,value).runTransaction(transaction=>action(new Proxy(transaction,{
+      get(target,key){
+        if(['set','create','update'].includes(key))return(ref,data,...options)=>{
+          if(!ref.path.startsWith(`${businessPath(value.businessId)}/`))throw new HttpsError('permission-denied','Destino de pagamento fora da empresa.');
+          return target[key](ref,{...data,workspaceGeneration:value.workspaceGeneration},...options);
+        };
+        return typeof target[key]==='function'?target[key].bind(target):target[key];
+      },
+    })));
+  }
   async function context(request,{admin=false}={}){
     const businessId=text(request.data?.businessId||request.data?.companyId,100),value=await permissions().authenticatedContext(request,businessId,{ownerOnly:false});
     if(!ROLES.has(value.profile?.role))throw new HttpsError('permission-denied','Seu perfil não pode operar pagamentos.');
     if(value.member&&value.profile.role!=='owner'&&value.member.permissions?.['sales.create']!==true)throw new HttpsError('permission-denied','Seu acesso não permite realizar vendas.');
     if(admin&&!['owner','admin'].includes(value.profile?.role))throw new HttpsError('permission-denied','Somente proprietário ou administrador pode gerenciar maquininhas.');
-    return{...value,businessId};
+    const workspaceGeneration=request.data?.workspaceGeneration??0;
+    assertWritable(value.business,workspaceGeneration);
+    return{...value,businessId,workspaceGeneration};
   }
   const simulatorAllowed=value=>process.env.FUNCTIONS_EMULATOR==='true'||(value.businessId==='adi-festa'&&value.business?.subscription?.planId==='internal')||(value.business?.paymentFeatures?.integratedPaymentsV1===true&&value.business?.paymentFeatures?.mock===true);
   function persistTransitionEvent(transaction,ref,status,actor,source='engine'){
     const event=ref.collection('events').doc(`${source}_${status}`);
     transaction.set(event,{id:event.id,businessId:ref.parent.parent.id,intentId:ref.id,type:`payment_${status}`,status,source,actor,createdAt:FieldValue.serverTimestamp()});
   }
-  async function recordEvent({businessId,intentId,status,actor,source='engine',details={}}){
+  async function recordEvent({businessId,workspaceGeneration=0,intentId,status,actor,source='engine',details={}}){
     const ref=intentRef(businessId,intentId).collection('events').doc(`${source}_${status}`);
-    try{await ref.create({id:ref.id,businessId,intentId,type:`payment_${status}`,status,source,actor,details,createdAt:FieldValue.serverTimestamp()});}catch(error){if(error.code!==6&&error.code!=='already-exists')throw error;}
+    try{await inWorkspace({businessId,workspaceGeneration},transaction=>transaction.create(ref,{id:ref.id,businessId,intentId,type:`payment_${status}`,status,source,actor,details,createdAt:FieldValue.serverTimestamp()}));}catch(error){if(error.code!==6&&error.code!=='already-exists')throw error;}
   }
   async function getIntent(contextValue,id){
     const ref=intentRef(contextValue.businessId,text(id,100)),snapshot=await ref.get();
     if(!snapshot.exists)throw new HttpsError('not-found','Cobrança não encontrada.');
     const data=snapshot.data();
     if(data.businessId!==contextValue.businessId)throw new HttpsError('permission-denied','Cobrança pertence a outra empresa.');
+    if((data.workspaceGeneration??0)!==contextValue.workspaceGeneration)throw new HttpsError('failed-precondition','Cobrança de uma configuração anterior.');
     if(!allowedSpace(contextValue,data.spaceId)||data.createdByUid!==contextValue.uid&&contextValue.profile.role!=='owner')throw new HttpsError('permission-denied','Você não tem acesso a este pagamento.');
     return{ref,snapshot,data};
   }
@@ -185,16 +202,17 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     for(const id of scope.allowedSpaceIds){if(!/^[\w-]{3,120}$/.test(id))throw new HttpsError('invalid-argument','Espaço inválido.');const space=(await db.doc(`financialSpaces/${id}`).get()).data();if(!space||(space.businessId||space.linkedBusinessId)!==value.businessId||!allowedSpace(value,id))throw new HttpsError('permission-denied','Espaço não autorizado.');}
     const paired=existing.exists?existing.data():await provider.pairTerminal({nickname}),actor=actorOf(value),isDefault=input.isDefault===true||input.makeDefault===true;
     if(isDefault){
-      const all=await db.collection(`${businessPath(value.businessId)}/paymentTerminals`).where('isDefault','==',true).get(),batch=db.batch();
+      await inWorkspace(value,async batch=>{
+      const all=await batch.get(db.collection(`${businessPath(value.businessId)}/paymentTerminals`).where('isDefault','==',true));
       all.docs.forEach(doc=>batch.set(doc.ref,{isDefault:false,updatedAt:FieldValue.serverTimestamp()},{merge:true}));
       batch.set(ref,{id:ref.id,businessId:value.businessId,provider:providerId,nickname,externalTerminalId:paired.externalTerminalId,model:paired.model||null,serial:paired.serial||null,merchantId:null,status:'connected',isDefault:true,...scope,capabilities:providerId==='mock'?{...MOCK_CAPABILITIES}:{...SIMULATOR_CAPABILITIES},createdByUid:existing.data()?.createdByUid||value.uid,updatedBy:actor,createdAt:existing.data()?.createdAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),archivedAt:null},{merge:true});
-      await batch.commit();
-    }else await ref.set({id:ref.id,businessId:value.businessId,provider:providerId,nickname,externalTerminalId:paired.externalTerminalId,model:paired.model||null,serial:paired.serial||null,merchantId:null,status:'connected',isDefault:existing.data()?.isDefault===true,...scope,capabilities:providerId==='mock'?{...MOCK_CAPABILITIES}:{...SIMULATOR_CAPABILITIES},createdByUid:existing.data()?.createdByUid||value.uid,updatedBy:actor,createdAt:existing.data()?.createdAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),archivedAt:null},{merge:true});
+      });
+    }else await inWorkspace(value,transaction=>transaction.set(ref,{id:ref.id,businessId:value.businessId,provider:providerId,nickname,externalTerminalId:paired.externalTerminalId,model:paired.model||null,serial:paired.serial||null,merchantId:null,status:'connected',isDefault:existing.data()?.isDefault===true,...scope,capabilities:providerId==='mock'?{...MOCK_CAPABILITIES}:{...SIMULATOR_CAPABILITIES},createdByUid:existing.data()?.createdByUid||value.uid,updatedBy:actor,createdAt:existing.data()?.createdAt||FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),archivedAt:null},{merge:true}));
     const saved=await ref.get();return{terminal:{id:saved.id,...saved.data()}};
   }
   async function archiveTerminal(request){
     const value=await context(request,{admin:true}),found=await getIntentOrTerminal(value,request.data?.terminalId,'terminal');
-    await found.ref.set({status:'archived',isDefault:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),updatedBy:actorOf(value)},{merge:true});
+    await inWorkspace(value,transaction=>transaction.set(found.ref,{status:'archived',isDefault:false,archivedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),updatedBy:actorOf(value)},{merge:true}));
     return{terminalId:found.ref.id,status:'archived'};
   }
   async function getIntentOrTerminal(value,id,type){
@@ -225,7 +243,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     const payment=validatePaymentInput(input,terminal.data),simulatorScenario='manual',requestHash=sha(JSON.stringify({businessId:value.businessId,saleDraft,terminalId:terminal.ref.id,...payment,simulatorScenario})),intentId=`pi_${sha(`${value.businessId}:${idempotencyKey}`).slice(0,36)}`,ref=intentRef(value.businessId,intentId),actor=actorOf(value),base={
       id:intentId,actorUid:value.uid,cartFingerprint:requestHash,checkoutId:saleDraft.id,isTest:isMock(terminal.data.provider),businessId:value.businessId,spaceId:saleDraft.spaceId,saleId:saleDraft.id,terminalId:terminal.ref.id,terminalNickname:terminal.data.nickname,provider:terminal.data.provider,amountCents:payment.amountCents,currency:'BRL',paymentMethod:payment.paymentMethod,installments:payment.installments,status:'created',saleStatus:'payment_pending',active:true,idempotencyKey,requestHash,providerPaymentId:null,providerOrderId:null,createdByUid:value.uid,createdBy:actor,capabilities:terminal.data.capabilities||{},saleDraft,simulatorScenario,finalizationOperationId:`terminal_payment_${intentId}`,finalizationStatus:'pending',failureReason:null,
     };
-    const transactionResult=await db.runTransaction(async transaction=>{
+    const transactionResult=await inWorkspace(value,async transaction=>{
       const lockRef=db.doc(`${businessPath(value.businessId)}/paymentCheckoutLocks/${value.uid}`),lock=await transaction.get(lockRef),previous=lock.data()?.intentId?await transaction.get(intentRef(value.businessId,lock.data().intentId)):null;
       const current=await transaction.get(ref),sale=await transaction.get(db.doc(`${businessPath(value.businessId)}/sales/${saleDraft.id}`));
       if(current.exists){
@@ -241,7 +259,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
       return{reused:false,data:base};
     });
     if(transactionResult.reused){const data=transactionResult.data.status==='created'?await prepareProviderIntent(value,ref):transactionResult.data;return{intent:publicIntent(intentId,data),reused:true};}
-    await recordEvent({businessId:value.businessId,intentId,status:'created',actor});
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId,status:'created',actor});
     const prepared=await prepareProviderIntent(value,ref);
     return{intent:publicIntent(intentId,prepared),reused:false};
   }
@@ -252,7 +270,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     let created;
     try{created=await provider.createPayment({intent,terminal:terminal.data});}
     catch(error){created={status:'pending_confirmation',failureReason:text(error.code||'provider_network_error',100)};}
-    const result=await db.runTransaction(async transaction=>{
+    const result=await inWorkspace(value,async transaction=>{
       const current=(await transaction.get(ref)).data();
       if(current.status!=='created')return current;
       assertTransition(current.status,created.status);
@@ -260,7 +278,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
       persistTransitionEvent(transaction,ref,created.status,actorOf(value));
       return{...current,...created};
     });
-    await recordEvent({businessId:value.businessId,intentId:ref.id,status:result.status,actor:actorOf(value)});
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId:ref.id,status:result.status,actor:actorOf(value)});
     return result;
   }
   async function dispatchPayment(request){
@@ -268,7 +286,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     if(found.data.status==='created')found.data=await prepareProviderIntent(value,found.ref);
     const scenario=text(request.data?.simulatorScenario||'manual',30),simulate=scenario!=='manual';
     if(simulate&&(!isMock(found.data.provider)||!simulatorAllowed(value)))throw new HttpsError('permission-denied','Controles de teste não autorizados.');
-    const state=await db.runTransaction(async transaction=>{
+    const state=await inWorkspace(value,async transaction=>{
       const current=await transaction.get(found.ref),data=current.data()||{};
       if(FINAL_STATUSES.has(data.status)||data.status==='pending_confirmation'&&!simulate)return{dispatch:false,data};
       if(data.status==='processing'&&timestampMillis(data.processingLeaseUntil)>now()&&!simulate)return{dispatch:false,data};
@@ -277,20 +295,20 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
       transaction.set(found.ref,{status:'processing',active:true,processingLeaseUntil:leaseUntil,processingStartedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});persistTransitionEvent(transaction,found.ref,'processing',actor);return{dispatch:true,data:{...data,status:'processing',active:true}};
     });
     if(!state.dispatch)return{intent:publicIntent(found.ref.id,state.data),reused:true};
-    await recordEvent({businessId:value.businessId,intentId:found.ref.id,status:'processing',actor});
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId:found.ref.id,status:'processing',actor});
     const provider=registry.get(state.data.provider);
     if(typeof provider.dispatchPayment!=='function')throw new HttpsError('failed-precondition','Provider ainda não suporta envio remoto.');
     await new Promise(resolve=>setTimeout(resolve,650));
     let result;
     try{result=scenario==='manual'?{status:'processing'}:await provider.dispatchPayment({intent:state.data,scenario});}catch(error){result={status:'pending_confirmation',failureReason:text(error.code||'provider_network_error',100)};}
-    const final=await db.runTransaction(async transaction=>{
+    const final=await inWorkspace(value,async transaction=>{
       const current=await transaction.get(found.ref),data=current.data()||{};
       if(FINAL_STATUSES.has(data.status)||data.status==='pending_confirmation')return data;
       assertTransition(data.status,result.status);
       const patch={status:result.status,saleStatus:saleStatusForPayment(result.status),active:ACTIVE_STATUSES.has(result.status)||result.status==='approved',failureReason:result.failureReason||null,approvedAt:result.approvedAt?Timestamp.fromDate(new Date(result.approvedAt)):null,...(result.status==='declined'?{declinedAt:FieldValue.serverTimestamp()}:{}),...(result.status==='expired'?{expiredAt:FieldValue.serverTimestamp()}:{}),...(result.status==='cancelled'?{cancelledAt:FieldValue.serverTimestamp()}:{}),processingLeaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()};
       transaction.set(found.ref,patch,{merge:true});persistTransitionEvent(transaction,found.ref,result.status,actor,'provider');return{...data,...result};
     });
-    await recordEvent({businessId:value.businessId,intentId:found.ref.id,status:final.status,actor,source:'provider',details:{reason:final.failureReason||null}});
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId:found.ref.id,status:final.status,actor,source:'provider',details:{reason:final.failureReason||null}});
     return{intent:publicIntent(found.ref.id,final)};
   }
   async function getPaymentStatus(request){const value=await context(request),found=await getIntent(value,request.data?.intentId),provider=registry.get(found.data.provider);const outcome=await provider.getPaymentStatus({intent:found.data});if(outcome.status!==found.data.status)throw new HttpsError('failed-precondition','Resultado diferente exige reconciliação auditável do provider.');return{intent:publicIntent(found.ref.id,found.data),source:'provider'};}
@@ -300,7 +318,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     if(!ACTIVE_STATUSES.has(found.data.status))throw new HttpsError('failed-precondition','Pagamento não pode ser cancelado neste estado.');
     const cancellation=await provider.cancelPayment({intent:found.data});
     if(cancellation.status!=='cancelled')throw new HttpsError('failed-precondition','Cancelamento não confirmado. Verifique o pagamento; não cobre novamente.');
-    const result=await db.runTransaction(async transaction=>{
+    const result=await inWorkspace(value,async transaction=>{
       const current=await transaction.get(found.ref),data=current.data()||{};
       if(data.status==='cancelled')return data;
       if(data.status==='approved'||data.finalizationStatus==='completed')throw new HttpsError('failed-precondition','Pagamento aprovado não pode ser cancelado. Use o fluxo de estorno.');
@@ -308,7 +326,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
       assertTransition(data.status,'cancelled');
       const patch={status:'cancelled',saleStatus:'cancelled',active:false,cancelledAt:FieldValue.serverTimestamp(),processingLeaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()};transaction.set(found.ref,patch,{merge:true});persistTransitionEvent(transaction,found.ref,'cancelled',actor);return{...data,...patch,status:'cancelled',active:false};
     });
-    await recordEvent({businessId:value.businessId,intentId:found.ref.id,status:'cancelled',actor});return{intent:publicIntent(found.ref.id,result)};
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId:found.ref.id,status:'cancelled',actor});return{intent:publicIntent(found.ref.id,result)};
   }
   async function refundPayment(request){
     throw new HttpsError('failed-precondition','Pagamento integrado requer estorno. Estorno não implementado nesta V1.');
@@ -317,7 +335,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
   async function claimFinalization(request){
     const value=await context(request),found=await getIntent(value,request.data?.intentId),claimToken=text(request.data?.claimToken,100);
     if(!/^[A-Za-z0-9_-]{16,100}$/.test(claimToken))throw new HttpsError('invalid-argument','Identificador de finalização inválido.');
-    return db.runTransaction(async transaction=>{
+    return inWorkspace(value,async transaction=>{
       const current=await transaction.get(found.ref),data=current.data()||{};
       if(data.status!=='approved')throw new HttpsError('failed-precondition','A venda só pode ser finalizada após a aprovação.');
       if(data.finalizationStatus==='completed')return{claimed:false,completed:true,intent:publicIntent(found.ref.id,data)};
@@ -330,7 +348,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     const value=await context(request),found=await getIntent(value,request.data?.intentId),claimToken=text(request.data?.claimToken,100),saleId=text(request.data?.saleId,100),actor=actorOf(value);
     if(!claimToken||sha(claimToken)!==found.data.finalizationClaimTokenHash)throw new HttpsError('permission-denied','Finalização não pertence a esta sessão.');
     if(saleId!==found.data.saleId)throw new HttpsError('failed-precondition','Venda finalizada não corresponde à cobrança.');
-    const receivableRef=db.doc(`${businessPath(value.businessId)}/paymentReceivables/${found.ref.id}`),result=await db.runTransaction(async transaction=>{
+    const receivableRef=db.doc(`${businessPath(value.businessId)}/paymentReceivables/${found.ref.id}`),result=await inWorkspace(value,async transaction=>{
       const current=await transaction.get(found.ref),data=current.data()||{};
       if(data.finalizationStatus==='completed')return data;
       if(data.status!=='approved'||data.finalizationClaimTokenHash!==sha(claimToken))throw new HttpsError('failed-precondition','A finalização perdeu validade.');
@@ -340,7 +358,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
       persistTransitionEvent(transaction,found.ref,'sale_finalized',actor,'sales');
       transaction.set(receivableRef,{id:found.ref.id,businessId:value.businessId,paymentIntentId:found.ref.id,saleId,actorUid:data.createdByUid,spaceId:data.spaceId,isTest:isMock(data.provider),grossAmountCents:data.amountCents,currency:data.currency||'BRL',provider:data.provider,terminalId:data.terminalId,terminalNickname:data.terminalNickname,status:'pending_settlement',feeStatus:'unknown',feeAmountCents:null,netAmountCents:null,expectedSettlement:null,settledAt:null,createdByUid:data.createdByUid,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:false});return{...data,finalizationStatus:'completed',finalizedSaleId:saleId};
     });
-    await recordEvent({businessId:value.businessId,intentId:found.ref.id,status:'sale_finalized',actor,source:'sales',details:{saleId}});return{intent:publicIntent(found.ref.id,result),receivableId:found.ref.id};
+    await recordEvent({businessId:value.businessId,workspaceGeneration:value.workspaceGeneration,intentId:found.ref.id,status:'sale_finalized',actor,source:'sales',details:{saleId}});return{intent:publicIntent(found.ref.id,result),receivableId:found.ref.id};
   }
   async function activePayment(request){
     const value=await context(request),snapshot=await db.collection(`${businessPath(value.businessId)}/paymentIntents`).where('createdByUid','==',value.uid).where('active','==',true).limit(10).get(),rows=snapshot.docs.map(doc=>({id:doc.id,...doc.data()})).filter(item=>item.businessId===value.businessId&&(ACTIVE_STATUSES.has(item.status)||item.status==='approved'&&item.finalizationStatus!=='completed')).sort((a,b)=>timestampMillis(b.updatedAt)-timestampMillis(a.updatedAt));

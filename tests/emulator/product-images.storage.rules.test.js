@@ -27,6 +27,8 @@ test.before(async () => {
   });
   await env.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
+    await setDoc(doc(db, 'businesses', businessA), {active:true,ownerId:'owner-a'});
+    await setDoc(doc(db, 'businesses', businessB), {active:true,ownerId:'owner-b'});
     await setDoc(doc(db, "users", "owner-a"), {
       uid: "owner-a",
       businessId: businessA,

@@ -39,6 +39,7 @@ async function harness() {
     scheduleImmediate() {},
     queueKey: () => 'test-sync-queue',
     activeBusinessId: () => 'test-business',
+    WorkspaceRuntime: { capture: () => ({ businessId:'test-business', workspaceGeneration:0, uid:'owner' }) },
     deviceId: () => 'device-a',
     queueSubtype: () => 'financial',
     now: () => new Date().toISOString(),

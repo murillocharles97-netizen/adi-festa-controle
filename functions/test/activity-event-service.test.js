@@ -35,7 +35,7 @@ test('saída de estoque da própria venda não cria uma segunda ação',()=>{
 
 test('reentrega do trigger grava por merge no mesmo documento',async()=>{
   const writes=[];
-  const db={doc:path=>({set:async(value,options)=>writes.push({path,value,options})})};
+  const db={doc:path=>({path}),runTransaction:async fn=>fn({get:async()=>({data:()=>({active:true})}),set:(ref,value,options)=>writes.push({path:ref.path,value,options})})};
   const service=activityEventService(db,{FieldValue,Timestamp});
   const snapshot={exists:true,data:()=>({operationId:'op-1',clienteId:'c1',valor:150,paymentMethod:'pix',createdAt:'2026-09-22T19:15:57.577Z'})};
   await service.project({businessId:'biz',sourceCollection:'payments',sourceDocumentId:'payment-1',after:snapshot});

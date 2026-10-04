@@ -253,7 +253,7 @@
   }
 
   function subscriptionInternal(subscription = {}) {
-    return subscription.planId === "internal" && ["active", "internal"].includes(subscription.status);
+    return subscription?.planId === "internal" && ["active", "internal"].includes(subscription.status);
   }
 
   function updateOrders() {

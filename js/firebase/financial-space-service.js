@@ -15,13 +15,13 @@ import {
   updateDoc,
   where,
   writeBatch,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "./workspace-firestore.js";
 import {
   getDownloadURL,
   getStorage,
   ref,
   uploadBytes,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
+} from "./workspace-storage.js";
 import { sanitizeForFirestore, normalizeFirestoreData } from "./firestore-utils.js";
 
 const Engine = window.FinancialEngine;
@@ -337,6 +337,7 @@ async function mutateFinancialViewProfile(mutator) {
         defaultViewId: next.defaultViewId || null,
         lastViewId: next.lastViewId || null,
         schemaVersion: 1,
+        profileRevision: Number(snapshot.data()?.profileRevision || 0) + 1,
         updatedAt: now(),
       };
     transaction.set(reference, clean(value), { merge: true });

@@ -1,5 +1,5 @@
 import {auth,db} from './firebase-config.js';
-import {collection,doc,onSnapshot,serverTimestamp,setDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import {collection,doc,onSnapshot,serverTimestamp,setDoc} from './workspace-firestore.js';
 import {maskPhone,normalizeBrazilianPhone} from '../catalog-portal.js';
 import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js';
 
@@ -99,8 +99,9 @@ function refreshVisitSubscriptions(){
 }
 let publishTimer=null,lastPublishFingerprint='';
 function publicationFingerprint(){const data=DB.carregar(),settings=data.config.catalogSettings||{};return JSON.stringify({settings,products:(data.produtos||[]).map(p=>[p.id,p.nome,p.preco,p.estoqueAtual,p.ativo,p.imageUpdatedAt,p.catalogVisible,p.catalogFeatured]),campaigns:(data.campanhas||[]).map(c=>[c.id,c.status,c.ativo,c.updatedAt]),progress:(data.progressosCampanha||[]).map(p=>[p.id,p.updatedAt]),orders:(data.catalogOrders||[]).map(o=>[o.id,o.orderStatus,o.updatedAt])})}
-function scheduleUniversalPublish(force=false){clearTimeout(publishTimer);publishTimer=setTimeout(()=>{if(!auth.currentUser)return;const fingerprint=publicationFingerprint();if(!force&&fingerprint===lastPublishFingerprint)return;lastPublishFingerprint=fingerprint;window.CatalogoUniversal?.publish?.()},force?100:900)}
-function bindAll(){if(!auth.currentUser)return;window.CatalogoUniversal?.ensure?.();refreshVisitSubscriptions()}
+function automaticCatalogReady(){return auth.currentUser&&!window.WorkspaceRuntime?.isBlocked()&&(!(DB.getWorkspaceGeneration?.()>0)||Boolean(DB.carregar().config.catalogSettings?.publicToken));}
+function scheduleUniversalPublish(force=false){clearTimeout(publishTimer);publishTimer=setTimeout(()=>{if(!automaticCatalogReady())return;const fingerprint=publicationFingerprint();if(!force&&fingerprint===lastPublishFingerprint)return;lastPublishFingerprint=fingerprint;window.CatalogoUniversal?.publish?.()},force?100:900)}
+function bindAll(){if(!automaticCatalogReady())return;window.CatalogoUniversal?.ensure?.();refreshVisitSubscriptions()}
 addEventListener('catalog-publish-request',event=>publish(event.detail.visit).finally(refreshVisitSubscriptions));
 addEventListener('catalog-orders-updated',event=>{const visit=DB.carregar().visitas.find(v=>v.id===event.detail.visitId);if(visit)publish(visit,{publishProfiles:false})});
 addEventListener('catalog-order-status-request',event=>{const order=event.detail.order,visit=DB.carregar().visitas.find(v=>v.id===order.visitId),catalogToken=order.catalogToken||visit?.publicToken||window.CatalogoUniversal?.settings?.().publicToken;if(!catalogToken)return;setDoc(doc(db,'publicCatalogs',catalogToken,'orders',order.id),{orderStatus:order.orderStatus,confirmedAt:order.confirmedAt||null,preparingAt:order.preparingAt||null,dispatchedAt:order.dispatchedAt||null,deliveredAt:order.deliveredAt||null,cancelledAt:order.cancelledAt||null,convertedSaleId:order.convertedSaleId||null,clientId:order.clientId||null,clientNameSnapshot:order.clientNameSnapshot||null,linkedAt:order.linkedAt||null,keptAsGuest:Boolean(order.keptAsGuest),updatedAt:serverTimestamp()},{merge:true}).then(()=>recordFirestoreOperation('write',{collection:'publicCatalogOrders',documents:1})).catch(error=>console.error('[Catalog order status]',error))});

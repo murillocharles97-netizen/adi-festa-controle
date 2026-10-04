@@ -1,7 +1,7 @@
 (function(root){
   'use strict';
   // Audit-only projection. Never use this to write a document or repair money.
-  const meta=new Set(['origin','ownerId','createdAt','criadoEm','updatedAt','atualizadoEm','serverUpdatedAt','localUpdatedAt','revision','version','schemaVersion','syncConfirmedAt','cacheMetadata','syncDiagnostics','runtimeMetadata','imageUploadStatus','imageOperationId']);
+  const meta=new Set(['origin','ownerId','createdAt','criadoEm','updatedAt','atualizadoEm','serverUpdatedAt','localUpdatedAt','revision','version','schemaVersion','syncConfirmedAt','cacheMetadata','syncDiagnostics','runtimeMetadata','imageUploadStatus','imageOperationId','workspaceWriteId']);
   const numberKeys=new Set('saldo saldoAnterior saldoAtual saldoNovo saldoPendente valor valorTotal valorFinal subtotalOriginal descontoTotal custoTotal lucro custo cost price stock minStock preco minPrice maxPrice estoque estoqueAtual estoqueMinimo totalStock activeVariationCount financialVersion totalComprado quantidadeVendas quantidade quantity custoUnitario costSnapshot durationValue spaceScopeVersion'.split(' '));
   const setKeys=new Set(['allowedSpaceIds','etiquetas']);
   const copy=x=>structuredClone(x);

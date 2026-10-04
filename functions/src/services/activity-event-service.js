@@ -1,5 +1,7 @@
 'use strict';
 
+const {projectInWorkspace}=require('./workspace-projection');
+
 const SOURCE_SPECS=Object.freeze({
   sales:{prefix:'sale',type:'sale'},
   payments:{prefix:'payment',type:'payment'},
@@ -94,7 +96,7 @@ function buildActivityEvent({businessId,sourceCollection,sourceDocumentId,data,s
     sourceUpdatedAt:timestamp(first(data,'updatedAt',dateValue(data,spec.type)),Timestamp),
     status:sourceDeleted?'source_deleted':sourceStatus(data,spec.type),sourceDeleted:Boolean(sourceDeleted),
     sourceCollection,sourceDocumentId:text(sourceDocumentId,500),
-    summary:summary(data,spec.type),schemaVersion:1,
+    summary:summary(data,spec.type),schemaVersion:1,workspaceGeneration:data.workspaceGeneration??0,
   };
 }
 
@@ -104,8 +106,10 @@ function activityEventService(db,{FieldValue,Timestamp}){
     const afterExists=Boolean(after?.exists),snapshot=afterExists?after:before,data=snapshot?.data?.();
     const value=buildActivityEvent({businessId,sourceCollection,sourceDocumentId,data,sourceDeleted:!afterExists,Timestamp});
     if(!value)return{skipped:true};
-    await eventRef(businessId,value.eventId).set({...value,updatedAt:FieldValue.serverTimestamp()},{merge:true});
-    return{eventId:value.eventId,created:true};
+    return projectInWorkspace(db,businessId,data,async transaction=>{
+      transaction.set(eventRef(businessId,value.eventId),{...value,updatedAt:FieldValue.serverTimestamp()},{merge:true});
+      return{eventId:value.eventId,created:true};
+    });
   }
   async function reconcileBusiness(businessId,{limit=50}={}){
     const bounded=Math.max(1,Math.min(100,Number(limit)||50)),rows=[];
@@ -116,12 +120,20 @@ function activityEventService(db,{FieldValue,Timestamp}){
         if(value)rows.push(value);
       }
     }
-    for(let offset=0;offset<rows.length;offset+=400){
-      const batch=db.batch();
-      rows.slice(offset,offset+400).forEach(value=>batch.set(eventRef(businessId,value.eventId),{...value,updatedAt:FieldValue.serverTimestamp()},{merge:true}));
-      await batch.commit();
+    const projected=[];
+    // Never mix documents from different generations in a reconciliation commit.
+    for(const epoch of new Set(rows.map(row=>row.workspaceGeneration))){
+      const group=rows.filter(row=>row.workspaceGeneration===epoch);
+      for(let offset=0;offset<group.length;offset+=400){
+        const chunk=group.slice(offset,offset+400);
+        const result=await projectInWorkspace(db,businessId,{workspaceGeneration:epoch},async transaction=>{
+          chunk.forEach(value=>transaction.set(eventRef(businessId,value.eventId),{...value,updatedAt:FieldValue.serverTimestamp()},{merge:true}));
+          return{created:true};
+        });
+        if(result.created)projected.push(...chunk);
+      }
     }
-    return{businessId,sourceLimit:bounded,projected:rows.length,byType:rows.reduce((all,row)=>({...all,[row.type]:(all[row.type]||0)+1}),{})};
+    return{businessId,sourceLimit:bounded,projected:projected.length,skipped:rows.length-projected.length,byType:projected.reduce((all,row)=>({...all,[row.type]:(all[row.type]||0)+1}),{})};
   }
   return{project,reconcileBusiness};
 }

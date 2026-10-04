@@ -1,5 +1,5 @@
 import { db } from './firebase-config.js';
-import { doc,getDoc,setDoc,serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { doc,getDoc,setDoc,serverTimestamp } from './workspace-firestore.js';
 
 let loadedFor='',saving=false,pending=null;
 const CACHE_VERSION=2,CACHE_TTL=6*60*60*1000,cacheKey=businessId=>`adiFesta:operation:${businessId}:v${CACHE_VERSION}`;

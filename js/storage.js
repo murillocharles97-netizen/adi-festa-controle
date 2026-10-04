@@ -1,7 +1,7 @@
 window.DB=(()=>{
   const LEGACY_KEY='adiFestaDB_v1',ACTIVE_KEY='adiFestaActiveBusinessId',VERSAO=14,agora=()=>new Date().toISOString();
-  let activeBusinessId=localStorage.getItem(ACTIVE_KEY)||'adi-festa',activePrincipal='legacy',memoryData=null,memoryStorageKey='';
-  const storageKey=()=>activePrincipal==='legacy'?`${LEGACY_KEY}:${activeBusinessId}`:`${LEGACY_KEY}:${activeBusinessId}:${activePrincipal}`;
+  let activeBusinessId=localStorage.getItem(ACTIVE_KEY)||'adi-festa',activePrincipal='legacy',activeGeneration=0,memoryData=null,memoryStorageKey='';
+  const storageKey=()=>`${activePrincipal==='legacy'?`${LEGACY_KEY}:${activeBusinessId}`:`${LEGACY_KEY}:${activeBusinessId}:${activePrincipal}`}${activeGeneration>0?`:generation:${activeGeneration}`:''}`;
   const legacyId=(tipo,valor)=>{let h=2166136261;for(const c of `${tipo}|${String(valor).trim().toLowerCase()}`){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return`${tipo}_${(h>>>0).toString(36)}`};
   const configBase=()=>({nome:'Adi Festa'});
   const bloquearCargaAutomatica=config=>Object.assign(config,{demonstracaoRemovida:true,kyteImportacao:'Customers_20251012_20260705.csv',kyteSaldosImportacao:'Clientes.xlsx-v1',saldoCorrecoes:'confirmadas-v1',saldoNegativoEhDebito:true});
@@ -72,12 +72,29 @@ window.DB=(()=>{
   const normalizarParaMemoria=dados=>{const normalizado=migrar(dados);normalizado.config.appSchemaVersion=Math.max(VERSAO,Number(normalizado.config.appSchemaVersion||0));normalizado.config.recentClientIds=Array.isArray(normalizado.config.recentClientIds)?normalizado.config.recentClientIds:[];normalizado.produtos.forEach(p=>{p.favorito=Boolean(p.favorito);p.semControleEstoque=Boolean(p.itemKind==='service'||p.semControleEstoque||p.controlaEstoque===false);p.controlaEstoque=p.itemKind!=='service'&&!p.semControleEstoque;p.codigo=p.codigo||'';p.barcode=window.normalizeBarcode?.(p.barcode)||String(p.barcode||'').replace(/\s/g,'');p.barcodeType=p.barcodeType||null;p.barcodeUpdatedAt=p.barcodeUpdatedAt||null;p.alternateBarcodes=Array.isArray(p.alternateBarcodes)?p.alternateBarcodes:[];p.palavrasChave=p.palavrasChave||'';p.imagem=p.imagem||'';p.image=p.image&&typeof p.image==='object'?p.image:null;p.imageMode=p.imageMode||'own';p.imageUrl=p.imageUrl||p.image?.url||p.imagem||null;p.imageStoragePath=p.imageStoragePath||p.image?.storagePath||null;p.imageThumbUrl=p.imageThumbUrl||p.image?.thumbnailUrl||null;p.imageThumbStoragePath=p.imageThumbStoragePath||p.image?.thumbnailStoragePath||null;p.imageUpdatedAt=p.imageUpdatedAt||p.image?.updatedAt||null;p.imageUploadStatus=['none','pending','uploading','uploaded','error'].includes(p.imageUploadStatus)?p.imageUploadStatus:(p.imageUrl?'uploaded':'none');p.imageOperationId=p.imageOperationId||null});return normalizado};
   const cache=dados=>{memoryStorageKey=storageKey();memoryData=dados;return dados};
   const invalidarCache=()=>{memoryData=null;memoryStorageKey=''};
-  const salvar=dados=>{const normalizado=normalizarParaMemoria(dados);if(!window.DB?.businessCache)throw Error('O armazenamento IndexedDB ainda não está disponível.');DB.businessCache.stage(normalizado,storageKey());return cache(normalizado)};
+  const assertWorkspace=()=>{const origin=window.WorkspaceRuntime?.capture();if(origin&&(origin.businessId!==activeBusinessId||origin.workspaceGeneration!==activeGeneration))throw Object.assign(Error('O ambiente da empresa mudou. Reabra a VECONI.'),{code:'workspace-generation-mismatch'});};
+  const salvar=dados=>{assertWorkspace();const normalizado=normalizarParaMemoria(dados);if(!window.DB?.businessCache)throw Error('O armazenamento IndexedDB ainda não está disponível.');DB.businessCache.stage(normalizado,storageKey());return cache(normalizado)};
   // Called only after successful IndexedDB import; remove only copied operational rows.
   const compactMessageSequences=async ids=>{const current=carregar(),copied=new Set(ids),next={...current,messageSequences:(current.messageSequences||[]).filter(item=>!copied.has(item.id))};if(next.messageSequences.length===current.messageSequences.length)return;salvar(next);await DB.flush()};
   // Startup reads are read-only; malformed legacy data must NEVER reset to demo.
   const carregar=()=>{const key=storageKey();if(memoryData&&memoryStorageKey===key)return memoryData;const bruto=localStorage.getItem(key);return cache(normalizarParaMemoria(bruto?JSON.parse(bruto):vazio()))};
-  const useBusiness=async(businessId,options={})=>{const next=String(businessId||'').trim(),identified=Boolean(options.uid||options.permissionSignature),uid=String(options.uid||'anonymous').replace(/[^a-z0-9_-]/gi,'').slice(0,128)||'anonymous',signature=String(options.permissionSignature||'none').replace(/[^a-z0-9_-]/gi,'').slice(0,80)||'none',principal=identified?`${uid}:${signature}`:'legacy';if(!/^([a-z0-9_-]{3,128})$/i.test(next))throw Error('Identificador de empresa inválido.');await window.DB?.flush?.();if(next!==activeBusinessId||principal!==activePrincipal)invalidarCache();activeBusinessId=next;activePrincipal=principal;try{localStorage.setItem(ACTIVE_KEY,next)}catch{/* small preference; IndexedDB is authoritative for local persistence */}const candidates=[storageKey()];if(options.migratePrivateCache===true)candidates.push(`${LEGACY_KEY}:${next}`);if(options.migrateLegacy&&next==='adi-festa')candidates.push(LEGACY_KEY);const loaded=normalizarParaMemoria(await DB.businessCache.open(storageKey(),candidates,vazio));window.TeamAccess?.sanitizePrivateCache?.(loaded);cache(loaded);DB.businessCache.stage(loaded);await DB.flush();return loaded};
+  const useBusiness=async(businessId,options={})=>{
+    const next=String(businessId||'').trim(),identified=Boolean(options.uid||options.permissionSignature),uid=String(options.uid||'anonymous').replace(/[^a-z0-9_-]/gi,'').slice(0,128)||'anonymous',signature=String(options.permissionSignature||'none').replace(/[^a-z0-9_-]/gi,'').slice(0,80)||'none',principal=identified?`${uid}:${signature}`:'legacy',generation=options.workspaceGeneration??0;
+    if(!/^([a-z0-9_-]{3,128})$/i.test(next))throw Error('Identificador de empresa inválido.');
+    if(!Number.isSafeInteger(generation)||generation<0)throw Error('Geração operacional inválida.');
+    await window.DB?.flush?.();
+    if(next!==activeBusinessId||principal!==activePrincipal||generation!==activeGeneration)invalidarCache();
+    activeBusinessId=next;activePrincipal=principal;activeGeneration=generation;
+    assertWorkspace();
+    try{localStorage.setItem(ACTIVE_KEY,next)}catch{/* small preference; IndexedDB is authoritative for local persistence */}
+    const candidates=generation===0?[storageKey()]:[];
+    if(generation===0&&options.migratePrivateCache===true)candidates.push(`${LEGACY_KEY}:${next}`);
+    if(generation===0&&options.migrateLegacy&&next==='adi-festa')candidates.push(LEGACY_KEY);
+    const loaded=normalizarParaMemoria(await DB.businessCache.open(storageKey(),candidates,vazio));
+    assertWorkspace();
+    window.TeamAccess?.sanitizePrivateCache?.(loaded);cache(loaded);DB.businessCache.stage(loaded);await DB.flush();return loaded;
+  };
+  const retireBusiness=async()=>{await DB.businessCache.retire();invalidarCache();activeBusinessId='__reset_locked__';activePrincipal='locked';activeGeneration=0;};
   const releaseBusiness=()=>{activeBusinessId='__signed_out__';activePrincipal='signed_out';invalidarCache();localStorage.removeItem(ACTIVE_KEY);void window.DB?.businessCache?.release?.().catch(error=>console.error('[STORAGE logout]',{code:error.code}))};
   const alterar=funcao=>{const dados=structuredClone(carregar());funcao(dados);return salvar(dados)};
   const validarBackup=d=>{if(!d||typeof d!=='object')throw Error('O arquivo nao contem um backup valido');const listas=['clientes','produtos','vendas','pagamentos','movimentacoes'];const ausentes=listas.filter(c=>!Array.isArray(d[c]));if(ausentes.length)throw Error(`Backup incompleto: faltam ${ausentes.join(', ')}`);if(!d.config||typeof d.config!=='object')throw Error('Backup incompleto: faltam as configuracoes');return true};
@@ -88,5 +105,5 @@ window.DB=(()=>{
   // Demo datasets belong in isolated test fixtures, never in a production API.
   const restaurar=()=>{throw Error('Carga de demonstração desativada. Use somente backup verificado.');};
   // IndexedDB commits use optimistic revision checks to reject stale-tab writes.
-  return{prepare:normalizarParaMemoria,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,VERSAO};
+  return{prepare:normalizarParaMemoria,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,retireBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,getWorkspaceGeneration:()=>activeGeneration,VERSAO};
 })();

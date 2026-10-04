@@ -110,6 +110,7 @@
         }),
       ])}
       ${group("Ações", "Gerencie sua sessão com segurança.", [
+        ...(window.FirebaseSession?.member?.role==='owner'?[row({iconName:"shield-alert",title:"Dados e segurança",subtitle:"Zona de risco · restaurar empresa",action:"workspace-risk",tone:"is-danger"})]:[]),
         row({ iconName: "log-out", title: "Sair da conta", subtitle: "Encerrar sessão neste dispositivo", logout: true, tone: "is-danger" }),
       ])}
       <p class="settings-version">VECONI · <span data-mobile-app-version></span></p><div class="settings-legacy-hooks" aria-hidden="true"><button id="export" type="button"></button><input type="file" id="import" accept="application/json"><button id="clear-device" type="button"></button></div></section>`;
@@ -257,6 +258,7 @@
           if (action === "whatsapp") editBusiness(true);
           if (action === "account") account();
           if (action === "backup") backup();
+          if (action === "workspace-risk") window.WorkspaceResetUI?.risk();
           if (action === "tutorials") tutorials();
           if (action === "terminals") window.TerminalPayments?.openSettings?.();
           if (action === "sync") {
