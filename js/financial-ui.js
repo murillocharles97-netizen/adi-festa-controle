@@ -297,11 +297,16 @@ window.FinanceiroUI = (() => {
     const groups = institutionGroups(data), summary = data.summary || {};
     return `<div class="financial-consolidated-home"><section class="financial-home-intro"><div><h1>Financeiro</h1><p>Visão geral da sua vida financeira.</p></div>${compactContextMarkup()}</section>
       ${consolidatedSummaryMarkup(summary)}
-      <section class="financial-section financial-home-institutions" data-tour="financial-accounts"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${groups.length ? `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>` : `<div class="financial-empty-inline">${icon("landmark")}<div><b>Nenhum recurso financeiro</b><span>Cadastre uma conta, carteira, cartão ou investimento para acompanhar aqui.</span></div></div>`}</section>
+      ${accountsCarouselMarkup(data)}
       ${attentionMarkup(data)}
       <section class="financial-section financial-home-upcoming"><header><h2>Próximas contas</h2><button type="button" data-financial-view="accounts">Ver todas ${icon("arrow-right")}</button></header>${consolidatedPayablesMarkup((data.payables || []).slice(0, 4))}</section>
       ${consolidatedSpacesMarkup(data)}
     </div>`;
+  }
+
+  function accountsCarouselMarkup(data = {}) {
+    const groups = institutionGroups(data);
+    return `<section class="financial-section financial-home-institutions" data-tour="financial-accounts"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${window.FinancialAccountsCarousel?.render(groups, Engine) || `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>`}</section>`;
   }
 
   function attentionMarkup(data = {}) {
@@ -365,7 +370,7 @@ window.FinanceiroUI = (() => {
       </div></section>
       ${attentionMarkup(data)}
       <section class="financial-section"><header><h2>Próximas contas</h2><button type="button" data-financial-view="accounts">Ver todas</button></header>${payablesMarkup((data.payables || []).slice(0, 3))}</section>
-      ${compactCardsMarkup(data)}
+      ${accountsCarouselMarkup(data)}
       <section class="financial-section"><header><h2>Categorias do mês</h2><button type="button" data-financial-view="categories">Ver relatório</button></header>${categoriesMarkup(summary.categories, summary.expensesTotalCents)}</section>
       <section class="financial-section"><header><h2>Últimos lançamentos</h2><button type="button" data-financial-view="entries">Ver todos</button></header>${latestMarkup((data.latest || []).slice(0, 5))}</section>`;
   }
@@ -567,6 +572,7 @@ window.FinanceiroUI = (() => {
       categories: categoriesPageMarkup,
       entries: entriesPageMarkup,
     };
+    window.FinancialAccountsCarousel?.destroy();
     page.innerHTML = (views[state.view] || dashboardMarkup)(state.dashboard);
     page.dataset.financialView = state.view;
     bindPage();
@@ -1547,6 +1553,12 @@ window.FinanceiroUI = (() => {
   function bindPage() {
     const page = root();
     if (!page) return;
+    const context = window.BusinessContext?.get?.() || {};
+    window.FinancialAccountsCarousel?.mount(page.querySelector('.veconi-accounts-carousel'), {
+      scope: JSON.stringify([context.businessId, context.userProfile?.uid, context.business?.workspaceGeneration, state.activeViewId]),
+      onDetails: (key) => { state.institutionKey = key; state.view = 'institution'; paint(); },
+      onMenu: openInstitutionActions,
+    });
     page.querySelector("[data-financial-retry]")?.addEventListener("click", () => refresh());
     page.querySelectorAll("[data-financial-retry-cards]").forEach((button) => button.onclick = () => refresh({ silent: true }));
     page.querySelectorAll("[data-financial-open-spaces]").forEach((button) => button.onclick = openSpaces);
@@ -1611,7 +1623,7 @@ window.FinanceiroUI = (() => {
     bindPage();
     refresh();
   }
-  function destroy() { state.requestVersion += 1; state.viewInitialized = false; closeModal(); }
+  function destroy() { state.requestVersion += 1; state.viewInitialized = false; window.FinancialAccountsCarousel?.destroy(); closeModal(); }
   function resume() { if (root()) refresh({ silent: true }); }
 
   addEventListener("financial-data-changed", () => { if (root() && !state.loading) refresh({ silent: true }); });

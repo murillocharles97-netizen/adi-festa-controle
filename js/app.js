@@ -1489,7 +1489,8 @@
         });
         financialModulePromise = (async () => {
           if (!window.FinancialEngine) await loadScript("./js/financial-engine.js?v=135");
-          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=143");
+          if (!window.FinancialAccountsCarousel) await loadScript("./js/financial-accounts-carousel.js?v=162");
+          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=162");
           if (!window.FinancialSpaceService) await import("./firebase/financial-space-service.js?v=143");
         })().catch((error) => {
           financialModulePromise = null;

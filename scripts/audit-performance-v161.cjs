@@ -91,7 +91,7 @@ async function main(){
   await page.waitForFunction(()=>window.PerformanceDashboard?.state.complete&&document.querySelectorAll('.analytics-kpi').length===4,{timeout:60000,polling:100});
   await page.evaluate(async()=>{await navigator.serviceWorker.register('./service-worker.js');await navigator.serviceWorker.ready;});
   await page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),{timeout:30000,polling:100});
-  const cached=await page.evaluate(async()=>Promise.all(['js/performance-model.js','js/performance-dashboard.js','css/performance-dashboard.css'].map(async file=>Boolean(await caches.match(new URL(file,location.href))))));assert.deepEqual(cached,[true,true,true]);
+  const cached=await page.evaluate(async()=>Promise.all(['js/performance-model.js','js/performance-dashboard.js','css/performance-dashboard.css','js/financial-accounts-carousel.js','css/financial-accounts-carousel.css'].map(async file=>Boolean(await caches.match(new URL(file,location.href))))));assert.deepEqual(cached,[true,true,true,true,true]);
   await page.reload({waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.FirebaseBootstrap?.state==='authorized'&&document.querySelector('#auth-gate')?.hidden&&window.PerformanceDashboard?.state.complete,{timeout:60000,polling:100});
   await page.setOfflineMode(true);await page.click('[data-analytics-refresh]');await page.waitForFunction(()=>document.querySelector('.analytics-status')?.textContent.includes('offline'),{polling:100});await page.setOfflineMode(false);
   assert.deepEqual(errors,[]);
