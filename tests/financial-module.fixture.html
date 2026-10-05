@@ -45,6 +45,8 @@
     Object.assign(window.FinancialSpaceService,{useExistingCreditCard:async(home,id,input)=>({...card,cardHomeSpaceId:home,id,...input}),archiveCreditCard:async()=>({deleted:false,archived:true,references:2})});
     window.Utils={toast:()=>{}};window.BusinessContext={get:()=>({businessId:'adi-festa',business:{id:'adi-festa',name:'Adi Festa'}})};window.DB={carregar:()=>({config:{nome:'Adi Festa'}})};window.Router={atual:()=> 'financeiro'};
   </script>
+  <link rel="stylesheet" href="../css/financial-accounts-carousel.css">
+  <script src="../js/financial-accounts-carousel.js"></script>
   <script src="../js/financial-ui.js"></script>
   <script>app.innerHTML=FinanceiroUI.render();FinanceiroUI.bind();window.__financialReady=true;</script>
 </body></html>
