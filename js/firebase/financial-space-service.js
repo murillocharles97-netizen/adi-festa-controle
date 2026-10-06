@@ -870,6 +870,41 @@ async function updateFinancialInstitution(input = {}) {
   return { name, updated: records.length };
 }
 
+function canCustomizeFinancialPresentation(homeSpaceId) {
+  const context = window.BusinessContext?.get?.() || {}, home = state.spaces.find(s => s.id === String(homeSpaceId));
+  if (!home || !['owner', 'manager', 'admin'].includes(context.role)) return false;
+  if (context.member && context.member.status !== 'active') return false;
+  if (home.type !== 'business') return home.ownerUid === auth.currentUser?.uid;
+  return home.linkedBusinessId === context.businessId && window.TeamAccess?.has?.('financial.view') === true;
+}
+
+// Only presentation fields. Existing records retain financial identity, amounts,
+// timestamps and operations. One atomic batch, one write per affected resource;
+// no new collection/listener and the existing reset/generation fence applies.
+async function updateFinancialPresentation(input = {}) {
+  const records = financialInstitutionRefs(input), source = input.presentation || {};
+  const displayName = String(source.displayName || '').trim();
+  const color = String(source.color || '').toLowerCase();
+  if (displayName.length > 80 || !/^#[0-9a-f]{6}$/.test(color)
+    || !['solid', 'gradient'].includes(source.gradientVariant)) throw new Error('Aparência inválida. Revise nome, cor e estilo.');
+  const changedAt = now(), batch = writeBatch(db), unique = new Set();
+  for (const record of records) {
+    const home = record.ref.path.split('/')[1];
+    if (!canCustomizeFinancialPresentation(home)) throw new Error('Somente o proprietário ou gerente autorizado pode personalizar este recurso.');
+    if (unique.has(record.ref.path)) continue;
+    unique.add(record.ref.path);
+    const nickname = String(input.cardNicknames?.[record.ref.path] || '').trim();
+    if (nickname.length > 80) throw new Error('O nome do cartão deve ter até 80 caracteres.');
+    batch.update(record.ref, { presentation: input.reset === true ? {} : {
+      displayName, color, gradientVariant: source.gradientVariant,
+      ...(record.kind === 'card' ? { cardNickname: nickname } : {}),
+    }, presentationUpdatedAt: changedAt });
+  }
+  await batch.commit();
+  invalidateFinancialAccountCatalog(); invalidateCreditCardCatalog();
+  return { updated: unique.size };
+}
+
 async function archiveFinancialInstitution(input = {}) {
   const records = financialInstitutionRefs(input), changedAt = now();
   await runTransaction(db, async (transaction) => {
@@ -2826,6 +2861,8 @@ const FinancialSpaceService = {
   archiveFinancialAccount,
   adjustFinancialAccountBalance,
   updateFinancialInstitution,
+  canCustomizeFinancialPresentation,
+  updateFinancialPresentation,
   archiveFinancialInstitution,
   listCreditCards,
   createCreditCard,

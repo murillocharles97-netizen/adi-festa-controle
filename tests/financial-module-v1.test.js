@@ -11,7 +11,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
   assert.doesNotMatch(html, /<script[^>]+financial-space-service\.js/);
-  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=143"\)/);
+  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=163"\)/);
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 
@@ -110,8 +110,8 @@ test("categorias V2 separam macro, subcategoria e customização por espaço", (
 });
 
 test("release 136 mantém recursos financeiros globais no cache PWA", () => {
-  assert.match(read("js/build-info.js"), /release: "162"/);
-  assert.match(sw, /veconi-v162-accounts-carousel/);
+  assert.match(read("js/build-info.js"), /release: "163"/);
+  assert.match(sw, /veconi-v163-card-presentation/);
   for (const asset of ["css/financial.css", "css/financial-credit-v2.css", "js/financial-engine.js", "js/financial-ui.js", "js/firebase/financial-space-service.js"])
     assert.match(sw, new RegExp(asset.replaceAll("/", "\\/")));
 });
