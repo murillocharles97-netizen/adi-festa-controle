@@ -30,3 +30,67 @@
 .vac-empty{display:grid;justify-items:center;gap:14px;padding:30px 16px;text-align:center}.vac-empty>svg{color:var(--af-color-primary,#08a889);width:30px}.vac-empty>b{font-size:14px}
 @media(max-width:780px){.veconi-accounts-carousel{--vac-width:min(82vw,360px);margin-inline:-12px}.veconi-accounts-carousel .vac-track{gap:6px;padding-top:14px;padding-bottom:18px}.veconi-accounts-carousel .vac-card{padding:18px;min-height:270px}.veconi-accounts-carousel .vac-primary strong{font-size:28px}.veconi-accounts-carousel .vac-navigation{gap:14px}.veconi-accounts-carousel .vac-navigation>button{width:28px;height:28px}.veconi-accounts-carousel .vac-card h3{font-size:15px}}
 @media(prefers-reduced-motion:reduce){.veconi-accounts-carousel .vac-card{transition:none}.veconi-accounts-carousel .vac-track{scroll-behavior:auto}}
+
+/* V163: presentation-only surfaces, isolated from financial forms/calculations. */
+.financial-home-institutions{overflow:hidden;font-family:var(--veconi-font-family,system-ui,sans-serif)}
+.financial-home-institutions h2,.financial-home-institutions button{font-family:inherit}
+.financial-home-institutions>.vac-section-head{align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:0;padding:18px 18px 0}
+.vac-section-head>div:first-child{min-width:0;flex:1 1 300px}
+.vac-section-head h2{margin:0 0 7px}
+.vac-section-head p{font-size:12px;line-height:1.5;color:var(--af-color-text-secondary,#64758a);margin:0}
+.vac-section-actions{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.financial-home-institutions .vac-section-actions button{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.financial-home-institutions .vac-section-actions [data-vac-customize]{border:1px solid var(--af-color-border,#dce6eb);border-radius:10px;padding:10px 12px;background:var(--af-color-surface,#fff);color:var(--af-color-text,#12283d);font-size:11px}
+.vac-section-actions svg{width:16px;height:16px}
+.veconi-accounts-carousel{--vac-width:clamp(320px,24vw,396px)}
+.veconi-accounts-carousel .vac-track{gap:0;padding-top:20px;padding-bottom:20px}
+.veconi-accounts-carousel .vac-card{position:relative;isolation:isolate;min-height:335px;padding:22px;border:1px solid color-mix(in srgb,var(--vac-ink) 18%,transparent);background:linear-gradient(145deg,var(--vac-bg),var(--vac-end));color:var(--vac-ink);transform:scale(.88);opacity:.7;border-radius:22px;box-shadow:0 12px 28px #10243d12}
+.veconi-accounts-carousel .is-neighbor .vac-card{transform:scale(.9);opacity:.94}
+.veconi-accounts-carousel .is-active .vac-card,.veconi-accounts-carousel.is-single .vac-card{border-color:color-mix(in srgb,var(--vac-ink) 28%,transparent);box-shadow:0 16px 26px #10243d26}
+.veconi-accounts-carousel .vac-card:before,.veconi-accounts-carousel .vac-card:after{content:'';position:absolute;z-index:-1;pointer-events:none;width:360px;height:190px;right:-180px;top:25px;transform:rotate(-26deg);border-radius:50%;border:1px solid color-mix(in srgb,var(--vac-ink) 15%,transparent);background:color-mix(in srgb,var(--vac-ink) 4%,transparent)}
+.veconi-accounts-carousel .vac-card:after{top:105px;right:-180px;background:transparent;border-width:28px;border-color:color-mix(in srgb,var(--vac-ink) 4%,transparent)}
+.veconi-accounts-carousel .vac-watermark{position:absolute;pointer-events:none;right:25px;top:120px;font-size:52px;font-weight:850;letter-spacing:-4px;color:var(--vac-ink);opacity:.14;z-index:-1}
+.veconi-accounts-carousel .vac-card>header{grid-template-columns:44px minmax(0,1fr) auto;gap:10px}
+.veconi-accounts-carousel .vac-card>header:has(.vac-pencil){grid-template-columns:44px minmax(0,1fr) 32px 24px}
+.veconi-accounts-carousel .vac-card h3{font-size:15px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;color:inherit}
+.veconi-accounts-carousel .vac-card small,.veconi-accounts-carousel .vac-primary>span,.veconi-accounts-carousel .vac-card>footer>span,.veconi-accounts-carousel .vac-limit>div:first-child{color:var(--vac-ink)}
+.veconi-accounts-carousel .vac-card .vac-bank{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:color-mix(in srgb,var(--vac-ink) 12%,transparent);color:var(--vac-ink);font-weight:800;font-size:18px}
+.veconi-accounts-carousel .vac-card>header button{display:grid;place-items:center;background:transparent;border:0;color:var(--vac-ink);padding:4px;min-width:24px;height:32px;border-radius:50%}
+.veconi-accounts-carousel .vac-card>header button svg{width:18px;height:18px}
+.veconi-accounts-carousel .vac-card>header .vac-pencil{background:var(--vac-ink);color:var(--vac-bg);visibility:hidden}
+.veconi-accounts-carousel .is-active .vac-card>header .vac-pencil,.veconi-accounts-carousel.is-single .vac-pencil{visibility:visible}
+.veconi-accounts-carousel .vac-nickname{display:block;align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:18px;background:color-mix(in srgb,var(--vac-ink) 12%,transparent);font-size:11px;font-weight:700;padding:5px 10px;margin-top:14px}
+.veconi-accounts-carousel .vac-primary{margin:20px 0 14px;gap:5px}
+.veconi-accounts-carousel .vac-primary strong{font-size:clamp(24px,2.25vw,34px);letter-spacing:-.8px;color:inherit;white-space:nowrap}
+.veconi-accounts-carousel .vac-invoice{padding-top:12px;margin-bottom:13px;border-color:color-mix(in srgb,var(--vac-ink) 22%,transparent)}
+.veconi-accounts-carousel .vac-invoice>div:only-child{text-align:left}
+.veconi-accounts-carousel .vac-invoice b{font-size:15px;color:inherit}
+.veconi-accounts-carousel .vac-limit-track{height:7px;background:color-mix(in srgb,var(--vac-ink) 23%,transparent)}
+.veconi-accounts-carousel .vac-limit-track i{background:var(--vac-ink)}
+.veconi-accounts-carousel .vac-card[style*="#242424"] .vac-limit-track i{background:#20e6c8}
+.veconi-accounts-carousel .vac-card>footer{padding-top:15px}
+.veconi-accounts-carousel .vac-card>footer>button{color:var(--vac-ink)}
+.veconi-accounts-carousel .vac-track.is-rebasing{scroll-snap-type:none}
+.veconi-accounts-carousel .is-rebasing .vac-card{transition:none!important}
+.vac-appearance-sheet{max-width:740px!important}
+.vac-appearance-sheet .modal-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}
+.vac-appearance-fields{display:grid;gap:14px;min-width:0;align-content:start}
+.vac-appearance-fields label{display:grid;gap:6px;font-size:12px;font-weight:650}
+.vac-appearance-fields input,.vac-appearance-fields select{width:100%;min-width:0;box-sizing:border-box;min-height:40px;border:1px solid var(--af-color-border,#dce6eb);border-radius:10px;padding:9px 11px;background:var(--af-color-surface,#fff);color:var(--af-color-text,#12283d);font:inherit}
+.vac-appearance-fields .vac-presets{display:flex;gap:9px;flex-wrap:wrap}
+.vac-presets button{border:2px solid #fff;outline:1px solid #d4dce2;width:27px;height:27px;border-radius:50%;background:var(--swatch)}
+.vac-presets button[aria-pressed=true]{outline:2px solid #008f79;outline-offset:2px}
+.vac-appearance-fields input[type=color]{height:36px;max-width:100px;padding:3px}
+.vac-appearance-preview{min-width:0;align-self:center}
+.vac-appearance-preview .veconi-accounts-carousel{--vac-width:100%;margin:0}
+.vac-appearance-preview .vac-slide{width:100%}
+.vac-appearance-preview button{pointer-events:none}
+.vac-appearance-preview .vac-card{min-height:315px;padding:18px}
+.vac-appearance-preview .vac-primary strong{font-size:27px}
+.vac-appearance-sheet [data-appearance-error]{color:#b3233d;font-size:12px;grid-column:1/-1}
+.vac-appearance-note{font-size:11px;color:var(--af-color-text-secondary,#64758a);line-height:1.5}
+.vac-appearance-sheet .modal-foot{flex-wrap:wrap}
+@media(min-width:1600px){.veconi-accounts-carousel{--vac-width:396px}}
+@media(max-width:780px){.veconi-accounts-carousel{--vac-width:86vw;margin-inline:-18px}.veconi-accounts-carousel .vac-card{padding:18px;min-height:315px}.veconi-accounts-carousel .vac-primary strong{font-size:29px}.vac-section-head>div:first-child{flex-basis:100%}.vac-section-actions{width:100%;justify-content:space-between;gap:8px}.vac-appearance-sheet .modal-body{grid-template-columns:1fr}.vac-appearance-preview{order:-1;width:min(100%,350px);justify-self:center}.vac-appearance-sheet{max-height:90dvh!important}.vac-appearance-sheet .modal-foot{position:sticky;bottom:0;background:var(--af-color-surface,#fff)} }
+@media(max-width:360px){.veconi-accounts-carousel .vac-primary strong{font-size:25px}.veconi-accounts-carousel .vac-card>header{gap:7px}.veconi-accounts-carousel .vac-card h3{font-size:13px}}
+@media(max-width:780px){.veconi-accounts-carousel:not(.is-single) .vac-track>.vac-slide{margin-inline-end:-24px}.vac-appearance-preview .vac-card{min-height:0}.vac-appearance-preview .vac-primary{margin:12px 0}.vac-appearance-preview .vac-card>footer{padding-top:10px}}

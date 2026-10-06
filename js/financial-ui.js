@@ -305,8 +305,57 @@ window.FinanceiroUI = (() => {
   }
 
   function accountsCarouselMarkup(data = {}) {
-    const groups = institutionGroups(data);
-    return `<section class="financial-section financial-home-institutions" data-tour="financial-accounts"><header><h2>Contas e cartões</h2><button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></header>${window.FinancialAccountsCarousel?.render(groups, Engine) || `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>`}</section>`;
+    const groups = institutionGroups(data).map(group => ({ ...group, canCustomize: canCustomizeGroup(group) }));
+    return `<section class="financial-section financial-home-institutions" data-tour="financial-accounts"><header class="vac-section-head"><div><h2>Contas e cartões</h2><p>Visualize e gerencie suas contas e cartões em um só lugar.</p></div><div class="vac-section-actions">${groups.some(g => g.canCustomize) ? `<button type="button" data-vac-customize>${icon('settings-2')} Personalizar cartões</button>` : ''}<button type="button" data-financial-view="institutions">Ver todos ${icon("arrow-right")}</button></div></header>${window.FinancialAccountsCarousel?.render(groups, Engine) || `<div class="financial-institution-carousel">${groups.map((group) => institutionCardMarkup(group)).join("")}</div>`}</section>`;
+  }
+
+  function canCustomizeGroup(group) {
+    const homes = [...group.accounts.map(a => accountHomeSpaceId(a)), ...group.cards.map(c => c.cardHomeSpaceId || c.financialSpaceId)];
+    return homes.length > 0 && homes.every(home => window.FinancialSpaceService?.canCustomizeFinancialPresentation?.(home) === true);
+  }
+
+  function openAppearance(key) {
+    const groups = institutionGroups(state.dashboard).filter(canCustomizeGroup), Card = window.FinancialInstitutionCard;
+    if (!groups.length || !Card) return Utils.toast('Você não tem permissão para personalizar estes recursos.', true);
+    let group = groups.find(g => g.key === key) || groups[0], resetting = false, busy = false;
+    const nicknameKey = c => `financialSpaces/${c.cardHomeSpaceId || c.financialSpaceId}/creditCards/${c.id}`;
+    sheet(`${sheetHeader('Personalizar contas e cartões', 'A aparência muda. Seus dados financeiros continuam iguais.')}<form data-appearance-form><div class="modal-body"><div class="vac-appearance-fields"><label>Conta ou instituição<select name="institution">${groups.map(g => `<option value="${esc(g.key)}" ${g === group ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label><label>Nome personalizado<input name="displayName" maxlength="80" placeholder="Nome da instituição"></label><div data-card-nicknames></div><label>Cor</label><div class="vac-presets">${Object.entries(Card.presets).map(([name, color]) => `<button type="button" data-color="${color}" style="--swatch:${color}" aria-label="${name}" aria-pressed="false" title="${name}"></button>`).join('')}</div><label>Cor personalizada<input type="color" name="color" aria-label="Cor personalizada"></label><label>Estilo<select name="gradientVariant"><option value="gradient">Gradiente</option><option value="solid">Cor sólida</option></select></label><button class="btn btn-light" type="button" data-appearance-reset>Restaurar aparência padrão</button><p class="vac-appearance-note">Só será salvo ao confirmar. Nenhum saldo, limite, fatura ou espaço será alterado.</p></div><div class="vac-appearance-preview" aria-label="Prévia da aparência"></div><p data-appearance-error role="alert" hidden></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar aparência</button></footer></form>`, 'vac-appearance-sheet');
+    const form = modal().querySelector('[data-appearance-form]'), fields = form.elements;
+    function preview() {
+      const presentation = { displayName: fields.displayName.value, color: fields.color.value, gradientVariant: fields.gradientVariant.value };
+      const cards = group.cards.map((c, i) => ({ ...c, presentation: { cardNickname: form.querySelector(`[data-nickname="${i}"]`).value } }));
+      form.querySelector('.vac-appearance-preview').innerHTML = `<div class="veconi-accounts-carousel is-single">${Card.render({ ...group, cards, presentation, canCustomize: false }, Engine, 0, 1)}</div>`;
+      form.querySelectorAll('[data-color]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.color === fields.color.value)));
+      form.querySelectorAll('.vac-appearance-preview button').forEach(b => { b.tabIndex = -1; b.disabled = true; });
+      window.lucide?.createIcons();
+    }
+    function fill(defaults = false) {
+      const appearance = Card.appearance(defaults ? { ...group, presentation: {} } : group);
+      fields.displayName.value = appearance.displayName;
+      fields.color.value = appearance.color;
+      fields.gradientVariant.value = appearance.gradientVariant;
+      form.querySelector('[data-card-nicknames]').innerHTML = group.cards.map((c, i) => `<label>Nome do cartão${c.last4 ? ` · •••• ${esc(c.last4)}` : ''}<input data-nickname="${i}" maxlength="80" placeholder="${esc(c.name || 'Nome visual do cartão')}" value="${esc(defaults ? '' : c.presentation?.cardNickname || '')}"></label>`).join('');
+      preview();
+    }
+    fill();
+    fields.institution.onchange = () => { group = groups.find(g => g.key === fields.institution.value); resetting = false; fill(); };
+    form.oninput = () => { resetting = false; preview(); };
+    fields.gradientVariant.onchange = () => { resetting = false; preview(); };
+    form.querySelectorAll('[data-color]').forEach(b => b.onclick = () => { resetting = false; fields.color.value = b.dataset.color; preview(); });
+    form.querySelector('[data-appearance-reset]').onclick = () => { resetting = true; fill(true); };
+    form.onsubmit = async event => {
+      event.preventDefault(); if (busy) return; busy = true;
+      const errorNode = form.querySelector('[data-appearance-error]'); errorNode.hidden = true;
+      const input = {
+        accounts: group.accounts.map(a => ({ id: a.id, accountHomeSpaceId: accountHomeSpaceId(a) })),
+        cards: group.cards.map(c => ({ id: c.id, cardHomeSpaceId: c.cardHomeSpaceId || c.financialSpaceId })),
+        presentation: { displayName: fields.displayName.value, color: fields.color.value, gradientVariant: fields.gradientVariant.value },
+        cardNicknames: Object.fromEntries(group.cards.map((c, i) => [nicknameKey(c), form.querySelector(`[data-nickname="${i}"]`).value])), reset: resetting,
+      };
+      form.querySelectorAll('input,select,button').forEach(el => { el.disabled = true; });
+      try { await window.FinancialSpaceService.updateFinancialPresentation(input); closeModal(); Utils.toast('Aparência salva.'); await refresh(); }
+      catch (error) { errorNode.textContent = error.code === 'permission-denied' ? 'Você não tem permissão para salvar a aparência destes recursos.' : error.message || 'Não foi possível salvar a aparência. Tente novamente.'; errorNode.hidden = false; busy = false; form.querySelectorAll('input,select,button').forEach(el => { el.disabled = false; }); }
+    };
   }
 
   function attentionMarkup(data = {}) {
@@ -1558,7 +1607,9 @@ window.FinanceiroUI = (() => {
       scope: JSON.stringify([context.businessId, context.userProfile?.uid, context.business?.workspaceGeneration, state.activeViewId]),
       onDetails: (key) => { state.institutionKey = key; state.view = 'institution'; paint(); },
       onMenu: openInstitutionActions,
+      onAppearance: openAppearance,
     });
+    page.querySelector('[data-vac-customize]')?.addEventListener('click', () => openAppearance());
     page.querySelector("[data-financial-retry]")?.addEventListener("click", () => refresh());
     page.querySelectorAll("[data-financial-retry-cards]").forEach((button) => button.onclick = () => refresh({ silent: true }));
     page.querySelectorAll("[data-financial-open-spaces]").forEach((button) => button.onclick = openSpaces);

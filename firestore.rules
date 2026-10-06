@@ -469,6 +469,35 @@ service cloud.firestore {
     function creditCardAt(homeSpaceId, cardId) {
       return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/creditCards/$(cardId)).data;
     }
+    function canCustomizeFinancialPresentation(spaceId) {
+      let space = financialSpace(spaceId);
+      // All callers already require canManageFinancialSpace. Do not expand it
+      // twice: membership/generation checks otherwise exhaust Rules' budget.
+      return (
+        (space.type == 'business'
+          && roleForBusiness(space.linkedBusinessId) in ['owner', 'manager', 'admin'])
+        || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid
+          && activeUser() && userProfile().role in ['owner', 'manager', 'admin'])
+      );
+    }
+    function validFinancialPresentation(p) {
+      return p is map && p.keys().hasOnly(['displayName', 'cardNickname', 'color', 'gradientVariant'])
+        && p.get('displayName', '') is string && p.get('displayName', '').size() <= 80
+        && p.get('cardNickname', '') is string && p.get('cardNickname', '').size() <= 80
+        && (p.get('color', '') == '' || (p.color is string && p.color.matches('^#[0-9a-fA-F]{6}$')))
+        && p.get('gradientVariant', 'solid') in ['solid', 'gradient'];
+    }
+    function financialPresentationWriteAllowed(spaceId) {
+      return resource == null
+        ? (!('presentation' in request.resource.data) || (canCustomizeFinancialPresentation(spaceId)
+          && validFinancialPresentation(request.resource.data.presentation)))
+        : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+          || (canCustomizeFinancialPresentation(spaceId)
+            && validFinancialPresentation(request.resource.data.get('presentation', {}))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'presentation', 'presentationUpdatedAt', 'workspaceGeneration', 'workspaceWriteId'
+            ])));
+    }
     function financialAccountAt(homeSpaceId, accountId) {
       return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/financialAccounts/$(accountId)).data;
     }
@@ -1404,6 +1433,7 @@ service cloud.firestore {
       match /financialAccounts/{accountId} {
         allow read: if canReadFinancialSpace(spaceId);
         allow create: if canManageFinancialSpace(spaceId)
+          && financialPresentationWriteAllowed(spaceId)
           && request.resource.data.id == accountId
           && request.resource.data.financialSpaceId == spaceId
           && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
@@ -1418,7 +1448,10 @@ service cloud.firestore {
           && validFinancialAccountAccess(request.resource.data, spaceId)
           && request.resource.data.active == true;
         allow update: if canManageFinancialSpace(spaceId)
-          && request.resource.data.id == resource.data.id
+          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+            ? financialPresentationWriteAllowed(spaceId)
+            : (
+          request.resource.data.id == resource.data.id
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
@@ -1427,12 +1460,13 @@ service cloud.firestore {
           && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
           && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool)
           && request.resource.data.active is bool
-          && financialAccountScopeUpdateAllowed(resource.data, request.resource.data, spaceId);
+          && financialAccountScopeUpdateAllowed(resource.data, request.resource.data, spaceId)));
         allow delete: if false;
       }
       match /creditCards/{cardId} {
         allow read: if canReadFinancialSpace(spaceId);
         allow create: if canManageFinancialSpace(spaceId)
+          && financialPresentationWriteAllowed(spaceId)
           && request.resource.data.id == cardId
           && request.resource.data.financialSpaceId == spaceId
           && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
@@ -1456,7 +1490,10 @@ service cloud.firestore {
           && validCreditCardAccess(request.resource.data, spaceId)
           && request.resource.data.active == true;
         allow update: if canManageFinancialSpace(spaceId)
-          && request.resource.data.id == resource.data.id
+          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+            ? financialPresentationWriteAllowed(spaceId)
+            : (
+          request.resource.data.id == resource.data.id
           && request.resource.data.financialSpaceId == resource.data.financialSpaceId
           && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.operationId == resource.data.operationId
@@ -1475,7 +1512,7 @@ service cloud.firestore {
           && request.resource.data.dueDay >= 1
           && request.resource.data.dueDay <= 31
           && request.resource.data.active is bool
-          && creditCardScopeUpdateAllowed(resource.data, request.resource.data, spaceId);
+          && creditCardScopeUpdateAllowed(resource.data, request.resource.data, spaceId)));
         allow delete: if false;
       }
       match /creditCardInvoices/{invoiceId} {

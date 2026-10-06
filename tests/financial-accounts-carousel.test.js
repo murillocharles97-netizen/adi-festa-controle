@@ -34,3 +34,30 @@ test('presentation escapes names and snapping/easing is deterministic',()=>{
  assert.equal(nearest([0,376,752],411),1);assert.equal(nearest([0,376,752],710),2);assert.equal(easing(0),0);assert.equal(easing(1),1);
  let last=0;for(let i=0;i<=100;i++){assert.ok(easing(i/100)>=last);last=easing(i/100);}
 });
+test('loop duplicates presentation only; real indices/pagination remain bounded',()=>{
+ for(const n of [1,2,4,12]){
+  const data=Array.from({length:n},(_,i)=>group({key:'bank-'+i})),before=JSON.stringify(data),html=carousel.render(data,E);
+  const indices=[...html.matchAll(/data-logical-index="(\d+)"/g)].map(m=>Number(m[1]));
+  assert.ok(indices.every(i=>i>=0&&i<n));assert.equal(new Set(indices).size,n);
+  assert.equal(indices.length===1,n===1);assert.equal(JSON.stringify(data),before);
+  assert.doesNotMatch(html,/\sid="/);
+ }
+});
+test('appearance uses exact institution keys, not substring guessing, and never mutates financial data',()=>{
+ const g=group({name:'Banco Interior',key:'interior',accounts:[{institutionKey:'interior',currentBalanceCents:123}]});
+ const before=JSON.stringify(g);assert.notEqual(card.appearance(g).color,card.presets.Laranja);assert.equal(JSON.stringify(g),before);
+ assert.equal(card.appearance(group({key:'inter',name:'Nome editado'})).color,card.presets.Laranja);
+ const p=card.present(group({presentation:{displayName:'Inter Principal',color:'#123456',gradientVariant:'solid'},accounts:[{type:'bank_account'}]}),E);
+ assert.equal(p.name,'Inter Principal');assert.equal(p.primaryCents,862);assert.equal(p.style.end,'#123456');
+});
+test('text has AA contrast across gradient endpoints and color cannot inject CSS',()=>{
+ for(const color of [...Object.values(card.presets),'#ffffff','#000000','#ffff00','#ff7a00','#888888','#80ffff']){
+  for(const gradientVariant of ['solid','gradient']){const a=card.appearance(group({presentation:{color,gradientVariant}}));assert.ok(card.contrast(a.color,a.text)>=4.5);assert.ok(card.contrast(a.end,a.text)>=4.5);}
+ }
+ assert.notEqual(card.appearance(group({presentation:{color:'red;position:fixed'}})).color,'red;position:fixed');
+});
+test('missing invoice is stated once; large amounts and nicknames preserve semantics',()=>{
+ const html=card.render(group({cards:[{name:'real',presentation:{cardNickname:'Meu cartão'},last4:'4521'}]}),E,0,1);
+ assert.equal((html.match(/Sem fatura/g)||[]).length,1);assert.match(html,/Meu cartão/);assert.match(html,/4521/);assert.doesNotMatch(html,/Mastercard|Visa/);
+ for(const cents of [862,676634,9876543,123456789]) assert.equal(card.present(group({accounts:[{type:'bank_account'}],availableBalanceCents:cents}),E).primaryCents,cents);
+});
