@@ -239,7 +239,7 @@
     return `<div class="mobile-product-empty">${icon("search-x")}<h3>Nenhum produto encontrado</h3><button data-clear-product-filters>Limpar filtros</button></div>`;
   }
   function actions() {
-    return `<div class="mobile-product-compact-actions"><button data-product-new>${icon("plus")} Novo produto</button><button data-scan-stock>${icon("package-plus")} Entrada por código</button><button data-product-entry-select hidden></button><button data-product-inventory hidden></button></div>`;
+    return `<div class="mobile-product-compact-actions"><button data-product-new>${icon("plus")} Novo produto</button><button data-scan-stock>${icon("package-plus")} Entrada por código</button><button data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button><button data-product-entry-select hidden></button><button data-product-inventory hidden></button></div>`;
   }
   function filtersSheet() {
     const categories = [
@@ -940,6 +940,7 @@
       (button) => (button.onclick = () => productForm()),
     );
     $("[data-product-entry-select]").onclick = selectEntry;
+    $("[data-product-spreadsheet]").onclick = () => window.ProductSpreadsheetUI.open();
     $("[data-product-inventory]").onclick = inventory;
     $$("[data-clear-product-filters]").forEach(
       (button) =>
