@@ -303,7 +303,7 @@
       cabecalho(
         "Produtos",
         window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.",
-        `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button>`,
+        `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button><button class="btn btn-light" data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button>`,
       ) +
       `<section class="desktop-products-page"><div class="desktop-product-toolbar"><input class="search" id="search" value="${escapar(desktopProductState.query)}" placeholder="Buscar produto por nome ou código..."><button class="desktop-product-filter-toggle" data-focus-product-filters aria-label="Ir para filtros">${icon("sliders-horizontal")}</button><button class="btn btn-light" data-scan-stock>${icon("package-plus")} Entrada por código</button></div><div class="desktop-product-filters" id="desktop-product-filters">${desktopProductFilter("Todos", "todos", counts.todos, false)}${desktopProductFilter("Em estoque", "disponivel", counts.disponivel)}${desktopProductFilter("Estoque baixo", "baixo", counts.baixo)}${desktopProductFilter("Esgotados", "esgotado", counts.esgotado)}${desktopProductFilter("Sem controle", "sem-controle", counts["sem-controle"])}</div><section class="desktop-product-grid" id="desktop-product-grid">${desktopProductGrid()}</section></section>`
     );
@@ -687,6 +687,7 @@
     if (route === "produtos") {
       if (window.ProdutosMobile?.isMobile()) return;
       $("#new-product").onclick = () => formularioProduto();
+      $("[data-product-spreadsheet]").onclick = () => window.ProductSpreadsheetUI.open();
       $("#search").oninput = (e) => {
         desktopProductState.query = e.target.value;
         desktopProductState.limit = 40;
