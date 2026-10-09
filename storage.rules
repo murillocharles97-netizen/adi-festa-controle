@@ -37,6 +37,7 @@ service firebase.storage {
     function canAccessFinancialSpace(spaceId) {
       return signedIn()
         && firestore.exists(/databases/(default)/documents/financialSpaces/$(spaceId))
+        && financialPlanAllows(spaceId)
         && financialSpace(spaceId).active != false
         && (
           (
@@ -58,6 +59,21 @@ service firebase.storage {
           financialSpace(spaceId).type in ['personal', 'other']
           || permitted(financialSpace(spaceId).linkedBusinessId, 'financial.view')
         );
+    }
+    // Projection of the central financeAdvanced entitlement; attachment access
+    // cannot bypass the Finance module restriction. Keep paid legacy rights.
+    function financialPlanAllows(spaceId) {
+      let space = financialSpace(spaceId);
+      let businessId = space.get('businessId',null) != null ? space.businessId
+        : (space.get('linkedBusinessId',null) != null ? space.linkedBusinessId : profile().get('businessId',null));
+      return businessId == null || businessFinanceAllowed(businessId);
+    }
+    function businessFinanceAllowed(businessId) {
+      let subscription = business(businessId).subscription;
+      let legacy = subscription.get('hasPaidSubscription',false) && subscription.get('catalogVersion',1) < 2
+        && subscription.planId in ['essential','professional','premium'];
+      return legacy ? subscription.get('legacyTransition',{}).get('features',{}).get('financeAdvanced',true)
+        : subscription.planId in ['professional','premium','trial','internal'];
     }
     match /businesses/{businessId}/products/{productId}/{fileName} {
       allow read: if canAccess(businessId);

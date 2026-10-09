@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { requirePlan, planBilling } = require('./plan-service');
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
 const {
   CouponError,
@@ -416,6 +417,9 @@ function couponFirestoreService(db) {
       )
         throw new CouponError("quote_expired");
       if (quote.expiresAt.toMillis() <= now.toMillis())
+        throw new CouponError("quote_expired");
+      // A pre-release quote cannot start a new checkout using an obsolete list price.
+      if (Number(quote.originalPrice) !== planBilling(requirePlan(planId), billingCycle).amount)
         throw new CouponError("quote_expired");
       const existing = await transaction.get(redemptionRef);
       if (

@@ -3,7 +3,8 @@ import { doc, runTransaction, serverTimestamp, increment } from './workspace-fir
 import { createFirestoreRepository } from './firestore-repository.js';
 
 const Model = window.ProductSpreadsheet;
-const requireOnline = () => { if (!navigator.onLine) throw Error('Conecte-se à internet para importar ou exportar produtos atualizados.'); };
+const requireOnline = () => {
+  if(window.PlanLimitService)window.PlanLimitService.assert(window.PlanLimitService.canUseFeature('spreadsheetImport'),'importar/exportar produtos'); if (!navigator.onLine) throw Error('Conecte-se à internet para importar ou exportar produtos atualizados.'); };
 function capture() {
   requireOnline();
   const context = window.BusinessContext?.get?.(), uid = auth.currentUser?.uid;
@@ -91,7 +92,7 @@ export async function applyPreview(catalog, preview, onProgress) {
               data: timestamp, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 3,
             });
           }
-          tx.update(ref, { ...patch, businessId: scope.businessId, atualizadoEm: timestamp, updatedAt: serverTimestamp(), updatedByUid: scope.uid, version: increment(1) });
+          tx.update(ref, { ...patch, spreadsheetImportOperationId:operationId, businessId: scope.businessId, atualizadoEm: timestamp, updatedAt: serverTimestamp(), updatedByUid: scope.uid, version: increment(1) });
           outcomes.push({ id: row.id, line: row.line, ok: true });
         }
         return outcomes;

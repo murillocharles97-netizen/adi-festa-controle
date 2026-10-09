@@ -13,6 +13,8 @@
     });
   }
   async function open() {
+    const access=window.PlanLimitService?.canUseFeature('spreadsheetImport');
+    if(access?.ok===false){window.PlansUI?.openUpgradeRequiredModal('spreadsheetImport',access);return;}
     if (opened && document.querySelector('.product-spreadsheet-modal')) return;
     opened = true;
     const root = document.querySelector('#modal');

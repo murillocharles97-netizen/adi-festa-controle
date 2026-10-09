@@ -1,17 +1,20 @@
 'use strict';
 
 const {getPlan}=require('./plan-service');
+const Catalog=require('../shared/plan-catalog');
 
 const MP_STATUS={authorized:'active',pending:'pending',paused:'paused',cancelled:'cancelled',canceled:'cancelled',expired:'expired'};
 const ACTIVE_STATUSES=new Set(['trial','active','grace_period']);
 
-function parseDate(value){if(!value)return null;const date=new Date(value);return Number.isNaN(date.getTime())?null:date}
+function parseDate(value){if(!value)return null;const date=new Date(Catalog.dateMs(value));return Number.isNaN(date.getTime())?null:date}
 function mapProviderStatus(value){return MP_STATUS[String(value||'').toLowerCase()]||'pending'}
 function normalizedStatus(subscription={}){const raw=String(subscription.status||subscription.subscriptionStatus||'inactive').toLowerCase();return raw==='trial'?'trialing':raw==='cancelled'?'canceled':raw}
 function isTrialActive(subscription,now=new Date()){const end=parseDate(subscription?.trialEndsAt);return normalizedStatus(subscription)==='trialing'&&Boolean(end)&&end>now}
 function computeAccess(subscription={},now=new Date()){
-  const status=normalizedStatus(subscription),plan=getPlan(subscription.planId),trial=isTrialActive(subscription,now),internal=subscription.planId==='internal'&&(subscription.isInternal===true||['active','internal'].includes(status)),active=internal||status==='active'||status==='grace_period'||trial;
-  return{status,planId:subscription.planId||'',active,canAccessApp:true,canMutate:active,readOnly:!active,trial,features:internal?null:plan?.features||{},limits:internal?null:plan?.limits||{},unlimited:internal};
+  const legacy=Catalog.legacyState(subscription,now);
+  if(legacy.legacy)return{status:legacy.active?'active':'expired',planId:subscription.planId,active:legacy.active,canAccessApp:true,canMutate:legacy.active,readOnly:!legacy.active,trial:false,features:legacy.features,limits:subscription.legacyTransition?.limits||getPlan(subscription.planId)?.limits||{},unlimited:false,legacy};
+  const status=normalizedStatus(subscription),trial=isTrialActive(subscription,now),plan=getPlan(trial?'professional':subscription.planId),internal=subscription.planId==='internal'&&(subscription.isInternal===true||['active','internal'].includes(status)),active=internal||status==='active'||status==='grace_period'||trial;
+  return{status,planId:subscription.planId||'',active,canAccessApp:true,canMutate:active,readOnly:!active,trial,features:internal?Catalog.plans.premium.features:plan?.features||{},limits:internal?null:plan?.limits||{},unlimited:internal};
 }
 function providerPatch(provider,{planId,now,existing={},billingCycle,discount,paymentMethodType,providerPlanId,localStatus,currentPeriodStart}={}){
   const status=localStatus||mapProviderStatus(provider.status),active=status==='active',pending=['pending','trialing'].includes(status),hadPaidSubscription=existing.hasPaidSubscription===true,plan=getPlan(planId||existing.planId),lastPaymentDate=active?(provider.summarized?.last_charged_date||currentPeriodStart||existing.lastPaymentDate||null):(existing.lastPaymentDate||null);

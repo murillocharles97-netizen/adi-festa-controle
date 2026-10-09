@@ -4,6 +4,7 @@ const { FieldValue } = require("firebase-admin/firestore");
 const { providerPatch } = require("./subscription-service");
 const { getPlan } = require("./plan-service");
 const { counterId } = require("./coupon-firestore-service");
+const {readMigration,activateMigration}=require('./legacy-plan-transition-service');
 
 function validateProviderSubscription(provider, index, business = {}) {
   const active = String(provider?.status || "").toLowerCase() === "authorized";
@@ -130,6 +131,11 @@ function firestoreSubscriptionService(db) {
           reason: "superseded",
         };
       }
+      const protectedSubscription=businessSnapshot.data().subscription||{};
+      if(Number(index.catalogVersion||1)<2&&(protectedSubscription.legacyTransition||protectedSubscription.catalogVersion===2)){
+        transaction.set(indexRef,{providerStatus:String(provider.status||''),lastIgnoredSource:source||'provider',updatedAt:now},{merge:true});
+        return{businessId:index.businessId,subscription:protectedSubscription,redemptionId:null,ignored:true,reason:'legacy-transition-frozen'};
+      }
       const redemptionRef = index.couponRedemptionId
           ? db.doc(`couponRedemptions/${index.couponRedemptionId}`)
           : null,
@@ -149,7 +155,10 @@ function firestoreSubscriptionService(db) {
         paidThrough=Date.parse(existingSubscription.currentPeriodEnd||existingSubscription.expiresAt||''),
         preservePaidPeriod=active===false&&existingSubscription.hasPaidSubscription===true&&['active','grace_period'].includes(String(existingSubscription.status||''))&&Number.isFinite(paidThrough)&&paidThrough>Date.parse(now),
         preserveTrial=active===false&&['trial','trialing'].includes(String(existingSubscription.status||''))&&Date.parse(existingSubscription.trialEndsAt||'')>Date.parse(now);
-      if(active&&!isCurrentProvider)throw Object.assign(Error('Uma assinatura antiga foi autorizada enquanto outra tentativa está ativa.'),{code:'provider-subscription-conflict'});
+      const migration=await readMigration(db,transaction,index,existingSubscription,subscriptionId);
+      if(active&&migration&&(!validation.active||activation?.reason!=='initial_payment_approved'||!activation?.paymentId))throw Object.assign(Error('Pagamento da migração não confirmado.'),{code:'legacy-payment-proof-required'});
+      if(active&&migration&&!migration.activated&&(source!=='webhook'||!eventId))return{businessId:index.businessId,subscription:existingSubscription,awaitingWebhook:true};
+      if(active&&!isCurrentProvider&&!migration)throw Object.assign(Error('Uma assinatura antiga foi autorizada enquanto outra tentativa está ativa.'),{code:'provider-subscription-conflict'});
       let couponReleased=false;
       const discount =
           redemption?.discountSnapshot || index.discountSnapshot || null,
@@ -168,7 +177,10 @@ function firestoreSubscriptionService(db) {
       if(terminal&&preservePaidPeriod){subscription.cancelAtPeriodEnd=true;subscription.nextBillingDate=null;subscription.currentPeriodEnd=existingSubscription.currentPeriodEnd||existingSubscription.expiresAt||subscription.currentPeriodEnd;}
       if(terminal){delete subscription.pendingDiscount;if(business.subscription?.hasPaidSubscription!==true){subscription.mercadoPago.subscriptionId=null;subscription.mercadoPago.preapprovalId=null;subscription.mercadoPago.lastClosedSubscriptionId=subscriptionId}}
       if (eventId) subscription.mercadoPago.lastWebhookEventId = eventId;
-      if (active) subscription.hasPaidSubscription = true;
+      if (active) {
+        subscription.hasPaidSubscription = true;
+        if(index.catalogVersion===2){subscription.catalogVersion=2;subscription.legacyPlan=false;subscription.legacyTransition=null;}
+      }
       if (active && redemption && redemption.status !== "active") {
         const couponRef = db.doc(`adminCoupons/${redemption.couponId}`),
           businessCounter = db.doc(
@@ -265,6 +277,17 @@ function firestoreSubscriptionService(db) {
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
+      if(active&&migration){
+        if(!Number.isFinite(Date.parse(provider.next_payment_date||''))||Date.parse(provider.next_payment_date)<=Date.parse(now))throw Object.assign(Error('Período pago da nova assinatura não confirmado.'),{code:'legacy-replacement-period-unverified'});
+        subscription.expiresAt=subscription.currentPeriodEnd;
+        if(!discount){delete subscription.discount;delete subscription.pendingDiscount;}
+        subscription.billingStrategy='recurring_card';
+      }
+      if(active&&migration)activateMigration(transaction,migration,subscription,{paymentId:activation.paymentId,approvedAt:activation.currentPeriodStart,now,source,eventId});
+      if(terminal&&migration&&!migration.activated){
+        transaction.update(migration.ref,{status:'attempt_closed',nextAttemptAt:null,closedAt:now});
+        transaction.update(businessRef,{'subscription.legacyMigration.status':'attempt_closed','subscription.pendingPlanId':null,'subscription.pendingPaymentMethodType':null});
+      }
       const businessPatch = {
         subscription,
         limits: plan?.limits || business.limits || {},
@@ -273,7 +296,7 @@ function firestoreSubscriptionService(db) {
       if (active && index.billingPayerEmail)
         businessPatch["billingProfile.billingPayerEmail"] =
           index.billingPayerEmail;
-      if(isCurrentProvider)transaction.update(businessRef, businessPatch);
+      if(isCurrentProvider||active&&migration)transaction.update(businessRef, businessPatch);
       const terminalAttemptStatus=String(provider.status||'').toLowerCase()==='expired'?'expired':'cancelled',attemptStatus=active?'approved':terminal?terminalAttemptStatus:'pending_payment';
       transaction.set(
         db.doc(
@@ -301,10 +324,10 @@ function firestoreSubscriptionService(db) {
       );
       return {
         businessId: index.businessId,
-        subscription:isCurrentProvider?subscription:(business.subscription||{}),
+        subscription:isCurrentProvider||active&&migration?subscription:(business.subscription||{}),
         redemptionId: redemptionRef?.id || null,
         couponReleased,
-        ignoredBusinessUpdate:!isCurrentProvider,
+        ignoredBusinessUpdate:!isCurrentProvider&&!(active&&migration),
       };
     });
   }
@@ -319,6 +342,7 @@ function firestoreSubscriptionService(db) {
       const businessRef = db.doc(`businesses/${index.data().businessId}`),
         business = await transaction.get(businessRef),
         discount = business.data()?.subscription?.discount;
+      if(Number(index.data()?.catalogVersion||1)<2&&(business.data()?.subscription?.legacyTransition||business.data()?.subscription?.catalogVersion===2))return{processed:false};
       if (
         !discount ||
         !["first_payment", "billing_cycles"].includes(discount.durationType) ||
@@ -371,9 +395,10 @@ function firestoreSubscriptionService(db) {
       const indexSnapshot=await transaction.get(indexRef),index=indexSnapshot.data()||{};
       if(!indexSnapshot.exists||!index.businessId)return{processed:false};
       const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentStatusDetail':String(result.statusDetail||'')||null,'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
+      if(Number(index.catalogVersion||1)<2&&(subscription.legacyTransition||subscription.catalogVersion===2))return{processed:false,reason:'legacy-transition-frozen'};
       if(successful)patch['subscription.lastPaymentDate']=result.dateApproved||nowIso();
       else if(paymentMethodType==='pix_monthly'&&subscription.status==='active')patch['subscription.status']='payment_pending';
-      transaction.update(businessRef,patch);
+      if(!index.legacyMigrationOperationId||subscription.mercadoPago?.subscriptionId===subscriptionId)transaction.update(businessRef,patch);
       const row={eventId,subscriptionId,businessId:index.businessId,paymentMethodType,successful,status:String(result.status||'unknown'),statusDetail:String(result.statusDetail||'')||null,paymentId:result.paymentId||null,paymentMethodId:String(result.paymentMethodId||'')||null,paymentTypeId:String(result.paymentTypeId||'')||null,createdAt:FieldValue.serverTimestamp()};
       transaction.create(markerRef,row);
       return{processed:true,...row};

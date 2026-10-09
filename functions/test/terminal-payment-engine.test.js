@@ -28,7 +28,7 @@ test('explicit state machine rejects terminal-state resurrection and supports un
 test('production mock cannot be enabled by request data or a global simulator flag',async()=>{
   const {terminalPaymentService}=require('../src/terminal-payments/terminal-payment-service');
   const previous=process.env.FUNCTIONS_EMULATOR;delete process.env.FUNCTIONS_EMULATOR;
-  const value={uid:'owner',profile:{role:'owner'},member:{role:'owner',status:'active',spaceAccess:'all'},business:{active:true,subscription:{planId:'premium'}}};
+  const value={uid:'owner',profile:{role:'owner'},member:{role:'owner',status:'active',spaceAccess:'all'},business:{active:true,subscription:{planId:'premium',status:'active'}}};
   const db={collection:()=>({get:async()=>({docs:[]})})};
   const service=terminalPaymentService(db,{permissionService:()=>({authenticatedContext:async()=>value}),simulatorEnabled:()=>true});
   try{
@@ -37,6 +37,17 @@ test('production mock cannot be enabled by request data or a global simulator fl
     value.business.paymentFeatures={integratedPaymentsV1:true,mock:true};
     assert.equal((await service.getSetup({data:{businessId:'merchant-prod'}})).simulatorAllowed,true);
   }finally{if(previous===undefined)delete process.env.FUNCTIONS_EMULATOR;else process.env.FUNCTIONS_EMULATOR=previous;}
+});
+
+test('new terminal payments require Pro before provider calls or writes',async()=>{
+  const {terminalPaymentService}=require('../src/terminal-payments/terminal-payment-service');
+  for(const planId of ['essential','professional']){
+    let checks=0;
+    const value={uid:'owner',profile:{role:'owner'},member:{role:'owner',status:'active',spaceAccess:'all'},business:{active:true,subscription:{planId,status:'active'}}};
+    const service=terminalPaymentService({}, {permissionService:()=>({authenticatedContext:async()=>{checks++;return value;}})});
+    for(const action of ['saveTerminal','createPayment'])await assert.rejects(service[action]({data:{businessId:'merchant-prod'}}),error=>error.code==='failed-precondition'&&error.details.requiredPlan==='premium');
+    assert.equal(checks,2,'one auth context per request');
+  }
 });
 
 test('contrato comum cobre ciclo completo e providers registrados o implementam',()=>{

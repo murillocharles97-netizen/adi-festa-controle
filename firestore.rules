@@ -46,8 +46,10 @@ service cloud.firestore {
       let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
       let subscription = business.subscription;
       return business.active == true
+        && (subscription.get('catalogVersion',1) >= 2 || !subscription.get('legacyPlan',false) || subscription.get('legacyTransition',{}).get('paidThroughAt',null) == null || subscription.legacyTransition.paidThroughAt > request.time)
         && (
           (subscription.planId == 'internal' && subscription.status == 'active')
+          || (subscription.get('catalogVersion',1) < 2 && subscription.get('legacyPlan',false) && subscription.get('legacyTransition',{}).get('paidThroughAt',null) != null && subscription.legacyTransition.paidThroughAt > request.time)
           || subscription.status == 'active'
           || (subscription.status in ['trial', 'trialing'] && subscription.trialEndsAt > request.time)
           || (
@@ -56,14 +58,22 @@ service cloud.firestore {
           )
         );
     }
+    // Catalog v2 projection. Contract tests compare these tiers with plan-catalog.js.
+    function planAllowsFeature(businessId, feature) {
+      let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
+      let id = subscription.planId;
+      let tier = {'essential':1, 'professional':2, 'trial':2, 'premium':3, 'internal':99}.get(id,0);
+      let required = {'simpleCampaigns':1, 'messageCenter':1, 'crmAdvanced':2, 'advancedCampaigns':2, 'customerSubscriptions':2, 'onlineOrders':2, 'financeAdvanced':2, 'spreadsheetImport':2, 'teamManagement':3, 'paymentTerminalIntegration':3, 'fiscalIntegration':3}.get(feature,99);
+      let legacy = subscription.get('hasPaidSubscription',false) && subscription.get('catalogVersion',1) < 2 && id in ['essential','professional','premium'];
+      return legacy ? subscription.get('legacyTransition',{}).get('features',{}).get(feature,true) : tier >= required && tier > 0;
+    }
     function planAllowsCollection(businessId, collectionName) {
       let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
       return !(collectionName in [
-          'campaigns', 'campaignProgress', 'campaignEvents',
-          'campaignRedemptions', 'paymentAllocations', 'rewards', 'charges',
+          'campaignProgress',
+          'campaignRedemptions', 'rewards',
           'customerSubscriptions', 'customerSubscriptionEvents',
-          'messageHistory', 'messageTemplates', 'messageSequences',
-          'visits', 'catalogOrders'
+          'customerSegments', 'visits', 'catalogOrders'
         ])
         || subscription.planId in ['internal', 'trial', 'professional', 'premium'];
     }
@@ -146,6 +156,9 @@ service cloud.firestore {
         ));
     }
     function canWriteCollection(businessId, collectionName) {
+      let member = memberExists(businessId) ? teamMember(businessId) : {};
+      let privileged = member.get('role','') in ['owner','platform_admin'];
+      let grants = member.get('permissions',{});
       return workspaceWriteAllowed(businessId)
         && subscriptionAllowsWrites(businessId)
         && planAllowsCollection(businessId, collectionName)
@@ -155,18 +168,18 @@ service cloud.firestore {
             activeMember(businessId)
             && activeBusiness(businessId)
             && (
-              (collectionName == 'sales' && (permissionGranted(businessId, 'sales.create') || permissionGranted(businessId, 'sales.cancel')))
-              || (collectionName in ['products', 'productVariants'] && (permissionGranted(businessId, 'products.edit') || permissionGranted(businessId, 'inventory.adjust') || permissionGranted(businessId, 'sales.create')))
-              || (collectionName == 'stockMovements' && (permissionGranted(businessId, 'inventory.adjust') || permissionGranted(businessId, 'sales.create')))
-              || (collectionName == 'clients' && (permissionGranted(businessId, 'customers.edit') || permissionGranted(businessId, 'customers.receiveDebt') || permissionGranted(businessId, 'customers.adjustBalance') || permissionGranted(businessId, 'sales.create')))
-              || (collectionName == 'payments' && permissionGranted(businessId, 'customers.receiveDebt'))
-              || (collectionName == 'balanceAdjustments' && permissionGranted(businessId, 'customers.adjustBalance'))
-              || (collectionName in ['balanceEvents', 'processedOperations'] && (permissionGranted(businessId, 'sales.create') || permissionGranted(businessId, 'customers.receiveDebt') || permissionGranted(businessId, 'customers.adjustBalance')))
-              || (collectionName in ['campaignProgress', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptions', 'customerSubscriptionEvents', 'rewards'] && permissionGranted(businessId, 'sales.create'))
-              || (collectionName == 'campaigns' && permissionGranted(businessId, 'reports.view'))
-              || (collectionName in ['charges', 'messageHistory', 'messageTemplates', 'messageSequences', 'clientContacts', 'catalogOrders'] && permissionGranted(businessId, 'customers.edit'))
-              || (collectionName == 'customerSegments' && permissionGranted(businessId, 'reports.view'))
-              || (collectionName == 'settings' && permissionGranted(businessId, 'settings.manage'))
+              (collectionName == 'sales' && ((privileged || grants.get('sales.create',false) == true) || (privileged || grants.get('sales.cancel',false) == true)))
+              || (collectionName in ['products', 'productVariants'] && ((privileged || grants.get('products.edit',false) == true) || (privileged || grants.get('inventory.adjust',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'stockMovements' && ((privileged || grants.get('inventory.adjust',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'clients' && ((privileged || grants.get('customers.edit',false) == true) || (privileged || grants.get('customers.receiveDebt',false) == true) || (privileged || grants.get('customers.adjustBalance',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'payments' && (privileged || grants.get('customers.receiveDebt',false) == true))
+              || (collectionName == 'balanceAdjustments' && (privileged || grants.get('customers.adjustBalance',false) == true))
+              || (collectionName in ['balanceEvents', 'processedOperations'] && ((privileged || grants.get('sales.create',false) == true) || (privileged || grants.get('customers.receiveDebt',false) == true) || (privileged || grants.get('customers.adjustBalance',false) == true)))
+              || (collectionName in ['campaignProgress', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptions', 'customerSubscriptionEvents', 'rewards'] && (privileged || grants.get('sales.create',false) == true))
+              || (collectionName == 'campaigns' && (privileged || grants.get('reports.view',false) == true))
+              || (collectionName in ['charges', 'messageHistory', 'messageTemplates', 'messageSequences', 'clientContacts', 'catalogOrders'] && (privileged || grants.get('customers.edit',false) == true))
+              || (collectionName == 'customerSegments' && (privileged || grants.get('reports.view',false) == true))
+              || (collectionName == 'settings' && (privileged || grants.get('settings.manage',false) == true))
               || collectionName == 'syncMetadata'
             )
           )
@@ -430,7 +443,7 @@ service cloud.firestore {
     }
     function canReadFinancialSpace(spaceId) {
       let space = financialSpace(spaceId);
-      return signedIn() && space.active != false && (
+      return signedIn() && space.active != false && financialPlanAllows(spaceId) && (
         (
           space.type == 'business'
           && (
@@ -444,20 +457,30 @@ service cloud.firestore {
         )
       );
     }
-    function canManageFinancialSpace(spaceId) {
+    function canManageFinancialSpaceMetadata(spaceId) {
       let space = financialSpace(spaceId);
+      let businessOwner = space.type == 'business' && ownsActiveBusiness(space.linkedBusinessId);
       return signedIn() && space.active != false && financialWorkspaceWritable(space) && (
         (
           space.type == 'business'
-          && (ownsActiveBusiness(space.linkedBusinessId) || canAccessSpace(space.linkedBusinessId, spaceId))
+          && (businessOwner || canAccessSpace(space.linkedBusinessId, spaceId))
           && subscriptionAllowsWrites(space.linkedBusinessId)
-          && (ownsActiveBusiness(space.linkedBusinessId) || permissionGranted(space.linkedBusinessId, 'financial.view'))
+          && (businessOwner || permissionGranted(space.linkedBusinessId, 'financial.view'))
         )
         || (
           space.type in ['personal', 'other']
           && space.ownerUid == request.auth.uid
         )
       );
+    }
+    function canManageFinancialSpace(spaceId) {
+      return financialPlanAllows(spaceId) && canManageFinancialSpaceMetadata(spaceId);
+    }
+    function financialPlanAllows(spaceId) {
+      let space = financialSpace(spaceId);
+      let businessId = space.get('businessId',null) != null ? space.businessId
+        : (space.get('linkedBusinessId',null) != null ? space.linkedBusinessId : userProfile().get('businessId',null));
+      return businessId == null || planAllowsFeature(businessId,'financeAdvanced');
     }
     function financialWorkspaceWritable(space) {
       let businessId = space.get('businessId', null);
@@ -1062,7 +1085,8 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductSpaceScope(request.resource.data, businessId);
-        allow update: if canWriteCollection(businessId, 'products')
+        allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
+          && canWriteCollection(businessId, 'products')
           && (
             !memberExists(businessId)
             || permissionGranted(businessId, 'products.edit')
@@ -1160,8 +1184,10 @@ service cloud.firestore {
       }
       match /campaigns/{documentId} {
         allow read: if canReadCollection(businessId, 'campaigns');
-        allow create: if canCreateGenericDocument(businessId, 'campaigns', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'campaigns', documentId);
+        allow create: if canCreateGenericDocument(businessId, 'campaigns', documentId)
+          && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
+        allow update: if canUpdateGenericDocument(businessId, 'campaigns', documentId)
+          && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
         allow delete: if false;
       }
       match /campaignProgress/{documentId} {
@@ -1304,7 +1330,7 @@ service cloud.firestore {
           )
         )
         && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId));
-      allow update: if canManageFinancialSpace(spaceId)
+      allow update: if canManageFinancialSpaceMetadata(spaceId)
         && (
           resource.data.type in ['personal', 'other']
           || ownsActiveBusiness(resource.data.linkedBusinessId)
@@ -1667,11 +1693,11 @@ service cloud.firestore {
     // incluir ownerUid == request.auth.uid. A regra não concede essa visão
     // consolidada a membros de empresa nem atravessa proprietários.
     match /{path=**}/creditCards/{cardId} {
-      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow read: if signedIn() && planAllowsFeature(currentBusinessId(),'financeAdvanced') && resource.data.ownerUid == request.auth.uid;
     }
 
     match /{path=**}/financialAccounts/{accountId} {
-      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow read: if signedIn() && planAllowsFeature(currentBusinessId(),'financeAdvanced') && resource.data.ownerUid == request.auth.uid;
     }
 
     match /financialTransfers/{transferId} {

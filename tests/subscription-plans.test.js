@@ -7,23 +7,24 @@ const businessSource=read('js/firebase/business-context.js').replace(/^export /g
 const sandbox={window:null,structuredClone,dispatchEvent(){},CustomEvent:function(){},console,setTimeout,clearTimeout};
 sandbox.window=sandbox;
 vm.createContext(sandbox);
+vm.runInContext(read('functions/src/shared/plan-catalog.js'),sandbox);
 vm.runInContext(businessSource,sandbox,{filename:'business-context.js'});
 const {PLANS,resolveSubscriptionAccess,SubscriptionService,BusinessContext,PlanLimitService}=sandbox.__plans;
 const now=new Date('2026-07-24T12:00:00Z');
 
 assert.equal(PLANS.essential.monthlyPrice,29.90);
-assert.equal(PLANS.essential.yearlyPrice,299);
+assert.equal(PLANS.essential.yearlyPrice,287.04);
 assert.equal(PLANS.essential.limits.products,300);
 assert.equal(PLANS.essential.limits.clients,500);
 assert.equal(PLANS.essential.limits.monthlySales,1500);
-assert.equal(PLANS.professional.monthlyPrice,49.90);
-assert.equal(PLANS.professional.yearlyPrice,499);
+assert.equal(PLANS.professional.monthlyPrice,59.90);
+assert.equal(PLANS.professional.yearlyPrice,575.04);
 assert.equal(PLANS.professional.limits.users,3);
 assert.equal(PLANS.professional.limits.products,2000);
 assert.equal(PLANS.professional.limits.clients,5000);
 assert.equal(PLANS.professional.limits.monthlySales,10000);
-assert.equal(PLANS.premium.monthlyPrice,79.90);
-assert.equal(PLANS.premium.yearlyPrice,799);
+assert.equal(PLANS.premium.monthlyPrice,119.90);
+assert.equal(PLANS.premium.yearlyPrice,1151.04);
 assert.equal(PLANS.premium.limits.users,10);
 assert.equal(PLANS.internal.features.campaigns,true);
 assert.equal(PLANS.internal.features.onlineCatalog,true);
@@ -38,7 +39,7 @@ assert.equal(internal.features.automations,true);
 
 const essential=resolveSubscriptionAccess({planId:'essential',status:'active'},{},now);
 assert.equal(essential.features.products,true);
-assert.equal(essential.features.campaigns,false);
+assert.equal(essential.features.campaigns,true);
 assert.equal(essential.features.onlineCatalog,false);
 
 const professional=resolveSubscriptionAccess({planId:'professional',status:'active'},{},now);
@@ -57,7 +58,7 @@ assert.equal(featureTrial.features.campaigns,true);
 
 const expiredFeatureTrial=resolveSubscriptionAccess({planId:'essential',status:'active',featureTrial:{planId:'professional',used:true,status:'active',endsAt:'2026-07-23T12:00:00Z'}},{},now);
 assert.equal(expiredFeatureTrial.featureTrialActive,false);
-assert.equal(expiredFeatureTrial.features.campaigns,false);
+assert.equal(expiredFeatureTrial.features.campaigns,true);
 
 const internalFallback=resolveSubscriptionAccess({business:{id:'adi-festa'},subscription:{},now});
 assert.equal(internalFallback.canUseApp,true);
@@ -125,8 +126,8 @@ assert.match(worker,/js\/plans\.js/);
 assert.match(rules,/request\.resource\.data\.subscription == resource\.data\.subscription/);
 assert.doesNotMatch(businessSource,/subscription\.status\s*=\s*['"]active/);
 assert.equal(planSeed.essential.monthlyPrice,29.9);
-assert.equal(planSeed.professional.monthlyPrice,49.9);
-assert.equal(planSeed.premium.monthlyPrice,79.9);
+assert.equal(planSeed.professional.monthlyPrice,59.9);
+assert.equal(planSeed.premium.monthlyPrice,119.9);
 assert.equal(planSeed.trial.effectivePlanId,'professional');
 assert.equal(planSeed.trial.limits.users,3);
 assert.match(plansUi,/comparison-limit-row/);

@@ -88,6 +88,7 @@ const businessModule=read('js/firebase/business-context.js').replace(/^export /g
 const businessSandbox={window:null,structuredClone,dispatchEvent:()=>{},CustomEvent:function(){},console};
 businessSandbox.window=businessSandbox;
 vm.createContext(businessSandbox);
+vm.runInContext(read('functions/src/shared/plan-catalog.js'),businessSandbox);
 vm.runInContext(businessModule,businessSandbox,{filename:'business-context.js'});
 const {getSubscriptionAccess,PLANS}=businessSandbox.__businessTest;
 const base=new Date('2026-07-23T12:00:00Z');

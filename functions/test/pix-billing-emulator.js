@@ -75,7 +75,7 @@ async function main(){
   const firstQuote=await couponService.validateAndQuote({context,code:couponCode,planId:'professional',billingCycle:'monthly'}),firstReservation=await couponService.reserveQuote({quoteId:firstQuote.quoteId,context,planId:'professional',billingCycle:'monthly'});
   await couponService.releaseReservation(firstReservation.id,'pix_expired');
   const replacement=await couponService.reserveCheckoutCoupon({quoteId:firstQuote.quoteId,couponCode,context,planId:'professional',billingCycle:'monthly'});
-  assert.equal(replacement.quoteRefreshed,true);assert.notEqual(replacement.quoteId,firstQuote.quoteId);assert.equal(replacement.discountedPrice,39.92);assert.equal((await db.doc(`couponRedemptions/${replacement.id}`).get()).data().status,'reserved');
+  assert.equal(replacement.quoteRefreshed,true);assert.notEqual(replacement.quoteId,firstQuote.quoteId);assert.equal(replacement.discountedPrice,47.92);assert.equal((await db.doc(`couponRedemptions/${replacement.id}`).get()).data().status,'reserved');
   const checkoutBatch=db.batch();
   await couponService.markCheckout({redemptionId:replacement.id,internalSubscriptionId:'operation-pix-coupon-005',providerOrderId:'order-pix-coupon-005',writer:checkoutBatch});
   await checkoutBatch.commit();

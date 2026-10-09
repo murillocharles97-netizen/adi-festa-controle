@@ -517,6 +517,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function refresh(options = {}) {
+    if (!financeAllowed()) return showFinanceUpgrade();
     const page = root();
     if (!page) return;
     const version = ++state.requestVersion;
@@ -607,9 +608,15 @@ window.FinanceiroUI = (() => {
     }
   }
 
+  const financeAllowed = () => window.PlanLimitService?.canUseFeature('financeAdvanced').ok !== false;
+  function showFinanceUpgrade() {
+    destroy();
+    if(root())root().innerHTML = '<section class="financial-page"><h2>Financeiro disponível no Gestão</h2><p>Conheça o plano Gestão para acessar este módulo.</p><button class="btn btn-primary" data-requires-feature-action="financeAdvanced">Conhecer Gestão</button></section>';
+  }
   function paint() {
     const page = root();
     if (!page || !state.dashboard) return;
+    if (!financeAllowed()) return showFinanceUpgrade();
     const views = {
       dashboard: dashboardMarkup,
       institutions: institutionsMarkup,
@@ -1229,6 +1236,7 @@ window.FinanceiroUI = (() => {
   }
 
   async function openEntryForm(direction = "out") {
+    if (!financeAllowed()) { window.PlansUI?.guardRoute('financeiro'); return; }
     if (state.consolidated) return openActionSpacePicker(direction === "out" ? "Em qual espaço registrar a despesa?" : "Em qual espaço registrar a entrada?", () => openEntryForm(direction));
     const service = window.FinancialSpaceService, categoryItems = await service.listCategories(state.selectedSpaceId), isExpense = direction === "out",
       financialAccounts = await service.listFinancialAccounts(state.selectedSpaceId),
@@ -1671,6 +1679,7 @@ window.FinanceiroUI = (() => {
   }
 
   function bind() {
+    if (!financeAllowed()) return showFinanceUpgrade();
     bindPage();
     refresh();
   }
@@ -1681,5 +1690,6 @@ window.FinanceiroUI = (() => {
   addEventListener("financial-space-metadata-changed", () => { if (root() && !state.loading) refresh({ silent: true }); });
   addEventListener("financial-service-ready", () => { if (root() && !state.loading) refresh(); });
   addEventListener("app-resumed", () => { if (window.Router?.atual?.() === "financeiro") resume(); });
+  addEventListener("business-context-changed", () => { if(root() && !financeAllowed()) showFinanceUpgrade(); });
   return { render, bind, refresh, destroy, resume, state: () => structuredClone(state), openEntryForm, openSpaces };
 })();

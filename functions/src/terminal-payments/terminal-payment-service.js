@@ -9,6 +9,8 @@ const {MOCK_CAPABILITIES}=require('./providers/mock-provider');
 const {assertTransition}=require('./payment-state-machine');
 const {assertWritable}=require('../services/workspace-reset-policy');
 const {workspaceWriteFence}=require('../services/workspace-write-fence');
+const {computeAccess}=require('../services/subscription-service');
+function requireTerminalPlan(value){const access=computeAccess(value.business?.subscription||{});if(!access.canMutate||(!access.unlimited&&!access.features.paymentTerminalIntegration))throw new HttpsError('failed-precondition','Integração com maquininhas está no plano Pro.',{code:'subscription_feature_required',feature:'paymentTerminalIntegration',requiredPlan:'premium'});}
 const isMock=provider=>['mock','simulator'].includes(provider);
 const allowedSpace=(context,id)=>!context.member||context.member.role==='owner'||context.member.spaceAccess==='all'||context.member.allowedSpaceIds?.includes(id);
 const terminalAllows=(terminal,id)=>terminal.active!==false&&terminal.status==='connected'&&(terminal.spaceAccess!=='selected_spaces'||terminal.allowedSpaceIds?.includes(id));
@@ -191,6 +193,7 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
   }
   async function saveTerminal(request){
     const value=await context(request,{admin:true}),input=request.data?.terminal||{},providerId=text(input.provider||'mock',40);
+    requireTerminalPlan(value);
     if(!isMock(providerId))throw new HttpsError('failed-precondition','Este provider ainda não está disponível na Fase 1.');
     if(!simulatorAllowed(value))throw new HttpsError('permission-denied','O simulador está restrito ao ambiente interno ou de testes.');
     const provider=registry.get(providerId),nickname=text(input.nickname||'Simulador Caixa 1',60);
@@ -222,7 +225,9 @@ function terminalPaymentService(db,{permissionService,registry=new ProviderRegis
     const data=snapshot.data();if(data.businessId!==value.businessId)throw new HttpsError('permission-denied','Maquininha pertence a outra empresa.');return{ref,snapshot,data};
   }
   async function createPayment(request){
-    const value=await context(request),input=request.data||{},idempotencyKey=text(input.idempotencyKey,100),saleDraft=normalizeSaleDraft(input.saleDraft||{});
+    const value=await context(request);
+    requireTerminalPlan(value);
+    const input=request.data||{},idempotencyKey=text(input.idempotencyKey,100),saleDraft=normalizeSaleDraft(input.saleDraft||{});
     if(!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey))throw new HttpsError('invalid-argument','Chave idempotente inválida.');
     const saleSpaceSnapshot=await db.doc(`financialSpaces/${saleDraft.spaceId}`).get(),saleSpace=saleSpaceSnapshot.data()||{},saleSpaceBusinessId=text(saleSpace.businessId||saleSpace.linkedBusinessId,100);
     if(!saleSpaceSnapshot.exists)throw new HttpsError('not-found','Espaço de venda não encontrado.');

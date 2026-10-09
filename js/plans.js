@@ -19,6 +19,7 @@
     };
   let pixUnsubscribe=null,cardBrickController=null,cardChallengeListener=null;
   const featureLabels = {
+    ...(globalThis.VeconiPlanCatalog?.labels || {}),
     products: "Produtos e estoque",
     stock: "Controle de estoque",
     sales: "Vendas e pagamentos",
@@ -107,7 +108,7 @@
       access = state.access || session.access || {},
       business = state.business || session.business || {},
       status = String(
-        subscription.status ||
+        (globalThis.VeconiPlanCatalog?.legacyState?.(subscription)?.legacy ? (globalThis.VeconiPlanCatalog.legacyState(subscription).active?'active':'expired') : null) || subscription.status ||
           subscription.subscriptionStatus ||
           access.status ||
           "inactive",
@@ -368,6 +369,11 @@
       .join("")}</div></section>`;
   }
   function stateHero(ctx, publicMode) {
+    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(ctx.subscription);
+    if(!publicMode&&legacy?.legacy){
+      const name={essential:'Essencial anterior',professional:'Profissional anterior',premium:'Premium anterior'}[ctx.subscription.planId]||'Plano anterior';
+      return `<section class="plan-state-hero ${legacy.active?'state-active':'state-expired'}"><span class="plan-state-badge">${legacy.active?'Período contratado preservado':'Período anterior encerrado'}</span><div class="plan-state-main"><div><h2>${esc(name)}</h2><p>${legacy.active?'Recursos anteriores mantidos até '+(dateLabel(legacy.paidThrough)||'a confirmação da data paga')+'.':'Seus dados continuam disponíveis para consulta.'}</p></div></div>${verifyPaymentButton(ctx.subscription)}<button type="button" class="plan-manage-button" data-manage-plan>Gerenciar assinatura</button></section>`;
+    }
     if (publicMode || !ctx.subscription.planId)
       return `<section class="plan-state-hero state-trial"><span class="plan-state-badge">${icon("sparkles")} Teste grátis</span><div class="plan-state-main"><i>${icon("party-popper")}</i><div><h2>Comece com 7 dias para conhecer o app</h2><p>O teste é ativado na criação da empresa e não exige cartão.</p></div></div><div class="plan-state-note">${icon("info")} Depois do teste, seus dados ficam preservados no modo leitura até você escolher um plano.</div></section>`;
     if (ctx.internal)
@@ -423,31 +429,31 @@
       paymentLabel=paymentMethod==="pix_monthly"?"Pix mensal":paymentMethod==="card_monthly"?"Cartão mensal":paymentMethod==="card"?"Cartão automático":"Mercado Pago";
     return `<section class="plan-state-hero ${tone}"><span class="plan-state-badge">${icon(ctx.status === "active" ? "badge-check" : danger ? "circle-alert" : "clock-3")} ${esc(statusLabel)}</span><div class="plan-state-main"><i>${icon(ctx.status === "active" ? "gem" : danger ? "lock-keyhole" : "credit-card")}</i><div><h2>${ctx.status === "active" ? `${esc(current?.name || s.planId || "Plano")} está ativo` : esc(statusLabel)}</h2><p>${ctx.status === "active" ? (period ? `Próximo período em ${period}.` : "O acesso está liberado conforme o status confirmado no Firebase.") : paymentMethod==="pix_monthly"?"Estamos aguardando a confirmação oficial do Mercado Pago.":"Seus dados permanecem preservados e disponíveis para consulta."}</p>${paymentMethod?`<small class="plan-payment-method">Pagamento: <b>${esc(paymentLabel)}</b></small>`:""}</div></div>${s.cancelAtPeriodEnd && period ? `<div class="plan-state-note warning">${icon("calendar-x")} Cancelamento agendado para ${period}.</div>` : ctx.access.readOnly ? `<div class="plan-state-note warning">${icon("eye")} O app está em modo leitura. Regularize ou escolha um plano para voltar a criar dados.</div>` : ctx.status==="pending" ? `<div class="plan-state-note warning">${icon("clock-3")} Confirme o pagamento ou cancele esta tentativa antes de iniciar outra.</div>` : `<div class="plan-state-note">${icon("circle-check")} Status confirmado pela assinatura da empresa.</div>`}${verifyPaymentButton(s)}${changePayerEmailButton(s)}<button type="button" class="plan-manage-button" data-manage-plan>${icon("settings-2")} Gerenciar assinatura</button></section>`;
   }
+  let billingPeriod = 'monthly';
+  const priceFrames = new WeakMap();
   function planFeatures(plan) {
-    return Object.entries(plan.features || {})
-      .filter(([key, value]) => value === true && featureLabels[key])
-      .slice(0, plan.id === "essential" ? 5 : 6)
-      .map(
-        ([key]) =>
-          `<li>${icon("circle-check")} ${esc(featureLabels[key])}</li>`,
-      )
-      .join("");
+    const catalog=globalThis.VeconiPlanCatalog;
+    const keys=catalog?.tiers[plan.id]||Object.keys(plan.features||{});
+    return (plan.id==='professional'?'<li class="plan-inherits">Tudo do Essencial, mais:</li>':plan.id==='premium'?'<li class="plan-inherits">Tudo do Gestão, mais:</li>':'')+keys.map(key=>'<li>'+icon('circle-check')+' '+esc(catalog?.labels[key]||featureLabels[key]||key)+'</li>').join('')+(plan.id==='essential'?'<li class="plan-exclusion">Sem acesso ao módulo Financeiro. Disponível no Gestão e Pro.</li>':'');
   }
   function planCard(plan, ctx, publicMode) {
-    const current =
-        ctx.status === "active" && ctx.subscription.planId === plan.id,
-      limit = plan.limits || {},
-      action = ctx.internal
-        ? '<button type="button" class="plan-select" disabled>Conta isenta de cobrança</button>'
-        : `<button type="button" class="plan-select ${plan.recommended ? "primary" : ""}" ${current ? "data-manage-plan" : `data-plan-cta="${esc(plan.id)}"`}>${publicMode ? "Criar minha conta" : current ? "Gerenciar plano" : "Escolher plano"}</button>`;
-    return `<article class="plan-offer ${current ? "is-current" : ""} ${plan.recommended ? "is-popular" : ""}" data-plan-card="${esc(plan.id)}">${plan.recommended ? '<span class="plan-popular">★ Mais popular</span>' : ""}<header><i>${icon(plan.id === "essential" ? "send" : plan.id === "professional" ? "gem" : "crown")}</i><div><h2>${esc(plan.name)}</h2><p>${esc(plan.summary || "")}</p></div></header><div class="plan-offer-price"><small>R$</small><b>${Number(
-      plan.monthlyPrice || 0,
-    )
-      .toFixed(2)
-      .replace(
-        ".",
-        ",",
-      )}</b><span>/mês</span></div><small class="plan-year-price">ou ${money(plan.yearlyPrice)} por ano</small>${current ? '<em class="plan-current">Plano atual</em>' : ""}<ul>${planFeatures(plan)}</ul><p class="plan-limit-copy">${Number(limit.users || 1)} usuário${Number(limit.users || 1) === 1 ? "" : "s"} · ${Number(limit.products || 0).toLocaleString("pt-BR")} produtos · ${Number(limit.monthlySales || 0).toLocaleString("pt-BR")} vendas/mês</p>${action}</article>`;
+    const current=ctx.status==='active'&&ctx.subscription.planId===plan.id&&!globalThis.VeconiPlanCatalog?.legacyState?.(ctx.subscription)?.legacy;
+    const value=billingPeriod==='yearly'?plan.yearlyPrice/12:plan.monthlyPrice;
+    return `<article class="plan-offer ${current?'is-current':''} ${plan.recommended?'is-popular':''}" data-plan-card="${esc(plan.id)}">${plan.recommended?'<span class="plan-popular">Mais escolhido</span>':''}<header><i>${icon(plan.id==='essential'?'store':plan.id==='professional'?'gem':'crown')}</i><div><h2>${esc(plan.name)}</h2><p>${esc(plan.summary)}</p></div></header><div class="plan-offer-price"><small>R$</small><b data-price-value data-value="${value}">${value.toFixed(2).replace('.',',')}</b><span>/mês</span></div><small class="plan-year-price" data-period-note>${billingPeriod==='yearly'?'Cobrado '+money(plan.yearlyPrice)+'/ano':'Cobrança mensal'}</small>${current?'<em class="plan-current">Plano atual · preço contratado preservado</em>':''}<ul>${planFeatures(plan)}</ul>${plan.id==='premium'?'<p class="plan-future-note">Terminal de teste disponível em ambientes autorizados. Cielo e emissão fiscal/SEFAZ: em breve, não incluídas como serviço já ativo.</p>':''}<button type="button" class="plan-select ${plan.recommended?'primary':''}" ${ctx.internal?'disabled':current?'data-manage-plan':'data-plan-cta="'+esc(plan.id)+'"'}>${ctx.internal?'Conta isenta de cobrança':publicMode?'Criar minha conta':current?'Gerenciar assinatura':'Escolher '+esc(plan.name)}</button></article>`;
+  }
+  function setBillingPeriod(period, scope) {
+    billingPeriod=period==='yearly'?'yearly':'monthly';couponQuote=null;
+    const feedback=$('[data-coupon-feedback]',scope);if(feedback)feedback.innerHTML='';
+    const cycle=$('[data-coupon-cycle]',scope);if(cycle)cycle.value=billingPeriod;
+    $$('[data-billing-period]',scope).forEach(button=>{const selected=button.dataset.billingPeriod===billingPeriod;button.setAttribute('aria-pressed',String(selected));button.classList.toggle('active',selected);});
+    for(const plan of plans()){
+      const card=$('[data-plan-card="'+plan.id+'"]',scope);if(!card)continue;
+      const el=$('[data-price-value]',card),to=billingPeriod==='yearly'?plan.yearlyPrice/12:plan.monthlyPrice,from=Number(el.dataset.value),started=performance.now();
+      cancelAnimationFrame(priceFrames.get(el));
+      const draw=now=>{const t=matchMedia('(prefers-reduced-motion: reduce)').matches?1:Math.min(1,(now-started)/360),value=from+(to-from)*(1-Math.pow(1-t,3));el.dataset.value=value;el.textContent=value.toFixed(2).replace('.',',');if(t<1&&el.isConnected)priceFrames.set(el,requestAnimationFrame(draw));};
+      priceFrames.set(el,requestAnimationFrame(draw));
+      $('[data-period-note]',card).textContent=billingPeriod==='yearly'?'Cobrado '+money(plan.yearlyPrice)+'/ano':'Cobrança mensal';
+    }
   }
   function couponBox(available, ctx, publicMode) {
     if (publicMode || ctx.internal) return "";
@@ -462,7 +468,7 @@
       publicMode = Boolean(renderOptions.publicMode),
       available = plans(),
       showBack = publicMode || renderOptions.authMode;
-    return `<section class="plans-page-v2 ${publicMode ? "public-plans-page" : ""}" data-plans-root><header class="plans-page-heading">${showBack ? `<button type="button" data-plans-back aria-label="Voltar">${icon("arrow-left")}</button>` : ""}<div><h1>Planos</h1><p>Escolha o plano ideal para continuar usando o app.</p></div></header>${stateHero(ctx, publicMode)}${usageMarkup(ctx)}<section class="plan-offers" data-plans-carousel>${available.map((plan) => planCard(plan, ctx, publicMode)).join("")}</section><div class="plan-indicators">${available.map((plan, index) => `<button type="button" data-plan-indicator="${index}" aria-label="Mostrar ${esc(plan.name)}"></button>`).join("")}</div><button class="plan-compare-button" type="button" data-full-comparison>${icon("list-checks")} Comparar todos os recursos</button>${couponBox(available, ctx, publicMode)}<section class="plan-faq"><h2>${icon("circle-help")} Dúvidas frequentes</h2>${[
+    return `<section class="plans-page-v2 ${publicMode ? "public-plans-page" : ""}" data-plans-root><header class="plans-page-heading">${showBack ? `<button type="button" data-plans-back aria-label="Voltar">${icon("arrow-left")}</button>` : ""}<div><h1>Planos</h1><p>Escolha o plano ideal para continuar usando o app.</p></div></header>${stateHero(ctx, publicMode)}${usageMarkup(ctx)}<div class="plan-billing-switch" role="group" aria-label="Periodicidade da cobrança"><button type="button" data-billing-period="monthly" aria-pressed="${billingPeriod==='monthly'}" class="${billingPeriod==='monthly'?'active':''}">Mensal</button><button type="button" data-billing-period="yearly" aria-pressed="${billingPeriod==='yearly'}" class="${billingPeriod==='yearly'?'active':''}">Anual <span>Economize 20%</span></button></div><section class="plan-offers" data-plans-carousel>${available.map((plan) => planCard(plan, ctx, publicMode)).join("")}</section><div class="plan-indicators">${available.map((plan, index) => `<button type="button" data-plan-indicator="${index}" aria-label="Mostrar ${esc(plan.name)}"></button>`).join("")}</div><button class="plan-compare-button" type="button" data-full-comparison>${icon("list-checks")} Comparar todos os recursos</button>${couponBox(available, ctx, publicMode)}<section class="plan-faq"><h2>${icon("circle-help")} Dúvidas frequentes</h2>${[
       [
         "O que acontece quando o teste acaba?",
         "Seus dados são preservados e o app passa para modo leitura até a contratação.",
@@ -485,26 +491,18 @@
       )}</section><p class="plan-payment-note">${icon("shield-check")} Pagamento processado com segurança pelo Mercado Pago. O aplicativo usa o status oficial do Firebase.</p>${publicMode ? '<div class="public-plan-actions"><button data-public-register>Começar teste grátis</button><button data-public-login>Entrar na minha conta</button></div>' : ""}</section>`;
   }
   function fullComparison() {
-    const available = plans(),
-      features = [
-        "products",
-        "clients",
-        "sales",
-        "campaigns",
-        "crm",
-        "onlineCatalog",
-        "onlineOrders",
-        "multipleUsers",
-        "advancedReports",
-      ],
+    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(context().subscription);
+    const available = [...(legacy?.legacy?[{id:'legacy',name:'Seu plano anterior',features:legacy.features}]:[]),...plans()],
+      features = Object.keys(globalThis.VeconiPlanCatalog?.labels || featureLabels).filter(key=>!globalThis.VeconiPlanCatalog?.aliases[key]),
       root = $("#modal");
     if (!root) return;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-comparison-sheet"><header class="modal-head"><div><h3>Comparação completa</h3><small>Recursos conforme a configuração atual.</small></div><button class="icon-btn mobile-icon-button" data-close-comparison>${icon("x")}</button></header><div class="modal-body"><div class="plan-comparison-table comparison-limit-row"><header><b>Recurso</b>${available.map((plan) => `<b>${esc(plan.name)}</b>`).join("")}</header>${features.map((feature) => `<p><span>${esc(featureLabels[feature])}</span>${available.map((plan) => `<i>${plan.features?.[feature] ? icon("check") : "—"}</i>`).join("")}</p>`).join("")}</div></div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-comparison-sheet"><header class="modal-head"><div><h3>Comparação completa</h3><small>Recursos conforme a configuração atual.</small></div><button class="icon-btn mobile-icon-button" data-close-comparison>${icon("x")}</button></header><div class="modal-body"><div class="plan-comparison-table comparison-limit-row ${legacy?.legacy?'has-legacy':''}"><header><b>Recurso</b>${available.map((plan) => `<b>${esc(plan.name)}</b>`).join("")}</header>${features.map((feature) => `<p><span>${esc(globalThis.VeconiPlanCatalog?.labels[feature]||featureLabels[feature]||feature)}</span>${available.map((plan) => `<i>${plan.features?.[feature] ? icon("check") : "—"}</i>`).join("")}</p>`).join("")}</div></div></section></div>`;
     $("[data-close-comparison]", root).onclick = () => (root.innerHTML = "");
     window.lucide?.createIcons();
   }
   function openProModal(feature, decision = {}) {
-    const detail = proDetails[feature] || {
+    const required=globalThis.VeconiPlanCatalog?.requiredPlan(feature),name=globalThis.VeconiPlanCatalog?.plans[required]?.name;
+    const detail = name ? {title:(globalThis.VeconiPlanCatalog.labels[globalThis.VeconiPlanCatalog.normalizeFeature(feature)]||"Este recurso")+" está no plano "+name,text:"Conheça o plano "+name+" para usar este recurso. Seus dados continuam preservados.",benefits:["Disponível a partir do "+name,"Sem apagar os dados da empresa"]} : proDetails[feature] || {
         title: "Recurso disponível em outro plano",
         text: "Seus dados existentes continuam preservados.",
         benefits: ["Mais recursos", "Dados preservados", "Consulta liberada"],
@@ -623,6 +621,8 @@
   function bind(root = document, bindOptions = {}) {
     options = { ...options, ...bindOptions };
     const scope = $("[data-plans-root]", root) || root;
+    $$("[data-billing-period]",scope).forEach(button=>button.onclick=()=>setBillingPeriod(button.dataset.billingPeriod,scope));
+    $("[data-coupon-cycle]",scope)?.addEventListener("change",event=>setBillingPeriod(event.target.value,scope));
     if (scope.dataset?.plansBound) return;
     scope.dataset.plansBound = "true";
     const carousel = $("[data-plans-carousel]", scope),
@@ -714,9 +714,18 @@
     window.lucide?.createIcons();
   }
   async function selectPlan(button, scope) {
+    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(context().subscription);
+    if(legacy?.needsReview){window.Utils?.toast?.('Precisamos confirmar a data do seu período pago antes da troca.',true);return;}
+    if(legacy?.legacy){
+      const consent=document.createElement('div');consent.className='modal';
+      consent.innerHTML='<div class="modal-bg"><section class="modal-box mobile-modal"><header class="modal-head"><h3>Trocar para um novo plano?</h3></header><div class="modal-body"><p>Sua assinatura atual permanece ativa enquanto o novo pagamento estiver pendente. Após a confirmação, o novo plano e seus recursos entram em vigor; só então encerraremos a recorrência antiga.</p><p>Uma nova cobrança será feita pelo plano escolhido. O período já pago não gera crédito automático. Se houver atraso no cancelamento, informaremos a pendência.</p><button type="button" class="btn btn-light" data-cancel>Cancelar</button><button type="button" class="btn btn-primary" data-accept>Escolher pagamento</button></div></section></div>';
+      document.body.appendChild(consent);
+      const accepted=await new Promise(resolve=>{consent.querySelector('[data-cancel]').onclick=()=>resolve(false);consent.querySelector('[data-accept]').onclick=()=>resolve(true);});
+      consent.remove();if(!accepted)return;
+    }
     if (options.publicMode) return options.onRegister?.();
     const planId=button.dataset.planCta,
-      billingCycle=$("[data-coupon-cycle]",scope)?.value||"monthly",
+      billingCycle=billingPeriod,
       quote=couponQuote?.planId===planId&&couponQuote?.billingCycle===billingCycle?couponQuote:null;
     openPaymentMethodModal({planId,billingCycle,quote});
   }
@@ -1018,15 +1027,47 @@
   function canUse(feature) {
     return window.PlanLimitService?.canUseFeature?.(feature)?.ok !== false;
   }
+  function legacyNotice(force=false) {
+    const subscription=context().subscription,migration=subscription?.legacyMigration;
+    if(migration?.activatedAt&&migration.status==='cancellation_pending')return '<section class="plan-legacy-notice" role="status"><h3>Novo plano ativo</h3><p>Seu acesso ao novo plano já está liberado. O encerramento da recorrência anterior ainda está pendente; não contrate outra assinatura. Estamos tentando concluir esta etapa.</p><button type="button" class="btn btn-primary" data-legacy-plans>Ver assinatura</button></section>';
+    const state=globalThis.VeconiPlanCatalog?.legacyState?.(subscription);
+    if(!state)return '';
+    if(!state.legacy||(!force&&!state.showNotice))return '';
+    const date=state.paidThrough?new Date(state.paidThrough).toLocaleDateString('pt-BR'):'data em verificação';
+    const title=state.expired?'Escolha seu novo plano':'Os planos da VECONI mudaram';
+    const message=state.expired?'Sua assinatura anterior chegou ao fim. Selecione um dos novos planos da VECONI para continuar usando os recursos contratados. Seus dados foram preservados.':
+      'Seu período atual está pago até '+date+'. Você pode escolher um novo plano agora. Enquanto o novo pagamento estiver pendente, o acesso atual permanece. A troca só entra em vigor após a confirmação do novo pagamento. Nenhuma contratação será feita automaticamente.';
+    const renewal=state.renewalStopped?'A renovação automática anterior está desativada.':state.needsReview?'A data do período pago está em verificação. Nenhuma nova cobrança pode ser iniciada.':'A recorrência anterior só será encerrada depois da ativação do novo plano.';
+    return '<section class="plan-legacy-notice" role="status"><h3>'+title+'</h3><p>'+esc(message)+'</p><p>'+esc(renewal)+'</p><button type="button" class="btn btn-primary" data-legacy-plans>Conhecer novos planos</button></section>';
+  }
+  let legacyNoticeTimer=null;
+  function syncLegacyNotice(){
+    clearTimeout(legacyNoticeTimer);
+    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(context().subscription);
+    if(legacy?.legacy&&legacy.paidThrough&&!legacy.expired){
+      const end=Date.parse(legacy.paidThrough),boundary=legacy.showNotice?end:end-7*86400000;
+      legacyNoticeTimer=setTimeout(()=>{const state=window.BusinessContext?.get?.();if(state?.business&&state?.userProfile)window.BusinessContext.set({business:state.business,userProfile:state.userProfile,member:state.member});syncLegacyNotice();},Math.max(1000,Math.min(86400000,boundary-Date.now()+50)));
+    }
+    document.getElementById('legacy-plan-notice')?.remove();
+    const markup=legacyNotice(window.Router?.atual?.()==='planos');
+    const app=document.getElementById('app');if(!markup||!app)return;
+    const notice=document.createElement('div');notice.id='legacy-plan-notice';notice.innerHTML=markup;
+    notice.querySelector('[data-legacy-plans]').onclick=()=>{if(window.Router?.ir)window.Router.ir('planos');else location.hash='#/planos';};
+    app.prepend(notice);
+  }
   function syncNavigation() {
+    syncLegacyNotice();
+    for(const link of $$('[data-route]')){const feature=globalThis.VeconiPlanCatalog?.routes[link.dataset.route];if(feature)link.dataset.planFeature=feature;}
     $$("[data-plan-feature]").forEach((link) => {
       const allowed = canUse(link.dataset.planFeature);
+      // Finance is absent from Essencial navigation; direct routes still show upgrade.
+      if(link.dataset.route==='financeiro')link.hidden=!allowed;
       link.classList.toggle("plan-locked", !allowed);
       let badge = $(".plan-pro-badge", link);
       if (!allowed && !badge) {
         badge = document.createElement("span");
         badge.className = "plan-pro-badge";
-        badge.textContent = "◇ PRO";
+        const required=globalThis.VeconiPlanCatalog?.requiredPlan(link.dataset.planFeature);badge.textContent = "◇ "+(globalThis.VeconiPlanCatalog?.plans[required]?.name||"Plano");
         link.append(badge);
       }
       if (allowed) badge?.remove();
@@ -1040,7 +1081,11 @@
           ? `Planos · ${ctx.access.daysRemaining} dias`
           : "Planos";
   }
-  function guardRoute() {
+  function guardRoute(route) {
+    const feature=globalThis.VeconiPlanCatalog?.routes[route];
+    if(!feature)return true;
+    const decision=window.PlanLimitService?.canUseFeature?.(feature);
+    if(decision?.ok===false){openProModal(feature,decision);return false;}
     return true;
   }
   document.addEventListener(
@@ -1066,6 +1111,8 @@
     renderedSubscriptionSignature=signature;
   });
   addEventListener("firebase-auth-ready", syncNavigation);
+  addEventListener("pageshow",syncLegacyNotice);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncLegacyNotice();});
   window.PlansUI = {
     render,
     bind,
@@ -1073,6 +1120,7 @@
     openProModal,
     openUpgradeRequiredModal: openProModal,
     syncNavigation,
+    syncLegacyNotice,
     guardRoute,
     routeFeatures,
     canUseFeature: canUse,
