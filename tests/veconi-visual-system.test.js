@@ -43,8 +43,8 @@ test('shell identifica VECONI sem fixar um negócio legado antes da hidratação
 test('login, planos e catálogo usam a marca da plataforma nos pontos corretos', () => {
   assert.match(read('js/firebase/auth.js'), /brandMarkup/);
   assert.doesNotMatch(read('js/firebase/auth.js'), /auth-logo">AF/);
-  const context = read('js/firebase/business-context.js');
-  for (const plan of ['VECONI Essencial','VECONI Profissional','VECONI Premium']) assert.match(context, new RegExp(plan));
+  const catalog = require('../functions/src/shared/plan-catalog');
+  assert.deepEqual(Object.values(catalog.plans).map(plan=>plan.name), ['Essencial','Gestão','Pro']);
   assert.match(read('js/catalogo-publico.js'), /Criado com <b>VECONI<\/b>/);
   assert.match(read('js/catalogo-publico.js'), /catalog\.publicName\|\|catalog\.businessName/);
   assert.match(read('functions/src/services/mercado-pago-service.js'), /reason:`VECONI - \$\{plan\.name\}`/);
@@ -52,9 +52,9 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
 
 test('service worker v136 troca o cache e inclui os assets V133 da marca e do Financeiro', () => {
   const worker = read('service-worker.js');
-  assert.match(worker, /veconi-v164-product-spreadsheet/);
+  assert.match(worker, /veconi-v165-plans-approval-first/);
   assert.match(worker, /financial-refinement\.css/);
-  assert.match(worker, /release:'164'/);
+  assert.match(worker, /release:'165'/);
   for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','veconi-maskable-512-v133.png','veconi-apple-touch-icon-180-v133.png','veconi-favicon-32-v133.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
 });
 

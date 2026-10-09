@@ -69,6 +69,7 @@
   }
 
   async function openSettings(){
+    const access=window.PlanLimitService?.canUseFeature('paymentTerminalIntegration');if(access?.ok===false){window.PlansUI?.openUpgradeRequiredModal('paymentTerminalIntegration',access);return;}
     const root=modal(`<header class="terminal-sheet-head"><div><small>Configurações</small><h3>Integrações e maquininhas</h3><p>Gerencie os terminais usados no caixa.</p></div><button class="icon-btn" data-terminal-close aria-label="Fechar">${icon('x')}</button></header><div class="terminal-loading">${icon('loader-circle')} Carregando maquininhas…</div>`,'terminal-settings-modal');
     root?.querySelector('[data-terminal-close]')?.addEventListener('click',closeSettings);
     try{
@@ -124,6 +125,7 @@
   }
 
   async function beginCheckout({saleDraft,amountCents}){
+    if(window.PlanLimitService)window.PlanLimitService.assert(PlanLimitService.canUseFeature('paymentTerminalIntegration'),'usar maquininha integrada');
     if(!navigator.onLine){showOffline();return false;}
     const root=modal(`<header class="terminal-sheet-head"><div><small>Pagamento presencial</small><h3>Preparando maquininhas</h3></div></header><div class="terminal-loading">${icon('loader-circle')} Verificando terminais…</div>`);
     try{

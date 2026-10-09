@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto=require('node:crypto');
+const {computeAccess}=require('./subscription-service');
 const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable}=require('./workspace-reset-policy');
 const {workspaceWriteFence}=require('./workspace-write-fence');
@@ -58,6 +59,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const legacyOwner=!memberSnapshot.exists&&business.ownerId===uid&&profile.active===true&&profile.businessId===businessId&&['owner','admin'].includes(profile.role);
     const member=memberSnapshot.exists?memberSnapshot.data():legacyOwner?{uid,name:profile.name,email:profile.email,role:'owner',status:'active',spaceAccess:'all',allowedSpaceIds:[],permissions:ROLE_PRESETS.owner}:null;
     if(!member||member.status!=='active'||business.active!==true)throw new HttpsError('permission-denied','Seu acesso a esta empresa não está ativo.');
+    if(permission){const access=computeAccess(business.subscription||{});if(!access.canMutate||(!access.unlimited&&!access.features.teamManagement))throw new HttpsError('failed-precondition','Equipe está disponível no plano Pro.',{code:'subscription_feature_required',feature:'teamManagement',requiredPlan:'premium'});}
     if(permission&&!hasPermission(member,permission))throw new HttpsError('permission-denied','Você não possui permissão para gerenciar a equipe.');
     return{uid,business,businessRef:businessSnapshot.ref,member,memberRef:memberRef(businessId,uid),profile};
   }
@@ -161,6 +163,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
       const [inviteSnapshot,profileSnapshot,businessSnapshot,memberSnapshot]=await Promise.all([transaction.get(inviteRef),transaction.get(profileRef),transaction.get(businessRef(pointer.businessId)),transaction.get(targetMemberRef)]);
       if(!inviteSnapshot.exists||!businessSnapshot.exists)throw new HttpsError('not-found','Convite não encontrado.');
       const invite=inviteSnapshot.data(),profile=profileSnapshot.data()||{};
+      const access=computeAccess(businessSnapshot.data().subscription||{});if(!access.canMutate||(!access.unlimited&&!access.features.teamManagement))throw new HttpsError('failed-precondition','O plano Pro é necessário para aceitar um novo funcionário.');
       // The signed invitation, not a caller-selected epoch, anchors acceptance.
       assertWritable(businessSnapshot.data(),invite.workspaceGeneration??0);
       if(invite.tokenHash!==hash||invite.status!=='pending'||invite.expiresAt?.toMillis?.()<=Date.now())throw new HttpsError('failed-precondition','Este convite expirou ou já foi utilizado.');

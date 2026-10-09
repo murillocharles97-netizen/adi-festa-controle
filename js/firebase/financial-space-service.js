@@ -1370,6 +1370,9 @@ async function createEntries(space, rawEntries, eventKind = "entry_created") {
 }
 
 async function createEntry(spaceId, input = {}) {
+  if(window.PlanLimitService){
+    window.PlanLimitService.assert(window.PlanLimitService.canUseFeature('financeAdvanced'),'registrar este lançamento');
+  }
   const space = assertSpace(spaceId), opId = String(input.operationId || operationId("entry")),
     id = String(input.id || opId), paid = input.paidNow === true || input.status === "paid",
     at = input.paidAt || input.occurredAt || input.dueAt || now(), category = input.category || {},
@@ -2903,6 +2906,13 @@ const FinancialSpaceService = {
   limits: Object.freeze({ month: MAX_MONTH_ENTRIES, recurrenceOccurrences: MAX_RECURRENCE_OCCURRENCES, cards: MAX_CREDIT_CARDS, invoices: MAX_CREDIT_INVOICES }),
 };
 
+// Guard financial reads and writes at the existing service boundary. Global space
+// metadata remains usable by sales/products and must not depend on Finance access.
+const spaceMetadataMethods=new Set(['listSpaces','listCachedSpaces','selectedSpaceId','selectSpace','createSpace','archiveSpace','automationState','getReadStats']);
+for(const name of Object.keys(FinancialSpaceService).filter(name=>!spaceMetadataMethods.has(name))){
+  const original=FinancialSpaceService[name];if(typeof original!=='function')continue;
+  FinancialSpaceService[name]=function(...args){if(window.PlanLimitService)window.PlanLimitService.assert(PlanLimitService.canUseFeature('financeAdvanced'),'usar o financeiro completo');return original.apply(this,args);};
+}
 window.FinancialSpaceService = FinancialSpaceService;
 addEventListener("veconi-spaces-ready", (event) => {
   if (!auth.currentUser?.uid) return;

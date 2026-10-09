@@ -1253,6 +1253,7 @@
     if (route === "financeiro") FinanceiroUI.bind();
     if (route === "historico") window.ActivityCenter?.bind?.();
     if (route === "planos") window.PlansUI.bind($("#app"));
+    window.PlansUI?.syncLegacyNotice?.();
     if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
     window.TeamAccess?.syncNavigation?.();
@@ -1476,6 +1477,7 @@
   }
   function mountRoute(route) {
     const mountToken = ++financialMountToken;
+    if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
     if (route === "financeiro" && (!window.FinanceiroUI || !window.FinancialSpaceService)) {
       const root = $("#app");
       root.innerHTML = `<section class="financial-page" aria-live="polite"><div class="financial-loading-card"><i data-lucide="loader-circle"></i><b>Carregando seu financeiro…</b></div></section>`;

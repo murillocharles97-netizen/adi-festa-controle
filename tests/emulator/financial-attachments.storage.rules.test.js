@@ -31,3 +31,13 @@ test("nega tenant diferente, metadata divergente e executável", async () => {
   await assertFails(uploadBytes(ref(owner, "financialSpaces/space/entries/entry/wrong.pdf"), new Uint8Array([1]), { ...metadata(), customMetadata: { ...metadata().customMetadata, entryId: "wrong" } }));
   await assertFails(uploadBytes(ref(owner, "financialSpaces/space/entries/entry/file.exe"), new Uint8Array([1]), metadata("application/octet-stream")));
 });
+
+test('Finance attachments are denied to new Essencial and allowed to Gestão/Pro',async()=>{
+  const storage=env.authenticatedContext('owner').storage(),proof=ref(storage,'financialSpaces/space/entries/entry/plan-proof.pdf');
+  for(const planId of ['essential','professional','premium']){
+    await env.withSecurityRulesDisabled(ctx=>setDoc(doc(ctx.firestore(),'businesses',businessId),{id:businessId,ownerId:'owner',active:true,subscription:{planId,status:'active',catalogVersion:2}}));
+    await (planId==='essential'?assertFails:assertSucceeds)(uploadBytes(proof,new Uint8Array([1,2,3]),metadata()));
+  }
+  await env.withSecurityRulesDisabled(ctx=>setDoc(doc(ctx.firestore(),'businesses',businessId),{id:businessId,ownerId:'owner',active:true,subscription:{planId:'essential',status:'active',catalogVersion:2}}));
+  await assertFails(getMetadata(proof));
+});

@@ -143,6 +143,7 @@
   }
 
   function save(data) {
+    if(window.PlanLimitService&&globalThis.VeconiPlanCatalog)PlanLimitService.assert(PlanLimitService.canUseFeature(globalThis.VeconiPlanCatalog.campaignFeature(data)), 'usar esta modalidade de campanha');
     if (!data.id && window.PlanLimitService) {
       PlanLimitService.assert(PlanLimitService.canUseCampaigns(), "usar campanhas");
     }
