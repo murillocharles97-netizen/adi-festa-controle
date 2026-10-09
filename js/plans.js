@@ -439,7 +439,7 @@
   function planCard(plan, ctx, publicMode) {
     const current=ctx.status==='active'&&ctx.subscription.planId===plan.id&&!globalThis.VeconiPlanCatalog?.legacyState?.(ctx.subscription)?.legacy;
     const value=billingPeriod==='yearly'?plan.yearlyPrice/12:plan.monthlyPrice;
-    return `<article class="plan-offer ${current?'is-current':''} ${plan.recommended?'is-popular':''}" data-plan-card="${esc(plan.id)}">${plan.recommended?'<span class="plan-popular">Mais escolhido</span>':''}<header><i>${icon(plan.id==='essential'?'store':plan.id==='professional'?'gem':'crown')}</i><div><h2>${esc(plan.name)}</h2><p>${esc(plan.summary)}</p></div></header><div class="plan-offer-price"><small>R$</small><b data-price-value data-value="${value}">${value.toFixed(2).replace('.',',')}</b><span>/mês</span></div><small class="plan-year-price" data-period-note>${billingPeriod==='yearly'?'Cobrado '+money(plan.yearlyPrice)+'/ano':'Cobrança mensal'}</small>${current?'<em class="plan-current">Plano atual · preço contratado preservado</em>':''}<ul>${planFeatures(plan)}</ul>${plan.id==='premium'?'<p class="plan-future-note">Terminal de teste disponível em ambientes autorizados. Cielo e emissão fiscal/SEFAZ: em breve, não incluídas como serviço já ativo.</p>':''}<button type="button" class="plan-select ${plan.recommended?'primary':''}" ${ctx.internal?'disabled':current?'data-manage-plan':'data-plan-cta="'+esc(plan.id)+'"'}>${ctx.internal?'Conta isenta de cobrança':publicMode?'Criar minha conta':current?'Gerenciar assinatura':'Escolher '+esc(plan.name)}</button></article>`;
+    return `<article class="plan-offer ${current?'is-current':''} ${plan.recommended?'is-popular':''}" data-plan-card="${esc(plan.id)}" aria-label="${esc(plan.name)}">${plan.recommended?'<span class="plan-popular">Mais escolhido</span>':''}<header><i>${icon(plan.id==='essential'?'store':plan.id==='professional'?'gem':'crown')}</i><div><h2>${esc(plan.name)}</h2><p>${esc(plan.summary)}</p></div></header><div class="plan-offer-price"><small>R$</small><b data-price-value data-value="${value}">${value.toFixed(2).replace('.',',')}</b><span>/mês</span></div><small class="plan-year-price" data-period-note>${billingPeriod==='yearly'?'Cobrado '+money(plan.yearlyPrice)+'/ano':'Cobrança mensal'}</small>${current?'<em class="plan-current">Plano atual · preço contratado preservado</em>':''}<ul>${planFeatures(plan)}</ul>${plan.id==='premium'?'<p class="plan-future-note">Terminal de teste disponível em ambientes autorizados. Cielo e emissão fiscal/SEFAZ: em breve, não incluídas como serviço já ativo.</p>':''}<button type="button" class="plan-select ${plan.recommended?'primary':''}" ${ctx.internal?'disabled':current?'data-manage-plan':'data-plan-cta="'+esc(plan.id)+'"'}>${ctx.internal?'Conta isenta de cobrança':publicMode?'Criar minha conta':current?'Gerenciar assinatura':'Escolher '+esc(plan.name)}</button></article>`;
   }
   function setBillingPeriod(period, scope) {
     billingPeriod=period==='yearly'?'yearly':'monthly';couponQuote=null;
@@ -468,7 +468,7 @@
       publicMode = Boolean(renderOptions.publicMode),
       available = plans(),
       showBack = publicMode || renderOptions.authMode;
-    return `<section class="plans-page-v2 ${publicMode ? "public-plans-page" : ""}" data-plans-root><header class="plans-page-heading">${showBack ? `<button type="button" data-plans-back aria-label="Voltar">${icon("arrow-left")}</button>` : ""}<div><h1>Planos</h1><p>Escolha o plano ideal para continuar usando o app.</p></div></header>${stateHero(ctx, publicMode)}${usageMarkup(ctx)}<div class="plan-billing-switch" role="group" aria-label="Periodicidade da cobrança"><button type="button" data-billing-period="monthly" aria-pressed="${billingPeriod==='monthly'}" class="${billingPeriod==='monthly'?'active':''}">Mensal</button><button type="button" data-billing-period="yearly" aria-pressed="${billingPeriod==='yearly'}" class="${billingPeriod==='yearly'?'active':''}">Anual <span>Economize 20%</span></button></div><section class="plan-offers" data-plans-carousel>${available.map((plan) => planCard(plan, ctx, publicMode)).join("")}</section><div class="plan-indicators">${available.map((plan, index) => `<button type="button" data-plan-indicator="${index}" aria-label="Mostrar ${esc(plan.name)}"></button>`).join("")}</div><button class="plan-compare-button" type="button" data-full-comparison>${icon("list-checks")} Comparar todos os recursos</button>${couponBox(available, ctx, publicMode)}<section class="plan-faq"><h2>${icon("circle-help")} Dúvidas frequentes</h2>${[
+    return `<section class="plans-page-v2 ${publicMode ? "public-plans-page" : ""}" data-plans-root><header class="plans-page-heading">${showBack ? `<button type="button" data-plans-back aria-label="Voltar">${icon("arrow-left")}</button>` : ""}<div><h1>Planos</h1><p>Escolha o plano ideal para continuar usando o app.</p></div></header>${stateHero(ctx, publicMode)}${usageMarkup(ctx)}<div class="plan-billing-switch" role="group" aria-label="Periodicidade da cobrança"><button type="button" data-billing-period="monthly" aria-pressed="${billingPeriod==='monthly'}" class="${billingPeriod==='monthly'?'active':''}">Mensal</button><button type="button" data-billing-period="yearly" aria-pressed="${billingPeriod==='yearly'}" class="${billingPeriod==='yearly'?'active':''}">Anual <span>Economize 20%</span></button></div><section class="plan-offers" data-plans-carousel role="region" aria-label="Planos disponíveis">${available.map((plan) => planCard(plan, ctx, publicMode)).join("")}</section><div class="plan-indicators" role="group" aria-label="Navegar entre planos">${available.map((plan, index) => `<button type="button" data-plan-indicator="${index}" aria-label="Mostrar ${esc(plan.name)}"></button>`).join("")}</div><button class="plan-compare-button" type="button" data-full-comparison>${icon("list-checks")} Comparar todos os recursos</button>${couponBox(available, ctx, publicMode)}<section class="plan-faq"><h2>${icon("circle-help")} Dúvidas frequentes</h2>${[
       [
         "O que acontece quando o teste acaba?",
         "Seus dados são preservados e o app passa para modo leitura até a contratação.",
@@ -618,6 +618,80 @@
         root,
       );
   }
+  let disposePlanCarousel = () => {};
+  function bindPlanCarousel(scope) {
+    disposePlanCarousel();
+    const carousel = $("[data-plans-carousel]", scope),
+      cards = $$("[data-plan-card]", scope),
+      dots = $$("[data-plan-indicator]", scope);
+    if (!carousel || !cards.length) return;
+    let selected = Math.max(0, cards.findIndex(card => card.classList.contains("is-popular"))),
+      frame = 0, disposed = false;
+    const mobile = () => getComputedStyle(carousel).display === "flex";
+    const mark = index => {
+      selected = index;
+      dots.forEach((dot, i) => {
+        dot.classList.toggle("active", i === index);
+        if (i === index) dot.setAttribute("aria-current", "true");
+        else dot.removeAttribute("aria-current");
+      });
+    };
+    const select = (index, immediate = false) => {
+      index = Math.max(0, Math.min(cards.length - 1, index));
+      if (!mobile()) return;
+      mark(index);
+      const viewport = carousel.getBoundingClientRect(), card = cards[index].getBoundingClientRect();
+      carousel.scrollTo({
+        left: carousel.scrollLeft + card.left + card.width / 2 - viewport.left - carousel.clientWidth / 2,
+        behavior: immediate || matchMedia('(prefers-reduced-motion: reduce)').matches ? "instant" : "smooth",
+      });
+    };
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!carousel.isConnected || !mobile()) return;
+        const viewport = carousel.getBoundingClientRect(), center = viewport.left + carousel.clientWidth / 2;
+        mark(cards.reduce((best, card, i) => {
+          const rect = card.getBoundingClientRect(), distance = Math.abs(rect.left + rect.width / 2 - center);
+          return distance < best.distance ? {i, distance} : best;
+        }, {i: 0, distance: Infinity}).i);
+      });
+    };
+    const onKey = event => {
+      if (!mobile() || (event.target !== carousel && !event.target.matches('[data-plan-indicator]'))) return;
+      const next = {ArrowRight: selected + 1, ArrowLeft: selected - 1, Home: 0, End: cards.length - 1}[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      select(next);
+      if (event.target !== carousel) dots[selected]?.focus({preventScroll: true});
+    };
+    const onFocus = event => {
+      const card = event.target.closest('[data-plan-card]');
+      if (card) select(cards.indexOf(card));
+    };
+    const layout = () => {
+      if (disposed) return;
+      if (!carousel.isConnected) { dispose(); return; }
+      carousel.tabIndex = mobile() ? 0 : -1;
+      if (mobile()) { carousel.setAttribute('aria-roledescription', 'carrossel'); select(selected, true); }
+      else { carousel.removeAttribute('aria-roledescription'); carousel.scrollLeft = 0; }
+    };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
+    const dispose = () => {
+      disposed = true; observer?.disconnect(); cancelAnimationFrame(frame);
+      carousel.removeEventListener('scroll', onScroll);
+      carousel.removeEventListener('focusin', onFocus);
+      scope.removeEventListener('keydown', onKey);
+    };
+    disposePlanCarousel = dispose;
+    carousel.addEventListener('scroll', onScroll, {passive: true});
+    carousel.addEventListener('focusin', onFocus);
+    scope.addEventListener('keydown', onKey);
+    dots.forEach((dot, index) => { dot.onclick = () => select(index); });
+    mark(selected);
+    observer?.observe(carousel);
+    requestAnimationFrame(layout);
+  }
   function bind(root = document, bindOptions = {}) {
     options = { ...options, ...bindOptions };
     const scope = $("[data-plans-root]", root) || root;
@@ -625,54 +699,7 @@
     $("[data-coupon-cycle]",scope)?.addEventListener("change",event=>setBillingPeriod(event.target.value,scope));
     if (scope.dataset?.plansBound) return;
     scope.dataset.plansBound = "true";
-    const carousel = $("[data-plans-carousel]", scope),
-      cards = $$("[data-plan-card]", scope),
-      target = ["trial", "trialing"].includes(context().status)
-        ? "professional"
-        : context().subscription.planId || "professional",
-      targetIndex = Math.max(
-        0,
-        cards.findIndex((card) => card.dataset.planCard === target),
-      );
-    const select = (index) => {
-      const card = cards[Math.max(0, Math.min(cards.length - 1, index))];
-      if (!card || !carousel) return;
-      carousel.scrollTo({
-        left: Math.max(
-          0,
-          card.offsetLeft - (carousel.clientWidth - card.offsetWidth) / 2,
-        ),
-        behavior: "smooth",
-      });
-    };
-    requestAnimationFrame(() => select(targetIndex));
-    carousel?.addEventListener(
-      "scroll",
-      () => {
-        const center = carousel.scrollLeft + carousel.clientWidth / 2,
-          index = cards.reduce(
-            (best, card, i) =>
-              Math.abs(card.offsetLeft + card.offsetWidth / 2 - center) <
-              best.distance
-                ? {
-                    i,
-                    distance: Math.abs(
-                      card.offsetLeft + card.offsetWidth / 2 - center,
-                    ),
-                  }
-                : best,
-            { i: 0, distance: Infinity },
-          ).i;
-        $$("[data-plan-indicator]", scope).forEach((dot, i) =>
-          dot.classList.toggle("active", i === index),
-        );
-      },
-      { passive: true },
-    );
-    $$("[data-plan-indicator]", scope).forEach(
-      (button) =>
-        (button.onclick = () => select(Number(button.dataset.planIndicator))),
-    );
+    bindPlanCarousel(scope);
     $("[data-full-comparison]", scope)?.addEventListener(
       "click",
       fullComparison,
