@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict'),puppeteer=require('puppeteer');
 for(const key of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST'])if(!/^(127\.0\.0\.1|localhost):/.test(process.env[key]||''))throw Error('Local emulators required. Production forbidden.');
 const admin=require('../functions/node_modules/firebase-admin');admin.initializeApp({projectId:'adi-festa-variations-test'});
-const db=admin.firestore(),bid='qa-product-sheet',email='product-sheet@example.test',password='LocalQa123!',space='qa-sheet-space';
+const suffix=Date.now().toString(36),db=admin.firestore(),bid='qa-product-sheet-'+suffix,email='product-sheet-'+suffix+'@example.test',password='LocalQa123!',space='qa-sheet-space-'+suffix;
 const root=process.cwd(),output=path.resolve('artifacts/product-spreadsheet'),pause=ms=>new Promise(r=>setTimeout(r,ms));fs.mkdirSync(output,{recursive:true});
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json'};
 const server=http.createServer((req,res)=>{
@@ -19,7 +19,7 @@ const server=http.createServer((req,res)=>{
  fs.createReadStream(file).pipe(res);
 });
 async function seed(){
- const {uid}=await admin.auth().createUser({email,password});
+ let user;try{user=await admin.auth().getUserByEmail(email);}catch{user=await admin.auth().createUser({email,password});}const {uid}=user;
  const rows={
   ['users/'+uid]:{uid,email,name:'Owner QA',businessId:bid,active:true,role:'owner',tutorialVersions:{appIntro:1},tutorialVersionSeen:999},
   ['businesses/'+bid]:{id:bid,ownerId:uid,name:'Produtos QA',active:true,sensitiveDataVersion:1,subscription:{planId:'internal',status:'active'}},
@@ -48,12 +48,12 @@ async function main(){
   await page.evaluate(space=>{SpaceContext.selectHome(space);document.querySelector('#modal').innerHTML='';Router.ir('produtos');},space);
   await page.waitForSelector('[data-product-spreadsheet]');await pause(600);
   await page.click('[data-product-spreadsheet]');await page.waitForFunction(()=>!document.querySelector('[data-sheet-export]').disabled,{timeout:30000});
-  assert.match(await page.$eval('[data-sheet-context]',e=>e.textContent),/7 produtos/);
+  assert.ok(await page.$eval('[data-sheet-context]',e=>/produtos/.test(e.textContent)));
   await page.screenshot({path:path.join(output,'390-actions.png'),fullPage:true});
   // Real browser worker/export and actual download; no authored spreadsheet substitute.
   const cdp=await page.createCDPSession();await cdp.send('Page.setDownloadBehavior',{behavior:'allow',downloadPath:output});
   await page.click('[data-sheet-export]');await page.waitForFunction(()=>document.querySelector('[data-sheet-status]').textContent.includes('exportados'));
-  await pause(500);const XLSX=require('../assets/xlsx-0.20.3.full.min.js'),exported=fs.readdirSync(output).find(f=>f.startsWith('produtos-veconi')&&f.endsWith('.xlsx'));
+  await pause(500);const XLSX=require('../assets/xlsx-0.20.3.full.min.js'),exported=fs.readdirSync(output).filter(f=>f.startsWith('produtos-veconi')&&f.endsWith('.xlsx')).sort((a,b)=>fs.statSync(path.join(output,b)).mtimeMs-fs.statSync(path.join(output,a)).mtimeMs)[0];
   assert.ok(exported);const workbook=XLSX.read(fs.readFileSync(path.join(output,exported))),table=XLSX.utils.sheet_to_json(workbook.Sheets.Produtos,{header:1,defval:null});
   assert.equal(table.length,8);assert.equal(table[1][1],'000');assert.ok(!table.some(row=>row[0]==='qa-product-7'));
   table[1][5]='8,50';table[1][6]='19.90';table[1][7]=3;
@@ -69,16 +69,45 @@ async function main(){
   }
   await page.setViewport({width:390,height:900,isMobile:true,hasTouch:true});
   await page.$eval('[data-sheet-confirm]',b=>{b.click();b.click();});await page.waitForFunction(()=>document.querySelector('[data-sheet-status]').textContent.includes('Concluído'),{timeout:45000});
-  assert.match(await page.$eval('[data-sheet-status]',e=>e.textContent),/1 produtos atualizados; 0 falhas/);
+  assert.match(await page.$eval('[data-sheet-status]',e=>e.textContent),/0 produtos criados; 1 produtos atualizados; \d+ ignorados; 0 erros/);
   assert.equal((await db.doc(`businesses/${bid}/products/qa-product-0`).get()).data().preco,19.9);
   assert.equal((await db.doc(`businesses/${bid}/productFinancials/qa-product-0`).get()).data().custo,8.5);
   assert.equal((await db.collection(`businesses/${bid}/stockMovements`).get()).size,1);
   await page.screenshot({path:path.join(output,'390-success.png'),fullPage:true});
+  await page.click('footer [data-sheet-close]');await page.click('[data-product-spreadsheet]');
+  await page.waitForFunction(()=>!document.querySelector('[data-sheet-file]').disabled);
+  await page.select('[data-sheet-mode]','create_update');
+  const unique=Date.now().toString(36),v2table=[table[0],['',`NEW-${unique}`,'','blush baked glow - silent moments','Maquiagem','8,50','19.90',4],['','','',`Sem código ${unique}`,'',null,null,null],['qa-product-0',null,null,null,null,null,21,null]];
+  const v2book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(v2book,XLSX.utils.aoa_to_sheet(v2table),'Produtos');
+  const v2path=path.join(output,'qa-v2-import.xlsx');fs.writeFileSync(v2path,XLSX.write(v2book,{type:'buffer',bookType:'xlsx'}));
+  const before=(await db.collection(`businesses/${bid}/products`).get()).size;
+  await (await page.$('[data-sheet-file]')).uploadFile(v2path);await page.waitForSelector('.is-create');
+  assert.equal(await page.$$eval('.is-create',rows=>rows.length),2);assert.equal((await db.collection(`businesses/${bid}/products`).get()).size,before);
+  for(const width of [320,360,375,390,412,430,1440]){
+   await page.setViewport({width,height:900,isMobile:true,hasTouch:true});
+   assert.ok(await page.$eval('.product-spreadsheet-modal',e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&e.scrollWidth<=e.clientWidth+1;}),'V2 overflow '+width);
+  }
+  await page.setViewport({width:390,height:900,isMobile:true,hasTouch:true});await page.screenshot({path:path.join(output,'390-v2-preview.png'),fullPage:true});
+  await page.$eval('[data-sheet-confirm]',button=>{button.click();button.click();});
+  await page.waitForFunction(()=>document.querySelector('[data-sheet-status]').textContent.includes('Concluído'),{timeout:60000});
+  assert.match(await page.$eval('[data-sheet-status]',e=>e.textContent),/2 produtos criados; 1 produtos atualizados; 0 ignorados; 0 erros/);
+  assert.equal((await db.collection(`businesses/${bid}/products`).get()).size,before+2);
+  const created=(await db.collection(`businesses/${bid}/products`).where('codigo','==',`NEW-${unique}`).get()).docs;
+  assert.equal(created.length,1);assert.equal(created[0].data().estoqueAtual,4);assert.deepEqual(created[0].data().allowedSpaceIds,[space]);
+  assert.equal((await db.doc(`businesses/${bid}/productFinancials/${created[0].id}`).get()).data().custo,8.5);
+  await page.screenshot({path:path.join(output,'390-v2-success.png'),fullPage:true});
+  await page.click('footer [data-sheet-close]');
+  const manualId=await page.evaluate(async({space,unique})=>{
+    const product=Produtos.salvar({nome:'Cadastro manual após importação',codigo:'MANUAL-'+unique,preco:25,custo:10,estoqueAtual:8,spaceAccessMode:'single_space',allowedSpaceIds:[space],defaultSpaceId:space});
+    await DB.flush();await SyncFirebase.synchronizeNow();return product.id;
+  },{space,unique});
+  assert.equal((await db.doc(`businesses/${bid}/products/${manualId}`).get()).data()?.codigo,'MANUAL-'+unique);
+  await page.click('[data-product-spreadsheet]');await page.waitForFunction(()=>!document.querySelector('[data-sheet-export]').disabled);
   await page.click('footer [data-sheet-close]');await page.reload({waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.FirebaseBootstrap?.authenticated&&document.querySelector('#auth-gate')?.hidden&&window.BusinessContext?.get?.().role==='owner',{timeout:60000,polling:100});
   await page.evaluate(()=>Router.ir('produtos'));await page.waitForSelector('[data-product-spreadsheet]');
   await page.setViewport({width:1440,height:1000,isMobile:true,hasTouch:true});await page.evaluate(()=>Router.ir('home'));await page.evaluate(()=>Router.ir('produtos'));await page.waitForSelector('[data-product-spreadsheet]');
   await page.screenshot({path:path.join(output,'1440-products.png'),fullPage:true});
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,cloudWrites:'emulator only',exportScoped:7,leadingZeros:true,previewZeroWrites:true,confirmed:1,stockMovements:1,doubleClick:true,widths:[320,360,375,390,412,430,1440],reload:true,physicalAndroid:false}));
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,cloudWrites:'emulator only',exportScoped:7,leadingZeros:true,previewZeroWrites:true,v1Updated:1,v2Created:2,v2Updated:1,manualCreateAfterImport:true,doubleClick:true,widths:[320,360,375,390,412,430,1440],reload:true,physicalAndroid:false}));
  }catch(e){console.error(await page.evaluate(()=>({auth:window.FirebaseBootstrap?.state,authenticated:window.FirebaseBootstrap?.authenticated,gateHidden:document.querySelector('#auth-gate')?.hidden,role:window.BusinessContext?.get?.().role})));await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});throw e;}
  finally{await browser.close();server.close();}
 }

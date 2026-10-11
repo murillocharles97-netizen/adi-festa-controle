@@ -15,6 +15,7 @@ function productRuntime() {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(read('functions/src/shared/product-model.js'), context);
   vm.runInContext(read("js/produtos.js"), context);
   return context;
 }

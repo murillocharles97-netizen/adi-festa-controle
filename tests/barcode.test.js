@@ -76,6 +76,7 @@ context.BarcodeDetector=class{
 };
 vm.createContext(context);
 vm.runInContext(source,context);
+vm.runInContext(fs.readFileSync('functions/src/shared/product-model.js','utf8'),context);
 vm.runInContext(fs.readFileSync('js/produtos.js','utf8'),context);
 
 assert.equal(context.normalizeBarcode(' 0789 123\u200b456\n'),'0789123456','normalization must preserve leading zero');

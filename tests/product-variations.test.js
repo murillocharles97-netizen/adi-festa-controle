@@ -9,6 +9,7 @@ function runtime(){
   const context={console,structuredClone,Date,Map,Set,Error,String,Number,Boolean,Array,Object,JSON,Math,crypto:{randomUUID:()=>`id_${++sequence}`},Utils:{uuid:()=>`id_${++sequence}`},DB:{getBusinessId:()=> 'empresa_teste',carregar:()=>data,alterar(mutator){mutator(data);return data}},PlanLimitService:null,BarcodeIndex:{invalidate(){},assertAvailable(){}},normalizeBarcode:value=>String(value||'').replace(/\s/g,''),Campanhas:{aplicarBeneficios:items=>items,aplicarVendaNoBanco:()=>[],reverterVendaNoBanco(){}},dispatchEvent(){},CustomEvent:function(){}};
   context.window=context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('functions/src/shared/product-model.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/produtos.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/product-variations.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/vendas.js','utf8'),context);

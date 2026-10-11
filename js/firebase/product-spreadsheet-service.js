@@ -25,15 +25,21 @@ function assertContext(scope) {
 export async function loadCatalog() {
   const scope = capture(); assertContext(scope);
   const permissions = { cost: window.TeamAccess.has('cost.view'), stock: window.TeamAccess.has('inventory.adjust'), edit: window.TeamAccess.has('products.edit') };
-  const [products, financials] = await Promise.all([
+  const [products, financials, variants] = await Promise.all([
     createFirestoreRepository('products').listAllPaged(200),
     permissions.cost ? createFirestoreRepository('productFinancials').listAllPaged(200) : [],
+    createFirestoreRepository('productVariants').listAllPaged(200),
   ]);
   assertContext(scope);
   const costs = new Map(financials.map(f => [f.productId || f.id, f]));
-  return { scope, permissions, products: products.filter(p => Model.inScope(p, scope)).map(p => ({ ...p,
+  const visible = products.filter(p => Model.inScope(p, scope)).map(p => ({ ...p,
     custo: permissions.cost ? costs.get(p.id)?.custo ?? p.custo ?? null : null,
-  })) };
+  }));
+  const inactive = products.filter(p => Model.inScope(p, scope, true) && !Model.inScope(p, scope));
+  const byId = new Map([...visible, ...inactive].map(p => [p.id, p]));
+  const reservations = variants.filter(v => byId.has(v.parentProductId) && !v.deleted && !v.deletedAt).map(v => ({...byId.get(v.parentProductId), id:`variant:${v.id}`, codigo:v.sku || v.codigo || '', barcode:v.barcode || '', identifierReservation:true}));
+  for (const p of byId.values()) for (const barcode of p.alternateBarcodes || []) reservations.push({...p, id:`alternate:${p.id}:${barcode}`, codigo:'', barcode, identifierReservation:true});
+  return {scope, permissions, products:visible, matchingProducts:[...visible, ...inactive, ...reservations]};
 }
 
 // Optimistic read/compare/write transactions, not blind full-document overwrites.
@@ -41,7 +47,24 @@ export async function loadCatalog() {
 export async function applyPreview(catalog, preview, onProgress) {
   assertContext(catalog.scope);
   if (!window.TeamAccess.has('products.edit')) throw Error('Você não tem permissão para editar produtos.');
-  const scope = catalog.scope, selected = preview.rows.filter(r => r.status === 'update'), results = [];
+  const scope = catalog.scope, selected = preview.rows.filter(r => r.status === 'update'), creates = preview.rows.filter(r => r.status === 'create'), results = [];
+  if (creates.length && preview.mode !== 'create_update') throw Error('Confirme o modo de criação antes de importar.');
+  if (creates.length && scope.spaceId === 'all_spaces') throw Error('Selecione um espaço específico para criar produtos.');
+  for (let offset = 0; offset < creates.length; offset += 25) {
+    const batch = creates.slice(offset, offset + 25);
+    try {
+      assertContext(scope);
+      const response = await window.FirebaseCallable('createSpreadsheetProducts', {
+        businessId:scope.businessId, spaceId:scope.spaceId, workspaceGeneration:scope.generation,
+        rows:batch.map(row => ({line:row.line, data:row.create})),
+      });
+      results.push(...(response.data || response).results);
+    } catch (error) {
+      results.push(...creates.slice(offset).map(row => ({line:row.line, ok:false, message:error.message || 'Não foi possível confirmar a criação. Gere outra prévia; o reenvio é protegido contra duplicidade.'})));
+      onProgress?.(results.length, creates.length + selected.length); break;
+    }
+    onProgress?.(results.length, creates.length + selected.length);
+  }
   // Small atomic groups stay below Rules document-access limits, even with stock/cost writes.
   for (let offset = 0; offset < selected.length; offset += 5) {
     const batch = selected.slice(offset, offset + 5);
@@ -60,6 +83,9 @@ export async function applyPreview(catalog, preview, onProgress) {
         for (const { row, ref, costRef, p, cost } of loaded) {
           if (!Model.inScope(p, scope)) { outcomes.push({ id: row.id, line: row.line, ok: false, message: 'Produto removido ou fora do espaço selecionado.' }); continue; }
           const current = Model.values({ ...p, custo: cost?.custo ?? p.custo ?? null });
+          if (row.targetIdentity && (current.codigo !== row.targetIdentity.codigo || current.barcode !== row.targetIdentity.barcode)) {
+            outcomes.push({id:row.id, line:row.line, ok:false, message:'Os identificadores mudaram desde a prévia. Reimporte para revisar.'}); continue;
+          }
           const changes = { ...row.changes }, keys = Object.keys(changes);
           const allowed = ['nome', 'categoria', 'custo', 'preco', 'estoqueAtual'];
           if (keys.some(k => !allowed.includes(k))) throw Error('Campo não permitido nesta importação.');
@@ -93,7 +119,7 @@ export async function applyPreview(catalog, preview, onProgress) {
             });
           }
           tx.update(ref, { ...patch, spreadsheetImportOperationId:operationId, businessId: scope.businessId, atualizadoEm: timestamp, updatedAt: serverTimestamp(), updatedByUid: scope.uid, version: increment(1) });
-          outcomes.push({ id: row.id, line: row.line, ok: true });
+          outcomes.push({ id: row.id, line: row.line, ok: true, action:'update' });
         }
         return outcomes;
       });
@@ -103,10 +129,10 @@ export async function applyPreview(catalog, preview, onProgress) {
       results.push(...batch.map(row => ({ id: row.id, line: row.line, ok: false, message: error.message || 'Falha ao confirmar gravação na nuvem.' })));
       if (!navigator.onLine || ['permission-denied', 'unavailable'].includes(error.code)) {
         results.push(...selected.slice(offset + 5).map(row => ({ id: row.id, line: row.line, ok: false, message: 'Não processado. Verifique conexão/acesso e gere nova prévia.' })));
-        onProgress?.(results.length, selected.length); break;
+        onProgress?.(results.length, creates.length + selected.length); break;
       }
     }
-    onProgress?.(results.length, selected.length);
+    onProgress?.(results.length, creates.length + selected.length);
   }
   let refreshWarning = '';
   if (results.some(r => r.ok)) {
