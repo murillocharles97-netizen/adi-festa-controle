@@ -45,7 +45,7 @@ const MP_WEBHOOK_SECRET=defineSecret('MERCADO_PAGO_WEBHOOK_SECRET');
 const MP_ENV=defineString('MERCADO_PAGO_ENV',{default:'production'});
 // Production remains disabled until the complete reset release is validated.
 const MP_PUBLIC_KEY=defineString('MERCADO_PAGO_PUBLIC_KEY',{default:''});
-const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://murillocharles97-netizen.github.io/adi-festa-controle/'});
+const APP_URL=defineString('ADI_FESTA_APP_URL',{default:'https://veconi.app.br'});
 const MP_WEBHOOK_URL=defineString('MERCADO_PAGO_WEBHOOK_URL',{default:'https://southamerica-east1-adi-festa-controle.cloudfunctions.net/receiveWebhook?source_news=webhooks'});
 const FUNCTION_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,secrets:[MP_TOKEN,MP_TEST_TOKEN]};
 const TERMINAL_PAYMENT_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20};
@@ -317,7 +317,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     const cardReplacement=pendingProviderId?await supersedePendingCardCheckout({businessId,context,subscriptionId:String(pendingProviderId),newOperationId:opId}):null,effectiveCouponCode=couponCode||cardReplacement?.couponCode||'';
     redemption=(quoteId||effectiveCouponCode)?await coupons().reserveCheckoutCoupon({quoteId,couponCode:effectiveCouponCode,context,planId:plan.id,billingCycle}):null;
     if(redemption)logger.info('[Billing] coupon_applied',{businessId,planId:plan.id,couponId:redemption.couponId,redemptionId:redemption.id});
-    const effectiveQuoteId=redemption?.quoteId||quoteId||null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId:effectiveQuoteId}:null,backUrl=`${APP_URL.value()}#/planos`,now=iso();
+    const effectiveQuoteId=redemption?.quoteId||quoteId||null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId:effectiveQuoteId}:null,backUrl=new URL('#/planos',APP_URL.value()).href,now=iso();
     if(paymentMethod.id==='card_monthly'){
       logger.info('[BILLING_CARD_MONTHLY_STARTED]',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12),deviceSessionPresent:Boolean(deviceSessionId)});
       const order=await mp().createCardOrder({businessId,email:billingPayerEmail,plan,billing,operationId:opId,payment:manualCard,notificationUrl:MP_WEBHOOK_URL.value(),deviceSessionId}),details=orderDetails(order,'card_monthly'),expectedExternalReference=billingExternalReference(businessId,opId);
