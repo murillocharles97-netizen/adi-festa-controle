@@ -18,6 +18,7 @@ import {
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 import '../integrity.js?v=157';
+import {prepareProductImportFence} from './product-import-fence.js';
 
 // Compatibility API for synchronous domain code; backed by structured IDB rows.
 // All durable boundaries below await DB.flush before upload/success/cursor advance.
@@ -1914,6 +1915,7 @@ async function commitQueueItem(item) {
   await runTransaction(db, async (transaction) => {
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
+    const commitProductImportFence = await prepareProductImportFence({transaction,db,businessId,writes,doc,serverTimestamp});
     for (const write of writes.filter((entry) =>
       entry.entityType === "sales" && entry.operation === "create")) {
       const resolution = await transaction.get(doc(db, "businesses", businessId,
@@ -2305,6 +2307,7 @@ async function commitQueueItem(item) {
         String(write.entityId) === String(financialEffect.customerId)) : null,
       creditClientSnapshot = creditClientWrite
         ? snapshots.get(`clients:${creditClientWrite.entityId}`) : null;
+    commitProductImportFence();
     for (const write of writes) {
       currentPath = `businesses/${businessId}/${write.entityType}/${write.entityId}`;
       const reference = doc(

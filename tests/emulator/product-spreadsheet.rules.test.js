@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
 const M=require('../../js/product-spreadsheet');
-let env;const bid='spreadsheet-qa',uid='spreadsheet-owner',space='spreadsheet-space';
+let env;const suffix=Date.now().toString(36),bid='spreadsheet-qa-'+suffix,uid='spreadsheet-owner-'+suffix,space='spreadsheet-space-'+suffix;
 const scope={businessId:bid,uid,spaceId:space,allSpaces:true,allowedSpaceIds:[space],generation:0};
 const product=id=>({id,businessId:bid,nome:'Produto '+id,codigo:id,barcode:'',categoria:'Teste',preco:15,estoqueAtual:5,estoque:5,ativo:true,itemKind:'product',productType:'simple',controlaEstoque:true,semControleEstoque:false,spaceAccessMode:'single_space',allowedSpaceIds:[space],defaultSpaceId:space,spaceScopeVersion:1});
 function service(db,role='owner'){

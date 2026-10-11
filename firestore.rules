@@ -334,6 +334,13 @@ service cloud.firestore {
     function validProductItemKind(product) {
       return !('itemKind' in product) || product.itemKind in ['product', 'service'];
     }
+    // Once the catalog fence exists, pre-V2 clients cannot restore a stale identity.
+    // Stock-only operations remain untouched. Updated clients join the same
+    // transaction fence as the backend; old queues are retained on denial.
+    function joinsProductImportFence(businessId) {
+      let lock = /databases/$(database)/documents/businesses/$(businessId)/productImportIdentifiers/catalog-revision;
+      return !exists(lock) || getAfter(lock).data.get('commitToken', '') != get(lock).data.get('commitToken', '');
+    }
     function validProductSpaceScope(product, businessId) {
       return validProductItemKind(product)
         && (
@@ -941,11 +948,13 @@ service cloud.firestore {
         allow read: if hasPermission(businessId, 'products.view')
           && (!resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
         allow create: if canWriteCollection(businessId, 'productVariants')
+          && joinsProductImportFence(businessId)
           && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
           && validVariant(request.resource.data)
           && (!request.resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId))
           && parentProduct(request.resource.data.parentProductId).data.businessId == businessId;
         allow update: if canWriteCollection(businessId, 'productVariants')
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sku','codigo','barcode','active','deleted','deletedAt']) || joinsProductImportFence(businessId))
           && (
             !memberExists(businessId)
             || permissionGranted(businessId, 'products.edit')
@@ -1081,11 +1090,14 @@ service cloud.firestore {
         allow read: if hasPermission(businessId, 'products.view')
           && (resource == null || !resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
         allow create: if canWriteCollection(businessId, 'products')
+          && joinsProductImportFence(businessId)
+          && !request.resource.data.keys().hasAny(['spreadsheetImportOperationId'])
           && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductSpaceScope(request.resource.data, businessId);
         allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['codigo','barcode','alternateBarcodes','spaceAccessMode','allowedSpaceIds','active','ativo','deleted','deletedAt']) || joinsProductImportFence(businessId))
           && canWriteCollection(businessId, 'products')
           && (
             !memberExists(businessId)
@@ -1103,6 +1115,24 @@ service cloud.firestore {
             preservesProductSpaceScope(request.resource.data, resource.data)
             || validProductSpaceScope(request.resource.data, businessId)
           );
+        allow delete: if false;
+      }
+      // Import receipts are server-owned; a client cannot forge a completed creation.
+      match /productImportOperations/{operationId} {
+        allow read, write: if false;
+      }
+      match /productImportIdentifiers/{identifierId} {
+        allow read: if hasPermission(businessId, 'products.view');
+        allow create, update: if identifierId == 'catalog-revision'
+          && hasPermission(businessId, 'products.edit') && workspaceWriteAllowed(businessId)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.revision is int
+          // MVCC validates the read version. Do not compare to the concurrently
+          // changed value here: that returns permission-denied before SDK retry.
+          && request.resource.data.revision > 0
+          && request.resource.data.commitToken is string
+          && request.resource.data.commitToken.size() == 36
+          && request.resource.data.keys().hasOnly(['businessId','revision','commitToken','updatedAt','workspaceGeneration','workspaceWriteId']);
         allow delete: if false;
       }
       match /sales/{saleId} {

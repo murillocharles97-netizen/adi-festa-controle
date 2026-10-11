@@ -17,4 +17,8 @@
 .product-sheet-rows .is-not_found{background:#fffbeb;border-color:#fde68a}
 .product-sheet-rows p{font-size:13px;margin:6px 0}
 [data-sheet-error]{padding:12px;border-radius:10px}
+.product-sheet-mode{display:grid;gap:6px;font-weight:600;margin:12px 0}
+.product-sheet-mode select{width:100%;max-width:100%;min-width:0;font:inherit;padding:10px;border:1px solid var(--border,#dfe7ed);border-radius:10px;background:var(--surface,#fff);color:inherit}
+.product-sheet-rows .is-create{background:#effcf8;border-color:#8ad9c5}
+body:has(.product-spreadsheet-modal) .product-filter-sheet,body:has(.product-spreadsheet-modal) .product-action-sheet,body:has(.product-spreadsheet-modal) .product-sheet-overlay{visibility:hidden;pointer-events:none}
 @media(max-width:767px){.product-xlsx-actions>*{width:100%}.product-spreadsheet-modal .modal-foot{display:grid;grid-template-columns:1fr 1.5fr;padding:12px}.product-spreadsheet-modal .modal-foot .btn{white-space:normal;font-size:13px}.product-spreadsheet-modal .modal-head h3{font-size:16px}}

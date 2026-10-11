@@ -11,6 +11,7 @@ const {logger}=require('firebase-functions');
 const {mercadoPagoService,billingExternalReference,pixExternalReference,normalizeDeviceSessionId,providerErrorDiagnostics}=require('./services/mercado-pago-service');
 const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('./services/billing-payer-service');
 const {permissionService}=require('./services/permission-service');
+const {productSpreadsheetService}=require('./services/product-spreadsheet-service');
 const {legacyPlanTransitionService,assertLegacyCheckoutReady}=require('./services/legacy-plan-transition-service');
 const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
 const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
@@ -39,6 +40,7 @@ const {terminalPaymentService}=require('./terminal-payments/terminal-payment-ser
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
+exports.createSpreadsheetProducts=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5},request=>productSpreadsheetService(db,{FieldValue}).createProducts(request));
 const MP_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN');
 const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');
 const MP_WEBHOOK_SECRET=defineSecret('MERCADO_PAGO_WEBHOOK_SECRET');

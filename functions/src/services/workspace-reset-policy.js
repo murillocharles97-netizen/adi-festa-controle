@@ -11,7 +11,7 @@ const OPERATIONAL_COLLECTIONS=new Set([
   'customerSubscriptionEvents','customerMetrics','customerMonthlyMetrics','customerSegments',
   'metricEvents','visits','catalogOrders','activityEvents','auditLogs','invites','teamInvites',
   'settings','syncMetadata','paymentTerminals','paymentProviderConfigs','paymentIntents',
-  'paymentCheckoutLocks','paymentReceivables',
+  'paymentCheckoutLocks','paymentReceivables','productImportOperations','productImportIdentifiers',
 ]);
 const RESET_STATES=new Set(['REQUESTED','LOCKED','DELETING','VERIFYING','COMPLETED','FAILED']);
 const NEXT={REQUESTED:['LOCKED','FAILED'],LOCKED:['DELETING','FAILED'],DELETING:['VERIFYING','FAILED'],VERIFYING:['COMPLETED','FAILED'],FAILED:['LOCKED'],COMPLETED:[]};
