@@ -9,6 +9,20 @@ const script = read("js/mobile-navigation.js");
 const manifest = JSON.parse(read("manifest.json"));
 const worker = read("service-worker.js");
 
+test("badge counts only active authorized V2 orders, never archived history", () => {
+  const vm=require('node:vm'),Orders=require('../functions/src/shared/online-order');
+  const modern={source:'online_store',schemaVersion:2,spaceId:'a',orderStatus:'recebido'};
+  const rows=[modern,{...modern,source:'online_catalog'},{...modern,deletedAt:'2026-10-14'},
+    {...modern,orderStatus:'expirado'},{...modern,spaceId:'forbidden'}];
+  const badge={},ctx={DB:{carregar:()=>({catalogOrders:rows})},OnlineOrderModel:Orders,
+    Visitas:{canReadOrder:o=>o.spaceId!=='forbidden'},document:{querySelectorAll:()=>[badge]}};
+  ctx.window=ctx;vm.createContext(ctx);
+  vm.runInContext(script.slice(script.indexOf('  function updateOrders()'),script.indexOf('  function updateSync('))+'\nupdateOrders();',ctx);
+  assert.equal(badge.textContent,'1');assert.equal(badge.hidden,false);
+  rows.splice(0,rows.length,{...modern,source:'online_catalog'});
+  vm.runInContext('updateOrders();',ctx);assert.equal(badge.hidden,true);
+});
+
 test("drawer mobile não duplica a navegação principal do rodapé", () => {
   const mobile = index.match(/<nav class="mobile-sidebar-nav"[\s\S]*?<\/nav>/)?.[0] || "";
   assert.ok(mobile);

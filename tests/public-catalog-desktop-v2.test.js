@@ -9,6 +9,12 @@ const orders = fs.readFileSync("functions/src/services/online-order-service.js",
 const functions = fs.readFileSync("functions/src/index.js", "utf8");
 const html = fs.readFileSync("catalogo.html", "utf8");
 
+test("long store names can shrink without squeezing or clipping cart/back controls",()=>{
+ const v2Css=fs.readFileSync("css/online-store-public.css","utf8");
+ assert.match(v2Css,/\.catalog-header \.catalog-brand\{min-width:0;overflow:hidden;text-overflow:ellipsis;flex-shrink:1\}/);
+ assert.match(v2Css,/\.catalog-header \.cart-button,\.catalog-header \.back-button\{flex-shrink:0\}/);
+});
+
 test("desktop usa catálogo e pedido em duas áreas sem converter o mobile", () => {
   assert.match(portal, /desktop-catalog-layout/);
   assert.match(portal, /catalog-desktop-sidebar/);

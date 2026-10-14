@@ -1,88 +1,131 @@
-# Loja Online sem legado — validação final local
+# Loja Online V2 sem legado — validação final local
 
-14/10/2026, America/Sao_Paulo. Base: f23a8757bca6d72db959ffd8dfea86115c0ffe02.
-Nenhum deploy nem gravação de teste em produção nesta etapa.
+14/10/2026, America/Sao_Paulo. Base de retirada do legado: f23a8757bca6d72db959ffd8dfea86115c0ffe02.
+Correção de histórico somente leitura: 70a74431dcfa73059f2b05017e6b64b95660db7e.
+Nenhum deploy, migração ou gravação de teste em produção nesta validação.
+
+## Decisão
+
+AINDA HÁ UM BLOQUEADOR: a projeção pública de disponibilidade não acompanha o estoque/reserva canônicos.
+Não preparar/publicar V170 ainda. Correção local específica solicitada ao usuário.
+Android físico permanece pendente por indisponibilidade informada pelo usuário.
 
 ## Ambiente
 
-Aplicação real servida em http://127.0.0.1:8188, com a única substituição de endpoints
-Firebase para o projeto demo-veconi-online-qa. Auth 9098, Firestore 8098, Functions
-5008 (proxy local 8189) e Storage 9298. Callables, Sync, transações e Rules são reais,
-não mocks da lógica de negócio. Functions de billing/reset/providers não exportadas
-pelo wrapper QA. Configuração não secreta do Emulator não afeta env de produção.
+App real em http://127.0.0.1:8188, exclusivamente demo-veconi-online-qa:
+Auth 9098, Firestore 8098, Functions 5008 (proxy 8189), Storage 9298.
+SDKs, Sync, transações e Rules reais, não mocks da lógica operacional.
+Wrapper não exporta billing/reset/providers. Configuração Firebase real não foi alterada.
+Servidor e emuladores QA permanecem abertos; dados inteiramente sintéticos.
 
-Espaços sintéticos VECONI QA e VECONI QA — isolamento; produtos exclusivos A/B e
-uma unidade compartilhada para a corrida. Nenhuma loja criada no seed/bootstrap:
-o owner deve configurar e publicar pela UI. Um pedido antigo sintético e seu pai
-desativado exercitam o requisito de histórico preservado.
+Business online-integrated-qa-mv8845wu, espaços VECONI QA (qa-main-mv8845wu) e
+VECONI QA — isolamento (qa-isolation-mv8845wu). Quatro produtos QA, sem clientes reais.
+Um pedido antigo sintético preservado exercita a consulta histórica desativada.
 
-## Resultados até aqui
+## Smoke em navegador + Emulator
 
-- Login owner pelo formulário e Auth Emulator: passou; Home/Sync/cache carregados.
-- Loja A ausente: Em preparação; nenhum banner ou fluxo de migração.
-- Marca, descrição, contato, catálogo, entrega/retirada, checkout e slug configurados
-  pelo owner. Somente produtos de A e explicitamente compartilhados aparecem.
-- Salvar configuração: um draft V2, published=false, v2Enabled=false, sem cobrança,
-  pedido, venda ou reserva. Salvar não publica. Fonte inspecionada não cria catálogo global.
-- O usuário informou confirmação A, mas a leitura do Emulator mostrou published=false,
-  v2Enabled=false e somente uma chamada saveOnlineStore (o save anterior do rascunho).
-  Após conferir ausência de diálogo ativo, uma nova tentativa abriu a confirmação.
-  A extensão voltou a bloquear tanto a entrada quanto a captura de screenshot.
-  Nova confirmação local solicitada; não há chamada de publicação nem repetição backend.
+| Cenário | Resultado |
+| --- | --- |
+| Owner/Auth, Home e reload | Aprovado; sessão mantida no Auth Emulator |
+| Loja ausente por espaço | Em preparação, sem loja criada automaticamente |
+| Marca/tema/contato/catálogo/entrega/checkout/slug | Configurados pela UI, separadamente A/B |
+| Salvar rascunho | Não publica nem reserva; published=false e v2Enabled=false |
+| Publicar | Callables autenticadas explícitas A/B aprovadas; não automático |
+| Confirmação nativa de publicação | Não comprovada pela extensão: bloqueou repetidamente; usado endpoint local após autorização, sem alegar sucesso do diálogo |
+| Catálogo por espaço | A: exclusivos A + compartilhado; B: exclusivo B + compartilhado |
+| Permissões | Manager A lê A; callable B, leitura/edição produto B negadas |
+| Links e QR | Slugs A/B distintos, imagens QR carregadas; links oficiais distintos |
+| QR no Android/câmera | Pendente; não escaneado fisicamente |
+| Carrinho/checkout | Carrinho não move estoque; resumo antes do envio |
+| Entrega | Endereço vazio bloqueia envio; endereço sintético aceito |
+| Duplo clique em enviar | Um pedido, uma reserva |
+| Reserva | No commit de pedido Novo; estoque físico não baixado |
+| Cancelamento visual | Segunda confirmação inline; reserva liberada; zero venda |
+| Novo → Confirmado → Preparando → Pronto | Histórico preservado; sem baixa antes de concluir |
+| Reload em Pronto | Estado e ações recuperados |
+| Concluir pelo fluxo canônico | Uma venda, uma baixa/movimento; business/space/actor corretos |
+| Resposta perdida após submit | 503 após commit no proxy QA; reload recupera mesmo ID sem novo submit |
+| Resposta perdida após conclusão | Mesmo saleId/operationId recuperado; não repete estoque/venda |
+| Última unidade A/B concorrente | Uma tentativa aprovada, outra FAILED_PRECONDITION; reserva uma vez |
+| Expiração Novo | Serviço transacional executado com tempo controlado; UI mostra Expirado, data/motivo e liberação |
+| Confirmado não expira/replay/job duplicado | Aprovado em testes transacionais; não esperar 30 minutos reais nem observar Scheduler |
+| Histórico antigo | Modal somente consulta, sem status/vínculo/criação de cliente/conversão; dados originais intactos |
+| Link antigo | Catálogo encerrado ou indisponível; não abre fallback |
+| Banner/migração/bootstrap global | Ausentes na UI/source V2; load não escreve loja global |
+| Sync manual | dataSynced=true, integrityStatus=completed |
+| Índice local/SW/reload | IndexedDB, queue pending/errors/total=0, swControlled=true |
+| Android/PWA instalado | NÃO testado; standalone=false no navegador local |
+| Responsividade | Loja/admin/histórico/catalogo/checkout em 320/360/375/390/412/430/768/1366; sem overflow horizontal após ajuste mínimo do título público |
 
-## Pendências que impedem conclusão
+A extensão não concluiu o diálogo nativo de publicação: não houve chamada no backend
+quando a UI ainda mostrava rascunho. Publicação QA feita explicitamente pela mesma
+saveOnlineStore, com Auth owner, confirmação, revisão e escopo. Não contornar a
+confirmação de produção nem chamar isso de prova visual do diálogo.
 
-- Correção mínima autorizada e implementada localmente: histórico abre modal somente
-  de consulta, sem status/vínculo/criação de cliente/conversão. Rotas de Pedidos não
-  consultam mais uma flag legacy nem retornam à UI antiga. API local rejeita todas
-  as mutações antes de tocar DB/Clientes/Vendas. Rules negam create/update/delete
-  via frontend em catalogOrders e update de pedidos nos publicCatalogs antigos;
-  leitura continua isolada por empresa/espaço. Callables V2 permanecem responsáveis
-  pelas transições. Nenhum pedido preservado foi regravado.
-- Home mobile/desktop não conta históricos aposentados como atendimento ativo
-  (nem pedidos V2 expirados como pendência). Não houve redesign da Home.
-- Loja B, publicação, links/QR, checkout, cancelamento/conclusão/expiração visuais,
-  retry, SW, viewports e Sync/reload final ainda dependem de continuar o navegador.
-- Android físico: usuário informou indisponível; registrar pendência. Viewport mobile
-  e SW em loopback não equivalem a PWA Android instalado, teclado/background/rede real.
+Os links/QR apontam ao domínio oficial com slugs sintéticos; abrir a loja QA exigiu
+substituir somente o host pela origem do Emulator. Não abriu/executou loja real.
 
-## Versão / rollback
+## Artefatos de teste e transparência
 
-Sugestão da próxima versão: V170, somente após validação/preparação; não incrementada
-nem publicada. Produção permanece V169 e59b290b31d893e58f11b4ef40fe3bd4b77a26f9.
-Rollback de frontend: V169. Não restaurar dados globais excluídos, não reativar migração,
-não fazer rollback cego de handlers/Rules/reservas após novos pedidos. Pausar checkouts
-do piloto mantendo recuperação, reservas, histórico e expiração; nenhum rollback apaga dados.
+- O primeiro teste visual de expiração adiantou o relógio do serviço e gravou updatedAt
+  futuro no fixture, adiantando o cursor incremental QA. Isso foi identificado; apenas
+  timestamps do pedido/reserva sintéticos foram reenquadrados para passado-30min/agora.
+  Status, estoque, saleId, operationId e conteúdo operacional não mudaram. Sync completo
+  então recuperou todos os pedidos. O helper foi ajustado para envelhecer o fixture antes
+  de executar expiração com relógio real. Não houve alteração no código de Sync por isso.
+- Uma aba administrativa antiga foi corretamente bloqueada por cache alterado em outra
+  aba; reload permitiu continuar sem sobrescrever dados novos.
+- Na sequência de resize/click da automação ocorreu um envio QA adicional, com outra
+  tentativa/ID. Ele foi cancelado e sua reserva liberada, sem venda. Voltar ao carrinho
+  foi revalidado com layout estável/teclado e não enviou; a fonte já usa type=button.
+  Não classificar esse incidente como duplicação automática do mesmo pedido.
+- Capturas verificadas individualmente após estabilização (as primeiras capturas em
+  loop não são evidência final): verified-store-admin-desktop.jpg,
+  verified-public-stock-desktop.jpg e verified-history-readonly-mobile.jpg.
 
-O commit final candidato e evidências serão registrados quando o smoke estiver concluído.
+## Bloqueador comprovado: disponibilidade pública
 
-## Regressão da correção de histórico
+Produto qa-main-product, na loja A:
+- Firestore canônico após a venda: estoqueAtual=2, onlineReservedStock=0.
+- publicCatalogs da mesma loja: availableQuantity=3, reservedStock ausente.
+- Nova abertura pública ainda mostra “3 disponíveis”.
+- A venda/reserva valida o estoque canônico transacionalmente e nega consumo em excesso;
+  o dado exibido é que fica antigo, até republicação.
+- Inspeção do backend não encontrou projeção V2 de estoque disparada pela baixa.
+- Não reparar estoque nem regravar vendas para resolver a projeção.
+- Proposta dependente de autorização: atualização scoped da disponibilidade pública,
+  cobrindo reserva/liberação/baixa, inclusive variantes, sem catálogo global ou listener
+  global do frontend, sem expor custo/dados privados nem aumentar reads sem justificativa.
 
-- App: 656/656, backend: 131/131. Lint/build: 335 arquivos JavaScript; diff --check OK.
-- Teste de UI em VM: mostra conteúdo histórico escapado; exclui outra empresa,
-  registros sem permissão e pedidos V2; nenhum botão de mutação; Escape fecha;
-  dados permanecem exatamente iguais. Isso é teste automatizado, não screenshot.
-- Teste de API antiga: cada mutação rejeita antes de escrever; produtos, clientes,
-  pedidos e vendas permanecem iguais. Estado salvo legacy=true não restaura UI antiga.
-- Rules: owner pode consultar histórico, mas não editar status/vínculo, apagar ou
-  recriar pedido antigo. Os testes V2 continuam passando, incluindo conversão canônica,
-  reserva concorrente, repetição, 40 itens e variações.
-- Primeira execução conjunta em portas QA misturou projeto adi-festa-variations-test
-  com Storage iniciado como demo-veconi-online-qa, causando recusas de Storage.
-  Repetição de Storage com projeto coerente: 13/13. Nenhuma Rule foi afrouxada.
-  Suíte completa repetida com emulators:exec no projeto/portas padrão: 163/163,
-  saída 0 e encerramento automático desses emuladores. Backend: 131/131.
-- Expiração: comprovada transacionalmente com relógio de teste no limite de
-  30 minutos, replay e pedido Confirmado preservado. Não equivale a observar o
-  Cloud Scheduler nem esperar 30 minutos no navegador nesta etapa.
-- Nenhuma gravação/limpeza/deploy em produção nesta validação. A limpeza aprovada
-  da etapa anterior consta separadamente em legacy-store-retirement-audit.md.
+## Estado final QA
 
-## Decisão nesta etapa
+6 pedidos V2: 4 Cancelados, 1 Concluído, 1 Expirado. Um histórico legado sintético.
+Uma venda (online_77e92956-1be2-4194-b2a9-b9f93c86280e), operationId
+online-sale:77e92956-1be2-4194-b2a9-b9f93c86280e; um movimento de estoque.
+Nenhuma reserva ativa. Estoques: main=2, cancel=2, last-unit=1, isolation=2.
+Nenhum saldo/venda/pagamento de produção foi tocado. A limpeza aprovada na etapa
+anterior tem auditoria separada em legacy-store-retirement-audit.md.
 
-A correção de histórico está validada automaticamente, mas o smoke visual completo
-ainda não foi concluído. Não preparar/publicar V170 nem alegar validação física.
-Servidor QA e emuladores exclusivos do navegador permanecem abertos para retomada.
-A confirmação nativa deve ser resolvida pelo usuário somente na aba de loopback;
-não repetir ações em produção. Os arquivos novos do harness QA ficam locais,
-fora do commit de correção; não são uma alteração na configuração Firebase real.
+## Testes e ajustes locais
+
+- App: 658/658; backend: 131/131; Firestore/Storage Emulator: 163/163.
+- Lint/build: 335 arquivos JavaScript; git diff --check aprovado.
+- Rules testam consulta owner e bloqueio de create/update/delete histórico, mantendo
+  callables V2, concorrência, confirmação, venda canônica, variantes e 40 itens.
+- Primeira execução em portas QA misturou IDs de projetos e falhou em Storage;
+  Storage no projeto coerente: 13/13. Suíte completa em emulators:exec coerente: 163/163.
+  Nenhuma Rule foi afrouxada.
+- Histórico read-only também em testes de API/VM: nenhum dado alterado, conteúdo escapado,
+  isolamento por empresa/permissão; flag legacy antiga não restaura UI.
+- Badge mobile passa a contar somente Novos V2 autorizados/ativos, não históricos.
+- CSS público: nome longo pode encolher com ellipsis; carrinho/voltar não encolhem.
+  Corrigido corte do carrinho observado em 320 px; sem redesign ou mudança financeira.
+- Harness, wrappers e scripts de publicação/rebase ficam locais fora do commit operacional.
+
+## Versão e rollback
+
+V170 sugerida somente após resolver o bloqueador e repetir os testes. APP/SW ainda 169.
+Sem push/deploy. Produção V169: e59b290b31d893e58f11b4ef40fe3bd4b77a26f9.
+Rollback frontend: V169. Não restaurar dados globais excluídos nem fazer rollback cego
+de Rules/handlers após pedidos V2: pausar checkout mantendo reservas, recuperação,
+expiração e histórico. Nenhum rollback deve apagar registros.
