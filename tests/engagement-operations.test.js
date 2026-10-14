@@ -90,7 +90,7 @@ test("camada visual expõe ações, filtros completos, pedidos e editor do catá
   const crmMobile = fs.readFileSync(path.join(__dirname, "../js/crm-mobile.js"), "utf8");
   const crmDesktop = fs.readFileSync(path.join(__dirname, "../js/crm-dashboard.js"), "utf8");
   const campaign = fs.readFileSync(path.join(__dirname, "../js/campanhas-ui.js"), "utf8");
-  const catalog = fs.readFileSync(path.join(__dirname, "../js/catalogo-admin.js"), "utf8");
+  const catalog = fs.readFileSync(path.join(__dirname, "../js/online-store-ui.js"), "utf8");
   const orders = fs.readFileSync(path.join(__dirname, "../js/visitas.js"), "utf8");
   assert.match(crmMobile, /Quem você quer alcançar/);
   assert.match(fs.readFileSync(path.join(__dirname, "../js/crm-segment-builder.js"), "utf8"), /data-segment-value-to/);
@@ -101,8 +101,8 @@ test("camada visual expõe ações, filtros completos, pedidos e editor do catá
   assert.equal(loadSegments(baseData()).templates.length >= 8, true);
   assert.match(campaign, /Progresso pendente \(fiado\)/);
   assert.match(campaign, /Clientes parados/);
-  assert.match(catalog, /Banner do catálogo/);
-  assert.match(catalog, /Usar imagem exclusiva do catálogo/);
+  assert.match(catalog, /Banner — URL HTTPS/);
+  assert.match(catalog, /data-store-image/);
   assert.match(orders, /Confirmar pedido/);
   assert.match(orders, /Marcar como pronto/);
   assert.match(orders, /Marcar como entregue/);

@@ -8,19 +8,15 @@ const admin=read('js/catalogo-admin.js'),portal=read('js/catalogo-publico.js'),b
 
 assert.match(index,/data-route="catalogo"[^>]*>[^<]*<i[^>]*><\/i>Catálogo online|data-route="catalogo"/);
 assert.doesNotMatch(index,/data-route="visitas"/);
-assert.match(admin,/publicToken/);
-assert.match(admin,/migrationVersion/);
-assert.match(admin,/closedBehavior/);
-assert.match(admin,/catalogVisible|visible/);
-assert.match(admin,/acceptingOrders/);
-assert.match(admin,/operationMode/);
-assert.match(admin,/scheduled_visit/);
-assert.match(admin,/qrcode/);
-assert.match(bridge,/schemaVersion:5/);
-assert.doesNotMatch(bridge,/legacyRedirect:true/); // Never redirect/re-publish ambiguous catalogs automatically.
-assert.match(bridge,/Associe esta loja antiga a um espaço/);
+assert.match(admin,/OnlineStoreUI.render/);
+assert.doesNotMatch(admin,/CatalogoUniversal|ensure\(/);
+const store=read('js/online-store-ui.js'),service=read('functions/src/services/online-store-service.js');
+assert.match(store,/Espaço da loja/);
+assert.match(store,/qrcode/);
+assert.match(service,/schemaVersion:6,catalogType:'space_store'/);
+assert.doesNotMatch(bridge,/setDoc|onSnapshot|addEventListener/);
 assert.doesNotMatch(bridge,/CatalogoUniversal\?\.ensure\?\.\(\)/);
-assert.match(portal,/legacy-token-redirected/);
+assert.doesNotMatch(portal,/legacy-token-redirected|redirectToken/);
 assert.match(portal,/httpsCallable\(functions,'identifyCatalogCustomer'\)/);
 assert.match(portal,/httpsCallable\(functions,'submitCatalogOrder'\)/);
 assert.doesNotMatch(portal,/getDocs\(collection/);

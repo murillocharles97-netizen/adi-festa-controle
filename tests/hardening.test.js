@@ -38,9 +38,7 @@ assert.match(repository, /CACHE_TTL_MS\s*=\s*60000/);
 assert.match(repository, /async listAllPaged\(max\s*=\s*200\)/);
 assert.match(repository, /listenerClosed\(collectionName\)/);
 
-assert.match(bridge, /desired=universal\?\.publicToken\?\[universal\]:\[\]/);
-assert.match(bridge, /function stopAllSubscriptions\(\)/);
-assert.match(bridge, /firebase-sync-status/);
+assert.doesNotMatch(bridge, /onSnapshot|setDoc|addEventListener/);
 
 assert.match(publicCatalog, /getDoc\(reference\)/);
 assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
@@ -63,6 +61,6 @@ assert.match(lifecycle,/export function cleanupCurrentSession/);
 
 assert.match(rules, /match \/businesses\/\{businessId\}/);
 assert.match(rules, /activeMember\(businessId\) \|\| legacyMember\(businessId\)/);
-assert.match(rules, /match \/publicCatalogs\/\{visitToken\} \{[\s\S]*allow get: if true;[\s\S]*allow list: if false;/);
+assert.match(rules, /match \/publicCatalogs\/\{visitToken\} \{[\s\S]*allow get: if resource[\s\S]*allow list: if false;/);
 
 console.log('hardening.test.js: OK');
