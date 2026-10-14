@@ -72,6 +72,16 @@ test('retirement preserves an old order exactly and cannot expose archived porta
  await assertFails(sdk.getDoc(sdk.doc(anon,'publicCatalogs',token,'portalProfiles','test-private')));
  await assertFails(sdk.setDoc(sdk.doc(owner,'publicCatalogs',token,'portalProfiles','recreated'),{businessId:bid}));
  await assertSucceeds(sdk.getDoc(sdk.doc(owner,'publicCatalogs',token,'orders','legacy-order')));
+ await assertFails(sdk.updateDoc(sdk.doc(owner,'publicCatalogs',token,'orders','legacy-order'),{orderStatus:'confirmado'}));
+ const archivedRef=db.doc(`businesses/${bid}/catalogOrders/archived-history`);
+ await archivedRef.set({...before,businessId:bid,spaceId:a,source:'online_catalog'});
+ const archived=sdk.doc(owner,'businesses',bid,'catalogOrders','archived-history');
+ await assertSucceeds(sdk.getDoc(archived));
+ await assertFails(sdk.updateDoc(archived,{orderStatus:'confirmado'}));
+ await assertFails(sdk.updateDoc(archived,{clientId:'fabricated'}));
+ await assertFails(sdk.deleteDoc(archived));
+ await assertFails(sdk.setDoc(sdk.doc(owner,'businesses',bid,'catalogOrders','recreated-legacy'),{businessId:bid,spaceId:a,source:'online_catalog'}));
+ assert.equal((await archivedRef.get()).data().orderStatus,before.orderStatus);
  assert.deepEqual((await db.doc(`publicCatalogs/${token}/orders/legacy-order`).get()).data(),before);
  assert.deepEqual((await db.doc(`businesses/${bid}/products/${pid}`).get()).data(),productBefore);
  const state=await service.load(request());assert.equal(state.legacyCatalogs,undefined);assert.ok(state.store.publicToken!==token);

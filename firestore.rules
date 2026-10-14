@@ -819,8 +819,8 @@ service cloud.firestore {
         allow create: if false;
         allow get: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
         allow list: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
-        allow update: if signedIn() && !boundCatalog(visitToken) && catalog().get('schemaVersion',0) < 6
-          && scopedCatalogOrder(catalog().businessId, resource.data) && workspaceWriteAllowed(catalog().businessId);
+        // Archived orders are read-only; V2 transitions use validated callables.
+        allow update: if false;
         allow delete: if false;
       }
 
@@ -1383,13 +1383,7 @@ service cloud.firestore {
       }
       match /catalogOrders/{documentId} {
         allow read: if scopedCatalogOrder(businessId, resource.data);
-        allow create: if canCreateGenericDocument(businessId, 'catalogOrders', documentId)
-          && request.resource.data.get('source','') != 'online_store'
-          && scopedCatalogOrder(businessId, request.resource.data);
-        allow update: if canUpdateGenericDocument(businessId, 'catalogOrders', documentId)
-          && resource.data.get('source','') != 'online_store' && request.resource.data.get('source','') != 'online_store'
-          && scopedCatalogOrder(businessId, resource.data)
-          && request.resource.data.get('spaceId', '') == resource.data.get('spaceId', '');
+        allow create, update: if false;
         allow delete: if false;
       }
       match /customerMetrics/{documentId} {

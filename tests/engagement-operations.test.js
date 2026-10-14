@@ -103,10 +103,12 @@ test("camada visual expõe ações, filtros completos, pedidos e editor do catá
   assert.match(campaign, /Clientes parados/);
   assert.match(catalog, /Banner — URL HTTPS/);
   assert.match(catalog, /data-store-image/);
-  assert.match(orders, /Confirmar pedido/);
-  assert.match(orders, /Marcar como pronto/);
-  assert.match(orders, /Marcar como entregue/);
-  assert.match(orders, /statusOperationId/);
+  const v2Orders=fs.readFileSync(path.join(__dirname, "../js/online-orders-ui.js"), "utf8");
+  assert.match(v2Orders, /Histórico da loja anterior/);
+  assert.match(v2Orders, /Somente consulta/);
+  assert.match(v2Orders, /Concluir e registrar venda/);
+  assert.match(v2Orders, /changeOnlineOrderStatus/);
+  assert.doesNotMatch(orders, /legacy=true|data-online-deliver|data-deliver-only/);
 });
 
 test("apresentação do catálogo guarda overrides separados do cadastro operacional", () => {
