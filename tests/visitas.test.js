@@ -11,20 +11,13 @@ const visit=Visitas.salvar({spaceId:'business_adi-festa',nome:'Shopping',local:'
 assert.equal(data.visitas.length,1);assert.equal(visit.catalogItems.length,1);assert.equal(visit.catalogItems[0].salePrice,8);assert.equal(visit.publicToken.length,36);
 const publicUrl=new URL(Visitas.link(visit));assert.equal(publicUrl.pathname,'/app/catalogo.html');assert.equal(publicUrl.searchParams.get('v'),visit.publicToken);
 data.catalogOrders.push({id:'o1',visitId:visit.id,publicOrderNumber:'AF001',clientId:'c1',customerPhone:'17999999999',items:[{productId:'p1',name:'Cone',quantity:2,unitPrice:8,subtotal:16}],total:16,paymentPreference:'pix',orderStatus:'separando'});
-const first=Visitas.converter('o1','pago'),second=Visitas.converter('o1','pago');
-assert.equal(first.id,second.id);assert.equal(data.vendas.length,1);assert.equal(data.catalogOrders[0].orderStatus,'entregue');assert.equal(data.catalogOrders[0].convertedSaleId,first.id);
-data.catalogOrders.push({id:'o2',visitId:visit.id,customerName:'Cliente',customerPhone:'(17) 99999-9999',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8,subtotal:8}],total:8,paymentPreference:'entrega',orderStatus:'recebido'});
-assert.equal(Visitas.clientesCompativeis('o2').length,1);
-Visitas.vincularCliente('o2','c1');
-assert.equal(data.catalogOrders.find(order=>order.id==='o2').clientId,'c1');
-data.catalogOrders.push({id:'o3',visitId:visit.id,customerName:'Novo Cliente',customerPhone:'(17) 98888-7777',customerLocation:'Loja 20',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8,subtotal:8}],total:8,paymentPreference:'pix',orderStatus:'recebido'});
-const created=Visitas.criarClienteParaPedido('o3');
-assert.equal(data.catalogOrders.find(order=>order.id==='o3').clientId,created.id);
-assert.equal(data.clientes.filter(client=>Clientes.normalizePhone(client.telefone)==='5517988887777').length,1);
-data.catalogOrders.push({id:'o4',visitId:visit.id,customerName:'Visitante',customerPhone:'(17) 97777-6666',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8,subtotal:8}],total:8,paymentPreference:'dinheiro',orderStatus:'recebido'});
-Visitas.manterVisitante('o4');
-assert.equal(data.catalogOrders.find(order=>order.id==='o4').keptAsGuest,true);
-data.catalogOrders.push({id:'legacy-order',visitId:'legacy-visit',customerName:'Legado',items:[{productId:'p1',name:'Cone',quantity:1,unitPrice:8}],paymentPreference:'pix',orderStatus:'separando'});
-assert.throws(()=>Visitas.converter('legacy-order','pago'),/pedido legado não possui espaço/);
-assert.equal(data.vendas.length,1);
+const preserved=structuredClone(data);
+for(const [method,args] of [['converter',['o1','pago']],['atualizarPedido',['o1','entregue']],['vincularCliente',['o1','c1']],['criarClienteParaPedido',['o1']],['manterVisitante',['o1']],['revisarVinculo',['o1']]]){
+  assert.throws(()=>Visitas[method](...args),/históricos somente para consulta/);
+  assert.deepEqual(data,preserved,'archived records, clients, stock and sales remain unchanged');
+}
+assert.equal(Visitas.clientesCompativeis('o1').length,1);
+global.OnlineOrdersUI={legacy:true,render:()=> 'V2 only',bind:()=> 'V2 bind'};
+assert.equal(VisitasUI.renderOrdersPage(),'V2 only','saved legacy flag cannot restore the old UI');
+assert.equal(VisitasUI.bindOrdersPage(),'V2 bind');
 console.log('visitas.test.js: ok');

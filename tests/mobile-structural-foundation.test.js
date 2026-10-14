@@ -26,13 +26,13 @@ test("fundação mobile oficial cobre componentes, modal, safe area e seis viewp
 
 test("CRM, Campanhas, Catálogo e Pedidos usam a mesma camada sem novas leituras Firebase", () => {
   const index = read("index.html");
-  const modules = ["js/crm-mobile.js", "js/campanhas-ui.js", "js/catalogo-admin.js", "js/visitas.js"].map(read).join("\n");
+  const modules = ["js/crm-mobile.js", "js/campanhas-ui.js", "js/catalogo-admin.js", "js/visitas.js", "js/online-orders-ui.js"].map(read).join("\n");
   assert.ok(index.indexOf("engagement-operations.css") < index.indexOf("mobile-components.css"));
   assert.match(modules, /mobile-page/);
   assert.match(modules, /mobile-modal/);
   assert.match(read("js/online-store-ui.js"), /store-upload-actions/);
   assert.match(modules, /Progresso da campanha/);
-  assert.match(modules, /Gerencie os pedidos online/);
+  assert.match(modules, /Pedidos, reservas e atendimento separados por espaço/);
   assert.doesNotMatch(modules, /\b(?:getDocs|getDoc|onSnapshot|collection|query)\s*\(/);
 });
 

@@ -291,7 +291,7 @@
       }),
       pendingOrders = (db.catalogOrders || []).filter(
         (order) =>
-          !["entregue", "cancelado"].includes(
+          window.OnlineOrderModel?.isV2(order) && !["entregue", "cancelado", "expirado"].includes(
             order.orderStatus || order.status,
           ),
       ),
