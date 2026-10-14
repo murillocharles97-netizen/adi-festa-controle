@@ -72,6 +72,7 @@
   }
   function sanitizePrivateCache(data) {
     if (!data || typeof data !== "object") return data;
+    if(current().role!=='owner'&&Array.isArray(data.catalogOrders))data.catalogOrders=data.catalogOrders.filter(o=>has('sales.viewAll')&&o.spaceId&&window.BusinessContext?.canAccessSpace?.(o.spaceId));
     if (!has("cost.view")) {
       (data.produtos || []).forEach((item) => { delete item.custo; delete item.cost; });
       (data.variacoesProdutos || []).forEach((item) => { delete item.cost; delete item.custo; });

@@ -4,6 +4,11 @@ import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from "./wo
 const storage = getStorage(app);
 const businessId = () => window.BusinessContext?.getCurrentBusinessId?.() || window.FirebaseSession?.businessId || window.FirebaseSession?.profile?.businessId || "";
 const scopeInfo = (scope, entityId) => {
+  if(scope==='store'){
+    const {spaceId,slot}=entityId||{};
+    if(!/^[A-Za-z0-9_-]{3,128}$/.test(spaceId||'')||!['logo','banner','cover'].includes(slot))throw Error('Espaço ou imagem da loja inválido.');
+    return {folder:`businesses/${businessId()}/catalog/spaces/${spaceId}/${slot}`,entityType:'onlineStoreImage',spaceId,slot};
+  }
   if (!['banner','category','product'].includes(scope)) throw Error('Tipo de imagem do catálogo inválido.');
   const plural = scope === 'category' ? 'categories' : `${scope}s`;
   return { folder: `businesses/${businessId()}/catalog/${plural}/${entityId}`, entityType: `catalog${scope[0].toUpperCase()}${scope.slice(1)}` };
@@ -13,7 +18,7 @@ async function upload(scope, entityId, processed, old = {}) {
   if (!navigator.onLine) throw Error('Conecte-se à internet para enviar a imagem.');
   if (!window.FirebaseSession?.user) throw Error('Entre na sua conta para enviar a imagem.');
   const tenantId = businessId(); if (!tenantId) throw Error('Empresa não identificada.');
-  const operationId = crypto.randomUUID(), info = scopeInfo(scope, entityId), extension = processed.extension || 'webp', mainPath = `${info.folder}/main-${operationId}.${extension}`, thumbPath = `${info.folder}/thumb-${operationId}.${extension}`, metadata = { contentType: processed.contentType, cacheControl: 'public,max-age=31536000,immutable', customMetadata: { businessId: tenantId, entityId: String(entityId), entityType: info.entityType, operationId } };
+  const operationId = crypto.randomUUID(), info = scopeInfo(scope, entityId), extension = processed.extension || 'webp', mainPath = `${info.folder}/main-${operationId}.${extension}`, thumbPath = `${info.folder}/thumb-${operationId}.${extension}`, metadata = { contentType: processed.contentType, cacheControl: 'public,max-age=31536000,immutable', customMetadata: { businessId: tenantId, entityId: typeof entityId==='object'?entityId.spaceId:String(entityId), entityType: info.entityType, operationId,...(info.spaceId?{spaceId:info.spaceId,slot:info.slot}:{}) } };
   const uploaded = [];
   try {
     const main = await uploadBytes(ref(storage, mainPath), processed.mainBlob, metadata); uploaded.push(mainPath);

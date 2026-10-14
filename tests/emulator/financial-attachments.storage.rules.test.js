@@ -5,7 +5,7 @@ const { doc, setDoc } = require("firebase/firestore");
 const { ref, uploadBytes, getMetadata } = require("firebase/storage");
 
 let env;
-const projectId = "adi-festa-variations-test", businessId = "financial-storage";
+const projectId = process.env.VECONI_EMULATOR_PROJECT_ID || "adi-festa-variations-test", businessId = "financial-storage";
 test.before(async () => {
   env = await initializeTestEnvironment({ projectId, firestore: { rules: fs.readFileSync("firestore.rules", "utf8") }, storage: { rules: fs.readFileSync("storage.rules", "utf8") } });
   await env.withSecurityRulesDisabled(async (context) => {

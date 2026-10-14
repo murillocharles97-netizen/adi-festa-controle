@@ -5,7 +5,8 @@ service firebase.storage {
     function profile() { return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data; }
     function business(businessId) { return firestore.get(/databases/(default)/documents/businesses/$(businessId)).data; }
     function member(businessId) { return firestore.get(/databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data; }
-    function modernAccess(businessId) { return business(businessId).get('legacyAccessDisabled', false) == true; }
+    function modernAccess(businessId) { return business(businessId).get('legacyAccessDisabled', false) == true
+      || firestore.exists(/databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid)); }
     function canAccess(businessId) {
       return signedIn()
         && business(businessId).active == true
@@ -30,6 +31,19 @@ service firebase.storage {
     }
     function canManageProducts(businessId) {
       return permitted(businessId, 'products.edit') && workspaceWritable(businessId);
+    }
+    function memberProductScope(businessId,productId) {
+      let product=firestore.get(/databases/(default)/documents/businesses/$(businessId)/products/$(productId)).data;
+      return product.businessId == businessId && (product.spaceAccessMode == 'all_spaces'
+            || (product.spaceAccessMode in ['selected_spaces','single_space']
+              && (member(businessId).get('spaceAccess','selected') == 'all'
+                || product.allowedSpaceIds.hasAny(member(businessId).get('allowedSpaceIds',[])))));
+    }
+    function legacyCatalogOwner(businessId) {
+      return canAccess(businessId) && (modernAccess(businessId)?member(businessId).role == 'owner':profile().role == 'owner');
+    }
+    function scopedProduct(businessId,productId) {
+      return legacyCatalogOwner(businessId) || (canAccess(businessId) && modernAccess(businessId) && memberProductScope(businessId,productId));
     }
     function financialSpace(spaceId) {
       return firestore.get(/databases/(default)/documents/financialSpaces/$(spaceId)).data;
@@ -76,19 +90,19 @@ service firebase.storage {
         : subscription.planId in ['professional','premium','trial','internal'];
     }
     match /businesses/{businessId}/products/{productId}/{fileName} {
-      allow read: if canAccess(businessId);
-      allow create, update: if canManageProducts(businessId)
+      allow read: if scopedProduct(businessId,productId);
+      allow create, update: if canManageProducts(businessId) && scopedProduct(businessId,productId)
         && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
         && request.resource.metadata.productId == productId
         && request.resource.metadata.entityType == 'product';
-      allow delete: if canManageProducts(businessId);
+      allow delete: if canManageProducts(businessId) && scopedProduct(businessId,productId);
     }
     match /businesses/{businessId}/products/{productId}/variants/{variantId}/{fileName} {
-      allow read: if canAccess(businessId);
-      allow create, update: if canManageProducts(businessId)
+      allow read: if scopedProduct(businessId,productId);
+      allow create, update: if canManageProducts(businessId) && scopedProduct(businessId,productId)
         && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
@@ -96,40 +110,64 @@ service firebase.storage {
         && request.resource.metadata.productId == productId
         && request.resource.metadata.variantId == variantId
         && request.resource.metadata.entityType == 'productVariant';
-      allow delete: if canManageProducts(businessId);
+      allow delete: if canManageProducts(businessId) && scopedProduct(businessId,productId);
     }
     match /businesses/{businessId}/catalog/banners/{entityId}/{fileName} {
-      allow read: if canAccess(businessId);
-      allow create, update: if canManageProducts(businessId)
+      allow read: if legacyCatalogOwner(businessId);
+      allow create, update: if canManageProducts(businessId) && legacyCatalogOwner(businessId)
         && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
         && request.resource.metadata.entityId == entityId
         && request.resource.metadata.entityType == 'catalogBanner';
-      allow delete: if canManageProducts(businessId);
+      allow delete: if canManageProducts(businessId) && legacyCatalogOwner(businessId);
+    }
+    match /businesses/{businessId}/catalog/spaces/{spaceId}/{slot}/{fileName} {
+      function authorizedStoreSpace(){
+        let space=financialSpace(spaceId);
+        return permitted(businessId,'products.edit') && space.active != false
+          && space.get('businessId',space.get('linkedBusinessId','')) == businessId
+          && space.get('linkedBusinessId',businessId) == businessId
+          && space.get('capabilities',{}).get('products',false) == true
+          && (!modernAccess(businessId) || member(businessId).role == 'owner'
+            || member(businessId).get('spaceAccess','selected') == 'all'
+            || spaceId in member(businessId).get('allowedSpaceIds',[]));
+      }
+      allow read: if authorizedStoreSpace();
+      allow create: if resource == null && authorizedStoreSpace() && workspaceWritable(businessId)
+        && slot in ['logo','banner','cover']
+        && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(webp|jpeg)')
+        && request.resource.metadata.businessId == businessId
+        && request.resource.metadata.spaceId == spaceId
+        && request.resource.metadata.slot == slot
+        && request.resource.metadata.entityType == 'onlineStoreImage';
+      // Immutable assets. Do not remove the image still referenced by a saved store.
+      allow update, delete: if false;
     }
     match /businesses/{businessId}/catalog/categories/{entityId}/{fileName} {
-      allow read: if canAccess(businessId);
-      allow create, update: if canManageProducts(businessId)
+      allow read: if legacyCatalogOwner(businessId);
+      allow create, update: if canManageProducts(businessId) && legacyCatalogOwner(businessId)
         && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
         && request.resource.metadata.entityId == entityId
         && request.resource.metadata.entityType == 'catalogCategory';
-      allow delete: if canManageProducts(businessId);
+      allow delete: if canManageProducts(businessId) && legacyCatalogOwner(businessId);
     }
     match /businesses/{businessId}/catalog/products/{entityId}/{fileName} {
-      allow read: if canAccess(businessId);
-      allow create, update: if canManageProducts(businessId)
+      allow read: if legacyCatalogOwner(businessId);
+      allow create, update: if canManageProducts(businessId) && legacyCatalogOwner(businessId)
         && fileName.matches('^(main|thumb)-[A-Za-z0-9_-]{1,80}\\.(webp|jpg)$')
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(webp|jpeg)')
         && request.resource.metadata.businessId == businessId
         && request.resource.metadata.entityId == entityId
         && request.resource.metadata.entityType == 'catalogProduct';
-      allow delete: if canManageProducts(businessId);
+      allow delete: if canManageProducts(businessId) && legacyCatalogOwner(businessId);
     }
     match /financialSpaces/{spaceId}/entries/{entryId}/{fileName} {
       allow read: if canAccessFinancialSpace(spaceId)

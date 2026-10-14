@@ -3,13 +3,14 @@ const test=require('node:test'),fs=require('node:fs');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
 const {doc,setDoc,updateDoc}=require('firebase/firestore');
 const {ref,uploadBytes,getMetadata,updateMetadata,deleteObject}=require('firebase/storage');
-let env;const bid='qa-epoch-storage';
+let env;const bid='qa-epoch-storage',attachmentNonce=`personal-attachment-${Date.now()}`;
 const metadata=(generation='5',nonce='generation-five-upload-0001')=>({contentType:'image/webp',customMetadata:{businessId:bid,productId:'product-a',entityType:'product',workspaceGeneration:generation,workspaceWriteId:nonce}});
 test.before(async()=>{
-  env=await initializeTestEnvironment({projectId:'adi-festa-variations-test',firestore:{rules:fs.readFileSync('firestore.rules','utf8')},storage:{rules:fs.readFileSync('storage.rules','utf8')}});
+  env=await initializeTestEnvironment({projectId:process.env.VECONI_EMULATOR_PROJECT_ID||'adi-festa-variations-test',firestore:{rules:fs.readFileSync('firestore.rules','utf8')},storage:{rules:fs.readFileSync('storage.rules','utf8')}});
   await env.withSecurityRulesDisabled(async context=>{
     const db=context.firestore();
-    await setDoc(doc(db,'businesses',bid),{active:true,ownerId:'epoch-storage-owner',workspaceGeneration:5,legacyAccessDisabled:true});
+    // The existing Finance entitlement rule requires a subscription even in a reset fixture.
+    await setDoc(doc(db,'businesses',bid),{active:true,ownerId:'epoch-storage-owner',workspaceGeneration:5,legacyAccessDisabled:true,subscription:{planId:'internal',status:'active'}});
     for(const uid of ['epoch-storage-owner','epoch-storage-removed'])await setDoc(doc(db,'users',uid),{businessId:bid,active:true,role:'owner'});
     await setDoc(doc(db,'businesses',bid,'members','epoch-storage-owner'),{role:'owner',status:'active'});
   });
@@ -41,7 +42,7 @@ test('business-bound personal attachment cannot bypass the reset lock',async()=>
     await setDoc(doc(db,'financialSpaces','scoped-private-attachment','entries','entry-a'),{id:'entry-a'});
   });
   const target=ref(env.authenticatedContext('epoch-storage-owner').storage(),'financialSpaces/scoped-private-attachment/entries/entry-a/qa.pdf');
-  const metadata={contentType:'application/pdf',customMetadata:{financialSpaceId:'scoped-private-attachment',entryId:'entry-a',ownerUid:'epoch-storage-owner',entityType:'financialAttachment',workspaceGeneration:'5',workspaceWriteId:'personal-attachment-00001'}};
+  const metadata={contentType:'application/pdf',customMetadata:{financialSpaceId:'scoped-private-attachment',entryId:'entry-a',ownerUid:'epoch-storage-owner',entityType:'financialAttachment',workspaceGeneration:'5',workspaceWriteId:attachmentNonce}};
   await assertFails(uploadBytes(target,new Uint8Array([1]),metadata));
   await env.withSecurityRulesDisabled(context=>updateDoc(doc(context.firestore(),'businesses',bid),{workspaceReset:{status:'COMPLETED'}}));
   await assertFails(uploadBytes(target,new Uint8Array([1]),{...metadata,customMetadata:{...metadata.customMetadata,workspaceGeneration:'4'}}));

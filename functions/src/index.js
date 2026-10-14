@@ -11,6 +11,8 @@ const {logger}=require('firebase-functions');
 const {mercadoPagoService,billingExternalReference,pixExternalReference,normalizeDeviceSessionId,providerErrorDiagnostics}=require('./services/mercado-pago-service');
 const {normalizeBillingPayerEmail,providerIndicatesPayerEmailMismatch}=require('./services/billing-payer-service');
 const {permissionService}=require('./services/permission-service');
+const {onlineStoreService}=require('./services/online-store-service');
+const {onlineOrderService}=require('./services/online-order-service');
 const {productSpreadsheetService}=require('./services/product-spreadsheet-service');
 const {legacyPlanTransitionService,assertLegacyCheckoutReady}=require('./services/legacy-plan-transition-service');
 const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
@@ -75,6 +77,19 @@ exports.processBusinessReset=onDocumentWritten({region:REGION,memory:'512MiB',ti
   }
 });
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
+const onlineStores=onlineStoreService(db);
+const {auditOnline}=require('./shared/online-audit');
+exports.getOnlineStore=onCall(CATALOG_OPTIONS,request=>onlineStores.load(request));
+exports.saveOnlineStore=onCall(CATALOG_OPTIONS,request=>auditOnline('STORE_CONFIGURATION',request,()=>onlineStores.save(request)));
+const onlineOrders=onlineOrderService(db);
+exports.getOnlineOrderStatus=onCall(CATALOG_OPTIONS,request=>onlineOrders.status(request));
+exports.changeOnlineOrderStatus=onCall(CATALOG_OPTIONS,request=>auditOnline('ORDER_STATUS',request,()=>onlineOrders.change(request)));
+exports.claimOnlineOrderFinalization=onCall(CATALOG_OPTIONS,request=>auditOnline('SALE_CLAIM',request,()=>onlineOrders.claim(request)));
+exports.acknowledgeOnlineOrderFinalization=onCall(CATALOG_OPTIONS,request=>auditOnline('SALE_COMPLETED',request,()=>onlineOrders.acknowledge(request)));
+exports.expireOnlineOrderReservations=onSchedule({region:REGION,schedule:'every 1 minutes',memory:'256MiB',timeoutSeconds:120,maxInstances:1},async()=>{
+  const result=await require('./services/online-order-expiry').onlineOrderExpiry(db).sweep();
+  logger.info('[ONLINE_ORDER_EXPIRY_FINISHED]',result);
+});
 const ONBOARDING_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20};
 const validCatalogToken=value=>/^[A-Za-z0-9_-]{20,128}$/.test(String(value||''));
 const normalizePhone=value=>{let digits=String(value||'').replace(/\D/g,'');digits=digits.replace(/^0+/,'');if(digits.length===10||digits.length===11)digits=`55${digits}`;return digits};
@@ -687,6 +702,8 @@ exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
   const started=Date.now();
   try{
     const context=await publicCatalog(request),phone=normalizePhone(request.data?.phone);
+    if(context.catalog.schemaVersion>=6||(await db.doc(`catalogStoreBindings/${context.catalogToken}`).get()).exists)
+      throw new HttpsError('failed-precondition','O portal de clientes desta loja será habilitado após a validação do isolamento por espaço.');
     if(!validPhone(phone))throw new HttpsError('invalid-argument','Informe um telefone com DDD.');
     await enforcePublicRateLimit(request,context.catalogToken,'identify',12);
     const clients=await db.collection(`businesses/${context.catalog.businessId}/clients`).where('normalizedPhone','==',phone).limit(2).get();
@@ -703,6 +720,9 @@ exports.identifyCatalogCustomer=onCall(CATALOG_OPTIONS,async request=>{
 exports.submitCatalogOrder=onCall(CATALOG_OPTIONS,async request=>{
   try{
     const context=await publicCatalog(request),data=request.data||{};
+    if(context.catalog.schemaVersion>=6){await enforcePublicRateLimit(request,context.catalogToken,'order',24);return auditOnline('ORDER_SUBMITTED',request,()=>onlineOrders.submit(request));}
+    if((await db.doc(`catalogStoreBindings/${context.catalogToken}`).get()).exists)
+      throw new HttpsError('failed-precondition','Esta loja aguarda republicação no novo fluxo de pedidos.');
     await requireBusinessFeature(context.catalog.businessId,'onlineOrders','orders.receive');
     await enforcePublicRateLimit(request,context.catalogToken,'order',24);
     const canReceive=(context.catalog.acceptingOrders===true&&withinCatalogHours(context.catalog))||context.catalog.closedBehavior==='accept_for_later';if(!canReceive)throw new HttpsError('failed-precondition','Este catálogo não está recebendo pedidos.');

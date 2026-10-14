@@ -112,6 +112,7 @@ function canPullSource(name) {
   if (name === "clients") return has("customers.view");
   if (name === "messageHistory" && has("customers.view") && has("customers.edit")) return true;
   if (name === "sales") return has("sales.create") || has("sales.viewAll");
+  if (name === "catalogOrders") return has("sales.viewAll");
   if (name === "stockMovements") return has("inventory.view");
   if (["productFinancials", "variantFinancials", "stockMovementFinancials"].includes(name))
     return has("cost.view");
@@ -128,6 +129,7 @@ function canPullSource(name) {
 // coleções continuam chegando pelo sinal incremental ou por sincronização
 // manual, sem varrer todo o histórico de uma conta nova no dispositivo.
 const DEFAULT_PULL_NAMES = [
+    "catalogOrders",
     "clients",
     "sales",
     "productFinancials",
@@ -1915,6 +1917,13 @@ async function commitQueueItem(item) {
   await runTransaction(db, async (transaction) => {
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
+    const onlineSaleWrite = writes.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data?.onlineOrderId);
+    let onlineClaim=null;
+    if(onlineSaleWrite){
+      const s=await transaction.get(doc(db,'businesses',businessId,'catalogOrders',onlineSaleWrite.data.onlineOrderId));onlineClaim=s.exists()?s.data():null;
+      if(!onlineClaim||onlineClaim.finalizationStatus!=='pending'||onlineClaim.finalizationOperationId!==operationId||onlineClaim.saleId!==onlineSaleWrite.entityId||onlineClaim.finalizationActorUid!==currentUser.uid)
+        throw Object.assign(Error('A conclusão do pedido não está autorizada. Retome o pedido original.'),{code:'online-order-finalization-invalid'});
+    }
     const commitProductImportFence = await prepareProductImportFence({transaction,db,businessId,writes,doc,serverTimestamp});
     for (const write of writes.filter((entry) =>
       entry.entityType === "sales" && entry.operation === "create")) {
@@ -2350,6 +2359,13 @@ async function commitQueueItem(item) {
               (Number(data[field]) - Number(write.before?.[field] ?? 0));
         if (write.entityType === "clients" && Number.isFinite(merged.saldo))
           merged.saldo = roundedMoney(merged.saldo);
+        if(['products','productVariants'].includes(write.entityType)){
+          const quantity=Number(base.onlineReservedStock||0),key=write.entityType==='products'?`p_${write.entityId}`:`v_${write.entityId}`,own=Number(onlineClaim?.reservedQuantities?.[key]||0),field=write.entityType==='products'?'estoqueAtual':'stock';
+          if(quantity>0&&!base.allowNegativeStock&&Number(merged[field])<quantity-own)
+            throw Object.assign(Error('Este estoque está reservado para pedidos online. Atualize a venda ou conclua o pedido correspondente.'),{code:'online-stock-reserved'});
+          merged.onlineReservedStock=quantity;
+          merged.onlineOrderFinalizationId=onlineClaim?.id||null;
+        }
         if (
           write.entityType === "clients" &&
           financialEffect &&
@@ -3580,6 +3596,14 @@ async function pullCloudCollections(options = {}) {
       documents,
       options: { authoritative: !since },
     });
+    if(name==='catalogOrders'&&canPullSource('productVariants')){
+      // Resume reservation state only for affected variable products. Never
+      // turn bootstrap into a global variants scan or one listener per item.
+      const parentIds=new Set(documents.flatMap(o=>(o.items||[]).filter(i=>i.variantId).map(i=>i.productId)));
+      const variants=[];
+      for(const id of parentIds)variants.push(...await repositories.productVariants.listWherePaged('parentProductId',id));
+      if(variants.length)pendingApplications.push({name:'productVariants',documents:variants,options:{authoritative:true}});
+    }
     // Nunca avance o cursor usando o relógio do aparelho. Um celular com hora
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
@@ -6237,8 +6261,38 @@ async function readIntegratedSale(intent, { flush = false } = {}) {
   applyCloudCollection("sales", [sale], { authoritative: true });
   return sale;
 }
+async function readOnlineOrderSale(order,{flush=false}={}){
+  if(!currentUser||!navigator.onLine||order.businessId!==activeBusinessId())throw Error('Conecte-se à empresa do pedido para concluir a venda.');
+  if(flush)await processSyncQueue({force:true});
+  const snapshot=await getDocFromServer(doc(db,'businesses',activeBusinessId(),'sales',order.saleId));
+  if(order.businessId!==activeBusinessId())throw Error('A empresa ativa mudou. Retome o pedido na empresa original.');
+  if(!snapshot.exists())return null;
+  const sale=cleanCloudItem({id:snapshot.id,...snapshot.data()});
+  if(sale.onlineOrderId!==order.id||sale.operationId!==order.finalizationOperationId)throw Error('Venda diferente do pedido. Revisão necessária.');
+  applyCloudCollection('sales',[sale],{authoritative:true});return sale;
+}
 window.SyncFirebase = {
+  applyOnlineOrderResult: order => {
+    if (!order || order.businessId !== activeBusinessId() || order.source !== 'online_store') throw Error('Pedido de outra empresa.');
+    applyCloudCollection('catalogOrders', [order], {authoritative:true});
+  },
+  refreshOnlineOrderStock: async order => {
+    if (!currentUser || order.businessId !== activeBusinessId() || !navigator.onLine) throw Error('Conecte-se à empresa do pedido.');
+    const products = [], variants = [];
+    for (const id of new Set(order.items.map(i=>i.productId))) {
+      const snap = await getDocFromServer(doc(db,'businesses',order.businessId,'products',id));
+      if (snap.exists()) products.push({id:snap.id,...snap.data()});
+    }
+    // Canonical ProductVariations.recomputeInData needs ALL sibling variations,
+    // not just the one ordered; otherwise a partial cache could corrupt the parent total.
+    for (const id of new Set(order.items.filter(i=>i.variantId).map(i=>i.productId)))
+      variants.push(...await repositories.productVariants.listWherePaged('parentProductId',id));
+    if (order.businessId !== activeBusinessId()) throw Error('A empresa ativa mudou.');
+    applyCloudCollection('products',products,{authoritative:true});
+    if (variants.length) applyCloudCollection('productVariants',variants,{authoritative:true});
+  },
   readIntegratedSale,
+  readOnlineOrderSale,
   setUser,
   setAuthReady: (value) => emit({ authReady: Boolean(value) }),
   stop: () => setUser(null),

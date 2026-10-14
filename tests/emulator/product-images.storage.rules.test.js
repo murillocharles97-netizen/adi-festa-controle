@@ -15,7 +15,7 @@ const {
 } = require("firebase/storage");
 
 let env;
-const projectId = "adi-festa-variations-test",
+const projectId = process.env.VECONI_EMULATOR_PROJECT_ID || "adi-festa-variations-test",
   businessA = "empresa-imagem-a",
   businessB = "empresa-imagem-b";
 

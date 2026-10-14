@@ -2,7 +2,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require("@firebase/rules-unit-testing");
-const { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, runTransaction } = require("firebase/firestore");
+const { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, deleteDoc, where, runTransaction } = require("firebase/firestore");
 
 const projectId = "adi-festa-variations-test";
 const businessId = "team-access-v150";
@@ -23,6 +23,11 @@ test.before(async () => {
   env = await initializeTestEnvironment({ projectId, firestore: { rules: fs.readFileSync("firestore.rules", "utf8") } });
   await env.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
+    // Remove only receipts created by THIS fixture in previous test runs.
+    for(const name of ['sales','charges','messageHistory','processedOperations']){
+      const stale=await getDocs(collection(db,'businesses',businessId,name));
+      await Promise.all(stale.docs.map(row=>deleteDoc(row.ref)));
+    }
     const subscription = { planId: "internal", status: "active" };
     await setDoc(doc(db, "businesses", businessId), { id: businessId, ownerId: "owner-team", active: true, subscription });
     await setDoc(doc(db, "businesses", foreignBusinessId), { id: foreignBusinessId, ownerId: "owner-foreign", active: true, subscription });
@@ -39,7 +44,7 @@ test.before(async () => {
     await setDoc(doc(db, "businesses", foreignBusinessId, "members", "owner-foreign"), member("owner-foreign", "owner", ownerPermissions, []));
     for (const id of [spaceA, spaceB])
       await setDoc(doc(db, "financialSpaces", id), { id, name: id, type: "business", linkedBusinessId: businessId, businessId, ownerUid: "owner-team", active: true, status: "active", capabilities: { finance: true, sales: true, products: true, inventory: true, goals: true } });
-    await setDoc(doc(db, "businesses", businessId, "products", "operational-product"), { id: "operational-product", businessId, nome: "Produto", preco: 25, estoqueAtual: 10, active: true });
+    await setDoc(doc(db, "businesses", businessId, "products", "operational-product"), { id: "operational-product", businessId, nome: "Produto", preco: 25, estoqueAtual: 10, active: true, spaceAccessMode:'selected_spaces',allowedSpaceIds:[spaceA],defaultSpaceId:spaceA,spaceScopeVersion:1 });
     await setDoc(doc(db, "businesses", businessId, "clients", "charge-customer"), { id: "charge-customer", businessId, nome: "Cliente Cobrança", saldo: -550, financialVersion: 7, active: true });
     await setDoc(doc(db, "businesses", businessId, "productFinancials", "operational-product"), { id: "operational-product", productId: "operational-product", businessId, custo: 9 });
     await setDoc(doc(db, "financialSpaces", spaceA, "entries", "private-entry"), { id: "private-entry", financialSpaceId: spaceA, ownerUid: "owner-team", amountCents: 2500 });

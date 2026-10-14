@@ -17,7 +17,9 @@ assert.match(admin,/operationMode/);
 assert.match(admin,/scheduled_visit/);
 assert.match(admin,/qrcode/);
 assert.match(bridge,/schemaVersion:5/);
-assert.match(bridge,/legacyRedirect:true/);
+assert.doesNotMatch(bridge,/legacyRedirect:true/); // Never redirect/re-publish ambiguous catalogs automatically.
+assert.match(bridge,/Associe esta loja antiga a um espaço/);
+assert.doesNotMatch(bridge,/CatalogoUniversal\?\.ensure\?\.\(\)/);
 assert.match(portal,/legacy-token-redirected/);
 assert.match(portal,/httpsCallable\(functions,'identifyCatalogCustomer'\)/);
 assert.match(portal,/httpsCallable\(functions,'submitCatalogOrder'\)/);
