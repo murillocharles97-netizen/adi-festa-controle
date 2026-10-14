@@ -6,6 +6,8 @@ const {doc,getDoc,setDoc,writeBatch,Timestamp}=require('firebase/firestore');
 
 let env;
 const projectId='adi-festa-variations-test';
+const authEmulator=process.env.FIREBASE_AUTH_EMULATOR_HOST||'127.0.0.1:9099';
+if(!/^(localhost|127\.0\.0\.1):\d+$/.test(authEmulator))throw Error('Local Auth emulator required');
 
 test.before(async()=>{
   env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});
@@ -80,13 +82,13 @@ test('planos são somente leitura e não existem gravações públicas paralelas
 
 test('conta nova autentica novamente, mas criação empresarial direta continua bloqueada',async()=>{
   const suffix=Date.now(),email=`new-company-${suffix}@example.test`,password='Test@123456';
-  const signUp=await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
+  const signUp=await fetch(`http://${authEmulator}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
   const signUpBody=await signUp.json();
   assert.equal(signUp.status,200,JSON.stringify(signUpBody));
   const created=signUpBody,uid=created.localId;
   const db=env.authenticatedContext(uid,{email}).firestore(),{commit}=onboardingBatch(db,uid,email);
   await assertFails(commit());
-  const login=await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
+  const login=await fetch(`http://${authEmulator}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});
   const loginBody=await login.json();
   assert.equal(login.status,200,JSON.stringify(loginBody));
   const authenticated=loginBody;

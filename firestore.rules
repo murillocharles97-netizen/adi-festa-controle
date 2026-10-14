@@ -786,7 +786,9 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
     function boundCatalog(token) {
-      return exists(/databases/$(database)/documents/catalogStoreBindings/$(token));
+      return exists(/databases/$(database)/documents/catalogStoreBindings/$(token))
+        || (exists(/databases/$(database)/documents/publicCatalogs/$(token))
+          && get(/databases/$(database)/documents/publicCatalogs/$(token)).data.get('legacyStoreRetired',false));
     }
     function scopedCatalogOrder(businessId, order) {
       let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
@@ -800,7 +802,8 @@ service cloud.firestore {
           && (!modern || actor.get('spaceAccess','selected') == 'all' || space in actor.get('allowedSpaceIds',[]))));
     }
     match /publicCatalogs/{visitToken} {
-      allow get: if true;
+      allow get: if resource == null || !resource.data.get('legacyStoreRetired',false)
+        || (signedIn() && belongsToBusiness(resource.data.businessId));
       allow list: if false;
       // Old links remain readable; only the server may publish after explicit
       // owner association. Stale PWAs cannot recreate a mixed global catalog.
@@ -1414,11 +1417,16 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /settings/{documentId} {
+        function preservesStoreRetirement() {
+          return resource == null || !resource.data.get('legacyStoreRetired',false)
+            || (request.resource.data.get('legacyStoreRetired',false) == true
+              && !request.resource.data.keys().hasAny(['catalogSettings']));
+        }
         allow read: if canReadCollection(businessId, 'settings');
-        allow create: if canCreateGenericDocument(businessId, 'settings', documentId)
-          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && request.resource.data.businessId == businessId);
-        allow update: if canUpdateGenericDocument(businessId, 'settings', documentId)
-          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && resource.data.businessId == businessId && request.resource.data.businessId == businessId);
+        allow create: if preservesStoreRetirement() && (canCreateGenericDocument(businessId, 'settings', documentId)
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && request.resource.data.businessId == businessId));
+        allow update: if preservesStoreRetirement() && (canUpdateGenericDocument(businessId, 'settings', documentId)
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && resource.data.businessId == businessId && request.resource.data.businessId == businessId));
         allow delete: if false;
       }
       match /syncMetadata/{documentId} {

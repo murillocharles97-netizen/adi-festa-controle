@@ -76,9 +76,11 @@ assert.match(rules,/allow list: if false/);
 
 const catalogBridge=read('js/firebase/catalog-bridge.js');
 const publicCatalog=read('js/catalogo-publico.js');
-assert.match(catalogBridge,/businessSlug:business\.slug/);
-assert.match(catalogBridge,/businessName:business\.name/);
-assert.match(catalogBridge,/publicSettings:/);
+assert.doesNotMatch(catalogBridge,/setDoc|onSnapshot/);
+const storeService=read('functions/src/services/online-store-service.js');
+assert.match(storeService,/businessId:c\.businessId/);
+assert.match(storeService,/spaceId:c\.spaceId/);
+assert.match(storeService,/publicSettings:settings/);
 assert.match(publicCatalog,/businessId:catalog\.businessId/);
 
 const backup=read('js/backup.js');

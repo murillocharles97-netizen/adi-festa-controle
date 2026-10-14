@@ -87,7 +87,7 @@ test("branding visível fixo não usa mais AF ou Adi Festa como marca da platafo
   assert.match(app, /businessReference/);
   assert.match(read("functions/src/services/mercado-pago-service.js"), /reason:`VECONI - \$\{plan\.name\}`/);
   assert.match(read("js/catalogo-publico.js"), /publicOrderNumber:`VC\$\{Date\.now\(\)/);
-  assert.match(read("functions/src/index.js"), /publicOrderNumber=`VC\$\{Date\.now\(\)/);
+  assert.match(read("functions/src/services/online-order-service.js"), /publicOrderNumber:`VC-/);
 });
 
 test("identificadores técnicos legados permanecem compatíveis", () => {

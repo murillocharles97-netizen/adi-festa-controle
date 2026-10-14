@@ -4,7 +4,8 @@ const fs = require("node:fs");
 
 const portal = fs.readFileSync("js/catalogo-publico.js", "utf8");
 const css = fs.readFileSync("css/catalogo.css", "utf8");
-const admin = fs.readFileSync("js/catalogo-admin.js", "utf8");
+const admin = fs.readFileSync("functions/src/shared/online-store.js", "utf8");
+const orders = fs.readFileSync("functions/src/services/online-order-service.js", "utf8");
 const functions = fs.readFileSync("functions/src/index.js", "utf8");
 const html = fs.readFileSync("catalogo.html", "utf8");
 
@@ -44,16 +45,16 @@ test("modal e seletor de variação são centrais no desktop", () => {
 
 test("modalidade escolhida é validada e persistida pelo engine atual", () => {
   assert.match(portal, /serviceModeId:data\.serviceModeId\|\|null/);
-  assert.match(functions, /configuredServiceModes/);
-  assert.match(functions, /Tipo de pedido inválido/);
-  assert.match(functions, /serviceModeId:selectedServiceMode/);
-  assert.match(functions, /serviceModeType:selectedServiceMode/);
-  assert.match(functions, /serviceModeLabel:selectedServiceMode/);
+  assert.match(orders, /serviceMode/);
+  assert.match(orders, /Entrega ou retirada não disponível/);
+  assert.match(orders, /serviceModeId:serviceMode/);
+  assert.match(orders, /serviceModeType:serviceMode/);
+  assert.match(orders, /serviceModeLabel:/);
 });
 
 test("apresentação pública preserva enquadramento sem leituras de metadata", () => {
-  assert.match(admin, /imagePresentation: displayImage\?\.presentation/);
-  assert.match(admin, /imagePresentation: productDisplayImage\?\.presentation/);
+  assert.match(admin, /productImage:image/);
+  assert.match(admin, /productMainImage:image/);
   assert.match(portal, /function imageStyle\(item\)/);
   assert.match(css, /--catalog-image-fit/);
   assert.doesNotMatch(portal, /getMetadata|listAll|firebase-storage/);

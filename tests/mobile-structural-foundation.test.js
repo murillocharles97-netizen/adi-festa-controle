@@ -30,17 +30,17 @@ test("CRM, Campanhas, Catálogo e Pedidos usam a mesma camada sem novas leituras
   assert.ok(index.indexOf("engagement-operations.css") < index.indexOf("mobile-components.css"));
   assert.match(modules, /mobile-page/);
   assert.match(modules, /mobile-modal/);
-  assert.match(modules, /mobile-file-picker/);
+  assert.match(read("js/online-store-ui.js"), /store-upload-actions/);
   assert.match(modules, /Progresso da campanha/);
   assert.match(modules, /Gerencie os pedidos online/);
   assert.doesNotMatch(modules, /\b(?:getDocs|getDoc|onSnapshot|collection|query)\s*\(/);
 });
 
-test("editores do catálogo não expõem file input ou checkbox nativo no visual", () => {
-  const catalog = read("js/catalogo-admin.js");
-  assert.match(catalog, /mobile-file-picker-button/);
-  assert.match(catalog, /mobile-check-mark/);
+test("editores V2 mantêm seleção e uploads no painel próprio", () => {
+  const catalog = read("js/online-store-ui.js");
+  assert.match(catalog, /data-store-image/);
+  assert.match(catalog, /store-check/);
   assert.doesNotMatch(catalog, /<label>Imagem(?: própria)?<input type="file"/);
-  assert.match(catalog, /Editar categoria/);
-  assert.match(catalog, /Editar produto/);
+  assert.match(catalog, /Ordem das categorias/);
+  assert.match(catalog, /Produtos deste espaço/);
 });
