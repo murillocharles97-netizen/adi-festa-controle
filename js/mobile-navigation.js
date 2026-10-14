@@ -258,7 +258,9 @@
 
   function updateOrders() {
     const orders = window.DB?.carregar?.().catalogOrders || [];
-    const count = orders.filter((order) => order.orderStatus === "recebido").length;
+    const count = orders.filter((order) => window.OnlineOrderModel?.isV2(order)
+      && !order.deletedAt && order.orderStatus === "recebido"
+      && window.Visitas?.canReadOrder(order)).length;
     document.querySelectorAll("[data-mobile-orders-count]").forEach((item) => {
       item.hidden = count < 1;
       item.textContent = count > 99 ? "99+" : String(count);
