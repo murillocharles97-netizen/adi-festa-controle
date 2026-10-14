@@ -379,18 +379,68 @@ service cloud.firestore {
         'spaceAccessMode', 'allowedSpaceIds', 'defaultSpaceId', 'spaceScopeVersion'
       ]);
     }
+    // Legacy unscoped products are owner-review only. Shared products are
+    // explicit; a restricted operator may never widen their scope.
+    function canAccessProduct(businessId, product) {
+      return (
+        roleForBusiness(businessId) == 'owner'
+        || (product.businessId == businessId && (
+          product.spaceAccessMode == 'all_spaces'
+          || (product.spaceAccessMode in ['selected_spaces','single_space'] && (
+              teamMember(businessId).get('spaceAccess','selected') == 'all'
+              || product.allowedSpaceIds.hasAny(teamMember(businessId).allowedSpaceIds)
+            ))
+        ))
+      );
+    }
+    function canAssignProductScope(businessId, product) {
+      return roleForBusiness(businessId) == 'owner'
+        || (teamMember(businessId).get('spaceAccess','selected') == 'all' && canAccessProduct(businessId,product))
+        || (product.get('spaceAccessMode','') in ['selected_spaces','single_space']
+          && product.get('allowedSpaceIds',[]).size() > 0
+          && product.allowedSpaceIds.hasOnly(teamMember(businessId).get('allowedSpaceIds',[])));
+    }
     function onlyOperationalProductStockChanged(product, persistedProduct) {
       return product.diff(persistedProduct).affectedKeys().hasOnly([
-        'estoqueAtual', 'estoque', 'totalStock', 'hasAvailableStock',
+        'estoqueAtual', 'estoque', 'totalStock', 'hasAvailableStock', 'onlineOrderFinalizationId',
         'updatedAt', 'updatedByUid', 'actorUid', 'actorNameSnapshot',
         'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
       ]);
     }
     function onlyOperationalVariantStockChanged(variant, persistedVariant) {
       return variant.diff(persistedVariant).affectedKeys().hasOnly([
-        'stock', 'updatedAt', 'updatedByUid', 'actorUid',
+        'stock', 'onlineOrderFinalizationId', 'updatedAt', 'updatedByUid', 'actorUid',
         'actorNameSnapshot', 'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
       ]);
+    }
+    function onlineReservationAllowance(businessId,data,key) {
+      let id=data.get('onlineOrderFinalizationId',null);
+      let order=id != null ? get(/databases/$(database)/documents/businesses/$(businessId)/catalogOrders/$(id)).data : {};
+      let sale=id != null ? getAfter(/databases/$(database)/documents/businesses/$(businessId)/sales/$(order.saleId)).data : {};
+      return id == null ? 0 : (order.finalizationStatus == 'pending'
+        && order.finalizationActorUid == request.auth.uid
+        && !exists(/databases/$(database)/documents/businesses/$(businessId)/sales/$(order.saleId))
+        && sale.onlineOrderId == id && sale.operationId == order.finalizationOperationId
+        && sale.spaceId == order.spaceId && sale.actorUid == request.auth.uid
+        ? order.reservedQuantities.get(key,0) : -1);
+    }
+    function preservesOnlineStock(businessId,data,before,field,key) {
+      let held=before.get('onlineReservedStock',0);
+      return data.get('onlineReservedStock',0) == held
+        && (held == 0 || data.get(field,0) >= before.get(field,0)
+          || data.get(field,0) >= held || before.get('allowNegativeStock',false)
+          || (data.get('onlineOrderFinalizationId',null) != null
+            && data.get(field,0) >= held-onlineReservationAllowance(businessId,data,key)));
+    }
+    function validOnlineSale(businessId,saleId,data) {
+      let id=data.get('onlineOrderId',null);
+      let order=id != null ? get(/databases/$(database)/documents/businesses/$(businessId)/catalogOrders/$(id)).data : {};
+      return id == null || (order.finalizationStatus == 'pending' && order.saleId == saleId
+        && order.finalizationOperationId == data.operationId && order.spaceId == data.spaceId
+        && order.finalizationActorUid == request.auth.uid && data.actorUid == request.auth.uid
+        && data.status == order.saleStatus && data.formaPagamento == order.paymentMethod
+        && data.get('clienteId',null) == order.clientId && math.round(data.valorFinal*100) == math.round(order.total*100)
+        && data.itens == order.saleItems);
     }
     function preservesSaleActor(sale, persistedSale) {
       return (
@@ -726,21 +776,35 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /publicCatalogSlugs/{slug} {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+    match /catalogStoreBindings/{token} {
+      allow get: if signedIn() && (resource == null || (belongsToBusiness(resource.data.businessId)
+        && canAccessSpace(resource.data.businessId, resource.data.spaceId)));
+      allow list, create, update, delete: if false;
+    }
+    function boundCatalog(token) {
+      return exists(/databases/$(database)/documents/catalogStoreBindings/$(token));
+    }
+    function scopedCatalogOrder(businessId, order) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let modern = exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+      let actor = modern ? get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data : userProfile();
+      let space = order.get('spaceId','');
+      let active = modern ? actor.get('status','') == 'active' : !business.get('legacyAccessDisabled',false) && actor.get('businessId','') == businessId && actor.get('active',false);
+      return signedIn() && business.active == true && active && (actor.role == 'owner'
+        || (space is string && space != '' && !(space in ['all','all_spaces'])
+          && (actor.get('permissions',{}).get('sales.viewAll',false) || (!modern && actor.role in ['admin','manager']))
+          && (!modern || actor.get('spaceAccess','selected') == 'all' || space in actor.get('allowedSpaceIds',[]))));
+    }
     match /publicCatalogs/{visitToken} {
       allow get: if true;
       allow list: if false;
-      allow create: if signedIn()
-        && request.resource.data.businessId is string
-        && workspaceWriteAllowed(request.resource.data.businessId)
-        && belongsToBusiness(request.resource.data.businessId)
-        && subscriptionAllowsWrites(request.resource.data.businessId)
-        && get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
-      allow update: if signedIn()
-        && resource.data.businessId == request.resource.data.businessId
-        && workspaceWriteAllowed(resource.data.businessId)
-        && belongsToBusiness(resource.data.businessId)
-        && subscriptionAllowsWrites(resource.data.businessId)
-        && get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.subscription.planId in ['internal', 'trial', 'professional', 'premium'];
+      // Old links remain readable; only the server may publish after explicit
+      // owner association. Stale PWAs cannot recreate a mixed global catalog.
+      allow create, update: if false;
       allow delete: if false;
 
       match /orders/{orderId} {
@@ -750,16 +814,17 @@ service cloud.firestore {
         // Pedidos públicos são validados e gravados exclusivamente pela
         // Cloud Function submitCatalogOrder. O Admin SDK ignora estas regras.
         allow create: if false;
-        allow get: if true;
-        allow list: if signedIn() && belongsToBusiness(catalog().businessId);
-        allow update: if signedIn() && belongsToBusiness(catalog().businessId) && workspaceWriteAllowed(catalog().businessId);
+        allow get: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
+        allow list: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
+        allow update: if signedIn() && !boundCatalog(visitToken) && catalog().get('schemaVersion',0) < 6
+          && scopedCatalogOrder(catalog().businessId, resource.data) && workspaceWriteAllowed(catalog().businessId);
         allow delete: if false;
       }
 
       match /campaignProgress/{phoneHash} {
-        allow get: if true;
+        allow get: if !boundCatalog(visitToken);
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
@@ -767,27 +832,27 @@ service cloud.firestore {
         // A busca por telefone passa pela função com rate limit e resposta uniforme.
         allow get: if false;
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalProfiles/{clientRefToken} {
-        allow get: if true;
+        allow get: if !boundCatalog(visitToken);
         allow list: if false;
-        allow create, update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /portalSessions/{sessionHash} {
-        allow get: if true;
-        allow list: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow get: if !boundCatalog(visitToken);
+        allow list: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow create: if false;
-        allow update: if belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+        allow update: if !boundCatalog(visitToken) && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
       match /redemptionRequests/{requestId} {
-        allow create: if request.resource.data.id == requestId
+        allow create: if !boundCatalog(visitToken) && request.resource.data.id == requestId
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && request.resource.data.status == 'solicitado'
           && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
@@ -797,15 +862,25 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash))
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.active == true
           && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.clientRefToken == request.resource.data.clientRefToken;
-        allow get: if true;
-        allow list: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
-        allow update: if signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+        allow get: if !boundCatalog(visitToken);
+        allow list: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
           && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
         allow delete: if false;
       }
     }
 
     match /businesses/{businessId} {
+      match /onlineStores/{storeId} {
+        allow get: if hasPermission(businessId, 'products.edit') && canAccessSpace(businessId, resource.data.spaceId);
+        allow list, create, update, delete: if false;
+      }
+      match /onlineStockReservations/{reservationId} {
+        allow read, write: if false;
+      }
+      match /onlineOrderReservations/{orderId} {
+        allow read, write: if false;
+      }
       match /workspaceResetJobs/{operationId} {
         allow read: if isOwner(businessId)
           && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
@@ -936,7 +1011,7 @@ service cloud.firestore {
               'id', 'businessId', 'ownerId', 'parentProductId',
               'attributeValues', 'displayName', 'displayNameNormalized',
               'searchTokens', 'sku', 'barcode', 'price', 'stock',
-              'cost', 'custo', 'minStock', 'active', 'catalogVisible', 'allowNegativeStock',
+              'cost', 'custo', 'minStock', 'active', 'catalogVisible', 'allowNegativeStock', 'onlineReservedStock', 'onlineOrderFinalizationId',
               'durationValue', 'durationUnit',
               'image', 'imageMode', 'imageUrl', 'imageStoragePath',
               'imageThumbUrl', 'imageThumbStoragePath', 'imageUpdatedAt',
@@ -946,14 +1021,19 @@ service cloud.firestore {
             ]);
         }
         allow read: if hasPermission(businessId, 'products.view')
+          && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
           && (!resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
         allow create: if canWriteCollection(businessId, 'productVariants')
+          && canAccessProduct(businessId,parentProduct(request.resource.data.parentProductId).data)
+          && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
           && joinsProductImportFence(businessId)
           && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
           && validVariant(request.resource.data)
           && (!request.resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId))
           && parentProduct(request.resource.data.parentProductId).data.businessId == businessId;
         allow update: if canWriteCollection(businessId, 'productVariants')
+          && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
+          && preservesOnlineStock(businessId,request.resource.data,resource.data,'stock','v_'+variantId)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sku','codigo','barcode','active','deleted','deletedAt']) || joinsProductImportFence(businessId))
           && (
             !memberExists(businessId)
@@ -1045,37 +1125,58 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       match /productFinancials/{productId} {
-        allow read: if hasPermission(businessId, 'cost.view');
+        allow read: if hasPermission(businessId, 'cost.view')
+          && canAccessProduct(businessId,get(/databases/$(database)/documents/businesses/$(businessId)/products/$(resource.data.productId)).data);
         allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId)).data)
           && request.resource.data.businessId == businessId
           && request.resource.data.productId == productId;
         allow delete: if false;
       }
       match /variantFinancials/{variantId} {
-        allow read: if hasPermission(businessId, 'cost.view');
+        function scopedVariant(id) {
+          let variant=get(/databases/$(database)/documents/businesses/$(businessId)/productVariants/$(id)).data;
+          return canAccessProduct(businessId,get(/databases/$(database)/documents/businesses/$(businessId)/products/$(variant.parentProductId)).data);
+        }
+        allow read: if hasPermission(businessId, 'cost.view') && scopedVariant(resource.data.variantId);
         allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedVariant(variantId))
           && request.resource.data.businessId == businessId
           && request.resource.data.variantId == variantId;
         allow delete: if false;
       }
       match /saleFinancials/{saleId} {
-        allow read: if hasPermission(businessId, 'cost.view') || hasPermission(businessId, 'profit.view');
+        function scopedSale(id) {
+          let sale=get(/databases/$(database)/documents/businesses/$(businessId)/sales/$(id)).data;
+          return isOwner(businessId) || (sale.get('spaceId',null) != null && canAccessSpace(businessId,sale.spaceId)
+            && (permissionGranted(businessId,'sales.viewAll') || sale.get('actorUid','') == request.auth.uid));
+        }
+        allow read: if (hasPermission(businessId, 'cost.view') || hasPermission(businessId, 'profit.view')) && scopedSale(resource.data.saleId);
         allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedSale(saleId))
           && request.resource.data.businessId == businessId
           && request.resource.data.saleId == saleId;
         allow delete: if false;
       }
       match /stockMovementFinancials/{movementId} {
-        allow read: if hasPermission(businessId, 'cost.view');
+        function scopedMovement(id) {
+          let movement=get(/databases/$(database)/documents/businesses/$(businessId)/stockMovements/$(id)).data;
+          return isOwner(businessId) || (movement.get('spaceId',null) != null && canAccessSpace(businessId,movement.spaceId));
+        }
+        allow read: if hasPermission(businessId, 'cost.view') && scopedMovement(resource.data.stockMovementId);
         allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedMovement(movementId))
           && request.resource.data.businessId == businessId
           && request.resource.data.stockMovementId == movementId;
         allow delete: if false;
       }
       match /stockMovements/{movementId} {
         allow read: if hasPermission(businessId, 'inventory.view')
+          && (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
           && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
         allow create, update: if canWriteCollection(businessId, 'stockMovements')
+          && (isOwner(businessId) || (request.resource.data.get('spaceId',null) != null && canAccessSpace(businessId,request.resource.data.spaceId)))
+          && (isOwner(businessId) || canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.produtoId)).data))
           && request.resource.data.businessId == businessId
           && !request.resource.data.keys().hasAny(['custoUnitario', 'costUnit']);
         allow delete: if false;
@@ -1088,15 +1189,21 @@ service cloud.firestore {
       }
       match /products/{productId} {
         allow read: if hasPermission(businessId, 'products.view')
+          && (resource == null || canAccessProduct(businessId,resource.data))
           && (resource == null || !resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
         allow create: if canWriteCollection(businessId, 'products')
+          && canAssignProductScope(businessId,request.resource.data)
+          && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
           && joinsProductImportFence(businessId)
           && !request.resource.data.keys().hasAny(['spreadsheetImportOperationId'])
           && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductSpaceScope(request.resource.data, businessId);
-        allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
+        allow update: if canAccessProduct(businessId,resource.data)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
+          && (preservesProductSpaceScope(request.resource.data,resource.data) || canAssignProductScope(businessId,request.resource.data))
+          && preservesOnlineStock(businessId,request.resource.data,resource.data,'estoqueAtual','p_'+productId)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['codigo','barcode','alternateBarcodes','spaceAccessMode','allowedSpaceIds','active','ativo','deleted','deletedAt']) || joinsProductImportFence(businessId))
           && canWriteCollection(businessId, 'products')
           && (
@@ -1156,12 +1263,14 @@ service cloud.firestore {
             )
           );
         allow create: if canWriteCollection(businessId, 'sales')
+          && validOnlineSale(businessId,saleId,request.resource.data)
           && validIntegratedPayment(request.resource.data)
           && request.resource.data.businessId == businessId
           && (!memberExists(businessId) || request.resource.data.get('actorUid', '') == request.auth.uid)
           && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
           && validSaleSpace(request.resource.data, businessId);
         allow update: if canWriteCollection(businessId, 'sales')
+          && resource.data.get('onlineOrderId',null) == null && request.resource.data.get('onlineOrderId',null) == null
           && resource.data.get('paymentIntentId', null) == null
           && request.resource.data.get('paymentIntentId', null) == null
           && request.resource.data.get('formaPagamento', '') != 'cartao_presencial'
@@ -1270,9 +1379,14 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /catalogOrders/{documentId} {
-        allow read: if canReadCollection(businessId, 'catalogOrders');
-        allow create: if canCreateGenericDocument(businessId, 'catalogOrders', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'catalogOrders', documentId);
+        allow read: if scopedCatalogOrder(businessId, resource.data);
+        allow create: if canCreateGenericDocument(businessId, 'catalogOrders', documentId)
+          && request.resource.data.get('source','') != 'online_store'
+          && scopedCatalogOrder(businessId, request.resource.data);
+        allow update: if canUpdateGenericDocument(businessId, 'catalogOrders', documentId)
+          && resource.data.get('source','') != 'online_store' && request.resource.data.get('source','') != 'online_store'
+          && scopedCatalogOrder(businessId, resource.data)
+          && request.resource.data.get('spaceId', '') == resource.data.get('spaceId', '');
         allow delete: if false;
       }
       match /customerMetrics/{documentId} {

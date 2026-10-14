@@ -3,6 +3,7 @@
 const {HttpsError}=require('firebase-functions/v2/https');
 const BILLING_COLLECTIONS=new Set(['billingCheckoutAttempts','subscriptionIntents']);
 const OPERATIONAL_COLLECTIONS=new Set([
+  'onlineStores','onlineStockReservations','onlineOrderReservations',
   'products','productVariants','stockMovements','productFinancials','variantFinancials',
   'stockMovementFinancials','clients','sales','saleFinancials','payments','balanceAdjustments',
   'balanceEvents','processedOperations','campaigns','campaignProgress','campaignEvents',

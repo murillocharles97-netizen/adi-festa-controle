@@ -17,6 +17,15 @@ function workspaceAssetsService(db,bucket){
         const access=member.data();
         if(access?.status!=='active'||access.role!=='owner'&&access.permissions?.['products.edit']!==true)
           throw new HttpsError('permission-denied','Sem permissão para gerenciar imagens.');
+        if(access.role!=='owner'){
+          const parts=relative.split('/');
+          // Unbound legacy catalog assets are owner-review only, not inferred.
+          if(parts[0]!=='products')throw new HttpsError('permission-denied','Associe a loja a um espaço antes de gerenciar arquivos antigos.');
+          const product=(await tx.get(businessRef.collection('products').doc(parts[1]))).data();
+          if(!product||product.businessId!==businessId||!(product.spaceAccessMode==='all_spaces'
+            || ['selected_spaces','single_space'].includes(product.spaceAccessMode)&&(access.spaceAccess==='all'||product.allowedSpaceIds?.some(id=>(access.allowedSpaceIds||[]).includes(id)))))
+            throw new HttpsError('permission-denied','Produto fora dos espaços autorizados.');
+        }
       });
     }
     await authorize();

@@ -44,7 +44,8 @@ assert.match(bridge, /firebase-sync-status/);
 
 assert.match(publicCatalog, /getDoc\(reference\)/);
 assert.doesNotMatch(publicCatalog, /getDocs\(collection\(/);
-assert.match(publicCatalog, /subscribedOrderIds\.size>=5/);
+assert.match(publicCatalog, /slice\(0,5\)/);
+assert.doesNotMatch(publicCatalog, /onSnapshot\(doc\(db,'publicCatalogs',visitToken,'orders'/);
 assert.match(publicCatalog, /addEventListener\('pagehide'/);
 
   assert.match(worker, /veconi-v\d+-/);

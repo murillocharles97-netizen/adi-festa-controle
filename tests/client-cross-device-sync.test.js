@@ -204,7 +204,7 @@ test("a cadeia de módulos mantém versões explícitas na release 130", () => {
     /js\/firebase\/auth\.js\?v=160[\s\S]*js\/firebase\/firebase-ui\.js\?v=160/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
-  assert.match(serviceWorkerSource, /veconi-v168-product-import/);
+  assert.match(serviceWorkerSource, /veconi-v169-online-store-pilot/);
   assert.doesNotMatch(
     `${authSource}\n${firebaseUiSource}\n${syncSource}`,
     /(?:sync|firestore-repository)\.js\?v=(?:62|83)/,

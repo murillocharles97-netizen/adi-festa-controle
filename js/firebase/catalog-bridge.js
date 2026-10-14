@@ -1,5 +1,5 @@
 import {auth,db} from './firebase-config.js';
-import {collection,doc,onSnapshot,serverTimestamp,setDoc} from './workspace-firestore.js';
+import {collection,doc,getDoc,onSnapshot,serverTimestamp,setDoc} from './workspace-firestore.js';
 import {maskPhone,normalizeBrazilianPhone} from '../catalog-portal.js';
 import {listenerClosed,listenerOpened,recordFirestoreOperation} from './usage-monitor.js';
 
@@ -40,25 +40,14 @@ async function publishPortalData(visit){
   localStorage.setItem(fingerprintKey,JSON.stringify(fingerprints));
 }
 
-async function publish(visit,{publishProfiles=true}={}){
+async function publish(visit){
   if(!auth.currentUser)return;
-  const visitToken=visit?.publicToken;
-  if(!validPublicToken(visitToken)){
-    console.error('[Public catalog publish]',{code:'invalid-token',visitId:visit?.id||null,visitToken,expectedPath:'publicCatalogs/{visitToken}'});
-    Utils.toast?.('Não foi possível publicar: token público inválido.',true);
-    return;
-  }
-  try{
-    const payload=publicPayload(visit),open=(DB.carregar().catalogOrders||[]).filter(o=>o.visitId===visit.id&&!['cancelado','entregue'].includes(o.orderStatus));
-    payload.items=payload.items.map(item=>({...item,reservedStock:open.reduce((sum,o)=>sum+Number(o.items?.find(x=>x.catalogItemId===item.id)?.quantity||0),0)}));
-    const reference=doc(db,'publicCatalogs',visitToken);
-    if(reference.id!==visitToken)throw Object.assign(new Error('O ID público não corresponde ao token.'),{code:'token-mismatch'});
-    await setDoc(reference,payload);recordFirestoreOperation('write',{collection:'publicCatalogs',documents:1});
-    if(visit.universal){for(const legacyToken of window.CatalogoUniversal?.legacyTokens?.()||[]){if(!validPublicToken(legacyToken))continue;await setDoc(doc(db,'publicCatalogs',legacyToken),{schemaVersion:4,legacyRedirect:true,universalCatalogToken:visitToken,businessId:payload.businessId,publicName:payload.publicName,active:true,updatedAt:serverTimestamp()},{merge:true});recordFirestoreOperation('write',{collection:'publicCatalogs',documents:1})}}
-    console.info('[Public catalog publish]',{code:'published',documentPath:reference.path,documentId:reference.id,urlToken:visitToken,tokenMatchesDocumentId:reference.id===visitToken,itemCount:payload.items.length,active:payload.active});
-    if(publishProfiles)await publishPortalData(visit);
-    refreshVisitSubscriptions();
-  }catch(error){console.error('[Public catalog publish]',{code:error.code||'unknown',message:error.message,documentPath:`publicCatalogs/${visitToken}`,visitId:visit.id});Utils.toast?.('Visita salva; publicação aguardando a nuvem.',true)}
+  const token=visit?.publicToken;
+  if(!validPublicToken(token))return;
+  // Bound catalogs are server-managed. Unbound old links remain untouched until
+  // explicit owner migration; never republish a business-wide product snapshot.
+  if((await getDoc(doc(db,'catalogStoreBindings',token))).exists())return;
+  Utils.toast?.('Associe esta loja antiga a um espaço antes de publicar alterações.',true);
 }
 
 function mergeOrders(visit,docs){
@@ -91,17 +80,30 @@ function subscribeVisit(visit){
 }
 
 function stopAllSubscriptions(){for(const stop of subscriptions.values())stop();subscriptions.clear()}
-function refreshVisitSubscriptions(){
-  if(!auth.currentUser)return;
-  const universal=window.CatalogoUniversal?.entity?.(),desired=universal?.publicToken?[universal]:[],tokens=new Set(desired.map(visit=>visit.publicToken));
+let subscriptionRefresh=0;
+async function refreshVisitSubscriptions(){
+  const ticket=++subscriptionRefresh,uid=auth.currentUser?.uid,scope=businessId();
+  // Restricted members receive their scoped orders through the existing business sync.
+  // Never attach a global legacy order/profile listener for them.
+  if(!uid||window.BusinessContext?.get?.()?.role!=='owner'){stopAllSubscriptions();return;}
+  const hasLegacyToken=DB.carregar().config.catalogSettings?.publicToken;
+  const universal=hasLegacyToken?window.CatalogoUniversal?.entity?.():null,desired=universal?.publicToken?[universal]:[],tokens=new Set(desired.map(visit=>visit.publicToken));
   for(const[token,stop]of subscriptions)if(!tokens.has(token)){stop();subscriptions.delete(token)}
-  desired.forEach(subscribeVisit);
+  for(const visit of desired){
+    try{
+      const binding=await getDoc(doc(db,'catalogStoreBindings',visit.publicToken));
+      if(ticket!==subscriptionRefresh||uid!==auth.currentUser?.uid||scope!==businessId())return;
+      if(binding.exists()){subscriptions.get(visit.publicToken)?.();subscriptions.delete(visit.publicToken);continue;}
+      subscribeVisit(visit);
+    }catch(error){if(ticket===subscriptionRefresh){stopAllSubscriptions();console.warn('[Catalog subscriptions]',{code:error.code||'unknown'});}}
+  }
 }
+addEventListener('online-store-migrated',()=>{stopAllSubscriptions();refreshVisitSubscriptions();});
 let publishTimer=null,lastPublishFingerprint='';
 function publicationFingerprint(){const data=DB.carregar(),settings=data.config.catalogSettings||{};return JSON.stringify({settings,products:(data.produtos||[]).map(p=>[p.id,p.nome,p.preco,p.estoqueAtual,p.ativo,p.imageUpdatedAt,p.catalogVisible,p.catalogFeatured]),campaigns:(data.campanhas||[]).map(c=>[c.id,c.status,c.ativo,c.updatedAt]),progress:(data.progressosCampanha||[]).map(p=>[p.id,p.updatedAt]),orders:(data.catalogOrders||[]).map(o=>[o.id,o.orderStatus,o.updatedAt])})}
 function automaticCatalogReady(){return auth.currentUser&&!window.WorkspaceRuntime?.isBlocked()&&(!(DB.getWorkspaceGeneration?.()>0)||Boolean(DB.carregar().config.catalogSettings?.publicToken));}
-function scheduleUniversalPublish(force=false){clearTimeout(publishTimer);publishTimer=setTimeout(()=>{if(!automaticCatalogReady())return;const fingerprint=publicationFingerprint();if(!force&&fingerprint===lastPublishFingerprint)return;lastPublishFingerprint=fingerprint;window.CatalogoUniversal?.publish?.()},force?100:900)}
-function bindAll(){if(!automaticCatalogReady())return;window.CatalogoUniversal?.ensure?.();refreshVisitSubscriptions()}
+function scheduleUniversalPublish(force=false){clearTimeout(publishTimer);publishTimer=setTimeout(()=>{if(automaticCatalogReady())refreshVisitSubscriptions();},force?100:900)}
+function bindAll(){if(!automaticCatalogReady())return;refreshVisitSubscriptions()}
 addEventListener('catalog-publish-request',event=>publish(event.detail.visit).finally(refreshVisitSubscriptions));
 addEventListener('catalog-orders-updated',event=>{const visit=DB.carregar().visitas.find(v=>v.id===event.detail.visitId);if(visit)publish(visit,{publishProfiles:false})});
 addEventListener('catalog-order-status-request',event=>{const order=event.detail.order,visit=DB.carregar().visitas.find(v=>v.id===order.visitId),catalogToken=order.catalogToken||visit?.publicToken||window.CatalogoUniversal?.settings?.().publicToken;if(!catalogToken)return;setDoc(doc(db,'publicCatalogs',catalogToken,'orders',order.id),{orderStatus:order.orderStatus,confirmedAt:order.confirmedAt||null,preparingAt:order.preparingAt||null,dispatchedAt:order.dispatchedAt||null,deliveredAt:order.deliveredAt||null,cancelledAt:order.cancelledAt||null,convertedSaleId:order.convertedSaleId||null,clientId:order.clientId||null,clientNameSnapshot:order.clientNameSnapshot||null,linkedAt:order.linkedAt||null,keptAsGuest:Boolean(order.keptAsGuest),updatedAt:serverTimestamp()},{merge:true}).then(()=>recordFirestoreOperation('write',{collection:'publicCatalogOrders',documents:1})).catch(error=>console.error('[Catalog order status]',error))});

@@ -76,7 +76,7 @@ function businessResetService(db,{bucket,assertInfrastructureReady=noReady,autoD
       if(ids.some(id=>!spaces.has(id)))throw new HttpsError('failed-precondition','Há transferência entre esta empresa e outro espaço. O reset simples foi bloqueado.',{reason:'cross-workspace-transfer'});
     }
     const external=[];
-    for(const name of ['publicCatalogs','teamInviteTokens','memberships','onboarding'])
+    for(const name of ['publicCatalogs','publicCatalogSlugs','catalogStoreBindings','teamInviteTokens','memberships','onboarding'])
       for(const row of await documents(db.collection(name).where('businessId','==',context.id))){
         if(name==='memberships'&&row.data().uid===context.uid)continue;
         external.push(row.ref.path);
@@ -84,7 +84,7 @@ function businessResetService(db,{bucket,assertInfrastructureReady=noReady,autoD
     // A deleted catalog parent can still have orders/sessions beneath it. Use
     // explicit business-owned token references; never enumerate another tenant.
     const tokens=new Set();
-    for(const name of ['visits','settings'])for(const row of await documents(context.ref.collection(name))){
+    for(const name of ['visits','settings','onlineStores'])for(const row of await documents(context.ref.collection(name))){
       const value=row.data();for(const token of [value.publicToken,value.catalogSettings?.publicToken,value.config?.catalogSettings?.publicToken])if(token)tokens.add(policy.validId(token,'Catálogo'));
     }
     for(const token of tokens){

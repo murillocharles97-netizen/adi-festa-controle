@@ -23,7 +23,7 @@ test("busca, categoria, filtros e carrinho continuam locais", () => {
   assert.match(portal, /function filteredCatalogItems\(\)/);
   assert.match(portal, /data-quick-filter/);
   assert.match(portal, /data-load-more/);
-  assert.match(portal, /localStorage\.setItem\(cartKey/);
+  assert.match(portal, /safeStorage\(cartKey/);
   assert.doesNotMatch(portal, /#catalog-search[^\n]*getDoc/);
   assert.doesNotMatch(portal, /data-quick-filter[^\n]*getDoc/);
 });

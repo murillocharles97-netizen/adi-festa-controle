@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import {
   collection,
+  and,
+  or,
   doc,
   documentId,
   endAt,
@@ -11,7 +13,7 @@ import {
   limit,
   onSnapshot,
   orderBy,
-  query,
+  query as firebaseQuery,
   serverTimestamp,
   setDoc,
   startAfter,
@@ -31,15 +33,35 @@ import {
 
 const queryCache = new Map(),
   CACHE_TTL_MS = 60000;
+const query=(reference,...constraints)=>{
+  const filters=constraints.filter(c=>['where','and','or'].includes(c.type)),rest=constraints.filter(c=>!['where','and','or'].includes(c.type));
+  return firebaseQuery(reference,...(filters.length>1?[and(...filters)]:filters),...rest);
+};
 const cacheKey = (businessId, collectionName, variant) => {
   const uid=auth.currentUser?.uid||"anonymous",
     permissionSignature=window.BusinessContext?.get?.().permissionSignature||"none";
-  return `${businessId}:${uid}:${permissionSignature}:${collectionName}:${variant}`;
+  const scope=window.BusinessContext?.get?.()||{};
+  return `${businessId}:${uid}:${permissionSignature}:${scope.spaceAccess}:${(scope.allowedSpaceIds||[]).join(',')}:${collectionName}:${variant}`;
 };
-const visibilityConstraints = (collectionName) =>
-  ["sales", "activityEvents"].includes(collectionName) && window.TeamAccess?.has?.("sales.viewAll") === false
+const visibilityConstraints = (collectionName,spaceIds=null) => {
+  if(collectionName==='products'){
+    const context=window.BusinessContext?.get?.()||{};
+    if(context.role==='owner')return [];
+    if(context.spaceAccess==='all')return [where('businessId','==',requireBusinessId()),where('spaceAccessMode','in',['all_spaces','selected_spaces','single_space'])];
+    const ids=(spaceIds||context.allowedSpaceIds||[]).slice(0,14);
+    return [where('businessId','==',requireBusinessId()),or(where('spaceAccessMode','==','all_spaces'),and(where('spaceAccessMode','in',['selected_spaces','single_space']),where('allowedSpaceIds','array-contains-any',ids.length?ids:['__no_authorized_space__'])))];
+  }
+  if(['catalogOrders','stockMovements','sales','activityEvents'].includes(collectionName)){
+    const context=window.BusinessContext?.get?.()||{};
+    if(context.role==='owner')return [];
+    const ids=context.spaceAccess==='all'?(window.SpaceContext?.salesSpaces?.()||[]).map(s=>s.id):context.allowedSpaceIds||[];
+    if(ids.length>30)throw Error('Consulta de pedidos requer paginação por espaço para mais de 30 espaços autorizados.');
+    return [where('spaceId','in',ids.length?ids:['__no_authorized_space__']),...(['sales','activityEvents'].includes(collectionName)&&window.TeamAccess?.has?.('sales.viewAll')===false?[where('actorUid','==',requireUser().uid)]:[])];
+  }
+  return ["sales", "activityEvents"].includes(collectionName) && window.TeamAccess?.has?.("sales.viewAll") === false
     ? [where("actorUid", "==", requireUser().uid)]
     : [];
+};
 const cached = (key) => {
   const item = queryCache.get(key);
   return item && Date.now() - item.at < CACHE_TTL_MS
@@ -110,6 +132,30 @@ export function createFirestoreRepository(collectionName) {
   let lastReadMetadata = null;
   const collectionRef = () => getBusinessCollectionRef(collectionName);
   const documentRef = (id) => getBusinessDocumentRef(collectionName, id);
+  // Variants inherit the parent's scope. Query per bounded parent group rather
+  // than downloading a global variants collection and filtering it in the UI.
+  const readVisible = async (constraints,{reader=getDocsFromServer,sort='__name__',direction='asc',max=null}={}) => {
+    const context=window.BusinessContext?.get?.()||{};
+    const business=requireBusinessId(),uid=requireUser().uid,assertScope=()=>{if(business!==requireBusinessId()||uid!==requireUser().uid)throw Error('A empresa ou sessão ativa mudou.');};
+    const merge=docs=>{
+      assertScope();const unique=[...new Map(docs.map(d=>[d.id,d])).values()],val=d=>sort==='__name__'?d.id:d.data()[sort]?.toMillis?.()??d.data()[sort];
+      unique.sort((a,b)=>{const x=val(a),y=val(b);return ((x<y?-1:x>y?1:0)*(direction==='desc'?-1:1))||a.id.localeCompare(b.id);});
+      const selected=max?unique.slice(0,max):unique;return {docs:selected,size:selected.length,metadata:{fromCache:false,hasPendingWrites:false}};
+    };
+    if(collectionName==='products'&&context.role!=='owner'&&context.spaceAccess!=='all'&&(context.allowedSpaceIds||[]).length>14){
+      const docs=[],extra=constraints.slice(visibilityConstraints(collectionName).length),ids=context.allowedSpaceIds;
+      for(let i=0;i<ids.length;i+=14){assertScope();const snap=await reader(query(collectionRef(),...visibilityConstraints(collectionName,ids.slice(i,i+14)),...extra));docs.push(...snap.docs);}
+      return merge(docs);
+    }
+    if(!['productVariants','productFinancials','variantFinancials','saleFinancials','stockMovementFinancials'].includes(collectionName)||context.role==='owner'){const snap=await reader(query(collectionRef(),...constraints));assertScope();return snap;}
+    const related={variantFinancials:['productVariants','variantId'],saleFinancials:['sales','saleId'],stockMovementFinancials:['stockMovements','stockMovementId']}[collectionName];
+    let ids,field;
+    if(related){ids=(await createFirestoreRepository(related[0]).listAllPaged(100)).map(v=>v.id);field=related[1];}
+    else {ids=(await createFirestoreRepository('products').listAllPaged(200)).map(p=>p.id);field=collectionName==='productFinancials'?'productId':'parentProductId';}
+    const docs=[];
+    for(let i=0;i<ids.length;i+=4){const group=ids.slice(i,i+4);const snap=await reader(query(collectionRef(),where(field,'in',group),...constraints));docs.push(...snap.docs);}
+    return merge(docs);
+  };
   const snapshotMetadata = (snapshot, source = "default") => ({
     collection: collectionName,
     source,
@@ -148,6 +194,8 @@ export function createFirestoreRepository(collectionName) {
       return lastReadMetadata ? structuredClone(lastReadMetadata) : null;
     },
     async countFromServer() {
+      if(collectionName==='products'&&window.BusinessContext?.get?.()?.role!=='owner')return (await this.listAllPaged()).length;
+      if(['productVariants','productFinancials','variantFinancials','saleFinancials','stockMovementFinancials'].includes(collectionName)&&window.BusinessContext?.get?.()?.role!=='owner')return (await this.listAllPaged()).length;
       const snapshot = await timed("read", `${collectionName}:count`, async () => {
         const aggregate = await getCountFromServer(query(collectionRef(), ...visibilityConstraints(collectionName)));
         return { size: 1, data: () => aggregate.data() };
@@ -167,7 +215,7 @@ export function createFirestoreRepository(collectionName) {
         hit = !options.force && cached(key);
       if (hit) return hit;
       const snapshot = await timed("read", collectionName, () =>
-        getDocs(query(collectionRef(), ...visibilityConstraints(collectionName))),
+        readVisible(visibilityConstraints(collectionName),{reader:getDocs}),
       );
       return cachePut(
         key,
@@ -187,7 +235,7 @@ export function createFirestoreRepository(collectionName) {
       const hit = !options.force && cached(key);
       if (hit) return hit;
       const snapshot = await timed("read", collectionName, () =>
-        getDocs(query(collectionRef(), ...visibilityConstraints(collectionName), where(field, "==", value), limit(max))),
+        readVisible([...visibilityConstraints(collectionName),where(field,'==',value),limit(max)],{reader:getDocs,max}),
       );
       return cachePut(
         key,
@@ -195,6 +243,20 @@ export function createFirestoreRepository(collectionName) {
           .map((item) => convert(item))
           .filter((item) => !item.deletedAt),
       );
+    },
+    async listWherePaged(field, value, max = 100) {
+      const businessId=requireBusinessId(),uid=requireUser().uid,reference=collectionRef(),items=[];
+      let cursor=null;
+      do {
+        if(requireBusinessId()!==businessId||requireUser().uid!==uid)throw Error('A empresa ou sessão ativa mudou.');
+        const constraints=[...visibilityConstraints(collectionName),where(field,'==',value),orderBy(documentId()),limit(max)];
+        if(cursor)constraints.push(startAfter(cursor));
+        const snapshot=rememberMetadata(await timed('read',collectionName,()=>readVisible(constraints,{max})),'server');
+        if(requireBusinessId()!==businessId||requireUser().uid!==uid)throw Error('A empresa ou sessão ativa mudou.');
+        items.push(...snapshot.docs.map(convert));
+        cursor=snapshot.size===max?snapshot.docs.at(-1):null;
+      } while(cursor);
+      return items;
     },
     async create(data) {
       const id = String(data.id || crypto.randomUUID());
@@ -254,18 +316,14 @@ export function createFirestoreRepository(collectionName) {
     },
     async listChangedSince(since, max = 200) {
       if (!since) return this.list({ force: true });
-      const snapshot = rememberMetadata(await timed("read", collectionName, () =>
-        getDocsFromServer(
-          query(
-            collectionRef(),
-            ...visibilityConstraints(collectionName),
-            where("updatedAt", ">", Timestamp.fromDate(new Date(since))),
-            orderBy("updatedAt", "asc"),
-            limit(max),
-          ),
-        ),
-      ), "server");
-      return snapshot.docs.map((item) => convert(item));
+      const readCursor=value=>readVisible([...visibilityConstraints(collectionName),where('updatedAt','>=',value),orderBy('updatedAt','asc'),limit(max)],{sort:'updatedAt',max});
+      const snapshot=rememberMetadata(await timed('read',collectionName,()=>readCursor(Timestamp.fromDate(new Date(since)))),'server');
+      // Compatibility read only for legacy order dates, without rewriting old
+      // documents or changing the global Timestamp contract. No new listener.
+      const legacy=collectionName==='catalogOrders'?await timed('read',collectionName,()=>readCursor(new Date(since).toISOString())):null;
+      const unique=new Map([...snapshot.docs,...(legacy?.docs||[])].map(d=>[d.id,convert(d)]));
+      if(legacy)lastReadMetadata={...lastReadMetadata,documents:unique.size};
+      return [...unique.values()].sort((a,b)=>new Date(a.updatedAt)-new Date(b.updatedAt));
     },
     async listPage(cursor = null, max = 50) {
       const constraints = [...visibilityConstraints(collectionName), orderBy("createdAt", "desc")];
@@ -273,7 +331,7 @@ export function createFirestoreRepository(collectionName) {
       constraints.push(limit(max));
       const snapshot = rememberMetadata(
         await timed("read", collectionName, () =>
-          getDocsFromServer(query(collectionRef(), ...constraints)),
+          readVisible(constraints,{max,sort:'createdAt',direction:'desc'}),
         ),
         "server",
       );
@@ -291,9 +349,9 @@ export function createFirestoreRepository(collectionName) {
         orders = Array.isArray(options.orders) && options.orders.length
           ? options.orders
           : [{ field: "nomeNormalizado", direction: "asc" }],
-        constraints = filters.map((item) =>
+        constraints = [...visibilityConstraints(collectionName),...filters.map((item) =>
           where(String(item.field), String(item.operator || "=="), item.value),
-        );
+        )];
       orders.forEach((item) =>
         constraints.push(
           orderBy(String(item.field), item.direction === "desc" ? "desc" : "asc"),
@@ -308,7 +366,7 @@ export function createFirestoreRepository(collectionName) {
       constraints.push(limit(max));
       const snapshot = rememberMetadata(
         await timed("read", collectionName, () =>
-          getDocsFromServer(query(collectionRef(), ...constraints)),
+          readVisible(constraints,{max,sort:orders[0].field,direction:orders[0].direction}),
         ),
         "server",
       );
@@ -335,7 +393,7 @@ export function createFirestoreRepository(collectionName) {
         constraints.push(limit(max));
         const snapshot = rememberMetadata(
           await timed("read", collectionName, () =>
-            getDocsFromServer(query(collectionRef(), ...constraints)),
+            readVisible(constraints,{max}),
           ),
           "server",
         );
@@ -346,6 +404,21 @@ export function createFirestoreRepository(collectionName) {
       return items;
     },
     subscribe(callback, onError) {
+      const scope=window.BusinessContext?.get?.()||{},ids=scope.allowedSpaceIds||[];
+      if(collectionName==='products'&&scope.role!=='owner'&&scope.spaceAccess!=='all'&&ids.length>14){
+        const groups=Array.from({length:Math.ceil(ids.length/14)},(_,i)=>ids.slice(i*14,(i+1)*14)),latest=new Map();
+        const stops=groups.map((group,index)=>{listenerOpened(collectionName);return onSnapshot(query(collectionRef(),...visibilityConstraints(collectionName,group)),snap=>{recordFirestoreOperation('listen',{collection:collectionName,documents:latest.has(index)?snap.docChanges().length:snap.size});latest.set(index,snap.docs);if(latest.size===groups.length){const docs=[...new Map([...latest.values()].flat().map(d=>[d.id,d])).values()];lastReadMetadata=snapshotMetadata({size:docs.length,metadata:snap.metadata},'listener');callback(docs.map(convert),lastReadMetadata);}},onError);});
+        return ()=>stops.forEach(stop=>{stop();listenerClosed(collectionName);});
+      }
+      if(['productFinancials','variantFinancials','saleFinancials','stockMovementFinancials'].includes(collectionName)&&window.BusinessContext?.get?.()?.role!=='owner'){
+        // Restricted projections use bounded scoped refreshes, not an unsafe
+        // collection-wide listener. Reuse existing app change notifications.
+        let stopped=false,active=false,again=false;
+        const refresh=async()=>{if(stopped)return;if(active){again=true;return;}active=true;try{const docs=await this.listAllPaged();if(!stopped)callback(docs,lastReadMetadata);}catch(error){if(!stopped)onError?.(error);}finally{active=false;if(again){again=false;refresh();}}};
+        const changed=e=>{if(['products','productVariants','sales','stockMovements'].includes(e.detail?.collection))refresh();};
+        addEventListener('cloud-data-updated',changed);refresh();
+        return ()=>{stopped=true;removeEventListener('cloud-data-updated',changed);};
+      }
       let first = true,
         opened = true;
       listenerOpened(collectionName);

@@ -6,7 +6,7 @@
 })(typeof window==='undefined'?globalThis:window,function(){
   'use strict';
   // Identity/bootstrap and VECONI subscription billing intentionally stay out.
-  const operational=new Set(['getTerminalPaymentSetup','savePaymentTerminal','archivePaymentTerminal',
+  const operational=new Set(['getOnlineStore','saveOnlineStore','changeOnlineOrderStatus','claimOnlineOrderFinalization','acknowledgeOnlineOrderFinalization','getTerminalPaymentSetup','savePaymentTerminal','archivePaymentTerminal',
     'createTerminalPayment','dispatchTerminalPayment','getTerminalPaymentStatus','cancelTerminalPayment',
     'refundTerminalPayment','claimTerminalPaymentFinalization','acknowledgeTerminalPaymentSale',
     'getActiveTerminalPayment','createTeamInvite','updateTeamMember','migrateSensitiveTeamData',

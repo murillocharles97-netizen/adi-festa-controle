@@ -40,7 +40,7 @@ window.Vendas = (() => {
         const p = Produtos.obter(i.produtoId),
           v = i.variantId ? ProductVariations?.get(i.variantId) : null,
           q = Number(i.quantidade || 0),
-          stock = Number(v?.stock ?? p?.estoqueAtual ?? 0),
+          stock = Number(v?.stock ?? p?.estoqueAtual ?? 0) - Number((v || p)?.onlineReservedStock || 0),
           allow = Boolean(
             v?.allowNegativeStock ||
               !p ||
@@ -108,13 +108,16 @@ window.Vendas = (() => {
     ((db) => {
       const cliente = db.clientes.find((c) => c.id === d.clienteId),
         data = new Date().toISOString(), actor = window.TeamAccess?.actor?.() || {};
-      const itensComCampanha =
+      const itensComCampanha = d.onlineOrderId ? d.itens :
         window.Campanhas?.aplicarBeneficios?.(d.itens, d.clienteId, {
           manualAdjustment: Boolean(d.ajusteManual),
           selectedCampaignIds: d.appliedCampaignIds || [],
           status: d.status,
         }) || d.itens;
-      const itens = itensComCampanha.map((i) => {
+      const frozenOnlineItems = d.onlineOrderId ? window.OnlineOrderModel?.saleItems(d.onlineOrderItems || []) : null;
+      if (d.onlineOrderId && (!frozenOnlineItems || frozenOnlineItems.length !== itensComCampanha.length))
+        throw Error('O pedido online precisa do resumo confirmado no backend.');
+      const itens = itensComCampanha.map((i, itemIndex) => {
         const produto = db.produtos.find((p) => p.id === i.produtoId),
           variacao = i.variantId
             ? (db.variacoesProdutos || []).find((v) => v.id === i.variantId)
@@ -133,6 +136,7 @@ window.Vendas = (() => {
           subtotalOriginal = quantidade * precoOriginal,
           subtotalFinal = quantidade * precoFinalUnitario,
           custoTotal = quantidade * custoUnitario;
+        if (frozenOnlineItems) return {...frozenOnlineItems[itemIndex], custoUnitario, custoTotal, lucro:subtotalFinal-custoTotal, costSnapshot:custoUnitario};
         return {
           produtoId: i.produtoId,
           productId: i.produtoId,
@@ -223,6 +227,8 @@ window.Vendas = (() => {
         sellerUid: actor.actorUid || null,
         sellerNameSnapshot: actor.actorNameSnapshot || null,
         terminalId: d.terminalId || null,
+        onlineOrderId: d.onlineOrderId || null,
+        source: d.onlineOrderId ? 'online_store' : (d.source || null),
         clienteNome: cliente?.nome || "Venda avulsa",
         itens,
         subtotalOriginal,
@@ -404,6 +410,8 @@ window.Vendas = (() => {
     DB.alterar((db) => {
       const venda = db.vendas[db.vendas.length - 1], actor = window.TeamAccess?.actor?.() || {};
       if (!venda) throw Error("Nenhuma venda para desfazer");
+      if (venda.onlineOrderId)
+        throw Error("Venda de pedido online concluído exige devolução específica. Não é possível desfazer por este atalho.");
       if (venda.paymentIntentId || venda.formaPagamento === "cartao_presencial")
         throw Error("Pagamento integrado requer estorno. Estorno não disponível nesta V1.");
       if (Date.now() - new Date(venda.data).getTime() > 5 * 60 * 1000)

@@ -461,6 +461,7 @@ window.CatalogoUI = (() => {
     window.lucide?.createIcons();
   }
   function bind() {
+    if(window.OnlineStoreUI?.legacy){const b=document.createElement('button');b.className='btn btn-light';b.textContent='Voltar à Loja Online V2';b.onclick=()=>{OnlineStoreUI.legacy=false;dispatchEvent(new HashChangeEvent('hashchange'));};document.querySelector('.catalog-admin')?.prepend(b);}
     const root = document.querySelector(".catalog-admin"),
       form = document.querySelector("#catalog-settings-form");
     if (!root || !form) return;
@@ -587,5 +588,5 @@ window.CatalogoUI = (() => {
     };
     window.lucide?.createIcons();
   }
-  return { render, bind };
+  return { render:()=>window.OnlineStoreUI&&!OnlineStoreUI.legacy?OnlineStoreUI.render():render(), bind:()=>window.OnlineStoreUI?OnlineStoreUI.bind():bind() };
 })();
