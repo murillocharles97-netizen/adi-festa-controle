@@ -203,9 +203,9 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /validProductSpaceScope/);
   assert.match(financial, /business_\$\{businessId\}/);
-  assert.match(index, /spaces\.js\?v=151/);
+  assert.match(index, /spaces\.js\?v=171/);
   assert.match(index, /firebase\/space-service\.js\?v=151/);
-  assert.match(worker, /veconi-v170-online-store-scoped-finance/);
+  assert.match(worker, /veconi-v171-order-recovery-scoped-stock/);
 });
 
 test('stock movement origin requires an eligible business space; no global or ambiguous fallback',()=>{
