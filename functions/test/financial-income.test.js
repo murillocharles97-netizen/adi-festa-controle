@@ -2,7 +2,28 @@
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale}=require('../src/services/financial-income-service');
+const {automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale,spaceRoutingIssue,onlineOrderId}=require('../src/services/financial-income-service');
+
+test('roteamento exige origem explícita e capacidade Financeiro, sem destino global implícito',()=>{
+  const source={businessId:'a',spaceId:'qa'},space={id:'qa',type:'business',businessId:'a',linkedBusinessId:'a',ownerUid:'owner',capabilities:{sales:true,finance:false}};
+  assert.equal(spaceRoutingIssue('a',source,space),'finance-disabled');
+  assert.equal(spaceRoutingIssue('a',{},space),'source-space-required');
+  assert.equal(spaceRoutingIssue('a',{...source,spaceId:'all_spaces'},space),'source-space-required');
+  assert.equal(spaceRoutingIssue('b',source,space),'source-business-mismatch');
+  assert.equal(spaceRoutingIssue('a',source,{...space,linkedBusinessId:'b'}),'space-business-mismatch');
+  assert.equal(spaceRoutingIssue('a',{...source,financialSpaceId:'global'},space),'source-space-conflict');
+  assert.equal(spaceRoutingIssue('a',source,{...space,capabilities:{sales:true,finance:true}}),null);
+  // Legacy schema is supported ONLY with an explicitly named, linked space.
+  assert.equal(spaceRoutingIssue('a',source,{...space,capabilities:undefined}),null);
+  assert.equal(spaceRoutingIssue('a',source,{...space,capabilities:{finance:false}}),'finance-disabled');
+});
+
+test('Loja Online V2 respeita autoIncome.onlineOrders como o fluxo histórico',()=>{
+  assert.equal(onlineOrderId({onlineOrderId:'v2'}),'v2');
+  assert.equal(onlineOrderId({operationId:'online-sale:v2'}),'v2');
+  assert.equal(onlineOrderId({operationId:'catalog-order:old'}),'old');
+  assert.equal(onlineOrderId({operationId:'manual-sale'}),null);
+});
 
 test('automação exige vínculo explícito ou marco legado',()=>{
   assert.equal(automationFor({type:'personal'}).enabled,false);

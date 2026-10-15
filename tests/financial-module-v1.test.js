@@ -77,12 +77,13 @@ test("operações automáticas e transferências têm IDs determinísticos", () 
   assert.match(service, /`\$\{transferId\}_in`/);
 });
 
-test("automação é explícita por espaço e reconciliação é limitada", () => {
+test("automação é explícita por espaço e não reprocessa histórico ao abrir Financeiro", () => {
   assert.match(service, /automationState/);
-  assert.match(service, /reconcileBusinessFinancialIncome/);
-  assert.match(service, /limit: 100/);
-  assert.match(backend, /where\('data','>=',activationIso\)/);
-  assert.match(backend, /\.limit\(capped\)/);
+  assert.match(service, /historical-reconciliation-requires-authorization/);
+  assert.match(backend, /historical-reconciliation-requires-authorization/);
+  assert.match(backend, /spaceRoutingIssue/);
+  assert.match(backend, /source-route-conflict/);
+  assert.doesNotMatch(backend, /where\('data','>=',activationIso\)/);
   assert.match(read("js/financial-ui.js"), /Automação financeira/);
   assert.match(read("js/financial-ui.js"), /Automático/);
 });

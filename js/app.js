@@ -756,7 +756,7 @@
               divida = Math.abs(c.saldo);
             abrirFormulario(
               `Receber de ${escapar(c.nome)}`,
-              `<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div><div class="field"><label>Forma de pagamento</label><select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Informação opcional"></div>`,
+              `<p>Débito atual: <b>${dinheiro(divida)}</b></p><div class="field"><label>Valor recebido *</label><input name="valor" type="number" min=".01" max="${divida}" step=".01" value="${divida}" required></div>${window.Fiados?.spaceField?.() || ""}<div class="field"><label>Forma de pagamento</label><select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></div><div class="field"><label>Observação</label><input name="observacao" placeholder="Informação opcional"></div>`,
               async (f) => {
                 const amount = Number(f.get("valor"));
                 Fiados.receber(c.id, amount, f.get("observacao"), {
@@ -765,6 +765,7 @@
                       ? "total"
                       : "partial",
                   paymentMethod: String(f.get("paymentMethod") || "other"),
+                  spaceId: String(f.get("paymentSpaceId") || ""),
                 });
                 await DB.flush?.();
                 toast("Pagamento registrado");

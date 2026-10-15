@@ -480,24 +480,10 @@ async function updateAutomation(spaceId, input = {}) {
   return structuredClone(automation);
 }
 
-async function reconcileBusinessIncome(spaceId, options = {}) {
-  const space = assertSpace(spaceId), automation = automationState(space);
-  if (space.type !== "business" || !space.linkedBusinessId || !automation.enabled)
-    return { skipped: "automation-disabled" };
-  const previous = state.reconciliation.get(space.id);
-  if (!options.force && previous && Date.now() - previous.at < 120_000) return { ...(await previous.result), cached: true };
-  if (!navigator.onLine || typeof window.FirebaseCallable !== "function") return { skipped: "offline" };
-  const promise = window.FirebaseCallable("reconcileBusinessFinancialIncome", {
-    businessId: space.linkedBusinessId,
-    limit: 100,
-  }).then((response) => response.data || {}).catch((error) => {
-    console.warn("[FINANCIAL_INCOME_RECONCILIATION_PENDING]", { spaceId: space.id, code: error?.code || "unknown" });
-    return { skipped: "temporarily-unavailable" };
-  });
-  state.reconciliation.set(space.id, { at: Date.now(), result: promise });
-  const result = await promise;
-  state.reconciliation.set(space.id, { at: Date.now(), result });
-  return { ...result, cached: false };
+async function reconcileBusinessIncome() {
+  // Never backfill historical revenue just because the dashboard was opened.
+  // A separate audit and explicit authorization are required for old records.
+  return { skipped: "historical-reconciliation-requires-authorization", created: 0 };
 }
 
 async function archiveSpace(spaceId) {
