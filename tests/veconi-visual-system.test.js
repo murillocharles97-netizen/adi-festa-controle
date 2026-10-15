@@ -52,9 +52,9 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
 
 test('service worker v136 troca o cache e inclui os assets V133 da marca e do Financeiro', () => {
   const worker = read('service-worker.js');
-  assert.match(worker, /veconi-v170-online-store-scoped-finance/);
+  assert.match(worker, /veconi-v171-order-recovery-scoped-stock/);
   assert.match(worker, /financial-refinement\.css/);
-  assert.match(worker, /release:'170'/);
+  assert.match(worker, /release:'171'/);
   for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','veconi-maskable-512-v133.png','veconi-apple-touch-icon-180-v133.png','veconi-favicon-32-v133.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
 });
 
