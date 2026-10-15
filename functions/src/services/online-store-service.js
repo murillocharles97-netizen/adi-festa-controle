@@ -62,6 +62,14 @@ function onlineStoreService(db){
         presentation.categories=[...previous.values()];
       }
       const store={...existing,v2Enabled:existing?.v2Enabled===true||action==='activate'||action==='publish',activation:existing?.activation||((action==='activate'||action==='publish')?{confirmedBy:c.uid,confirmedAt:timestamp,mode:'manual_space_activation'}:null),id:c.ref.id,kind:'space_store',schemaVersion:2,businessId:c.businessId,spaceId:c.spaceId,publicToken:existing?.publicToken||token,slug,catalogSettings:settings,presentation,selectedProductIds:ids,revision:(existing?.revision||0)+1,workspaceGeneration:c.workspaceGeneration,actorUid:c.uid,createdAt:existing?.createdAt||timestamp,updatedAt:timestamp,published:existing?.published||false,checkoutEnabled:settings.checkoutEnabled};
+      // Keep the LIVE selection independent of an unpublished draft. Compatibility
+      // reads are scoped to this existing V2 public token, never to legacy catalogs.
+      if(action==='publish')store.publishedProductIds=ids;
+      else if(existing?.published&&!Array.isArray(existing.publishedProductIds)){
+        const live=(await tx.get(db.doc(`publicCatalogs/${existing.publicToken}`))).data();
+        if(live?.schemaVersion===6&&live.catalogType==='space_store'&&live.businessId===c.businessId&&live.spaceId===c.spaceId&&live.workspaceGeneration===c.workspaceGeneration)
+          store.publishedProductIds=[...new Set((live.items||[]).map(item=>item.productId))];
+      }
       if(action==='publish')store.published=input.published!==false;
       if(Buffer.byteLength(JSON.stringify(store),'utf8')>850000)fail('resource-exhausted','Esta loja excede o limite seguro de configuração. Nada foi truncado; reduza a publicação ou use paginação.');
       // All reads precede writes. Only V2 aliases are retained.

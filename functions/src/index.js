@@ -78,6 +78,16 @@ exports.processBusinessReset=onDocumentWritten({region:REGION,memory:'512MiB',ti
 });
 const CATALOG_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:30};
 const onlineStores=onlineStoreService(db);
+const publicStock=require('./services/online-store-stock-projection').onlineStoreStockProjection(db);
+const PUBLIC_STOCK_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:120,maxInstances:5,retry:true};
+const projectPublicStock=kind=>async event=>{
+  const result=await publicStock.handle({businessId:event.params.businessId,documentId:event.params.documentId,kind,
+    before:event.data?.before.exists?event.data.before.data():null,after:event.data?.after.exists?event.data.after.data():null});
+  if(!result.skipped)logger.info('[ONLINE_STORE_AVAILABILITY]',{businessId:event.params.businessId,documentId:event.params.documentId,kind,...result});
+  return result;
+};
+exports.projectOnlineProductAvailability=onDocumentWritten({...PUBLIC_STOCK_OPTIONS,document:'businesses/{businessId}/products/{documentId}'},projectPublicStock('product'));
+exports.projectOnlineVariantAvailability=onDocumentWritten({...PUBLIC_STOCK_OPTIONS,document:'businesses/{businessId}/productVariants/{documentId}'},projectPublicStock('variant'));
 const {auditOnline}=require('./shared/online-audit');
 exports.getOnlineStore=onCall(CATALOG_OPTIONS,request=>onlineStores.load(request));
 exports.saveOnlineStore=onCall(CATALOG_OPTIONS,request=>auditOnline('STORE_CONFIGURATION',request,()=>onlineStores.save(request)));
