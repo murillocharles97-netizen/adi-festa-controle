@@ -1191,22 +1191,21 @@ function enrich(name, item) {
       nomeNormalizado: normalizeText(clean.nome),
       telefoneNormalizado: String(clean.telefone || "").replace(/\D/g, ""),
     });
-  if (name === "products")
-    Object.assign(clean, {
-      nomeNormalizado: normalizeText(clean.nome),
-      controlaEstoque: !clean.semControleEstoque,
-    });
+  if (name === "products") {
+    if (Object.hasOwn(clean, 'nome')) clean.nomeNormalizado = normalizeText(clean.nome);
+    if (Object.hasOwn(clean, 'semControleEstoque')) clean.controlaEstoque = !clean.semControleEstoque;
+  }
   if (name === "productVariants") {
-    Object.assign(clean, {
-      displayNameNormalized: normalizeText(clean.displayName),
-      searchTokens: [
+    // Partial stock patches must not overwrite presentation/index fields.
+    if (Object.hasOwn(clean, 'displayName')) clean.displayNameNormalized = normalizeText(clean.displayName);
+    if (['sku','barcode','attributeValues'].some(key => Object.hasOwn(clean, key)))
+      clean.searchTokens = [
         clean.sku,
         clean.barcode,
         ...Object.values(clean.attributeValues || {}),
       ]
         .map(normalizeText)
-        .filter(Boolean),
-    });
+        .filter(Boolean);
     const allowed = new Set([
       "parentProductId",
       "attributeValues",
@@ -1218,6 +1217,9 @@ function enrich(name, item) {
       "price",
       "cost",
       "stock",
+      // Operational reservation proof; Rules still validate ownership and amount.
+      "onlineReservedStock",
+      "onlineOrderFinalizationId",
       "minStock",
       "active",
       "catalogVisible",
@@ -1241,8 +1243,13 @@ function enrich(name, item) {
 }
 function cloudPayload(name, id, data, creating = false) {
   const clean = enrich(name, data),
-    businessId = activeBusinessId(), actor = window.TeamAccess?.actor?.() || {};
+    businessId = activeBusinessId(), actor = window.TeamAccess?.actor?.() || {},
+    catalogPatch = !creating && ['products','productVariants'].includes(name);
   delete clean.version;
+  if (catalogPatch) {
+    delete clean.ownerId;
+    delete clean.schemaVersion;
+  }
   if (["sales", "payments", "balanceAdjustments", "stockMovements", "clients", "products", "productVariants", "settings"].includes(name)) {
     clean.updatedByUid = actor.actorUid || currentUser.uid;
     if (creating || ["sales", "payments", "balanceAdjustments", "stockMovements"].includes(name)) {
@@ -1261,8 +1268,8 @@ function cloudPayload(name, id, data, creating = false) {
     ...clean,
     id: String(id),
     businessId,
-    ownerId: currentUser.uid,
-    schemaVersion: 3,
+    // A stock-only update must not take ownership or migrate the catalog schema.
+    ...(!catalogPatch ? {ownerId: currentUser.uid, schemaVersion: 3} : {}),
     ...(creating
       ? {
           createdAt:
@@ -1666,6 +1673,21 @@ function changedFields(previous, item) {
   return patch;
 }
 function diffWrites(before, after) {
+  const previousMovements = new Set((before.movimentacoesEstoque || []).map(m => String(m.id)));
+  for (const movement of after.movimentacoesEstoque || []) {
+    if (previousMovements.has(String(movement.id))) continue; // Never backfill history.
+    const sale = (after.vendas || []).find(s => s.id === movement.vendaId);
+    const product = (after.produtos || []).find(p => p.id === movement.produtoId);
+    const businessId = activeBusinessId();
+    if (movement.businessId && movement.businessId !== businessId)
+      throw Error('Movimentação de estoque de outra empresa.');
+    const requested = movement.spaceId || sale?.spaceId || '';
+    if (sale?.spaceId && requested !== sale.spaceId)
+      throw Error('A movimentação deve pertencer ao espaço da venda.');
+    const origin = window.SpaceContext?.stockMovementOrigin?.(product, requested);
+    if (!origin) throw Error('Selecione o espaço desta movimentação de estoque.');
+    Object.assign(movement, origin);
+  }
   const writes = [];
   for (const name of Object.keys(SOURCES)) {
     const previous = new Map(
@@ -1927,6 +1949,9 @@ async function commitQueueItem(item) {
     const commitProductImportFence = await prepareProductImportFence({transaction,db,businessId,writes,doc,serverTimestamp});
     for (const write of writes.filter((entry) =>
       entry.entityType === "sales" && entry.operation === "create")) {
+      // Online sale IDs/operations are fixed by the backend claim; they are not
+      // legacy local-only sales. Sellers must not read private balance adjustments.
+      if (onlineClaim && write.entityId === onlineClaim.saleId) continue;
       const resolution = await transaction.get(doc(db, "businesses", businessId,
         "balanceAdjustments", legacyReconciliationOperationId(write.entityId)));
       if (resolution.exists() &&
@@ -1938,8 +1963,9 @@ async function commitQueueItem(item) {
     for (const write of writes)
       if (
         (transactional && deltaEntities.includes(write.entityType)) ||
-        (IDEMPOTENT_EVENT_NAMES.has(write.entityType) &&
-          write.data?.operationId)
+        (IDEMPOTENT_EVENT_NAMES.has(write.entityType) && write.data?.operationId &&
+          !(onlineClaim && write.entityType === 'stockMovements' &&
+            write.operation === 'create' && write.data.vendaId === onlineClaim.saleId))
       ) {
           const reference = doc(
             db,
@@ -2363,7 +2389,10 @@ async function commitQueueItem(item) {
           const quantity=Number(base.onlineReservedStock||0),key=write.entityType==='products'?`p_${write.entityId}`:`v_${write.entityId}`,own=Number(onlineClaim?.reservedQuantities?.[key]||0),field=write.entityType==='products'?'estoqueAtual':'stock';
           if(quantity>0&&!base.allowNegativeStock&&Number(merged[field])<quantity-own)
             throw Object.assign(Error('Este estoque está reservado para pedidos online. Atualize a venda ou conclua o pedido correspondente.'),{code:'online-stock-reserved'});
-          merged.onlineReservedStock=quantity;
+          // Variant reservations live on the variant, not its parent. Do not
+          // invent a new parent reservation field during a stock-only sale.
+          if (Object.hasOwn(base, 'onlineReservedStock')) merged.onlineReservedStock=quantity;
+          else delete merged.onlineReservedStock;
           merged.onlineOrderFinalizationId=onlineClaim?.id||null;
         }
         if (
@@ -2456,6 +2485,15 @@ async function commitQueueItem(item) {
         payload.lucro = deleteField();
       }
       if (write.entityType === "stockMovements") {
+        // V170 pending online-sale queues lack spaceId. Recover only from the
+        // authenticated server claim already validated above, never today's UI selection.
+        if (creating && onlineClaim && data.vendaId === onlineClaim.saleId) {
+          if (payload.spaceId && payload.spaceId !== onlineClaim.spaceId ||
+              !onlineClaim.items.some(i => i.productId === data.produtoId &&
+                (i.variantId || null) === (data.variantId || null)))
+            throw Object.assign(Error('A movimentação não corresponde ao espaço e aos itens do pedido.'), {code:'online-stock-scope-mismatch'});
+          payload.spaceId = onlineClaim.spaceId;
+        }
         const hasCost = Object.prototype.hasOwnProperty.call(data || {}, "custoUnitario") ||
           Object.prototype.hasOwnProperty.call(data || {}, "costUnit");
         if (hasCost && canWriteCosts) {

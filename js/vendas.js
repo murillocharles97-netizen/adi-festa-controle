@@ -296,6 +296,8 @@ window.Vendas = (() => {
           db.movimentacoesEstoque.push({
             id: Utils.uuid(),
             operationId,
+            businessId,
+            spaceId,
             produtoId: p.id,
             parentProductId: p.id,
             variantId: v.id,
@@ -310,17 +312,19 @@ window.Vendas = (() => {
             data,
             ...actor,
           });
-          ProductVariations.recomputeInData(db, p.id);
+          ProductVariations.recomputeInData(db, p.id, {stockOnly:true});
           return;
         }
         const anterior = Number(p.estoqueAtual || 0),
           novo = anterior - Number(i.quantidade);
         p.estoqueAtual = novo;
         p.estoque = novo;
-        p.atualizadoEm = data;
+        p.updatedAt = data;
         db.movimentacoesEstoque.push({
           id: Utils.uuid(),
           operationId,
+          businessId,
+          spaceId,
           produtoId: p.id,
           produtoNome: p.nome,
           tipo: "saida_venda",
@@ -416,6 +420,8 @@ window.Vendas = (() => {
         throw Error("Pagamento integrado requer estorno. Estorno não disponível nesta V1.");
       if (Date.now() - new Date(venda.data).getTime() > 5 * 60 * 1000)
         throw Error("O prazo de 5 minutos para desfazer terminou");
+      const businessId = String(venda.businessId || DB.getBusinessId?.() || '');
+      const spaceId = requiredSalesSpace(venda.spaceId || '');
       if (!options.administrativeResolution)
         window.Campanhas?.validarReversaoVendaNoBanco?.(db, venda);
       removida = { ...venda };
@@ -444,6 +450,8 @@ window.Vendas = (() => {
           db.movimentacoesEstoque.push({
             id: Utils.uuid(),
             operationId,
+            businessId,
+            spaceId,
             produtoId: p.id,
             parentProductId: p.id,
             variantId: v.id,
@@ -458,17 +466,19 @@ window.Vendas = (() => {
             data: agora,
             ...actor,
           });
-          ProductVariations.recomputeInData(db, p.id);
+          ProductVariations.recomputeInData(db, p.id, {stockOnly:true});
           return;
         }
         const anterior = Number(p.estoqueAtual || 0),
           novo = anterior + Number(i.quantidade);
         p.estoqueAtual = novo;
         p.estoque = novo;
-        p.atualizadoEm = agora;
+        p.updatedAt = agora;
         db.movimentacoesEstoque.push({
           id: Utils.uuid(),
           operationId,
+          businessId,
+          spaceId,
           produtoId: p.id,
           produtoNome: p.nome,
           tipo: "venda_desfeita",

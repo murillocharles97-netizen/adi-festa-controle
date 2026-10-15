@@ -51,7 +51,7 @@
       .filter(Boolean)
       .join(" / ") ||
     "Variação";
-  const recomputeInData = (data, parentProductId) => {
+  const recomputeInData = (data, parentProductId, { stockOnly = false } = {}) => {
     const product = (data.produtos || []).find(
       (item) => item.id === parentProductId,
     );
@@ -59,23 +59,28 @@
     const variants = active(parentProductId, data),
       prices = variants.map((item) => num(item.price)),
       stock = variants.reduce((sum, item) => sum + num(item.stock), 0);
-    product.activeVariationCount = variants.length;
     product.totalStock = stock;
     product.estoqueAtual = stock;
     product.estoque = stock;
-    product.minPrice = prices.length ? Math.min(...prices) : 0;
-    product.maxPrice = prices.length ? Math.max(...prices) : 0;
-    product.preco = product.minPrice;
-    product.variationSearchTokens = [
-      ...new Set(
-        variants.flatMap((item) => [
-          displayName(item),
-          item.sku,
-          item.barcode,
-          ...Object.values(item.attributeValues || {}),
-        ]),
-      ),
-    ].filter(Boolean);
+    // Selling/undoing stock must not edit catalog identity, prices or search
+    // indexes (variant query order is not stable across reloads).
+    if (!stockOnly) {
+      product.activeVariationCount = variants.length;
+      product.minPrice = prices.length ? Math.min(...prices) : 0;
+      product.maxPrice = prices.length ? Math.max(...prices) : 0;
+      product.preco = product.minPrice;
+      product.variationSearchTokens = [
+        ...new Set(
+          variants.flatMap((item) => [
+            displayName(item),
+            item.sku,
+            item.barcode,
+            ...Object.values(item.attributeValues || {}),
+          ]),
+        ),
+      ].filter(Boolean);
+      product.schemaVersion = Math.max(14, num(product.schemaVersion));
+    }
     const controlsStock =
       product.itemKind !== "service" &&
       !product.semControleEstoque &&
@@ -83,8 +88,7 @@
     product.hasAvailableStock =
       !controlsStock ||
       variants.some((item) => item.allowNegativeStock || num(item.stock) > 0);
-    product.atualizadoEm = now();
-    product.schemaVersion = Math.max(14, num(product.schemaVersion));
+    product.updatedAt = now();
     return product;
   };
   const recompute = (parentProductId) => {
@@ -382,7 +386,7 @@
         data: now(),
       };
       data.movimentacoesEstoque.push(movement);
-      recomputeInData(data, parentProductId);
+      recomputeInData(data, parentProductId, {stockOnly:true});
     });
     return movement;
   }
