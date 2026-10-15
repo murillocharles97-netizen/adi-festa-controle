@@ -207,3 +207,16 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(index, /firebase\/space-service\.js\?v=151/);
   assert.match(worker, /veconi-v170-online-store-scoped-finance/);
 });
+
+test('stock movement origin requires an eligible business space; no global or ambiguous fallback',()=>{
+  const {window}=loadSpaces(),spaces=fixtures();spaces[1].capabilities.inventory=true;
+  window.SpaceContext.setSpaces(spaces);
+  const p={businessId:'business-a',spaceAccessMode:'all_spaces'};
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin(p),/Selecione/);
+  assert.equal(window.SpaceContext.stockMovementOrigin(p,'adi').spaceId,'adi');
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'all_spaces'),/Selecione/);
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'casa'),/Selecione/);
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin({...p,businessId:'foreign'},'adi'),/empresa/);
+  window.SpaceContext.selectHome('iptv');assert.equal(window.SpaceContext.stockMovementOrigin(p).spaceId,'iptv');
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin({...p,spaceAccessMode:'single_space',allowedSpaceIds:['adi']},'iptv'),/Selecione/);
+});

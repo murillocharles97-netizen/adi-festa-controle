@@ -90,35 +90,31 @@ service cloud.firestore {
       return belongsToBusiness(businessId) && roleForBusiness(businessId) in ['owner', 'admin', 'manager'];
     }
     function permissionGranted(businessId, permission) {
-      return roleForBusiness(businessId) in ['owner', 'platform_admin']
-        || (
-          memberExists(businessId)
-          && teamMember(businessId).get('permissions', {}).get(permission, false) == true
-        )
-        || (
-          !memberExists(businessId)
-          && (
-            (userProfile().role in ['admin', 'manager'] && permission != 'exportCRM')
-            || userProfile().get('permissions', {}).get(permission, false) == true
-            || (permission == 'reports.view' && userProfile().get('permissions', {}).get('viewCRM', false) == true)
-            || (permission == 'settings.manage' && userProfile().get('permissions', {}).get('manageOperationSettings', false) == true)
-          )
-        );
+      let modern = memberExists(businessId);
+      let actor = modern ? teamMember(businessId) : userProfile();
+      return actor.role in ['owner', 'platform_admin']
+        || (modern ? actor.get('permissions', {}).get(permission, false) == true
+          : ((actor.role in ['admin', 'manager'] && permission != 'exportCRM')
+            || actor.get('permissions', {}).get(permission, false) == true
+            || (permission == 'reports.view' && actor.get('permissions', {}).get('viewCRM', false) == true)
+            || (permission == 'settings.manage' && actor.get('permissions', {}).get('manageOperationSettings', false) == true)));
     }
     function hasPermission(businessId, permission) {
       return belongsToBusiness(businessId) && permissionGranted(businessId, permission);
     }
     function canAccessSpace(businessId, spaceId) {
+      let modern = memberExists(businessId);
+      let member = modern ? teamMember(businessId) : {};
       return belongsToBusiness(businessId)
         && spaceId is string
         && !(spaceId in ['all', 'all_spaces'])
         && (
-          !memberExists(businessId)
-          || roleForBusiness(businessId) == 'owner'
-          || teamMember(businessId).spaceAccess == 'all'
+          !modern
+          || member.role == 'owner'
+          || member.spaceAccess == 'all'
           || (
-            teamMember(businessId).allowedSpaceIds is list
-            && spaceId in teamMember(businessId).allowedSpaceIds
+            member.allowedSpaceIds is list
+            && spaceId in member.allowedSpaceIds
           )
         );
     }
@@ -156,16 +152,17 @@ service cloud.firestore {
         ));
     }
     function canWriteCollection(businessId, collectionName) {
-      let member = memberExists(businessId) ? teamMember(businessId) : {};
+      let modern = memberExists(businessId);
+      let member = modern ? teamMember(businessId) : {};
       let privileged = member.get('role','') in ['owner','platform_admin'];
       let grants = member.get('permissions',{});
       return workspaceWriteAllowed(businessId)
         && subscriptionAllowsWrites(businessId)
         && planAllowsCollection(businessId, collectionName)
         && (
-          (legacyMember(businessId) && activeBusiness(businessId) && legacyCanWriteCollection(businessId, collectionName))
-          || (
-            activeMember(businessId)
+          (!modern && legacyMember(businessId) && activeBusiness(businessId) && legacyCanWriteCollection(businessId, collectionName))
+          || (modern &&
+            member.status == 'active'
             && activeBusiness(businessId)
             && (
               (collectionName == 'sales' && ((privileged || grants.get('sales.create',false) == true) || (privileged || grants.get('sales.cancel',false) == true)))

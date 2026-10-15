@@ -4,7 +4,7 @@ import {doc,getDoc,getDocFromServer,serverTimestamp,setDoc} from './workspace-fi
 import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-context.js?v=123';
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
-import {cleanupCurrentSession,registerCleanup} from './session-lifecycle.js';
+import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
 import './sync.js?v=160';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
@@ -278,12 +278,15 @@ function syncSubscriptionShell(context){
   showSubscriptionBanner(context.access);
 }
 addEventListener('business-context-changed',event=>syncSubscriptionShell(event.detail));
-async function allowed(user,profile,business,member){
+async function allowed(user,profile,business,member,token){
+  assertCurrentRun(token);
   const workspace=workspaceRuntime().capture();
   bootstrapLog('preparing business context');
   const context=BusinessContext.set({business,userProfile:profile,member});
   const permissionSignature=context.permissions.slice().sort().join('|').split('').reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(36);
   await DB.useBusiness(profile.businessId,{uid:user.uid,permissionSignature,workspaceGeneration:workspace.workspaceGeneration,migrateLegacy:profile.businessId===INTERNAL_BUSINESS_ID&&context.role==='owner',migratePrivateCache:context.role==='owner'});
+  // A logout/rebootstrap may have happened while IndexedDB was opening.
+  assertCurrentRun(token);
   workspaceRuntime().capture();
   window.TeamAccess?.sanitizePrivateCache?.(DB.carregar());
   if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
@@ -296,12 +299,19 @@ async function allowed(user,profile,business,member){
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
   syncSubscriptionShell(context);
   try{
+    // End old subscriptions BEFORE starting replacements. Registering a cleanup
+    // after setUser used to run the previous stop() against the new Sync session.
+    runCleanup('cloud-badge');
+    runCleanup('firebase-sync');
+    assertCurrentRun(token);
     window.SyncFirebase.setUser(user,profile,business);
-    badgeSubscription?.();badgeSubscription=window.SyncFirebase.subscribe(updateCloudBadge);
+    const unsubscribe=window.SyncFirebase.subscribe(updateCloudBadge);
+    badgeSubscription=unsubscribe;
     registerCleanup('firebase-sync',()=>window.SyncFirebase?.stop?.());
-    registerCleanup('cloud-badge',()=>{try{badgeSubscription?.()}finally{badgeSubscription=null}});
+    registerCleanup('cloud-badge',()=>{try{unsubscribe()}finally{if(badgeSubscription===unsubscribe)badgeSubscription=null}});
     bootstrapLog('sync prepared',{degraded:false});
   }catch(error){
+    if(normalizedCode(error)==='bootstrap/cancelled')throw error;
     console.warn('[Bootstrap optional module]',{module:'sync',code:normalizedCode(error)||'SYNC_UNAVAILABLE',message:error?.message});
     window.FirebaseBootstrap.details={...(window.FirebaseBootstrap.details||{}),warning:'SYNC_UNAVAILABLE'};
     bootstrapLog('sync prepared',{degraded:true});
@@ -312,7 +322,7 @@ async function allowed(user,profile,business,member){
   const readyDetail={uid:user.uid,businessId:profile.businessId,business,member,access:context.access};
   bootstrapLog('environment ready',{businessId:profile.businessId});
   setTimeout(()=>{
-    if(auth.currentUser?.uid!==user.uid||bootstrapState!=='authorized'||window.WorkspaceRuntime?.isBlocked())return;
+    if(token.cancelled||token.sequence!==bootstrapSequence||auth.currentUser?.uid!==user.uid||bootstrapState!=='authorized'||window.WorkspaceRuntime?.isBlocked())return;
     const mountStartedAt=performance.now();
     dispatchEvent(new CustomEvent('firebase-auth-ready',{detail:readyDetail}));
     const mountMs=Math.max(0,Math.round(performance.now()-mountStartedAt));
@@ -455,7 +465,7 @@ async function bootstrapCore(user,token,mode){
   }
   bootstrapLog('migration checked',{businessId:profile.businessId});
   setBootstrapState('loading_access',{businessId:profile.businessId});
-  await allowed(user,profile,business,member);
+  await allowed(user,profile,business,member,token);
   bootstrapLog('subscription resolved',{planId:window.FirebaseSession?.subscription?.planId||'fallback',status:window.FirebaseSession?.subscription?.status||'fallback'});
   bootstrapLog('permissions resolved',{role:profile.role});
   if(bootstrapState==='authorized')readyUid=user.uid;

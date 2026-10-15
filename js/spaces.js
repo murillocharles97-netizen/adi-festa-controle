@@ -257,6 +257,20 @@
     state.adapter = adapter;
     return adapter;
   }
+  function stockMovementOrigin(product, requestedId = '') {
+    ensureContext();
+    const businessId = currentContext().businessId;
+    if (!businessId || !product || product.businessId && product.businessId !== businessId)
+      throw Error('Não foi possível confirmar a empresa do estoque.');
+    const eligible = homeSpaces().filter(s => s.businessId === businessId &&
+      s.capabilities.products && s.capabilities.inventory && productAllowsSpace(product, s.id));
+    const explicit = String(requestedId || '').trim();
+    const selected = explicit || (state.homeId !== ALL_SPACES ? state.homeId : '');
+    const space = selected ? eligible.find(s => s.id === selected) : eligible.length === 1 ? eligible[0] : null;
+    if (!space || RESERVED_SPACE_IDS.has(space.id))
+      throw Error('Selecione um espaço autorizado para esta movimentação de estoque.');
+    return {businessId, spaceId:space.id};
+  }
   function selectionLabel(kind = "home") {
     if (kind === "home" && state.homeId === ALL_SPACES) return "Todos os espaços";
     return (kind === "sales" ? selectedSales() : selectedHome())?.name || "Espaço";
@@ -516,6 +530,7 @@
     selectHome,
     selectSales,
     requireSalesSpace,
+    stockMovementOrigin,
     selectionLabel,
     renderBar,
     contextualData,
