@@ -6,8 +6,9 @@ Nenhum deploy, migração ou gravação de teste em produção nesta validação
 
 ## Decisão
 
-AINDA HÁ UM BLOQUEADOR: a projeção pública de disponibilidade não acompanha o estoque/reserva canônicos.
-Não preparar/publicar V170 ainda. Correção local específica solicitada ao usuário.
+O bloqueador da projeção pública foi corrigido localmente após autorização explícita.
+Resultados atualizados em online-store-public-availability-validation.md; nenhuma publicação realizada.
+V170 sugerida para a próxima publicação autorizada, com smoke em nuvem/Android ainda pendente.
 Android físico permanece pendente por indisponibilidade informada pelo usuário.
 
 ## Ambiente
@@ -83,7 +84,7 @@ substituir somente o host pela origem do Emulator. Não abriu/executou loja real
   loop não são evidência final): verified-store-admin-desktop.jpg,
   verified-public-stock-desktop.jpg e verified-history-readonly-mobile.jpg.
 
-## Bloqueador comprovado: disponibilidade pública
+## Bloqueador comprovado na validação anterior: disponibilidade pública (corrigido)
 
 Produto qa-main-product, na loja A:
 - Firestore canônico após a venda: estoqueAtual=2, onlineReservedStock=0.
@@ -93,7 +94,7 @@ Produto qa-main-product, na loja A:
   o dado exibido é que fica antigo, até republicação.
 - Inspeção do backend não encontrou projeção V2 de estoque disparada pela baixa.
 - Não reparar estoque nem regravar vendas para resolver a projeção.
-- Proposta dependente de autorização: atualização scoped da disponibilidade pública,
+- Correção autorizada e implementada: atualização scoped da disponibilidade pública,
   cobrindo reserva/liberação/baixa, inclusive variantes, sem catálogo global ou listener
   global do frontend, sem expor custo/dados privados nem aumentar reads sem justificativa.
 
@@ -124,7 +125,7 @@ anterior tem auditoria separada em legacy-store-retirement-audit.md.
 
 ## Versão e rollback
 
-V170 sugerida somente após resolver o bloqueador e repetir os testes. APP/SW ainda 169.
+Bloqueador resolvido e testes locais repetidos; detalhes no relatório complementar. APP/SW ainda 169.
 Sem push/deploy. Produção V169: e59b290b31d893e58f11b4ef40fe3bd4b77a26f9.
 Rollback frontend: V169. Não restaurar dados globais excluídos nem fazer rollback cego
 de Rules/handlers após pedidos V2: pausar checkout mantendo reservas, recuperação,
