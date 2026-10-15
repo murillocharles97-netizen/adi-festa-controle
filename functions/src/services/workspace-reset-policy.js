@@ -6,7 +6,7 @@ const OPERATIONAL_COLLECTIONS=new Set([
   'onlineStores','onlineStockReservations','onlineOrderReservations',
   'products','productVariants','stockMovements','productFinancials','variantFinancials',
   'stockMovementFinancials','clients','sales','saleFinancials','payments','balanceAdjustments',
-  'balanceEvents','processedOperations','campaigns','campaignProgress','campaignEvents',
+  'balanceEvents','processedOperations','financialIncomeRoutes','campaigns','campaignProgress','campaignEvents',
   'campaignRedemptions','paymentAllocations','rewards','charges','messageHistory',
   'messageTemplates','messageSequences','clientContacts','customerSubscriptions',
   'customerSubscriptionEvents','customerMetrics','customerMonthlyMetrics','customerSegments',

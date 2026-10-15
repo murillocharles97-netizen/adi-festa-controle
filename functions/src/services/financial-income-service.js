@@ -1,6 +1,7 @@
 'use strict';
 
 const {FieldValue,Timestamp}=require('firebase-admin/firestore');
+const {createHash}=require('node:crypto');
 const {projectInWorkspace}=require('./workspace-projection');
 
 const INVALID_STATUSES=new Set(['cancelado','cancelada','cancelled','canceled','desfeito','desfeita','venda_desfeita','estornado','estornada','reversed','refunded','conflict']);
@@ -58,28 +59,61 @@ const afterActivation=(automation,value)=>{
   return Boolean(occurred&&(!activated||new Date(occurred)>=new Date(activated)));
 };
 const entryIdentity=(spaceId,sourceType,sourceId)=>`${spaceId}:${sourceType}:${sourceId}`;
+const sourceSpaceId=source=>text(source?.spaceId);
+const onlineOrderId=sale=>text(sale?.onlineOrderId||sale?.catalogOrderId)||text(sale?.operationId).match(/^(?:catalog-order|online-sale):(.+)$/)?.[1]||null;
+function spaceRoutingIssue(businessId,source,space){
+  const id=sourceSpaceId(source);
+  if(!id||['all','all_spaces'].includes(id)||id.includes('/'))return'source-space-required';
+  if(source.businessId&&text(source.businessId)!==text(businessId))return'source-business-mismatch';
+  if(source.financialSpaceId&&text(source.financialSpaceId)!==id)return'source-space-conflict';
+  if(!space||space.id!==id)return'space-not-found';
+  if(space.active===false||(space.status&&space.status!=='active'))return'space-inactive';
+  if(!text(space.ownerUid))return'space-owner-missing';
+  const bindings=[space.businessId,space.linkedBusinessId].map(text).filter(Boolean);
+  if(!bindings.length||bindings.some(value=>value!==text(businessId)))return'space-business-mismatch';
+  const legacy=space.type==='business'&&text(space.linkedBusinessId)===text(businessId)&&!space.capabilities;
+  if(!legacy&&space.capabilities?.finance!==true)return'finance-disabled';
+  if(!legacy&&space.capabilities?.sales!==true)return'sales-disabled';
+  return null;
+}
+const projectionFingerprint=source=>JSON.stringify([
+  text(source.businessId),sourceSpaceId(source),text(source.financialSpaceId),source.workspaceGeneration??0,
+  lower(source.status||source.saleStatus),lower(source.applicationStatus),
+  cents(source.effectiveAmount??source.valorFinal??source.valorTotal??source.total??source.valor??source.amount),
+  Boolean(source.deletedAt||source.reversedAt||source.cancelledAt||source.active===false||source.ativo===false),
+  iso(firstDate(source,['paidAt','receivedAt','data','createdAt'])),onlineOrderId(source),
+  text(source.formaPagamento||source.paymentMethod),isTerminalPaymentSale(source),
+  cents(source.reversedAmount??source.reversalAmount??source.effectiveReversalAmount),
+  text(source.reversalOperationId||source.reversedByOperationId||source.cancelOperationId),
+  iso(firstDate(source,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt'])),
+]);
+const saleIsPaid=source=>PAID_SALE_STATUSES.has(lower(source?.status||source?.saleStatus));
+const paymentIsApplied=source=>APPLIED_PAYMENT_STATUSES.has(lower(source?.applicationStatus||source?.status));
 
 function financialIncomeService(db){
-  const spaceIdFor=businessId=>`business_${businessId}`;
-  const spaceRefFor=businessId=>db.doc(`financialSpaces/${spaceIdFor(businessId)}`);
   const entryRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/entries/${id}`);
   const eventRef=(spaceId,id)=>db.doc(`financialSpaces/${spaceId}/events/${id}`);
+  const routeRef=(businessId,kind,id)=>db.doc(`businesses/${businessId}/financialIncomeRoutes/${createHash('sha256').update(`${kind}:${id}`).digest('hex')}`);
   const balanceEventRef=(businessId,paymentId)=>db.doc(`businesses/${businessId}/balanceEvents/payment_received:${paymentId}`);
 
-  async function linkedSpace(businessId,{requireEnabled=true}={}){
-    const ref=spaceRefFor(businessId),snapshot=await ref.get();
-    if(!snapshot.exists)return null;
-    const space={id:snapshot.id,...snapshot.data()};
-    if(space.active===false||space.type!=='business'||text(space.linkedBusinessId)!==text(businessId))return null;
+  async function linkedSpace(businessId,source={}, {requireEnabled=true}={}){
+    const id=sourceSpaceId(source);
+    const issue=spaceRoutingIssue(businessId,source,{id});
+    if(['source-space-required','source-business-mismatch','source-space-conflict'].includes(issue))return{skipped:issue};
+    const ref=db.doc(`financialSpaces/${id}`),snapshot=await ref.get();
+    const space=snapshot.exists?{...snapshot.data(),id:snapshot.id}:null;
+    const skipped=spaceRoutingIssue(businessId,source,space);
+    if(skipped)return{skipped};
     const automation=automationFor(space);
-    if(requireEnabled&&!automation.enabled)return null;
+    if(requireEnabled&&!automation.enabled)return{skipped:'automation-disabled'};
     return{space,automation,ref};
   }
-
   const baseEntry=({space,businessId,id,sourceType,sourceId,amountCents,occurredAt,description,paymentMethodId,customerId=null,relatedSaleIds=[],relatedOrderId=null,direction='in',reversesEntryId=null,legacyAmountCents=0,allocatedAmountCents=0,financialAccountId=null,financialAccountHomeSpaceId=null})=>({
     id,
     financialSpaceId:space.id,
-    spaceType:'business',
+    sourceSpaceId:space.id,
+    financialRoutingVersion:2,
+    spaceType:space.type,
     linkedBusinessId:businessId,
     ownerUid:space.ownerUid,
     createdBy:'system',
@@ -106,8 +140,8 @@ function financialIncomeService(db){
     periodKey:occurredAt.slice(0,7),
     duePeriodKey:occurredAt.slice(0,7),
     paymentMethod:paymentMethodId,
-    financialAccountId:text(financialAccountId||space.automation?.defaultIncomeFinancialAccountId)||null,
-    financialAccountHomeSpaceId:text(financialAccountHomeSpaceId||space.automation?.defaultIncomeFinancialAccountHomeSpaceId)||null,
+    financialAccountId:text(direction==='out'?financialAccountId:financialAccountId||space.automation?.defaultIncomeFinancialAccountId)||null,
+    financialAccountHomeSpaceId:text(direction==='out'?financialAccountHomeSpaceId:financialAccountHomeSpaceId||space.automation?.defaultIncomeFinancialAccountHomeSpaceId)||null,
     sourceType,
     sourceId:text(sourceId),
     customerId:text(customerId)||null,
@@ -122,17 +156,51 @@ function financialIncomeService(db){
   });
 
   async function createOnce({space,businessId,eventKind,source={},...input}){
-    let value={...baseEntry({space,businessId,...input}),workspaceGeneration:source.workspaceGeneration??0};
-    const ref=entryRef(space.id,value.id),event=eventRef(space.id,value.id);
+    let value;
+    const saleSource=input.sourceType.startsWith('sale_'),kind=saleSource?'sale':'customer_payment',reversal=input.direction==='out';
+    const route=routeRef(businessId,kind,input.sourceId),sourceRef=db.doc(`businesses/${businessId}/${saleSource?'sales':'payments'}/${input.sourceId}`);
+    // Read-only compatibility guard, NEVER a routing fallback. A historical
+    // entry in the former global destination must not be copied or corrected.
+    const legacySpaceId=`business_${businessId}`,originalId=saleSource?`sale_${input.sourceId}`:`credit_payment_${input.sourceId}`;
+    const legacyRef=legacySpaceId!==space.id?entryRef(legacySpaceId,originalId):null;
+    const ref=entryRef(space.id,input.id),event=eventRef(space.id,input.id);
     return projectInWorkspace(db,businessId,source,async transaction=>{
-      const existing=await transaction.get(ref);
+      const [spaceSnapshot,routeSnapshot,currentSource,existing,originalSnapshot,legacySnapshot,businessSnapshot]=await Promise.all([
+        transaction.get(db.doc(`financialSpaces/${space.id}`)),transaction.get(route),transaction.get(sourceRef),transaction.get(ref),
+        reversal?transaction.get(entryRef(space.id,originalId)):null,legacyRef?transaction.get(legacyRef):null,transaction.get(db.doc(`businesses/${businessId}`)),
+      ]);
+      const freshSpace=spaceSnapshot.exists?{...spaceSnapshot.data(),id:spaceSnapshot.id}:null,issue=spaceRoutingIssue(businessId,source,freshSpace);
+      if(issue)return{skipped:issue};
+      if(text(freshSpace.ownerUid)!==text(businessSnapshot.data()?.ownerId))return{skipped:'space-owner-mismatch'};
+      if(routeSnapshot.exists&&routeSnapshot.data().financialSpaceId!==space.id)return{skipped:'source-route-conflict'};
+      if(legacySnapshot?.exists)return{skipped:'historical-entry-in-other-space'};
       if(existing.exists)return{created:false,entry:{id:existing.id,...existing.data()}};
+      if(!currentSource.exists&&!reversal)return{skipped:'source-missing'};
+      if(currentSource.exists&&projectionFingerprint(currentSource.data())!==projectionFingerprint(source))return{skipped:'stale-source-event'};
+      const automation=automationFor(freshSpace);
+      if(!reversal){
+        if(routeSnapshot.exists)return{skipped:'projection-receipt-without-entry'};
+        if(!automation.enabled)return{skipped:'automation-disabled'};
+        if(!(saleSource?automation.sales:automation.customerPayments))return{skipped:'income-kind-disabled'};
+        if(saleSource&&onlineOrderId(source)&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
+        if(!afterActivation(automation,input.occurredAt))return{skipped:'before-activation'};
+      }
+      let original=null,amountCents=input.amountCents;
+      if(reversal){
+        if(!originalSnapshot?.exists)return{skipped:'original-missing'};
+        original=originalSnapshot.data();
+        const already=Number(original.reversedAmountCents||(original.reversalStatus==='reversed'?original.amountCents:0));
+        amountCents=Math.min(amountCents,Math.max(0,Number(original.amountCents||0)-already));
+        if(!amountCents)return{skipped:'already-reversed'};
+      }
+      value={...baseEntry({space:freshSpace,businessId,...input,amountCents}),workspaceGeneration:source.workspaceGeneration??0};
       const accountHomeSpaceId=value.financialAccountId?text(value.financialAccountHomeSpaceId)||space.id:null,
         accountRef=value.financialAccountId?db.doc(`financialSpaces/${accountHomeSpaceId}/financialAccounts/${value.financialAccountId}`):null,
         accountSnapshot=accountRef?await transaction.get(accountRef):null,
         account=accountSnapshot?.exists?accountSnapshot.data():null;
       const mode=text(account?.accessMode)||'single_space',allowed=Array.isArray(account?.allowedFinancialSpaceIds)?account.allowedFinancialSpaceIds.map(text):[],defaultSpace=text(account?.defaultFinancialSpaceId)||accountHomeSpaceId,
-        accountAllowed=account&&account.active!==false&&text(account.ownerUid)===text(space.ownerUid)&&(mode==='all_spaces'||(mode==='selected_spaces'&&allowed.includes(space.id))||(mode==='single_space'&&defaultSpace===space.id));
+        accountAllowed=account&&account.active!==false&&text(account.ownerUid)===text(freshSpace.ownerUid)&&(mode==='all_spaces'||(mode==='selected_spaces'&&allowed.includes(freshSpace.id))||(mode==='single_space'&&defaultSpace===freshSpace.id));
+      if(reversal&&value.financialAccountId&&!accountAllowed)return{skipped:'original-account-requires-review'};
       if(!accountAllowed)value={...value,financialAccountId:null,financialAccountHomeSpaceId:null};
       else if(accountRef){
         value={...value,financialAccountHomeSpaceId:accountHomeSpaceId};
@@ -141,9 +209,16 @@ function financialIncomeService(db){
         transaction.update(accountRef,{currentBalanceCents:currentBalanceCents+delta,balanceUpdatedAt:value.occurredAt,lastBalanceOperationId:value.operationId,schemaVersion:Math.max(3,Number(account.schemaVersion||0)),updatedAt:FieldValue.serverTimestamp()});
       }
       transaction.create(ref,value);
+      if(!routeSnapshot.exists)transaction.create(route,{businessId,sourceSpaceId:space.id,financialSpaceId:space.id,sourceType:kind,sourceId:input.sourceId,entryId:originalId,financialRoutingVersion:2,workspaceGeneration:source.workspaceGeneration??0,createdAt:FieldValue.serverTimestamp()});
+      if(reversal){
+        const reversedAmountCents=Number(original.reversedAmountCents||0)+amountCents;
+        transaction.update(originalSnapshot.ref,{reversedAmountCents,reversalStatus:reversedAmountCents>=original.amountCents?'reversed':'partially_reversed',reversalEntryId:value.id,reversedAt:timestamp(value.occurredAt),updatedAt:FieldValue.serverTimestamp()});
+      }
       transaction.create(event,{
         id:value.id,
         financialSpaceId:space.id,
+        sourceSpaceId:space.id,
+        financialRoutingVersion:2,
         linkedBusinessId:businessId,
         ownerUid:space.ownerUid,
         createdBy:'system',
@@ -170,95 +245,39 @@ function financialIncomeService(db){
     return snapshot.exists&&lower(evidence.type)==='payment_received'&&APPLIED_BALANCE_EVENT_STATUSES.has(lower(evidence.status))&&text(evidence.sourceDocumentId)===text(paymentId)&&cents(evidence.amount)===amountCents&&(!paymentClientId||!evidenceClientId||paymentClientId===evidenceClientId);
   };
 
-  async function backfillProcessedPaymentEvidence(businessId,paymentId,space,expectedAmountCents,source={}){
-    const paymentRef=db.doc(`businesses/${businessId}/payments/${paymentId}`),evidenceRef=balanceEventRef(businessId,paymentId);
-    return projectInWorkspace(db,businessId,source,async transaction=>{
-      const paymentSnapshot=await transaction.get(paymentRef);
-      if(!paymentSnapshot.exists)return{applied:false,reason:'payment-missing'};
-      const payment={id:paymentSnapshot.id,...paymentSnapshot.data()},amountCents=cents(payment.effectiveAmount??payment.valor??payment.amount),clientId=text(payment.clienteId||payment.clientId||payment.customerId),operationId=text(payment.operationId),ownerId=text(payment.ownerId||payment.ownerUid),occurredAt=iso(firstDate(payment,['receivedAt','paidAt','data','createdAt']));
-      if(amountCents!==expectedAmountCents||!clientId||!operationId||operationId!==text(paymentId)||text(payment.idempotencyKey)!==operationId)return{applied:false,reason:'payment-identity-mismatch'};
-      if(text(payment.businessId)!==text(businessId)||ownerId!==text(space.ownerUid)||payment.financialStateDependent!==true)return{applied:false,reason:'payment-scope-mismatch'};
-      if(!['pending','pending_sync'].includes(lower(payment.applicationStatus))||!['pending','pending_sync'].includes(lower(payment.status)))return{applied:false,reason:'payment-status-not-eligible'};
-      if(payment.confirmedConflictId||payment.reversedAt||payment.cancelledAt||payment.financialAppliedAt||payment.financialOperationId)return{applied:false,reason:'payment-already-resolved'};
-      if(cents(payment.valor)!==amountCents||cents(payment.requestedAmount)!==amountCents||cents(payment.legacyAmount)+cents(payment.allocatedAmount)!==amountCents)return{applied:false,reason:'payment-amount-mismatch'};
-      const beforeCents=signedCents(payment.saldoAnterior),afterCents=signedCents(payment.saldoNovo);
-      if(beforeCents===null||afterCents===null||beforeCents+amountCents!==afterCents)return{applied:false,reason:'payment-transition-mismatch'};
-      const evidenceSnapshot=await transaction.get(evidenceRef);
-      if(evidenceSnapshot.exists)return paymentEvidenceMatches(evidenceSnapshot,paymentId,payment,amountCents)?{applied:true,created:false}:{applied:false,reason:'existing-evidence-mismatch'};
-      const clientRef=db.doc(`businesses/${businessId}/clients/${clientId}`),markerRef=db.doc(`businesses/${businessId}/processedOperations/${operationId}`),clientSnapshot=await transaction.get(clientRef),markerSnapshot=await transaction.get(markerRef);
-      if(!clientSnapshot.exists||!markerSnapshot.exists)return{applied:false,reason:'transaction-proof-missing'};
-      const client=clientSnapshot.data()||{},marker=markerSnapshot.data()||{},committedAt=iso(payment.updatedAt);
-      if(text(client.businessId)!==text(businessId)||text(marker.businessId)!==text(businessId)||text(client.ownerId||client.ownerUid)!==ownerId||text(marker.ownerId||marker.ownerUid)!==ownerId)return{applied:false,reason:'transaction-scope-mismatch'};
-      if(lower(marker.status)!=='processed'||lower(marker.eventKind)!=='sale'||text(marker.id||markerSnapshot.id)!==operationId||text(marker.idempotencyKey)!==operationId)return{applied:false,reason:'processed-marker-mismatch'};
-      if(!committedAt||iso(marker.processedAt)!==committedAt||iso(client.updatedAt)!==committedAt||iso(client.atualizadoEm)!==occurredAt||signedCents(client.saldo)!==afterCents)return{applied:false,reason:'atomic-commit-proof-mismatch'};
-      const effectId=`payment_received:${paymentId}`;
-      transaction.create(evidenceRef,{
-        id:effectId,
-        operationId,
-        idempotencyKey:effectId,
-        businessId,
-        ownerId,
-        customerId:clientId,
-        clientId,
-        saleId:null,
-        sourceCollection:'payments',
-        sourceDocumentId:paymentId,
-        sourceDeviceId:text(payment.sourceDeviceId)||null,
-        type:'payment_received',
-        direction:'credit',
-        amount:amountCents/100,
-        balanceDelta:amountCents/100,
-        eventKind:'payment_reconciliation',
-        status:'applied_by_reconciliation',
-        appliedAt:FieldValue.serverTimestamp(),
-        createdAt:timestamp(occurredAt)||FieldValue.serverTimestamp(),
-        updatedAt:FieldValue.serverTimestamp(),
-        schemaVersion:3,
-        workspaceGeneration:source.workspaceGeneration??0,
-      });
-      transaction.set(paymentRef,{
-        financialAppliedAt:FieldValue.serverTimestamp(),
-        financialOperationId:effectId,
-        status:'applied',
-        applicationStatus:'applied',
-        reconciliationReason:'processed_payment_missing_balance_event',
-        reconciledAt:FieldValue.serverTimestamp(),
-        updatedAt:FieldValue.serverTimestamp(),
-      },{merge:true});
-      return{applied:true,created:true};
-    });
-  }
 
-  async function projectSale(businessId,saleId,sale={}){
-    const linked=await linkedSpace(businessId,{requireEnabled:false});
-    if(!linked)return{skipped:'space-not-linked'};
+  async function projectSale(businessId,saleId,sale={},options={}){
+    const linked=await linkedSpace(businessId,sale,{requireEnabled:false});
+    if(linked.skipped)return linked;
     const {space,automation}=linked,status=lower(sale.status||sale.saleStatus),occurredAt=iso(firstDate(sale,['paidAt','receivedAt','data','createdAt'])),amountCents=cents(sale.valorFinal??sale.valorTotal??sale.total??sale.amount);
-    const orderMatch=text(sale.operationId).match(/^catalog-order:(.+)$/);
+    const orderId=onlineOrderId(sale);
     if(INVALID_STATUSES.has(status)||sale.deletedAt||sale.active===false||sale.ativo===false){
       const reversedAt=firstDate(sale,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt','updatedAt'])||new Date();
       return reverseSource(businessId,'sale',saleId,reversedAt,0,'full',sale);
     }
+    if(options.before&&saleIsPaid(options.before))return{skipped:'historical-source-update-requires-review'};
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.sales)return{skipped:'sales-disabled'};
-    if(orderMatch&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
+    if(orderId&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
     if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
     if(!amountCents)return{skipped:'zero-value'};
     if(CREDIT_SALE_STATUSES.has(status))return{skipped:'credit-sale-not-realized'};
     if(!PAID_SALE_STATUSES.has(status))return{skipped:'sale-not-paid'};
     if(isTerminalPaymentSale(sale))return{skipped:'terminal-payment-is-receivable'};
     const customerName=text(sale.clienteNome||sale.customerName)||'Venda avulsa';
-    return createOnce({space,businessId,source:sale,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderMatch?.[1]||null,eventKind:'sale_receipt_recorded'});
+    return createOnce({space,businessId,source:sale,id:`sale_${saleId}`,sourceType:'sale_receipt',sourceId:saleId,amountCents,occurredAt,description:`Venda · ${customerName}`,paymentMethodId:paymentMethod(sale.formaPagamento||sale.paymentMethod),customerId:sale.clienteId||sale.clientId||sale.customerId,relatedSaleIds:[saleId],relatedOrderId:orderId,eventKind:'sale_receipt_recorded'});
   }
 
-  async function projectPayment(businessId,paymentId,payment={}){
-    const linked=await linkedSpace(businessId,{requireEnabled:false});
-    if(!linked)return{skipped:'space-not-linked'};
+  async function projectPayment(businessId,paymentId,payment={},options={}){
+    const linked=await linkedSpace(businessId,payment,{requireEnabled:false});
+    if(linked.skipped)return linked;
     const {space,automation}=linked,status=lower(payment.applicationStatus||payment.status),occurredAt=iso(firstDate(payment,['receivedAt','paidAt','data','createdAt'])),amountCents=cents(payment.effectiveAmount??payment.valor??payment.amount);
     if(INVALID_STATUSES.has(status)||payment.reversedAt||payment.cancelledAt){
       const reversedAmountCents=cents(payment.reversedAmount??payment.reversalAmount??payment.effectiveReversalAmount)||amountCents,
         reversalKey=text(payment.reversalOperationId||payment.reversedByOperationId||payment.cancelOperationId)||'full';
       return reverseSource(businessId,'customer_payment',paymentId,firstDate(payment,['reversedAt','cancelledAt','updatedAt'])||new Date(),reversedAmountCents,reversalKey,payment);
     }
+    if(options.before&&paymentIsApplied(options.before))return{skipped:'historical-source-update-requires-review'};
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.customerPayments)return{skipped:'customer-payments-disabled'};
     if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
@@ -266,60 +285,38 @@ function financialIncomeService(db){
     if(!APPLIED_PAYMENT_STATUSES.has(status)){
       const evidenceSnapshot=await balanceEventRef(businessId,paymentId).get();
       if(!paymentEvidenceMatches(evidenceSnapshot,paymentId,payment,amountCents)){
-        if(evidenceSnapshot.exists)return{skipped:'payment-not-applied',evidence:'existing-evidence-mismatch'};
-        const backfill=await backfillProcessedPaymentEvidence(businessId,paymentId,space,amountCents,payment);
-        if(!backfill.applied)return{skipped:'payment-not-applied',evidence:backfill.reason};
+        return{skipped:'payment-not-applied',evidence:evidenceSnapshot.exists?'existing-evidence-mismatch':'balance-evidence-missing'};
       }
     }
     const directSaleId=text(payment.saleId||payment.relatedSaleId||payment.sourceSaleId);
-    if(directSaleId&&(await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
+    if(directSaleId){
+      const directSale=await db.doc(`businesses/${businessId}/sales/${directSaleId}`).get();
+      if(directSale.exists&&saleIsPaid(directSale.data()))return{skipped:'sale-receipt-is-canonical'};
+      if((await entryRef(space.id,`sale_${directSaleId}`).get()).exists)return{skipped:'sale-receipt-is-canonical'};
+    }
     const allocations=Array.isArray(payment.allocations)?payment.allocations:[],saleIds=allocations.map(item=>item?.saleId),customerName=text(payment.clienteNome||payment.customerName)||'Cliente';
     return createOnce({space,businessId,source:payment,id:`credit_payment_${paymentId}`,sourceType:'customer_payment',sourceId:paymentId,amountCents,occurredAt,description:`Pagamento de ${customerName}`,paymentMethodId:paymentMethod(payment.paymentMethod||payment.formaPagamento||payment.observacao),customerId:payment.clienteId||payment.clientId||payment.customerId,relatedSaleIds:saleIds,legacyAmountCents:cents(payment.legacyAmount),allocatedAmountCents:cents(payment.allocatedAmount),eventKind:'customer_payment_recorded'});
   }
 
   async function reverseSource(businessId,sourceType,sourceId,when=new Date(),requestedAmountCents=0,reversalKey='full',source={}){
-    const linked=await linkedSpace(businessId,{requireEnabled:false});
-    if(!linked)return{skipped:'automation-disabled'};
+    const linked=await linkedSpace(businessId,source,{requireEnabled:false});
+    if(linked.skipped)return linked;
     const {space}=linked,originalId=sourceType==='sale'?`sale_${sourceId}`:`credit_payment_${sourceId}`,originalSnapshot=await entryRef(space.id,originalId).get();
     if(!originalSnapshot.exists)return{skipped:'original-missing'};
     const original=originalSnapshot.data(),amountCents=Math.min(Number(original.amountCents||0),Number(requestedAmountCents||original.amountCents||0)),occurredAt=iso(when)||new Date().toISOString();
     if(!amountCents)return{skipped:'zero-value'};
     const reversalType=sourceType==='sale'?'sale_reversal':'customer_payment_reversal',key=text(reversalKey).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,80)||'full',reversalId=`reversal_${sourceType}_${sourceId}_${key}`;
-    if(key==='full'&&(original.reversalStatus==='reversed'||original.reversedByEntryId||original.reversalEntryId))return{skipped:'already-reversed'};
-    const result=await createOnce({space,businessId,source,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId,financialAccountId:original.financialAccountId||null,financialAccountHomeSpaceId:original.financialAccountHomeSpaceId||null});
-    if(result.created)await projectInWorkspace(db,businessId,source,async transaction=>{
-      transaction.update(entryRef(space.id,originalId),{reversalStatus:'reversed',reversalEntryId:reversalId,reversedAt:timestamp(occurredAt),updatedAt:FieldValue.serverTimestamp()});
-    });
-    return result;
+    return createOnce({space,businessId,source,id:reversalId,sourceType:reversalType,sourceId,amountCents,occurredAt,description:`Estorno · ${original.description||'Recebimento'}`,paymentMethodId:original.paymentMethod||'other',customerId:original.customerId,relatedSaleIds:original.relatedSaleIds||[],relatedOrderId:original.relatedOrderId,eventKind:'automatic_income_reversed',direction:'out',reversesEntryId:originalId,financialAccountId:original.financialAccountId||null,financialAccountHomeSpaceId:original.financialAccountHomeSpaceId||null});
   }
 
-  async function reconcileBusiness(businessId,{limit=100}={}){
-    const linked=await linkedSpace(businessId);
-    if(!linked)return{skipped:'automation-disabled',checked:0,created:0};
-    const activationIso=iso(linked.automation.activatedAt);
-    if(!activationIso)return{skipped:'activation-missing',checked:0,created:0};
-    const capped=Math.max(1,Math.min(200,Number(limit)||100)),business=db.collection('businesses').doc(businessId),results=[],sourceStates={};
-    const countState=(kind,value)=>{
-      const state=lower(value).replace(/[^a-z0-9_-]/g,'_').slice(0,48)||'missing',key=`${kind}:${state}`;
-      sourceStates[key]=(sourceStates[key]||0)+1;
-    };
-    if(linked.automation.sales){
-      const sales=await business.collection('sales').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
-      for(const snapshot of sales.docs){const value=snapshot.data();countState('sale',value.status||value.saleStatus);results.push(await projectSale(businessId,snapshot.id,value));}
-    }
-    if(linked.automation.customerPayments){
-      const payments=await business.collection('payments').where('data','>=',activationIso).orderBy('data','asc').limit(capped).get();
-      for(const snapshot of payments.docs){const value=snapshot.data();countState('payment',value.applicationStatus||value.status);results.push(await projectPayment(businessId,snapshot.id,value));}
-    }
-    const reasons=results.reduce((counts,result)=>{
-      const reason=result?.created===true?'created':result?.skipped||'already-created';
-      counts[reason]=(counts[reason]||0)+1;
-      return counts;
-    },{});
-    return{checked:results.length,created:results.filter(result=>result?.created).length,skipped:results.filter(result=>result?.skipped).length,activation:activationIso,reasons,sourceStates};
+  async function reconcileBusiness(){
+    // Opening Financeiro is NOT authorization to backfill old financial data.
+    // Live Firestore triggers remain retryable and idempotent. Historical repair
+    // requires a separate, explicitly approved audit/repair workflow.
+    return{skipped:'historical-reconciliation-requires-authorization',checked:0,created:0};
   }
 
-  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness,backfillProcessedPaymentEvidence};
+  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness};
 }
 
-module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale};
+module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale,spaceRoutingIssue,onlineOrderId};

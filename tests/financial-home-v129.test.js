@@ -56,7 +56,7 @@ test("receitas automáticas usam conta padrão opcional sem perder idempotência
   assert.match(ui, /Conta padrão para recebimentos/);
   assert.match(ui, /reconciliationSpaceIds = state\.activeSpaceIds\.filter/);
   assert.match(ui, /result\?\.cached \? 0 : result\?\.created/);
-  assert.match(service, /cached: true/);
+  assert.match(service, /historical-reconciliation-requires-authorization/);
 });
 
 test("carrossel agrupa conta e cartão por instituição e preserva teaser mobile", () => {

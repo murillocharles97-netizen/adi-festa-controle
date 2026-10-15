@@ -27,9 +27,13 @@ window.Fiados = (() => {
       paymentMode = options.paymentMode === "total" ? "total" : "partial";
     const existing = DB.carregar().pagamentos.find((entry) => String(entry.operationId || entry.id) === operationId);
     if (existing) {
+      if (options.spaceId && String(existing.spaceId || "") !== String(options.spaceId))
+        throw Error("Este recebimento já pertence a outro espaço.");
       window.SyncFirebase?.assertPaymentTracked?.(existing);
       return existing;
     }
+    const spaceId = window.SpaceContext?.requireSalesSpace?.(options.spaceId || "") || null;
+    if (!spaceId && typeof document !== "undefined") throw Error("Selecione o espaço deste recebimento.");
     const before = DB.carregar(),
       nextData = typeof structuredClone === "function" ? structuredClone(before) : JSON.parse(JSON.stringify(before));
     ((db) => {
@@ -69,6 +73,8 @@ window.Fiados = (() => {
         idempotencyKey: operationId,
         syncPipelineVersion: 2,
         businessId: DB.getBusinessId?.() || null,
+        spaceId,
+        financialSpaceId: spaceId,
         schemaVersion: 3,
         ...actor,
         clienteId,
@@ -172,6 +178,7 @@ window.Fiados = (() => {
         allowCredit: true,
         confirmedConflictId: conflict.id,
         paymentMode: "partial",
+        spaceId: conflict.spaceId || "",
       },
     );
   }
@@ -298,6 +305,7 @@ window.Fiados = (() => {
           {
             paymentMode: "total",
             adjustedFromPaymentId: detail.paymentId,
+            spaceId: DB.carregar().pagamentos.find((entry) => String(entry.id) === String(detail.paymentId))?.spaceId || "",
           },
         );
         window.SyncFirebase?.resolveLocalPaymentAdjustment?.(
@@ -330,6 +338,10 @@ window.Fiados = (() => {
   );
 
   return {
+    spaceField: () => {
+      const spaces = window.SpaceContext?.salesSpaces?.() || [], selected = window.SpaceContext?.salesId?.();
+      return `<div class="field"><label>Espaço do recebimento</label><select name="paymentSpaceId" required>${spaces.map((space) => `<option value="${esc(space.id)}"${space.id === selected ? " selected" : ""}>${esc(space.name)}</option>`).join("")}</select><small>O recebimento pertence a este espaço. A dívida do cliente não muda de espaço.</small></div>`;
+    },
     listar,
     receber,
     confirmarConflito,

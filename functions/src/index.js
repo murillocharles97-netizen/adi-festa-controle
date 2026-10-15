@@ -572,20 +572,20 @@ exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{bu
   });
 });
 
-exports.projectSaleFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
+exports.projectSaleFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,retry:true},async event=>{
   const source=event.data?.after?.exists?event.data.after.data():{...(event.data?.before?.data?.()||{}),deletedAt:new Date().toISOString()};
   const [incomeResult,costResult]=await Promise.all([
-    financialIncome().projectSale(event.params.businessId,event.params.saleId,source),
+    financialIncome().projectSale(event.params.businessId,event.params.saleId,source,{before:event.data?.before?.exists?event.data.before.data():null}),
     event.data?.after?.exists?saleCosts().project(event.params.businessId,event.params.saleId,source):Promise.resolve({created:false,skipped:'source-deleted'}),
   ]);
-  logger.info('[FINANCIAL_INCOME_SALE]',{businessId:event.params.businessId,saleId:event.params.saleId,created:incomeResult?.created===true,skipped:incomeResult?.skipped||null,costSnapshotCreated:costResult?.created===true,costSnapshotSkipped:costResult?.skipped||null});
+  logger.info('[FINANCIAL_INCOME_SALE]',{businessId:event.params.businessId,spaceId:source.spaceId||null,financialSpaceId:incomeResult?.entry?.financialSpaceId||null,saleId:event.params.saleId,created:incomeResult?.created===true,skipped:incomeResult?.skipped||null,costSnapshotCreated:costResult?.created===true,costSnapshotSkipped:costResult?.skipped||null});
   return{income:incomeResult,cost:costResult};
 });
 
-exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/payments/{paymentId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20},async event=>{
+exports.projectCustomerPaymentFinancialIncome=onDocumentWritten({document:'businesses/{businessId}/payments/{paymentId}',region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:20,retry:true},async event=>{
   const source=event.data?.after?.exists?event.data.after.data():{...(event.data?.before?.data?.()||{}),cancelledAt:new Date().toISOString()};
-  const result=await financialIncome().projectPayment(event.params.businessId,event.params.paymentId,source);
-  logger.info('[FINANCIAL_INCOME_PAYMENT]',{businessId:event.params.businessId,paymentId:event.params.paymentId,created:result?.created===true,skipped:result?.skipped||null});
+  const result=await financialIncome().projectPayment(event.params.businessId,event.params.paymentId,source,{before:event.data?.before?.exists?event.data.before.data():null});
+  logger.info('[FINANCIAL_INCOME_PAYMENT]',{businessId:event.params.businessId,spaceId:source.spaceId||null,financialSpaceId:result?.entry?.financialSpaceId||null,paymentId:event.params.paymentId,created:result?.created===true,skipped:result?.skipped||null});
   return result;
 });
 

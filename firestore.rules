@@ -1308,9 +1308,19 @@ service cloud.firestore {
       }
       match /payments/{documentId} {
         allow read: if canReadCollection(businessId, 'payments');
-        allow create: if canCreateGenericDocument(businessId, 'payments', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'payments', documentId);
+        allow create: if (request.resource.data.get('spaceId',null) == null || validSaleSpace(request.resource.data, businessId))
+          && canCreateGenericDocument(businessId, 'payments', documentId);
+        allow update: if (resource.data.get('spaceId',null) == null
+            ? request.resource.data.get('spaceId',null) == null
+            : preservesSaleSpaceAssignment(request.resource.data, resource.data, businessId)
+              && canAccessSpace(businessId, resource.data.spaceId))
+          && canUpdateGenericDocument(businessId, 'payments', documentId);
         allow delete: if false;
+      }
+      match /financialIncomeRoutes/{documentId} {
+        // Projection receipts are server-owned; clients cannot move/replay income.
+        allow read: if isOwner(businessId);
+        allow write: if false;
       }
       match /balanceAdjustments/{documentId} {
         allow read: if canReadCollection(businessId, 'balanceAdjustments');
