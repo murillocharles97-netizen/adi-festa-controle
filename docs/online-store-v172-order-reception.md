@@ -95,7 +95,40 @@ Logs locais: `artifacts/v172-targeted-app-tests.txt`,
 `artifacts/v172-backend-lint.txt`, `artifacts/v172-build.txt`,
 `artifacts/v172-targeted-backend-tests.txt`.
 
-Smoke visual local: em andamento; controle Chrome precisou de reconexão.
+## Smoke visual local concluído
+
+O skill computer-use foi usado para operar a UI real, não para acionar funções
+internas da página. Endereço `http://127.0.0.1:8188/#/catalogo`, projeto
+`demo-veconi-online-qa`. Somente loja `VECONI QA` local.
+
+- Painel visível na visão geral, separado da publicação: passou.
+- Confirmação inline mostra o espaço exato e exige segundo toque: passou.
+- Pausar pedidos pelo painel: confirmou no callable/Firestore do Emulator e no
+  catálogo público local, que exibiu Pedidos pausados/botão de compra desabilitado.
+- Reload da administração manteve a pausa: passou.
+- Ativar pedidos pelo mesmo painel: confirmou no backend e liberou o botão de
+  compra no catálogo público local após reload.
+- Uma segunda aba autenticada carregou o estado Recebendo pedidos.
+- Troca QA A → QA B → QA A: estado de cada loja preservado.
+- Comparação antes/depois: produtos, estoque físico, reservas, 7 pedidos e 1 venda
+  do checkpoint local inalterados; loja B manteve a mesma revisão/configuração.
+  O teste visual de recebimento não criou pedido/venda nem ajustou estoque.
+- Layout do controle em 320/360/390/430px: sem overflow horizontal da página,
+  com botões e rótulos legíveis. Viewport temporário restaurado ao terminar.
+- Auditoria local registrou ação set_order_reception, ator, espaço, revisão e
+  checkoutEnabled, sem conteúdo de compradores/tokens.
+
+Entre sessões os processos locais haviam encerrado; a primeira tentativa no
+front em cache falhou com erro interno de conexão, sem confirmação de sucesso.
+Verificado ECONNREFUSED nos serviços locais. Reiniciados exclusivamente Emulator
+e servidor loopback; retomado o checkpoint Firestore QA preservado, sem regravar
+suas coleções. Identidades Auth **sintéticas locais** recompostas com os mesmos
+UIDs, pois o checkpoint era Firestore-only. Nenhuma alteração de Auth real.
+O teste completo acima foi executado depois desse reinício, com handlers reais.
+
+Evidências: `artifacts/v172-local-paused.jpg`,
+`artifacts/v172-local-receiving-desktop.jpg`,
+`artifacts/v172-local-receiving-mobile.jpg`, `artifacts/v172-ui-verification.txt`.
 Não confundir validação em Emulator/viewport com Android físico.
 
 ## Arquivos de runtime/release
