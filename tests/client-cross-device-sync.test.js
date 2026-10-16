@@ -201,7 +201,7 @@ test("a cadeia de módulos mantém versões explícitas na release 130", () => {
   );
   assert.match(
     indexSource,
-    /js\/firebase\/auth\.js\?v=171[\s\S]*js\/firebase\/firebase-ui\.js\?v=171/,
+    /js\/firebase\/auth\.js\?v=173[\s\S]*js\/firebase\/firebase-ui\.js\?v=173/,
   );
   assert.match(indexSource, /financial-concurrency\.js\?v=108/);
   assert.match(serviceWorkerSource, /veconi-v171-order-recovery-scoped-stock/);

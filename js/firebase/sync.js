@@ -184,6 +184,7 @@ const repositories = Object.fromEntries(
   syncSignalRepository = createFirestoreRepository("syncMetadata"),
   syncSessionId = crypto.randomUUID();
 let currentUser = null,
+  syncSessionGeneration = 0,
   originalAlter = null,
   applyingCloud = false,
   processingPromise = null,
@@ -236,6 +237,8 @@ const state = {
   clientProjection: null,
   dataAudit: null,
   syncFailure: null,
+  syncFailureHistory: [],
+  sessionTrace: [],
   syncTrace: [],
   integrityStatus: "not_checked",
   integrityFailure: null,
@@ -1104,6 +1107,8 @@ const diagnostic = () => {
     lastErrorCode,
     lastErrorMessage: lastError,
     syncFailure: state.syncFailure,
+    syncFailureHistory: structuredClone(state.syncFailureHistory),
+    sessionTrace: structuredClone(state.sessionTrace),
     syncTrace: state.syncTrace,
     integrityStatus: state.integrityStatus,
     integrityFailure: state.integrityFailure,
@@ -1175,7 +1180,14 @@ function reportError(error, context = "Firebase", extra = {}) {
   state.syncFailure = error.syncDetail || {stage: context, code: lastErrorCode,
     message: String(error.message || "Falha sem mensagem").slice(0,600),
     collection: extra.collection || "", path: extra.path || currentPath || "", at: now()};
-  console.error("[SYNC ERROR]", state.syncFailure);
+  const failure = {...state.syncFailure, operation: extra.operation || state.syncFailure.request || "",
+    businessId: state.userProfile?.businessId || "", authUid: auth.currentUser?.uid || "",
+    actorUid: currentUser?.uid || "", subscriptionUid: extra.subscriptionUid || "",
+    sessionGeneration: syncSessionGeneration, queue: queueCounts()};
+  state.syncFailureHistory = [...(state.syncFailureHistory || []), failure].slice(-10);
+  // A later successful pull must not erase the evidence needed to diagnose a
+  // rejected listener. Log metadata as text: some clients collapse objects.
+  console.error("[SYNC ERROR]", JSON.stringify(failure));
   console.error(`[${context}]`, {
     ...extra,
     code: error?.code,
@@ -3323,7 +3335,11 @@ function applyCloudCollectionBatch(entries) {
 function registerRealtimeCollection(name, mode = "all") {
   const key = `${activeBusinessId()}:${name}:${mode}`;
   if (listenerRegistry.has(key)) return listenerRegistry.get(key);
+  const generation = syncSessionGeneration, subscriptionUid = currentUser?.uid || "",
+    path = `businesses/${activeBusinessId()}/${name}${mode === "document" ? "/default" : ""}`,
+    isCurrent = () => generation === syncSessionGeneration && currentUser?.uid === subscriptionUid;
   const onDocuments = (documents, metadata) => {
+      if (!isCurrent()) return;
       const list = Array.isArray(documents)
         ? documents
         : documents
@@ -3350,8 +3366,10 @@ function registerRealtimeCollection(name, mode = "all") {
         listenerConnected: true,
       });
     },
-    onError = (error) =>
-      reportError(error, "Realtime collection listener", { collection: name });
+    onError = (error) => {
+      if (!isCurrent()) return;
+      reportError(error, "Realtime collection listener", {operation: "listen", collection: name, path, subscriptionUid});
+    };
   const unsubscribe =
     mode === "document"
       ? repositories[name].subscribeById("default", onDocuments, onError)
@@ -3362,12 +3380,16 @@ function registerRealtimeCollection(name, mode = "all") {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
+  const generation = syncSessionGeneration, subscriptionUid = currentUser.uid,
+    signalPath = `businesses/${activeBusinessId()}/syncMetadata/last-sync`,
+    isCurrent = () => generation === syncSessionGeneration && currentUser?.uid === subscriptionUid;
   if(canPullSource("products"))registerRealtimeCollection("products");
   if(canPullSource("productFinancials"))registerRealtimeCollection("productFinancials");
   registerRealtimeCollection("settings", "document");
   const unsubscribe = syncSignalRepository.subscribeById(
     "last-sync",
     (signal, metadata) => {
+      if (!isCurrent()) return;
       rememberSnapshotMetadata("syncMetadata", metadata);
       const revision = String(
         signal?.revision || signal?.updatedAt || signal?.syncedAt || "",
@@ -3416,6 +3438,7 @@ function startCloudSubscriptions() {
       if (!pendingNames.length) return;
       clearTimeout(signalPullTimer);
       signalPullTimer = setTimeout(async () => {
+        if (!isCurrent()) return;
         const changed = [...signalCollections],
           cloudNames = changed.filter(
             (name) => CLOUD_NAMES.includes(name) && !REALTIME_NAMES.has(name),
@@ -3448,10 +3471,13 @@ function startCloudSubscriptions() {
         }
       }, 120);
     },
-    (error) =>
+    (error) => {
+      if (!isCurrent()) return;
       reportError(error, "Realtime sync signal listener", {
         collection: "syncMetadata/last-sync",
-      }),
+        operation: "listen", path: signalPath, subscriptionUid,
+      });
+    },
   );
   unsubscribers.push(unsubscribe);
   emit({
@@ -4473,6 +4499,10 @@ async function exportLocalDiagnostic() {
     diagnosticVersion: 5,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
+    bootstrap: {state: window.FirebaseBootstrap?.state || "unknown",
+      authenticated: window.FirebaseBootstrap?.authenticated === true,
+      warning: window.FirebaseBootstrap?.details?.warning || null,
+      syncWarning: window.FirebaseBootstrap?.details?.syncWarning || null},
     projectId: PROJECT_ID,
     businessId,
     uid: currentUser?.uid
@@ -4490,6 +4520,8 @@ async function exportLocalDiagnostic() {
     ),
     queueCounts: queueCounts(),
     syncFailure: state.syncFailure,
+    syncFailureHistory: structuredClone(state.syncFailureHistory),
+    sessionTrace: structuredClone(state.sessionTrace),
     syncTrace: state.syncTrace,
     integrityStatus: state.integrityStatus,
     integrityFailure: state.integrityFailure,
@@ -6137,7 +6169,22 @@ async function clearLocalDevice(options = {}) {
   });
   return { discarded: pending, reloaded: navigator.onLine };
 }
-function setUser(user, profile = null, business = null) {
+function setUser(user, profile = null, business = null, {reason = "session_update"} = {}) {
+  const previousUid = currentUser?.uid || "";
+  let pendingBefore = null;
+  try { pendingBefore = queueCounts().total; } catch { /* Diagnostic only. Never modify the queue. */ }
+  syncSessionGeneration++;
+  // Diagnostics are memory-only and must not be exposed to the next account.
+  if (user && previousUid !== user.uid) {
+    state.syncFailureHistory = (state.syncFailureHistory || []).filter(entry => entry.actorUid === user.uid);
+    state.sessionTrace = (state.sessionTrace || []).filter(entry => entry.actorUid === user.uid);
+  }
+  if (user) { lastError = ""; lastErrorCode = ""; currentPath = ""; }
+  state.sessionTrace = [...(state.sessionTrace || []), {at: now(),
+    event: user ? "session_started" : "session_stopped", reason,
+    actorUid: user?.uid || previousUid, authUid: auth.currentUser?.uid || "",
+    businessId: profile?.businessId || state.userProfile?.businessId || "",
+    sessionGeneration: syncSessionGeneration, pendingBefore}].slice(-10);
   currentUser = user || null;
   state.userProfile = profile || null;
   canonicalClientSnapshots.clear();
@@ -6154,6 +6201,8 @@ function setUser(user, profile = null, business = null) {
   );
   lastUserValidationAt = trustedBootstrap ? Date.now() : 0;
   emit({
+    status: user ? "waiting" : "idle",
+    message: user ? "Preparando sincronização…" : "Sessão encerrada",
     authReady: true,
     userProfile: profile || null,
     businessDocument: trustedBootstrap,
@@ -6333,7 +6382,7 @@ window.SyncFirebase = {
   readOnlineOrderSale,
   setUser,
   setAuthReady: (value) => emit({ authReady: Boolean(value) }),
-  stop: () => setUser(null),
+  stop: ({reason = "runtime_stop"} = {}) => setUser(null, null, null, {reason}),
   subscribe: (callback) => {
     subscribers.add(callback);
     const details = diagnostic();

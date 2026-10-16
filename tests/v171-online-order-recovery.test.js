@@ -58,3 +58,11 @@ test('logout/new bootstrap while IndexedDB opens cannot reactivate an obsolete S
 test('cleanup releases its owner before invoking old callback',()=>{
  const h=bootstrap();let runs=0;h.c.registerCleanup('nested',()=>{runs++;h.c.runCleanup('nested');});h.c.runCleanup('nested');assert.equal(runs,1);
 });
+
+test('authorized UI does not erase an optional Sync initialization failure from diagnostics',async()=>{
+ const h=bootstrap();Object.assign(h.c,{FirebaseBootstrap:{details:{}},BOOTSTRAP_STATES:new Set(['authorized']),bootstrapTimeline:[],LEGACY_MIGRATION_VERSION:1});
+ vm.runInContext(section(auth,'function setBootstrapState(','function normalizedCode('),h.c);
+ h.c.SyncFirebase.setUser=()=>{throw Object.assign(Error('Synthetic bootstrap failure'),{code:'qa-sync-init'});};
+ await h.run({sequence:1});assert.equal(h.c.FirebaseBootstrap.state,'authorized');
+ assert.equal(h.c.FirebaseBootstrap.details.warning,'SYNC_UNAVAILABLE');assert.equal(h.c.FirebaseBootstrap.details.syncWarning.code,'qa-sync-init');
+});
