@@ -12,6 +12,7 @@ async function auditOnline(event,request,action){
       operationId:record.finalizationOperationId||record.expirationOperationId||record.operationId||null,
       saleId:record.convertedSaleId||record.saleId||null,finalizationStatus:record.finalizationStatus||null,
       replayed:!!(result.idempotent||result.replayed),v2Enabled:record.v2Enabled===true,
+      ...(request.data?.action==='set_order_reception'?{action:'set_order_reception',checkoutEnabled:record.checkoutEnabled===true}:{}),
       timestamp:new Date().toISOString()});
     return result;
   }catch(error){logger.warn('[ONLINE_V2_ERROR]',{event,code:error.code||'internal',businessId:request.data?.businessId||null,spaceId:request.data?.spaceId||null,orderId:request.data?.id||null});throw error;}
