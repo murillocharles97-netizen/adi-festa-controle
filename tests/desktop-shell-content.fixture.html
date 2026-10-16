@@ -149,6 +149,22 @@
   <script src="../js/home-mobile.js"></script>
   <script src="../js/checkout-mobile.js"></script>
   <script>
+    // Local-only visual QA for the shared toast, including repeated additions.
+    if (new URLSearchParams(location.search).has('toast-qa')) {
+      addEventListener('sale-item-added', () => Utils.toast('Produto adicionado'));
+      addEventListener('DOMContentLoaded', () => {
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display:flex;gap:6px;padding:6px;flex-wrap:wrap';
+        controls.innerHTML = '<button type="button" data-qa-repeat>Adicionar 5 produtos QA</button><button type="button" data-qa-toast>Mostrar confirmação QA</button>';
+        document.querySelector('#app').before(controls);
+        controls.querySelector('[data-qa-repeat]').onclick = () => {
+          for (let n = 0; n < 5; n++) document.querySelector('.pos-product[data-add="p1"]')?.click();
+        };
+        controls.querySelector('[data-qa-toast]').onclick = () => Utils.toast('Produto adicionado');
+      });
+    }
+  </script>
+  <script>
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     function snapshot(route) {
       const app = document.querySelector("#app"), dashboard = document.querySelector("[data-desktop-dashboard]"), style = getComputedStyle(app), rect = app.getBoundingClientRect(), center = document.elementFromPoint(innerWidth / 2, Math.min(innerHeight - 1, 220));

@@ -99,6 +99,13 @@
   let valueTimer=null;document.addEventListener('input',event=>{if(!mq.matches||!['discount-value','discount-percent','manual-total'].includes(event.target.id))return;clearTimeout(valueTimer);valueTimer=setTimeout(()=>event.target.dispatchEvent(new Event('change',{bubbles:true})),180)},true);
   new MutationObserver(()=>queueMicrotask(enhance)).observe($('#app'),{childList:true});
   addEventListener('sale-next-action',event=>prepareNext(event.detail.action,event.detail.sale));
+  addEventListener('sale-item-added',()=>{
+    if(!mq.matches||Router.atual()!=='vender'||matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+    const bag=$('#open-sale-summary');
+    if(!bag||document.body.classList.contains('sale-sheet-open'))return;
+    bag.getAnimations?.().forEach(animation=>animation.cancel());
+    bag.animate?.([{transform:'scale(1)'},{transform:'scale(1.08)'},{transform:'scale(1)'}],{duration:220,easing:'ease-out'});
+  });
   addEventListener('hashchange',()=>{if($('#pos-summary')?.classList.contains('mobile-open'))closeSummary({immediate:true});else document.body.classList.remove('sale-sheet-open');setTimeout(enhance,0)});
   addEventListener('firebase-session-cleared',()=>{pending=null;payment='pix';enhancing=false;window.CheckoutPaymentMethod='pix'});
   window.CheckoutMobile={enhance,openSummary,closeSummary,prepareNext};
