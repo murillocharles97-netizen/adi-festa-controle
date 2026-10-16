@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
-import './sync.js?v=171';
+import './sync.js?v=173';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';
@@ -21,6 +21,7 @@ const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated'
 const NON_TERMINAL_STATES=new Set(['initializing','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access']);
 let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0,bootstrapStartedAt=0,bootstrapTimeline=[];
 let invitePreviewCache=null,invitePreviewPromise=null;
+let pendingInviteToken=INVITE_TOKEN,inviteRegistrationInFlight=false;
 const automaticBootstrapAttempts=new Set();
 const businessTypes=['Mercearia','Doceria','Conveniência','Papelaria','Loja de festas','Lanchonete','Loja de roupas','Comércio geral','Outro'];
 const registerState={step:1,data:{name:'',phone:'',email:'',password:'',confirm:'',businessName:'',businessType:'Doceria',businessPhone:'',city:'',state:'SP',document:''}};
@@ -44,7 +45,7 @@ function workspaceBlockedScreen(detail={}){
 function workspaceRuntime(){
   return window.WorkspaceRuntime ||= window.WorkspaceRuntimeFactory.create({
     protocol:window.WorkspaceGenerationProtocol,records:DB.localRecords,localStorage,sessionStorage,
-    stop:()=>{if(window.FirebaseSession?.user){cleanupCurrentSession();window.SyncFirebase?.stop?.();}},
+    stop:()=>{if(window.FirebaseSession?.user){cleanupCurrentSession();window.SyncFirebase?.stop?.({reason:'workspace_invalidated'});}},
     retire:()=>DB.retireBusiness(),onBlocked:workspaceBlockedScreen
   });
 }
@@ -89,18 +90,21 @@ async function loadInvitePreview(){
   invitePreviewPromise||=window.FirebaseCallable('getTeamInvitePreview',{token:INVITE_TOKEN}).then(response=>invitePreviewCache=response.data);
   try{return await invitePreviewPromise}catch(error){login('Este convite é inválido ou expirou.');throw error}
 }
-function clearInviteToken(){if(!INVITE_TOKEN)return;const url=new URL(location.href);url.searchParams.delete('teamInvite');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`)}
+function clearInviteToken(){pendingInviteToken='';if(!INVITE_TOKEN)return;const url=new URL(location.href);url.searchParams.delete('teamInvite');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`)}
 async function inviteRegister(message=''){
   let preview;
   try{preview=await loadInvitePreview()}catch{return}
   screen(`<section class="auth-card auth-register-card">${brandMarkup()}<h1>Crie seu acesso</h1><p>Você entrará em <b>${esc(preview.businessName)}</b> como ${esc(window.TeamAccess?.ROLE_LABELS?.[preview.role]||preview.role)}.</p><form id="invite-register-form"><label>Nome<input name="name" required autocomplete="name" value="${esc(preview.name||'')}"></label><label>E-mail<input name="email" type="email" readonly value="${esc(preview.email)}"></label><label>Senha<input name="password" type="password" minlength="6" required autocomplete="new-password"></label><label>Confirmar senha<input name="confirm" type="password" minlength="6" required autocomplete="new-password"></label><p class="auth-error">${esc(message)}</p><div class="auth-form-actions"><button class="btn btn-light" type="button" data-invite-login>Já tenho conta</button><button class="btn btn-primary" data-invite-create>Criar acesso</button></div></form></section>`);
   document.querySelector('[data-invite-login]').onclick=()=>login('',preview.email);
   document.querySelector('#invite-register-form').onsubmit=async event=>{
-    event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget));
+    event.preventDefault();if(inviteRegistrationInFlight)return;const data=Object.fromEntries(new FormData(event.currentTarget));
     if(data.password!==data.confirm)return inviteRegister('As senhas não são iguais.');
     const button=document.querySelector('[data-invite-create]');setButtonLoading(button,true,'Criando acesso…');
-    try{await createUserWithEmailAndPassword(auth,preview.email,data.password);await window.FirebaseCallable('acceptTeamInvite',{token:INVITE_TOKEN});clearInviteToken();location.reload()}
-    catch(error){if(error.code==='auth/email-already-in-use')return login('Este e-mail já possui uma conta. Entre com sua senha para aceitar o convite.',preview.email);inviteRegister(friendly(error.code))}
+    inviteRegistrationInFlight=true;
+    // onAuthStateChanged -> bootstrapCore is the sole owner of invite acceptance.
+    // Calling it here too consumed the same one-use invitation concurrently.
+    try{await createUserWithEmailAndPassword(auth,preview.email,data.password)}
+    catch(error){inviteRegistrationInFlight=false;console.warn('[Team invite registration]',JSON.stringify({stage:'auth_account_creation',code:normalizedCode(error)||'unknown'}));if(error.code==='auth/email-already-in-use')return login('Este e-mail já possui uma conta. Entre com sua senha para aceitar o convite.',preview.email);inviteRegister(friendly(error.code))}
   };
 }
 
@@ -202,7 +206,7 @@ function bootstrapTechnicalDetails(details={}){
 }
 function suspendRuntimeForAccessCheck(reason){
   readyUid='';
-  try{window.SyncFirebase?.stop?.()}catch{}
+  try{window.SyncFirebase?.stop?.({reason:`access_check:${reason}`})}catch{}
   try{badgeSubscription?.()}catch{}badgeSubscription=null;
   bootstrapLog('runtime suspended',{reason});
 }
@@ -225,7 +229,7 @@ async function bootstrapLogout(reason='user_request'){
   bootstrapRun=null;readyUid='';
   cleanupCurrentSession();
   window.WorkspaceRuntime?.endSession();
-  try{window.SyncFirebase?.stop?.()}catch{}
+  try{window.SyncFirebase?.stop?.({reason:`logout:${logoutReason}`})}catch{}
   try{window.BarcodeScanner?.stop?.();window.BarcodeScanner?.close?.()}catch{}
   try{window.CheckoutMobile?.reset?.()}catch{}
   try{badgeSubscription?.()}catch{}badgeSubscription=null;
@@ -307,16 +311,18 @@ async function allowed(user,profile,business,member,token){
     window.SyncFirebase.setUser(user,profile,business);
     const unsubscribe=window.SyncFirebase.subscribe(updateCloudBadge);
     badgeSubscription=unsubscribe;
-    registerCleanup('firebase-sync',()=>window.SyncFirebase?.stop?.());
+    registerCleanup('firebase-sync',()=>window.SyncFirebase?.stop?.({reason:'registered_session_cleanup'}));
     registerCleanup('cloud-badge',()=>{try{unsubscribe()}finally{if(badgeSubscription===unsubscribe)badgeSubscription=null}});
     bootstrapLog('sync prepared',{degraded:false});
   }catch(error){
     if(normalizedCode(error)==='bootstrap/cancelled')throw error;
-    console.warn('[Bootstrap optional module]',{module:'sync',code:normalizedCode(error)||'SYNC_UNAVAILABLE',message:error?.message});
-    window.FirebaseBootstrap.details={...(window.FirebaseBootstrap.details||{}),warning:'SYNC_UNAVAILABLE'};
+    const syncWarning={code:normalizedCode(error)||'SYNC_UNAVAILABLE',message:String(error?.message||'Sync indisponível').slice(0,600)};
+    console.warn('[Bootstrap optional module]',JSON.stringify({module:'sync',...syncWarning}));
+    window.FirebaseBootstrap.details={...(window.FirebaseBootstrap.details||{}),warning:'SYNC_UNAVAILABLE',syncWarning};
     bootstrapLog('sync prepared',{degraded:true});
   }
-  setBootstrapState('authorized',{businessId:profile.businessId,role:context.role});
+  const syncBootstrapWarning=window.FirebaseBootstrap?.details?.syncWarning;
+  setBootstrapState('authorized',{businessId:profile.businessId,role:context.role,...(syncBootstrapWarning?{warning:'SYNC_UNAVAILABLE',syncWarning:syncBootstrapWarning}:{})});
   gate.hidden=true;document.documentElement.classList.remove('auth-pending');
   window.lucide?.createIcons();
   const readyDetail={uid:user.uid,businessId:profile.businessId,business,member,access:context.access};
@@ -407,7 +413,7 @@ async function bootstrapCore(user,token,mode){
   bootstrapLog('profile loading');
   screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Validando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-loading-logout').onclick=bootstrapLogout;
-  if(INVITE_TOKEN){await window.FirebaseCallable('acceptTeamInvite',{token:INVITE_TOKEN});clearInviteToken()}
+  if(pendingInviteToken){await window.FirebaseCallable('acceptTeamInvite',{token:pendingInviteToken});assertCurrentRun(token);clearInviteToken()}
   const profileRef=doc(db,'users',user.uid),profileSnapshot=await getDoc(profileRef);
   assertCurrentRun(token);
   if(!profileSnapshot.exists()){
@@ -529,6 +535,7 @@ function startBootstrap(user,{mode='automatic'}={}){
       }
     })
     .finally(()=>{
+      inviteRegistrationInFlight=false;
       if(bootstrapRun===run)bootstrapRun=null;
       if(token.sequence===bootstrapSequence&&NON_TERMINAL_STATES.has(bootstrapState)){
         bootstrapErrorScreen(user,'fatal_error','A validação foi interrompida antes de ser concluída. Tente novamente. Nenhum dado foi perdido.',{details:{code:'BOOTSTRAP_INCOMPLETE'}});

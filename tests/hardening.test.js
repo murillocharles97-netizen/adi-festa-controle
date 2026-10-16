@@ -23,7 +23,7 @@ assert.doesNotMatch(sync, /setInterval\(automaticSync/);
 assert.match(sync, /cloudPaused/);
 assert.match(sync, /["']permission-denied["'][\s\S]*["']unauthenticated["'][\s\S]*["']resource-exhausted["'][\s\S]*["']failed-precondition["']/);
 assert.doesNotMatch(sync, /connection-test/);
-assert.match(sync, /function setUser\(user,\s*profile\s*=\s*null,\s*business\s*=\s*null\)/);
+assert.match(sync, /function setUser\(user,\s*profile\s*=\s*null,\s*business\s*=\s*null,/);
 assert.match(sync, /testPassed\s*:\s*trustedBootstrap/);
 assert.match(sync, /payloadVersion:\s*PAYLOAD_VERSION/);
 assert.match(sync, /legacyBackup/);
