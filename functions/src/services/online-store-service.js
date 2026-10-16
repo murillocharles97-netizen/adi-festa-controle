@@ -9,6 +9,22 @@ const fail=(code,message)=>{throw new HttpsError(code,message)};
 const storeId=spaceId=>`store_${hash(spaceId).slice(0,32)}`;
 const serial=s=>s?.exists?{...s.data(),id:s.id}:null;
 function onlineStoreService(db){
+  const liveMatches=(c,store,catalog)=>!!store&&!!catalog&&store.kind==='space_store'&&
+    store.businessId===c.businessId&&store.spaceId===c.spaceId&&store.workspaceGeneration===c.workspaceGeneration&&
+    catalog.schemaVersion===6&&catalog.catalogType==='space_store'&&
+    catalog.businessId===c.businessId&&catalog.spaceId===c.spaceId&&
+    catalog.workspaceGeneration===c.workspaceGeneration;
+  function reception(c,store,catalog){
+    const published=store?.v2Enabled===true&&store?.published===true,
+      valid=liveMatches(c,store,catalog)&&catalog.active===true&&catalog.catalogVisible===true,
+      delivery=store?.catalogSettings?.pickupEnabled===true||store?.catalogSettings?.deliveryEnabled===true,
+      payments=(store?.catalogSettings?.paymentMethods||[]).length>0,
+      sales=c.space.capabilities?.sales===true,
+      enabled=published&&valid&&sales&&delivery&&payments&&store.checkoutEnabled===true&&catalog.acceptingOrders===true;
+    return {enabled,canEnable:published&&valid&&sales&&delivery&&payments,
+      reason:!published?'not_published':!valid?'publication_required':!sales?'sales_disabled':
+        !delivery?'delivery_required':!payments?'payment_required':enabled?'receiving':'paused'};
+  }
   async function context(tx,request,{write=false,ownerOnly=false}={}){
     const {businessId,spaceId,workspaceGeneration=0}=request.data||{},uid=request.auth?.uid;
     if(!uid)fail('unauthenticated','Entre na sua conta.');validId(businessId,'Empresa');validId(spaceId,'Espaço');
@@ -29,16 +45,51 @@ function onlineStoreService(db){
       const products=productDocs.docs.map(serial).filter(p=>Model.allows(p,c.spaceId)).map(p=>Model.product(p));
       let orders=[];
       if(c.member.role==='owner'||c.member.permissions?.['sales.viewAll']===true){const current=await tx.get(c.root.collection('catalogOrders').where('spaceId','==',c.spaceId).limit(101));if(current.size>100)fail('resource-exhausted','Paginação de pedidos necessária.');orders.push(...current.docs.map(serial).filter(o=>o.source==='online_store').map(orderSummary));}
-      return {store,products,orders,owner:c.member.role==='owner',phase:2,checkoutEnabled:store?.checkoutEnabled===true};
+      const catalog=store?.publicToken?(await tx.get(db.doc(`publicCatalogs/${store.publicToken}`))).data():null;
+      return {store,products,orders,owner:c.member.role==='owner',phase:2,checkoutEnabled:store?.checkoutEnabled===true,orderReception:reception(c,store,catalog)};
     });
   }
   const orderSummary=o=>({id:o.id,publicOrderNumber:o.publicOrderNumber||'',total:Number(o.total||0),orderStatus:o.orderStatus||'',spaceId:o.spaceId||null});
   async function save(request){
     const input=request.data||{},action=input.action||'save';
-    if(!['save','publish','activate'].includes(action))fail('invalid-argument','Ação inválida.');
+    if(!['save','publish','activate','set_order_reception'].includes(action))fail('invalid-argument','Ação inválida.');
     const token=randomBytes(24).toString('hex');
     return db.runTransaction(async tx=>{
       const c=await context(tx,request,{write:true,ownerOnly:true}),existing=serial(await tx.get(c.ref));
+      if(action==='set_order_reception'){
+        if(input.confirmed!==true||typeof input.enabled!=='boolean')fail('failed-precondition','Confirme o recebimento de pedidos somente neste espaço.');
+        if(!existing?.publicToken)fail('failed-precondition','Publique a loja deste espaço antes de receber pedidos.');
+        const catalogRef=db.doc(`publicCatalogs/${existing.publicToken}`),bindingRef=db.doc(`catalogStoreBindings/${existing.publicToken}`),
+          [publicDoc,bindingDoc]=await Promise.all([tx.get(catalogRef),tx.get(bindingRef)]),catalog=publicDoc.data(),binding=bindingDoc.data(),
+          current=reception(c,existing,catalog),enabled=input.enabled;
+        if(!liveMatches(c,existing,catalog)||binding?.businessId!==c.businessId||binding?.spaceId!==c.spaceId||
+          binding?.storeId!==c.ref.id||binding?.workspaceGeneration!==c.workspaceGeneration||binding?.status!=='completed')
+          fail('failed-precondition','Atualize a publicação deste espaço antes de alterar os pedidos.');
+        if(enabled&&!current.canEnable)fail('failed-precondition',{
+          not_published:'Publique a loja deste espaço antes de receber pedidos.',
+          publication_required:'Atualize a publicação deste espaço antes de receber pedidos.',
+          sales_disabled:'Este espaço não está habilitado para vendas.',
+          delivery_required:'Ative entrega ou retirada antes de receber pedidos.',
+          payment_required:'Configure uma preferência de pagamento antes de receber pedidos.'
+        }[current.reason]||'A loja não pode receber pedidos agora.');
+        // A lost response / double click replays the same desired state. An old
+        // request cannot reactivate a store paused later: revision still fences it.
+        const coherent=existing.checkoutEnabled===enabled&&existing.catalogSettings?.checkoutEnabled===enabled&&
+          catalog.acceptingOrders===enabled&&catalog.checkoutEnabled===enabled&&
+          catalog.publicSettings?.checkoutEnabled===enabled&&catalog.status===(enabled?'active':'paused');
+        if(coherent)return {store:existing,orderReception:current,replayed:true};
+        if((existing.revision||0)!==Number(input.revision))fail('aborted','A loja foi alterada em outro aparelho. Recarregue antes de alterar os pedidos.');
+        const timestamp=new Date().toISOString(),revision=(existing.revision||0)+1,
+          store={...existing,checkoutEnabled:enabled,catalogSettings:{...existing.catalogSettings,checkoutEnabled:enabled},
+            checkoutUpdatedAt:timestamp,checkoutUpdatedByUid:c.uid,revision,actorUid:c.uid,updatedAt:timestamp};
+        tx.update(c.ref,{checkoutEnabled:enabled,'catalogSettings.checkoutEnabled':enabled,
+          checkoutUpdatedAt:timestamp,checkoutUpdatedByUid:c.uid,revision,actorUid:c.uid,updatedAt:timestamp});
+        // Do not republish a draft or touch products, prices, stock, reservations,
+        // orders, aliases or any other store. These two updates commit atomically.
+        tx.update(catalogRef,{acceptingOrders:enabled,checkoutEnabled:enabled,
+          'publicSettings.checkoutEnabled':enabled,status:enabled?'active':'paused',revision,updatedAt:timestamp});
+        return {store,orderReception:reception(c,store,{...catalog,acceptingOrders:enabled}),replayed:false};
+      }
       if(['activate','publish'].includes(action)&&input.confirmed!==true)fail('failed-precondition','Confirme a ativação da Loja Online V2 neste espaço.');
       if(!existing&&!['save','activate'].includes(action))fail('failed-precondition','O proprietário deve ativar a Loja Online V2 explicitamente neste espaço.');
       if(existing&&existing.v2Enabled!==true&&!['save','activate','publish'].includes(action))fail('failed-precondition','Loja Online V2 não ativada neste espaço.');
@@ -47,6 +98,8 @@ function onlineStoreService(db){
       try{settings=Model.settings(input.settings||existing?.catalogSettings);slug=Model.slug(input.slug||existing?.slug);}catch(e){fail('invalid-argument',e.message);}
       if(!settings.publicName)fail('invalid-argument','Informe o nome público da loja.');
       if(settings.checkoutEnabled&&!settings.pickupEnabled&&!settings.deliveryEnabled)fail('invalid-argument','Ative entrega ou retirada antes de receber pedidos.');
+      if(action==='save'&&existing&&settings.checkoutEnabled!==existing.checkoutEnabled)
+        fail('failed-precondition','Use o controle de recebimento de pedidos ou confirme uma nova publicação.');
       const slugRef=db.doc(`publicCatalogSlugs/${slug}`),slugDoc=await tx.get(slugRef);
       if(slugDoc.exists&&(slugDoc.data().businessId!==c.businessId||slugDoc.data().storeId!==c.ref.id))fail('already-exists','Esse link já pertence a outra loja.');
       let ids=input.productIds||existing?.selectedProductIds||[];
