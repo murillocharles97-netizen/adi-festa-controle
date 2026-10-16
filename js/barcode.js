@@ -1009,17 +1009,61 @@
     if (event.target.closest("[data-scan-product]")) productLookup();
     if (event.target.closest("[data-scan-stock]")) stockSession();
   });
+  const keyboardScans = new WeakMap();
+  function resetSaleSearch(input) {
+    // Cart rendering may replace the input. Never defer this reset: a later
+    // callback could erase the next scan already being typed.
+    const current = document.getElementById(input.id) || input;
+    current.value = "";
+    current.dispatchEvent(new Event("input", { bubbles: true }));
+    current.focus({ preventScroll: true });
+    keyboardScans.delete(input);
+  }
   document.addEventListener("keydown", (event) => {
+    if (!event.target.matches?.("#product-search,#mobile-product-search,#search"))
+      return;
+    const input = event.target, now = event.timeStamp;
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const prior = keyboardScans.get(input);
+      keyboardScans.set(input, {
+        count: prior && now - prior.last <= 80 ? prior.count + 1 : 1,
+        last: now,
+      });
+      return;
+    }
     if (
       event.key !== "Enter" ||
-      !event.target.matches("#product-search,#mobile-product-search,#search")
+      event.isComposing
     )
       return;
-    const code = normalizeBarcode(event.target.value),
+    const code = normalizeBarcode(input.value),
       product = find(code);
-    if (!product) return;
+    const sale = location.hash.includes("vender"), burst = keyboardScans.get(input);
+    keyboardScans.delete(input);
+    if (!code || event.repeat) {
+      if (sale) event.preventDefault();
+      return;
+    }
+    if (!product) {
+      const query = String(input.value).trim().toLowerCase();
+      const manualMatch = sale && (window.DB?.carregar?.()?.produtos || []).some((item) =>
+        [item.nome, item.sku, item.codigo, item.codigoInterno].some((value) =>
+          value && String(value).toLowerCase().includes(query),
+        ),
+      );
+      // Ordinary name/SKU searches remain filters. A numeric code or a fast
+      // scanner burst terminated by Enter can be retried without concatenation.
+      if (sale && !manualMatch && (/^\d{4,}$/.test(code) || (burst?.count >= 4 && now - burst.last <= 80 && !/\s/.test(query)))) {
+        event.preventDefault();
+        Utils.toast("Produto não encontrado para este código. Leia outro código.", true);
+        resetSaleSearch(input);
+      }
+      return;
+    }
     event.preventDefault();
-    if (location.hash.includes("vender")) addSaleProduct(product);
+    if (sale) {
+      if (addSaleProduct(product)) resetSaleSearch(input);
+    }
     else {
       window.ProdutosMobile?.applyFilter?.();
       window.ProdutosMobile?.search?.(code);
