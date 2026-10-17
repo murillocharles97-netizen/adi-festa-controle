@@ -61,7 +61,8 @@ function saleRecoveryService(db,{FieldValue}){
     if(!b.exists||!m.exists||!p.exists||business.active!==true||profile.active!==true||member.status!=='active')fail('permission-denied','Vínculo empresarial não autorizado.');
     assertWritable(business,request.data.workspaceGeneration??0);
     const owner=business.ownerId===uid&&member.role==='owner';
-    if(!owner&&member.permissions?.['sales.create']!==true)fail('permission-denied','Acesso à recuperação não autorizado.');
+    // Preserving one's own evidence is not a commercial operation. Membership,
+    // tenant, epoch, space and original actor are still checked independently.
     return{uid,businessId,business,member,profile,owner};
   }
   async function space(reader,c,id){

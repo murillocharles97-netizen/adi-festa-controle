@@ -221,7 +221,93 @@
       lastCommit: session?.lastCommit || null, pending: Boolean(session?.dirty || session?.running), errorCode: session?.error?.code || null,
       legacyKeysBefore: session?.inventoryBefore || [], legacyKeysNow: inventory(), estimate};
   }
-  DB.businessCache = {open, flush, keyValue, diagnostic, inventory,
+  async function recoverySources(identity) {
+    const {businessId,uid,workspaceGeneration=0}=identity;
+    if(!/^[a-z0-9_-]+$/i.test(businessId||'')||!/^[a-z0-9_-]+$/i.test(uid||'')||!Number.isSafeInteger(workspaceGeneration)||workspaceGeneration<0)
+      throw failure('recovery-context-invalid','Entre na conta de origem para consultar as vendas retidas.');
+    const context=window.BusinessContext?.get?.();
+    if(window.FirebaseSession?.user?.uid!==uid||context?.userProfile?.uid!==uid||context?.businessId!==businessId||(context?.business?.workspaceGeneration??0)!==workspaceGeneration)
+      throw failure('recovery-context-invalid','A consulta precisa permanecer na conta e empresa de origem.');
+    const epoch=await DB.localRecords.read(`workspace-generation:${businessId}`);
+    if((epoch?.workspaceGeneration??0)!==workspaceGeneration||epoch?.cleanupPending===true)
+      throw failure('workspace-generation-mismatch','O ambiente da empresa mudou. Nenhum registro antigo será enviado.');
+    const keyPrefix=`adiFestaDB_v1:${businessId}:${uid}:`,prefix=`business-cache:v156:${keyPrefix}`;
+    const signatureOf=scope=>{
+      if(!String(scope).startsWith(prefix))return null;
+      const match=scope.slice(prefix.length).match(/^([a-z0-9_-]+)(?::generation:(\d+))?$/i);
+      return match&&Number(match[2]||0)===workspaceGeneration?match[1]:null;
+    };
+    const queueField=signature=>`adiFesta:${businessId}:${uid}:${signature}${workspaceGeneration>0?`:generation:${workspaceGeneration}`:''}:syncQueue`;
+    const parseQueue=raw=>{const value=JSON.parse(raw||'[]');if(value===null)return[];if(!Array.isArray(value))throw Error('invalid queue');return value;};
+    const retained=packets=>packets.filter(p=>p&&p.businessId===businessId&&p.userId===uid&&(p.workspaceGeneration??0)===workspaceGeneration&&
+      ['permission-denied','sale-recovery-review-required'].includes(p.lastErrorCode)&&p.payload?.writes?.some(w=>w.entityType==='sales'&&w.operation==='create'));
+    // Never hydrate another permission cache or import it into the active queue.
+    // Key cursors avoid reading old financial/customer/private collections.
+    const sources=await DB.localRecords.transaction('readonly',(store,done,fail)=>{
+      const rows=[],dataKeys=[],request=store.index('scope').openKeyCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+      request.onsuccess=()=>{
+        const cursor=request.result;
+        if(!cursor){
+          const groups=new Map();
+          for(const row of rows){if(!groups.has(row.scope))groups.set(row.scope,[]);groups.get(row.scope).push(row);}
+          try{const scoped=[...groups].map(([scope,records])=>{
+            const decoded=decode(records),packets=parseQueue(decoded.values.get(queueField(signatureOf(scope))));
+            return{scope,packets:retained(packets)};
+          }).filter(s=>s.packets.length),byScope=new Map(scoped.map(s=>[s.scope,s]));
+            // Ordinary sales/history are not read on every Sync status change.
+            // Only scopes containing retained evidence need related snapshots.
+            const wanted=dataKeys.filter(({scope,key})=>{
+              const source=byScope.get(scope);if(!source)return false;
+              return key.length===3||key[2]==='movimentacoesEstoque'||source.packets.some(p=>p.payload.writes.some(w=>w.entityType==='sales'&&w.entityId===key[3]));
+            });
+            const finish=()=>done(scoped.map(source=>{const decoded=decode(rows.filter(r=>r.scope===source.scope));return{...source,local:{vendas:decoded.data.vendas||[],movimentacoesEstoque:decoded.data.movimentacoesEstoque||[]}};}));
+            let remaining=wanted.length;
+            if(!remaining)finish();
+            for(const entry of wanted){
+              const item=store.get(entry.primaryKey);
+              item.onsuccess=()=>{
+                if(item.result)rows.push(item.result);
+                if(--remaining===0){try{finish();}catch{fail(failure('recovery-source-invalid','Snapshots preservados precisam de revisão. Nenhum dado foi alterado.'));}}
+              };
+            }
+          }catch{fail(failure('recovery-source-invalid','Um registro preservado precisa de revisão. Nenhum dado foi alterado.'));}
+          return;
+        }
+        const signature=signatureOf(cursor.key);
+        let key;try{key=JSON.parse(cursor.primaryKey);}catch{cursor.continue();return;}
+        if(signature&&Array.isArray(key)&&key[0]===cursor.key){
+          if(key[1]==='sync'&&key[2]===queueField(signature)){const item=store.get(cursor.primaryKey);item.onsuccess=()=>{if(item.result)rows.push(item.result);};}
+          else if(key[1]==='data'&&['vendas','movimentacoesEstoque'].includes(key[2]))dataKeys.push({scope:cursor.key,primaryKey:cursor.primaryKey,key});
+        }
+        cursor.continue();
+      };
+    });
+    const current=session;
+    if(current&&signatureOf(current.scope)&&!current.retired){
+      const raw=current.values.get(queueField(signatureOf(current.scope)))||'[]';
+      let packets;try{packets=retained(parseQueue(raw));}catch{throw failure('recovery-source-invalid','A fila preservada precisa de revisão. Nenhum dado foi alterado.');}
+      // Prefer the current in-memory revision over its older durable snapshot.
+      // Other namespaces stay read-only; no flush, stage, migration or ack.
+      const existing=sources.findIndex(source=>source.scope===current.scope);
+      if(existing>=0&&!current.error)sources.splice(existing,1);
+      if(packets.length){
+        const ids=new Set(packets.flatMap(p=>p.payload.writes.filter(w=>w.entityType==='sales').map(w=>w.entityId))),operations=new Set(packets.map(p=>p.operationId));
+        sources.push({packets,local:{vendas:(current.data.vendas||[]).filter(s=>ids.has(s.id)),movimentacoesEstoque:(current.data.movimentacoesEstoque||[]).filter(m=>operations.has(m.operationId)||ids.has(m.vendaId))}});
+      }
+    }
+    // Older scoped queue copies may still live in Storage. Read exact scopes only.
+    for(let n=0;n<localStorage.length;n++){
+      const key=localStorage.key(n),queuePrefix=`adiFesta:${businessId}:${uid}:`;
+      if(!key?.startsWith(queuePrefix)||!key.endsWith(':syncQueue'))continue;
+      const signature=signatureOf(prefix+key.slice(queuePrefix.length,-':syncQueue'.length));
+      if(!signature)continue;
+      let packets;try{packets=parseQueue(localStorage.getItem(key));}catch{throw failure('recovery-source-invalid','Uma cópia preservada precisa de revisão. Nenhum dado foi alterado.');}
+      // Same packets may exist in IDB; the client compares their full contents.
+      sources.push({packets:retained(packets),local:{vendas:[],movimentacoesEstoque:[]}});
+    }
+    return clone(sources);
+  }
+  DB.businessCache = {open, flush, keyValue, diagnostic, inventory, recoverySources,
     stage(data, key) { const current = requireSession(); if (key && key !== current.key) throw failure('local-cache-scope-changed', 'A empresa mudou durante a gravação. Tente novamente.'); current.data = clone(data); schedule(current); },
     async release() { await flush(); session = null; },
     async retire() {

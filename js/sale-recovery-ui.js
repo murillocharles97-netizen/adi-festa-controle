@@ -5,17 +5,30 @@ const when=value=>value?new Date(value).toLocaleString('pt-BR'):'Horário não r
 const notice='Registro preservado para análise. Nenhum efeito comercial foi aplicado por esta recuperação.';
 const context=()=>window.BusinessContext?.get?.()||{};
 const identity=()=>{const c=context();return `${c.uid||window.FirebaseSession?.user?.uid||''}:${c.businessId||''}:${c.business?.workspaceGeneration??0}`;};
-let count=0,busy=false,unsubscribe=null,lastIdentity='',message='';
+let count=0,busy=false,unsubscribe=null,lastIdentity='',message='',refreshSequence=0,scanError='';
+function recoveryIdentity(){
+  const c=context(),uid=window.FirebaseSession?.user?.uid,bootstrap=window.FirebaseBootstrap?.state;
+  if(!uid||c.userProfile?.uid!==uid||c.userProfile.active!==true||c.member?.status!=='active'||c.business?.active!==true||!c.businessId||
+    bootstrap&&!['authorized','ready','subscription_warning','subscription_blocked'].includes(bootstrap)||window.WorkspaceRuntime?.isBlocked?.())return null;
+  return{uid,businessId:c.businessId,workspaceGeneration:c.business.workspaceGeneration??0};
+}
+async function capture(){
+  const initial=recoveryIdentity(),session=identity();
+  if(!initial)throw Error('Entre na conta de origem para enviar os dados.');
+  const sources=await window.DB.businessCache.recoverySources(initial);
+  if(identity()!==session||!recoveryIdentity())throw Error('A sessão mudou. Seus dados continuam preservados.');
+  return{identity:initial,sources};
+}
 const call=(name,data)=>{
   const c=context();
   if(!window.FirebaseCallable||!window.FirebaseSession?.user)throw Error('Entre na sua conta para continuar.');
   return window.FirebaseCallable(name,{...data,businessId:c.businessId,workspaceGeneration:c.business?.workspaceGeneration??0});
 };
-const sender=window.SaleRecoveryClient.create({snapshot:()=>window.SyncFirebase.recoverySnapshot(),call,onProgress:({sent,total})=>{message=`Enviando dados… ${sent} de ${total}`;mount();}});
+const sender=window.SaleRecoveryClient.create({snapshot:capture,call,onProgress:({sent,total})=>{message=`Enviando dados… ${sent} de ${total}`;mount();}});
 function modal(title,body,footer=''){
   const root=document.querySelector('#modal');if(!root)return null;
   const prior=document.activeElement;
-  root.innerHTML=`<div class="modal-bg"><section class="modal-box sale-recovery-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
+  root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg"><section class="modal-box sale-recovery-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
   const panel=root.querySelector('section');
   const close=()=>{if(busy)return;root.replaceChildren();prior?.isConnected&&prior.focus();};
   root.querySelectorAll('[data-recovery-close]').forEach(b=>b.onclick=close);
@@ -31,7 +44,7 @@ function modal(title,body,footer=''){
   panel.focus();return panel;
 }
 function confirmSend(){
-  if(busy)return;
+  if(busy||!recoveryIdentity()||scanError)return;
   if(!navigator.onLine){message='Conecte-se à internet para enviar. Seus dados continuam preservados.';mount();return;}
   const panel=modal('Enviar dados para recuperação?',`<p>Serão enviados os registros das ${count} vendas retidas ao responsável pela empresa.</p><p><strong>Isso não refaz vendas, não movimenta estoque e não altera o Financeiro.</strong> Os dados originais continuarão preservados neste aparelho.</p><p data-recovery-result role="status" aria-live="polite"></p>`,`<button class="btn btn-light" type="button" data-recovery-close>Cancelar</button><button class="btn btn-primary" type="button" data-recovery-confirm>Confirmar envio</button>`);
   if(!panel)return;
@@ -83,20 +96,31 @@ async function openReviews(){
   await page();
 }
 function mount(){
-  const root=document.querySelector('#app');if(!root)return;
+  // Outside commercial route content: a denied route/readonly plan does not
+  // hide the original actor's evidence intake. Auth/membership gates still apply.
+  const app=document.querySelector('#app'),root=app?.parentElement;if(!root)return;
   const c=context(),key=identity();
-  if(lastIdentity!==key){message='';lastIdentity=key;}
+  if(lastIdentity!==key){message='';lastIdentity=key;document.querySelector('.sale-recovery-modal-bg')?.remove();}
   let bar=root.querySelector('[data-sale-recovery-bar]');
   const ownerArea=c.role==='owner'&&['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio');
-  if(!c.businessId||!window.FirebaseSession?.user||(!count&&!ownerArea)){bar?.remove();return;}
-  if(!bar){bar=document.createElement('section');bar.className='sale-recovery-banner';bar.dataset.saleRecoveryBar='';root.prepend(bar);}
-  const html=`<div><strong>${count?`Há ${count} vendas aguardando análise`:'Vendas aguardando revisão'}</strong><p role="status" aria-live="polite">${esc(message||'O envio preserva os registros, sem refazer vendas ou movimentar estoque.')}</p></div><div class="sale-recovery-actions">${count?`<button type="button" class="btn btn-primary" data-send-recovery ${busy?'disabled':''}>${busy?'Enviando…':'Enviar dados para recuperação'}</button>`:''}<button type="button" class="btn btn-light" data-view-recovery>${c.role==='owner'?'Vendas aguardando revisão':'Ver situação do envio'}</button></div>`;
+  if(!recoveryIdentity()||(!count&&!ownerArea&&!scanError)){bar?.remove();return;}
+  if(!bar){bar=document.createElement('section');bar.className='sale-recovery-banner';bar.dataset.saleRecoveryBar='';app.before(bar);}
+  const html=`<div><strong>${scanError?'Vendas preservadas neste aparelho':count?`Há ${count} vendas aguardando análise`:'Vendas aguardando revisão'}</strong><p role="status" aria-live="polite">${esc(scanError||message||'O envio preserva os registros, sem refazer vendas ou movimentar estoque.')}</p></div><div class="sale-recovery-actions">${count&&!scanError?`<button type="button" class="btn btn-primary" data-send-recovery ${busy?'disabled':''}>${busy?'Enviando…':'Enviar dados para recuperação'}</button>`:''}<button type="button" class="btn btn-light" data-view-recovery>${c.role==='owner'?'Vendas aguardando revisão':'Ver situação do envio'}</button></div>`;
   if(bar.recoveryMarkup!==html){bar.recoveryMarkup=html;bar.innerHTML=html;bar.querySelector('[data-send-recovery]')?.addEventListener('click',confirmSend);bar.querySelector('[data-view-recovery]').onclick=openReviews;}
 }
-function refresh(){count=window.SyncFirebase?.getRetainedSaleRecoveryCount?.()||0;mount();}
-function start(){unsubscribe?.();unsubscribe=window.SyncFirebase?.subscribe?.(refresh);refresh();}
+async function refresh(){
+  const sequence=++refreshSequence,session=identity();
+  if(!recoveryIdentity()){count=0;scanError='';mount();return;}
+  try{const snapshot=await capture();if(sequence!==refreshSequence||identity()!==session)return;count=window.SaleRecoveryClient.entries(snapshot).length;scanError='';}
+  catch(error){if(sequence!==refreshSequence||identity()!==session)return;count=0;scanError=error.message||'Não foi possível consultar os registros preservados. Nenhum dado foi alterado.';}
+  mount();
+}
+function start(){unsubscribe?.();unsubscribe=window.SyncFirebase?.subscribe?.(()=>{void refresh();});void refresh();}
 addEventListener('firebase-auth-ready',start);
 addEventListener('hashchange',refresh);
+addEventListener('business-context-changed',refresh);
+addEventListener('firebase-bootstrap-state',refresh);
+addEventListener('firebase-session-cleared',refresh);
 // Reattach to the existing panel after normal route renders, no cloud listener.
 let scheduled=false;
 new MutationObserver(()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;mount();});}).observe(document.querySelector('main')||document.body,{childList:true,subtree:true});

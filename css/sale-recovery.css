@@ -1,7 +1,9 @@
 .sale-recovery-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;margin:0 0 20px;border:1px solid #bce6df;border-radius:16px;background:#f1fbf8;color:#123b36;min-width:0}
+.shell>.sale-recovery-banner{width:min(1364px,calc(100% - 28px));margin:16px auto 0}
 .sale-recovery-banner p{margin:5px 0 0;font-size:.88rem;line-height:1.5}
 .sale-recovery-actions{display:flex;gap:8px;flex-wrap:wrap}
 .sale-recovery-modal{width:min(740px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}
+.sale-recovery-modal-bg{z-index:6001}
 .sale-recovery-modal .modal-head h2{margin:0;font-size:1.15rem}
 .sale-recovery-warning{padding:12px;border:1px solid #d5e4e0;border-radius:10px;background:#f3faf7;line-height:1.5}
 .sale-recovery-card{padding:16px;margin:12px 0;border:1px solid #dce5eb;border-radius:14px;overflow-wrap:anywhere}

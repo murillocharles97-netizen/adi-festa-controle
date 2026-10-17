@@ -12,6 +12,24 @@
   function eligible(packets,identity){
     return packets.filter(p=>held(p)&&p.businessId===identity.businessId&&p.userId===identity.uid&&(p.workspaceGeneration??0)===identity.workspaceGeneration);
   }
+  function entries(snapshot){
+    const found=new Map(),identity=snapshot.identity;
+    for(const source of snapshot.sources||[{packets:snapshot.packets,local:snapshot.local}]){
+      for(const packet of eligible(source.packets||[],identity)){
+        const saleIds=new Set(packet.payload.writes.filter(w=>w.entityType==='sales').map(w=>w.entityId));
+        const local={vendas:(source.local?.vendas||[]).filter(s=>saleIds.has(s.id)),movimentacoesEstoque:(source.local?.movimentacoesEstoque||[]).filter(m=>m.operationId===packet.operationId||saleIds.has(m.vendaId))};
+        const prior=found.get(packet.operationId);
+        if(prior){
+          if(canonical(prior.packet)!==canonical(packet))throw Error('Existem cópias diferentes de uma operação preservada. Nenhum envio foi iniciado; os originais continuam intactos.');
+          for(const field of ['vendas','movimentacoesEstoque']){
+            if(!prior.local[field].length)prior.local[field]=local[field];
+            else if(local[field].length&&canonical(prior.local[field])!==canonical(local[field]))throw Error('Existem snapshots diferentes da mesma operação. Os originais continuam preservados para análise.');
+          }
+        }else found.set(packet.operationId,{packet,local});
+      }
+    }
+    return [...found.values()].sort((a,b)=>String(a.packet.createdAtLocal||a.packet.createdAt||'').localeCompare(String(b.packet.createdAtLocal||b.packet.createdAt||'')));
+  }
   async function envelope(packet,local,identity,cryptoApi=globalThis.crypto){
     if(!eligible([packet],identity).length)throw Error('Esta venda não pertence à sessão atual.');
     const sales=packet.payload.writes.filter(w=>w.entityType==='sales');
@@ -28,25 +46,28 @@
     function send(){
       if(inFlight)return inFlight;
       inFlight=(async()=>{
-        const initial=await snapshot(),identity=initial.identity,packets=eligible(initial.packets,identity);
-        if(!packets.length)throw Error('Não há vendas elegíveis para envio nesta conta.');
-        if(packets.length>20)throw Error('Há muitas operações. Solicite acompanhamento do responsável. Nenhum dado foi alterado.');
+        const initial=await snapshot(),identity=initial.identity,selected=entries(initial);
+        if(!selected.length)throw Error('Não há vendas elegíveis para envio nesta conta.');
+        if(selected.length>20)throw Error('Há muitas operações. Solicite acompanhamento do responsável. Nenhum dado foi alterado.');
+        // Validate/hash every original before the first request. A local conflict
+        // cannot result in a partially uploaded set of evidence.
+        const prepared=await Promise.all(selected.map(({packet,local})=>envelope(packet,local,identity,cryptoApi)));
         let sent=0;
-        for(const packet of packets){
+        for(const [index,{packet}] of selected.entries()){
           const current=await snapshot();
           if(current.identity.uid!==identity.uid||current.identity.businessId!==identity.businessId||current.identity.workspaceGeneration!==identity.workspaceGeneration)throw Error('A sessão mudou. Seus dados continuam preservados.');
           // The original packet, not the refreshed sale/stock state, is the source.
-          const data=await envelope(packet,initial.local,identity,cryptoApi);
+          const data=prepared[index];
           const result=await call('submitSaleRecovery',data),receipt=result.data??result;
           if(receipt.status==='content_conflict')throw Error('Há dados diferentes para esta venda. Os registros foram preservados para análise.');
           if(receipt.status!=='awaiting_review'||receipt.operationId!==packet.operationId||receipt.contentHash!==data.contentHash)throw Error('Não foi possível confirmar o recebimento. Seus dados continuam preservados.');
-          sent++;onProgress({sent,total:packets.length});
+          sent++;onProgress({sent,total:selected.length});
         }
-        return{sent,total:packets.length};
+        return{sent,total:selected.length};
       })().finally(()=>{inFlight=null;});
       return inFlight;
     }
     return{send};
   }
-  return Object.freeze({canonical,held,eligible,envelope,create});
+  return Object.freeze({canonical,held,eligible,envelope,entries,create});
 });

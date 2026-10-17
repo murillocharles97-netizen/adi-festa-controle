@@ -1,6 +1,6 @@
-import './sync.js?v=180';
-import '../sale-recovery-client.js';
-import '../sale-recovery-ui.js';
+import './sync.js?v=181';
+import '../sale-recovery-client.js?v=181';
+import '../sale-recovery-ui.js?v=181';
 
 let unsubscribe=null,lastState=null;
 const escape=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));

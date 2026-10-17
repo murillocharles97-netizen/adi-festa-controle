@@ -6,6 +6,7 @@ const CACHE_VERSION=2,CACHE_TTL=6*60*60*1000,cacheKey=businessId=>`adiFesta:oper
 function readCache(businessId){try{const cached=JSON.parse(localStorage.getItem(cacheKey(businessId))||'null');return cached&&Date.now()-Number(cached.cachedAt||0)<CACHE_TTL?cached.operation:null}catch{return null}}
 function writeCache(businessId,operation){try{localStorage.setItem(cacheKey(businessId),JSON.stringify({cachedAt:Date.now(),operation}))}catch{}}
 const context=()=>({businessId:String(window.BusinessContext?.getCurrentBusinessId?.()||window.FirebaseSession?.profile?.businessId||''),uid:window.FirebaseSession?.user?.uid||''});
+const canConfigure=()=>window.BusinessContext?.hasPermission?.('settings.manage')===true;
 async function load(){
   const {businessId}=context();
   if(!businessId||loadedFor===businessId||!window.OperationMode)return;
@@ -15,15 +16,15 @@ async function load(){
     const snap=await getDoc(doc(db,'businesses',businessId,'settings','operation'));
     if(snap.exists()){
       const remote=snap.data(),local=window.OperationMode.get(),remoteTime=remote.updatedAt?.toDate?.()?.toISOString?.()||String(remote.updatedAt||'');
-      if(local.updatedAt&&remoteTime&&local.updatedAt>remoteTime)await persist({detail:{operation:local,reason:'retry'}});
+      if(canConfigure()&&local.updatedAt&&remoteTime&&local.updatedAt>remoteTime)await persist({detail:{operation:local,reason:'retry'}});
       else window.OperationMode.applyRemote(remote);
       writeCache(businessId,window.OperationMode.get());
-    }else await persist({detail:{operation:window.OperationMode.ensure(),reason:'migration'}});
+    }else if(canConfigure())await persist({detail:{operation:window.OperationMode.ensure(),reason:'migration'}});
   }catch(error){console.warn('[Operation Settings] cache local mantido',error?.code||error?.message)}
   finally{dispatchEvent(new CustomEvent('operation-settings-loaded',{detail:{businessId,operation:window.OperationMode.get()}}))}
 }
 async function persist(event){
-  if(saving||event.detail?.reason==='cloud')return;
+  if(saving||event.detail?.reason==='cloud'||!canConfigure())return;
   const {businessId,uid}=context();if(!businessId||!uid)return;saving=true;
   try{await setDoc(doc(db,'businesses',businessId,'settings','operation'),{...event.detail.operation,id:'operation',businessId,ownerId:uid,updatedAt:serverTimestamp()},{merge:true});writeCache(businessId,event.detail.operation)}
   catch(error){pending=event;console.warn('[Operation Settings] pendente de sincronização',error?.code||error?.message)}
