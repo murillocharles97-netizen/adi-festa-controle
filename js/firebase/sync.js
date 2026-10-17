@@ -566,6 +566,11 @@ function isOrphanReviewed(sale) {
       String(item.resolvedOperationId || "") === String(sale?.operationId || ""));
   return Boolean(resolution);
 }
+function diagnosticOperationEvidence(entity, item) {
+  const audit=state.dataAudit;
+  if(!audit||audit.businessId!==activeBusinessId()||item.businessId&&item.businessId!==activeBusinessId())return 'not_verified';
+  return window.IntegrityAudit?.operationEvidence?.(item,audit.collections?.[entity],checksumValue(item))||'not_verified';
+}
 function saleIntegrityDiagnostics() {
   if (!currentUser) return { count: 0, localWithoutQueue: [], queueWithoutLocal: [],
     onlyLocalAfterComparison: [], overdue: [], comparedAt: "" };
@@ -575,9 +580,14 @@ function saleIntegrityDiagnostics() {
     queued = new Set(queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "sales" && write.operation === "create")
       .map((write) => String(write.entityId)))),
-    localWithoutQueue = sales.filter((sale) => Number(sale.syncPipelineVersion || 0) >= 2 &&
+    candidates = sales.filter((sale) => Number(sale.syncPipelineVersion || 0) >= 2 &&
       !sale.deletedAt && sale.active !== false && !sale.syncConfirmedAt &&
-      !sale.financialAppliedAt && !queued.has(String(sale.id)))
+      !sale.financialAppliedAt && !queued.has(String(sale.id))),
+    confirmedRemotely = candidates.filter(sale=>['remote_confirmed','remote_present_difference'].includes(diagnosticOperationEvidence('sales',sale)))
+      .map(sale=>({saleId:String(sale.id),operationId:String(sale.operationId||''),spaceId:sale.spaceId||null,origin:sale.source||'unknown',category:diagnosticOperationEvidence('sales',sale)==='remote_confirmed'?'synchronized_without_local_marker':'remote_present_difference'})),
+    verificationPending = candidates.filter(sale=>diagnosticOperationEvidence('sales',sale)==='not_verified')
+      .map(sale=>({saleId:String(sale.id),operationId:String(sale.operationId||''),category:'remote_presence_not_verified'})),
+    localWithoutQueue = candidates.filter(sale=>diagnosticOperationEvidence('sales',sale)==='local_only')
       .map((sale) => ({ saleId: String(sale.id), operationId: String(sale.operationId || "") })),
     queueWithoutLocal = queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "sales" && write.operation === "create" &&
@@ -586,15 +596,14 @@ function saleIntegrityDiagnostics() {
         status: item.status }))),
     onlyLocalAfterComparison = (state.dataAudit?.collections?.sales?.onlyLocal || [])
       .filter((item) => item.classification === "B" &&
-        !byId.get(String(item.documentId))?.syncConfirmedAt &&
-        !byId.get(String(item.documentId))?.financialAppliedAt)
+        !queued.has(String(item.documentId))&&byId.has(String(item.documentId))&&diagnosticOperationEvidence('sales',byId.get(String(item.documentId)))==='local_only')
       .map((item) => ({ saleId: String(item.documentId), operationId: String(item.operationId || "") })),
     overdue = queue.filter((item) => item.payload?.eventKind === "sale" &&
       Date.now() - (Date.parse(item.createdAtLocal || item.createdAt || "") || Date.now()) > 15 * 60 * 1000)
       .map((item) => ({ operationId: String(item.operationId), status: item.status }));
   return { count: new Set([...localWithoutQueue, ...queueWithoutLocal,
     ...onlyLocalAfterComparison].map((item) => item.saleId)).size,
-    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue,
+    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue,confirmedRemotely,verificationPending,
     comparedAt: state.dataAudit?.generatedAt || "" };
 }
 function paymentIntegrityDiagnostics() {
@@ -606,9 +615,14 @@ function paymentIntegrityDiagnostics() {
     queued = new Set(queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "payments" && write.operation === "create")
       .map((write) => String(write.entityId)))),
-    localWithoutQueue = payments.filter((payment) => Number(payment.syncPipelineVersion || 0) >= 2 &&
+    candidates = payments.filter((payment) => Number(payment.syncPipelineVersion || 0) >= 2 &&
       !payment.syncConfirmedAt && payment.applicationStatus !== "applied" &&
-      !queued.has(String(payment.id)))
+      !queued.has(String(payment.id))),
+    confirmedRemotely = candidates.filter(payment=>['remote_confirmed','remote_present_difference'].includes(diagnosticOperationEvidence('payments',payment)))
+      .map(payment=>({paymentId:String(payment.id),operationId:String(payment.operationId||''),category:diagnosticOperationEvidence('payments',payment)==='remote_confirmed'?'synchronized_without_local_marker':'remote_present_difference'})),
+    verificationPending = candidates.filter(payment=>diagnosticOperationEvidence('payments',payment)==='not_verified')
+      .map(payment=>({paymentId:String(payment.id),operationId:String(payment.operationId||''),category:'remote_presence_not_verified'})),
+    localWithoutQueue = candidates.filter(payment=>diagnosticOperationEvidence('payments',payment)==='local_only')
       .map((payment) => ({ paymentId: String(payment.id), operationId: String(payment.operationId || "") })),
     queueWithoutLocal = queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "payments" && write.operation === "create" &&
@@ -617,14 +631,14 @@ function paymentIntegrityDiagnostics() {
         status: item.status }))),
     onlyLocalAfterComparison = (state.dataAudit?.collections?.payments?.onlyLocal || [])
       .filter((item) => item.classification === "B" &&
-        !(payments.find((payment) => String(payment.id) === String(item.documentId))?.syncConfirmedAt))
+        !queued.has(String(item.documentId))&&payments.some(payment=>String(payment.id)===String(item.documentId)&&diagnosticOperationEvidence('payments',payment)==='local_only'))
       .map((item) => ({ paymentId: String(item.documentId), operationId: String(item.operationId || "") })),
     overdue = queue.filter((item) => item.payload?.eventKind === "payment" &&
       Date.now() - (Date.parse(item.createdAtLocal || item.createdAt || "") || Date.now()) > 15 * 60 * 1000)
       .map((item) => ({ operationId: String(item.operationId), status: item.status }));
   return { count: new Set([...localWithoutQueue, ...queueWithoutLocal,
     ...onlyLocalAfterComparison].map((item) => item.paymentId)).size,
-    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue };
+    localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue,confirmedRemotely,verificationPending };
 }
 const queueErrorBreakdown = () => {
   const errors = readQueue().filter((item) => item.status === "error");
@@ -825,12 +839,13 @@ const localSummary = () => {
     produtos: data.produtos.length,
     vendas: data.vendas.length,
     pagamentos: data.pagamentos.length,
-    fiado: data.clientes.reduce(
-      (total, item) => total + Math.abs(Math.min(0, Number(item.saldo || 0))),
-      0,
-    ),
+    fiado: window.IntegrityAudit.balanceScope(data.clientes,[]).localActiveDebt,
   };
 };
+function cloudDebtSummary(clients) {
+  const scope=window.IntegrityAudit.balanceScope([],clients);
+  return {fiado:scope.remoteActiveDebt,historicalFiado:scope.remoteHistoricalDebt,fiadoIncludingHistory:scope.remoteTotalDebt};
+}
 const stableComparable = (value) => {
   if (Array.isArray(value)) return value.map(stableComparable);
   if (!value || typeof value !== "object") return value;
@@ -1116,6 +1131,8 @@ const diagnostic = () => {
     cloudClients: state.cloudCounts.clients ?? "—",
     localProducts: local.produtos,
     cloudFiado: state.cloudFinancial.fiado ?? "—",
+    cloudHistoricalFiado: state.cloudFinancial.historicalFiado ?? "—",
+    cloudFiadoIncludingHistory: state.cloudFinancial.fiadoIncludingHistory ?? "—",
     cloudNewest: state.cloudNewest,
     queueErrors: queueDiagnostics().filter((item) => item.status === "error"),
     cloudProducts: state.cloudCounts.products ?? "—",
@@ -1154,18 +1171,21 @@ function updateQueueState() {
     emit({ status: "error", message: "Fila local ilegível. Exporte o diagnóstico; a sincronização foi bloqueada." });
     return;
   }
-  const orphanCount = saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count;
+  const salesDiagnostic=saleIntegrityDiagnostics(),paymentsDiagnostic=paymentIntegrityDiagnostics(),
+    orphanCount = salesDiagnostic.count + paymentsDiagnostic.count;
   if (!navigator.onLine)
     emit({
       status: "offline",
       message: orphanCount
-        ? `Offline — ${orphanCount} operação(ões) somente locais para revisão`
+        ? `Offline — ${orphanCount} operação(ões) com pendência comprovada para revisão`
         : q.total
         ? `Offline — ${q.total} alteração(ões) pendente(s)`
         : "Offline — salvo no aparelho",
     });
-  else if (orphanCount && state.status !== "syncing")
-    emit({ status: "error", message: `${orphanCount} operação(ões) somente locais sem confirmação na última análise. Revise o diagnóstico.` });
+  else if (orphanCount && state.status !== "syncing") {
+    const message=`${orphanCount} operação(ões) com pendência comprovada na última análise. Veja os registros no diagnóstico.`;
+    emit({ status: "error", message,queueDiagnosticWarning:{businessId:activeBusinessId(),message} });
+  }
   else if (q.total && state.status !== "syncing")
     emit({
       status: q.errors ? "error" : "waiting",
@@ -1173,6 +1193,11 @@ function updateQueueState() {
         ? `Sincronização incompleta: ${q.errors} alteração(ões) com erro e ${q.pending} pendente(s).`
         : `${q.total} alteração(ões) aguardando sincronização`,
     });
+  else if(state.status==='error'&&!state.syncFailure&&state.dataAudit?.businessId===activeBusinessId()&&
+      state.queueDiagnosticWarning?.businessId===activeBusinessId()&&state.message===state.queueDiagnosticWarning.message){
+    const unverified=(salesDiagnostic.verificationPending?.length||0)+(paymentsDiagnostic.verificationPending?.length||0),actionable=state.dataAudit.integrity?.actionable;
+    emit({status:unverified||actionable?'waiting':'success',queueDiagnosticWarning:null,message:unverified?'Alguns registros precisam de uma nova comparação; ausência na nuvem ainda não comprovada.':actionable?'Comparação concluída. Há diferenças de conteúdo para revisão.':'Comparação concluída. Não há pendências somente locais comprovadas.'});
+  }
 }
 function reportError(error, context = "Firebase", extra = {}) {
   lastError = friendlyError(error);
@@ -3349,11 +3374,7 @@ function registerRealtimeCollection(name, mode = "all") {
       state.cloudNewest[name] = newestTimestamp(list);
       rememberSnapshotMetadata(name, metadata);
       if (name === "clients")
-        state.cloudFinancial.fiado = list.reduce(
-          (total, item) =>
-            total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
-          0,
-        );
+        state.cloudFinancial = {...state.cloudFinancial,...cloudDebtSummary(list)};
       const received = applyCloudCollection(name, list, {
         authoritative: mode === "all",
       });
@@ -3650,11 +3671,7 @@ async function pullCloudCollections(options = {}) {
       );
     state.cloudNewest[name] = newestTimestamp(documents);
     if (name === "clients" && !since)
-      state.cloudFinancial.fiado = documents.reduce(
-        (total, item) =>
-          total + Math.abs(Math.min(0, Number(item?.saldo || 0))),
-        0,
-      );
+      state.cloudFinancial = {...state.cloudFinancial,...cloudDebtSummary(documents)};
     pendingApplications.push({
       name,
       documents,
@@ -4408,7 +4425,8 @@ async function performDeviceComparison(options = {}) {
   const remoteFinancialEffects =
       await syncStep("orphan_comparison", () => financialEffectsRepository.listAllPaged(200), {service: "Firestore", collection: "balanceEvents", businessId, request: "listAllPaged"}),
     balanceAudit = buildFinancialBalanceAudit(raw, remoteFinancialEffects);
-  const localBalance = (data.clientes || []).reduce(
+  const balanceScope=window.IntegrityAudit.balanceScope(data.clientes,raw.clients.remoteItems),
+    localBalance = (data.clientes || []).reduce(
       (total, client) => total + Number(client.saldo || 0),
       0,
     ),
@@ -4451,9 +4469,13 @@ async function performDeviceComparison(options = {}) {
       clients: summarize(["clients"]),
       financial: {
         ...summarize(["sales", "payments", "balanceAdjustments"]),
-        localBalance,
-        remoteBalance,
-        balanceDifference: Number((localBalance - remoteBalance).toFixed(2)),
+        localBalance:balanceScope.localActiveBalance,
+        remoteBalance:balanceScope.remoteActiveBalance,
+        balanceDifference: Number((balanceScope.localActiveBalance-balanceScope.remoteActiveBalance).toFixed(2)),
+        localBalanceIncludingHistory:localBalance,
+        remoteBalanceIncludingHistory:remoteBalance,
+        balanceDifferenceIncludingHistory:Number((localBalance-remoteBalance).toFixed(2)),
+        balanceScope,
         balanceContributions: window.IntegrityAudit.balanceContributions(data.clientes,raw.clients.remoteItems),
         possibleDuplicates: [
           ...collections.sales.possibleDuplicates.local,
@@ -5328,6 +5350,8 @@ async function compareLocalAndCloud() {
       sales: state.cloudCounts.sales ?? 0,
       payments: state.cloudCounts.payments ?? 0,
       fiado: Number(state.cloudFinancial.fiado || 0),
+      historicalFiado: Number(state.cloudFinancial.historicalFiado || 0),
+      fiadoIncludingHistory: Number(state.cloudFinancial.fiadoIncludingHistory ?? state.cloudFinancial.fiado ?? 0),
     };
   const countsMatch =
       local.clientes === remote.clients &&

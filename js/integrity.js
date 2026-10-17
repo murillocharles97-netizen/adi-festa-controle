@@ -38,6 +38,9 @@
       if(d.custo===undefined)d.custo=fin.custo??d.cost??0;
     }
     if(entity==='productVariants'){
+      // Same semantic default as storage.normalize: missing minimum is zero.
+      // Audit projection only; nonzero/invalid values remain comparable.
+      if(d.minStock===undefined||d.minStock===null)d.minStock=numeric(d.estoqueMinimo??0);
       fill(d,{image:null,imageMode:d.imageUrl||d.imagem?'own':'inherit',imageUrl:d.imagem||null,imageThumbUrl:null,imageStoragePath:null,imageThumbStoragePath:null,imageUpdatedAt:d.image?.updatedAt||null});
       if(d.cost===undefined)d.cost=fin.cost??d.custo??0;
     }
@@ -70,6 +73,29 @@
     return[...new Set([...l.keys(),...r.keys()])].sort().flatMap(clientId=>{const a=l.get(clientId),b=r.get(clientId),localBalance=a?Number(a.saldo||0):null,remoteBalance=b?Number(b.saldo||0):null,difference=Math.round(((localBalance||0)-(remoteBalance||0))*100)/100;
       return difference?[{clientId,localBalance,remoteBalance,difference,localActive:a?.active??a?.ativo??null,remoteActive:b?.active??b?.ativo??null,localDeleted:!!a?.deletedAt,remoteDeleted:!!b?.deletedAt,origin:!a?'only_remote':!b?'only_local':'common'}]:[];
     });
+  }
+  const historicalClient=x=>Boolean(x?.deletedAt||x?.deleted===true||x?.active===false||x?.ativo===false);
+  function balanceScope(local=[],remote=[]){
+    const cents=x=>Math.round(Number(x.saldo||0)*100),sum=(rows,debt=false)=>rows.reduce((n,x)=>n+(debt?Math.max(0,-cents(x)):cents(x)),0)/100;
+    const localActive=local.filter(x=>!historicalClient(x)),remoteActive=remote.filter(x=>!historicalClient(x)),localHistorical=local.filter(historicalClient),remoteHistorical=remote.filter(historicalClient);
+    const operationalContributions=balanceContributions(localActive,remoteActive),localActiveDebt=sum(localActive,true),remoteActiveDebt=sum(remoteActive,true);
+    return {version:1,localActiveBalance:sum(localActive),remoteActiveBalance:sum(remoteActive),localActiveDebt,remoteActiveDebt,localHistoricalDebt:sum(localHistorical,true),remoteHistoricalDebt:sum(remoteHistorical,true),localTotalDebt:sum(local,true),remoteTotalDebt:sum(remote,true),localActiveCount:localActive.length,remoteActiveCount:remoteActive.length,operationalDifference:Math.round((localActiveDebt-remoteActiveDebt)*100)/100,operationalMatches:operationalContributions.length===0,operationalContributions,
+      historicalContributions:balanceContributions(local,remote).filter(x=>x.localBalance===null&&x.remoteDeleted)};
+  }
+  const evidenceIndexes=new WeakMap();
+  function operationEvidence(item,collection,checksum){
+    // A remote ID alone is insufficient: the compared local payload and operation
+    // must still match. Session/business binding is enforced by the caller.
+    if(!collection)return 'not_verified';
+    const arrays=[collection.equal,collection.divergent,collection.onlyLocal],cached=evidenceIndexes.get(collection);
+    let index=cached?.index;
+    if(!index||arrays.some((a,n)=>cached.arrays[n]!==a||cached.sizes[n]!==a?.length)){
+      index=new Map();
+      for(const [rows,status]of [[collection.equal,'remote_confirmed'],[collection.divergent,'remote_present_difference'],[collection.onlyLocal,'local_only']])for(const row of rows||[]){const metadata=status==='remote_present_difference'?row.local:row;if(metadata)index.set(String(metadata.documentId),{metadata,status});}
+      evidenceIndexes.set(collection,{arrays,sizes:arrays.map(a=>a?.length),index});
+    }
+    const entry=index.get(String(item.id)),x=entry?.metadata;
+    return x&&x.checksum===checksum&&String(x.operationId||'')===String(item.operationId||item.sourceOperationId||'')?entry.status:'not_verified';
   }
   function severity(collections,balanceAudit){
     const issues=[];
@@ -106,7 +132,7 @@
     }
     return{rows,blocked};
   }
-  const api={canonicalizeForIntegrity,compare,differencePaths,balanceContributions,severity,legacyFixtureIdentity,confirmedLegacyFixture,fixtureCleanupPlan};
+  const api={canonicalizeForIntegrity,compare,differencePaths,balanceContributions,balanceScope,historicalClient,operationEvidence,severity,legacyFixtureIdentity,confirmedLegacyFixture,fixtureCleanupPlan};
   root.IntegrityAudit=Object.freeze(api);
   if(typeof module!=='undefined')module.exports=api;
 })(typeof window==='undefined'?globalThis:window);
