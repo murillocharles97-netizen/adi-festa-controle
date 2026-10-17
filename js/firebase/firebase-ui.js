@@ -1,4 +1,4 @@
-import './sync.js?v=178';
+import './sync.js?v=179';
 
 let unsubscribe=null,lastState=null;
 const escape=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
@@ -113,6 +113,8 @@ function openQueueDetails(filter={}){
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
   root.querySelector('.modal-body')?.insertAdjacentHTML('beforeend',operationConfirmationHtml(details));
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
+  const held=items.filter(item=>item.reviewRequired);
+  if(held.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning" role="status"><b>${held.length} venda(s) preservada(s) — aguardando revisão</b><p>O reenvio dessas operações está bloqueado, inclusive na sincronização manual. Seus registros e erros originais foram mantidos neste aparelho para evitar baixa ou receita duplicada.</p></section>`);
   const dataAudit=details.dataAudit||state.dataAudit||null,scope=dataAudit?.financial?.balanceScope;
   const comparison=details.comparison||state.comparison,local=comparison?.local||{},remote=comparison?.remote||{},mismatches=comparison&&!comparison.ok?[['Clientes',local.clientes,remote.clients],['Produtos',local.produtos,remote.products],['Vendas',local.vendas,remote.sales],['Pagamentos',local.pagamentos,remote.payments],['Fiado ativo',money(scope?.localActiveDebt??local.fiado),money(scope?.remoteActiveDebt??remote.fiado)]].filter(([,device,cloud])=>device!==cloud):[];
   if(mismatches.length){root.querySelector('.sync-error-list').insertAdjacentHTML('beforebegin',`<section class="sync-error-list"><h4>Contagens técnicas — não indicam falha de transferência</h4>${mismatches.map(([label,device,cloud])=>`<article><b>${escape(label)}</b><p>Aparelho: ${escape(device)} · Nuvem: ${escape(cloud)}</p></article>`).join('')}</section>`)}
@@ -131,6 +133,7 @@ function openQueueDetails(filter={}){
   const retryAll=root.querySelector('[data-retry-all]');
   if(state.queueTotal){retryAll.textContent=errors.length?'Reprocessar todos':'Sincronizar pendentes';retryAll.onclick=async()=>{await manualSync();openQueueDetails(filter)}}
   else retryAll.remove();
+  if(items.length&&held.length===items.length){retryAll.disabled=true;retryAll.textContent='Aguardando revisão';retryAll.onclick=null;}
   root.querySelector('[data-export-diagnostic]').onclick=exportDiagnostic;
   root.querySelector('[data-compare-cloud]').onclick=event=>compareCloudData(event.currentTarget);
   root.querySelector('[data-export-only-local]')?.addEventListener('click',exportOnlyLocalSales);

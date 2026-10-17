@@ -571,7 +571,6 @@ window.Checkout = (() => {
   }
   function invalidateAttempt() { if (!finishing) activeAttempt = null; }
   function setSubmissionState(state, message = "") {
-    const submissionTiming = window.VeconiSaleTiming?.start?.('ui.submission', 'ui');
     const button = document.querySelector("#finish-sale"), feedback = document.querySelector("#sale-submit-feedback"),
       labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente', conflict: '<i data-lucide="cloud-search"></i> Comparar com a nuvem' };
     if (button) {
@@ -594,8 +593,6 @@ window.Checkout = (() => {
       feedback.classList.toggle("success", state === "success");
     }
     window.lucide?.createIcons();
-    window.VeconiSaleTiming?.end?.(submissionTiming);
-    window.VeconiSaleTiming?.state?.(state);
   }
   const totals = (items = cart) => {
     const original = items.reduce(
@@ -932,13 +929,10 @@ window.Checkout = (() => {
     };
     document.querySelector("#sale-note")?.addEventListener("input", () => { invalidateAttempt(); saveDraft(); });
     document.querySelector("#finish-sale").onclick = async () => {
-      const saleTimingTrace = !finishing && (document.querySelector("#sale-payment-method")?.value === "fiado" || document.querySelector("#sale-status")?.value === "fiado")
-        ? window.VeconiSaleTiming?.begin?.() : null;
       traceSale("[SALE] submit clicked", { finishing, items: cartCount() });
       if (activeConflict && document.querySelector("#sale-payment-method")?.value === "fiado" &&
         document.querySelector("#sale-client")?.value === activeConflict.customerId) {
         dispatchEvent(new CustomEvent("resolve-sale-conflict", { detail: activeConflict }));
-        window.VeconiSaleTiming?.finish?.('aborted', saleTimingTrace);
         return;
       }
       if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
@@ -971,14 +965,12 @@ window.Checkout = (() => {
         return validationError("Venda com renovação exige um cliente.");
       if (cart.some((item) => item.productType === "recurring" && item.recurringActivation?.clientIdSnapshot !== clienteId))
         return validationError("Revise as renovações: o cliente da sacola foi alterado.");
-      window.VeconiSaleTiming?.validated?.(saleTimingTrace);
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           activeAttempt = attempt;
-          window.VeconiSaleTiming?.bind?.(attempt.operationId, saleTimingTrace);
           saveDraft();
           finishing = true;
           setSubmissionState("processing", navigator.onLine === false ? "Salvando neste aparelho. A sincronização ocorrerá quando a conexão voltar." : "Concluindo a venda…");
@@ -1018,26 +1010,13 @@ window.Checkout = (() => {
           }
           let sale;
           try {
-            if (status === "fiado") {
-              const preparationTiming = window.VeconiSaleTiming?.start?.('customer.prepare', 'control', saleTimingTrace);
-              let preparationOk = false;
-              try { await window.SyncFirebase?.prepareCustomerForSale?.(clienteId); preparationOk = true; }
-              finally { window.VeconiSaleTiming?.end?.(preparationTiming, preparationOk); }
-            }
+            if (status === "fiado")
+              await window.SyncFirebase?.prepareCustomerForSale?.(clienteId);
             traceSale("[SALE] local write started", { operationId: attempt.operationId });
-            const localSaleTiming = window.VeconiSaleTiming?.start?.('local.sale_create', 'local', saleTimingTrace);
-            try { sale = Repositories.saleRepository().create(saleDraft); }
-            finally { window.VeconiSaleTiming?.end?.(localSaleTiming, Boolean(sale)); }
-            const localFlushTiming = window.VeconiSaleTiming?.start?.('local.flush', 'persistence', saleTimingTrace);
-            let localFlushOk = false;
-            try { await DB.flush?.(); localFlushOk = true; }
-            finally { window.VeconiSaleTiming?.end?.(localFlushTiming, localFlushOk); }
-            if (status === "fiado" && navigator.onLine !== false) {
-              const confirmationTiming = window.VeconiSaleTiming?.start?.('local.sale_confirmation', 'control', saleTimingTrace);
-              let confirmationOk = false;
-              try { sale = await window.SyncFirebase.confirmCreditSale(sale); confirmationOk = true; }
-              finally { window.VeconiSaleTiming?.end?.(confirmationTiming, confirmationOk); }
-            }
+            sale = Repositories.saleRepository().create(saleDraft);
+            await DB.flush?.();
+            if (status === "fiado" && navigator.onLine !== false)
+              sale = await window.SyncFirebase.confirmCreditSale(sale);
             if (status === "fiado" && sale.status !== "fiado")
               sale = { ...sale, status: "fiado", formaPagamento: "fiado" };
           } catch (error) {
@@ -1066,28 +1045,20 @@ window.Checkout = (() => {
           setSubmissionState("success", pendingSync
             ? "Venda salva no aparelho e aguardando sincronização."
             : "Venda concluída com sucesso.");
-          const finalUiTiming = window.VeconiSaleTiming?.start?.('ui.final', 'ui', saleTimingTrace);
-          try { refreshClients(); closeCartSurface({ immediate: true }); }
-          finally { window.VeconiSaleTiming?.end?.(finalUiTiming); }
+          refreshClients();
+          closeCartSurface({ immediate: true });
           traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId });
-          const receiptTiming = window.VeconiSaleTiming?.start?.('ui.receipt', 'ui', saleTimingTrace);
           try { Recibos.mostrar(sale, clienteId ? clients().getById(clienteId) : null); }
           catch { toast("Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.", true); }
-          finally { window.VeconiSaleTiming?.end?.(receiptTiming); window.VeconiSaleTiming?.finish?.('ok', saleTimingTrace); }
         };
-      const stockCheckTiming = window.VeconiSaleTiming?.start?.('local.stock_check', 'local', saleTimingTrace);
-      let missing;
-      try { missing = Vendas.estoqueInsuficiente(cart); }
-      finally { window.VeconiSaleTiming?.end?.(stockCheckTiming); }
+      const missing = Vendas.estoqueInsuficiente(cart);
       if (
         missing.length &&
         !confirm(
           `Estoque insuficiente para: ${missing.map((x) => x.produto.nome).join(", ")}. Deseja continuar?`,
         )
-      ) {
-        window.VeconiSaleTiming?.finish?.('aborted', saleTimingTrace);
+      )
         return;
-      }
       await proceed();
     };
     document.querySelector("#desktop-clear-cart")?.addEventListener(

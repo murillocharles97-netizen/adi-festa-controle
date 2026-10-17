@@ -4,13 +4,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('js/firebase/sync.js', 'utf8');
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-test('V173 updates the app/SW and both entry points import the same Sync singleton',()=>{
+test('session hotfix keeps app/SW version and both Sync singleton imports aligned',()=>{
   const read=p=>fs.readFileSync(p,'utf8'),auth=read('js/firebase/auth.js'),ui=read('js/firebase/firebase-ui.js'),index=read('index.html');
-  assert.match(read('js/build-info.js'),/release: "173"/);
-  assert.match(read('service-worker.js'),/veconi-v173-session-team-hotfix/);
-  assert.match(read('service-worker.js'),/release:'173'/);
-  for(const entry of [auth,ui])assert.match(entry,/import '\.\/sync\.js\?v=173'/);
-  assert.match(index,/firebase\/auth\.js\?v=173/);assert.match(index,/firebase\/firebase-ui\.js\?v=173/);
+  const version=read('js/build-info.js').match(/release:\s*"(\d+)"/)[1];assert.ok(Number(version)>=173);
+  assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));
+  assert.ok(read('service-worker.js').includes(`release:'${version}'`));
+  for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${version}'`));
+  assert.ok(index.includes(`firebase/auth.js?v=${version}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${version}`));
 });
 function runtime() {
   const queues = new Map([['qa-business:owner', [{operationId:'persisted-operation', status:'pending', payload:{safe:true}}]]]);

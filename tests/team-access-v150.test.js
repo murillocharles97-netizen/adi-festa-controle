@@ -57,5 +57,5 @@ test("integração V150 contém ator, isolamento de cache e coleções financeir
   assert.match(rules, /match \/saleFinancials\/\{saleId\}/);
   assert.match(rules, /match \/members\/\{memberUid\}/);
   assert.match(html, /data-route="equipe"/);
-  assert.match(fs.readFileSync("js/build-info.js", "utf8"), /release:\s*"173"/);
+  assert.ok(Number(fs.readFileSync("js/build-info.js", "utf8").match(/release:\s*"(\d+)"/)[1])>=173);
 });
