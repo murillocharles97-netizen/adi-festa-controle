@@ -3,6 +3,7 @@
 const {createHash}=require('node:crypto');
 const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable,validId,belongsToWorkspace}=require('./workspace-reset-policy');
+const {prepareRecoveredSale}=require('./sale-recovery-decision');
 const MAX_BYTES=500*1024;
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -91,7 +92,7 @@ function saleRecoveryService(db,{FieldValue}){
           }
           return{status:'content_conflict',saleId:v.saleId,operationId:v.operationId};
         }
-        return{saleId:v.saleId,operationId:v.operationId,contentHash:request.data.contentHash,status:'awaiting_review',duplicate:true};
+        return{saleId:v.saleId,operationId:v.operationId,contentHash:request.data.contentHash,status:review.data().status,duplicate:true};
       }
       const movementIds=v.packet.payload.writes.filter(w=>w.entityType==='stockMovements').map(w=>w.entityId);
       const [existingSale,marker,...movements]=await Promise.all([tx.get(ref(businessId,'sales',v.saleId)),tx.get(ref(businessId,'processedOperations',v.operationId)),...movementIds.map(id=>tx.get(ref(businessId,'stockMovements',id)))]);
@@ -119,7 +120,7 @@ function saleRecoveryService(db,{FieldValue}){
       const value=doc.data();await space(reader,c,value.spaceId);
       if(value.workspaceGeneration!==(c.business.workspaceGeneration??0))fail('failed-precondition','Registro de uma configuração anterior.');
       let possibleMatches=[];
-      if(c.owner){
+      if(c.owner&&value.status==='awaiting_review'){
         const cacheKey=`${value.spaceId}:${value.originalSaleAt.slice(0,10)}`;
         if(!candidateCache.has(cacheKey)){
           // Reuse existing spaceId/data index (ascending); hints, never deduplication.
@@ -129,9 +130,10 @@ function saleRecoveryService(db,{FieldValue}){
             candidateCache.set(cacheKey,found.docs.map(d=>({id:d.id,...d.data()})));
           }catch{candidateCache.set(cacheKey,null);}
         }
-        possibleMatches=similarSales(value,(candidateCache.get(cacheKey)||[]).filter(s=>s.actorUid===c.business.ownerId));
+        possibleMatches=similarSales(value,(candidateCache.get(cacheKey)||[]).filter(s=>s.actorUid===c.business.ownerId&&!s.deletedAt&&!['cancelado','desfeito','reversed'].includes(s.status))).filter(s=>!(value.dismissedMatchIds||[]).includes(s.saleId));
       }
-      items.push({...value,receivedAt:date(value.receivedAt),possibleMatches,comparisonScope:c.owner?(candidateCache.get(`${value.spaceId}:${value.originalSaleAt.slice(0,10)}`)===null?'Comparação temporariamente indisponível. O registro original permanece preservado.':'Sugestões entre até 100 vendas do gestor no mesmo espaço e dia UTC. Ausência de sugestão não descarta duplicidade.'):null});
+      if(request.data.view==='resolved'&&value.status==='awaiting_review'||request.data.view==='pending'&&value.status!=='awaiting_review')continue;
+      items.push({...value,receivedAt:date(value.receivedAt),resolvedAt:date(value.resolvedAt),possibleMatches,comparisonScope:c.owner&&value.status==='awaiting_review'?(candidateCache.get(`${value.spaceId}:${value.originalSaleAt.slice(0,10)}`)===null?'Comparação temporariamente indisponível. O registro original permanece preservado.':'Sugestões entre até 100 vendas do gestor no mesmo espaço e dia UTC. Ausência de sugestão não descarta duplicidade.'):null});
     }
     return{items,nextCursor:snapshot.size>20?docs.at(-1).id:null};
   }
@@ -142,6 +144,66 @@ function saleRecoveryService(db,{FieldValue}){
     if(review.data().workspaceGeneration!==(c.business.workspaceGeneration??0))fail('failed-precondition','Registro de uma configuração anterior.');
     const raw=await r.collection('original').doc('payload').get();return raw.data();
   }
-  return{submit,list,original};
+  async function decide(request){
+    const input=request.data||{},action=input.action;
+    const confirmations={link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR'};
+    if(!confirmations[action]||input.confirmation!==confirmations[action])fail('invalid-argument','Confirme explicitamente a decisão.');
+    return db.runTransaction(async tx=>{
+      const c=await context(tx,request);if(!c.owner)fail('permission-denied','Somente o proprietário pode decidir sobre a recuperação.');
+      const saleId=validId(input.saleId,'Venda'),reviewRef=ref(c.businessId,'saleRecoveryReviews',saleId),snapshot=await tx.get(reviewRef),review=snapshot.data();
+      if(!snapshot.exists)fail('not-found','Registro não encontrado.');
+      const s=await space(tx,c,review.spaceId);
+      if(review.workspaceGeneration!==(c.business.workspaceGeneration??0)||review.contentHash!==input.contentHash)fail('failed-precondition','O registro mudou ou pertence a outra geração. Reabra a revisão.');
+      const target=action==='recover_original'?saleId:validId(input.linkedSaleId,'Venda do gestor');
+      if(review.status!=='awaiting_review'){
+        if(review.decision===action&&review.linkedSaleId===target)return{saleId,status:review.status,linkedSaleId:target,idempotent:true};
+        fail('failed-precondition','Esta revisão já foi resolvida com outra decisão.');
+      }
+      const dismissed=review.dismissedMatchIds||[];
+      if(action==='dismiss_match'&&dismissed.includes(target))return{saleId,status:review.status,idempotent:true};
+      if((review.revision??0)!==input.revision)fail('aborted','A revisão mudou em outro aparelho. Atualize antes de confirmar.');
+      if(review.conflictCount)fail('failed-precondition','Há payloads conflitantes preservados. É necessária revisão técnica antes de decidir.');
+      const raw=(await tx.get(reviewRef.collection('original').doc('payload'))).data();
+      if(!raw||raw.contentHash!==review.contentHash)fail('failed-precondition','O original imutável não pôde ser validado.');
+      const v=validateOriginal(raw,review.actorUid,c.businessId);v.contentHash=review.contentHash;
+      const opRef=ref(c.businessId,'saleRecoveryOperations',v.operationId),op=(await tx.get(opRef)).data();
+      if(v.saleId!==saleId||v.operationId!==review.operationId||v.spaceId!==review.spaceId||(v.packet.workspaceGeneration??0)!==review.workspaceGeneration||op?.contentHash!==review.contentHash||op.saleId!==saleId||op.actorUid!==v.sale.actorUid||op.spaceId!==v.spaceId||op.workspaceGeneration!==review.workspaceGeneration)fail('failed-precondition','Índices e autoria do pacote divergem.');
+      let linked=null,prepared=null;
+      if(action!=='recover_original'){
+        const candidate=(await tx.get(ref(c.businessId,'sales',target))).data();
+        if(!candidate||candidate.businessId!==c.businessId||candidate.spaceId!==review.spaceId||candidate.actorUid!==c.business.ownerId||(candidate.workspaceGeneration??0)!==review.workspaceGeneration||candidate.deletedAt||candidate.status!=='pago')fail('failed-precondition','A venda do gestor não está válida neste espaço.');
+        linked={saleId:target,at:date(candidate.data),total:Number(candidate.valorFinal??candidate.total),paymentMethod:String(candidate.formaPagamento||''),actorUid:candidate.actorUid};
+        if(action==='link_existing'){
+          const match=similarSales(review,[{...candidate,id:target}])[0];
+          if(!match||!match.sameTotal||!match.samePaymentMethod)fail('failed-precondition','Itens, quantidades, valor ou pagamento diferem. Não é seguro vincular esta venda.');
+          const movementIds=v.packet.payload.writes.filter(w=>w.entityType==='stockMovements').map(w=>w.entityId);
+          const evidence=await Promise.all([tx.get(ref(c.businessId,'sales',saleId)),tx.get(ref(c.businessId,'processedOperations',v.operationId)),...movementIds.map(id=>tx.get(ref(c.businessId,'stockMovements',id))),...movementIds.map(id=>tx.get(ref(c.businessId,'stockMovementFinancials',id))),tx.get(ref(c.businessId,'saleFinancials',saleId)),tx.get(db.doc(`financialSpaces/${v.spaceId}/entries/sale_${saleId}`)),tx.get(ref(c.businessId,'financialIncomeRoutes',digest(`sale:${saleId}`))),tx.get(db.collection(`businesses/${c.businessId}/stockMovements`).where('operationId','==',v.operationId).limit(1)),tx.get(db.collection(`businesses/${c.businessId}/stockMovements`).where('vendaId','==',saleId).limit(1))]);
+          if(evidence.some(s=>s.exists||s.empty===false))fail('failed-precondition','A operação original já possui efeitos na nuvem. Não será vinculada sem revisão técnica.');
+        }
+      }else{
+        // Preserve causal order where held operations share a product/variant.
+        const earlier=await tx.get(db.collection(`businesses/${c.businessId}/saleRecoveryReviews`).limit(501));
+        if(earlier.size>500)fail('failed-precondition','Muitos registros para conferir a ordem causal. Solicite revisão técnica.');
+        const pending=earlier.docs.map(d=>d.data()).find(r=>r.status==='awaiting_review'&&r.saleId!==saleId&&r.workspaceGeneration===review.workspaceGeneration&&r.originalSaleAt<review.originalSaleAt&&r.items.some(i=>review.items.some(j=>j.productId===i.productId)));
+        if(pending)fail('failed-precondition',`Resolva primeiro a venda anterior ${pending.saleId}, que compartilha produtos com esta operação.`);
+        prepared=await prepareRecoveredSale({db,tx,c,space:s,v,FieldValue});
+      }
+      const at=FieldValue.serverTimestamp(),revision=(review.revision??0)+1;
+      const audit=reviewRef.collection('decisions').doc(String(revision));
+      tx.create(audit,{action,actorUid:c.uid,actorName:String(c.profile.name||c.profile.nome||'Proprietário').slice(0,120),at,contentHash:review.contentHash,linkedSaleId:target,businessId:c.businessId,spaceId:review.spaceId});
+      if(action==='dismiss_match'){
+        if(dismissed.length>=100)fail('failed-precondition','Limite de sugestões revisadas atingido.');
+        tx.update(reviewRef,{dismissedMatchIds:[...dismissed,target],revision});
+        return{saleId,status:'awaiting_review',idempotent:false};
+      }
+      if(prepared)prepared.commit();
+      const status=action==='link_existing'?'already_recreated':'recovered';
+      tx.update(reviewRef,{status,decision:action,revision,linkedSaleId:target,linkedSale:linked||{saleId,at:v.originalSaleAt,total:v.total,paymentMethod:review.paymentMethod,actorUid:review.actorUid},resolvedAt:at,resolvedByUid:c.uid,resolvedByName:String(c.profile.name||c.profile.nome||'Proprietário').slice(0,120),commercialEffectsApplied:action==='recover_original',movementIds:prepared?.movementIds||[]});
+      tx.update(opRef,{status,decision:action,linkedSaleId:target,resolvedAt:at,resolvedByUid:c.uid});
+      // Immutable original and the device's commercial queue are never altered.
+      return{saleId,status,linkedSaleId:target,idempotent:false};
+    });
+  }
+  return{submit,list,original,decide};
 }
 module.exports={saleRecoveryService,validateOriginal,similarSales,MAX_BYTES};

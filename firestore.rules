@@ -1180,6 +1180,13 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /stockMovements/{movementId} {
+        function notRecoveryReplay() {
+          let saleId = request.resource.data.get('vendaId', '');
+          // A reviewed original is applied only by its owner decision transaction.
+          // Legitimate later reversals use venda_desfeita and remain unchanged.
+          return saleId == '' || request.resource.data.get('tipo', '') == 'venda_desfeita'
+            || !exists(/databases/$(database)/documents/businesses/$(businessId)/saleRecoveryReviews/$(saleId));
+        }
         allow read: if hasPermission(businessId, 'inventory.view')
           // A new movement is read for idempotency before the same transaction
           // creates it. Missing docs contain no private or other-space data.
@@ -1187,7 +1194,8 @@ service cloud.firestore {
             (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
             && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'))
           ));
-        allow create, update: if canWriteCollection(businessId, 'stockMovements')
+        allow create, update: if notRecoveryReplay()
+          && canWriteCollection(businessId, 'stockMovements')
           && (isOwner(businessId) || (request.resource.data.get('spaceId',null) != null && canAccessSpace(businessId,request.resource.data.spaceId)))
           && (isOwner(businessId) || canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.produtoId)).data))
           && request.resource.data.businessId == businessId
@@ -1260,8 +1268,11 @@ service cloud.firestore {
           // Evaluate the private tombstone here, without granting its contents
           // to sellers/cashiers. Direct writes and old clients use this fence too.
           let resolution = /databases/$(database)/documents/businesses/$(businessId)/balanceAdjustments/$(('legacy_reconciliation:' + saleId));
-          return !exists(resolution)
-            || get(resolution).data.get('resolutionStatus', '') != 'resolved_by_reconciliation';
+          // Once preserved for review, only the owner decision callable may
+          // materialize the original. This also fences old/offline clients.
+          let review = /databases/$(database)/documents/businesses/$(businessId)/saleRecoveryReviews/$(saleId);
+          return !exists(review) && (!exists(resolution)
+            || get(resolution).data.get('resolutionStatus', '') != 'resolved_by_reconciliation');
         }
         function validIntegratedPayment(data) {
           let integrated = data.get('formaPagamento', '') == 'cartao_presencial' || data.get('paymentIntentId', null) != null;
@@ -1282,8 +1293,8 @@ service cloud.firestore {
               && (!resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view') || permissionGranted(businessId, 'profit.view'))
             )
           );
-        allow create: if canWriteCollection(businessId, 'sales')
-          && notReconciledSale()
+        allow create: if notReconciledSale()
+          && canWriteCollection(businessId, 'sales')
           && validOnlineSale(businessId,saleId,request.resource.data)
           && validIntegratedPayment(request.resource.data)
           && request.resource.data.businessId == businessId
