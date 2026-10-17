@@ -32,7 +32,7 @@ test("CRM, Campanhas, Catálogo e Pedidos usam a mesma camada sem novas leituras
   assert.match(modules, /mobile-modal/);
   assert.match(read("js/online-store-ui.js"), /store-upload-actions/);
   assert.match(modules, /Progresso da campanha/);
-  assert.match(modules, /Pedidos, reservas e atendimento separados por espaço/);
+  assert.match(modules, /Acompanhe, filtre e atenda os pedidos da sua loja/);
   assert.doesNotMatch(modules, /\b(?:getDocs|getDoc|onSnapshot|collection|query)\s*\(/);
 });
 

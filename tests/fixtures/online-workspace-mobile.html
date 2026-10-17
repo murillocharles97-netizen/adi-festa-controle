@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <base href="/">
+  <title>VECONI · Prévia local de Loja e Pedidos</title>
+  <!-- APP_STYLES -->
+  <style>
+    html,body{margin:0;min-width:0}.qa-shell{margin:0!important;width:100%;min-width:0}.qa-shell #app{padding:20px;max-width:1200px}.qa-shell .topbar{background:linear-gradient(110deg,#071b27,#06494b);color:#fff;padding:16px;gap:12px;height:78px}.qa-shell .topbar h1{color:#fff;font-size:18px}.qa-shell .topbar small{color:#a8c9ca;font-size:11px}.qa-logo{width:31px;height:31px}.qa-title{flex:1;min-width:0}.qa-shell .avatar{background:#ffffff18}.qa-local-note{margin:0;padding:7px 16px;background:#e6f8f3;color:#007a6b;font-size:10px;text-align:center}.qa-bottom{position:fixed;bottom:0;left:0;right:0;height:65px;display:flex;justify-content:space-around;align-items:center;background:#fff;border-top:1px solid #e1e8ed;z-index:30}.qa-bottom a{display:grid;justify-items:center;gap:5px;font-size:10px;text-decoration:none;color:#687c8b}.qa-bottom svg{width:20px;height:20px}.qa-bottom .active{color:#008c82}.qa-shell{padding-bottom:80px}#qa-frame{display:block;border:0;background:#f5f7f9;margin:0 auto;width:var(--qa-width);height:calc(100vh - 62px);max-width:100%}.qa-harness-bar{display:flex;align-items:center;justify-content:center;gap:12px;min-height:62px;background:#0b2631;color:#fff;padding:10px;font-size:12px}.qa-harness-bar a{color:#68e0cb}.qa-harness-bar select{max-width:100%;color:#17283f;padding:5px}.qa-shell .menu-btn{display:inline-grid}
+    .qa-app-head{display:flex;align-items:center;gap:12px;height:78px;padding:14px 16px;background:linear-gradient(110deg,#071b27,#06494b);color:white}.qa-app-head h1{font-size:18px;margin:0}.qa-app-head small{color:#a8c9ca;font-size:11px}.qa-app-head .local-badge{margin:0}.qa-app-head .avatar{background:#ffffff18}.qa-app-head .icon-btn{flex-shrink:0}.qa-title{overflow:hidden}.qa-title h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    @media(max-width:760px){.qa-shell #app{padding:16px 12px}.qa-app-head{padding:12px;gap:10px}.qa-app-head h1{font-size:16px}.qa-logo{width:28px;height:28px}.qa-app-head .local-badge{padding:8px}.qa-app-head .local-badge span{display:none}}
+    @media(min-width:761px){.qa-bottom{display:none}.qa-shell{padding-bottom:24px}}
+  </style>
+</head>
+<body>
+  <div class="shell qa-shell">
+    <header class="qa-app-head"><span class="icon-btn">☰</span><img class="qa-logo" src="assets/veconi-symbol.svg" alt="VECONI"><div class="qa-title"><h1 id="qa-title">Loja online</h1><small>Seu negócio mais completo.</small></div><span class="local-badge"><i data-lucide="cloud"></i><span>Prévia</span></span><span class="avatar">Q</span></header>
+    <p class="qa-local-note">PRÉVIA LOCAL · dados fictícios · sem conexão com Firebase</p>
+    <main id="app"></main>
+    <nav class="qa-bottom" aria-label="Prévia local"><a href="tests/fixtures/online-workspace-mobile.html?page=catalog" id="qa-nav-catalog"><i data-lucide="store"></i>Loja online</a><a href="tests/fixtures/online-workspace-mobile.html?page=orders" id="qa-nav-orders"><i data-lucide="clipboard-list"></i>Pedidos online</a></nav>
+  </div>
+  <div id="modal"></div><div id="toasts"></div>
+  <script src="assets/lucide.min.js"></script>
+  <script src="functions/src/shared/online-store.js"></script>
+  <script src="functions/src/shared/online-order.js"></script>
+  <script src="tests/fixtures/online-workspace-mobile.js"></script>
+  <script src="js/online-order-finalization.js"></script>
+  <script src="js/online-store-ui.js"></script>
+  <script src="js/online-orders-ui.js"></script>
+  <script>
+    const qaParams=new URLSearchParams(location.search),qaPage=qaParams.get('page')==='orders'?'orders':'catalog',qaWidth=Number(qaParams.get('width'));
+    if(qaWidth>=320&&qaWidth<=1600){
+      document.body.innerHTML='<div class="qa-harness-bar"><b>Prévia local · '+qaWidth+' px</b><a href="tests/fixtures/online-workspace-mobile.html?page=catalog&width='+qaWidth+'">Catálogo</a><a href="tests/fixtures/online-workspace-mobile.html?page=orders&width='+qaWidth+'">Pedidos</a><label>Largura <select id="qa-width"><option>'+qaWidth+'</option>'+[320,360,390,430,768,1366].filter(n=>n!==qaWidth).map(n=>'<option>'+n+'</option>').join('')+'</select></label></div><iframe id="qa-frame" title="Prévia '+qaPage+' em '+qaWidth+' pixels" style="--qa-width:'+qaWidth+'px" src="tests/fixtures/online-workspace-mobile.html?page='+qaPage+'"></iframe>';
+      document.querySelector('#qa-width').onchange=e=>location.href='tests/fixtures/online-workspace-mobile.html?page='+qaPage+'&width='+e.target.value;
+    }else{
+      document.querySelector('#qa-title').textContent=qaPage==='orders'?'Pedidos online':'Loja online';
+      document.querySelector('#qa-nav-'+qaPage).classList.add('active');
+      const qaUI=qaPage==='orders'?OnlineOrdersUI:OnlineStoreUI;
+      document.querySelector('#app').innerHTML=qaUI.render();qaUI.bind();window.lucide?.createIcons();
+    }
+  </script>
+</body>
+</html>
