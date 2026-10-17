@@ -6489,6 +6489,12 @@ window.SyncFirebase = {
   runFirebaseDiagnostic,
   getFirebaseDiagnostic: diagnostic,
   getQueueDiagnostics: queueDiagnostics,
+  getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,
+  // Read-only recovery source. Never normalize, acknowledge or save this queue.
+  recoverySnapshot: () => {
+    const packets=readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()),data=DB.carregar(),ids=new Set(packets.flatMap(p=>p.payload.writes.filter(w=>w.entityType==='sales').map(w=>w.entityId))),operations=new Set(packets.map(p=>p.operationId));
+    return structuredClone({identity:{uid:currentUser?.uid||'',businessId:activeBusinessId(),workspaceGeneration:DB.getWorkspaceGeneration()},packets,local:{vendas:(data.vendas||[]).filter(s=>ids.has(s.id)),movimentacoesEstoque:(data.movimentacoesEstoque||[]).filter(m=>operations.has(m.operationId)||ids.has(m.vendaId))}});
+  },
   describeResult: describeSyncResult,
   describeError: friendlyError,
   migrateQueueCompatibility: migrateScopedQueueCompatibility,

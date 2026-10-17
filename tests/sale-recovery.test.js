@@ -1,0 +1,32 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),vm=require('node:vm');
+const client=require('../js/sale-recovery-client'),{validateOriginal,similarSales}=require('../functions/src/services/sale-recovery-service'),f=require('./fixtures/retained-sale-recovery.cjs');
+const identity={uid:f.seller,businessId:f.bid,workspaceGeneration:0};
+function setup(call){const fixtures=Array.from({length:4},(_,n)=>f.sample(n)),packets=fixtures.map(f=>f.packet),local={vendas:fixtures.map(f=>f.sale),movimentacoesEstoque:fixtures.flatMap(f=>f.movements)};const snapshot=()=>({identity,packets,local});return{fixtures,packets,local,snapshot,sender:client.create({snapshot,call,cryptoApi:crypto.webcrypto})};}
+test('four complete original packets are sent separately; queue, snapshots and errors stay byte-equivalent',async()=>{
+ const sent=[],r=setup(async(_,data)=>{const v=validateOriginal(data,f.seller,f.bid);sent.push(v);return{data:{status:'awaiting_review',operationId:v.operationId,contentHash:data.contentHash}};}),before=JSON.stringify(r.snapshot());
+ const result=await r.sender.send();assert.equal(result.sent,4);assert.equal(sent.length,4);assert.equal(JSON.stringify(r.snapshot()),before);assert.equal(sent.flatMap(v=>v.original.localMovements).length,11);assert.deepEqual(sent.map(v=>v.packet.payload.writes.length),[3,11,9,3]);assert.equal(sent[0].original.packet.attempts,6);assert.equal(sent[0].original.localSale.itens[0].custoUnitario,5);
+});
+test('double tap shares one in-flight upload; no second set of requests',async()=>{let calls=0;const r=setup(async(_,data)=>{calls++;await new Promise(resolve=>setTimeout(resolve,5));const p=JSON.parse(data.originalJson).packet;return{status:'awaiting_review',operationId:p.operationId,contentHash:data.contentHash};});const a=r.sender.send(),b=r.sender.send();assert.equal(a,b);await Promise.all([a,b]);assert.equal(calls,4);});
+test('lost response keeps all originals and allows explicit idempotent resend',async()=>{const stored=new Map();let lose=true,calls=0;const r=setup(async(_,data)=>{const p=JSON.parse(data.originalJson).packet;calls++;stored.set(p.operationId,data.originalJson);if(lose){lose=false;throw Error('response lost');}return{status:'awaiting_review',operationId:p.operationId,contentHash:data.contentHash};});const before=JSON.stringify(r.snapshot());await assert.rejects(r.sender.send(),/response lost/);assert.equal(JSON.stringify(r.snapshot()),before);await r.sender.send();assert.equal(calls,5);assert.equal(stored.size,4);assert.equal(JSON.stringify(r.snapshot()),before);});
+test('conflicting receipt stops sequence without commercial acknowledgement',async()=>{let calls=0;const r=setup(async()=>{calls++;return{status:'content_conflict'};});await assert.rejects(r.sender.send(),/diferentes/);assert.equal(calls,1);assert.equal(r.packets.length,4);});
+test('foreign user, business, generation and non-retained failures are not eligible',()=>{const p=f.sample().packet;for(const change of [{userId:'other'},{businessId:'other'},{workspaceGeneration:1},{lastErrorCode:'unavailable'}])assert.equal(client.eligible([{...p,...change}],identity).length,0);});
+test('canonical encoding is stable across property order and input is never mutated',()=>{const a={b:{z:1,a:2},a:[3,2,1]};const copy=JSON.stringify(a);assert.equal(client.canonical(a),client.canonical({a:[3,2,1],b:{a:2,z:1}}));assert.equal(JSON.stringify(a),copy);});
+test('envelope rejects altered hash, foreign actor, space snapshots, credentials and invalid quantities',()=>{
+ const data=f.envelope(f.sample().original);assert.throws(()=>validateOriginal({...data,contentHash:'bad'},f.seller,f.bid),{code:'invalid-argument'});
+ for(const change of [o=>o.packet.userId='foreign',o=>o.packet.payload.writes[0].data.actorUid='foreign',o=>o.localMovements[0].businessId='foreign',o=>o.packet.payload.writes[0].data.itens[0].quantidade=0,o=>o.packet.access_token='private']){
+  const o=structuredClone(f.sample().original);change(o);assert.throws(()=>validateOriginal(f.envelope(o),f.seller,f.bid));
+ }
+});
+test('matching compares items/quantities without deciding duplicates; excludes self, foreign space, same actor',()=>{
+ const x=f.sample(),review={saleId:x.sale.id,spaceId:f.spaceId,actorUid:f.seller,items:[{productId:'shared-product',variantId:null,quantity:1}],total:24.9,paymentMethod:'dinheiro'};
+ const owner={...x.sale,id:'owner-copy',actorUid:f.owner};assert.equal(similarSales(review,[owner]).length,1);for(const override of [{id:x.sale.id},{spaceId:f.otherSpace},{actorUid:f.seller},{itens:[{produtoId:'shared-product',quantidade:2}]}])assert.equal(similarSales(review,[{...owner,...override}]).length,0);
+});
+test('Sync recovery adapter is read-only and captures only related records',()=>{
+ const source=fs.readFileSync('js/firebase/sync.js','utf8'),start=source.indexOf('  recoverySnapshot: () =>'),end=source.indexOf('  describeResult:',start),fragment=source.slice(start,end).replace(/^  recoverySnapshot:/,'this.snapshot =').replace(/,\s*$/,';');
+ const x=f.sample(),data={vendas:[x.sale,{id:'unrelated'}],movimentacoesEstoque:[...x.movements,{id:'unrelated'}]},queue=[x.packet],before=JSON.stringify({data,queue});
+ const c={readQueue:()=>queue,saleQueueRequiresReview:client.held,currentUser:{uid:f.seller},activeBusinessId:()=>f.bid,DB:{getWorkspaceGeneration:()=>0,carregar:()=>data},structuredClone,Set};vm.createContext(c);vm.runInContext(fragment,c);const captured=c.snapshot();assert.equal(captured.packets.length,1);assert.equal(captured.local.vendas.length,1);assert.equal(captured.local.movimentacoesEstoque.length,1);assert.equal(JSON.stringify({data,queue}),before);captured.packets[0].attempts=0;assert.equal(queue[0].attempts,6);
+});
+test('new collection has no business trigger; UI has explicit confirmation and no automatic upload',()=>{
+ const backend=fs.readFileSync('functions/src/index.js','utf8'),ui=fs.readFileSync('js/sale-recovery-ui.js','utf8');assert.doesNotMatch(backend,/document:\s*['"`][^'"`]*saleRecovery/);assert.match(ui,/Enviar dados para recuperação/);assert.match(ui,/Confirmar envio/);assert.match(ui,/Nenhum efeito comercial foi aplicado/);assert.equal((ui.match(/await sender\.send\(/g)||[]).length,1);assert.match(ui,/if\(busy\)return/);assert.doesNotMatch(ui,/processSyncQueue|reprocess|clearLocal|saveQueue|setDoc/);
+});

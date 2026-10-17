@@ -871,6 +871,15 @@ service cloud.firestore {
     }
 
     match /businesses/{businessId} {
+      // Recovery intake is server-only. Payloads can contain private snapshots.
+      // No direct client read/write, including owner. Callables scope each read.
+      match /saleRecoveryReviews/{saleId} {
+        allow read, write: if false;
+        match /{document=**} { allow read, write: if false; }
+      }
+      match /saleRecoveryOperations/{operationId} {
+        allow read, write: if false;
+      }
       match /onlineStores/{storeId} {
         allow get: if hasPermission(businessId, 'products.edit') && canAccessSpace(businessId, resource.data.spaceId);
         allow list, create, update, delete: if false;

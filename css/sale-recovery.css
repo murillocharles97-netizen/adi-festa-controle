@@ -1,0 +1,12 @@
+.sale-recovery-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;margin:0 0 20px;border:1px solid #bce6df;border-radius:16px;background:#f1fbf8;color:#123b36;min-width:0}
+.sale-recovery-banner p{margin:5px 0 0;font-size:.88rem;line-height:1.5}
+.sale-recovery-actions{display:flex;gap:8px;flex-wrap:wrap}
+.sale-recovery-modal{width:min(740px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}
+.sale-recovery-modal .modal-head h2{margin:0;font-size:1.15rem}
+.sale-recovery-warning{padding:12px;border:1px solid #d5e4e0;border-radius:10px;background:#f3faf7;line-height:1.5}
+.sale-recovery-card{padding:16px;margin:12px 0;border:1px solid #dce5eb;border-radius:14px;overflow-wrap:anywhere}
+.sale-recovery-card header{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.sale-recovery-card p,.sale-recovery-card li{line-height:1.6}
+.sale-recovery-status{font-size:.8rem;padding:5px 9px;border-radius:20px;background:#e2f5ef;color:#136a55}
+.sale-recovery-modal button:focus-visible,.sale-recovery-banner button:focus-visible{outline:3px solid #008e87;outline-offset:3px}
+@media(max-width:600px){.sale-recovery-banner{align-items:stretch;flex-direction:column;padding:14px}.sale-recovery-actions{display:grid;grid-template-columns:1fr}.sale-recovery-actions .btn{white-space:normal}.sale-recovery-modal .modal-head,.sale-recovery-modal .modal-foot{gap:8px;flex-wrap:wrap}.sale-recovery-modal .modal-body{padding:14px}.sale-recovery-modal .modal-foot .btn{flex:1;white-space:normal}}
