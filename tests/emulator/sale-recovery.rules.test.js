@@ -78,3 +78,17 @@ t('cashier can preserve own packet without financial access; cannot fetch anothe
  const original=f.sample(9,uid).original;original.packet.payload.writes[0].data.actorRoleSnapshot='cashier';const before=await businessSnapshot();assert.equal((await service.submit(f.request(f.envelope(original),uid))).status,'awaiting_review');assert.deepEqual(await businessSnapshot(),before);
  const rows=await service.list(f.request({businessId:f.bid,spaceId:f.spaceId},uid));assert.equal(rows.items.length,1);assert.equal(rows.items[0].actorUid,uid);await assert.rejects(service.original(f.request({businessId:f.bid,saleId:'retained-sale-0'},uid)),{code:'permission-denied'});
 });
+
+t('recovery is available without ANY commercial permission or active billing; membership/space/actor remain mandatory',async()=>{
+ const uid='recovery-no-commerce';await db.doc(`users/${uid}`).set({uid,businessId:f.bid,active:true,role:'seller'});
+ await doc('members',uid).set({uid,role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:[f.spaceId],permissions:{'sales.create':false,'sales.cancel':false,'inventory.view':false,'inventory.adjust':false,'financial.view':false,'settings.manage':false}});
+ await db.doc(`businesses/${f.bid}`).update({subscription:{planId:'essential',status:'expired'}});
+ const before=await businessSnapshot(),original=f.sample(10,uid).original;
+ assert.equal((await service.submit(f.request(f.envelope(original),uid))).status,'awaiting_review');
+ assert.equal((await service.submit(f.request(f.envelope(original),uid))).duplicate,true);
+ const visible=await service.list(f.request({businessId:f.bid,spaceId:f.spaceId},uid));assert.equal(visible.items.length,1);assert.equal(visible.items[0].actorUid,uid);
+ await assert.rejects(service.submit(f.request(f.envelope(f.sample(11,uid,f.otherSpace).original),uid)),{code:'permission-denied'});
+ await assert.rejects(service.original(f.request({businessId:f.bid,saleId:'retained-sale-10'},uid)),{code:'permission-denied'});
+ await doc('members',uid).update({status:'disabled'});await assert.rejects(service.submit(f.request(f.envelope(original),uid)),{code:'permission-denied'});
+ assert.deepEqual(await businessSnapshot(),before);
+});

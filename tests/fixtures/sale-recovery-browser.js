@@ -7,9 +7,10 @@
   return{sale,packet:{operationId,businessId,userId:uid,workspaceGeneration:0,lastErrorCode:'permission-denied',attempts:6-n,payload:{writes:[{entityType:'sales',entityId:id,operation:'create',data:sale}]}}};
  });
  const initial=JSON.stringify(data);
- window.BusinessContext={get:()=>({businessId,role,spaceAccess:role==='owner'?'all':'selected',allowedSpaceIds:[spaceId],business:{workspaceGeneration:0}})};
+ window.BusinessContext={get:()=>({businessId,role,userProfile:{uid,active:true},member:{status:'active'},spaceAccess:role==='owner'?'all':'selected',allowedSpaceIds:[spaceId],business:{active:true,workspaceGeneration:0}})};
  window.FirebaseSession={user:{uid}};window.SpaceContext={homeId:()=>spaceId};
  window.SyncFirebase={getRetainedSaleRecoveryCount:()=>role==='seller'?4:0,subscribe:fn=>{notifications.push(fn);fn();return()=>{notifications=notifications.filter(f=>f!==fn);};},recoverySnapshot:()=>structuredClone({identity:{uid,businessId,workspaceGeneration:0},packets:data.map(x=>x.packet),local:{vendas:data.map(x=>x.sale),movimentacoesEstoque:[]}})};
+ window.DB={businessCache:{recoverySources:async()=>role==='seller'?[{packets:data.map(x=>x.packet),local:{vendas:data.map(x=>x.sale),movimentacoesEstoque:[]}}]:[]}};
  window.FirebaseCallable=async(name,input)=>{
   if(name==='submitSaleRecovery'){
    const x=JSON.parse(input.originalJson),sale=x.localSale;
