@@ -42,6 +42,11 @@ const {terminalPaymentService}=require('./terminal-payments/terminal-payment-ser
 
 initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
+const saleRecoveries=require('./services/sale-recovery-service').saleRecoveryService(db,{FieldValue});
+const RECOVERY_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:3};
+exports.submitSaleRecovery=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.submit(request));
+exports.listSaleRecoveryReviews=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.list(request));
+exports.getSaleRecoveryOriginal=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.original(request));
 exports.createSpreadsheetProducts=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5},request=>productSpreadsheetService(db,{FieldValue}).createProducts(request));
 const MP_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN');
 const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');

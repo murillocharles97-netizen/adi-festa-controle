@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "saleRecoveryReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorUid", "order": "ASCENDING" },
+        { "fieldPath": "spaceId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "products",
       "queryScope": "COLLECTION",
       "fields": [
