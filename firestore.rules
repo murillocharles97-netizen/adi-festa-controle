@@ -1172,8 +1172,12 @@ service cloud.firestore {
       }
       match /stockMovements/{movementId} {
         allow read: if hasPermission(businessId, 'inventory.view')
-          && (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
-          && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
+          // A new movement is read for idempotency before the same transaction
+          // creates it. Missing docs contain no private or other-space data.
+          && (resource == null || (
+            (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
+            && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'))
+          ));
         allow create, update: if canWriteCollection(businessId, 'stockMovements')
           && (isOwner(businessId) || (request.resource.data.get('spaceId',null) != null && canAccessSpace(businessId,request.resource.data.spaceId)))
           && (isOwner(businessId) || canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.produtoId)).data))
@@ -1243,6 +1247,13 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /sales/{saleId} {
+        function notReconciledSale() {
+          // Evaluate the private tombstone here, without granting its contents
+          // to sellers/cashiers. Direct writes and old clients use this fence too.
+          let resolution = /databases/$(database)/documents/businesses/$(businessId)/balanceAdjustments/$(('legacy_reconciliation:' + saleId));
+          return !exists(resolution)
+            || get(resolution).data.get('resolutionStatus', '') != 'resolved_by_reconciliation';
+        }
         function validIntegratedPayment(data) {
           let integrated = data.get('formaPagamento', '') == 'cartao_presencial' || data.get('paymentIntentId', null) != null;
           let intent = integrated ? get(/databases/$(database)/documents/businesses/$(businessId)/paymentIntents/$(data.paymentIntentId)).data : {};
@@ -1263,6 +1274,7 @@ service cloud.firestore {
             )
           );
         allow create: if canWriteCollection(businessId, 'sales')
+          && notReconciledSale()
           && validOnlineSale(businessId,saleId,request.resource.data)
           && validIntegratedPayment(request.resource.data)
           && request.resource.data.businessId == businessId

@@ -4,7 +4,7 @@ const source=fs.readFileSync('js/firebase/sync.js','utf8');
 function preflight(generation,item){
   const context={window:{DB:{getWorkspaceGeneration:()=>generation,carregar:()=>({})}},SOURCES:{clients:{key:'clientes'}},CLOUD_NAMES:['clients'],activeBusinessId:()=> 'business-a',currentUser:{uid:'owner'}};
   vm.createContext(context);
-  vm.runInContext(source.slice(source.indexOf('const queuePreflight ='),source.indexOf('const readPullState ='))+'\nthis.check=queuePreflight;',context);
+  vm.runInContext(source.slice(source.indexOf('function saleQueueRequiresReview('),source.indexOf('const readPullState ='))+'\nthis.check=queuePreflight;',context);
   return context.check(item);
 }
 const operation=()=>({businessId:'business-a',userId:'owner',operationId:'operation-1',payload:{writes:[{entityType:'clients',entityId:'client-1',operation:'create',data:{nome:'QA'}}]}});

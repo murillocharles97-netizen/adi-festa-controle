@@ -250,12 +250,6 @@ function traceSync(stage, detail = {}) {
   state.syncTrace = [...state.syncTrace.slice(-39), entry];
   if (window.__VECONI_DEV__ || ["localhost", "127.0.0.1"].includes(location.hostname)) console.info("[SYNC]", entry);
 }
-// Observe the original promise; never add a read/write, substitute its result,
-// catch its rejection, or log a payload. Disabled by default, memory-only.
-function saleTimingWait(stage, kind, promise, context) {
-  try { window.VeconiSaleTiming?.observe?.(stage, kind, promise, context); } catch { /* diagnostic only */ }
-  return promise;
-}
 async function syncStep(stage, operation, detail = {}) {
   traceSync(stage, detail);
   try {
@@ -680,6 +674,7 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
+    reviewRequired: saleQueueRequiresReview(item),
     payloadVersion: Number(item.payloadVersion || 1),
     schemaVersion: Number(item.schemaVersion || 1),
     deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
@@ -710,6 +705,14 @@ const canAttempt = (item, force = false) =>
   !item.lastAttemptAt ||
   Date.now() - new Date(item.lastAttemptAt).getTime() >=
     retryDelay(item.attempts || 0, item.lastErrorCode);
+function saleQueueRequiresReview(item) {
+  // Previously denied sales may have been re-entered by another operator.
+  // A permission fix must not silently replay their commercial effects. This
+  // is derived from the durable error, not a version/cutoff or customer ID.
+  return ["permission-denied", "sale-recovery-review-required"].includes(item.lastErrorCode) &&
+    (item.payload?.writes || []).some((write) =>
+      write.entityType === "sales" && write.operation === "create");
+}
 const queuePreflight = (item) => {
   const businessId = activeBusinessId(),
     writes = Array.isArray(item.payload?.writes) ? item.payload.writes : [];
@@ -731,6 +734,9 @@ const queuePreflight = (item) => {
       code: "user-mismatch",
       message: "A operação pertence a outra sessão autenticada.",
     };
+  if (saleQueueRequiresReview(item))
+    return { ok: false, code: "sale-recovery-review-required",
+      message: "Venda preservada neste aparelho, aguardando revisão. O reenvio automático foi bloqueado para evitar efeitos duplicados." };
   if (!writes.length)
     return { ok: false, code: "empty-transaction", message: "A operação não possui gravações." };
   if(writes.some(write=>{
@@ -1437,6 +1443,7 @@ function migrateScopedQueueCompatibility() {
   let migrated = 0,
     blocked = 0;
   const next = queue.map((item) => {
+    if (saleQueueRequiresReview(item)) return item;
     const copy = structuredClone(item),
       writes = Array.isArray(copy.payload?.writes) ? copy.payload.writes : [];
     copy.queueId ||= crypto.randomUUID();
@@ -1917,7 +1924,7 @@ async function testFirestoreConnection() {
     throw error;
   }
 }
-async function commitQueueItem(item, saleTimingContext = null) {
+async function commitQueueItem(item) {
   window.WorkspaceRuntime.capture();
   const preflight=queuePreflight(item);
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code});
@@ -1979,9 +1986,9 @@ async function commitQueueItem(item, saleTimingContext = null) {
       ),
       { code: "financial-composite-incomplete" },
     );
-  await saleTimingWait(window.VeconiSaleTiming?.isTarget?.(item.operationId, saleTimingContext) ? 'transaction.commit' : 'transaction.dependency', 'firestore', runTransaction(db, async (transaction) => {
-    window.VeconiSaleTiming?.mark?.('transaction.attempt', 'control', saleTimingContext);
-    const processed = await saleTimingWait('transaction.read_idempotency', 'firestore', transaction.get(marker), saleTimingContext);
+  await runTransaction(db, async (transaction) => {
+    currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
+    const processed = await transaction.get(marker);
     if (processed.exists()) return;
     const onlineSaleWrite = writes.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data?.onlineOrderId);
     let onlineClaim=null;
@@ -1996,8 +2003,14 @@ async function commitQueueItem(item, saleTimingContext = null) {
       // Online sale IDs/operations are fixed by the backend claim; they are not
       // legacy local-only sales. Sellers must not read private balance adjustments.
       if (onlineClaim && write.entityId === onlineClaim.saleId) continue;
-      const resolution = await saleTimingWait('transaction.read_resolution', 'firestore', transaction.get(doc(db, "businesses", businessId,
-        "balanceAdjustments", legacyReconciliationOperationId(write.entityId))), saleTimingContext);
+      // The sale-create Rule checks this private tombstone for every actor.
+      // Keep the detailed diagnostic for authorized roles, but never require
+      // financial read access just to upload an operational sale.
+      if (!["financial.view", "customers.receiveDebt", "customers.adjustBalance"]
+        .some((permission) => window.TeamAccess?.has?.(permission) === true)) continue;
+      currentPath = `businesses/${businessId}/balanceAdjustments/${legacyReconciliationOperationId(write.entityId)}`;
+      const resolution = await transaction.get(doc(db, "businesses", businessId,
+        "balanceAdjustments", legacyReconciliationOperationId(write.entityId)));
       if (resolution.exists() &&
         resolution.data()?.resolutionStatus === "resolved_by_reconciliation")
         throw Object.assign(new Error("Esta operação já foi conciliada manualmente e não será sincronizada."),
@@ -2018,9 +2031,10 @@ async function commitQueueItem(item, saleTimingContext = null) {
             write.entityType,
             String(write.entityId),
           );
+          currentPath = `businesses/${businessId}/${write.entityType}/${write.entityId}`;
           snapshots.set(
             `${write.entityType}:${write.entityId}`,
-            await saleTimingWait(({clients:'transaction.read_client',products:'transaction.read_stock',productVariants:'transaction.read_variant',sales:'transaction.read_sale',stockMovements:'transaction.read_stock_movement'})[write.entityType] || 'transaction.read_document', 'firestore', transaction.get(reference), saleTimingContext),
+            await transaction.get(reference),
           );
       }
     const campaignIds = [...new Set(writes
@@ -2029,10 +2043,10 @@ async function commitQueueItem(item, saleTimingContext = null) {
       .filter(Boolean))];
     for (const campaignId of campaignIds) {
       const reference = doc(db, "businesses", businessId, "campaigns", campaignId);
-      snapshots.set(`campaigns:${campaignId}`, await saleTimingWait('transaction.read_campaign', 'firestore', transaction.get(reference), saleTimingContext));
+      snapshots.set(`campaigns:${campaignId}`, await transaction.get(reference));
     }
     const financialEffectSnapshot = financialEffectReference
-      ? await saleTimingWait('transaction.read_financial_effect', 'firestore', transaction.get(financialEffectReference), saleTimingContext)
+      ? await transaction.get(financialEffectReference)
       : null;
     const confirmedConflictReference = confirmedConflictId
         ? doc(
@@ -2044,7 +2058,7 @@ async function commitQueueItem(item, saleTimingContext = null) {
           )
         : null,
       confirmedConflictSnapshot = confirmedConflictReference
-        ? await saleTimingWait('transaction.read_conflict', 'firestore', transaction.get(confirmedConflictReference), saleTimingContext)
+        ? await transaction.get(confirmedConflictReference)
         : null;
     const alreadyApplied = writes.some((write) => {
       if (!IDEMPOTENT_EVENT_NAMES.has(write.entityType)) return false;
@@ -2552,12 +2566,9 @@ async function commitQueueItem(item, saleTimingContext = null) {
         payload.custoUnitario = deleteField();
         payload.costUnit = deleteField();
       }
-      if (write.entityType === 'sales' || write.entityType === 'clients')
-        window.VeconiSaleTiming?.mark?.(write.entityType === 'sales' ? 'transaction.stage_sale' : 'transaction.stage_client', 'local', saleTimingContext);
       transaction.set(reference, payload, { merge: true });
     }
     if (financialEffectReference && !financialEffectSnapshot?.exists()) {
-      window.VeconiSaleTiming?.mark?.('transaction.stage_financial_effect', 'local', saleTimingContext);
       currentPath = `businesses/${businessId}/balanceEvents/${financialEffect.id}`;
       transaction.set(
         financialEffectReference,
@@ -2618,26 +2629,25 @@ async function commitQueueItem(item, saleTimingContext = null) {
         schemaVersion: 3,
       }),
     );
-  }), saleTimingContext);
-  window.VeconiSaleTiming?.mark?.('transaction.committed', 'control', saleTimingContext);
+  });
   return transactionOutcome;
 }
-async function verifySaleQueueCommit(item, saleTimingContext = null) {
+async function verifySaleQueueCommit(item) {
   const saleWrite = (item.payload?.writes || []).find((write) =>
     write.entityType === "sales" && write.operation === "create");
   if (!saleWrite) return;
   const saleId = String(saleWrite.entityId),
     operationId = String(saleWrite.data?.operationId || item.operationId || ""),
     businessId = activeBusinessId(),
-    snapshot = await saleTimingWait('sale.verify_read', 'firestore', getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)), saleTimingContext),
+    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)),
     remote = snapshot.exists() ? snapshot.data() : null;
   if (!remote || String(remote.operationId || "") !== operationId)
     throw Object.assign(new Error("A venda não foi confirmada na nuvem. A fila foi preservada para revisão."),
       { code: "sale-remote-ack-missing", saleId, operationId });
   const credit = saleWrite.data?.status === "fiado" || saleWrite.data?.formaPagamento === "fiado";
   if (!credit) return;
-  const effect = await saleTimingWait('effect.verify_read', 'firestore', getDocFromServer(doc(db, "businesses", businessId,
-    "balanceEvents", balanceEffectId("credit_sale", saleId))), saleTimingContext);
+  const effect = await getDocFromServer(doc(db, "businesses", businessId,
+    "balanceEvents", balanceEffectId("credit_sale", saleId)));
   const clientId = String(saleWrite.data?.clienteId || saleWrite.data?.customerId || ""),
     amount = roundedMoney(saleWrite.data?.valorFinal ?? saleWrite.data?.valorTotal),
     remoteEffect = effect.exists() ? effect.data() : null;
@@ -2794,8 +2804,7 @@ function resolveLocalPaymentAdjustment(
   return resolved;
 }
 async function processSyncQueue(options = {}) {
-  const saleTimingContext = window.VeconiSaleTiming?.current?.();
-  if (processingPromise) return saleTimingWait('queue.wait_existing', 'queue_wait', processingPromise, saleTimingContext);
+  if (processingPromise) return processingPromise;
   if (queueCounts().corrupt)
     throw Error("A fila local está corrompida. Exporte o diagnóstico antes de sincronizar.");
   if (readOnlyMode)
@@ -2827,8 +2836,9 @@ async function processSyncQueue(options = {}) {
         errors: queueCounts().errors,
         paused: true,
       };
-    await saleTimingWait('queue.session_validation', 'control', validateUser(), saleTimingContext);
+    await validateUser();
     let sent = 0,
+      reviewHeld = 0,
       financialConflicts = 0,
       financialAdjustments = 0,
       index = 0,
@@ -2857,6 +2867,9 @@ async function processSyncQueue(options = {}) {
         }
         continue;
       }
+      // Do not edit, retry, reclassify or remove the original failed packet.
+      // force/manual sync cannot override this hold; new sales can still sync.
+      if (saleQueueRequiresReview(queued)) { reviewHeld++; continue; }
       const preflight = queuePreflight(queued);
       if (!preflight.ok) {
         const blocked = readQueue(),
@@ -2892,8 +2905,8 @@ async function processSyncQueue(options = {}) {
         progress: Math.round(((index + 1) / Math.max(1, queue.length)) * 100),
       });
       try {
-        const outcome = await commitQueueItem(live[position], saleTimingContext);
-        await saleTimingWait('sale.verify', 'control', verifySaleQueueCommit(live[position], saleTimingContext), saleTimingContext);
+        const outcome = await commitQueueItem(live[position]);
+        await verifySaleQueueCommit(live[position]);
         markLocalSaleConfirmed(live[position]);
         if (!["financial_conflict", "financial_payment_adjustment_required",
           "financial_payment_applied_adjusted"].includes(outcome?.status))
@@ -2997,6 +3010,7 @@ async function processSyncQueue(options = {}) {
     const counts = queueCounts();
     return {
       sent,
+      reviewHeld,
       financialConflicts,
       financialAdjustments,
       pending: counts.total,
@@ -3106,7 +3120,6 @@ function isSalePending(sale) {
       String(write.entityId) === String(sale?.id)));
 }
 async function prepareCustomerForSale(customerId) {
-  const saleTimingContext = window.VeconiSaleTiming?.current?.();
   const id = String(customerId || "");
   if (!id || !currentUser || !DB.__firebaseSyncWrapped || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para esta venda.");
@@ -3147,7 +3160,7 @@ async function prepareCustomerForSale(customerId) {
   if (unconfirmed.length > 10)
     throw Error("Há muitas vendas recentes sem confirmação neste aparelho. Exporte o diagnóstico antes de outra venda fiado.");
   for (const localSale of unconfirmed) {
-    const remote = await saleTimingWait('customer.read_previous_sale', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id))), saleTimingContext);
+    const remote = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id)));
     const confirmed = remote.exists() ? cleanCloudItem({ id: remote.id, ...remote.data() }) : null;
     if (!confirmed?.financialAppliedAt ||
       String(confirmed.operationId || "") !== String(localSale.operationId || ""))
@@ -3157,7 +3170,7 @@ async function prepareCustomerForSale(customerId) {
   }
   // Primeiro confirme operações deste aparelho. Enquanto houver pendências,
   // a projeção local já inclui os deltas e não pode ser substituída pela nuvem.
-  if (pendingIds("clients").has(id)) await saleTimingWait('customer.previous_confirmation', 'control', processSyncQueue({ force: true }), saleTimingContext);
+  if (pendingIds("clients").has(id)) await processSyncQueue({ force: true });
   const pending = readQueue().filter((item) => (item.payload?.writes || []).some(
     (write) => write.entityType === "clients" && String(write.entityId) === id,
   ));
@@ -3166,33 +3179,25 @@ async function prepareCustomerForSale(customerId) {
   if (pending.length)
     throw Error("A operação anterior deste cliente ainda está sincronizando. Aguarde a confirmação ou use o modo offline antes de outra venda fiado.");
   // Leitura pontual do servidor: nunca varre a coleção de clientes no checkout.
-  const snapshot = await saleTimingWait('customer.read_before', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id)), saleTimingContext);
+  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id));
   if (!snapshot.exists()) throw Error("Cliente não encontrado na empresa atual da nuvem.");
-  const customerApplyTiming = window.VeconiSaleTiming?.start?.('customer.apply_before', 'local', saleTimingContext);
   applyCloudCollection("clients", [{ id, ...snapshot.data() }], { authoritative: true });
-  window.VeconiSaleTiming?.end?.(customerApplyTiming);
   return { source: "server", financialVersion: financialVersionOf(snapshot.data()) };
 }
 async function confirmCreditSale(sale) {
-  const saleTimingContext = window.VeconiSaleTiming?.current?.();
   if ((sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") || !navigator.onLine) return sale;
   if (!currentUser || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para confirmar a venda.");
-  await saleTimingWait('queue.drain', 'control', processSyncQueue({ force: true }), saleTimingContext);
-  const snapshot = await saleTimingWait('sale.reread', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id))), saleTimingContext);
+  await processSyncQueue({ force: true });
+  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id)));
   const confirmed = snapshot.exists() ? cleanCloudItem({ id: snapshot.id, ...snapshot.data() }) : null;
   if (!confirmed?.financialAppliedAt ||
     String(confirmed.operationId || "") !== String(sale.operationId || ""))
     throw Error("Venda preservada neste aparelho, mas ainda sem confirmação financeira na nuvem. Não repita com outra operação; revise a sincronização.");
-  const saleApplyTiming = window.VeconiSaleTiming?.start?.('sale.apply_confirmed', 'local', saleTimingContext);
   applyCloudCollection("sales", [confirmed], { authoritative: true });
-  window.VeconiSaleTiming?.end?.(saleApplyTiming);
-  const clientSnapshot = await saleTimingWait('client.reread', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId))), saleTimingContext);
-  if (clientSnapshot.exists()) {
-    const clientApplyTiming = window.VeconiSaleTiming?.start?.('client.apply_confirmed', 'local', saleTimingContext);
+  const clientSnapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId)));
+  if (clientSnapshot.exists())
     applyCloudCollection("clients", [{ id: sale.clienteId, ...clientSnapshot.data() }], { authoritative: true });
-    window.VeconiSaleTiming?.end?.(clientApplyTiming);
-  }
   return { ...sale, ...confirmed, status: "fiado", formaPagamento: "fiado" };
 }
 function cleanCloudItem(item) {
@@ -4527,6 +4532,36 @@ async function performDeviceComparison(options = {}) {
   updateQueueState();
   return report;
 }
+function queueOperationDiagnostic(item) {
+  const sales = (item.payload?.writes || []).filter((write) => write.entityType === "sales"),
+    cleanMessage = (value) => String(value || "").slice(0, 800)
+      .replace(/https?:\/\/[^\s]+/gi, "[URL removida]")
+      .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[e-mail removido]")
+      .replace(/\bBearer\s+[^\s]+/gi, "Bearer [removido]")
+      .replace(/\b(token|password|senha|secret|authorization)\s*[:=]\s*[^\s,;]+/gi, "$1=[removido]");
+  return {
+    businessId: String(item.businessId || ""),
+    operationUserId: String(item.userId || ""),
+    eventKind: String(item.payload?.eventKind || item.subtype || ""),
+    lastAttemptAt: item.lastAttemptAt || null,
+    lastErrorPath: item.lastErrorPath || null,
+    lastErrorCode: String(item.lastErrorCode || ""),
+    lastErrorMessage: cleanMessage(item.lastErrorMessage),
+    reviewRequired: saleQueueRequiresReview(item),
+    // Older queues did not persist the first failure. Never label creation or
+    // the last attempt as the first failure, nor change the queue to export it.
+    firstFailureAt: item.firstFailureAt || item.firstFailedAt || null,
+    firstFailureRecorded: Boolean(item.firstFailureAt || item.firstFailedAt),
+    sales: sales.map((write) => ({
+      saleId: String(write.entityId || ""),
+      operationId: String(write.data?.operationId || item.operationId || ""),
+      businessId: String(write.data?.businessId || item.businessId || ""),
+      spaceId: write.data?.spaceId || null,
+      actorUid: write.data?.actorUid || null,
+      actorRoleSnapshot: write.data?.actorRoleSnapshot || null,
+    })),
+  };
+}
 async function exportLocalDiagnostic() {
   await validateUser();
   const businessId = activeBusinessId(),
@@ -4539,7 +4574,7 @@ async function exportLocalDiagnostic() {
       auditRecord(item, "local", name),
     );
   return {
-    diagnosticVersion: 5,
+    diagnosticVersion: 6,
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     bootstrap: {state: window.FirebaseBootstrap?.state || "unknown",
@@ -4558,6 +4593,13 @@ async function exportLocalDiagnostic() {
     indexedDb: await indexedDbInventory(),
     storage: await DB.businessCache?.diagnostic?.(),
     member: {status: window.BusinessContext?.get?.().member?.status || "unknown", spaceAccess: window.BusinessContext?.get?.().member?.spaceAccess || "unknown"},
+    technicalIdentity: {
+      uid: currentUser?.uid || "",
+      role: window.BusinessContext?.get?.().role || profile.role || "",
+      permissions: [...(window.BusinessContext?.get?.().permissions || [])],
+      allowedSpaceIds: [...(window.BusinessContext?.get?.().allowedSpaceIds || [])],
+      spaceAccess: window.BusinessContext?.get?.().spaceAccess || "unknown",
+    },
     localCounts: Object.fromEntries(
       Object.entries(entities).map(([name, items]) => [name, items.length]),
     ),
@@ -4591,7 +4633,8 @@ async function exportLocalDiagnostic() {
       retryCount: Number(item.retryCount || item.attempts || 0),
       status: item.status || "pending",
       errorCode: item.lastErrorCode || "",
-      errorMessage: item.lastErrorMessage || "",
+      errorMessage: queueOperationDiagnostic(item).lastErrorMessage,
+      technical: queueOperationDiagnostic(item),
       payloadVersion: Number(item.payloadVersion || 1),
       invalidPayload: containsInvalidFirestoreValue(item.payload),
       payloadChecksum: checksumValue(item.payload || {}),
