@@ -250,6 +250,12 @@ function traceSync(stage, detail = {}) {
   state.syncTrace = [...state.syncTrace.slice(-39), entry];
   if (window.__VECONI_DEV__ || ["localhost", "127.0.0.1"].includes(location.hostname)) console.info("[SYNC]", entry);
 }
+// Observe the original promise; never add a read/write, substitute its result,
+// catch its rejection, or log a payload. Disabled by default, memory-only.
+function saleTimingWait(stage, kind, promise, context) {
+  try { window.VeconiSaleTiming?.observe?.(stage, kind, promise, context); } catch { /* diagnostic only */ }
+  return promise;
+}
 async function syncStep(stage, operation, detail = {}) {
   traceSync(stage, detail);
   try {
@@ -1911,7 +1917,7 @@ async function testFirestoreConnection() {
     throw error;
   }
 }
-async function commitQueueItem(item) {
+async function commitQueueItem(item, saleTimingContext = null) {
   window.WorkspaceRuntime.capture();
   const preflight=queuePreflight(item);
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code});
@@ -1973,8 +1979,9 @@ async function commitQueueItem(item) {
       ),
       { code: "financial-composite-incomplete" },
     );
-  await runTransaction(db, async (transaction) => {
-    const processed = await transaction.get(marker);
+  await saleTimingWait(window.VeconiSaleTiming?.isTarget?.(item.operationId, saleTimingContext) ? 'transaction.commit' : 'transaction.dependency', 'firestore', runTransaction(db, async (transaction) => {
+    window.VeconiSaleTiming?.mark?.('transaction.attempt', 'control', saleTimingContext);
+    const processed = await saleTimingWait('transaction.read_idempotency', 'firestore', transaction.get(marker), saleTimingContext);
     if (processed.exists()) return;
     const onlineSaleWrite = writes.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data?.onlineOrderId);
     let onlineClaim=null;
@@ -1989,8 +1996,8 @@ async function commitQueueItem(item) {
       // Online sale IDs/operations are fixed by the backend claim; they are not
       // legacy local-only sales. Sellers must not read private balance adjustments.
       if (onlineClaim && write.entityId === onlineClaim.saleId) continue;
-      const resolution = await transaction.get(doc(db, "businesses", businessId,
-        "balanceAdjustments", legacyReconciliationOperationId(write.entityId)));
+      const resolution = await saleTimingWait('transaction.read_resolution', 'firestore', transaction.get(doc(db, "businesses", businessId,
+        "balanceAdjustments", legacyReconciliationOperationId(write.entityId))), saleTimingContext);
       if (resolution.exists() &&
         resolution.data()?.resolutionStatus === "resolved_by_reconciliation")
         throw Object.assign(new Error("Esta operação já foi conciliada manualmente e não será sincronizada."),
@@ -2013,7 +2020,7 @@ async function commitQueueItem(item) {
           );
           snapshots.set(
             `${write.entityType}:${write.entityId}`,
-            await transaction.get(reference),
+            await saleTimingWait(({clients:'transaction.read_client',products:'transaction.read_stock',productVariants:'transaction.read_variant',sales:'transaction.read_sale',stockMovements:'transaction.read_stock_movement'})[write.entityType] || 'transaction.read_document', 'firestore', transaction.get(reference), saleTimingContext),
           );
       }
     const campaignIds = [...new Set(writes
@@ -2022,10 +2029,10 @@ async function commitQueueItem(item) {
       .filter(Boolean))];
     for (const campaignId of campaignIds) {
       const reference = doc(db, "businesses", businessId, "campaigns", campaignId);
-      snapshots.set(`campaigns:${campaignId}`, await transaction.get(reference));
+      snapshots.set(`campaigns:${campaignId}`, await saleTimingWait('transaction.read_campaign', 'firestore', transaction.get(reference), saleTimingContext));
     }
     const financialEffectSnapshot = financialEffectReference
-      ? await transaction.get(financialEffectReference)
+      ? await saleTimingWait('transaction.read_financial_effect', 'firestore', transaction.get(financialEffectReference), saleTimingContext)
       : null;
     const confirmedConflictReference = confirmedConflictId
         ? doc(
@@ -2037,7 +2044,7 @@ async function commitQueueItem(item) {
           )
         : null,
       confirmedConflictSnapshot = confirmedConflictReference
-        ? await transaction.get(confirmedConflictReference)
+        ? await saleTimingWait('transaction.read_conflict', 'firestore', transaction.get(confirmedConflictReference), saleTimingContext)
         : null;
     const alreadyApplied = writes.some((write) => {
       if (!IDEMPOTENT_EVENT_NAMES.has(write.entityType)) return false;
@@ -2545,9 +2552,12 @@ async function commitQueueItem(item) {
         payload.custoUnitario = deleteField();
         payload.costUnit = deleteField();
       }
+      if (write.entityType === 'sales' || write.entityType === 'clients')
+        window.VeconiSaleTiming?.mark?.(write.entityType === 'sales' ? 'transaction.stage_sale' : 'transaction.stage_client', 'local', saleTimingContext);
       transaction.set(reference, payload, { merge: true });
     }
     if (financialEffectReference && !financialEffectSnapshot?.exists()) {
+      window.VeconiSaleTiming?.mark?.('transaction.stage_financial_effect', 'local', saleTimingContext);
       currentPath = `businesses/${businessId}/balanceEvents/${financialEffect.id}`;
       transaction.set(
         financialEffectReference,
@@ -2608,25 +2618,26 @@ async function commitQueueItem(item) {
         schemaVersion: 3,
       }),
     );
-  });
+  }), saleTimingContext);
+  window.VeconiSaleTiming?.mark?.('transaction.committed', 'control', saleTimingContext);
   return transactionOutcome;
 }
-async function verifySaleQueueCommit(item) {
+async function verifySaleQueueCommit(item, saleTimingContext = null) {
   const saleWrite = (item.payload?.writes || []).find((write) =>
     write.entityType === "sales" && write.operation === "create");
   if (!saleWrite) return;
   const saleId = String(saleWrite.entityId),
     operationId = String(saleWrite.data?.operationId || item.operationId || ""),
     businessId = activeBusinessId(),
-    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)),
+    snapshot = await saleTimingWait('sale.verify_read', 'firestore', getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)), saleTimingContext),
     remote = snapshot.exists() ? snapshot.data() : null;
   if (!remote || String(remote.operationId || "") !== operationId)
     throw Object.assign(new Error("A venda não foi confirmada na nuvem. A fila foi preservada para revisão."),
       { code: "sale-remote-ack-missing", saleId, operationId });
   const credit = saleWrite.data?.status === "fiado" || saleWrite.data?.formaPagamento === "fiado";
   if (!credit) return;
-  const effect = await getDocFromServer(doc(db, "businesses", businessId,
-    "balanceEvents", balanceEffectId("credit_sale", saleId)));
+  const effect = await saleTimingWait('effect.verify_read', 'firestore', getDocFromServer(doc(db, "businesses", businessId,
+    "balanceEvents", balanceEffectId("credit_sale", saleId))), saleTimingContext);
   const clientId = String(saleWrite.data?.clienteId || saleWrite.data?.customerId || ""),
     amount = roundedMoney(saleWrite.data?.valorFinal ?? saleWrite.data?.valorTotal),
     remoteEffect = effect.exists() ? effect.data() : null;
@@ -2783,7 +2794,8 @@ function resolveLocalPaymentAdjustment(
   return resolved;
 }
 async function processSyncQueue(options = {}) {
-  if (processingPromise) return processingPromise;
+  const saleTimingContext = window.VeconiSaleTiming?.current?.();
+  if (processingPromise) return saleTimingWait('queue.wait_existing', 'queue_wait', processingPromise, saleTimingContext);
   if (queueCounts().corrupt)
     throw Error("A fila local está corrompida. Exporte o diagnóstico antes de sincronizar.");
   if (readOnlyMode)
@@ -2815,7 +2827,7 @@ async function processSyncQueue(options = {}) {
         errors: queueCounts().errors,
         paused: true,
       };
-    await validateUser();
+    await saleTimingWait('queue.session_validation', 'control', validateUser(), saleTimingContext);
     let sent = 0,
       financialConflicts = 0,
       financialAdjustments = 0,
@@ -2880,8 +2892,8 @@ async function processSyncQueue(options = {}) {
         progress: Math.round(((index + 1) / Math.max(1, queue.length)) * 100),
       });
       try {
-        const outcome = await commitQueueItem(live[position]);
-        await verifySaleQueueCommit(live[position]);
+        const outcome = await commitQueueItem(live[position], saleTimingContext);
+        await saleTimingWait('sale.verify', 'control', verifySaleQueueCommit(live[position], saleTimingContext), saleTimingContext);
         markLocalSaleConfirmed(live[position]);
         if (!["financial_conflict", "financial_payment_adjustment_required",
           "financial_payment_applied_adjusted"].includes(outcome?.status))
@@ -3094,6 +3106,7 @@ function isSalePending(sale) {
       String(write.entityId) === String(sale?.id)));
 }
 async function prepareCustomerForSale(customerId) {
+  const saleTimingContext = window.VeconiSaleTiming?.current?.();
   const id = String(customerId || "");
   if (!id || !currentUser || !DB.__firebaseSyncWrapped || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para esta venda.");
@@ -3134,7 +3147,7 @@ async function prepareCustomerForSale(customerId) {
   if (unconfirmed.length > 10)
     throw Error("Há muitas vendas recentes sem confirmação neste aparelho. Exporte o diagnóstico antes de outra venda fiado.");
   for (const localSale of unconfirmed) {
-    const remote = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id)));
+    const remote = await saleTimingWait('customer.read_previous_sale', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id))), saleTimingContext);
     const confirmed = remote.exists() ? cleanCloudItem({ id: remote.id, ...remote.data() }) : null;
     if (!confirmed?.financialAppliedAt ||
       String(confirmed.operationId || "") !== String(localSale.operationId || ""))
@@ -3144,7 +3157,7 @@ async function prepareCustomerForSale(customerId) {
   }
   // Primeiro confirme operações deste aparelho. Enquanto houver pendências,
   // a projeção local já inclui os deltas e não pode ser substituída pela nuvem.
-  if (pendingIds("clients").has(id)) await processSyncQueue({ force: true });
+  if (pendingIds("clients").has(id)) await saleTimingWait('customer.previous_confirmation', 'control', processSyncQueue({ force: true }), saleTimingContext);
   const pending = readQueue().filter((item) => (item.payload?.writes || []).some(
     (write) => write.entityType === "clients" && String(write.entityId) === id,
   ));
@@ -3153,25 +3166,33 @@ async function prepareCustomerForSale(customerId) {
   if (pending.length)
     throw Error("A operação anterior deste cliente ainda está sincronizando. Aguarde a confirmação ou use o modo offline antes de outra venda fiado.");
   // Leitura pontual do servidor: nunca varre a coleção de clientes no checkout.
-  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id));
+  const snapshot = await saleTimingWait('customer.read_before', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id)), saleTimingContext);
   if (!snapshot.exists()) throw Error("Cliente não encontrado na empresa atual da nuvem.");
+  const customerApplyTiming = window.VeconiSaleTiming?.start?.('customer.apply_before', 'local', saleTimingContext);
   applyCloudCollection("clients", [{ id, ...snapshot.data() }], { authoritative: true });
+  window.VeconiSaleTiming?.end?.(customerApplyTiming);
   return { source: "server", financialVersion: financialVersionOf(snapshot.data()) };
 }
 async function confirmCreditSale(sale) {
+  const saleTimingContext = window.VeconiSaleTiming?.current?.();
   if ((sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") || !navigator.onLine) return sale;
   if (!currentUser || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para confirmar a venda.");
-  await processSyncQueue({ force: true });
-  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id)));
+  await saleTimingWait('queue.drain', 'control', processSyncQueue({ force: true }), saleTimingContext);
+  const snapshot = await saleTimingWait('sale.reread', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id))), saleTimingContext);
   const confirmed = snapshot.exists() ? cleanCloudItem({ id: snapshot.id, ...snapshot.data() }) : null;
   if (!confirmed?.financialAppliedAt ||
     String(confirmed.operationId || "") !== String(sale.operationId || ""))
     throw Error("Venda preservada neste aparelho, mas ainda sem confirmação financeira na nuvem. Não repita com outra operação; revise a sincronização.");
+  const saleApplyTiming = window.VeconiSaleTiming?.start?.('sale.apply_confirmed', 'local', saleTimingContext);
   applyCloudCollection("sales", [confirmed], { authoritative: true });
-  const clientSnapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId)));
-  if (clientSnapshot.exists())
+  window.VeconiSaleTiming?.end?.(saleApplyTiming);
+  const clientSnapshot = await saleTimingWait('client.reread', 'firestore', getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId))), saleTimingContext);
+  if (clientSnapshot.exists()) {
+    const clientApplyTiming = window.VeconiSaleTiming?.start?.('client.apply_confirmed', 'local', saleTimingContext);
     applyCloudCollection("clients", [{ id: sale.clienteId, ...clientSnapshot.data() }], { authoritative: true });
+    window.VeconiSaleTiming?.end?.(clientApplyTiming);
+  }
   return { ...sale, ...confirmed, status: "fiado", formaPagamento: "fiado" };
 }
 function cleanCloudItem(item) {
