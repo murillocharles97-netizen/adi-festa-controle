@@ -801,7 +801,7 @@
   function openStockQuantity(product, summary) {
     const root = document.querySelector("#modal"),
       current = Number(product.variant?.stock ?? product.estoqueAtual ?? 0);
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box barcode-stock-modal"><header class="modal-head"><h3>Entrada de estoque</h3><button class="icon-btn close">${icon("x")}</button></header><form><div class="modal-body"><p><b>${esc(product.nome)}</b></p><div class="barcode-stock-values"><span>Estoque atual<b>${current}</b></span><span>Novo estoque<b data-new-stock>${current + 1}</b></span></div><div class="field"><label>Quantidade de entrada</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" value="1" required></div><div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${product.custo ?? ""}"></div><div class="field"><label>Observação</label><input name="observacao" value="Entrada por código de barras"></div><button type="button" class="btn btn-light barcode-adjust-instead" data-barcode-stock-adjust>${icon("sliders-horizontal")} Ajustar estoque em vez de adicionar</button><label class="check"><input name="continue" type="checkbox" checked> Continuar lendo produtos</label><small>${summary.products} produto(s) · ${summary.units} unidade(s) nesta sessão</small></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Concluir</button><button class="btn btn-primary">Confirmar entrada</button></footer></form></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box barcode-stock-modal"><header class="modal-head"><h3>Entrada de estoque</h3><button class="icon-btn close">${icon("x")}</button></header><form><div class="modal-body"><p><b>${esc(product.nome)}</b></p><div class="barcode-stock-values"><span>Estoque atual<b>${current}</b></span><span>Novo estoque<b data-new-stock>${current + 1}</b></span></div>${window.SpaceContext?.stockMovementFields?.(window.Produtos?.obter?.(product.id) || product) || ""}<div class="field"><label>Quantidade de entrada</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" value="1" required></div><div class="field"><label>Custo unitário opcional</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${product.custo ?? ""}"></div><div class="field"><label>Observação</label><input name="observacao" value="Entrada por código de barras"></div><button type="button" class="btn btn-light barcode-adjust-instead" data-barcode-stock-adjust>${icon("sliders-horizontal")} Ajustar estoque em vez de adicionar</button><label class="check"><input name="continue" type="checkbox" checked> Continuar lendo produtos</label><small>${summary.products} produto(s) · ${summary.units} unidade(s) nesta sessão</small></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Concluir</button><button class="btn btn-primary">Confirmar entrada</button></footer></form></section></div>`;
     const quantity = root.querySelector('[name="quantidade"]');
     quantity.oninput = () =>
       (root.querySelector("[data-new-stock]").textContent = String(
@@ -830,12 +830,14 @@
             costUnitario: data.get("custo"),
             observation: data.get("observacao"),
             type: "entrada",
+            spaceId: data.get("stockSpaceId"),
           })
         : Produtos.entrada(
             product.id,
             units,
             data.get("custo"),
             data.get("observacao"),
+            data.get("stockSpaceId"),
           );
       const next = {
         products: summary.products + 1,
@@ -852,7 +854,7 @@
   function openStockAdjust(product, summary) {
     const root = document.querySelector("#modal"),
       current = Number(product.estoqueAtual || 0);
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box barcode-stock-modal"><header class="modal-head"><h3>Ajustar estoque</h3><button class="icon-btn close">${icon("x")}</button></header><form><div class="modal-body"><p><b>${esc(product.nome)}</b></p><div class="barcode-stock-values"><span>Estoque atual<b>${current}</b></span><span>Novo estoque<b data-adjust-preview>${current}</b></span></div><div class="field"><label>Novo estoque</label><input name="estoque" type="number" inputmode="decimal" step="1" value="${current}" required></div><div class="field"><label>Motivo do ajuste</label><input name="motivo" value="Ajuste por código de barras" required></div></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">Salvar ajuste</button></footer></form></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box barcode-stock-modal"><header class="modal-head"><h3>Ajustar estoque</h3><button class="icon-btn close">${icon("x")}</button></header><form><div class="modal-body"><p><b>${esc(product.nome)}</b></p><div class="barcode-stock-values"><span>Estoque atual<b>${current}</b></span><span>Novo estoque<b data-adjust-preview>${current}</b></span></div>${window.SpaceContext?.stockMovementFields?.(window.Produtos?.obter?.(product.id) || product) || ""}<div class="field"><label>Novo estoque</label><input name="estoque" type="number" inputmode="decimal" step="1" value="${current}" required></div><div class="field"><label>Motivo do ajuste</label><input name="motivo" value="Ajuste por código de barras" required></div></div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">Salvar ajuste</button></footer></form></section></div>`;
     const stock = root.querySelector('[name="estoque"]');
     stock.oninput = () =>
       (root.querySelector("[data-adjust-preview]").textContent = String(
@@ -872,6 +874,7 @@
         product.id,
         Number(data.get("estoque")),
         data.get("motivo"),
+        data.get("stockSpaceId"),
       );
       Utils.toast("Estoque ajustado.");
       root.innerHTML = "";

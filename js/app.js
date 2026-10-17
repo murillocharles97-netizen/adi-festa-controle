@@ -483,13 +483,14 @@
     if (p?.productType === "variable") return ProdutosMobile.stockEntry(id);
     abrirFormulario(
       "Adicionar entrada",
-      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p>${window.SpaceContext?.stockMovementFields?.(p) || ""}<div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (f) => {
         Produtos.entrada(
           id,
           f.get("quantidade"),
           f.get("custo"),
           f.get("observacao"),
+          f.get("stockSpaceId"),
         );
         toast("Entrada registrada");
       },
@@ -500,9 +501,9 @@
     const p = Produtos.obter(id);
     abrirFormulario(
       "Ajustar estoque",
-      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p><div class="field"><label>Novo estoque *</label><input name="estoque" type="number" step="1" value="${Number(p.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
+      `<p><b>${escapar(p.nome)}</b></p><p>Estoque atual: <b>${Number(p.estoqueAtual || 0)}</b></p>${window.SpaceContext?.stockMovementFields?.(p) || ""}<div class="field"><label>Novo estoque *</label><input name="estoque" type="number" step="1" value="${Number(p.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo do ajuste *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
       (f) => {
-        Produtos.ajustarEstoque(id, f.get("estoque"), f.get("motivo"));
+        Produtos.ajustarEstoque(id, f.get("estoque"), f.get("motivo"), f.get("stockSpaceId"));
         toast("Estoque ajustado");
       },
       "Salvar ajuste",

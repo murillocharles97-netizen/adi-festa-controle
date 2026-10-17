@@ -257,19 +257,41 @@
     state.adapter = adapter;
     return adapter;
   }
-  function stockMovementOrigin(product, requestedId = '') {
+  function stockMovementSpaces(product) {
     ensureContext();
     const businessId = currentContext().businessId;
     if (!businessId || !product || product.businessId && product.businessId !== businessId)
       throw Error('Não foi possível confirmar a empresa do estoque.');
-    const eligible = homeSpaces().filter(s => s.businessId === businessId &&
-      s.capabilities.products && s.capabilities.inventory && productAllowsSpace(product, s.id));
+    const source = product.availability || product;
+    const scoped = ACCESS_MODES.has(source.spaceAccessMode);
+    const role = window.BusinessContext?.get?.().role || window.FirebaseSession?.profile?.role;
+    // Rules reserve unscoped legacy products for owner review. Do not turn a
+    // restricted operator's only visible space into an inferred product owner.
+    if (!scoped && role !== 'owner') return [];
+    const legacyIds = !scoped ? uniqueIds([product.spaceId, product.financialSpaceId].filter(Boolean)) : [];
+    if (legacyIds.length > 1) return [];
+    return homeSpaces().filter(s => s.businessId === businessId &&
+      s.capabilities.products && s.capabilities.inventory && productAllowsSpace(product, s.id) &&
+      (!legacyIds.length || legacyIds.includes(s.id)));
+  }
+  function stockMovementOrigin(product, requestedId = '') {
+    const eligible = stockMovementSpaces(product), businessId = currentContext().businessId;
     const explicit = String(requestedId || '').trim();
     const selected = explicit || (state.homeId !== ALL_SPACES ? state.homeId : '');
     const space = selected ? eligible.find(s => s.id === selected) : eligible.length === 1 ? eligible[0] : null;
     if (!space || RESERVED_SPACE_IDS.has(space.id))
       throw Error('Selecione um espaço autorizado para esta movimentação de estoque.');
     return {businessId, spaceId:space.id};
+  }
+  function stockMovementFields(product) {
+    const eligible = stockMovementSpaces(product);
+    let origin = null;
+    try { origin = stockMovementOrigin(product); } catch {}
+    if (origin) {
+      const space = eligible.find(s => s.id === origin.spaceId);
+      return `<input type="hidden" name="stockSpaceId" value="${esc(origin.spaceId)}"><p class="muted">Espaço da movimentação: <b>${esc(space.name)}</b></p>`;
+    }
+    return `<div class="field"><label for="stock-movement-space">Espaço da movimentação *</label><select id="stock-movement-space" name="stockSpaceId" required><option value="">Selecione um espaço</option>${eligible.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select><small>${eligible.length ? 'Escolha onde esta entrada ou saída aconteceu. O vínculo do produto não será alterado.' : 'Nenhum espaço autorizado disponível. Peça ao proprietário para revisar o vínculo deste produto.'}</small></div>`;
   }
   function selectionLabel(kind = "home") {
     if (kind === "home" && state.homeId === ALL_SPACES) return "Todos os espaços";
@@ -531,6 +553,8 @@
     selectSales,
     requireSalesSpace,
     stockMovementOrigin,
+    stockMovementSpaces,
+    stockMovementFields,
     selectionLabel,
     renderBar,
     contextualData,

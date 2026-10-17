@@ -122,6 +122,25 @@ test("manager sem financeiro e stock seguem apenas as permissões concedidas", a
   await assertFails(setDoc(doc(stockDb, "businesses", businessId, "sales", "stock-sale"), { id: "stock-sale", businessId, spaceId: spaceA, actorUid: "stock-team", valorFinal: 10 }));
 });
 
+test('legacy stock remains owner-only; scoped operator receipts require authorized business and space',async()=>{
+  await env.withSecurityRulesDisabled(async context=>{
+    const db=context.firestore();
+    await setDoc(doc(db,'businesses',businessId,'products','legacy-stock'),{id:'legacy-stock',businessId,nome:'QA legacy',estoqueAtual:4,estoque:4,ativo:true,active:true,itemKind:'product',productType:'simple'});
+  });
+  const owner=env.authenticatedContext('owner-team').firestore(),stock=env.authenticatedContext('stock-team').firestore();
+  await assertSucceeds(updateDoc(doc(owner,'businesses',businessId,'products','legacy-stock'),{estoqueAtual:5,estoque:5}));
+  await assertFails(getDoc(doc(stock,'businesses',businessId,'products','legacy-stock')));
+  await assertFails(updateDoc(doc(stock,'businesses',businessId,'products','legacy-stock'),{estoqueAtual:6,estoque:6}));
+  const movement={businessId,produtoId:'operational-product',spaceId:spaceA,actorUid:'stock-team',tipo:'entrada',quantidade:1,estoqueAnterior:9,estoqueNovo:10};
+  const stamp=Date.now().toString(36);
+  await assertSucceeds(setDoc(doc(stock,'businesses',businessId,'stockMovements','allowed-'+stamp),movement));
+  await assertSucceeds(setDoc(doc(stock,'businesses',businessId,'stockMovements','out-'+stamp),{...movement,tipo:'saida',quantidade:-1}));
+  await assertFails(setDoc(doc(stock,'businesses',businessId,'stockMovements','cross-'+stamp),{...movement,spaceId:spaceB}));
+  await assertFails(setDoc(doc(stock,'businesses',businessId,'stockMovements','legacy-'+stamp),{...movement,produtoId:'legacy-stock'}));
+  await assertFails(setDoc(doc(stock,'businesses',foreignBusinessId,'stockMovements','foreign-'+stamp),{...movement,businessId:foreignBusinessId}));
+  await assertSucceeds(setDoc(doc(owner,'businesses',businessId,'stockMovements','owner-legacy-'+stamp),{...movement,produtoId:'legacy-stock',actorUid:'owner-team'}));
+});
+
 test("membro desativado e usuário externo não acessam o business", async () => {
   const disabledDb = env.authenticatedContext("disabled-team").firestore();
   await assertSucceeds(getDoc(doc(disabledDb, "businesses", businessId, "members", "disabled-team")));
