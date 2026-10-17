@@ -663,7 +663,7 @@
       costField = window.TeamAccess?.has?.("cost.view") ? `<div class="field"><label>Custo unitário</label><input name="custo" inputmode="decimal" value="${variant.cost ?? ""}"></div>` : "";
     modal(
       "Adicionar entrada",
-      `<p><b>${esc(product.nome)} — ${esc(ProductVariations.displayName(variant))}</b></p><p>Estoque atual: <b>${Number(variant.stock || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${esc(product.nome)} — ${esc(ProductVariations.displayName(variant))}</b></p><p>Estoque atual: <b>${Number(variant.stock || 0)} un.</b></p>${window.SpaceContext?.stockMovementFields?.(product) || ""}<div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="numeric" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (form) =>
         ProductVariations.stockChange({
           parentProductId: parentId,
@@ -672,6 +672,7 @@
           costUnitario: form.get("custo"),
           observation: form.get("observacao"),
           type: "entrada",
+          spaceId: form.get("stockSpaceId"),
         }),
       "Salvar entrada",
     );
@@ -694,13 +695,14 @@
     }
     modal(
       "Adicionar entrada",
-      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p><div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="decimal" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
+      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p>${window.SpaceContext?.stockMovementFields?.(product) || ""}<div class="field"><label>Quantidade adicionada *</label><input name="quantidade" type="number" inputmode="decimal" min="1" step="1" required></div>${costField}<div class="field"><label>Observação</label><textarea name="observacao" placeholder="Ex.: compra de mercadoria"></textarea></div>`,
       (form) =>
         Produtos.entrada(
           id,
           form.get("quantidade"),
           form.get("custo"),
           form.get("observacao"),
+          form.get("stockSpaceId"),
         ),
       "Salvar entrada",
     );
@@ -710,9 +712,9 @@
     if (window.ProductVariations?.isVariable(product)) return variableDetails(id);
     modal(
       "Ajustar estoque",
-      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p><div class="field"><label>Novo estoque *</label><input name="estoque" type="number" inputmode="decimal" step="1" value="${Number(product.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
+      `<p><b>${esc(product.nome)}</b></p><p>Estoque atual: <b>${Number(product.estoqueAtual || 0)} un.</b></p>${window.SpaceContext?.stockMovementFields?.(product) || ""}<div class="field"><label>Novo estoque *</label><input name="estoque" type="number" inputmode="decimal" step="1" value="${Number(product.estoqueAtual || 0)}" required></div><div class="field"><label>Motivo *</label><textarea name="motivo" required placeholder="Ex.: conferência manual"></textarea></div>`,
       (form) =>
-        Produtos.ajustarEstoque(id, form.get("estoque"), form.get("motivo")),
+        Produtos.ajustarEstoque(id, form.get("estoque"), form.get("motivo"), form.get("stockSpaceId")),
       "Salvar ajuste",
     );
   }

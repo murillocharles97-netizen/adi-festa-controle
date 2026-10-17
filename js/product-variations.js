@@ -324,6 +324,7 @@
     observation = "",
     saleId = null,
     operationId = uuid(),
+    spaceId = '',
   }) {
     let movement;
     DB.alterar((data) => {
@@ -343,6 +344,10 @@
       if (!variant || variant.parentProductId !== parentProductId)
         throw Error("Variação não encontrada.");
       const product = parent(variant, data);
+      const sale = saleId ? (data.vendas || []).find(item => item.id === saleId) : null;
+      if (sale?.spaceId && spaceId && sale.spaceId !== spaceId)
+        throw Error('A movimentação deve pertencer ao espaço da venda.');
+      const origin = window.SpaceContext?.stockMovementOrigin?.(product, spaceId || sale?.spaceId || '');
       if (
         product?.itemKind === "service" ||
         product?.semControleEstoque ||
@@ -384,6 +389,8 @@
         observacao: observation || "",
         vendaId: saleId || null,
         data: now(),
+        ...(origin || {}),
+        ...(window.TeamAccess?.actor?.() || {}),
       };
       data.movimentacoesEstoque.push(movement);
       recomputeInData(data, parentProductId, {stockOnly:true});
