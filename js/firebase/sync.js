@@ -333,7 +333,8 @@ const lastSyncKey = () => `adiFesta:${namespace()}:lastSync`;
 const lastAttemptKey = () => `adiFesta:${namespace()}:lastSyncAttempt`;
 const lastCompleteKey = () => `adiFesta:${namespace()}:lastCompleteSync`;
 const signalVersionKey = () => `adiFesta:${namespace()}:syncSignalVersions`;
-const deviceId = () => {
+const deviceId = ({diagnostic = false} = {}) => {
+  if (diagnostic && window.DB?.businessCache?.ready?.() === false) return null;
   let value = localStorage.getItem(DEVICE_ID_KEY);
   if (!value) {
     value = crypto.randomUUID();
@@ -1131,7 +1132,7 @@ const diagnostic = () => {
     hydrated: state.hydrated,
     listenerConnected: state.listenerConnected,
     schemaVersion: 3,
-    deviceId: deviceId(),
+    deviceId: deviceId({diagnostic: true}),
     lastErrorCode,
     lastErrorMessage: lastError,
     syncFailure: state.syncFailure,
@@ -1926,6 +1927,9 @@ async function testFirestoreConnection() {
   }
 }
 async function commitQueueItem(item) {
+  const generation=syncSessionGeneration,uid=currentUser?.uid;
+  const assertSession=()=>{if(generation!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid)throw Object.assign(Error('A sessão da operação foi substituída. A fila original foi preservada.'),{code:'sync-session-retired'});};
+  assertSession();
   window.WorkspaceRuntime.capture();
   const preflight=queuePreflight(item);
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code});
@@ -1988,6 +1992,13 @@ async function commitQueueItem(item) {
       { code: "financial-composite-incomplete" },
     );
   await runTransaction(db, async (transaction) => {
+    // Fence retries and every asynchronous read/write, including helper calls.
+    transaction = new Proxy(transaction, {get(target, property) {
+      if (property === 'get') return async (...args) => {assertSession();const value=await target.get(...args);assertSession();return value;};
+      if (['set','update','delete'].includes(property)) return (...args) => {assertSession();return target[property](...args);};
+      return Reflect.get(target, property);
+    }});
+    assertSession();
     currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
     const processed = await transaction.get(marker);
     if (processed.exists()) return;
@@ -2818,10 +2829,14 @@ async function processSyncQueue(options = {}) {
       collections: [],
     };
   const force = Boolean(options.force);
+  const generation=syncSessionGeneration,uid=currentUser?.uid,businessId=state.userProfile?.businessId;
+  const current=()=>generation===syncSessionGeneration&&uid===currentUser?.uid&&uid===auth.currentUser?.uid&&businessId===state.userProfile?.businessId;
+  const assertSession=()=>{if(!current())throw Object.assign(Error('A sessão da fila foi substituída. Nenhuma confirmação foi aplicada na nova conta.'),{code:'sync-session-retired'});};
   processingPromise = (async () => {
     await DB.flush?.();
     if (!currentUser)
       return { sent: 0, pending: readQueue().length, errors: 0 };
+    assertSession();
     if (!navigator.onLine) {
       updateQueueState();
       return {
@@ -2838,6 +2853,7 @@ async function processSyncQueue(options = {}) {
         paused: true,
       };
     await validateUser();
+    assertSession();
     let sent = 0,
       reviewHeld = 0,
       financialConflicts = 0,
@@ -2846,6 +2862,7 @@ async function processSyncQueue(options = {}) {
       queue = readQueue(),
       changedCollections = new Set();
     for (const queued of [...queue]) {
+      assertSession();
       // A preparação nunca pode chegar ao Firestore antes da venda local.
       if (queued.status === "local_preparing") continue;
       if (
@@ -2900,6 +2917,7 @@ async function processSyncQueue(options = {}) {
       };
       saveQueue(live);
       await DB.flush?.();
+      assertSession();
       emit({
         status: "syncing",
         message: `Sincronizando ${index + 1} de ${queue.length}…`,
@@ -2907,7 +2925,9 @@ async function processSyncQueue(options = {}) {
       });
       try {
         const outcome = await commitQueueItem(live[position]);
+        assertSession();
         await verifySaleQueueCommit(live[position]);
+        assertSession();
         markLocalSaleConfirmed(live[position]);
         if (!["financial_conflict", "financial_payment_adjustment_required",
           "financial_payment_applied_adjusted"].includes(outcome?.status))
@@ -2965,6 +2985,7 @@ async function processSyncQueue(options = {}) {
             changedCollections.add(write.entityType);
         sent++;
       } catch (error) {
+        if (!current() || error.code === 'sync-session-retired') throw error;
         const failed = readQueue(),
           failedIndex = failed.findIndex(
             (item) => item.queueId === queued.queueId,
@@ -3008,6 +3029,7 @@ async function processSyncQueue(options = {}) {
       index++;
     }
     await DB.flush?.();
+    assertSession();
     const counts = queueCounts();
     return {
       sent,
@@ -3022,10 +3044,11 @@ async function processSyncQueue(options = {}) {
       collections: [...changedCollections],
     };
   })();
+  const task=processingPromise;
   try {
-    return await processingPromise;
+    return await task;
   } finally {
-    processingPromise = null;
+    if(processingPromise===task)processingPromise = null;
   }
 }
 function pendingIds(name) {
@@ -6273,6 +6296,7 @@ function setUser(user, profile = null, business = null, {reason = "session_updat
   let pendingBefore = null;
   try { pendingBefore = queueCounts().total; } catch { /* Diagnostic only. Never modify the queue. */ }
   syncSessionGeneration++;
+  processingPromise = null; // The retired promise is fenced; it must not own the next identity's queue.
   // Diagnostics are memory-only and must not be exposed to the next account.
   if (user && previousUid !== user.uid) {
     state.syncFailureHistory = (state.syncFailureHistory || []).filter(entry => entry.actorUid === user.uid);

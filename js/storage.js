@@ -1,6 +1,6 @@
 window.DB=(()=>{
   const LEGACY_KEY='adiFestaDB_v1',ACTIVE_KEY='adiFestaActiveBusinessId',VERSAO=14,agora=()=>new Date().toISOString();
-  let activeBusinessId=localStorage.getItem(ACTIVE_KEY)||'adi-festa',activePrincipal='legacy',activeGeneration=0,memoryData=null,memoryStorageKey='';
+  let activeBusinessId=localStorage.getItem(ACTIVE_KEY)||'adi-festa',activePrincipal='legacy',activeGeneration=0,memoryData=null,memoryStorageKey='',businessOpenSequence=0;
   const storageKey=()=>`${activePrincipal==='legacy'?`${LEGACY_KEY}:${activeBusinessId}`:`${LEGACY_KEY}:${activeBusinessId}:${activePrincipal}`}${activeGeneration>0?`:generation:${activeGeneration}`:''}`;
   const legacyId=(tipo,valor)=>{let h=2166136261;for(const c of `${tipo}|${String(valor).trim().toLowerCase()}`){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return`${tipo}_${(h>>>0).toString(36)}`};
   const configBase=()=>({nome:'Adi Festa'});
@@ -77,10 +77,10 @@ window.DB=(()=>{
   // Startup reads are read-only; malformed legacy data must NEVER reset to demo.
   const carregar=()=>{const key=storageKey();if(memoryData&&memoryStorageKey===key)return memoryData;const bruto=localStorage.getItem(key);return cache(normalizarParaMemoria(bruto?JSON.parse(bruto):vazio()))};
   const useBusiness=async(businessId,options={})=>{
+    const request=++businessOpenSequence,assertRequest=()=>{if(request!==businessOpenSequence)throw Object.assign(Error('Esta sessão foi substituída.'),{code:'local-cache-session-retired'});};
     const next=String(businessId||'').trim(),identified=Boolean(options.uid||options.permissionSignature),uid=String(options.uid||'anonymous').replace(/[^a-z0-9_-]/gi,'').slice(0,128)||'anonymous',signature=String(options.permissionSignature||'none').replace(/[^a-z0-9_-]/gi,'').slice(0,80)||'none',principal=identified?`${uid}:${signature}`:'legacy',generation=options.workspaceGeneration??0;
     if(!/^([a-z0-9_-]{3,128})$/i.test(next))throw Error('Identificador de empresa inválido.');
     if(!Number.isSafeInteger(generation)||generation<0)throw Error('Geração operacional inválida.');
-    await window.DB?.flush?.();
     if(next!==activeBusinessId||principal!==activePrincipal||generation!==activeGeneration)invalidarCache();
     activeBusinessId=next;activePrincipal=principal;activeGeneration=generation;
     assertWorkspace();
@@ -88,12 +88,13 @@ window.DB=(()=>{
     const candidates=generation===0?[storageKey()]:[];
     if(generation===0&&options.migratePrivateCache===true)candidates.push(`${LEGACY_KEY}:${next}`);
     if(generation===0&&options.migrateLegacy&&next==='adi-festa')candidates.push(LEGACY_KEY);
-    const loaded=normalizarParaMemoria(await DB.businessCache.open(storageKey(),candidates,vazio));
+    const targetKey=storageKey(),loaded=normalizarParaMemoria(await DB.businessCache.open(targetKey,candidates,vazio));
+    assertRequest();
     assertWorkspace();
-    window.TeamAccess?.sanitizePrivateCache?.(loaded);cache(loaded);DB.businessCache.stage(loaded);await DB.flush();return loaded;
+    window.TeamAccess?.sanitizePrivateCache?.(loaded);cache(loaded);DB.businessCache.stage(loaded,targetKey);await DB.flush();assertRequest();return loaded;
   };
   const retireBusiness=async()=>{await DB.businessCache.retire();invalidarCache();activeBusinessId='__reset_locked__';activePrincipal='locked';activeGeneration=0;};
-  const releaseBusiness=()=>{activeBusinessId='__signed_out__';activePrincipal='signed_out';invalidarCache();localStorage.removeItem(ACTIVE_KEY);void window.DB?.businessCache?.release?.().catch(error=>console.error('[STORAGE logout]',{code:error.code}))};
+  const releaseBusiness=()=>{businessOpenSequence++;activeBusinessId='__signed_out__';activePrincipal='signed_out';invalidarCache();localStorage.removeItem(ACTIVE_KEY);const pending=Promise.resolve(window.DB?.businessCache?.release?.());pending.catch(error=>console.error('[STORAGE logout]',{code:error.code}));return pending;};
   const alterar=funcao=>{const dados=structuredClone(carregar());funcao(dados);return salvar(dados)};
   const validarBackup=d=>{if(!d||typeof d!=='object')throw Error('O arquivo nao contem um backup valido');const listas=['clientes','produtos','vendas','pagamentos','movimentacoes'];const ausentes=listas.filter(c=>!Array.isArray(d[c]));if(ausentes.length)throw Error(`Backup incompleto: faltam ${ausentes.join(', ')}`);if(!d.config||typeof d.config!=='object')throw Error('Backup incompleto: faltam as configuracoes');return true};
   const criarBackup=()=>{const d=structuredClone(carregar()),exportedAt=agora(),businessId=activeBusinessId,businessName=window.BusinessContext?.get?.().business?.name||d.config.nome||'',exportedBy=window.FirebaseSession?.user?.uid||'',backupId=Utils.uuid(),collections=['clientes','produtos','vendas','pagamentos','movimentacoes','movimentacoesEstoque','cobrancas','campanhas','progressosCampanha','recompensas','messageHistory','messageTemplates','messageSequences','config'],financial=new Set(['vendas','pagamentos','movimentacoes','movimentacoesEstoque','recompensas','messageHistory','messageSequences']);d.produtos.forEach(product=>{for(const field of ['imagem','imageUrl','imageThumbUrl'])if(/^data:/i.test(String(product[field]||'')))product[field]=field==='imagem'?'':null});for(const key of collections.filter(key=>key!=='config'))d[key]=(d[key]||[]).map(item=>({...item,...(financial.has(key)?{operationId:item.operationId||item.sourceOperationId||item.id}:{}),createdAt:item.createdAt||item.criadoEm||item.data||null,updatedAt:item.updatedAt||item.atualizadoEm||item.data||null,schemaVersion:item.schemaVersion||VERSAO}));const counts={clientes:d.clientes.length,produtos:d.produtos.length,vendas:d.vendas.length,pagamentos:d.pagamentos.length,ajustes:d.movimentacoes.filter(m=>m.tipo==='ajuste_saldo').length,movimentosEstoque:d.movimentacoesEstoque.length,campanhas:d.campanhas.length,recompensas:d.recompensas.length,mensagens:d.messageHistory.length,modelosMensagem:d.messageTemplates.length,sequenciasMensagem:d.messageSequences.length},totals={fiado:d.clientes.reduce((s,c)=>s+Math.abs(Math.min(0,Number(c.saldo||0))),0),estoque:d.produtos.reduce((s,p)=>s+Number(p.estoqueAtual||0),0),vendido:d.vendas.reduce((s,v)=>s+Number(v.valorFinal??v.valorTotal??0),0)};Object.assign(d,{backupId,exportedAt,exportedBy,businessName,appVersion:'v41',schemaVersion:VERSAO,projectId:'adi-festa-controle',businessId,sourceMode:'offline-first',collections,counts,totals});d.backupInfo={app:'VECONI',backupId,businessId,businessName,exportedBy,versao:VERSAO,exportadoEm:exportedAt,inclui:collections};return d};

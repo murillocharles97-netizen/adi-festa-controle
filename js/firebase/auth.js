@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
-import './sync.js?v=184';
+import './sync.js?v=185';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';
@@ -17,9 +17,10 @@ window.WorkspaceResetAuth={reauthenticate:async password=>{
 }};
 
 const gate=document.querySelector('#auth-gate'),PENDING_PREFIX='adiFesta:onboarding:',BOOTSTRAP_TIMEOUT_MS=15000,INVITE_TOKEN=new URLSearchParams(location.search).get('teamInvite')||'';
-const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error']);
+const BOOTSTRAP_STATES=new Set(['initializing','unauthenticated','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access','authorized','ready','onboarding_required','subscription_warning','subscription_blocked','network_error','membership_missing','access_disabled','access_denied','temporary_unavailable','permission_error','profile_error','business_error','fatal_error','local_cache_conflict']);
 const NON_TERMINAL_STATES=new Set(['initializing','authenticated','bootstrapping','loading_profile','loading_business','migration_required','loading_access']);
 let bootstrapState='unauthenticated',bootstrapRun=null,readyUid='',bootstrapSequence=0,bootstrapStartedAt=0,bootstrapTimeline=[];
+let authObserverUid=null,authTransitionSequence=0,authRelease=Promise.resolve();
 let invitePreviewCache=null,invitePreviewPromise=null;
 let pendingInviteToken=INVITE_TOKEN,inviteRegistrationInFlight=false;
 const automaticBootstrapAttempts=new Set();
@@ -202,7 +203,8 @@ function bootstrapTechnicalDetails(details={}){
     ['Proprietário da empresa',details.ownerId]
   ].filter(([,value])=>value);
   if(!rows.length)return'';
-  return `<details class="auth-technical-details"><summary>Detalhes técnicos</summary><div class="auth-review">${rows.map(([label,value])=>`<span><small>${esc(label)}</small><b>${esc(label==='Código'?value:abbreviateTechnicalId(value))}</b></span>`).join('')}</div><p><small>Por segurança, um UID divergente nunca é corrigido automaticamente. Confirme no Firebase Authentication e em users/{UID} qual conta é a proprietária, ou encaminhe estes identificadores abreviados ao administrador.</small></p></details>`;
+  const identityWarning=/^(profile\/(?:uid|document|email|business)-|business\/owner-mismatch)/.test(String(details.code||''));
+  return `<details class="auth-technical-details"><summary>Detalhes técnicos</summary><div class="auth-review">${rows.map(([label,value])=>`<span><small>${esc(label)}</small><b>${esc(label==='Código'?value:abbreviateTechnicalId(value))}</b></span>`).join('')}</div>${identityWarning?'<p><small>Por segurança, um UID divergente nunca é corrigido automaticamente. Encaminhe os identificadores abreviados ao administrador para revisão.</small></p>':''}</details>`;
 }
 function suspendRuntimeForAccessCheck(reason){
   readyUid='';
@@ -215,7 +217,7 @@ function bootstrapErrorScreen(user,state,message,{manual=false,title='',details=
   setBootstrapState(state,{code:details.code||state});
   const headings={network_error:'Conexão temporariamente indisponível',temporary_unavailable:'Configuração temporariamente indisponível',membership_missing:'Vínculo de equipe não encontrado',access_disabled:'Acesso desativado',access_denied:'Acesso não autorizado',permission_error:'Permissão necessária'};
   const heading=title||headings[state]||'Não foi possível abrir o aplicativo';
-  screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">Tentar novamente</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
+  screen(`<section class="auth-card auth-blocked-card">${brandMarkup()}<h1>${esc(heading)}</h1><p>${esc(message)}</p>${bootstrapTechnicalDetails(details)}<button class="btn btn-primary" id="bootstrap-retry" type="button">${state==='local_cache_conflict'?'Atualizar esta aba com segurança':'Tentar novamente'}</button>${manual?'<button class="btn btn-light" id="bootstrap-manual-migration" type="button">Completar migração manualmente</button>':''}<button class="btn btn-light" id="bootstrap-logout" type="button">Sair da conta</button></section>`);
   document.querySelector('#bootstrap-retry').onclick=async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Tentando…';await retryBootstrap(user)};
   document.querySelector('#bootstrap-manual-migration')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;event.currentTarget.textContent='Executando…';await completeLegacyMigrationManually()});
   document.querySelector('#bootstrap-logout').onclick=bootstrapLogout;
@@ -341,6 +343,8 @@ async function handleMembershipChange(change={}){
   if(!user)return;
   bootstrapLog('membership listener changed',{kind,code});
   if(kind==='permissions-changed'){
+    runCleanup('firebase-sync');runCleanup('cloud-badge');
+    try{window.SyncFirebase?.stop?.({reason:'permissions_changed'})}catch{}
     readyUid='';
     return startBootstrap(user,{mode:'membership-change'});
   }
@@ -478,7 +482,10 @@ async function bootstrapCore(user,token,mode){
 }
 function handleBootstrapError(user,error){
   const code=normalizedCode(error),reason=String(error?.details?.reason||'');
-  if(code==='bootstrap/cancelled')return;
+  if(code==='bootstrap/cancelled'||code==='local-cache-session-retired')return;
+  if(['local-cache-conflict','local-cache-in-use','local-cache-preservation-conflict'].includes(code)){
+    return bootstrapErrorScreen(user,'local_cache_conflict',code==='local-cache-conflict'?'A VECONI está aberta em outra aba ou sessão com dados mais recentes. Atualize esta aba para continuar com segurança. Alterações ainda não gravadas serão preservadas, sem reenviar operações.':error.message,{title:'Esta aba precisa ser atualizada',suspendRuntime:true,details:{code}});
+  }
   if(['workspace-reset-locked','workspace-reload-required','workspace-generation-mismatch'].includes(code))return workspaceBlockedScreen({code,...error.workspaceReset});
   try{BusinessContext.fail(error)}catch(contextError){console.warn('[Bootstrap optional module]',{module:'business-context-error-state',code:normalizedCode(contextError)||'STATE_ERROR'})}
   console.error('[Bootstrap] failed',{step:bootstrapState,code:code||'unknown',message:error?.message,stack:isDevelopment()?error?.stack:undefined});
@@ -553,8 +560,28 @@ window.LegacyMigrationAdmin={
 };
 screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Verificando acesso…</p></section>`);
 window.FirebaseRuntimeMetrics={...(window.FirebaseRuntimeMetrics||{}),activeAuthObservers:1};
-const observeAuthState=()=>onAuthStateChanged(auth,user=>{
+function retireAuthRuntime(reason){
+  bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;readyUid='';
+  cleanupCurrentSession();
+  try{window.SyncFirebase?.stop?.({reason})}catch{}
+  window.WorkspaceRuntime?.endSession();
+  BusinessContext.clear();window.FirebaseSession=null;window.SyncFirebaseState=null;
+  document.querySelector('#app').innerHTML='';document.querySelector('#modal').innerHTML='';
+  return DB.releaseBusiness();
+}
+async function handleAuthIdentity(user){
+  const nextUid=user?.uid||'',transition=++authTransitionSequence;
   try{window.SyncFirebase.setAuthReady(true)}catch(error){console.warn('[Bootstrap optional module]',{module:'sync-auth-ready',code:normalizedCode(error)||'SYNC_UNAVAILABLE'})}
+  if(authObserverUid!==nextUid){
+    authObserverUid=nextUid;
+    screen(`<section class="auth-card auth-loading">${brandMarkup()}<p>Preparando a sessão com segurança…</p></section>`);
+    try{authRelease=Promise.resolve(retireAuthRuntime('auth_identity_changed'));}
+    catch(error){authRelease=Promise.reject(error);}
+  }
+  try{await authRelease;}
+  catch(error){if(transition===authTransitionSequence)return handleBootstrapError(user,error);return;}
+  if(transition!==authTransitionSequence||String(auth.currentUser?.uid||'')!==nextUid)return;
+  if(nextUid&&readyUid===nextUid&&bootstrapState==='authorized')return;
   if(!user){
     bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;readyUid='';
     automaticBootstrapAttempts.clear();
@@ -562,6 +589,13 @@ const observeAuthState=()=>onAuthStateChanged(auth,user=>{
   }
   setBootstrapState('authenticated',{persistence:'local'});
   bootstrapLog('auth observer resolved',{authenticated:true,persistence:'local'});
-  startBootstrap(user,{mode:'automatic'});
+  await startBootstrap(user,{mode:'automatic'});
+}
+addEventListener('local-cache-obsolete',()=>{
+  const user=auth.currentUser;
+  bootstrapSequence++;if(bootstrapRun?.token)bootstrapRun.token.cancelled=true;bootstrapRun=null;
+  cleanupCurrentSession();
+  handleBootstrapError(user,Object.assign(Error('A VECONI está aberta em outra aba ou sessão com dados mais recentes. Atualize esta aba para continuar com segurança.'),{code:'local-cache-conflict'}));
 });
+const observeAuthState=()=>onAuthStateChanged(auth,user=>{void handleAuthIdentity(user).catch(error=>handleBootstrapError(user,error));});
 Promise.resolve(window.FirebaseAuthPersistenceReady).then(observeAuthState,observeAuthState);
