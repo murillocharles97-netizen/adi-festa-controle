@@ -26,7 +26,7 @@
    const i=uploaded.get(input.saleId);if(!i)throw Error('Registro inexistente');
    if(i.status==='awaiting_review'){
     if(input.action==='dismiss_match'){i.dismissedMatchIds=['owner-example'];i.revision=(i.revision||0)+1;}
-    else{i.status=input.action==='link_existing'?'already_recreated':'recovered';i.linkedSaleId=input.linkedSaleId||i.saleId;i.resolvedAt=new Date().toISOString();i.resolvedByName='Proprietário QA';if(input.action==='recover_original')effects++;}
+    else{i.status=input.action==='close_without_effects'?'closed_without_effects':input.action==='link_existing'?'already_recreated':'recovered';i.linkedSaleId=input.action==='close_without_effects'?null:input.linkedSaleId||i.saleId;i.resolvedAt=new Date().toISOString();i.resolvedByName='Proprietário QA';if(input.action==='recover_original')effects++;}
    }
    renderAudit();if(lost){lost=false;throw Object.assign(Error('QA resposta perdida'),{code:'unavailable'});}return{data:{saleId:i.saleId,status:i.status,linkedSaleId:i.linkedSaleId}};
   }

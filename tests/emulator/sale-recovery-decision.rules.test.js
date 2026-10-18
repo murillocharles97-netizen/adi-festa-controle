@@ -23,7 +23,7 @@ async function setup(label,{finance=false,stock=3}={}){
  const upload=async(n=0)=>{const data=fixture.envelope(originals[n]);return service.submit(request({...data,businessId:bid},seller));};
  const decision=async(n=0,action='recover_original',extra={})=>{
   const review=(await root.collection('saleRecoveryReviews').doc(originals[n].localSale.id).get()).data();
-  return service.decide(request({saleId:review.saleId,contentHash:review.contentHash,revision:review.revision??0,action,confirmation:{recover_original:'RECUPERAR',link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA'}[action],...extra}));
+  return service.decide(request({saleId:review.saleId,contentHash:review.contentHash,revision:review.revision??0,action,confirmation:{recover_original:'RECUPERAR',link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',close_without_effects:'ENCERRAR_SEM_EFEITOS'}[action],...extra}));
  };
  const manager=async(n=0,id='manager-sale')=>{await root.collection('sales').doc(id).set({...originals[n].localSale,id,actorUid:owner,data:'2026-10-17T18:59:26.000Z'});return id;};
  return{bid,owner,seller,a,b,root,originals,request,upload,decision,manager};
@@ -34,6 +34,57 @@ async function effects(c){
  for(const space of [c.a,c.b])result[space]=(await db.collection(`financialSpaces/${space}/entries`).get()).docs.map(d=>({id:d.id,value:d.data(),time:d.updateTime.toMillis()}));return result;
 }
 const count=async(c,kind)=>(await c.root.collection(kind).get()).size;
+
+t('incident equivalent: close 306.50 with zero effects, recover partial 59.90 patch 6 to 5 once, preserve resolved 24.90/243.60',async()=>{
+ const c=await setup('minimal-hotfix',{stock:6,finance:true});
+ await c.root.collection('products').doc('marrom').update({totalStock:6});
+ for(const [n,total]of [[0,24.9],[1,306.5],[2,243.6],[3,59.9]]){
+  const o=c.originals[n];
+  for(const sale of [o.localSale,o.packet.payload.writes.find(w=>w.entityType==='sales').data]){
+   sale.valorFinal=total;sale.formaPagamento=n?'cartao':'dinheiro';for(const item of sale.itens)item.precoFinalUnitario=total/sale.itens.length;
+  }
+  for(const w of o.packet.payload.writes.filter(w=>w.entityType==='products')){w.before={estoqueAtual:6,estoque:6,totalStock:6};w.data={estoqueAtual:5,estoque:5};}
+  for(const m of [...o.localMovements,...o.packet.payload.writes.filter(w=>w.entityType==='stockMovements').map(w=>w.data)]){m.estoqueAnterior=6;m.estoqueNovo=5;}
+  await c.upload(n);
+ }
+ for(const n of [0,2])await c.decision(n,'link_existing',{linkedSaleId:await c.manager(n,'manager-'+n)});
+ const protectedRefs=[0,2].map(n=>c.root.collection('saleRecoveryReviews').doc(c.originals[n].localSale.id));
+ const protectedBefore=await Promise.all(protectedRefs.map(r=>r.get()));
+ const raws=await Promise.all(c.originals.map(o=>c.root.collection('saleRecoveryReviews').doc(o.localSale.id).collection('original').doc('payload').get()));
+ const originalSnapshot=JSON.stringify(c.originals),before=await effects(c);
+ const closed=await c.decision(1,'close_without_effects');assert.equal(closed.status,'closed_without_effects');assert.equal(closed.linkedSaleId,null);
+ assert.equal((await c.decision(1,'close_without_effects')).idempotent,true);assert.deepEqual(await effects(c),before);
+ const review=(await c.root.collection('saleRecoveryReviews').doc(c.originals[1].localSale.id).get()).data();
+ assert.equal(review.commercialEffectsApplied,false);assert.equal(review.resolvedByUid,c.owner);assert.ok(review.resolvedAt);assert.deepEqual(review.movementIds,[]);
+ assert.equal((await c.root.collection('saleRecoveryReviews').doc(review.saleId).collection('decisions').get()).size,1);
+ await assert.rejects(c.decision(1),{code:'failed-precondition'});
+ const result=await Promise.all([c.decision(3),c.decision(3)]);assert.equal(result.filter(r=>!r.idempotent).length,1);
+ const sale=(await c.root.collection('sales').doc(c.originals[3].localSale.id).get()).data();assert.equal(sale.valorFinal,59.9);assert.equal(sale.operationId,c.originals[3].packet.operationId);assert.equal(sale.actorUid,c.seller);
+ const movement=(await c.root.collection('stockMovements').doc('movement-3-0').get()).data();assert.equal(movement.estoqueAnterior,6);assert.equal(movement.estoqueNovo,5);
+ assert.equal((await c.root.collection('products').doc('marrom').get()).data().estoqueAtual,5);assert.equal(await count(c,'sales'),3);assert.equal(await count(c,'stockMovements'),1);assert.equal(await count(c,'processedOperations'),1);
+ assert.equal((await c.root.collection('products').doc('marrom').get()).data().totalStock,5);
+ const income=financialIncomeService(db);await income.projectSale(c.bid,sale.id,sale);await income.projectSale(c.bid,sale.id,sale);
+ assert.equal((await db.collection(`financialSpaces/${c.a}/entries`).get()).size,1);assert.equal((await db.collection(`financialSpaces/${c.b}/entries`).get()).size,0);
+ for(const [i,r]of protectedRefs.entries())assert.equal((await r.get()).updateTime.toMillis(),protectedBefore[i].updateTime.toMillis());
+ for(const r of raws){const now=await r.ref.get();assert.equal(now.updateTime.toMillis(),r.updateTime.toMillis());assert.deepEqual(now.data(),r.data());}
+ assert.equal(JSON.stringify(c.originals),originalSnapshot);
+ const seller=await service.list(c.request({spaceId:c.a,view:'resolved'},c.seller));assert.equal(seller.items.length,4);assert.ok(seller.items.some(r=>r.status==='closed_without_effects'));assert.ok(seller.items.some(r=>r.status==='recovered'));
+ const client=env.authenticatedContext(c.seller).firestore();await assertFails(sdk.setDoc(sdk.doc(client,'businesses',c.bid,'sales',review.saleId),c.originals[1].localSale));
+});
+
+t('close without effects requires owner/confirmation and rejects pre-existing commercial evidence atomically',async()=>{
+ for(const mode of ['sale','movement','financial','marker']){
+  const c=await setup('close-block-'+mode);await c.upload();const o=c.originals[0];
+  if(mode==='sale')await c.root.collection('sales').doc(o.localSale.id).set(o.localSale);
+  if(mode==='movement')await c.root.collection('stockMovements').doc('unexpected-id').set(o.localMovements[0]);
+  if(mode==='marker')await c.root.collection('processedOperations').doc(o.packet.operationId).set({status:'processed'});
+  if(mode==='financial')await db.doc(`financialSpaces/${c.a}/entries/sale_${o.localSale.id}`).set({amountCents:2490});
+  const before=await effects(c);await assert.rejects(c.decision(0,'close_without_effects'),{code:'failed-precondition'});assert.deepEqual(await effects(c),before);
+  assert.equal((await c.root.collection('saleRecoveryReviews').doc(o.localSale.id).get()).data().status,'awaiting_review');
+ }
+ const c=await setup('close-access');await c.upload();const data={saleId:c.originals[0].localSale.id,contentHash:fixture.envelope(c.originals[0]).contentHash,revision:0,action:'close_without_effects',confirmation:'ENCERRAR_SEM_EFEITOS'};
+ await assert.rejects(service.decide(c.request(data,c.seller)),{code:'permission-denied'});await assert.rejects(service.decide(c.request({...data,confirmation:''})),{code:'invalid-argument'});
+});
 
 t('four synthetic originals: link A without effects, recover B/C/D chronologically with exact original IDs, immutable payload and unchanged local queues',async()=>{
  const c=await setup('four'),copy=JSON.stringify(c.originals);for(let n=0;n<4;n++)await c.upload(n);

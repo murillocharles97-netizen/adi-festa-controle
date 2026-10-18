@@ -70,11 +70,12 @@ function selectedSpace(){
   if(id&&!['all','all_spaces','todos'].includes(id))return id;
   return c.role!=='owner'&&c.spaceAccess!=='all'&&c.allowedSpaceIds?.length===1?c.allowedSpaceIds[0]:null;
 }
-const recoveryStatus=value=>({awaiting_review:'Aguardando revisão',already_recreated:'Já recriada pelo gestor',recovered:'Recuperada'}[value]||'Aguardando revisão');
+const recoveryStatus=value=>({awaiting_review:'Aguardando revisão',already_recreated:'Já recriada pelo gestor',recovered:'Recuperada',closed_without_effects:'Encerrada sem efeitos'}[value]||'Aguardando revisão');
 function confirmDecision(item,action,match,view){
   if(busy||context().role!=='owner')return;
-  const titles={link_existing:'Confirmar: já foi registrada',dismiss_match:'Não é a mesma venda',recover_original:'Recuperar venda original'};
+  const titles={link_existing:'Confirmar: já foi registrada',dismiss_match:'Não é a mesma venda',recover_original:'Recuperar venda original',close_without_effects:'Não recuperar / encerrada sem efeitos'};
   const explanations={
+    close_without_effects:'Esta revisão será encerrada sem recuperar a venda. O registro e os IDs originais serão preservados, com responsável e data da decisão. Não haverá venda, baixa de estoque, receita, estorno ou alteração de metas/faturamento. A operação original continuará bloqueada para reenvio comercial.',
     link_existing:`O registro original será vinculado à venda ${esc(match?.saleId)}. Não haverá nova venda, baixa, receita, estorno ou alteração de metas. A venda do gestor permanecerá intacta. O reenvio da operação original ficará bloqueado.`,
     dismiss_match:'Somente esta sugestão será descartada. A venda original continuará aguardando decisão, sem nenhum efeito comercial.',
     recover_original:'Confirme que esta venda NÃO foi registrada pelo gestor. O estoque e os vínculos serão revalidados. Se tudo conferir, a mesma operação original será executada uma única vez, com os IDs preservados. Ela passará a contar em vendas/metas e na automação financeira do espaço, quando habilitada. Falta de estoque ou conflito bloqueará a recuperação.'
@@ -87,10 +88,10 @@ function confirmDecision(item,action,match,view){
     const button=panel.querySelector('[data-decision-confirm]');button.disabled=true;button.textContent='Validando…';
     try{
       const response=await call('decideSaleRecovery',{saleId:item.saleId,contentHash:item.contentHash,revision:item.revision??0,action,linkedSaleId:match?.saleId,
-        confirmation:{link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR'}[action]});
+        confirmation:{link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR',close_without_effects:'ENCERRAR_SEM_EFEITOS'}[action]});
       const result=response.data??response;
       if(identity()!==session||!panel.isConnected)return;
-      panel.querySelector('[data-decision-result]').textContent=action==='dismiss_match'?'Sugestão descartada. O original continua aguardando decisão.':`${recoveryStatus(result.status)}. Venda vinculada: ${result.linkedSaleId}.`;
+      panel.querySelector('[data-decision-result]').textContent=action==='dismiss_match'?'Sugestão descartada. O original continua aguardando decisão.':action==='close_without_effects'?'Encerrada sem efeitos. Nenhuma venda, movimento de estoque ou receita foi criada. O original permanece preservado.':`${recoveryStatus(result.status)}. Venda vinculada: ${result.linkedSaleId}.`;
       button.remove();panel.querySelector('[data-decision-back]').textContent='Voltar aos registros';
     }catch(error){
       if(identity()===session&&panel.isConnected){
@@ -118,6 +119,14 @@ async function openReviews(view='pending'){
         const article=document.createElement('article');article.className='sale-recovery-card';
         const pending=item.status==='awaiting_review',owner=context().role==='owner',matches=item.possibleMatches||[];
         article.innerHTML=`<header><strong>${money(item.total)}</strong><span class="sale-recovery-status">${recoveryStatus(item.status)}</span></header><p><time>${esc(when(item.originalSaleAt))}</time> · ${esc(item.actorName)} · ${esc(item.spaceName)}</p><p>Origem: venda retida no aparelho de origem · ${esc(item.paymentMethod||'Pagamento não informado')}</p><ul>${item.items.map(i=>`<li>${esc(i.quantity)} × ${esc(i.name)}${i.variantName?` — ${esc(i.variantName)}`:''}</li>`).join('')}</ul><p class="sale-recovery-warning">${item.status==='recovered'?'Venda original recuperada com os mesmos IDs. Efeitos aplicados uma única vez; automações seguem a configuração do espaço.':notice}</p>${matches.length?`<div class="sale-recovery-warning"><strong>Possível venda semelhante registrada pelo gestor</strong>${matches.map((m,index)=>`<section class="sale-recovery-match"><p>${esc(when(m.at))} · ${money(m.total)} · ${esc(m.paymentMethod)}<br><small>Venda ${esc(m.saleId)} · ${m.sameTotal?'mesmo valor':'valor diferente'} · ${m.samePaymentMethod?'mesmo pagamento':'pagamento diferente'}</small></p>${pending&&owner?`<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-link-match="${index}">Confirmar: já foi registrada</button><button type="button" class="btn btn-light" data-dismiss-match="${index}">Não é a mesma venda</button></div>`:''}</section>`).join('')}</div>`:''}${item.comparisonScope?`<small>${esc(item.comparisonScope)}</small>`:''}${pending&&(item.remoteEvidence?.saleExists||item.remoteEvidence?.operationExists||item.remoteEvidence?.movementIdsPresent?.length)?'<p class="sale-recovery-warning">Já existem registros relacionados na nuvem. Conferência manual necessária; nenhum efeito foi aplicado por este envio.</p>':''}${item.conflictCount?'<p class="sale-recovery-warning">Foi recebido conteúdo diferente para estes IDs. O original permanece preservado para análise.</p>':''}${!pending?`<div class="sale-recovery-resolution"><strong>${recoveryStatus(item.status)}</strong><p>Decisão em ${esc(when(item.resolvedAt))}<br>Responsável: ${esc(item.resolvedByName||item.resolvedByUid)}<br>Venda vinculada: <strong>${esc(item.linkedSaleId)}</strong>${item.linkedSale?`<br>${esc(when(item.linkedSale.at))} · ${money(item.linkedSale.total)} · ${esc(item.linkedSale.paymentMethod)}`:''}</p><p>A operação original permanece preservada e bloqueada para reenvio comercial.</p></div>`:''}<details><summary>Identificação do registro</summary><p>Venda original: ${esc(item.saleId)}<br>Operação original: ${esc(item.operationId)}</p></details>${pending&&owner?'<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-recover-original>Recuperar venda original</button></div>':''}`;
+        if(pending&&owner){
+          const close=document.createElement('button');close.type='button';close.className='btn btn-light';close.textContent='Não recuperar / encerrada sem efeitos';
+          close.onclick=()=>confirmDecision(item,'close_without_effects',null,view);
+          article.querySelector('[data-recover-original]').parentElement.append(close);
+        }
+        if(item.status==='closed_without_effects'){
+          article.querySelector('.sale-recovery-resolution p').textContent=`Decisão em ${when(item.resolvedAt)} · Responsável: ${item.resolvedByName||item.resolvedByUid}. Nenhuma venda vinculada. Nenhum efeito comercial aplicado.`;
+        }
         article.querySelectorAll('[data-link-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'link_existing',matches[Number(b.dataset.linkMatch)],view));
         article.querySelectorAll('[data-dismiss-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'dismiss_match',matches[Number(b.dataset.dismissMatch)],view));
         article.querySelector('[data-recover-original]')?.addEventListener('click',()=>confirmDecision(item,'recover_original',null,view));

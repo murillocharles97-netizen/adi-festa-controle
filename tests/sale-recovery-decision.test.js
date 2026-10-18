@@ -19,9 +19,18 @@ test('variable parent aggregate deltas from canonical stock-only recomputation a
  assert.equal(plan(o).movements.length,1);
 });
 test('resolved upload receipts preserve all local evidence without commercial queue acknowledgment',async()=>{
- for(const status of ['already_recreated','recovered']){
+ for(const status of ['already_recreated','recovered','closed_without_effects']){
   const x=f.sample(),snapshot={identity:{uid:f.seller,businessId:f.bid,workspaceGeneration:0},packets:[x.packet],local:{vendas:[x.sale],movimentacoesEstoque:x.movements}},before=client.canonical(snapshot);
   const sender=client.create({snapshot:()=>snapshot,cryptoApi:crypto.webcrypto,call:async(_,d)=>({status,operationId:x.packet.operationId,contentHash:d.contentHash})});assert.equal((await sender.send()).sent,1);assert.equal(client.canonical(snapshot),before);assert.equal(client.held(x.packet),true);
+ }
+});
+
+test('partial patches inherit unchanged totalStock, but reject missing/invalid deltas without mutating the original',()=>{
+ const original=structuredClone(f.sample().original),patch=original.packet.payload.writes.find(w=>w.entityType==='products');
+ patch.before={estoqueAtual:6,estoque:6,totalStock:6};patch.data={estoqueAtual:5,estoque:5};
+ const before=JSON.stringify(original);assert.equal(plan(original).movements.length,1);assert.equal(JSON.stringify(original),before);
+ for(const change of [p=>p.data.totalStock=null,p=>p.data.totalStock='5',p=>p.data.totalStock=4,p=>p.data.estoqueAtual=4,p=>p.data={},p=>delete p.before.estoqueAtual]){
+  const bad=structuredClone(original);change(bad.packet.payload.writes.find(w=>w.entityType==='products'));assert.throws(()=>plan(bad));
  }
 });
 test('owner UI requires a separate confirmation, shows resolved audit/link, and cannot silently recover on list or upload',()=>{

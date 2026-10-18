@@ -40,12 +40,17 @@ function recoveryPlan(v){
     if(!selected.length)fail('Produto auxiliar não pertence à venda.');
     const fields=w.entityType==='products'?['estoqueAtual','estoque','totalStock']:['stock'];
     const quantity=selected.reduce((sum,i)=>sum+i.quantity,0);
+    // An update is a partial patch, not a replacement snapshot. Omitted fields
+    // retain the captured value; explicit null/non-numeric values remain invalid.
+    const effective={...w.before,...w.data};let changed=false;
     for(const field of fields){
       if(w.data[field]===undefined&&w.before[field]===undefined)continue;
-      if(!number(w.data[field])||!number(w.before[field]))fail('Delta de estoque inválido.');
-      const delta=w.data[field]-w.before[field];
+      if(!number(effective[field])||!number(w.before[field]))fail('Delta de estoque inválido.');
+      const delta=effective[field]-w.before[field];
       if(delta!==0&&Math.abs(delta+quantity)>0.000001)fail('Delta de estoque diferente dos itens.');
+      if(delta!==0)changed=true;
     }
+    if(!changed)fail('Patch sem a baixa de estoque correspondente aos itens.');
   }
   return{movements};
 }
@@ -112,6 +117,7 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
     for(const change of stock){
       const update={[change.field]:change.after,updatedAt:at,version:FieldValue.increment(1)};
       if(change.field==='estoqueAtual'&&Object.hasOwn(change.source,'estoque'))update.estoque=change.after;
+      if(change.field==='estoqueAtual'&&Object.hasOwn(change.source,'totalStock'))update.totalStock=change.after;
       tx.update(change.ref,update);
       tx.create(root.collection('stockMovements').doc(change.movement.entityId),{...operational(change.movement.data),...stamp,...canonical,entityType:'stockMovements',id:change.movement.entityId,tipo:'saida_venda',actorUid:v.sale.actorUid,
         estoqueAnterior:change.before,estoqueNovo:change.after,data:change.movement.data.data||v.originalSaleAt,recoveredAt:at,recoveredByUid:c.uid});
