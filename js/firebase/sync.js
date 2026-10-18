@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "./workspace-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=151";
+import { createFirestoreRepository } from "./firestore-repository.js?v=184";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -111,7 +111,7 @@ function canPullSource(name) {
   if (["products", "productVariants"].includes(name)) return has("products.view");
   if (name === "clients") return has("customers.view");
   if (name === "messageHistory" && has("customers.view") && has("customers.edit")) return true;
-  if (name === "sales") return has("sales.create") || has("sales.viewAll");
+  if (name === "sales") return window.TeamAccess?.canReadOperationalSales?.() ?? (has("sales.create") || has("sales.viewAll"));
   if (name === "catalogOrders") return has("sales.viewAll");
   if (name === "stockMovements") return has("inventory.view");
   if (["productFinancials", "variantFinancials", "stockMovementFinancials"].includes(name))
@@ -208,7 +208,8 @@ let currentUser = null,
   listenerRegistry = new Map(),
   lastDataAuditRaw = null,
   activityEventsCursor = null,
-  activityEventsHasMore = false;
+  activityEventsHasMore = false,
+  activitySubscriptionGeneration = 0;
 const state = {
   authReady: false,
   status: navigator.onLine ? "idle" : "offline",
@@ -3647,6 +3648,8 @@ async function refreshUserContext() {
 }
 async function pullCloudCollections(options = {}) {
   await validateUser();
+  const sessionGeneration=syncSessionGeneration,sessionUid=currentUser?.uid,sessionBusiness=activeBusinessId(),
+    assertPullSession=()=>{if(sessionGeneration!==syncSessionGeneration||sessionUid!==currentUser?.uid||sessionBusiness!==activeBusinessId())throw Object.assign(Error('A sessão mudou durante a leitura. Nenhum cursor foi avançado.'),{code:'sync-session-retired'});};
   const hydrateStartedAt = performance.now();
   const force = Boolean(options.force),
     full = Boolean(options.full),
@@ -3669,15 +3672,19 @@ async function pullCloudCollections(options = {}) {
     documentsRead = 0;
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
-      since = full ? "" : pullState[markerKey] || "",
+      readScope = name==='sales' ? window.TeamAccess?.operationalReadScopeKey?.() : null,
+      scopeChanged = Boolean(readScope && pullState[`${markerKey}:readScope`]!==readScope),
+      completeRead = full || INITIAL_FULL_NAMES.has(name) || scopeChanged,
+      since = full || scopeChanged ? "" : pullState[markerKey] || "",
       documents = await syncStep("downloading_changes", async () => since
         ? await repositories[name].listChangedSince(since, 500)
-        : full || INITIAL_FULL_NAMES.has(name)
+        : completeRead
           ? await repositories[name].listAllPaged(200)
           : await repositories[name].listRecent(
               INITIAL_RECENT_LIMITS[name] || 100,
               { force: true },
-            ), { service: "Firestore", collection: name, businessId, request: since ? "listChangedSince" : full || INITIAL_FULL_NAMES.has(name) ? "listAllPaged" : "listRecent" });
+            ), { service: "Firestore", collection: name, businessId, request: since ? "listChangedSince" : completeRead ? "listAllPaged" : "listRecent" });
+    assertPullSession();
     const metadata = repositories[name].getLastReadMetadata?.();
     rememberSnapshotMetadata(name, metadata);
     if (name === "clients") rememberCanonicalClients(documents, metadata);
@@ -3708,14 +3715,18 @@ async function pullCloudCollections(options = {}) {
       // turn bootstrap into a global variants scan or one listener per item.
       const parentIds=new Set(documents.flatMap(o=>(o.items||[]).filter(i=>i.variantId).map(i=>i.productId)));
       const variants=[];
-      for(const id of parentIds)variants.push(...await repositories.productVariants.listWherePaged('parentProductId',id));
+      for(const id of parentIds){variants.push(...await repositories.productVariants.listWherePaged('parentProductId',id));assertPullSession();}
       if(variants.length)pendingApplications.push({name:'productVariants',documents:variants,options:{authoritative:true}});
     }
     // Nunca avance o cursor usando o relógio do aparelho. Um celular com hora
     // adiantada poderia ignorar para sempre documentos gravados pelo servidor.
     pullState[markerKey] = newestTimestamp(documents) || since || "";
+    // Read-policy upgrades must fetch older store sales even when the old
+    // per-actor cursor is newer. Only the read cursor changes, never the queue.
+    if(readScope)pullState[`${markerKey}:readScope`]=readScope;
   }
-  received = await syncStep("persisting_cloud_snapshot", async () => { const result = applyCloudCollectionBatch(pendingApplications); await DB.flush?.(); return result; }, { service: "IndexedDB", database: "veconi-local-records", store: "records", collections: names, documents: documentsRead });
+  assertPullSession();
+  received = await syncStep("persisting_cloud_snapshot", async () => { const result = applyCloudCollectionBatch(pendingApplications); await DB.flush?.(); assertPullSession(); return result; }, { service: "IndexedDB", database: "veconi-local-records", store: "records", collections: names, documents: documentsRead });
   if (full && names.includes("clients")) {
     const clientDocuments =
         pendingApplications.find((entry) => entry.name === "clients")
@@ -6373,12 +6384,16 @@ function pendingActivityEvents() {
 }
 
 function subscribeRecentActivityEvents(callback, onError, max = 100) {
+  const generation=syncSessionGeneration,uid=currentUser?.uid,subscription=++activitySubscriptionGeneration;
+  let stopped=false;
+  const current=()=>!stopped&&generation===syncSessionGeneration&&uid===currentUser?.uid&&subscription===activitySubscriptionGeneration;
   activityEventsCursor = null;
   activityEventsHasMore = false;
   let additionalPages = 0,
     received = false;
   const stop = activityEventsRepository.subscribeRecent(
     (items, metadata, page) => {
+      if(!current())return;
       if (!received || additionalPages === 0) {
         activityEventsCursor = page?.cursor || null;
         activityEventsHasMore = Boolean(page?.hasMore);
@@ -6389,21 +6404,24 @@ function subscribeRecentActivityEvents(callback, onError, max = 100) {
         initialLimit: Math.max(1, Number(max) || 100),
       });
     },
-    onError,
+    error=>{if(current())onError?.(error);},
     Math.max(1, Math.min(100, Number(max) || 100)),
   );
   const wrapped = () => {
+    const ownsState=current();
+    stopped=true;
     stop?.();
-    activityEventsCursor = null;
-    activityEventsHasMore = false;
+    if(ownsState){activityEventsCursor = null;activityEventsHasMore = false;}
   };
   wrapped.loadMore = async (pageSize = 50) => {
+    if(!current())return{items:[],hasMore:false};
     if (!activityEventsHasMore || !activityEventsCursor)
       return { items: [], hasMore: false };
     const page = await activityEventsRepository.listPage(
       activityEventsCursor,
       Math.max(1, Math.min(100, Number(pageSize) || 50)),
     );
+    if(!current())return{items:[],hasMore:false};
     activityEventsCursor = page.cursor;
     activityEventsHasMore = page.hasMore;
     additionalPages++;

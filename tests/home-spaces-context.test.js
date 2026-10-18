@@ -137,7 +137,7 @@ test("Home específica usa apenas dados atribuídos e ignora venda cancelada", (
 
   const desktop = sandbox.DesktopDashboard.aggregate(fixture(), "today");
   assert.deepEqual(Array.from(desktop.sales, (sale) => sale.id), ["sale-a"]);
-  assert.deepEqual(Array.from(desktop.clients, (client) => client.id), ["client-a"]);
+  assert.deepEqual(Array.from(desktop.clients, (client) => client.id), ["client-a", "client-b", "client-legacy", "client-cancelled"]);
   assert.deepEqual(Array.from(desktop.products, (product) => product.id), ["product-all", "product-a"]);
   assert.equal(desktop.todayRevenue, 40);
   assert.equal(desktop.receivedToday, 10);
@@ -147,7 +147,7 @@ test("Home específica usa apenas dados atribuídos e ignora venda cancelada", (
 
   const mobile = sandbox.MobileHome.model();
   assert.deepEqual(Array.from(mobile.sales, (sale) => sale.id), ["sale-a"]);
-  assert.deepEqual(Array.from(mobile.clients, (client) => client.id), ["client-a"]);
+  assert.deepEqual(Array.from(mobile.clients, (client) => client.id), ["client-a", "client-b", "client-legacy", "client-cancelled"]);
   assert.equal(mobile.sold, 40);
   assert.equal(mobile.goal, 100);
   assert.equal(mobile.unassignedLegacySales, 1);

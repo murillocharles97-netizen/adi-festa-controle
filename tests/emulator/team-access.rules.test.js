@@ -86,10 +86,10 @@ test("seller vê somente o espaço permitido e dados operacionais sem custo ou F
   await assertFails(getDoc(doc(db, "businesses", businessId, "productFinancials", "operational-product")));
   await assertFails(getDoc(doc(db, "financialSpaces", spaceA, "entries", "private-entry")));
   await assertFails(getDocs(collection(db, "businesses", businessId, "members")));
-  await assertFails(getDoc(doc(db, "businesses", businessId, "sales", "owner-sale")));
+  await assertSucceeds(getDoc(doc(db, "businesses", businessId, "sales", "owner-sale")));
 });
 
-test("seller cria venda com ator próprio, consulta só as próprias e não atravessa space", async () => {
+test("seller cria venda com ator próprio, consulta o espaço operacional e não atravessa space", async () => {
   const db = env.authenticatedContext("seller-team").firestore();
   const ownSale = { id: "seller-sale", operationId: "seller-operation", businessId, ownerId: "seller-team", spaceId: spaceA, financialSpaceId: spaceA, actorUid: "seller-team", valorFinal: 25, status: "pago" };
   await assertSucceeds(setDoc(doc(db, "businesses", businessId, "sales", ownSale.id), ownSale));

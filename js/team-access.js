@@ -43,6 +43,14 @@
     return current().role === "owner" || current().permissions?.includes?.("*") || current().permissions?.includes?.(permission);
   }
   const canRoute = (route) => !ROUTE_PERMISSIONS[route] || has(ROUTE_PERMISSIONS[route]);
+  // Reading the operational ledger of an authorized space is not permission
+  // to manage other sales, financial projections, costs or staff. viewAll is
+  // retained for administrative screens; the store dashboard is not personal.
+  const canReadOperationalSales = () => has('sales.create') || has('sales.viewAll');
+  const operationalReadScopeKey = () => {
+    const c=current();
+    return JSON.stringify(['store-sales-v2',c.businessId||'',c.userProfile?.uid||window.FirebaseSession?.user?.uid||'',c.role||'',c.permissionSignature||[...(c.permissions||[])].sort().join('|'),c.spaceAccess||'selected',[...(c.allowedSpaceIds||[])].sort()]);
+  };
   function deniedMarkup() {
     return `<section class="access-denied" role="alert"><i data-lucide="shield-x"></i><h2>Você não tem acesso a esta área.</h2><p>Peça ao proprietário para revisar seu cargo e suas permissões.</p><button class="btn btn-primary" type="button" data-go="inicio">Voltar ao início</button></section>`;
   }
@@ -74,6 +82,7 @@
     if (!data || typeof data !== "object") return data;
     if(current().role!=='owner'&&Array.isArray(data.catalogOrders))data.catalogOrders=data.catalogOrders.filter(o=>has('sales.viewAll')&&o.spaceId&&window.BusinessContext?.canAccessSpace?.(o.spaceId));
     if (!has("cost.view")) {
+      delete data.productFinancials; delete data.variantFinancials; delete data.stockMovementFinancials;
       (data.produtos || []).forEach((item) => { delete item.custo; delete item.cost; });
       (data.variacoesProdutos || []).forEach((item) => { delete item.cost; delete item.custo; });
       (data.movimentacoesEstoque || []).forEach((item) => { delete item.custoUnitario; delete item.costUnit; });
@@ -90,6 +99,7 @@
         (sale.itens || []).forEach((item) => { delete item.lucro; });
       });
     }
+    if(!has('cost.view')&&!has('profit.view'))delete data.saleFinancials;
     if (!has("financial.view")) {
       for (const key of ["financialEntries", "financialAccounts", "creditCards", "paymentReceivables"])
         delete data[key];
@@ -98,7 +108,7 @@
   }
   window.TeamAccess = Object.freeze({
     PERMISSIONS, PRESETS, ROLE_LABELS, ROUTE_PERMISSIONS, normalizeRole,
-    permissionsFor, has, canRoute, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
+    permissionsFor, has, canRoute, canReadOperationalSales, operationalReadScopeKey, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
   });
   addEventListener("business-context-changed", () => queueMicrotask(syncNavigation));
   addEventListener("firebase-auth-ready", () => queueMicrotask(syncNavigation));

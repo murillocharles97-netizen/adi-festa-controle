@@ -182,6 +182,12 @@ service cloud.firestore {
           )
         );
     }
+    function canReadOperationalSales(businessId) {
+      // Operational store totals/history are shared by authorized sellers.
+      // This does not grant financial/private reads or administrative writes.
+      return permissionGranted(businessId, 'sales.create')
+        || permissionGranted(businessId, 'sales.viewAll');
+    }
     function canReadCollection(businessId, collectionName) {
       return (
         (
@@ -197,7 +203,7 @@ service cloud.firestore {
             || (collectionName == 'clients' && permissionGranted(businessId, 'customers.view'))
             || (collectionName in ['products', 'productVariants'] && permissionGranted(businessId, 'products.view'))
             || (collectionName == 'stockMovements' && permissionGranted(businessId, 'inventory.view'))
-            || (collectionName == 'sales' && permissionGranted(businessId, 'sales.viewAll'))
+            || (collectionName == 'sales' && canReadOperationalSales(businessId))
             || (collectionName in ['payments', 'balanceAdjustments', 'balanceEvents', 'charges', 'paymentAllocations'] && (permissionGranted(businessId, 'financial.view') || permissionGranted(businessId, 'customers.receiveDebt') || permissionGranted(businessId, 'customers.adjustBalance')))
             || (collectionName in ['campaigns', 'campaignProgress', 'campaignEvents', 'campaignRedemptions', 'rewards', 'customerSubscriptions', 'customerSubscriptionEvents', 'messageHistory', 'messageTemplates', 'messageSequences', 'clientContacts', 'catalogOrders'] && (permissionGranted(businessId, 'sales.create') || permissionGranted(businessId, 'reports.view')))
             || (collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments', 'visits'] && permissionGranted(businessId, 'reports.view'))
@@ -1204,7 +1210,9 @@ service cloud.firestore {
       }
       match /activityEvents/{eventId} {
         allow read: if belongsToBusiness(businessId)
-          && (permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid)
+          && (permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid
+            || (resource.data.get('type', '') == 'sale' && canReadOperationalSales(businessId)
+              && canAccessSpace(businessId, resource.data.get('spaceId', ''))))
           && (!('spaceId' in resource.data) || canAccessSpace(businessId, resource.data.spaceId));
         allow create, update, delete: if false;
       }
@@ -1288,7 +1296,8 @@ service cloud.firestore {
           && (
             resource == null
             || (
-              (!memberExists(businessId) || permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid)
+              (!memberExists(businessId) || permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid
+                || (canReadOperationalSales(businessId) && canAccessSpace(businessId, resource.data.get('spaceId', ''))))
               && (!('spaceId' in resource.data) || canAccessSpace(businessId, resource.data.spaceId))
               && (!resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view') || permissionGranted(businessId, 'profit.view'))
             )

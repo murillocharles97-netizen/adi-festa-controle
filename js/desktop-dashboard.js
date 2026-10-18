@@ -139,18 +139,9 @@
       selected = range(period),
       sales = (db.vendas || []).filter(isValidSale),
       payments = db.pagamentos || [],
-      validClientIds = isAllSpaces
-        ? null
-        : new Set(
-            sales
-              .map((sale) => sale.clienteId || sale.clientId)
-              .filter(Boolean)
-              .map(String),
-          ),
       clients = (db.clientes || []).filter(
         (client) =>
-          client.ativo !== false &&
-          (isAllSpaces || validClientIds.has(String(client.id))),
+          client.ativo !== false && client.active !== false && !client.deletedAt,
       ),
       products = (db.produtos || []).filter(
         (product) => product.ativo !== false,

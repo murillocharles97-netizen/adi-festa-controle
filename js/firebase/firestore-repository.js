@@ -41,8 +41,9 @@ const cacheKey = (businessId, collectionName, variant) => {
   const uid=auth.currentUser?.uid||"anonymous",
     permissionSignature=window.BusinessContext?.get?.().permissionSignature||"none";
   const scope=window.BusinessContext?.get?.()||{};
-  return `${businessId}:${uid}:${permissionSignature}:${scope.spaceAccess}:${(scope.allowedSpaceIds||[]).join(',')}:${collectionName}:${variant}`;
+  return `${businessId}:${uid}:${permissionSignature}:${scope.spaceAccess}:${(scope.allowedSpaceIds||[]).join(',')}:store-sales-v2:${collectionName}:${variant}`;
 };
+const repositoryScopeKey=()=>cacheKey(requireBusinessId(),'session','visibility');
 const visibilityConstraints = (collectionName,spaceIds=null) => {
   if(collectionName==='products'){
     const context=window.BusinessContext?.get?.()||{};
@@ -54,13 +55,27 @@ const visibilityConstraints = (collectionName,spaceIds=null) => {
   if(['catalogOrders','stockMovements','sales','activityEvents'].includes(collectionName)){
     const context=window.BusinessContext?.get?.()||{};
     if(context.role==='owner')return [];
-    const ids=context.spaceAccess==='all'?(window.SpaceContext?.salesSpaces?.()||[]).map(s=>s.id):context.allowedSpaceIds||[];
+    const ids=spaceIds||(context.spaceAccess==='all'?(window.SpaceContext?.salesSpaces?.()||[]).map(s=>s.id):context.allowedSpaceIds||[]);
     if(ids.length>30)throw Error('Consulta de pedidos requer paginação por espaço para mais de 30 espaços autorizados.');
-    return [where('spaceId','in',ids.length?ids:['__no_authorized_space__']),...(['sales','activityEvents'].includes(collectionName)&&window.TeamAccess?.has?.('sales.viewAll')===false?[where('actorUid','==',requireUser().uid)]:[])];
+    const filters=[where('spaceId','in',ids.length?ids:['__no_authorized_space__'])];
+    if(window.TeamAccess?.has?.('sales.viewAll')===false){
+      const operational=window.TeamAccess?.canReadOperationalSales?.()===true;
+      if(collectionName==='activityEvents')filters.push(operational
+        ?or(where('type','==','sale'),where('actorUid','==',requireUser().uid))
+        :where('actorUid','==',requireUser().uid));
+      else if(collectionName==='sales'&&!operational)filters.push(where('actorUid','==',requireUser().uid));
+    }
+    return filters;
   }
-  return ["sales", "activityEvents"].includes(collectionName) && window.TeamAccess?.has?.("sales.viewAll") === false
-    ? [where("actorUid", "==", requireUser().uid)]
-    : [];
+  return [];
+};
+// A history OR doubles Firestore's disjunction count. Keep each bounded query
+// within 30 alternatives while preserving all authorized spaces and pagination.
+const activityGroups=()=>{
+  const c=window.BusinessContext?.get?.()||{};
+  if(c.role==='owner'||window.TeamAccess?.has?.('sales.viewAll')!==false||window.TeamAccess?.canReadOperationalSales?.()!==true)return null;
+  const ids=c.spaceAccess==='all'?(window.SpaceContext?.salesSpaces?.()||[]).map(s=>s.id):c.allowedSpaceIds||[];
+  return ids.length>15?Array.from({length:Math.ceil(ids.length/15)},(_,i)=>ids.slice(i*15,(i+1)*15)):null;
 };
 const cached = (key) => {
   const item = queryCache.get(key);
@@ -136,12 +151,18 @@ export function createFirestoreRepository(collectionName) {
   // than downloading a global variants collection and filtering it in the UI.
   const readVisible = async (constraints,{reader=getDocsFromServer,sort='__name__',direction='asc',max=null}={}) => {
     const context=window.BusinessContext?.get?.()||{};
-    const business=requireBusinessId(),uid=requireUser().uid,assertScope=()=>{if(business!==requireBusinessId()||uid!==requireUser().uid)throw Error('A empresa ou sessão ativa mudou.');};
+    const scopeKey=repositoryScopeKey(),assertScope=()=>{if(scopeKey!==repositoryScopeKey())throw Error('A empresa, sessão ou permissão ativa mudou.');};
     const merge=docs=>{
       assertScope();const unique=[...new Map(docs.map(d=>[d.id,d])).values()],val=d=>sort==='__name__'?d.id:d.data()[sort]?.toMillis?.()??d.data()[sort];
       unique.sort((a,b)=>{const x=val(a),y=val(b);return ((x<y?-1:x>y?1:0)*(direction==='desc'?-1:1))||a.id.localeCompare(b.id);});
       const selected=max?unique.slice(0,max):unique;return {docs:selected,size:selected.length,metadata:{fromCache:false,hasPendingWrites:false}};
     };
+    const groups=collectionName==='activityEvents'?activityGroups():null;
+    if(groups){
+      const docs=[],extra=constraints.slice(visibilityConstraints(collectionName).length);
+      for(const group of groups){assertScope();docs.push(...(await reader(query(collectionRef(),...visibilityConstraints(collectionName,group),...extra))).docs);}
+      return merge(docs);
+    }
     if(collectionName==='products'&&context.role!=='owner'&&context.spaceAccess!=='all'&&(context.allowedSpaceIds||[]).length>14){
       const docs=[],extra=constraints.slice(visibilityConstraints(collectionName).length),ids=context.allowedSpaceIds;
       for(let i=0;i<ids.length;i+=14){assertScope();const snap=await reader(query(collectionRef(),...visibilityConstraints(collectionName,ids.slice(i,i+14)),...extra));docs.push(...snap.docs);}
@@ -303,9 +324,7 @@ export function createFirestoreRepository(collectionName) {
         hit = !options.force && cached(key);
       if (hit) return hit;
       const snapshot = rememberMetadata(await timed("read", collectionName, () =>
-        getDocsFromServer(
-          query(collectionRef(), ...visibilityConstraints(collectionName), orderBy("createdAt", "desc"), limit(max)),
-        ),
+        readVisible([...visibilityConstraints(collectionName),orderBy('createdAt','desc'),limit(max)],{sort:'createdAt',direction:'desc',max}),
       ), "server");
       return cachePut(
         key,
@@ -384,10 +403,12 @@ export function createFirestoreRepository(collectionName) {
       };
     },
     async listAllPaged(max = 200) {
+      const scopeKey=repositoryScopeKey();
       const items = [];
       let cursor = null,
         hasMore = true;
       while (hasMore) {
+        if(scopeKey!==repositoryScopeKey())throw Error('A sessão ou permissão mudou durante a leitura.');
         const constraints = [...visibilityConstraints(collectionName), orderBy(documentId())];
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(max));
@@ -397,6 +418,7 @@ export function createFirestoreRepository(collectionName) {
           ),
           "server",
         );
+        if(scopeKey!==repositoryScopeKey())throw Error('A sessão ou permissão mudou durante a leitura.');
         items.push(...snapshot.docs.map((item) => convert(item)));
         cursor = snapshot.docs.at(-1) || null;
         hasMore = snapshot.docs.length === max;
@@ -494,12 +516,31 @@ export function createFirestoreRepository(collectionName) {
       };
     },
     subscribeRecent(callback, onError, max = 100) {
+      const scopeKey=repositoryScopeKey();
+      let stopped=false;
+      const current=()=>{try{return !stopped&&scopeKey===repositoryScopeKey();}catch{return false;}};
+      const groups=collectionName==='activityEvents'?activityGroups():null;
+      if(groups){
+        const latest=new Map(),stops=groups.map((group,index)=>{
+          listenerOpened(collectionName);
+          return onSnapshot(query(collectionRef(),...visibilityConstraints(collectionName,group),orderBy('createdAt','desc'),limit(max)),snapshot=>{
+            if(!current())return;
+            recordFirestoreOperation('listen',{collection:collectionName,documents:latest.has(index)?snapshot.docChanges().length:snapshot.size});latest.set(index,snapshot.docs);
+            if(latest.size!==groups.length)return;
+            const time=d=>d.data().createdAt?.toMillis?.()??new Date(d.data().createdAt).getTime(),docs=[...new Map([...latest.values()].flat().map(d=>[d.id,d])).values()].sort((a,b)=>time(b)-time(a)||b.id.localeCompare(a.id)),selected=docs.slice(0,max);
+            lastReadMetadata=snapshotMetadata({size:selected.length,metadata:snapshot.metadata},'listener');
+            callback(selected.map(convert),lastReadMetadata,{cursor:selected.at(-1)||null,hasMore:docs.length>=max});
+          },error=>{if(current())onError?.(error);});
+        });
+        return()=>{stopped=true;stops.forEach(stop=>{stop();listenerClosed(collectionName);});};
+      }
       let first = true,
         opened = true;
       listenerOpened(collectionName);
       const stop = onSnapshot(
         query(collectionRef(), ...visibilityConstraints(collectionName), orderBy("createdAt", "desc"), limit(max)),
         (snapshot) => {
+          if(!current())return;
           recordFirestoreOperation("listen", {
             collection: collectionName,
             documents: first ? snapshot.size : snapshot.docChanges().length,
@@ -513,6 +554,7 @@ export function createFirestoreRepository(collectionName) {
           });
         },
         (error) => {
+          if(!current())return;
           recordFirestoreOperation("listen", {
             collection: collectionName,
             error,
@@ -526,6 +568,7 @@ export function createFirestoreRepository(collectionName) {
         },
       );
       return () => {
+        stopped=true;
         if (opened) {
           opened = false;
           listenerClosed(collectionName);

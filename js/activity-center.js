@@ -31,6 +31,7 @@
     cloudLoading = false,
     cloudBusinessId = "",
     stopCloudSubscription = null;
+  const historyScopeKey=()=>window.TeamAccess?.operationalReadScopeKey?.()||JSON.stringify([window.BusinessContext?.get?.().businessId||'',window.FirebaseSession?.user?.uid||'']);
   const TYPE_META = {
     sale: { label: "Venda", icon: "shopping-cart", tone: "green" },
     payment: { label: "Pagamento", icon: "wallet-cards", tone: "green" },
@@ -515,11 +516,18 @@
       cloudIds = new Set(canonical.map((item) => item.id)),
       merged = [...canonical, ...pendingLocalEvents(db, cloudIds)],
       canViewAll = window.TeamAccess?.has?.("sales.viewAll") ?? true,
+      operational = window.TeamAccess?.canReadOperationalSales?.() === true,
       actorUid = window.FirebaseSession?.user?.uid || "",
       seenIds = new Set(),
       seenOperations = new Set();
     return merged
-      .filter((item) => canViewAll || String(item.actorUid || item.raw?.actorUid || "") === actorUid)
+      .filter((item) => canViewAll || operational&&item.type==='sale' || String(item.actorUid || item.raw?.actorUid || "") === actorUid)
+      .filter((item) => {
+        const c=window.BusinessContext?.get?.()||{},raw=item.raw||{},spaceId=raw.spaceId||raw.financialSpaceId||'',selected=window.SpaceContext?.homeId?.();
+        if(raw.businessId&&c.businessId&&raw.businessId!==c.businessId)return false;
+        if(c.role&&c.role!=='owner'&&c.spaceAccess!=='all'&&!(c.allowedSpaceIds||[]).includes(spaceId))return false;
+        return !selected||selected==='all_spaces'||spaceId===selected;
+      })
       .filter((item) => {
         const operationKey = item.operationId
           ? `${item.type}:${item.operationId}`
@@ -655,6 +663,7 @@
     });
   }
   function ensureCloudSubscription() {
+    const scopeKey=historyScopeKey();
     const businessId = String(
       window.BusinessContext?.get?.().businessId ||
         window.FirebaseSession?.profile?.businessId ||
@@ -665,17 +674,18 @@
       typeof window.SyncFirebase?.subscribeRecentActivityEvents !== "function"
     )
       return;
-    if (stopCloudSubscription && cloudBusinessId === businessId) return;
+    if (stopCloudSubscription && cloudBusinessId === scopeKey) return;
     closeCloudSubscription();
-    cloudBusinessId = businessId;
+    cloudBusinessId = scopeKey;
     stopCloudSubscription = window.SyncFirebase.subscribeRecentActivityEvents(
       (items, _metadata, page) => {
-        if (cloudBusinessId !== businessId) return;
+        if (cloudBusinessId !== scopeKey || historyScopeKey()!==scopeKey) return;
         mergeCloudEvents(items);
         cloudHasMore = Boolean(page?.hasMore);
         rerender();
       },
       (error) => {
+        if(cloudBusinessId!==scopeKey||historyScopeKey()!==scopeKey)return;
         console.warn("[Activity history listener]", {
           code: error?.code || "unknown",
         });
@@ -895,7 +905,8 @@
     }),
   );
   window.addEventListener?.("business-context-changed", (event) => {
-    if (!event.detail?.businessId) closeCloudSubscription();
+    if (!event.detail?.businessId || cloudBusinessId && cloudBusinessId!==historyScopeKey()) closeCloudSubscription();
   });
+  window.addEventListener?.('firebase-session-cleared',closeCloudSubscription);
   window.ActivityCenter = { render, bind, events, state };
 })();

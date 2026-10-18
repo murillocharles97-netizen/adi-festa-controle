@@ -344,8 +344,15 @@
       allSales = Array.isArray(db?.vendas) ? db.vendas : [],
       sales = allSales.filter((sale) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || knownIds.has(resolveSaleSpaceId(sale))) : saleBelongsTo(sale, selectionId, knownIds)),
       products = (Array.isArray(db?.produtos) ? db.produtos : []).filter((product) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || [...knownIds].some((id) => productAllowsSpace(product,id))) : productAllowsSpace(product, selectionId)),
-      clientIds = new Set(sales.map((sale) => sale.clienteId || sale.clientId).filter(Boolean)),
-      clients = (Array.isArray(db?.clientes) ? db.clientes : []).filter((client) => selectionId === ALL_SPACES || clientIds.has(client.id)),
+      // Existing clients are a shared business directory, not the set of
+      // customers who happened to buy from this device/operator. Honor any
+      // explicit space binding without inferring one from a sale or its actor.
+      clients = (Array.isArray(db?.clientes) ? db.clientes : []).filter((client) => {
+        if(client.businessId&&client.businessId!==state.businessId)return false;
+        const explicit=resolveSaleSpaceId(client);
+        if(!explicit)return true;
+        return selectionId===ALL_SPACES?(unrestrictedSpaces()||knownIds.has(explicit)):explicit===selectionId;
+      }),
       payments = (Array.isArray(db?.pagamentos) ? db.pagamentos : []).filter((payment) => recordBelongsTo(payment, selectionId)),
       catalogOrders = (Array.isArray(db?.catalogOrders) ? db.catalogOrders : []).filter((order) => recordBelongsTo(order, selectionId)),
       customerSubscriptions = (Array.isArray(db?.customerSubscriptions) ? db.customerSubscriptions : []).filter((subscription) => recordBelongsTo(subscription, selectionId)),
