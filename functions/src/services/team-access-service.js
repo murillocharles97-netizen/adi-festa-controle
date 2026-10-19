@@ -28,6 +28,19 @@ const ROLE_PRESETS=Object.freeze({
 });
 const VALID_ROLES=new Set(Object.keys(ROLE_PRESETS));
 const VALID_STATUSES=new Set(['active','invited','disabled']);
+const ACCESS_SNAPSHOT_KEYS=Object.freeze(['role','status','spaceAccess','allowedSpaceIds','permissions']);
+// Compare the stored access shape, not normalized presets: absent, false,
+// array-form grants and map-form grants must remain distinguishable.
+function canonicalAccessSnapshot(value){
+  const canonical=item=>Array.isArray(item)?['array',item.map(canonical)]:item&&typeof item==='object'
+    ?['object',Object.keys(item).sort().map(key=>[key,canonical(item[key])])]
+    :[typeof item,item];
+  return JSON.stringify(ACCESS_SNAPSHOT_KEYS.map(key=>{
+    if(!Object.prototype.hasOwnProperty.call(value,key))return[key,['absent']];
+    const item=key==='allowedSpaceIds'&&Array.isArray(value[key])?[...value[key]].sort():value[key];
+    return[key,canonical(item)];
+  }));
+}
 const text=(value,max=160)=>String(value||'').trim().slice(0,max);
 const email=value=>text(value,320).toLowerCase();
 const tokenHash=value=>crypto.createHash('sha256').update(String(value||'')).digest('hex');
@@ -184,7 +197,12 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     return writeFence(request,businessId).runTransaction(async transaction=>{
       const targetSnapshot=await transaction.get(targetRef);
       if(!targetSnapshot.exists)throw new HttpsError('not-found','Funcionário não encontrado.');
-      const current=targetSnapshot.data(),role=text(request.data?.role??current.role,40).toLowerCase(),status=text(request.data?.status??current.status,40).toLowerCase(),spaceAccess=request.data?.spaceAccess==='all'?'all':request.data?.spaceAccess==='selected'?'selected':current.spaceAccess;
+      const current=targetSnapshot.data(),expectedAccess=request.data?.expectedAccess;
+      if(expectedAccess!==undefined){
+        if(!expectedAccess||typeof expectedAccess!=='object'||Array.isArray(expectedAccess))throw new HttpsError('invalid-argument','Snapshot de acesso inválido.');
+        if(canonicalAccessSnapshot(expectedAccess)!==canonicalAccessSnapshot(current))throw new HttpsError('aborted','As permissões deste funcionário foram alteradas em outra sessão. Recarregue antes de salvar.');
+      }
+      const role=text(request.data?.role??current.role,40).toLowerCase(),status=text(request.data?.status??current.status,40).toLowerCase(),spaceAccess=request.data?.spaceAccess==='all'?'all':request.data?.spaceAccess==='selected'?'selected':current.spaceAccess;
       if(!VALID_ROLES.has(role)||!VALID_STATUSES.has(status))throw new HttpsError('invalid-argument','Cargo ou status inválido.');
       if(context.member.role!=='owner'&&(current.role==='owner'||role==='owner'))throw new HttpsError('permission-denied','Somente um proprietário pode alterar proprietários.');
       if(context.uid===targetUid&&context.member.role!=='owner'&&(role!==current.role||status!==current.status||spaceAccess!==current.spaceAccess||JSON.stringify(request.data?.permissions||current.permissions)!==JSON.stringify(current.permissions)||JSON.stringify(request.data?.allowedSpaceIds||current.allowedSpaceIds)!==JSON.stringify(current.allowedSpaceIds)))throw new HttpsError('permission-denied','Você não pode elevar o próprio acesso.');

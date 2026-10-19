@@ -5,13 +5,15 @@ import { normalizeFirestoreData } from "./firestore-utils.js";
 let memberStop = null;
 const businessId = () => String(window.BusinessContext?.get?.().businessId || window.FirebaseSession?.businessId || "");
 const callable = async (name, data = {}) => (await window.FirebaseCallable(name, data)).data;
-const convert = (snapshot) => normalizeFirestoreData({ id: snapshot.id, ...snapshot.data() });
+const convert = (snapshot) => normalizeFirestoreData({ ...snapshot.data(), id: snapshot.id });
 
 async function listMembers() {
   const id = businessId();
   if (!id || !window.TeamAccess?.has?.("team.view")) throw Error("Você não tem acesso à equipe.");
   const snapshot = await getDocs(query(collection(db, "businesses", id, "members"), orderBy("name")));
-  return snapshot.docs.map(convert);
+  // The member document ID is the canonical Auth UID, including old records
+  // without an inline uid. Never trust an inline alias to select the target.
+  return snapshot.docs.map(item => ({ ...convert(item), uid: item.id }));
 }
 async function listInvites() {
   const id = businessId();

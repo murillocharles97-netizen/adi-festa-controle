@@ -7,15 +7,16 @@
   const state = { members: [], invites: [], loading: false, error: "", filter: "all", search: "", businessId: "" };
   let loadingPromise = null, formBusy = false;
   const permissionLabels = {
-    "sales.create": "Criar vendas", "sales.cancel": "Cancelar vendas", "sales.viewAll": "Ver vendas da equipe",
-    "customers.view": "Ver clientes", "customers.edit": "Editar clientes", "customers.receiveDebt": "Receber fiado",
-    "customers.adjustBalance": "Ajustar saldo", "products.view": "Ver produtos", "products.edit": "Editar produtos",
-    "inventory.view": "Ver estoque", "inventory.adjust": "Ajustar estoque", "financial.view": "Ver Financeiro",
-    "reports.view": "Ver desempenho", "profit.view": "Ver lucro", "cost.view": "Ver custos",
+    "sales.create": "Criar vendas", "sales.cancel": "Cancelar vendas", "sales.viewAll": "Consultar e administrar vendas / pedidos",
+    "customers.view": "Ver clientes", "customers.edit": "Cadastrar e editar clientes", "customers.receiveDebt": "Receber fiado",
+    "customers.adjustBalance": "Ajustar saldo devedor", "products.view": "Ver produtos", "products.edit": "Cadastrar e editar produtos",
+    "inventory.view": "Ver estoque e movimentações", "inventory.adjust": "Ajustar estoque", "financial.view": "Consultar e movimentar Financeiro",
+    "reports.view": "Ver relatórios, CRM e campanhas", "profit.view": "Ver lucro (pode incluir custos)", "cost.view": "Ver e gerenciar custos (pode incluir lucro)",
     "team.view": "Ver equipe", "team.manage": "Gerenciar equipe", "settings.manage": "Gerenciar configurações",
     "billing.manage": "Gerenciar plano", "spaces.manage": "Gerenciar espaços",
   };
   const initials = (name) => String(name || "?").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const memberUid = item => item?.uid || item?.id || "";
   const roleLabel = (role) => window.TeamAccess?.ROLE_LABELS?.[role] || role || "Funcionário";
   const statusLabel = (status) => ({ active: "Ativo", invited: "Convite pendente", pending: "Convite pendente", disabled: "Desativado" })[status] || status;
   function spacesLabel(item) {
@@ -35,7 +36,7 @@
   }
   function memberCard(item) {
     const manageable = window.TeamAccess?.has?.("team.manage"), currentUid = window.FirebaseSession?.user?.uid;
-    return `<article class="team-member-card status-${esc(item.status)}"><span class="team-avatar">${esc(initials(item.name))}</span><div class="team-member-copy"><h3>${esc(item.name || item.email)}</h3><p>${esc(roleLabel(item.role))}</p><small>${icon("map-pin")} ${esc(spacesLabel(item))}</small></div><span class="team-status">${esc(statusLabel(item.status))}</span>${manageable ? `<button class="team-card-action" type="button" data-team-edit="${esc(item.uid)}" aria-label="Editar ${esc(item.name)}">${icon("ellipsis-vertical")}</button>` : ""}${item.uid === currentUid ? '<em class="team-you">Você</em>' : ""}</article>`;
+    return `<article class="team-member-card status-${esc(item.status)}"><span class="team-avatar">${esc(initials(item.name))}</span><div class="team-member-copy"><h3>${esc(item.name || item.email)}</h3><p>${esc(roleLabel(item.role))}</p><small>${icon("map-pin")} ${esc(spacesLabel(item))}</small></div><span class="team-status">${esc(statusLabel(item.status))}</span>${manageable ? `<button class="team-card-action" type="button" data-team-edit="${esc(memberUid(item))}" aria-label="Editar ${esc(item.name)}">${icon("ellipsis-vertical")}</button>` : ""}${memberUid(item) === currentUid ? '<em class="team-you">Você</em>' : ""}</article>`;
   }
   function inviteCard(item) {
     return `<article class="team-member-card status-invited"><span class="team-avatar">${esc(initials(item.name))}</span><div class="team-member-copy"><h3>${esc(item.name || item.email)}</h3><p>${esc(roleLabel(item.role))}</p><small>${icon("map-pin")} ${esc(spacesLabel(item))}</small><small>${esc(item.email)}</small></div><span class="team-status">Pendente</span>${window.TeamAccess?.has?.("team.manage")?`<button class="team-card-action" type="button" data-team-invite="${esc(item.id)}" aria-label="Opções do convite de ${esc(item.name)}">${icon("ellipsis-vertical")}</button>`:""}</article>`;
@@ -83,11 +84,13 @@
   }
   const roleOptions = (selected) => Object.entries(window.TeamAccess.ROLE_LABELS).filter(([id]) => id !== "owner" || window.BusinessContext?.get?.().role === "owner").map(([id, label]) => `<option value="${id}" ${selected === id ? "selected" : ""}>${esc(label)}</option>`).join("");
   function spacesFields(item = {}) {
-    const spaces = window.SpaceContext?.homeSpaces?.() || [], access = item.spaceAccess || (item.role === "owner" ? "all" : "selected"), selected = new Set(item.allowedSpaceIds || []);
+    const spaces = window.TeamPermissionModel.spaceOptions(window.SpaceContext?.homeSpaces?.() || [], item.allowedSpaceIds || [], window.BusinessContext?.get?.().businessId), access = item.spaceAccess || (item.role === "owner" ? "all" : "selected"), selected = new Set(item.allowedSpaceIds || []);
     return `<fieldset class="team-form-section"><legend>Espaços autorizados</legend><label class="team-radio"><input type="radio" name="spaceAccess" value="all" ${access === "all" ? "checked" : ""}><span><b>Todos os espaços</b><small>Acesso aos espaços atuais e futuros.</small></span></label><label class="team-radio"><input type="radio" name="spaceAccess" value="selected" ${access !== "all" ? "checked" : ""}><span><b>Espaços específicos</b><small>Mostra somente os espaços escolhidos.</small></span></label><div class="team-space-options" data-team-space-options>${spaces.map((space) => `<label><input type="checkbox" name="allowedSpaceIds" value="${esc(space.id)}" ${selected.has(space.id) ? "checked" : ""}><span>${esc(space.name)}</span></label>`).join("") || "<small>Nenhum espaço ativo.</small>"}</div></fieldset>`;
   }
   function permissionFields(item = {}) {
-    const role = item.role || "seller", values = window.TeamAccess.permissionsFor(role, item.permissions || {});
+    const role = item.role || "seller", values = item.uid || item.id && item.status !== "pending"
+      ? window.TeamPermissionModel.explicit(item)
+      : ["seller", "manager"].includes(role) ? window.TeamPermissionModel.preset(role) : window.TeamAccess.permissionsFor(role, item.permissions || {});
     return `<section class="team-quick-permissions"><h4>Permissões rápidas</h4><div>${[["sales.create","Vendas","shopping-cart"],["customers.view","Clientes","users"],["products.view","Produtos","tag"]].map(([key,label,symbol])=>`<button type="button" data-team-quick="${key}" aria-pressed="${Boolean(values[key])}">${icon(symbol)}<span>${label}</span>${icon("check-circle")}</button>`).join("")}</div></section><details class="team-permissions"><summary>Personalizar permissões</summary><div data-team-permissions>${Object.entries(permissionLabels).map(([key, label]) => `<label><input type="checkbox" name="permission:${esc(key)}" ${values[key] ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div></details>`;
   }
   function formModal(item = null, focusName = "") {
@@ -99,7 +102,7 @@
       const selected = form.elements.spaceAccess.value, box = $("[data-team-space-options]", form);
       box.hidden = selected === "all"; $$('input[type="checkbox"]', box).forEach((input) => input.disabled = selected === "all");
     }, applyPreset = () => {
-      const values = window.TeamAccess.permissionsFor(roleInput.value, window.TeamAccess.PRESETS[roleInput.value]);
+      const values = ["seller", "manager"].includes(roleInput.value) ? window.TeamPermissionModel.preset(roleInput.value) : window.TeamAccess.permissionsFor(roleInput.value, window.TeamAccess.PRESETS[roleInput.value]);
       Object.entries(values).forEach(([key, enabled]) => { const input = form.elements[`permission:${key}`]; if (input) input.checked = enabled; });
       if (roleInput.value === "owner") { form.elements.spaceAccess.value = "all"; syncSpace(); }
       syncPermissions();
@@ -113,7 +116,7 @@
     $$('[name^="permission:"]', form).forEach(input=>input.onchange=syncPermissions);
     $$('[name="spaceAccess"]', form).forEach((input) => input.onchange = syncSpace);
     roleInput.onchange = applyPreset; syncSpace(); syncPermissions();
-    if (item?.uid === window.FirebaseSession?.user?.uid && item.role === "owner") { roleInput.disabled=true; form.elements.status.disabled=true; }
+    if (memberUid(item) === window.FirebaseSession?.user?.uid && item?.role === "owner") { roleInput.disabled=true; form.elements.status.disabled=true; }
     const previousFocus = document.activeElement;
     const close = () => { if(formBusy)return; root.innerHTML=""; previousFocus?.focus?.(); };
     $$('[data-team-close]', root).forEach((button) => button.onclick = close);
@@ -133,7 +136,7 @@
       formBusy=true;
       button.disabled = true; button.textContent = editing ? "Salvando…" : "Criando convite…"; error.textContent = "";
       try {
-        if (editing) await window.TeamService.updateMember(item.uid, input);
+        if (editing) await window.TeamService.updateMember(item.uid || item.id, { ...input, expectedAccess: window.TeamPermissionModel.snapshot(item) });
         else {
           const result = await window.TeamService.createInvite({ ...input, email: fd.get("email") });
           inviteReady(result, fd.get("email"));
@@ -155,12 +158,21 @@
   }
   function memberMenu(item, invite=false) {
     if(!item||formBusy||!window.TeamAccess?.has?.("team.manage"))return;
-    const root=$("#modal"), selfOwner=item.uid===window.FirebaseSession?.user?.uid&&item.role==='owner';
+    const root=$("#modal"), selfOwner=memberUid(item)===window.FirebaseSession?.user?.uid&&item.role==='owner';
     root.onkeydown=null;
     root.innerHTML=`<div class="modal-bg"><section class="modal-box team-invite-ready" role="dialog" aria-modal="true" aria-label="Opções do funcionário"><header class="modal-head"><h3>${esc(item.name)}</h3><button class="icon-btn" data-team-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body team-menu">${invite?'<p>Um novo link substituirá o convite anterior, que deixará de funcionar.</p><button class="btn btn-primary" data-team-resend>Reenviar convite</button>':`<button class="btn btn-light" data-team-menu-edit="name">Editar</button>${selfOwner?'':`<button class="btn btn-light" data-team-menu-edit="role">Alterar cargo</button><button class="btn btn-light" data-team-menu-edit="">Alterar espaços</button><button class="btn btn-light" data-team-menu-edit="status">${item.status==='active'?'Desativar acesso':'Reativar'}</button>`}` }<p class="team-form-error" data-team-menu-error role="alert"></p></div></section></div>`;
     $("[data-team-close]",root).onclick=()=>{if(!formBusy)root.innerHTML="";};
-    $$('[data-team-menu-edit]',root).forEach(button=>button.onclick=()=>formModal(item,button.dataset.teamMenuEdit));
+    $$('[data-team-menu-edit]',root).forEach(button=>button.onclick=()=>["role", ""].includes(button.dataset.teamMenuEdit) && window.TeamPermissionEditor
+      ? window.TeamPermissionEditor.open(item) : formModal(item,button.dataset.teamMenuEdit));
     const resend=$("[data-team-resend]",root);
+    if (!invite && window.TeamPermissionEditor) {
+      const permissionsButton = document.createElement("button");
+      permissionsButton.type = "button"; permissionsButton.className = "btn btn-primary";
+      permissionsButton.textContent = "Permissões e espaços";
+      permissionsButton.dataset.teamPermissions = item.uid || item.id;
+      permissionsButton.onclick = () => window.TeamPermissionEditor.open(item);
+      $(".team-menu", root).prepend(permissionsButton);
+    }
     if(resend)resend.onclick=async()=>{if(formBusy)return;formBusy=true;resend.disabled=true;try{const result=await window.TeamService.createInvite({name:item.name,email:item.email,role:item.role,spaceAccess:item.spaceAccess,allowedSpaceIds:item.allowedSpaceIds||[],permissions:item.permissions||{},replaceInviteId:item.id});inviteReady(result,item.email);await load();}catch(error){$('[data-team-menu-error]',root).textContent=error.message||"Não foi possível reenviar.";resend.disabled=false;}finally{formBusy=false;}};
     window.lucide?.createIcons();
   }
@@ -170,7 +182,7 @@
     if(retry)retry.onclick=load;
     if(search)search.oninput=()=>{state.search=search.value;rerender();};
     $$('[data-team-filter]',root).forEach(button=>button.onclick=()=>{state.filter=button.dataset.teamFilter;rerender();});
-    $$('[data-team-edit]', root).forEach((button) => button.onclick = () => memberMenu(state.members.find((item) => item.uid === button.dataset.teamEdit)));
+    $$('[data-team-edit]', root).forEach((button) => button.onclick = () => memberMenu(state.members.find((item) => memberUid(item) === button.dataset.teamEdit)));
     $$('[data-team-invite]',root).forEach(button=>button.onclick=()=>memberMenu(state.invites.find(item=>item.id===button.dataset.teamInvite),true));
   }
   function bind() { bindActions($("[data-team-page]") || document); void load(); }

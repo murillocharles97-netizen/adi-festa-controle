@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>VECONI — Permissões / QA local</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/design-system/tokens.css">
+  <link rel="stylesheet" href="../css/mobile.css">
+  <link rel="stylesheet" href="../css/design-system/veconi-theme.css">
+  <link rel="stylesheet" href="../css/team.css">
+  <link rel="stylesheet" href="../css/team-permissions.css">
+  <style>
+    *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#eaf7fb;background:#031014}button{font:inherit}.qa-shell{display:grid;grid-template-columns:200px minmax(0,1fr);max-width:1800px;min-height:100vh;margin:auto}.qa-sidebar{padding:26px 18px;border-right:1px solid #17333d;background:#041217}.qa-brand{display:flex;align-items:center;gap:8px;font-weight:650;font-size:20px;letter-spacing:1px;margin-bottom:40px}.qa-brand img{width:32px;height:32px}.qa-sidebar nav{display:grid;gap:5px;color:#95b3c0;font-size:13px}.qa-sidebar nav span{display:flex;align-items:center;gap:12px;padding:14px 12px}.qa-sidebar nav svg{width:19px;height:19px}.qa-sidebar nav .selected{color:#00eded;border:1px solid #086c76;border-radius:9px;background:#00475155}.qa-main{min-width:0}.qa-topbar{min-height:74px;border-bottom:1px solid #17333d;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 28px;font-size:12px;color:#90acb9}.qa-topbar b{color:#d5edf4}.qa-topbar button{border:1px solid #35525f;background:#0b2933;padding:9px;border-radius:8px;color:#b4d6df;cursor:pointer}.qa-topbar select{background:#09212a;color:#b4d6df;border:1px solid #35525f;border-radius:6px;padding:7px;max-width:100%}#app{padding:26px}.qa-mobile-nav{display:none}.qa-state{color:#75ead9;font-size:11px;white-space:normal}
+    @media(max-width:760px){.qa-shell{grid-template-columns:minmax(0,1fr)}.qa-sidebar{display:none}.qa-topbar{min-height:62px;padding:12px 15px;flex-wrap:wrap;font-size:10px}.qa-topbar select{font-size:10px}#app{padding:10px 8px 88px}.qa-mobile-nav{position:fixed;bottom:0;left:0;right:0;height:64px;background:#06191ff5;border-top:1px solid #25424b;display:flex;align-items:center;justify-content:space-around;font-size:10px;color:#7d9ba8;z-index:30}.qa-mobile-nav b{color:#02e0de}.qa-state{font-size:10px}}
+  </style>
+</head>
+<body>
+  <div class="qa-shell">
+    <aside class="qa-sidebar"><div class="qa-brand"><img src="../assets/veconi-symbol.svg" alt="">VECONI</div><nav><span><i data-lucide="house"></i>Início</span><span><i data-lucide="shopping-cart"></i>Vendas</span><span><i data-lucide="users"></i>Clientes</span><span><i data-lucide="box"></i>Produtos</span><span><i data-lucide="wallet"></i>Financeiro</span><span><i data-lucide="store"></i>Loja online</span><span class="selected"><i data-lucide="users-round"></i>Equipe</span><span><i data-lucide="settings"></i>Configurações</span></nav></aside>
+    <div class="qa-main"><header class="qa-topbar"><span><b>VECONI QA</b> · Ambiente local, sem Firebase</span><label>Funcionário <select id="qa-member"><option value="seller">Ana Souza · QA</option><option value="stock">Estoque · legado QA</option><option value="sparse">Acesso esparso QA</option><option value="owner">Proprietário QA</option></select></label><button type="button" id="qa-switch-session">Simular troca de sessão</button><output class="qa-state" id="qa-state">0 gravações · nenhum dado real</output></header><main id="app"></main></div>
+  </div>
+  <nav class="qa-mobile-nav"><span>Início</span><span>Vendas</span><b>Equipe</b><span>Produtos</span></nav>
+  <div id="modal"></div>
+  <script src="../assets/lucide.min.js"></script>
+  <script src="../js/team-permission-model.js"></script>
+  <script>
+    const context={businessId:'qa-permissions',businessName:'VECONI QA · Loja principal',role:'owner',permissions:['*'],allowedSpaceIds:[],spaceAccess:'all'};
+    window.BusinessContext={get:()=>context};window.FirebaseSession={user:{uid:'owner-qa'}};
+    window.SpaceContext={homeSpaces:()=>[{id:'qa-a',name:'Loja principal',businessId:'qa-permissions'},{id:'qa-b',name:'VECONI QA — isolamento',businessId:'qa-permissions'}]};
+    const base={uid:'seller-qa',name:'Ana Souza · QA',email:'ana@example.test',role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:['qa-a'],permissions:TeamPermissionModel.preset('seller')};
+    const records={seller:base,stock:{...base,uid:'stock-qa',name:'Estoque · QA',role:'stock',permissions:{'products.view':true,'inventory.view':true,'inventory.adjust':true}},sparse:{...base,uid:'sparse-qa',name:'Vínculo esparso · QA',permissions:{'products.view':true}},owner:{...base,uid:'owner-qa',name:'Proprietário · QA',role:'owner',spaceAccess:'all',allowedSpaceIds:[],permissions:{}}};
+    records.sparse.id=records.sparse.uid;delete records.sparse.uid;
+    records.sparse.allowedSpaceIds=['qa-a','qa-legacy-space'];
+    let writes=0;window.TeamService={listMembers:async()=>Object.values(records),listInvites:async()=>[],updateMember:async(uid,payload)=>{await new Promise(resolve=>setTimeout(resolve,120));writes++;document.getElementById('qa-state').textContent=`${writes} gravações QA · ${uid} · ${Object.keys(payload.permissions).length} chaves`;return {member:{uid,...payload}};}};
+    document.getElementById('qa-switch-session').onclick=()=>{context.role='seller';context.permissions=['sales.create'];FirebaseSession.user={uid:'other-qa'};dispatchEvent(new CustomEvent('business-context-changed'));};
+  </script>
+  <script src="../js/team-access.js"></script>
+  <script src="../js/team-permission-editor.js"></script>
+  <script src="../js/team-page.js"></script>
+  <script>
+    function show(){TeamPermissionEditor.open(records[document.getElementById('qa-member').value],{onClose:()=>{document.getElementById('app').innerHTML='<p>Editor fechado sem mudar o vínculo. Escolha um funcionário QA no topo.</p>';}});}
+    document.getElementById('qa-member').onchange=show;
+    if(new URLSearchParams(location.search).get('page')==='list'){document.getElementById('app').innerHTML=TeamPage.render();TeamPage.bind();}else show();lucide.createIcons();
+  </script>
+</body>
+</html>
