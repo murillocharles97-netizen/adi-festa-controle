@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
-import './sync.js?v=188';
+import './sync.js?v=189';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';
@@ -260,6 +260,27 @@ async function completeLegacyMigrationManually(){
 
 let badgeSubscription=null;
 function updateCloudBadge(syncState){const badge=document.querySelector('.local-badge');if(!badge)return;const count=Number(syncState.queueTotal||0),ready=syncState.testPassed&&syncState.hydrated&&syncState.listenerConnected&&!count,map=syncState.status==='error'?['cloud-off','Nuvem','error']:syncState.status==='offline'?['cloud-off','Nuvem','offline']:['testing','waiting','syncing'].includes(syncState.status)||!ready?['refresh-cw','Nuvem','syncing']:syncState.status==='success'?['cloud','Nuvem','success']:['cloud','Nuvem','idle'];const[icon,text,status]=map;badge.dataset.syncStatus=status;badge.setAttribute('role','button');badge.setAttribute('tabindex','0');badge.setAttribute('aria-label',`${text}. ${count} alterações pendentes${!count&&(syncState.preservedOccurrences||syncState.archivedOccurrences)?`. ${syncState.message}`:''}`);badge.innerHTML=`<i data-lucide="${icon}"></i> ${text}${count?`<b class="cloud-count">${count}</b>`:''}`;window.lucide?.createIcons()}
+function bindAccountExit(user){
+  let button=document.querySelector('.avatar');
+  if(!button)return;
+  if(button.tagName!=='BUTTON'){
+    const replacement=document.createElement('button');
+    replacement.className=button.className;
+    replacement.textContent=button.textContent;
+    button.replaceWith(replacement);button=replacement;
+  }
+  button.type='button';
+  button.setAttribute('aria-label','Sair ou trocar de conta');
+  button.title='Sair ou trocar de conta';
+  button.dataset.accountUid=user.uid;
+  if(button.dataset.accountExitBound)return;
+  button.dataset.accountExitBound='1';
+  button.addEventListener('click',()=>{
+    const uid=button.dataset.accountUid;
+    if(!uid||auth.currentUser?.uid!==uid||window.FirebaseSession?.user?.uid!==uid)return;
+    void logout();
+  });
+}
 function showFirstBusinessOnboarding(context){
   if(context.businessId===INTERNAL_BUSINESS_ID)return;
   const key=`adiFesta:${context.businessId}:onboardingSeen`,data=DB.carregar();
@@ -301,6 +322,7 @@ async function allowed(user,profile,business,member,token){
   window.FirebaseSession={user,profile,member,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};
   window.FirebaseAuthActions={signOut:logout,updateBusiness:updateBusinessDetails,updateProfile:updateProfileDetails,updateTutorialVersion,sendPasswordReset,handleMembershipChange:change=>{void handleMembershipChange(change)},handleAccessRevoked:()=>{void handleMembershipChange({kind:'access-check-failed',code:'ACCESS_CHECK_FAILED'})}};
   document.querySelector('.avatar').textContent=(profile.name||user.email||'A')[0].toUpperCase();
+  bindAccountExit(user);
   document.querySelectorAll('[data-business-name]').forEach(node=>node.textContent=business.name);
   document.querySelector('.brand-sub')?.replaceChildren(document.createTextNode(business.name));
   syncSubscriptionShell(context);
