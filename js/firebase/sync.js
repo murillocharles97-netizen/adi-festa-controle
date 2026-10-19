@@ -538,16 +538,20 @@ const saveQueue = (queue) => {
   updateQueueState();
 };
 const queueCounts = () => {
-  try { readQueueStrict(); } catch {
-    return { pending: 0, errors: 1, total: 1, corrupt: true };
-  }
-  const queue = readQueue();
+  try {
+  const queue = readQueueStrict();
+  const quarantined = queue.filter(item => queueQuarantineReason(item) && !readQueueArchive(item)).length,
+    archived = queue.filter(item => readQueueArchive(item)).length;
   return {
     pending: queue.filter((item) => item.status !== "error" && !queueManualReviewReason(item)).length,
-    errors: queue.filter((item) => item.status === "error").length,
-    manualReview: queue.filter((item) => queueManualReviewReason(item)).length,
+    errors: queue.filter((item) => item.status === "error" && !queueQuarantineReason(item)).length,
+    manualReview: queue.filter((item) => queueManualReviewReason(item) && !readQueueArchive(item)).length,
+    quarantined, archived, active: queue.length - quarantined - archived,
     total: queue.length,
   };
+  } catch {
+    return {pending:0,errors:1,total:1,active:1,quarantined:0,archived:0,manualReview:0,corrupt:true};
+  }
 };
 const knownOrphanKey = () => `veconi:known-only-local-sales:${activeBusinessId()}:${deviceId()}`;
 const orphanReviewKey = () => `veconi:reviewed-only-local-sales:${activeBusinessId()}:${deviceId()}`;
@@ -652,7 +656,7 @@ function paymentIntegrityDiagnostics() {
     localWithoutQueue, queueWithoutLocal, onlyLocalAfterComparison, overdue,confirmedRemotely,verificationPending };
 }
 const queueErrorBreakdown = () => {
-  const errors = readQueue().filter((item) => item.status === "error");
+  const errors = readQueue().filter((item) => item.status === "error" && !queueQuarantineReason(item));
   return {
     permission: errors.filter((item) => item.lastErrorCode === "permission-denied").length,
     invalid: errors.filter((item) => item.lastErrorCode === "invalid-argument").length,
@@ -685,13 +689,15 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
-    reviewRequired: Boolean(queueManualReviewReason(item)),
-    reviewState: queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
+    reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    archive: readQueueArchive(item),
+    payloadChecksum: checksumValue(item.payload || {}),
     payloadVersion: Number(item.payloadVersion || 1),
     schemaVersion: Number(item.schemaVersion || 1),
     deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
     origin: item.origin || item.source || "legado",
-    status: queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+    status: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
     originalStatus: item.status || "pending",
     subtype: item.subtype || queueSubtype(item),
     collection: String(item.payload?.writes?.[0]?.entityType || ""),
@@ -732,6 +738,26 @@ function saleQueueRequiresReview(item) {
 function queueReviewKey(item) {
   return `${queueKey()}:manualReview:${encodeURIComponent(String(item.queueId || item.operationId || "missing"))}`;
 }
+function queueArchiveKey(item) {
+  return `${queueKey()}:incidentArchive:${encodeURIComponent(String(item.operationId || "missing"))}`;
+}
+function readQueueArchive(item) {
+  const raw = localStorage.getItem(queueArchiveKey(item));
+  if (!raw) return null;
+  let value;try { value = JSON.parse(raw); } catch { /* fail closed */ }
+  if (!value || value.status !== "archived" || value.operationId !== item.operationId ||
+      value.businessId !== item.businessId || value.actorUid !== item.userId ||
+      value.payloadChecksum !== checksumValue(item.payload || {}) || value.commercialEffectsApplied !== false)
+    throw Object.assign(Error("O recibo do arquivamento precisa de revisão. Nenhum envio foi permitido."),
+      {code:"queue-archive-evidence-invalid"});
+  return value;
+}
+function preservedQueueMessage(counts = queueCounts()) {
+  if (counts.active || counts.corrupt) return "";
+  if (counts.quarantined) return `${counts.quarantined} ocorrência${counts.quarantined === 1 ? " preservada" : "s preservadas"} para análise. Nenhuma sincronização pendente.`;
+  if (counts.archived) return `${counts.archived} ocorrência${counts.archived === 1 ? " arquivada" : "s arquivadas"}. Nenhuma sincronização pendente.`;
+  return "";
+}
 function readQueueReview(item) {
   const raw = localStorage.getItem(queueReviewKey(item));
   if (!raw) return null;
@@ -762,9 +788,11 @@ function isHistoricalProjectionBatch(item) {
   return onlyProjection && privateChanges;
 }
 function queueQuarantineReason(item) {
+  if (readQueueArchive(item)) return "archived";
   if (readQueueReview(item)) return "quarantined";
-  if (["quarantined","manual_review"].includes(item.status) ||
-      ["quarantined","manual_review"].includes(item.reviewStatus) ||
+  if (item.lastErrorCode === "queue-operation-archived") return "remote_archive_fence";
+  if (["quarantined","manual_review","archived"].includes(item.status) ||
+      ["quarantined","manual_review","archived"].includes(item.reviewStatus) ||
       item.quarantined === true || item.reviewRequired === true)
     return "explicit_manual_review";
   if (isHistoricalProjectionBatch(item)) return "historical_projection_without_user_action";
@@ -790,6 +818,44 @@ function preserveQueueQuarantine(item) {
     payloadChecksum:checksumValue(item.payload || {}),originalPacketJson:JSON.stringify(item),
   }));
   return true;
+}
+const incidentArchiveTasks = new Map();
+async function archiveQuarantinedOperation(operationId) {
+  if (incidentArchiveTasks.has(operationId)) return incidentArchiveTasks.get(operationId);
+  const task = (async () => {
+    await validateUser();
+    const generation = syncSessionGeneration, uid = currentUser?.uid, businessId = activeBusinessId(), key = queueKey();
+    const assertOrigin = () => {
+      if (generation !== syncSessionGeneration || currentUser?.uid !== uid || activeBusinessId() !== businessId || queueKey() !== key)
+        throw Object.assign(Error("A sessão mudou. A evidência foi preservada; abra novamente o diagnóstico na conta de origem."), {code:"sync-session-obsolete"});
+    };
+    const item = readQueueStrict().find(entry => entry.operationId === operationId);
+    if (!item || item.userId !== uid || item.businessId !== businessId || !queueQuarantineReason(item))
+      throw Error("Somente uma ocorrência em quarentena da conta atual pode ser arquivada.");
+    preserveQueueQuarantine(item);
+    const evidence = readQueueReview(item), originalPacketJson = evidence.originalPacketJson;
+    if (JSON.stringify(item) !== originalPacketJson) throw Error("O pacote difere da evidência original. O arquivamento foi interrompido.");
+    await DB.flush?.();assertOrigin();
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(originalPacketJson));assertOrigin();
+    const contentHash = Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,"0")).join("");
+    const response = await window.FirebaseCallable("archiveSyncIncident", {
+      businessId,workspaceGeneration:DB.getWorkspaceGeneration(),originalPacketJson,contentHash,
+      payloadChecksum:evidence.payloadChecksum,
+    });assertOrigin();
+    const receipt = response.data ?? response;
+    if (receipt.status !== "archived" || receipt.operationId !== operationId || receipt.businessId !== businessId ||
+        receipt.actorUid !== uid || receipt.contentHash !== contentHash || receipt.payloadChecksum !== evidence.payloadChecksum ||
+        receipt.commercialEffectsApplied !== false || !receipt.archivedBy || !receipt.archivedAt)
+      throw Error("O encerramento não foi confirmado. O original continua preservado e sem reenvio.");
+    if (JSON.stringify(readQueueStrict().find(entry=>entry.operationId === operationId)) !== originalPacketJson)
+      throw Error("A fila mudou. A evidência remota foi preservada; revise antes de continuar.");
+    // Append a separate receipt. Neither the original queue nor its quarantine
+    // evidence is rewritten/deleted, even after a lost response or account swap.
+    localStorage.setItem(queueArchiveKey(item), JSON.stringify(receipt));
+    await DB.flush?.();assertOrigin();updateQueueState();
+    return receipt;
+  })().finally(()=>incidentArchiveTasks.delete(operationId));
+  incidentArchiveTasks.set(operationId,task);return task;
 }
 const queuePreflight = (item) => {
   if (queueQuarantineReason(item))
@@ -1193,7 +1259,9 @@ const diagnostic = () => {
     sessionWrites: usage.writes,
     sessionQueries: usage.queries,
     averageLatencyMs: usage.averageLatencyMs,
-    pendingOperations: q.total,
+    pendingOperations: q.active,
+    preservedOccurrences: q.quarantined,
+    archivedOccurrences: q.archived,
     pending: q.pending,
     syncErrors: q.errors,
     queueStorageCorrupt: Boolean(q.corrupt),
@@ -1248,7 +1316,9 @@ const emit = (patch) => {
       ...state,
       pending: counts.pending,
       errors: counts.errors,
-      queueTotal: counts.total,
+      queueTotal: counts.active,
+      preservedOccurrences: counts.quarantined,
+      archivedOccurrences: counts.archived,
       details: diagnostic(),
     };
   snapshot.orphanOperations = snapshot.details.orphanOperations ||
@@ -1270,21 +1340,24 @@ function updateQueueState() {
       status: "offline",
       message: orphanCount
         ? `Offline — ${orphanCount} operação(ões) com pendência comprovada para revisão`
-        : q.total
-        ? `Offline — ${q.total} alteração(ões) pendente(s)`
+        : q.active
+        ? `Offline — ${q.active} alteração(ões) pendente(s)`
         : "Offline — salvo no aparelho",
     });
   else if (orphanCount && state.status !== "syncing") {
     const message=`${orphanCount} operação(ões) com pendência comprovada na última análise. Veja os registros no diagnóstico.`;
     emit({ status: "error", message,queueDiagnosticWarning:{businessId:activeBusinessId(),message} });
   }
-  else if (q.total && state.status !== "syncing")
+  else if (q.active && state.status !== "syncing")
     emit({
       status: q.errors ? "error" : "waiting",
       message: q.errors
         ? `Sincronização incompleta: ${q.errors} alteração(ões) com erro e ${q.pending} pendente(s).`
-        : `${q.total} alteração(ões) aguardando sincronização`,
+        : `${q.active} alteração(ões) aguardando sincronização`,
     });
+  else if (preservedQueueMessage(q) && state.status !== "syncing" && !state.syncFailure &&
+      state.testPassed && state.hydrated && state.listenerConnected && !state.dataAudit?.integrity?.actionable)
+    emit({status:"success",message:preservedQueueMessage(q)});
   else if(state.status==='error'&&!state.syncFailure&&state.dataAudit?.businessId===activeBusinessId()&&
       state.queueDiagnosticWarning?.businessId===activeBusinessId()&&state.message===state.queueDiagnosticWarning.message){
     const unverified=(salesDiagnostic.verificationPending?.length||0)+(paymentsDiagnostic.verificationPending?.length||0),actionable=state.dataAudit.integrity?.actionable;
@@ -2081,6 +2154,8 @@ async function commitQueueItem(item) {
     assertSession();
     currentPath = `businesses/${businessId}/processedOperations/${operationId}`;
     const processed = await transaction.get(marker);
+    if (processed.exists() && processed.data()?.status === "archived_without_effects")
+      throw Object.assign(Error("Esta operação foi arquivada sem efeitos e não pode ser reenviada."), {code:"queue-operation-archived"});
     if (processed.exists()) return;
     const onlineSaleWrite = writes.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data?.onlineOrderId);
     let onlineClaim=null;
@@ -3122,7 +3197,10 @@ async function processSyncQueue(options = {}) {
       reviewHeld,
       financialConflicts,
       financialAdjustments,
-      pending: counts.total,
+      pending: counts.pending,
+      manualReview: counts.manualReview,
+      quarantined: counts.quarantined,
+      archived: counts.archived,
       errors: counts.errors,
       errorBreakdown: queueErrorBreakdown(),
       paused: cloudPaused,
@@ -3684,7 +3762,7 @@ async function publishSyncSignal(collections, status = "ok") {
       sourceSessionId: syncSessionId,
       revision,
       collectionVersions,
-      pendingOperations: queueCounts().total,
+      pendingOperations: queueCounts().active,
       syncedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
@@ -4668,8 +4746,9 @@ function queueOperationDiagnostic(item) {
     lastErrorPath: item.lastErrorPath || null,
     lastErrorCode: String(item.lastErrorCode || ""),
     lastErrorMessage: cleanMessage(item.lastErrorMessage),
-    reviewRequired: Boolean(queueManualReviewReason(item)),
-    reviewState: queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
+    reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    archive: readQueueArchive(item),
     // Older queues did not persist the first failure. Never label creation or
     // the last attempt as the first failure, nor change the queue to export it.
     firstFailureAt: item.firstFailureAt || item.firstFailedAt || null,
@@ -4753,7 +4832,7 @@ async function exportLocalDiagnostic() {
       createdAt: item.createdAtLocal || item.createdAt || "",
       updatedAt: item.updatedAt || "",
       retryCount: Number(item.retryCount || item.attempts || 0),
-      status: queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+      status: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
       originalStatus: item.status || "pending",
       errorCode: item.lastErrorCode || "",
       errorMessage: queueOperationDiagnostic(item).lastErrorMessage,
@@ -5551,7 +5630,7 @@ async function compareLocalAndCloud() {
       remote,
       countsMatch,
       balancesMatch,
-      ok: queueCounts().total === 0 && countsMatch && balancesMatch,
+      ok: queueCounts().active === 0 && countsMatch && balancesMatch,
       newestByCollection: { ...state.cloudNewest },
     };
   emit({ comparison });
@@ -5560,14 +5639,19 @@ async function compareLocalAndCloud() {
 function describeSyncResult(result = {}) {
   if (result.offline)
     return "Sem conexão. As alterações continuam salvas neste aparelho.";
+  if (result.syncFailure)
+    return "Há uma falha ativa de sincronização. Veja os detalhes.";
   const pending = Number(result.pending || 0),
     errors = Number(result.errors || 0),
     sent = Number(result.sent || 0);
   if(result.dataSynced&&result.integrityStatus==='failed')return 'Dados sincronizados. Não foi possível concluir a verificação de integridade; veja os detalhes.';
   if(result.dataSynced&&result.integrity?.actionable)return `Sincronizado com sucesso. ${result.integrity.level==='CRITICO'?'Integridade crítica':'Integridade requer atenção'}: veja os registros e motivos. Nenhum reparo financeiro foi aplicado.`;
-  if(result.complete)return result.integrity?.level==='INFORMATIVO'?'Sincronizado com sucesso. Alguns registros históricos foram analisados.':'Todos os dados estão sincronizados.';
+  if (!pending && !errors && !result.manualReview && !result.syncFailure &&
+      (!result.comparison || result.comparison.ok) && (result.quarantined || result.archived))
+    return preservedQueueMessage({active:0,quarantined:result.quarantined,archived:result.archived});
   if (result.dataSynced && result.comparison && !result.comparison.ok)
     return "Dados atualizados. A comparação de integridade identificou diferenças; veja os detalhes antes de qualquer correção.";
+  if(result.complete)return result.integrity?.level==='INFORMATIVO'?'Sincronizado com sucesso. Alguns registros históricos foram analisados.':'Todos os dados estão sincronizados.';
   if (sent && result.errorBreakdown?.permission)
     return `${sent} operação(ões) sincronizada(s). ${result.errorBreakdown.permission} continuam bloqueadas por permissão.`;
   if (!sent && result.errorBreakdown?.invalid)
@@ -5640,7 +5724,7 @@ async function runManualSync({manualRetry = false} = {}) {
   const
     comparison = await compareLocalAndCloud(),
     counts = queueCounts(),
-    complete = counts.total === 0 && counts.errors === 0,
+    complete = counts.active === 0 && counts.errors === 0 && !state.syncFailure,
     time = now(),
     result = {
       ...push,
@@ -5649,9 +5733,13 @@ async function runManualSync({manualRetry = false} = {}) {
       comparison,
       pending: counts.pending,
       errors: counts.errors,
-      queueTotal: counts.total,
+      queueTotal: counts.active,
+      quarantined: counts.quarantined,
+      archived: counts.archived,
+      manualReview: counts.manualReview - counts.quarantined,
+      syncFailure: state.syncFailure || null,
       complete,
-      dataSynced: counts.total === 0 && counts.errors === 0,
+      dataSynced: counts.active === 0 && counts.errors === 0,
       attemptedAt: attemptTime,
     };
   if (push.sent || counts.errors)
@@ -5662,7 +5750,7 @@ async function runManualSync({manualRetry = false} = {}) {
   lastError = ""; lastErrorCode = "";
   traceSync("data_sync_completed", {dataSynced: result.dataSynced, countSummariesMatch: comparison.ok, sent: push.sent, received});
   emit({
-    status: complete ? "success" : "error",
+    status: result.syncFailure ? "error" : complete ? "success" : "error",
     message: describeSyncResult(result),
     lastSync: result.dataSynced ? time : state.lastSync,
     lastCompleteSync: complete ? time : state.lastCompleteSync,
@@ -5681,7 +5769,7 @@ async function runManualSync({manualRetry = false} = {}) {
     } catch {
       result.integrityStatus = "failed";
     }
-    emit({status:result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
+    emit({status:result.syncFailure?'error':result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
     traceSync("completed", {dataSynced: true, integrityStatus: result.integrityStatus,integrityLevel:result.integrity?.level||'unknown',integrityMatches:result.integrity?!result.integrity.actionable:null});
   }
   return result;
@@ -5711,7 +5799,7 @@ async function runAutomaticSync() {
     if (push.sent || received || projection?.repaired) {
       const time = now(),
         counts = queueCounts(),
-        complete = counts.total === 0 && counts.errors === 0;
+        complete = counts.active === 0 && counts.errors === 0 && !state.syncFailure;
       writeSyncTime(lastAttemptKey(), time);
       if (complete) {
         writeSyncTime(lastSyncKey(), time);
@@ -5719,9 +5807,9 @@ async function runAutomaticSync() {
       }
       await DB.flush?.();
       emit({
-        status: complete ? "success" : counts.errors ? "error" : "waiting",
-        message: complete
-          ? "Todos os dados estão sincronizados."
+        status: state.syncFailure ? "error" : complete ? "success" : counts.errors ? "error" : "waiting",
+        message: state.syncFailure ? describeSyncResult({syncFailure:state.syncFailure}) : complete
+          ? preservedQueueMessage(counts) || "Todos os dados estão sincronizados."
           : describeSyncResult({
               sent: push.sent,
               pending: counts.pending,
@@ -6609,7 +6697,9 @@ window.SyncFirebase = {
     callback({
       ...state,
       ...queueCounts(),
-      queueTotal: queueCounts().total,
+      queueTotal: queueCounts().active,
+      preservedOccurrences: queueCounts().quarantined,
+      archivedOccurrences: queueCounts().archived,
       orphanOperations: details.orphanOperations || (state.dataAudit ? 0 : "Não verificado"),
       details,
     });
@@ -6621,6 +6711,7 @@ window.SyncFirebase = {
   runFirebaseDiagnostic,
   getFirebaseDiagnostic: diagnostic,
   getQueueDiagnostics: queueDiagnostics,
+  archiveQuarantinedOperation,
   getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,
   // Read-only recovery source. Never normalize, acknowledge or save this queue.
   recoverySnapshot: () => {

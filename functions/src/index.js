@@ -48,6 +48,9 @@ exports.submitSaleRecovery=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.submi
 exports.listSaleRecoveryReviews=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.list(request));
 exports.getSaleRecoveryOriginal=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.original(request));
 exports.decideSaleRecovery=onCall(RECOVERY_OPTIONS,request=>saleRecoveries.decide(request));
+const syncIncidents=require('./services/sync-incident-service').syncIncidentService(db,{FieldValue});
+exports.archiveSyncIncident=onCall(RECOVERY_OPTIONS,request=>syncIncidents.archive(request));
+exports.getSyncIncidentArchive=onCall(RECOVERY_OPTIONS,request=>syncIncidents.get(request));
 exports.createSpreadsheetProducts=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5},request=>productSpreadsheetService(db,{FieldValue}).createProducts(request));
 const MP_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN');
 const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');

@@ -151,12 +151,18 @@ service cloud.firestore {
           && (resource == null || request.resource.data.diff(resource.data).affectedKeys().hasAny(['workspaceWriteId']))
         ));
     }
+    function notArchivedSyncOperation(businessId) {
+      let id = request.resource == null ? '' : request.resource.data.get('operationId', '');
+      return !(id is string) || id == ''
+        || !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(id));
+    }
     function canWriteCollection(businessId, collectionName) {
       let modern = memberExists(businessId);
       let member = modern ? teamMember(businessId) : {};
       let privileged = member.get('role','') in ['owner','platform_admin'];
       let grants = member.get('permissions',{});
       return workspaceWriteAllowed(businessId)
+        && notArchivedSyncOperation(businessId)
         && subscriptionAllowsWrites(businessId)
         && planAllowsCollection(businessId, collectionName)
         && (
@@ -1067,6 +1073,7 @@ service cloud.firestore {
       match /processedOperations/{operationId} {
         allow read: if canReadCollection(businessId, 'processedOperations');
         allow create: if canRecordProcessedOperation(businessId)
+          && !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(operationId))
           && request.resource.data.id == operationId
           && request.resource.data.idempotencyKey == operationId
           && request.resource.data.businessId == businessId
@@ -1078,6 +1085,12 @@ service cloud.firestore {
             'eventKind', 'processedAt', 'createdAtLocal', 'schemaVersion', 'workspaceGeneration', 'workspaceWriteId'
           ]);
         allow update, delete: if false;
+      }
+      // Originals may contain private historical snapshots. Only authenticated
+      // callable services expose a scoped receipt; clients cannot edit evidence.
+      match /syncIncidentArchives/{operationId} {
+        allow read, write: if false;
+        match /{document=**} { allow read, write: if false; }
       }
       match /campaignEvents/{eventId} {
         allow read: if belongsToBusiness(businessId);

@@ -1,0 +1,15 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VECONI — Sync QA local</title>
+<link rel="stylesheet" href="../../css/style.css">
+<link rel="stylesheet" href="../../css/firebase.css">
+<link rel="stylesheet" href="../../css/firebase-audit.css">
+<style>
+body{display:block;background:#f4f7f9;color:#15353b;font-family:system-ui}main{padding:24px;max-width:900px;margin:auto}.qa-controls{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.modal-bg{position:fixed;inset:0;background:#102b3a66;display:flex;justify-content:center;align-items:center;padding:12px;z-index:2000}.modal-box{background:#fff;border-radius:16px;max-width:760px;max-height:94vh;overflow:auto;width:100%;word-break:break-word}.modal-head,.modal-foot{padding:16px;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between}.modal-body{padding:16px}.btn{min-height:44px}code,small{display:block;overflow-wrap:anywhere}#qa-result{padding:12px;background:#ddf7f0;border-radius:12px}
+</style></head><body><main>
+<h1>Sync — validação local</h1><p>Dados sintéticos. Renderer real da interface; ações simuladas. Sem conexão com produção.</p>
+<div class="qa-controls"><button class="btn local-badge">Nuvem</button><button class="btn" id="qa-active-error">Simular erro real</button><button class="btn" id="qa-reset">Voltar à quarentena</button></div>
+<p id="qa-result" role="status">1 ocorrência preservada para análise. Nenhuma sincronização pendente.</p><p id="qa-invariants">Tentativas: 2 · Checksum: fnv1a:12345678 · Efeitos comerciais: 0</p>
+</main><div id="modal"></div>
+<script src="./sync-incident-browser.js"></script><script type="module" src="/qa-sync-ui.js"></script>
+</body></html>

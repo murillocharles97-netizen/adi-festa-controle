@@ -1,4 +1,4 @@
-import './sync.js?v=187';
+import './sync.js?v=188';
 import '../sale-recovery-client.js?v=183';
 import '../sale-recovery-ui.js?v=183';
 
@@ -109,13 +109,34 @@ function exportOnlyLocalSales(){
   catch(error){notify(error.message||'Compare com a nuvem antes de exportar.',true)}
 }
 
+function incidentArchiveHtml(items){
+  const incidents=items.filter(item=>['quarantined','archived'].includes(item.reviewState));
+  if(!incidents.length)return '';
+  return `<section class="sync-error-list" aria-label="Ocorrências preservadas"><h4>Ocorrências preservadas</h4>${incidents.map(item=>`<article><b>${item.reviewState==='archived'?'Arquivada / resolvida — reenvio bloqueado':'Preservada para análise — sem tentativa ativa'}</b><p>Nenhuma venda, baixa de estoque ou alteração financeira é executada por este arquivamento.</p><code>${escape(item.operationId)}</code><small>Checksum: ${escape(item.payloadChecksum)} · Tentativas preservadas: ${escape(item.retryCount)}</small>${item.archive?`<p>Encerrada em ${escape(formattedTime(item.archive.archivedAt))} · responsável: ${escape(item.archive.archivedBy)}.</p>`:`<button class="btn btn-light" type="button" data-archive-incident="${escape(item.operationId)}">Arquivar ocorrência sem reenviar</button>`}</article>`).join('')}</section>`;
+}
+function confirmIncidentArchive(operationId,filter={}){
+  const item=(window.SyncFirebase.getQueueDiagnostics?.()||[]).find(i=>i.operationId===operationId&&i.reviewState==='quarantined');
+  if(!item)return;
+  const root=document.querySelector('#modal');
+  root.innerHTML=`<div class="modal-bg"><section class="modal-box" role="dialog" aria-modal="true" aria-label="Arquivar ocorrência"><header class="modal-head"><h3>Arquivar ocorrência sem reenviar?</h3></header><div class="modal-body"><p>O registro original e a auditoria serão preservados. O reenvio desta operação ficará bloqueado permanentemente.</p><p>Esta ação não executa venda nem altera estoque, Financeiro ou fiado. Não afeta outras operações.</p><code>${escape(operationId)}</code><p role="status" data-archive-result></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-archive-back>Voltar</button><button class="btn btn-primary" type="button" data-archive-confirm>Confirmar arquivamento</button></footer></section></div>`;
+  const button=root.querySelector('[data-archive-confirm]'),back=root.querySelector('[data-archive-back]');
+  back.onclick=()=>openQueueDetails(filter);
+  button.focus();
+  button.onclick=async()=>{
+    button.disabled=true;back.disabled=true;button.textContent='Preservando evidência…';
+    try{await window.SyncFirebase.archiveQuarantinedOperation(operationId);openQueueDetails(filter);notify('Ocorrência arquivada. Evidência preservada e reenvio bloqueado.');}
+    catch(error){root.querySelector('[data-archive-result]').textContent=window.SyncFirebase.describeError?.(error)||'Não foi possível confirmar o arquivamento. O original continua preservado.';button.disabled=false;back.disabled=false;button.textContent='Confirmar arquivamento';}
+  };
+}
 function openQueueDetails(filter={}){
   const state=lastState||{},details=state.details||{},items=window.SyncFirebase.getQueueDiagnostics?.()||[],errors=items.filter(item=>item.status==='error'),processing=items.filter(item=>item.status==='syncing').length,root=document.querySelector('#modal');
   root.innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide sync-diagnostics-modal"><header class="modal-head"><h3>Sincronização ${state.queueTotal?'incompleta':'dos dados'}</h3><button class="icon-btn close" type="button"><i data-lucide="x"></i></button></header><div class="modal-body"><div class="firebase-sync-grid"><span>Pendentes</span><strong>${escape(state.pending||0)}</strong><span>Com erro</span><strong>${escape(state.errors||0)}</strong><span>Processando</span><strong>${escape(processing)}</strong><span>Última tentativa</span><strong>${escape(formattedTime(details.lastAttemptAt))}</strong><span>Última sincronização completa</span><strong>${escape(formattedTime(details.lastCompleteSyncAt||state.lastSync))}</strong><span>Listener remoto</span><strong>${details.listenerConnected?'Ativo':'Inativo'}</strong><span>BusinessId</span><strong>${escape(details.userBusinessId||'—')}</strong><span>Build</span><strong>${escape(window.AdiFestaBuild?.shortCommit||'local')}</strong><span>Projeto</span><strong>${escape(details.projectId||'—')}</strong></div><section class="sync-error-list"><h4>Erros recentes</h4>${errors.length?errors.slice(0,50).map(item=>`<article><b>${escape(item.entityType)} · ${escape(item.action)}</b><small>${escape(formattedTime(item.createdAt))}</small><p>${escape(item.errorCode||'erro')}: ${escape(item.errorMessage||'A operação precisa de atenção.')}</p><code>${escape(item.operationId.slice(0,10))}… · ${escape(item.origin)}</code></article>`).join(''):'<p>Nenhuma operação marcada com erro neste aparelho.</p>'}</section></div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-light" type="button" data-open-technical>Ver diagnóstico técnico</button><button class="btn btn-primary" type="button" data-retry-all>${errors.length?'Reprocessar todos':'Tentar novamente'}</button></footer></section></div>`;
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
   root.querySelector('.modal-body')?.insertAdjacentHTML('beforeend',operationConfirmationHtml(details));
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
-  const held=items.filter(item=>item.reviewRequired),quarantined=held.filter(item=>item.reviewState==='quarantined'),retainedSales=held.filter(item=>item.reviewState!=='quarantined');
+  const held=items.filter(item=>item.reviewRequired),quarantined=held.filter(item=>item.reviewState==='quarantined'),retainedSales=held.filter(item=>item.reviewState==='manual_review');
+  errorSection?.insertAdjacentHTML('beforebegin',incidentArchiveHtml(items));
+  root.querySelectorAll('[data-archive-incident]').forEach(button=>button.onclick=()=>confirmIncidentArchive(button.dataset.archiveIncident,filter));
   if(quarantined.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning" role="status"><b>${quarantined.length} operação(ões) em quarentena</b><p>Registro preservado para análise. Envio e alteração automática estão bloqueados, inclusive ao sincronizar manualmente.</p></section>`);
   if(retainedSales.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning" role="status"><b>${retainedSales.length} venda(s) preservada(s) — aguardando revisão</b><p>O reenvio dessas operações está bloqueado, inclusive na sincronização manual. Seus registros e erros originais foram mantidos neste aparelho para evitar baixa ou receita duplicada.</p></section>`);
   const dataAudit=details.dataAudit||state.dataAudit||null,scope=dataAudit?.financial?.balanceScope;
