@@ -371,7 +371,7 @@ const queueSubtype = (item = {}) => {
   );
   if (names.has("payments")) return "payment_received";
   if (names.has("balanceAdjustments")) return "balance_adjustment";
-  if (names.has("sales")) return "credit_sale";
+  if (names.has("sales")) return kind || "simple";
   if (names.has("messageHistory")) return "message_history";
   if (names.has("clientContacts")) return "customer_contact";
   if (names.has("stockMovements")) return "stock_movement";
