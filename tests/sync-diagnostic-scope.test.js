@@ -27,7 +27,7 @@ test('no audit is unverified, not an assertion that a record is missing remotely
 });
 test('a resolved diagnostic warning clears only itself, never a permission/Sync failure',()=>{
   const s=sale(),h=runtime({vendas:[s],pagamentos:[]},{sales:{onlyLocal:[{...metadata(s),classification:'B'}]}}),c=h.c;
-  c.navigator={onLine:true};c.queueCounts=()=>({total:0,errors:0,pending:0});c.emit=patch=>Object.assign(c.state,patch);c.state.status='success';vm.runInContext(section(source,'function updateQueueState()','function reportError('),c);
+  c.navigator={onLine:true};c.queueCounts=()=>({total:0,active:0,errors:0,pending:0});c.emit=patch=>Object.assign(c.state,patch);c.state.status='success';vm.runInContext(section(source,'function preservedQueueMessage(', 'function readQueueReview(')+section(source,'function updateQueueState()','function reportError('),c);
   c.updateQueueState();assert.equal(c.state.status,'error');assert.ok(c.state.queueDiagnosticWarning);
   c.state.dataAudit={businessId:'qa',collections:{sales:{equal:[metadata(s)]}},integrity:{actionable:false}};c.updateQueueState();assert.equal(c.state.status,'success');assert.equal(c.state.queueDiagnosticWarning,null);
   const permission={code:'permission-denied'};c.state.status='error';c.state.message='Falha de permissão';c.state.syncFailure=permission;c.state.queueDiagnosticWarning={businessId:'qa',message:'Falha de permissão'};c.updateQueueState();assert.equal(c.state.status,'error');assert.equal(c.state.syncFailure,permission);assert.equal(c.state.message,'Falha de permissão');

@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
-import './sync.js?v=189';
+import './sync.js?v=190';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';

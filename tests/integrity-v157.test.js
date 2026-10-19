@@ -83,6 +83,9 @@ test('preflight prevents even a modified fixture or partial queued write from re
  const c={window:{IntegrityAudit:audit,DB:{carregar:()=>({clientes:[{id:'c1',criadoEm:'2026-09-24T10:34:12.474Z',nome:'Mariana Silva',saldo:-360}]})}},SOURCES:{clients:{key:'clientes'}},CLOUD_NAMES:['clients'],activeBusinessId:()=> 'adi-festa',currentUser:{uid:'owner'}};
  vm.createContext(c);vm.runInContext(source.slice(source.indexOf('const queuePreflight ='),source.indexOf('const readPullState ='))+'\nthis.preflight=queuePreflight;',c);
  c.window.DB.getWorkspaceGeneration=()=>0;
+ // This fixture is not quarantined; quarantine behavior has its own suite.
+ c.queueQuarantineReason=()=>'';
+ c.saleQueueRequiresReview=()=>false;
  const result=c.preflight({businessId:'adi-festa',userId:'owner',operationId:'operation',payload:{writes:[{entityType:'clients',entityId:'c1',operation:'update',data:{saldo:-360}}]}});
  assert.equal(result.ok,false);assert.equal(result.code,'legacy-fixture-upload-blocked');
 });

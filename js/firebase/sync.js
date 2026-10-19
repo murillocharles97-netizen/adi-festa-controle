@@ -3945,7 +3945,7 @@ async function pullCloudCollections(options = {}) {
       documents: documentsRead,
     });
   await syncStep("saving_pull_cursor", async () => { writePullState(pullState); await DB.flush?.(); }, { service: "IndexedDB" });
-  if (full) lastFullPullForAudit = {businessId, entries: pendingApplications};
+  if (full) lastFullPullForAudit = {businessId, sessionScope:namespace(), entries: pendingApplications};
   lastPullAt = Date.now();
   emit({
     cloudCounts: { ...state.cloudCounts },
@@ -4598,14 +4598,18 @@ function buildFinancialBalanceAudit(raw, effectItems = []) {
   };
 }
 async function compareDeviceWithCloud(options = {}) {
+  const generation=syncSessionGeneration,uid=currentUser?.uid,scope=namespace();
+  const current=()=>generation===syncSessionGeneration&&uid===currentUser?.uid&&uid===auth.currentUser?.uid&&scope===namespace();
   state.integrityStatus = "checking";
   state.integrityFailure = null;
   try {
     const result = await syncStep("orphan_comparison", () => performDeviceComparison(options), {service: "Firestore"});
     await DB.flush?.();
+    if(!current())throw Object.assign(Error('A sessão da auditoria foi substituída.'),{code:'sync-session-retired'});
     emit({integrityStatus: "completed", integrityFailure: null});
     return result;
   } catch (error) {
+    if(!current())throw error;
     console.error("[SYNC INTEGRITY ERROR]", error.syncDetail);
     // The optional audit must not rewrite the result/timestamp of data transfer.
     emit({integrityStatus: "failed", integrityFailure: error.syncDetail});
@@ -4619,25 +4623,34 @@ async function performDeviceComparison(options = {}) {
       code: "network-request-failed",
     });
   const businessId = activeBusinessId(),
+    generation=syncSessionGeneration,uid=currentUser?.uid,scope=namespace(),
+    assertAuditSession=()=>{if(generation!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||businessId!==activeBusinessId()||scope!==namespace())throw Object.assign(Error('A sessão da auditoria foi substituída.'),{code:'sync-session-retired'});},
+    allowed=name=>typeof window.TeamAccess?.has==='function'&&canPullSource(name)===true,
     data = DB.carregar(),
     queue = readQueue(),
     collections = {},
-    raw = {};
+    raw = {},skippedCollections=[],
+    prefetchedEntries=options.prefetched?.businessId===businessId&&options.prefetched.sessionScope===scope?options.prefetched.entries:[];
   const protectedNames={products:'productFinancials',productVariants:'variantFinancials',sales:'saleFinancials'},projections={};
   for(const [publicName,name] of Object.entries(protectedNames)){
-    if(!canPullSource(name))continue;
-    const prefetched=options.prefetched?.businessId===businessId?options.prefetched.entries.find(entry=>entry.name===name):null;
+    assertAuditSession();
+    if(!allowed(name)){skippedCollections.push({name,reason:'permission_scope'});continue;}
+    const prefetched=prefetchedEntries.find(entry=>entry.name===name);
     const remoteItems=prefetched?prefetched.documents:await syncStep('orphan_comparison',()=>repositories[name].listAllPaged(200),{service:'Firestore',collection:name,businessId,request:'listAllPaged'});
+    assertAuditSession();
     const localItems=sourceItems(data,name);
     projections[publicName]={localFinancial:new Map(localItems.map(x=>[String(x.id),x])),remoteFinancial:new Map(remoteItems.map(x=>[String(x.id),x]))};
     raw[name]={localItems,remoteItems};
     collections[name]=classifyCollectionAudit(name,localItems,remoteItems,queue);
   }
   for (const name of AUDIT_NAMES) {
+    assertAuditSession();
+    if(!allowed(name)){skippedCollections.push({name,reason:'permission_scope'});continue;}
     const localItems = sourceItems(data, name),
-      remoteItems = options.prefetched?.businessId === businessId && options.prefetched.entries.some(entry => entry.name === name)
-        ? options.prefetched.entries.find(entry => entry.name === name).documents
+      remoteItems = prefetchedEntries.some(entry => entry.name === name)
+        ? prefetchedEntries.find(entry => entry.name === name).documents
         : await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"});
+    assertAuditSession();
     raw[name] = { localItems, remoteItems };
     collections[name] = classifyCollectionAudit(
       name,
@@ -4647,19 +4660,28 @@ async function performDeviceComparison(options = {}) {
       projections[name],
     );
   }
-  const remoteFinancialEffects =
-      await syncStep("orphan_comparison", () => financialEffectsRepository.listAllPaged(200), {service: "Firestore", collection: "balanceEvents", businessId, request: "listAllPaged"}),
-    balanceAudit = buildFinancialBalanceAudit(raw, remoteFinancialEffects);
-  const balanceScope=window.IntegrityAudit.balanceScope(data.clientes,raw.clients.remoteItems),
-    localBalance = (data.clientes || []).reduce(
+  // A ledger audit needs all its sources. Missing authorization is not an empty
+  // ledger, a zero balance, a remote absence, or permission to repair anything.
+  const financialAudited=allowed('payments')&&['clients','sales','payments','balanceAdjustments'].every(name=>Boolean(raw[name]));
+  const remoteFinancialEffects = financialAudited
+      ? await syncStep("orphan_comparison", () => financialEffectsRepository.listAllPaged(200), {service: "Firestore", collection: "balanceEvents", businessId, request: "listAllPaged"})
+      : [];
+  assertAuditSession();
+  if(!financialAudited)skippedCollections.push({name:'balanceEvents',reason:allowed('payments')?'incomplete_authorized_sources':'permission_scope'});
+  const balanceAudit = financialAudited?buildFinancialBalanceAudit(raw, remoteFinancialEffects):null;
+  const balanceScope=financialAudited?window.IntegrityAudit.balanceScope(data.clientes,raw.clients.remoteItems):null,
+    localBalance = financialAudited?(data.clientes || []).reduce(
       (total, client) => total + Number(client.saldo || 0),
       0,
-    ),
-    remoteBalance = raw.clients.remoteItems.reduce(
+    ):null,
+    remoteBalance = financialAudited?raw.clients.remoteItems.reduce(
       (total, client) => total + Number(client.saldo || 0),
       0,
-    ),
-    summarize = (names) => ({
+    ):null,
+    summarize = (names) => {
+      names=names.filter(name=>collections[name]);
+      return {
+      status:names.length?'audited':'not_audited',
       local: names.reduce(
         (total, name) => total + collections[name].localTotal,
         0,
@@ -4684,15 +4706,16 @@ async function performDeviceComparison(options = {}) {
         (total, name) => total + collections[name].equal.length,
         0,
       ),
-    }),
+    };},
     report = {
       generatedAt: now(),
       businessId,
       deviceId: deviceId(),
       collections,
+      auditScope:{auditedCollections:Object.keys(collections),skippedCollections,financialAudited},
       products: summarize(["products", "productVariants"]),
       clients: summarize(["clients"]),
-      financial: {
+      financial: financialAudited?{
         ...summarize(["sales", "payments", "balanceAdjustments"]),
         localBalance:balanceScope.localActiveBalance,
         remoteBalance:balanceScope.remoteActiveBalance,
@@ -4711,7 +4734,7 @@ async function performDeviceComparison(options = {}) {
           ...collections.balanceAdjustments.possibleDuplicates.remote,
         ],
         balanceAudit,
-      },
+      }:{status:'not_audited',reason:allowed('payments')?'incomplete_authorized_sources':'permission_scope',message:'Financeiro não auditado neste perfil'},
       queue: queueCounts(),
       integrity: window.IntegrityAudit.severity(collections,balanceAudit),
       fixtureCleanup: data.localFixtureCleanup || null,
@@ -4725,7 +4748,7 @@ async function performDeviceComparison(options = {}) {
   };
   try {
     localStorage.setItem(knownOrphanKey(), JSON.stringify(
-      report.collections.sales.onlyLocal.map((item) => String(item.documentId))));
+      (report.collections.sales?.onlyLocal||[]).map((item) => String(item.documentId))));
   } catch (error) { console.warn("[Only-local audit cache]", error?.message || error); }
   emit({ dataAudit: report });
   updateQueueState();
@@ -5619,15 +5642,16 @@ async function compareLocalAndCloud() {
       historicalFiado: Number(state.cloudFinancial.historicalFiado || 0),
       fiadoIncludingHistory: Number(state.cloudFinancial.fiadoIncludingHistory ?? state.cloudFinancial.fiado ?? 0),
     };
-  const countsMatch =
-      local.clientes === remote.clients &&
-      local.produtos === remote.products &&
-      local.vendas === remote.sales &&
-      local.pagamentos === remote.payments,
-    balancesMatch = Math.abs(local.fiado - remote.fiado) < 0.01,
+  const checks={clients:local.clientes===remote.clients,products:local.produtos===remote.products,
+      sales:local.vendas===remote.sales,payments:local.pagamentos===remote.payments},
+    auditedCollections=Object.keys(checks).filter(name=>canPullSource(name)),
+    financialAudited=canPullSource('payments')&&canPullSource('clients'),
+    countsMatch=auditedCollections.every(name=>checks[name]),
+    balancesMatch = !financialAudited || Math.abs(local.fiado - remote.fiado) < 0.01,
     comparison = {
       local,
       remote,
+      scope:{collections:auditedCollections,financialAudited},
       countsMatch,
       balancesMatch,
       ok: queueCounts().active === 0 && countsMatch && balancesMatch,
