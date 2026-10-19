@@ -525,7 +525,15 @@ const readQueueStrict = () => {
   return parsed;
 };
 const saveQueue = (queue) => {
-  readQueueStrict();
+  const previous = readQueueStrict();
+  for (const item of previous) {
+    if (!queueQuarantineReason(item)) continue;
+    const next = queue.find(entry => entry.queueId === item.queueId &&
+      entry.operationId === item.operationId);
+    if (!next || JSON.stringify(next) !== JSON.stringify(item))
+      throw Object.assign(Error("A operação em quarentena foi preservada sem alterações."),
+        {code:"queue-quarantined-immutable"});
+  }
   localStorage.setItem(queueKey(), JSON.stringify(queue));
   updateQueueState();
 };
@@ -535,8 +543,9 @@ const queueCounts = () => {
   }
   const queue = readQueue();
   return {
-    pending: queue.filter((item) => item.status !== "error").length,
+    pending: queue.filter((item) => item.status !== "error" && !queueManualReviewReason(item)).length,
     errors: queue.filter((item) => item.status === "error").length,
+    manualReview: queue.filter((item) => queueManualReviewReason(item)).length,
     total: queue.length,
   };
 };
@@ -676,12 +685,14 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
-    reviewRequired: saleQueueRequiresReview(item),
+    reviewRequired: Boolean(queueManualReviewReason(item)),
+    reviewState: queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     payloadVersion: Number(item.payloadVersion || 1),
     schemaVersion: Number(item.schemaVersion || 1),
     deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
     origin: item.origin || item.source || "legado",
-    status: item.status || "pending",
+    status: queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+    originalStatus: item.status || "pending",
     subtype: item.subtype || queueSubtype(item),
     collection: String(item.payload?.writes?.[0]?.entityType || ""),
     paths: (item.payload?.writes || []).map((write) =>
@@ -702,11 +713,12 @@ const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
-const canAttempt = (item, force = false) =>
-  force ||
-  !item.lastAttemptAt ||
-  Date.now() - new Date(item.lastAttemptAt).getTime() >=
-    retryDelay(item.attempts || 0, item.lastErrorCode);
+const canAttempt = (item, force = false, manualRetry = false) =>
+  !queueManualReviewReason(item) &&
+  (manualRetry || item.status !== "error") &&
+  (force || !item.lastAttemptAt ||
+    Date.now() - new Date(item.lastAttemptAt).getTime() >=
+      retryDelay(item.attempts || 0, item.lastErrorCode));
 function saleQueueRequiresReview(item) {
   // Previously denied sales may have been re-entered by another operator.
   // A permission fix must not silently replay their commercial effects. This
@@ -715,7 +727,73 @@ function saleQueueRequiresReview(item) {
     (item.payload?.writes || []).some((write) =>
       write.entityType === "sales" && write.operation === "create");
 }
+// Quarantine is separate metadata. The queued packet, including its error,
+// payload and original IDs, is evidence and must never be rewritten to hold it.
+function queueReviewKey(item) {
+  return `${queueKey()}:manualReview:${encodeURIComponent(String(item.queueId || item.operationId || "missing"))}`;
+}
+function readQueueReview(item) {
+  const raw = localStorage.getItem(queueReviewKey(item));
+  if (!raw) return null;
+  let value;
+  try { value = JSON.parse(raw); } catch { /* fail closed */ }
+  if (!value || value.status !== "quarantined" ||
+      value.operationId !== String(item.operationId || "") ||
+      value.businessId !== String(item.businessId || "") ||
+      value.userId !== String(item.userId || ""))
+    throw Object.assign(Error("A evidência da quarentena precisa de revisão."),
+      {code:"queue-quarantine-evidence-invalid"});
+  return value;
+}
+function isHistoricalProjectionBatch(item) {
+  if (!["simple", "legacy"].includes(item.payload?.eventKind || "simple")) return false;
+  const writes = item.payload?.writes;
+  if (!Array.isArray(writes) || !writes.length || !writes.some(w=>w.entityType === "sales")) return false;
+  const metadata = new Set(["operationId","idempotencyKey","businessId","entityType","action","createdAt","schemaVersion"]);
+  const privateFields = {products:["custo","cost"],productVariants:["cost","custo"],sales:["custoTotal","lucro"]};
+  let privateChanges = false;
+  const onlyProjection = writes.every(write => {
+    const fields = privateFields[write.entityType];
+    if (!fields || write.operation !== "update" || !write.data || typeof write.data !== "object") return false;
+    const keys = Object.keys(write.data);
+    if (keys.some(key=>fields.includes(key))) privateChanges = true;
+    return keys.every(key=>fields.includes(key) || metadata.has(key));
+  });
+  return onlyProjection && privateChanges;
+}
+function queueQuarantineReason(item) {
+  if (readQueueReview(item)) return "quarantined";
+  if (["quarantined","manual_review"].includes(item.status) ||
+      ["quarantined","manual_review"].includes(item.reviewStatus) ||
+      item.quarantined === true || item.reviewRequired === true)
+    return "explicit_manual_review";
+  if (isHistoricalProjectionBatch(item)) return "historical_projection_without_user_action";
+  return "";
+}
+function queueManualReviewReason(item) {
+  return queueQuarantineReason(item) || (saleQueueRequiresReview(item) ? "sale_recovery_review_required" : "");
+}
+function preserveQueueQuarantine(item) {
+  const reason = queueQuarantineReason(item);
+  if (!reason) return false;
+  const existing = readQueueReview(item);
+  if (existing) {
+    if (existing.originalPacketJson !== JSON.stringify(item))
+      throw Object.assign(Error("A operação difere da evidência preservada. Nenhum envio foi permitido."),
+        {code:"queue-quarantine-evidence-conflict"});
+    return true;
+  }
+  localStorage.setItem(queueReviewKey(item), JSON.stringify({
+    version:1,status:"quarantined",reason,recordedAt:now(),
+    operationId:String(item.operationId || ""),queueId:String(item.queueId || ""),
+    businessId:String(item.businessId || ""),userId:String(item.userId || ""),
+    payloadChecksum:checksumValue(item.payload || {}),originalPacketJson:JSON.stringify(item),
+  }));
+  return true;
+}
 const queuePreflight = (item) => {
+  if (queueQuarantineReason(item))
+    return {ok:false,code:"queue-quarantined",message:"Operação em quarentena. O registro original foi preservado para revisão, sem envio."};
   const businessId = activeBusinessId(),
     writes = Array.isArray(item.payload?.writes) ? item.payload.writes : [];
   const generation=window.DB.getWorkspaceGeneration();
@@ -1362,6 +1440,8 @@ function migrateLegacyQueue() {
     legacy = JSON.parse(localStorage.getItem(LEGACY_QUEUE_KEY)) || [];
   } catch {}
   if (!legacy.length) return;
+  // Leave an explicitly retained legacy source untouched for manual review.
+  if (legacy.some(item => queueManualReviewReason(item))) return;
   localStorage.setItem(
     `${queueKey()}:legacyBackup:${Date.now()}`,
     JSON.stringify(legacy),
@@ -1422,6 +1502,7 @@ function validateQueueOwnership() {
   const businessId = activeBusinessId(),
     queue = readQueue(),
     next = queue.map((item) => {
+      if (queueManualReviewReason(item)) return item;
       const mismatch =
         (item.businessId && item.businessId !== businessId) ||
         (item.userId && item.userId !== currentUser.uid);
@@ -1445,7 +1526,10 @@ function migrateScopedQueueCompatibility() {
   let migrated = 0,
     blocked = 0;
   const next = queue.map((item) => {
+    if (preserveQueueQuarantine(item)) return item;
     if (saleQueueRequiresReview(item)) return item;
+    // A permanent failure is evidence. Compatibility is not an authorized retry.
+    if (item.status === "error") return item;
     const copy = structuredClone(item),
       writes = Array.isArray(copy.payload?.writes) ? copy.payload.writes : [];
     copy.queueId ||= crypto.randomUUID();
@@ -1498,12 +1582,7 @@ function migrateScopedQueueCompatibility() {
       copy.status = "error";
       copy.lastErrorCode = "legacy-payload-unsupported";
       copy.lastErrorMessage = `Operação legada preservada: coleção ${invalidWrite.entityType || "indefinida"} não reconhecida.`;
-    } else if (
-      copy.status === "syncing" ||
-      ["invalid-argument", "legacy-payload-unsupported"].includes(
-        copy.lastErrorCode,
-      )
-    ) {
+    } else if (copy.status === "syncing") {
       copy.status = "pending";
       copy.lastErrorCode = null;
       copy.lastErrorMessage = null;
@@ -1600,6 +1679,7 @@ function resumePreparedSales(operationId = "") {
   const data = DB.carregar();
   let promoted = 0;
   for (const item of prepared) {
+    if (queueManualReviewReason(item)) continue;
     if (item.source === "payment-write-ahead") {
       const paymentWrite = (item.payload?.writes || []).find((entry) =>
           entry.entityType === "payments" && entry.operation === "create"),
@@ -2829,6 +2909,7 @@ async function processSyncQueue(options = {}) {
       collections: [],
     };
   const force = Boolean(options.force);
+  const manualRetry = options.manualRetry === true;
   const generation=syncSessionGeneration,uid=currentUser?.uid,businessId=state.userProfile?.businessId;
   const current=()=>generation===syncSessionGeneration&&uid===currentUser?.uid&&uid===auth.currentUser?.uid&&businessId===state.userProfile?.businessId;
   const assertSession=()=>{if(!current())throw Object.assign(Error('A sessão da fila foi substituída. Nenhuma confirmação foi aplicada na nova conta.'),{code:'sync-session-retired'});};
@@ -2863,6 +2944,11 @@ async function processSyncQueue(options = {}) {
       changedCollections = new Set();
     for (const queued of [...queue]) {
       assertSession();
+      if (queueManualReviewReason(queued)) {
+        preserveQueueQuarantine(queued);
+        reviewHeld++;
+        continue;
+      }
       // A preparação nunca pode chegar ao Firestore antes da venda local.
       if (queued.status === "local_preparing") continue;
       if (
@@ -2906,7 +2992,7 @@ async function processSyncQueue(options = {}) {
         }
         continue;
       }
-      if (!canAttempt(queued, force)) continue;
+      if (!canAttempt(queued, force, manualRetry)) continue;
       const live = readQueue(),
         position = live.findIndex((item) => item.queueId === queued.queueId);
       if (position < 0) continue;
@@ -3054,6 +3140,7 @@ async function processSyncQueue(options = {}) {
 function pendingIds(name) {
   const ids = new Set();
   for (const item of readQueue())
+    if (!isHistoricalProjectionBatch(item))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
   return ids;
@@ -4581,7 +4668,8 @@ function queueOperationDiagnostic(item) {
     lastErrorPath: item.lastErrorPath || null,
     lastErrorCode: String(item.lastErrorCode || ""),
     lastErrorMessage: cleanMessage(item.lastErrorMessage),
-    reviewRequired: saleQueueRequiresReview(item),
+    reviewRequired: Boolean(queueManualReviewReason(item)),
+    reviewState: queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     // Older queues did not persist the first failure. Never label creation or
     // the last attempt as the first failure, nor change the queue to export it.
     firstFailureAt: item.firstFailureAt || item.firstFailedAt || null,
@@ -4665,7 +4753,8 @@ async function exportLocalDiagnostic() {
       createdAt: item.createdAtLocal || item.createdAt || "",
       updatedAt: item.updatedAt || "",
       retryCount: Number(item.retryCount || item.attempts || 0),
-      status: item.status || "pending",
+      status: queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+      originalStatus: item.status || "pending",
       errorCode: item.lastErrorCode || "",
       errorMessage: queueOperationDiagnostic(item).lastErrorMessage,
       technical: queueOperationDiagnostic(item),
@@ -5491,19 +5580,19 @@ function describeSyncResult(result = {}) {
     return "Sincronização incompleta: os dados locais e da nuvem ainda divergem.";
   return "Sincronização incompleta. Tente novamente ou veja os detalhes.";
 }
-function synchronizeNow() {
+function synchronizeNow(options = {}) {
   if (manualSyncPromise) return manualSyncPromise;
   manualSyncPromise = (async () => {
     if (automaticSyncPromise) await automaticSyncPromise;
     state.syncFailure = null;
     state.syncTrace = [];
     traceSync("manual_sync_started", {authenticated: Boolean(auth.currentUser), online: navigator.onLine});
-    try { return await syncStep("manual_sync", runManualSync); }
+    try { return await syncStep("manual_sync", () => runManualSync(options)); }
     catch(error) { reportError(error, "Manual sync"); throw error; }
   })().finally(() => { manualSyncPromise = null; });
   return manualSyncPromise;
 }
-async function runManualSync() {
+async function runManualSync({manualRetry = false} = {}) {
   const attemptTime = now();
   writeSyncTime(lastAttemptKey(), attemptTime);
   emit({ lastAttempt: attemptTime });
@@ -5530,7 +5619,7 @@ async function runManualSync() {
   const migration = await syncStep("queue_migration", migrateScopedQueueCompatibility, {service: "IndexedDB"});
   await syncStep("queue_ownership", validateQueueOwnership);
   traceSync("queue_state", queueCounts());
-  const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true }), {service: "Firestore"});
+  const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true, manualRetry }), {service: "Firestore"});
   if (push.paused && push.reason !== "subscription_read_only") {
       const counts = queueCounts(),
       result = {
@@ -6389,6 +6478,7 @@ function pendingActivityEvents() {
     },
     events = new Map();
   for (const queued of readQueue()) {
+    if (isHistoricalProjectionBatch(queued)) continue;
     for (const write of queued.payload?.writes || []) {
       const prefix = prefixes[write.entityType],
         entityId = String(write.entityId || "");
