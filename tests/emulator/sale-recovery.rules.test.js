@@ -7,6 +7,7 @@ const {saleRecoveryService}=require('../../functions/src/services/sale-recovery-
 let env,app,db,service;
 const emulator=Boolean(process.env.FIRESTORE_EMULATOR_HOST),t=(name,fn)=>test(name,{skip:!emulator},fn);
 const doc=(name,id)=>db.doc(`businesses/${f.bid}/${name}/${id}`);
+const payloadHash=p=>require('node:crypto').createHash('sha256').update(require('../../js/sale-recovery-client').canonical(p)).digest('hex');
 async function businessSnapshot(){
  const paths=['products','productVariants','stockMovements','sales','saleFinancials','financialIncomeRoutes','clients','payments','balanceEvents','activityEvents','settings','campaignProgress','processedOperations'];
  const result={};for(const name of paths){const rows=await db.collection(`businesses/${f.bid}/${name}`).get();result[name]=rows.docs.map(d=>({id:d.id,data:d.data(),updateTime:d.updateTime.toMillis()}));}
@@ -91,4 +92,36 @@ t('recovery is available without ANY commercial permission or active billing; me
  await assert.rejects(service.original(f.request({businessId:f.bid,saleId:'retained-sale-10'},uid)),{code:'permission-denied'});
  await doc('members',uid).update({status:'disabled'});await assert.rejects(service.submit(f.request(f.envelope(original),uid)),{code:'permission-denied'});
  assert.deepEqual(await businessSnapshot(),before);
+});
+
+async function resolutionCase(n,status='awaiting_review'){
+ const original=f.sample(n).original;await service.submit(f.request(f.envelope(original)));
+ const operationId=original.packet.operationId,saleId=original.localSale.id;
+ if(status!=='awaiting_review'){
+  const decision={recovered:'recover_original',already_recreated:'link_existing',closed_without_effects:'close_without_effects'}[status];
+  const data={status,decision,linkedSaleId:status==='closed_without_effects'?null:saleId,resolvedAt:new Date(),resolvedByUid:f.owner};
+  await doc('saleRecoveryReviews',saleId).update(data);await doc('saleRecoveryOperations',operationId).update(data);
+ }
+ const check={operationId,saleId,payloadHash:payloadHash(original.packet.payload)},request=f.request({businessId:f.bid,workspaceGeneration:0,resolutionChecks:[check]});
+ return {original,check,request,query:()=>service.list(request)};
+}
+for(const [n,status]of [[40,'recovered'],[41,'already_recreated'],[42,'closed_without_effects'],[43,'awaiting_review']])t(`resolution read: ${status}; own actor, payload hash and zero writes`,async()=>{
+ const c=await resolutionCase(n,status),before=await businessSnapshot(),raw=await doc('saleRecoveryReviews',c.check.saleId).collection('original').doc('payload').get();
+ const result=await c.query();assert.equal(result.items[0].status,status);assert.equal(result.items[0].payloadHash,c.check.payloadHash);assert.equal(result.items[0].actorUid,f.seller);assert.equal(result.items[0].spaceId,f.spaceId);assert.ok(!('originalJson'in result.items[0]));assert.deepEqual(await businessSnapshot(),before);assert.equal((await raw.ref.get()).updateTime.toMillis(),raw.updateTime.toMillis());
+});
+t('resolution read rejects hash, actor, operation, space and evidence mismatch',async()=>{
+ const c=await resolutionCase(44,'recovered');
+ for(const data of [{...c.check,payloadHash:'f'.repeat(64)},{...c.check,operationId:'other-operation'}])await assert.rejects(service.list(f.request({...c.request.data,resolutionChecks:[data]})));
+ await assert.rejects(service.list(f.request(c.request.data,f.owner)),{code:'permission-denied'});
+ await assert.rejects(service.list(f.request(c.request.data,'recovery-seller-b')),{code:'permission-denied'});
+ const membership=doc('members',f.seller),original=(await membership.get()).data();await membership.update({allowedSpaceIds:[f.otherSpace]});
+ await assert.rejects(c.query(),{code:'permission-denied'});await membership.set(original);
+ const op=doc('saleRecoveryOperations',c.check.operationId);await op.update({contentHash:'0'.repeat(64)});await assert.rejects(c.query(),{code:'failed-precondition'});
+});
+t('resolution read validates original SHA-256 and never returns corrupted evidence as resolved',async()=>{
+ const c=await resolutionCase(45,'recovered');await doc('saleRecoveryReviews',c.check.saleId).collection('original').doc('payload').update({originalJson:'{}'});await assert.rejects(c.query(),{code:'failed-precondition'});
+});
+t('missing remote review stays unconfirmed; no commercial receipt is fabricated',async()=>{
+ const before=await businessSnapshot(),request=f.request({businessId:f.bid,workspaceGeneration:0,resolutionChecks:[{saleId:'missing-sale',operationId:'missing-operation',payloadHash:'0'.repeat(64)}]});
+ assert.equal((await service.list(request)).items[0].status,'unconfirmed');assert.deepEqual(await businessSnapshot(),before);
 });

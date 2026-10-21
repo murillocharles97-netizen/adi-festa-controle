@@ -111,7 +111,7 @@ test('quarantine-only notice is informational, but real pending/error/denied sal
  assert.match(h.c.describeSyncResult({dataSynced:true,complete:true,quarantined:1,integrity:{actionable:true,level:'CRITICO'}}),/crítica/);
  assert.match(h.c.describeSyncResult({dataSynced:true,quarantined:1,integrityStatus:'failed'}),/Não foi possível/);
  assert.match(h.c.describeSyncResult({dataSynced:true,complete:true,quarantined:1,syncFailure:{code:'permission-denied'}}),/falha ativa/);
- const real=harness([{...legitimate(),status:'error',lastErrorCode:'permission-denied'}]);assert.equal(real.counts().errors,1);assert.equal(real.counts().active,1);assert.equal(h.c.preservedQueueMessage(real.counts()),'');
+ const real=harness([{...legitimate(),status:'error',lastErrorCode:'permission-denied'}]);assert.equal(real.counts().errors,0);assert.equal(real.counts().manualReview,1);assert.equal(real.counts().active,1);assert.equal(h.c.preservedQueueMessage(real.counts()),'');
 });
 test('current incident classifier/checksum agree with backend without special IDs or QA bypass',()=>{
  const backend=require('../functions/src/services/sync-incident-service'),h=archiveHarness();vm.runInContext(section(source,'const stableComparable =','const containsInvalidFirestoreValue')+'\nthis.computeIncidentChecksum=checksumValue;',h.c);

@@ -540,12 +540,12 @@ const saveQueue = (queue) => {
 const queueCounts = () => {
   try {
   const queue = readQueueStrict();
-  const quarantined = queue.filter(item => queueQuarantineReason(item) && !readQueueArchive(item)).length,
-    archived = queue.filter(item => readQueueArchive(item)).length;
+  const quarantined = queue.filter(item => queueQuarantineReason(item) && !readQueueArchive(item) && !readRecoveryResolution(item)).length,
+    archived = queue.filter(item => readQueueArchive(item) || readRecoveryResolution(item)).length;
   return {
     pending: queue.filter((item) => item.status !== "error" && !queueManualReviewReason(item)).length,
-    errors: queue.filter((item) => item.status === "error" && !queueQuarantineReason(item)).length,
-    manualReview: queue.filter((item) => queueManualReviewReason(item) && !readQueueArchive(item)).length,
+    errors: queue.filter((item) => item.status === "error" && !queueManualReviewReason(item)).length,
+    manualReview: queue.filter((item) => queueManualReviewReason(item) && !readQueueArchive(item) && !readRecoveryResolution(item)).length,
     quarantined, archived, active: queue.length - quarantined - archived,
     total: queue.length,
   };
@@ -691,8 +691,9 @@ const queueDiagnostics = () =>
     errorMessage: item.lastErrorMessage || "",
     diagnostic: queueSettingsDiagnostic(item),
     originalErrorPath: item.lastErrorPath || null,
-    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
-    reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item) && !readRecoveryResolution(item),
+    resolution: readRecoveryResolution(item),
+    reviewState: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     reviewReason: queueQuarantineReason(item) || null,
     canArchive: queueQuarantineReason(item) !== "settings_permission_required",
     archive: readQueueArchive(item),
@@ -701,7 +702,7 @@ const queueDiagnostics = () =>
     schemaVersion: Number(item.schemaVersion || 1),
     deviceId: item.deviceId ? `${String(item.deviceId).slice(0, 6)}…` : "legado",
     origin: item.origin || item.source || "legado",
-    status: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+    status: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
     originalStatus: item.status || "pending",
     subtype: item.subtype || queueSubtype(item),
     collection: String(item.payload?.writes?.[0]?.entityType || ""),
@@ -747,6 +748,38 @@ function queueReviewKey(item) {
 function queueArchiveKey(item) {
   return `${queueKey()}:incidentArchive:${encodeURIComponent(String(item.operationId || "missing"))}`;
 }
+function recoveryResolutionKey(item){return `${queueKey()}:recoveryResolution:${encodeURIComponent(item.operationId||'missing')}`;}
+function readRecoveryResolution(item){
+  let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
+  if(!value||!Array.isArray(item.payload?.writes))return null;
+  const sale=item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
+  return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
+}
+async function refreshRecoveryResolutions(isCurrent){
+  if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
+  const held=readQueue().filter(i=>saleQueueRequiresReview(i)&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
+  for(let offset=0;offset<held.length;offset+=20){
+    const batch=held.slice(offset,offset+20),key=queueKey();
+    try{
+      const checks=await Promise.all(batch.map(async item=>{
+        const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(window.SaleRecoveryClient.canonical(item.payload)));
+        return {operationId:item.operationId,saleId:item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create').entityId,payloadHash:Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('')};
+      }));
+      if(!isCurrent())return;
+      const response=await window.FirebaseCallable('listSaleRecoveryReviews',{businessId:activeBusinessId(),workspaceGeneration:window.DB?.getWorkspaceGeneration?.()??0,resolutionChecks:checks});
+      if(!isCurrent()||key!==queueKey())return;
+      const result=response.data??response;
+      for(const item of batch){
+        const check=checks.find(c=>c.operationId===item.operationId),r=result.items?.find(r=>r.operationId===item.operationId);
+        const sale=item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create');
+        if(!r||!['already_recreated','recovered','closed_without_effects'].includes(r.status)||r.payloadHash!==check.payloadHash||r.saleId!==check.saleId||r.businessId!==item.businessId||r.actorUid!==item.userId||r.spaceId!==sale.data.spaceId||r.workspaceGeneration!==(item.workspaceGeneration??0)||!r.resolvedAt||!r.resolvedByUid||!/^[a-f0-9]{64}$/.test(r.contentHash||''))continue;
+        const live=readQueue().find(q=>q.operationId===item.operationId);
+        if(!live||checksumValue(live.payload)!==checksumValue(item.payload))continue;
+        localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({...r,payloadChecksum:checksumValue(item.payload),verifiedAt:now()}));
+      }
+    }catch{/* Failed verification never authorizes replay or changes the original packet. */}
+  }
+}
 function readQueueArchive(item) {
   const raw = localStorage.getItem(queueArchiveKey(item));
   if (!raw) return null;
@@ -761,7 +794,7 @@ function readQueueArchive(item) {
 function preservedQueueMessage(counts = queueCounts()) {
   if (counts.active || counts.corrupt) return "";
   if (counts.quarantined) return `${counts.quarantined} ocorrência${counts.quarantined === 1 ? " preservada" : "s preservadas"} para análise. Nenhuma sincronização pendente.`;
-  if (counts.archived) return `${counts.archived} ocorrência${counts.archived === 1 ? " arquivada" : "s arquivadas"}. Nenhuma sincronização pendente.`;
+  if (counts.archived) return `Nenhuma sincronização pendente. ${counts.archived} ocorrência${counts.archived === 1 ? " resolvida preservada" : "s resolvidas preservadas"} para auditoria.`;
   return "";
 }
 function readQueueReview(item) {
@@ -834,6 +867,7 @@ function retireSettingsPermissionFailure(item) {
   state.syncFailure = null;
 }
 function queueQuarantineReason(item) {
+  if(readRecoveryResolution(item))return 'recovery_resolved';
   if (readQueueArchive(item)) return "archived";
   const review = readQueueReview(item);
   if (review) return review.reason || "quarantined";
@@ -850,6 +884,7 @@ function queueManualReviewReason(item) {
   return queueQuarantineReason(item) || (saleQueueRequiresReview(item) ? "sale_recovery_review_required" : "");
 }
 function preserveQueueQuarantine(item) {
+  if(readRecoveryResolution(item))return false;
   const reason = queueQuarantineReason(item);
   if (!reason) return false;
   const existing = readQueueReview(item);
@@ -1369,6 +1404,7 @@ const emit = (patch) => {
       queueTotal: counts.active,
       preservedOccurrences: counts.quarantined,
       archivedOccurrences: counts.archived,
+      manualReviewPending: counts.manualReview-counts.quarantined,
       details: diagnostic(),
     };
   snapshot.orphanOperations = snapshot.details.orphanOperations ||
@@ -1403,7 +1439,8 @@ function updateQueueState() {
       status: q.errors ? "error" : "waiting",
       message: q.errors
         ? `Sincronização incompleta: ${q.errors} alteração(ões) com erro e ${q.pending} pendente(s).`
-        : `${q.active} alteração(ões) aguardando sincronização`,
+        : !q.pending&&q.manualReview ? `Revisão manual — confirmação pendente. ${q.manualReview} ocorrência(s) preservada(s), sem reenvio automático.`
+        : `${q.pending} alteração(ões) aguardando sincronização`,
     });
   else if (preservedQueueMessage(q) && state.status !== "syncing" && !state.syncFailure &&
       state.testPassed && state.hydrated && state.listenerConnected && !state.dataAudit?.integrity?.actionable)
@@ -3132,6 +3169,8 @@ async function processSyncQueue(options = {}) {
         paused: true,
       };
     await validateUser();
+    assertSession();
+    await refreshRecoveryResolutions(current);
     assertSession();
     let sent = 0,
       reviewHeld = 0,
@@ -4901,8 +4940,9 @@ function queueOperationDiagnostic(item) {
     lastErrorStage: item.lastErrorStage || null,
     lastErrorRequest: item.lastErrorRequest || null,
     transactionPaths: item.lastErrorPaths || [],
-    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
-    reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item) && !readRecoveryResolution(item),
+    resolution: readRecoveryResolution(item),
+    reviewState: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     reviewReason: queueQuarantineReason(item) || null,
     archive: readQueueArchive(item),
     // Older queues did not persist the first failure. Never label creation or
@@ -4988,7 +5028,7 @@ async function exportLocalDiagnostic() {
       createdAt: item.createdAtLocal || item.createdAt || "",
       updatedAt: item.updatedAt || "",
       retryCount: Number(item.retryCount || item.attempts || 0),
-      status: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
+      status: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : item.status || "pending",
       originalStatus: item.status || "pending",
       errorCode: item.lastErrorCode || "",
       errorMessage: queueOperationDiagnostic(item).lastErrorMessage,
@@ -5809,6 +5849,7 @@ function describeSyncResult(result = {}) {
   if (result.dataSynced && result.comparison && !result.comparison.ok)
     return "Dados atualizados. A comparação de integridade identificou diferenças; veja os detalhes antes de qualquer correção.";
   if(result.complete)return result.integrity?.level==='INFORMATIVO'?'Sincronizado com sucesso. Alguns registros históricos foram analisados.':'Todos os dados estão sincronizados.';
+  if(!pending&&!errors&&result.manualReview)return `Revisão manual — confirmação pendente. ${result.manualReview} ocorrência(s) preservada(s), sem reenvio automático.`;
   if (sent && result.errorBreakdown?.permission)
     return `${sent} operação(ões) sincronizada(s). ${result.errorBreakdown.permission} continuam bloqueadas por permissão.`;
   if (!sent && result.errorBreakdown?.invalid)
@@ -5907,7 +5948,7 @@ async function runManualSync({manualRetry = false} = {}) {
   lastError = ""; lastErrorCode = "";
   traceSync("data_sync_completed", {dataSynced: result.dataSynced, countSummariesMatch: comparison.ok, sent: push.sent, received});
   emit({
-    status: result.syncFailure ? "error" : complete ? "success" : "error",
+    status: result.syncFailure || counts.errors ? "error" : complete ? "success" : "waiting",
     message: describeSyncResult(result),
     lastSync: result.dataSynced ? time : state.lastSync,
     lastCompleteSync: complete ? time : state.lastCompleteSync,
@@ -5971,6 +6012,7 @@ async function runAutomaticSync() {
               sent: push.sent,
               pending: counts.pending,
               errors: counts.errors,
+              manualReview: counts.manualReview-counts.quarantined,
               complete: false,
             }),
         lastSync: complete ? time : state.lastSync,
@@ -6857,6 +6899,7 @@ window.SyncFirebase = {
       queueTotal: queueCounts().active,
       preservedOccurrences: queueCounts().quarantined,
       archivedOccurrences: queueCounts().archived,
+      manualReviewPending: queueCounts().manualReview-queueCounts().quarantined,
       orphanOperations: details.orphanOperations || (state.dataAudit ? 0 : "Não verificado"),
       details,
     });

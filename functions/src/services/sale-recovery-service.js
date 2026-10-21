@@ -105,8 +105,31 @@ function saleRecoveryService(db,{FieldValue}){
     });
   }
   const reader={get:r=>r.get()};
+  const canonical=value=>JSON.stringify((function sort(v){return Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])])):v;})(value));
+  async function resolutions(c,checks){
+    if(!Array.isArray(checks)||checks.length>20)fail('invalid-argument','Limite de consultas excedido.');
+    const items=[];
+    for(const check of checks){
+      const saleId=validId(check.saleId,'Venda'),operationId=validId(check.operationId,'Operação');
+      const review=(await ref(c.businessId,'saleRecoveryReviews',saleId).get()).data();
+      if(!review){items.push({saleId,operationId,status:'unconfirmed'});continue;}
+      if(review.actorUid!==c.uid||review.businessId!==c.businessId||review.saleId!==saleId||review.operationId!==operationId||review.workspaceGeneration!==(c.business.workspaceGeneration??0))fail('permission-denied','Origem da revisão divergente.');
+      await space(reader,c,review.spaceId);
+      const [raw,operation]=await Promise.all([ref(c.businessId,'saleRecoveryReviews',saleId).collection('original').doc('payload').get(),ref(c.businessId,'saleRecoveryOperations',operationId).get()]);
+      const original=raw.data(),op=operation.data();
+      if(!original?.originalJson||digest(original.originalJson)!==review.contentHash||op?.contentHash!==review.contentHash||op?.saleId!==saleId||op?.operationId!==operationId||op?.actorUid!==c.uid||op?.spaceId!==review.spaceId||op?.workspaceGeneration!==(c.business.workspaceGeneration??0)||(op.status||'awaiting_review')!==review.status)fail('failed-precondition','Evidência da revisão divergente.');
+      const parsed=validateOriginal({originalJson:original.originalJson,contentHash:review.contentHash},c.uid,c.businessId);
+      const payloadHash=digest(canonical(parsed.packet.payload));
+      if(parsed.operationId!==operationId||parsed.saleId!==saleId||parsed.spaceId!==review.spaceId||(parsed.packet.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)||check.payloadHash!==payloadHash)fail('failed-precondition','Hash ou origem do payload divergente.');
+      const decisions={already_recreated:'link_existing',recovered:'recover_original',closed_without_effects:'close_without_effects'};
+      if(decisions[review.status]&&(!review.resolvedAt||!review.resolvedByUid||review.decision!==decisions[review.status]||op.decision!==review.decision||op.linkedSaleId!==review.linkedSaleId))fail('failed-precondition','Decisão final inconsistente.');
+      items.push({businessId:c.businessId,workspaceGeneration:c.business.workspaceGeneration??0,actorUid:c.uid,spaceId:review.spaceId,saleId,operationId,payloadHash,contentHash:review.contentHash,status:review.status,decision:review.decision||null,resolvedAt:date(review.resolvedAt),resolvedByUid:review.resolvedByUid||null,linkedSaleId:review.linkedSaleId||null});
+    }
+    return {items};
+  }
   async function list(request){
     const c=await context(reader,request),requestedSpace=request.data.spaceId||null;
+    if(request.data.resolutionChecks!==undefined)return resolutions(c,request.data.resolutionChecks);
     if(requestedSpace)await space(reader,c,requestedSpace);
     if(!c.owner&&c.member.spaceAccess!=='all'&&!requestedSpace)fail('invalid-argument','Selecione o espaço autorizado.');
     let query=db.collection(`businesses/${c.businessId}/saleRecoveryReviews`);

@@ -1,4 +1,4 @@
-import './sync.js?v=192';
+import './sync.js?v=193';
 import '../sale-recovery-client.js?v=183';
 import '../sale-recovery-ui.js?v=183';
 
@@ -132,11 +132,17 @@ function confirmIncidentArchive(operationId,filter={}){
   };
 }
 function openQueueDetails(filter={}){
-  const state=lastState||{},details=state.details||{},items=window.SyncFirebase.getQueueDiagnostics?.()||[],errors=items.filter(item=>item.status==='error'),processing=items.filter(item=>item.status==='syncing').length,root=document.querySelector('#modal');
+  const state=lastState||{},details=state.details||{},items=window.SyncFirebase.getQueueDiagnostics?.()||[],errors=items.filter(item=>item.status==='error'&&!item.reviewRequired),processing=items.filter(item=>item.status==='syncing').length,root=document.querySelector('#modal');
   root.innerHTML=`<div class="modal-bg"><section class="modal-box modal-wide sync-diagnostics-modal"><header class="modal-head"><h3>Sincronização ${state.queueTotal?'incompleta':'dos dados'}</h3><button class="icon-btn close" type="button"><i data-lucide="x"></i></button></header><div class="modal-body"><div class="firebase-sync-grid"><span>Pendentes</span><strong>${escape(state.pending||0)}</strong><span>Com erro</span><strong>${escape(state.errors||0)}</strong><span>Processando</span><strong>${escape(processing)}</strong><span>Última tentativa</span><strong>${escape(formattedTime(details.lastAttemptAt))}</strong><span>Última sincronização completa</span><strong>${escape(formattedTime(details.lastCompleteSyncAt||state.lastSync))}</strong><span>Listener remoto</span><strong>${details.listenerConnected?'Ativo':'Inativo'}</strong><span>BusinessId</span><strong>${escape(details.userBusinessId||'—')}</strong><span>Build</span><strong>${escape(window.AdiFestaBuild?.shortCommit||'local')}</strong><span>Projeto</span><strong>${escape(details.projectId||'—')}</strong></div><section class="sync-error-list"><h4>Erros recentes</h4>${errors.length?errors.slice(0,50).map(item=>`<article><b>${escape(item.entityType)} · ${escape(item.action)}</b><small>${escape(formattedTime(item.createdAt))}</small><p>${escape(item.errorCode||'erro')}: ${escape(item.errorMessage||'A operação precisa de atenção.')}</p><code>${escape(item.operationId.slice(0,10))}… · ${escape(item.origin)}</code></article>`).join(''):'<p>Nenhuma operação marcada com erro neste aparelho.</p>'}</section></div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-light" type="button" data-open-technical>Ver diagnóstico técnico</button><button class="btn btn-primary" type="button" data-retry-all>${errors.length?'Reprocessar todos':'Tentar novamente'}</button></footer></section></div>`;
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
   root.querySelector('.modal-body')?.insertAdjacentHTML('beforeend',operationConfirmationHtml(details));
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
+  const resolved=items.filter(item=>item.reviewState==='resolved'),manual=items.filter(item=>item.reviewState==='manual_review');
+  const grid=root.querySelector('.firebase-sync-grid');
+  if(grid){for(const span of grid.querySelectorAll('span')){if(span.textContent==='Pendentes')span.textContent='Pendências enviáveis';if(span.textContent==='Com erro')span.textContent='Erros ativos';}grid.insertAdjacentHTML('beforeend',`<span>Revisões manuais</span><strong>${manual.length}</strong><span>Arquivados/resolvidos</span><strong>${items.filter(i=>['archived','resolved'].includes(i.reviewState)).length}</strong>`);}
+  root.querySelector('h3').textContent='Sincronização dos dados';
+  if(resolved.length)errorSection?.insertAdjacentHTML('beforebegin',`<section role="status"><b>${resolved.length} ocorrências resolvidas preservadas para auditoria.</b><p>Reenvio bloqueado. Fila e payloads originais preservados.</p>${resolved.map(i=>`<details><summary>${escape(i.operationId)}</summary><p>${escape(i.resolution.status)} · ${escape(formattedTime(i.resolution.resolvedAt))}<br>Venda vinculada: ${escape(i.resolution.linkedSaleId||'Nenhuma — encerrada sem efeitos')}</p></details>`).join('')}</section>`);
+  if(manual.length)errorSection?.insertAdjacentHTML('beforebegin','<p role="status">Revisão manual — confirmação pendente. Nenhum reenvio automático será realizado.</p>');
   const held=items.filter(item=>item.reviewRequired),quarantined=held.filter(item=>item.reviewState==='quarantined'),retainedSales=held.filter(item=>item.reviewState==='manual_review');
   errorSection?.insertAdjacentHTML('beforebegin',incidentArchiveHtml(items));
   root.querySelectorAll('[data-archive-incident]').forEach(button=>button.onclick=()=>confirmIncidentArchive(button.dataset.archiveIncident,filter));
@@ -160,7 +166,7 @@ function openQueueDetails(filter={}){
   const retryAll=root.querySelector('[data-retry-all]');
   if(state.queueTotal){retryAll.textContent=errors.length?'Reprocessar todos':'Sincronizar pendentes';retryAll.onclick=async()=>{await manualSync();openQueueDetails(filter)}}
   else retryAll.remove();
-  if(items.length&&held.length===items.length){retryAll.disabled=true;retryAll.textContent='Aguardando revisão';retryAll.onclick=null;}
+  if(items.length&&items.every(i=>i.reviewRequired||['archived','resolved'].includes(i.reviewState))){retryAll.disabled=true;retryAll.textContent=manual.length?'Aguardando revisão':'Nenhuma operação enviável';retryAll.onclick=null;}
   root.querySelector('[data-export-diagnostic]').onclick=exportDiagnostic;
   root.querySelector('[data-compare-cloud]').onclick=event=>compareCloudData(event.currentTarget);
   root.querySelector('[data-export-only-local]')?.addEventListener('click',exportOnlyLocalSales);
@@ -189,12 +195,22 @@ function technicalDetails(d){
 
 const setText=(element,value)=>{const text=String(value??'');if(element&&element.textContent!==text)element.textContent=text};
 const setHtml=(element,value)=>{if(element&&element.innerHTML!==value)element.innerHTML=value};
-function renderState(state){lastState=state;window.SyncFirebaseState=state;const last=formattedTime(state.lastSync),status=document.querySelector('#firebase-status');if(status){const className=`firebase-status is-${state.status}`;if(status.className!==className)status.className=className;setText(status,state.message);setText(document.querySelector('#firebase-last-sync'),last);setText(document.querySelector('#firebase-pending'),state.pending);setText(document.querySelector('#firebase-errors'),state.errors);setText(document.querySelector('#firebase-orphans'),state.orphanOperations||0);setText(document.querySelector('#mobile-sync-pending'),state.pending);setText(document.querySelector('#mobile-sync-last'),last)}setHtml(document.querySelector('#firebase-details'),technicalDetails({...state.details,lastSyncAt:state.lastSync}));const modal=document.querySelector('#cloud-sync-panel');if(modal){setText(modal.querySelector('[data-cloud-status]'),state.message);setText(modal.querySelector('[data-cloud-last]'),last);setText(modal.querySelector('[data-cloud-pending]'),state.queueTotal);setText(modal.querySelector('[data-cloud-errors]'),state.errors);setText(modal.querySelector('[data-cloud-orphans]'),state.orphanOperations||0)}}
+function recoveryCounters(state){
+  const panel=document.querySelector('#cloud-sync-panel');if(!panel)return;
+  const grid=panel.querySelector('.firebase-sync-grid');
+  if(grid&&!panel.querySelector('[data-cloud-manual]'))grid.insertAdjacentHTML('beforeend','<span>Revisões manuais</span><strong data-cloud-manual></strong><span>Arquivados/resolvidos</span><strong data-cloud-resolved></strong>');
+  for(const label of grid?.querySelectorAll('span')||[]){if(label.textContent==='Pendências')label.textContent='Pendências enviáveis';if(label.textContent==='Erros')label.textContent='Erros ativos';}
+  setText(panel.querySelector('[data-cloud-pending]'),state.pending||0);
+  setText(panel.querySelector('[data-cloud-manual]'),state.manualReviewPending||0);
+  setText(panel.querySelector('[data-cloud-resolved]'),state.archivedOccurrences||0);
+}
+function renderState(state){lastState=state;window.SyncFirebaseState=state;const last=formattedTime(state.lastSync),status=document.querySelector('#firebase-status');if(status){const className=`firebase-status is-${state.status}`;if(status.className!==className)status.className=className;setText(status,state.message);setText(document.querySelector('#firebase-last-sync'),last);setText(document.querySelector('#firebase-pending'),state.pending);setText(document.querySelector('#firebase-errors'),state.errors);setText(document.querySelector('#firebase-orphans'),state.orphanOperations||0);setText(document.querySelector('#mobile-sync-pending'),state.pending);setText(document.querySelector('#mobile-sync-last'),last)}setHtml(document.querySelector('#firebase-details'),technicalDetails({...state.details,lastSyncAt:state.lastSync}));const modal=document.querySelector('#cloud-sync-panel');if(modal){setText(modal.querySelector('[data-cloud-status]'),state.message);setText(modal.querySelector('[data-cloud-last]'),last);setText(modal.querySelector('[data-cloud-pending]'),state.queueTotal);setText(modal.querySelector('[data-cloud-errors]'),state.errors);setText(modal.querySelector('[data-cloud-orphans]'),state.orphanOperations||0)}recoveryCounters(state)}
 
 function openHeaderPanel(){
   const state=lastState;if(!state)return;
   const financial=state.details?.dataAudit?.financial;
   document.querySelector('#modal').innerHTML=`<div class="modal-bg"><section class="modal-box cloud-panel" id="cloud-sync-panel"><header class="modal-head"><h3>Sincronização</h3><button class="icon-btn close" type="button"><i data-lucide="x"></i></button></header><div class="modal-body"><div class="cloud-panel-icon is-${escape(state.status)}"><i data-lucide="cloud"></i></div><h3 data-cloud-status>${escape(state.message)}</h3><div class="firebase-sync-grid"><span>Conexão</span><strong>${navigator.onLine?'Online':'Offline'}</strong><span>Última sincronização</span><strong data-cloud-last>${escape(formattedTime(state.lastSync))}</strong><span>Pendências</span><strong data-cloud-pending>${state.queueTotal}</strong><span>Erros</span><strong data-cloud-errors>${state.errors}</strong><span>Pendências comprovadas / somente locais</span><strong data-cloud-orphans>${escape(state.orphanOperations||0)}</strong></div>${fiadoScopeHtml(financial?.balanceScope,financial?.balanceAudit)}${operationConfirmationHtml(state.details)}</div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-light" id="cloud-panel-details" type="button">Ver detalhes</button><button class="btn btn-primary" id="cloud-panel-sync" type="button">Sincronizar agora</button></footer></section></div>`;
+  recoveryCounters(state);
   document.querySelectorAll('#cloud-sync-panel .close').forEach(button=>button.onclick=()=>document.querySelector('#modal').innerHTML='');document.querySelector('#cloud-panel-details').onclick=openQueueDetails;document.querySelector('#cloud-panel-sync').onclick=manualSync;window.lucide?.createIcons();
 }
 
