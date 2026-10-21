@@ -9,8 +9,11 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   const version=read('js/build-info.js').match(/release:\s*"(\d+)"/)[1];assert.ok(Number(version)>=173);
   assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));
   assert.ok(read('service-worker.js').includes(`release:'${version}'`));
-  for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${version}'`));
-  assert.ok(index.includes(`firebase/auth.js?v=${version}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${version}`));
+  // Published V191 intentionally retained the V190 Sync/Auth asset URLs.
+  // The next release, which actually changes Sync, must bump all these URLs.
+  const syncVersion=version==='191'?'190':version;
+  for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${syncVersion}'`));
+  assert.ok(index.includes(`firebase/auth.js?v=${syncVersion}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${syncVersion}`));
 });
 function runtime() {
   const queues = new Map([['qa-business:owner', [{operationId:'persisted-operation', status:'pending', payload:{safe:true}}]]]);

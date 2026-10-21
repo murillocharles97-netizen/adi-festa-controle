@@ -2,6 +2,25 @@ window.DB=(()=>{
   const LEGACY_KEY='adiFestaDB_v1',ACTIVE_KEY='adiFestaActiveBusinessId',VERSAO=14,agora=()=>new Date().toISOString();
   let activeBusinessId=localStorage.getItem(ACTIVE_KEY)||'adi-festa',activePrincipal='legacy',activeGeneration=0,memoryData=null,memoryStorageKey='',businessOpenSequence=0;
   const storageKey=()=>`${activePrincipal==='legacy'?`${LEGACY_KEY}:${activeBusinessId}`:`${LEGACY_KEY}:${activeBusinessId}:${activePrincipal}`}${activeGeneration>0?`:generation:${activeGeneration}`:''}`;
+  const recentClientPreferences=new Map();
+  const recentClientPreferenceKey=()=>{
+    const uid=activePrincipal.includes(':')?activePrincipal.split(':')[0]:'';
+    if(!uid||uid==='anonymous'||window.FirebaseSession?.user?.uid!==uid||!/^([a-z0-9_-]{3,128})$/i.test(activeBusinessId))return null;
+    return `adiFesta:localPreferences:${activeBusinessId}:${uid}:generation:${activeGeneration}:recentClientIds`;
+  };
+  const recentClientList=value=>Array.isArray(value)?[...new Set(value.filter(id=>typeof id==='string'&&id.length>0))].slice(0,5):[];
+  const getRecentClientIds=()=>{
+    const key=recentClientPreferenceKey();if(!key)return [];
+    if(recentClientPreferences.has(key))return [...recentClientPreferences.get(key)];
+    try{const raw=localStorage.getItem(key);if(raw!==null){const recent=recentClientList(JSON.parse(raw));recentClientPreferences.set(key,recent);return [...recent];}}catch{/* A device preference must not block checkout. */}
+    return [...(recentClientPreferences.get(key)||[])];
+  };
+  const rememberRecentClient=id=>{
+    const key=recentClientPreferenceKey();if(!key||typeof id!=='string'||!id)return getRecentClientIds();
+    const recent=recentClientList([id,...getRecentClientIds()]);recentClientPreferences.set(key,recent);
+    try{localStorage.setItem(key,JSON.stringify(recent));}catch{/* Keep this session usable when preference storage is unavailable. */}
+    return [...recent];
+  };
   const legacyId=(tipo,valor)=>{let h=2166136261;for(const c of `${tipo}|${String(valor).trim().toLowerCase()}`){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return`${tipo}_${(h>>>0).toString(36)}`};
   const configBase=()=>({nome:'Adi Festa'});
   const bloquearCargaAutomatica=config=>Object.assign(config,{demonstracaoRemovida:true,kyteImportacao:'Customers_20251012_20260705.csv',kyteSaldosImportacao:'Clientes.xlsx-v1',saldoCorrecoes:'confirmadas-v1',saldoNegativoEhDebito:true});
@@ -69,7 +88,7 @@ window.DB=(()=>{
     return d;
   };
   const vazio=()=>({versao:VERSAO,config:bloquearCargaAutomatica(configBase()),clientes:[],produtos:[],variacoesProdutos:[],productFinancials:[],variantFinancials:[],saleFinancials:[],stockMovementFinancials:[],vendas:[],pagamentos:[],movimentacoes:[],movimentacoesEstoque:[],cobrancas:[],campanhas:[],progressosCampanha:[],recompensas:[],eventosCampanha:[],resgatesCampanha:[],alocacoesPagamento:[],customerSubscriptions:[],customerSubscriptionEvents:[],messageHistory:[],messageTemplates:[],messageSequences:[],contatosCliente:[],metricasClientes:[],metricasClientesMensais:[],segmentosClientes:[],visitas:[],catalogOrders:[]});
-  const normalizarParaMemoria=dados=>{const normalizado=migrar(dados);normalizado.config.appSchemaVersion=Math.max(VERSAO,Number(normalizado.config.appSchemaVersion||0));normalizado.config.recentClientIds=Array.isArray(normalizado.config.recentClientIds)?normalizado.config.recentClientIds:[];normalizado.produtos.forEach(p=>{p.favorito=Boolean(p.favorito);p.semControleEstoque=Boolean(p.itemKind==='service'||p.semControleEstoque||p.controlaEstoque===false);p.controlaEstoque=p.itemKind!=='service'&&!p.semControleEstoque;p.codigo=p.codigo||'';p.barcode=window.normalizeBarcode?.(p.barcode)||String(p.barcode||'').replace(/\s/g,'');p.barcodeType=p.barcodeType||null;p.barcodeUpdatedAt=p.barcodeUpdatedAt||null;p.alternateBarcodes=Array.isArray(p.alternateBarcodes)?p.alternateBarcodes:[];p.palavrasChave=p.palavrasChave||'';p.imagem=p.imagem||'';p.image=p.image&&typeof p.image==='object'?p.image:null;p.imageMode=p.imageMode||'own';p.imageUrl=p.imageUrl||p.image?.url||p.imagem||null;p.imageStoragePath=p.imageStoragePath||p.image?.storagePath||null;p.imageThumbUrl=p.imageThumbUrl||p.image?.thumbnailUrl||null;p.imageThumbStoragePath=p.imageThumbStoragePath||p.image?.thumbnailStoragePath||null;p.imageUpdatedAt=p.imageUpdatedAt||p.image?.updatedAt||null;p.imageUploadStatus=['none','pending','uploading','uploaded','error'].includes(p.imageUploadStatus)?p.imageUploadStatus:(p.imageUrl?'uploaded':'none');p.imageOperationId=p.imageOperationId||null});return normalizado};
+  const normalizarParaMemoria=dados=>{const normalizado=migrar(dados);normalizado.config.appSchemaVersion=Math.max(VERSAO,Number(normalizado.config.appSchemaVersion||0));normalizado.produtos.forEach(p=>{p.favorito=Boolean(p.favorito);p.semControleEstoque=Boolean(p.itemKind==='service'||p.semControleEstoque||p.controlaEstoque===false);p.controlaEstoque=p.itemKind!=='service'&&!p.semControleEstoque;p.codigo=p.codigo||'';p.barcode=window.normalizeBarcode?.(p.barcode)||String(p.barcode||'').replace(/\s/g,'');p.barcodeType=p.barcodeType||null;p.barcodeUpdatedAt=p.barcodeUpdatedAt||null;p.alternateBarcodes=Array.isArray(p.alternateBarcodes)?p.alternateBarcodes:[];p.palavrasChave=p.palavrasChave||'';p.imagem=p.imagem||'';p.image=p.image&&typeof p.image==='object'?p.image:null;p.imageMode=p.imageMode||'own';p.imageUrl=p.imageUrl||p.image?.url||p.imagem||null;p.imageStoragePath=p.imageStoragePath||p.image?.storagePath||null;p.imageThumbUrl=p.imageThumbUrl||p.image?.thumbnailUrl||null;p.imageThumbStoragePath=p.imageThumbStoragePath||p.image?.thumbnailStoragePath||null;p.imageUpdatedAt=p.imageUpdatedAt||p.image?.updatedAt||null;p.imageUploadStatus=['none','pending','uploading','uploaded','error'].includes(p.imageUploadStatus)?p.imageUploadStatus:(p.imageUrl?'uploaded':'none');p.imageOperationId=p.imageOperationId||null});return normalizado};
   const cache=dados=>{memoryStorageKey=storageKey();memoryData=dados;return dados};
   const invalidarCache=()=>{memoryData=null;memoryStorageKey=''};
   const assertWorkspace=()=>{const origin=window.WorkspaceRuntime?.capture();if(origin&&(origin.businessId!==activeBusinessId||origin.workspaceGeneration!==activeGeneration))throw Object.assign(Error('O ambiente da empresa mudou. Reabra a VECONI.'),{code:'workspace-generation-mismatch'});};
@@ -98,6 +117,12 @@ window.DB=(()=>{
   const retireBusiness=async()=>{await DB.businessCache.retire();invalidarCache();activeBusinessId='__reset_locked__';activePrincipal='locked';activeGeneration=0;};
   const releaseBusiness=()=>{businessOpenSequence++;activeBusinessId='__signed_out__';activePrincipal='signed_out';invalidarCache();localStorage.removeItem(ACTIVE_KEY);const pending=Promise.resolve(window.DB?.businessCache?.release?.());pending.catch(error=>console.error('[STORAGE logout]',{code:error.code}));return pending;};
   const alterar=funcao=>{const dados=structuredClone(carregar());funcao(dados);return salvar(dados)};
+  // Authenticated business metadata is hydration, not a settings edit by this user.
+  const hydrateConfig=patch=>{
+    assertWorkspace();
+    const current=carregar(),next={...current,config:{...current.config,...structuredClone(patch)}};
+    return salvar(next).config;
+  };
   // Cloud/cache hydration is not a user mutation. Do not normalize the entire
   // database or pass through Sync's commercial change-capture wrapper.
   const hydrateOperation=operation=>{
@@ -115,5 +140,5 @@ window.DB=(()=>{
   // Demo datasets belong in isolated test fixtures, never in a production API.
   const restaurar=()=>{throw Error('Carga de demonstração desativada. Use somente backup verificado.');};
   // IndexedDB commits use optimistic revision checks to reject stale-tab writes.
-  return{prepare:normalizarParaMemoria,hydrateOperation,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,retireBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,getWorkspaceGeneration:()=>activeGeneration,VERSAO};
+  return{prepare:normalizarParaMemoria,hydrateConfig,hydrateOperation,getRecentClientIds,rememberRecentClient,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,retireBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,getWorkspaceGeneration:()=>activeGeneration,VERSAO};
 })();

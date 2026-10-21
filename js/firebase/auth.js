@@ -5,7 +5,7 @@ import {APP_NAME,BusinessContext,INTERNAL_BUSINESS_ID,PLANS} from './business-co
 import {LEGACY_MIGRATION_VERSION,resetLegacyMigrationAttempt,runLegacyMigration} from './legacy-migration.js';
 import {abbreviateTechnicalId,profileValidationInfo,validateAuthenticatedBusiness,validateAuthenticatedProfile} from './profile-validation.js';
 import {cleanupCurrentSession,registerCleanup,runCleanup} from './session-lifecycle.js';
-import './sync.js?v=190';
+import './sync.js?v=192';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';
@@ -316,7 +316,12 @@ async function allowed(user,profile,business,member,token){
   assertCurrentRun(token);
   workspaceRuntime().capture();
   window.TeamAccess?.sanitizePrivateCache?.(DB.carregar());
-  if(profile.businessId!==INTERNAL_BUSINESS_ID)DB.alterar(data=>{if(!data.config.nome||data.config.nome==='Adi Festa')data.config.nome=business.name;if(!data.config.telefone&&business.phone)data.config.telefone=business.phone});
+  if(profile.businessId!==INTERNAL_BUSINESS_ID){
+    const config=DB.carregar().config,patch={};
+    if(!config.nome||config.nome==='Adi Festa')patch.nome=business.name;
+    if(!config.telefone&&business.phone)patch.telefone=business.phone;
+    DB.hydrateConfig(patch);
+  }
   bootstrapLog('local environment loaded');
   profile=context.userProfile;
   window.FirebaseSession={user,profile,member,businessId:profile.businessId,business:context.business,subscription:context.subscription,access:context.access};

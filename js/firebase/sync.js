@@ -680,7 +680,7 @@ const queueDiagnostics = () =>
     documentId: String(item.entityId || ""),
     businessId: String(item.businessId || ""),
     firestorePath:
-      item.lastErrorPath ||
+      queueSettingsDiagnostic(item)?.path || item.lastErrorPath ||
       (item.businessId && item.entityType && item.entityId
         ? `businesses/${item.businessId}/${item.entityType}/${item.entityId}`
         : "indefinido"),
@@ -689,8 +689,12 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
+    diagnostic: queueSettingsDiagnostic(item),
+    originalErrorPath: item.lastErrorPath || null,
     reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
     reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewReason: queueQuarantineReason(item) || null,
+    canArchive: queueQuarantineReason(item) !== "settings_permission_required",
     archive: readQueueArchive(item),
     payloadChecksum: checksumValue(item.payload || {}),
     payloadVersion: Number(item.payloadVersion || 1),
@@ -721,6 +725,8 @@ const retryDelay = (attempts, code = "") =>
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
 const canAttempt = (item, force = false, manualRetry = false) =>
   !queueManualReviewReason(item) &&
+  !(Array.isArray(item.payload?.writes) && item.payload.writes.some(write => write.entityType === "settings") &&
+    !canWriteSharedSettings()) &&
   (manualRetry || item.status !== "error") &&
   (force || !item.lastAttemptAt ||
     Date.now() - new Date(item.lastAttemptAt).getTime() >=
@@ -787,15 +793,57 @@ function isHistoricalProjectionBatch(item) {
   });
   return onlyProjection && privateChanges;
 }
+function settingsQueueRequiresPermission(item) {
+  // A permission hold is not a judgement about the original config fields.
+  // Only this principal's standalone configuration packet is classified here;
+  // commercial/mixed packets and unknown sessions retain their existing flow.
+  const writes = item.payload?.writes;
+  const context = window.BusinessContext?.get?.();
+  return typeof window.TeamAccess?.has === "function" && Boolean(currentUser?.uid) &&
+    currentUser?.uid === auth.currentUser?.uid && item.userId === currentUser?.uid &&
+    item.businessId === activeBusinessId() && state.userProfile?.businessId === item.businessId &&
+    context?.loading === false && !context.error &&
+    ["owner", "platform_admin", "manager", "seller", "stock"].includes(context.role) &&
+    context.businessId === item.businessId && context.userProfile?.uid === currentUser.uid &&
+    context.userProfile?.businessId === item.businessId &&
+    context.userProfile?.active !== false && Array.isArray(context.permissions) &&
+    (!context.member?.status || context.member.status === "active") &&
+    (item.workspaceGeneration ?? 0) === (window.DB?.getWorkspaceGeneration?.() ?? 0) &&
+    ["simple", "legacy"].includes(item.payload?.eventKind || "simple") &&
+    Array.isArray(writes) && writes.length > 0 && writes.every(write =>
+      write.entityType === "settings" && write.entityId === "default" &&
+      ["create", "update"].includes(write.operation)) && window.TeamAccess.has("settings.manage") === false;
+}
+function queueSettingsDiagnostic(item) {
+  const held = readQueueReview(item)?.reason === "settings_permission_required" ||
+    settingsQueueRequiresPermission(item);
+  if (!held) return null;
+  return {stage:"settings_permission_preflight",collection:"settings",
+    path:`businesses/${item.businessId}/settings/default`,requiredPermission:"settings.manage",
+    code:"settings-permission-required",replayBlocked:true,
+    originalErrorPath:item.lastErrorPath || null,
+    message:"Configuração preservada. Este perfil não pode enviá-la; sincronizar novamente não libera essa permissão."};
+}
+function retireSettingsPermissionFailure(item) {
+  // Only retire an active error explicitly attributed to this preserved packet.
+  // Listener, network, mixed/commercial errors and all historical evidence stay.
+  const failure = state.syncFailure;
+  if (queueQuarantineReason(item) !== "settings_permission_required" ||
+      failure?.operationId !== item.operationId || failure.businessId !== item.businessId ||
+      failure.actorUid !== item.userId || failure.code !== "permission-denied") return;
+  state.syncFailure = null;
+}
 function queueQuarantineReason(item) {
   if (readQueueArchive(item)) return "archived";
-  if (readQueueReview(item)) return "quarantined";
+  const review = readQueueReview(item);
+  if (review) return review.reason || "quarantined";
   if (item.lastErrorCode === "queue-operation-archived") return "remote_archive_fence";
   if (["quarantined","manual_review","archived"].includes(item.status) ||
       ["quarantined","manual_review","archived"].includes(item.reviewStatus) ||
       item.quarantined === true || item.reviewRequired === true)
     return "explicit_manual_review";
   if (isHistoricalProjectionBatch(item)) return "historical_projection_without_user_action";
+  if (settingsQueueRequiresPermission(item)) return "settings_permission_required";
   return "";
 }
 function queueManualReviewReason(item) {
@@ -832,6 +880,8 @@ async function archiveQuarantinedOperation(operationId) {
     const item = readQueueStrict().find(entry => entry.operationId === operationId);
     if (!item || item.userId !== uid || item.businessId !== businessId || !queueQuarantineReason(item))
       throw Error("Somente uma ocorrência em quarentena da conta atual pode ser arquivada.");
+    if (queueQuarantineReason(item) === "settings_permission_required")
+      throw Error("Esta configuração está preservada para análise de autorização. Não será arquivada nem reenviada por esta ação.");
     preserveQueueQuarantine(item);
     const evidence = readQueueReview(item), originalPacketJson = evidence.originalPacketJson;
     if (JSON.stringify(item) !== originalPacketJson) throw Error("O pacote difere da evidência original. O arquivamento foi interrompido.");
@@ -1268,7 +1318,7 @@ const diagnostic = () => {
     orphanOperations: saleIntegrity.count + paymentIntegrity.count,
     saleIntegrity,
     paymentIntegrity,
-    processingOperations: readQueue().filter((item) => item.status === "syncing")
+    processingOperations: readQueue().filter((item) => item.status === "syncing" && !queueManualReviewReason(item))
       .length,
     lastAttemptAt: state.lastAttempt,
     lastCompleteSyncAt: state.lastCompleteSync,
@@ -1370,6 +1420,8 @@ function reportError(error, context = "Firebase", extra = {}) {
   state.syncFailure = error.syncDetail || {stage: context, code: lastErrorCode,
     message: String(error.message || "Falha sem mensagem").slice(0,600),
     collection: extra.collection || "", path: extra.path || currentPath || "", at: now()};
+  if (extra.operationId) state.syncFailure = {...state.syncFailure,operationId:extra.operationId,
+    businessId:state.userProfile?.businessId || "",actorUid:currentUser?.uid || ""};
   const failure = {...state.syncFailure, operation: extra.operation || state.syncFailure.request || "",
     businessId: state.userProfile?.businessId || "", authUid: auth.currentUser?.uid || "",
     actorUid: currentUser?.uid || "", subscriptionUid: extra.subscriptionUid || "",
@@ -1601,6 +1653,9 @@ function migrateScopedQueueCompatibility() {
   const next = queue.map((item) => {
     if (preserveQueueQuarantine(item)) return item;
     if (saleQueueRequiresReview(item)) return item;
+    // Permission resolution is not permission to enrich/rewrite a config packet.
+    if (Array.isArray(item.payload?.writes) && item.payload.writes.some(write => write.entityType === "settings") &&
+        !canWriteSharedSettings()) return item;
     // A permanent failure is evidence. Compatibility is not an authorized retry.
     if (item.status === "error") return item;
     const copy = structuredClone(item),
@@ -1676,6 +1731,12 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
+  if (writes.some(write => write.entityType === "settings") && !canWriteSharedSettings())
+    throw Object.assign(Error("Este perfil não pode alterar configurações da empresa. Nenhuma configuração foi enfileirada."),
+      {code:"settings-permission-required",syncDetail:{stage:"settings_permission_preflight",
+        service:"Firestore",code:"settings-permission-required",collection:"settings",
+        path:`businesses/${activeBusinessId()}/settings/default`,request:"queue_settings_write",
+        message:"Configuração empresarial exige settings.manage."}});
   const workspaceOrigin=window.WorkspaceRuntime.capture();
   if(writes.some(write=>window.IntegrityAudit?.legacyFixtureIdentity(write.entityType,write.data,activeBusinessId())))
     throw Object.assign(Error('Registro de demonstração confirmado: envio à nuvem bloqueado.'),{code:'legacy-fixture-upload-blocked'});
@@ -1877,6 +1938,26 @@ function changedFields(previous, item) {
       patch[key] = item?.[key];
   return patch;
 }
+function canWriteSharedSettings() {
+  // Unknown/bootstrap permission state must never grant a configuration write.
+  if (window.TeamAccess?.has?.("settings.manage") !== true) return false;
+  const context = window.BusinessContext?.get?.();
+  return Boolean(currentUser?.uid) && currentUser.uid === auth.currentUser?.uid &&
+    context?.loading === false && !context.error &&
+    ["owner", "platform_admin", "manager", "seller", "stock"].includes(context.role) &&
+    context.businessId === activeBusinessId() && context.userProfile?.uid === currentUser.uid &&
+    context.userProfile?.businessId === context.businessId && context.userProfile?.active !== false &&
+    Array.isArray(context.permissions) && (!context.member?.status || context.member.status === "active") &&
+    window.TeamAccess?.has?.("settings.manage") === true;
+}
+function sharedSettingsConfig(config) {
+  // Compare hydrated defaults symmetrically, without mutating either snapshot.
+  const value = structuredClone(config || {});
+  const normalized = DB.prepare ? DB.prepare({config:value}).config : value;
+  const result = {...normalized};
+  for (const key of ["operation", "recentClientIds", "appSchemaVersion"]) delete result[key];
+  return result;
+}
 function diffWrites(before, after) {
   const previousMovements = new Set((before.movimentacoesEstoque || []).map(m => String(m.id)));
   for (const movement of after.movimentacoesEstoque || []) {
@@ -1922,18 +2003,18 @@ function diffWrites(before, after) {
           data: { active: false, deletedAt: now() },
         });
   }
-  const beforeConfig = { ...(before.config || {}) },
-    afterConfig = { ...(after.config || {}) };
-  delete beforeConfig.operation;
-  delete afterConfig.operation;
-  if (JSON.stringify(beforeConfig) !== JSON.stringify(afterConfig))
-    writes.push({
-      entityType: "settings",
-      entityId: "default",
-      operation: "update",
-      before: beforeConfig,
-      data: changedFields(beforeConfig, afterConfig),
-    });
+  if (canWriteSharedSettings()) {
+    const beforeConfig = sharedSettingsConfig(before.config),
+      afterConfig = sharedSettingsConfig(after.config);
+    if (JSON.stringify(beforeConfig) !== JSON.stringify(afterConfig))
+      writes.push({
+        entityType: "settings",
+        entityId: "default",
+        operation: "update",
+        before: beforeConfig,
+        data: changedFields(beforeConfig, afterConfig),
+      });
+  }
   return writes;
 }
 function captureChanges(before, after) {
@@ -2085,7 +2166,15 @@ async function commitQueueItem(item) {
   assertSession();
   window.WorkspaceRuntime.capture();
   const preflight=queuePreflight(item);
-  if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code});
+  if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
+    ...(queueSettingsDiagnostic(item) ? {syncDetail:{...queueSettingsDiagnostic(item),service:"Firestore",request:"queue_preflight"}} : {})});
+  const settingsWrite = item.payload?.writes?.find(write => write.entityType === "settings");
+  if (settingsWrite && !canWriteSharedSettings())
+    throw Object.assign(Error("A autorização para alterar configurações não está disponível. Nenhum envio foi permitido."),
+      {code:"settings-permission-required",syncDetail:{stage:"settings_permission_preflight",service:"Firestore",
+        code:"settings-permission-required",collection:"settings",request:"queue_preflight",
+        path:`businesses/${activeBusinessId()}/settings/${settingsWrite.entityId}`,
+        message:"A configuração exige autorização explícita de settings.manage."}});
   const businessId = activeBusinessId(),
     operationId = stableLegacyOperationId(item),
     marker = doc(
@@ -2144,11 +2233,22 @@ async function commitQueueItem(item) {
       ),
       { code: "financial-composite-incomplete" },
     );
+  let transactionStage = "transaction_start", transactionPaths = [];
+  try {
   await runTransaction(db, async (transaction) => {
+    transactionPaths = [];
     // Fence retries and every asynchronous read/write, including helper calls.
     transaction = new Proxy(transaction, {get(target, property) {
-      if (property === 'get') return async (...args) => {assertSession();const value=await target.get(...args);assertSession();return value;};
-      if (['set','update','delete'].includes(property)) return (...args) => {assertSession();return target[property](...args);};
+      if (property === 'get') return async (...args) => {
+        assertSession(); transactionStage = "transaction_read"; currentPath = args[0]?.path || currentPath;
+        const value = await target.get(...args); assertSession(); return value;
+      };
+      if (['set','update','delete'].includes(property)) return (...args) => {
+        assertSession(); transactionStage = "transaction_write_prepare";
+        currentPath = args[0]?.path || currentPath;
+        if (args[0]?.path) transactionPaths.push(args[0].path);
+        return target[property](...args);
+      };
       return Reflect.get(target, property);
     }});
     assertSession();
@@ -2796,7 +2896,30 @@ async function commitQueueItem(item) {
         schemaVersion: 3,
       }),
     );
+    transactionStage = "transaction_commit";
   });
+  } catch (error) {
+    // Retired-session callbacks are not Firestore failures and must not attach
+    // a diagnostic from the previous principal to the replacement session.
+    if (error.code === "sync-session-retired") throw error;
+    if (!error.syncDetail) {
+      const targets = [...new Set(writes.map(write =>
+        `businesses/${businessId}/${write.entityType}/${write.entityId}`))];
+      const committing = transactionStage === "transaction_commit";
+      const settingsOnly = writes.length > 0 && writes.every(write => write.entityType === "settings");
+      error.syncDetail = {
+        stage: committing && settingsOnly ? "shared_settings_commit" : transactionStage,
+        service:"Firestore",code:errorCode(error) || "unknown",
+        collection:committing ? settingsOnly ? "settings" : "" : String(currentPath).split("/").at(-2) || "",
+        path:committing ? targets.length === 1 ? targets[0] : "" : currentPath,
+        pathAttribution:committing ? "payload_target_not_individual_rule_result" : "observed_operation",
+        request:committing ? "atomic_commit" : transactionStage,
+        transactionPaths:[...new Set(transactionPaths)],lastObservedPath:currentPath,
+        message:String(error.message || "Falha na transação Firestore.").slice(0,600),
+      };
+    }
+    throw error;
+  }
   return transactionOutcome;
 }
 async function verifySaleQueueCommit(item) {
@@ -3021,6 +3144,7 @@ async function processSyncQueue(options = {}) {
       assertSession();
       if (queueManualReviewReason(queued)) {
         preserveQueueQuarantine(queued);
+        retireSettingsPermissionFailure(queued);
         reviewHeld++;
         continue;
       }
@@ -3169,7 +3293,10 @@ async function processSyncQueue(options = {}) {
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
             lastErrorMessage: String(error?.message || friendlyError(error)).slice(0,800),
-            lastErrorPath: currentPath || null,
+            lastErrorPath: error.syncDetail?.path ?? (currentPath || null),
+            lastErrorStage: error.syncDetail?.stage || null,
+            lastErrorRequest: error.syncDetail?.request || null,
+            lastErrorPaths: error.syncDetail?.transactionPaths || [],
           };
           saveQueue(failed);
         }
@@ -3218,7 +3345,8 @@ async function processSyncQueue(options = {}) {
 function pendingIds(name) {
   const ids = new Set();
   for (const item of readQueue())
-    if (!isHistoricalProjectionBatch(item))
+    if (!isHistoricalProjectionBatch(item) &&
+        !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required"))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
   return ids;
@@ -4769,8 +4897,13 @@ function queueOperationDiagnostic(item) {
     lastErrorPath: item.lastErrorPath || null,
     lastErrorCode: String(item.lastErrorCode || ""),
     lastErrorMessage: cleanMessage(item.lastErrorMessage),
+    diagnostic: queueSettingsDiagnostic(item),
+    lastErrorStage: item.lastErrorStage || null,
+    lastErrorRequest: item.lastErrorRequest || null,
+    transactionPaths: item.lastErrorPaths || [],
     reviewRequired: Boolean(queueManualReviewReason(item)) && !readQueueArchive(item),
     reviewState: readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
+    reviewReason: queueQuarantineReason(item) || null,
     archive: readQueueArchive(item),
     // Older queues did not persist the first failure. Never label creation or
     // the last attempt as the first failure, nor change the queue to export it.

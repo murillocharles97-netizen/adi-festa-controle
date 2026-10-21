@@ -294,24 +294,47 @@ window.Checkout = (() => {
   const row = (c) =>
     `<button class="client-choice" data-choose-client="${c.id}"><div><b>${escapar(c.nome)}</b><small>${escapar(c.telefone) || "Sem telefone"}${c.ultimaCompra ? ` · Última compra: ${new Date(c.ultimaCompra).toLocaleDateString("pt-BR")}` : ""}</small></div>${balance(c)}</button>`;
   function picker(onSelected = null, options = {}) {
+    const pickerOrigin = {
+      businessId: DB.getBusinessId(),
+      principal: DB.getPrincipal(),
+      generation: DB.getWorkspaceGeneration(),
+    };
     const all = clients()
         .list()
         .filter((c) => c.ativo !== false)
         .sort((a, b) => a.nome.localeCompare(b.nome)),
-      recent = (DB.carregar().config.recentClientIds || [])
+      recent = DB.getRecentClientIds()
         .map((id) => all.find((c) => c.id === id))
         .filter(Boolean);
-    document.querySelector("#modal").innerHTML =
+    const modal = document.querySelector("#modal");
+    modal.innerHTML =
       `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>${options.title || "Selecionar cliente"}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button><div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
-    const close = () => (document.querySelector("#modal").innerHTML = "");
+    const input = document.querySelector("#client-picker-search"),
+      results = document.querySelector("#client-result-list"),
+      more = document.querySelector("#client-result-more");
+    let timer, closed = false;
+    const currentPicker = () => !closed &&
+      pickerOrigin.businessId === DB.getBusinessId() &&
+      pickerOrigin.principal === DB.getPrincipal() &&
+      pickerOrigin.generation === DB.getWorkspaceGeneration() &&
+      document.querySelector("#modal") === modal &&
+      document.querySelector("#client-picker-search") === input &&
+      document.querySelector("#client-result-list") === results &&
+      document.querySelector("#client-result-more") === more;
+    const close = () => {
+      const ownsModal = currentPicker();
+      closed = true;
+      clearTimeout(timer);
+      if (ownsModal) modal.innerHTML = "";
+    };
     document
       .querySelectorAll("#modal .close")
       .forEach((x) => (x.onclick = close));
-    const input = document.querySelector("#client-picker-search");
-    let timer;
     input.oninput = () => {
+      if (!currentPicker()) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
+        if (!currentPicker()) return;
         const q = norm(input.value),
           d = somenteNumeros(input.value),
           found = all.filter(
@@ -322,30 +345,22 @@ window.Checkout = (() => {
               ).includes(q) ||
               (d && somenteNumeros(`${c.telefone}${c.telefone2}`).includes(d)),
           );
-        document.querySelector("#client-result-list").innerHTML =
+        results.innerHTML =
           found.slice(0, 60).map(row).join("") ||
           '<p class="empty">Nenhum cliente encontrado</p>';
-        document.querySelector("#client-result-more").textContent =
+        more.textContent =
           found.length > 60 ? "Mostrando 60 resultados. Refine a busca." : "";
         window.lucide?.createIcons();
       }, 130);
     };
-    document.querySelector("#modal").onclick = (e) => {
+    modal.onclick = (e) => {
+      if (!currentPicker()) return;
       const b = e.target.closest("[data-choose-client]");
       if (b) {
         const sel = document.querySelector("#sale-client");
         sel.value = b.dataset.chooseClient;
         sel.dispatchEvent(new Event("change"));
-        if (sel.value)
-          DB.alterar(
-            (db) =>
-              (db.config.recentClientIds = [
-                sel.value,
-                ...(db.config.recentClientIds || []).filter(
-                  (id) => id !== sel.value,
-                ),
-              ].slice(0, 5)),
-          );
+        if (sel.value) DB.rememberRecentClient(sel.value);
         close();
         refresh();
         if (onSelected && sel.value) onSelected(clients().getById(sel.value));

@@ -29,9 +29,9 @@ test.before(async()=>{
  baseline=await snapshot();
 });
 test.after(async()=>env?.cleanup());
-async function snapshot(){return env.withSecurityRulesDisabled(async ctx=>{
- const result={};for(const name of Object.keys(rows)){const docs=await sdk.getDocs(sdk.collection(ctx.firestore(),'businesses',bid,name));result[name]=docs.docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));}return JSON.stringify(result);
-});}
+async function snapshot(){let snapshotJson;await env.withSecurityRulesDisabled(async ctx=>{
+ const result={};for(const name of Object.keys(rows)){const docs=await sdk.getDocs(sdk.collection(ctx.firestore(),'businesses',bid,name));result[name]=docs.docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));}snapshotJson=JSON.stringify(result);
+});return snapshotJson;}
 function runtime(role){
  const uid=role==='owner'?owner:seller,context={businessId:bid,role,permissions:role==='owner'?['*']:operational,spaceAccess:role==='owner'?'all':'selected',allowedSpaceIds:[space],permissionSignature:uid,userProfile:{uid,businessId:bid}},
   db=env.authenticatedContext(uid).firestore(),s={...sdk,where:(field,operator,value)=>sdk.where(field,operator,bridge(value)),console,Date,performance,structuredClone,firebaseQuery:sdk.query,auth:{currentUser:{uid}},db,normalizeFirestoreData:normalize,
