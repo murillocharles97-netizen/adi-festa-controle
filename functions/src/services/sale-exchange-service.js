@@ -7,6 +7,7 @@ const {computeAccess}=require('./subscription-service');
 const {stockKey}=require('./online-stock-reservation');
 const {planExchange}=require('../shared/sale-exchange');
 const Model=require('../shared/online-store');
+const {allowsExchangeProduct}=require('../shared/exchange-product-scope');
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function saleExchangeService(db) {
@@ -39,7 +40,7 @@ function saleExchangeService(db) {
       let parent=parents.get(row.productId);
       if(!parent){const ref=c.root.collection('products').doc(row.productId),snap=await tx.get(ref);parent={ref,data:snap.data()};parents.set(row.productId,parent);}
       const p=parent.data;
-      if(!p||p.businessId!==c.bid||(p.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)||!['all_spaces','selected_spaces'].includes(p.spaceAccessMode)||!Model.allows(p,c.sale.spaceId)||p.spaceId&&p.spaceId!==c.sale.spaceId)fail('permission-denied','Produto não autorizado no espaço; cadastros legados ambíguos exigem associação explícita.');
+      if(!p||p.businessId!==c.bid||(p.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)||!allowsExchangeProduct(p,c.sale.spaceId)||p.spaceId&&p.spaceId!==c.sale.spaceId)fail('permission-denied','Produto não autorizado no espaço; cadastros legados ambíguos exigem associação explícita.');
       if(p.itemKind==='service'||p.productType==='recurring'||p.semControleEstoque||p.controlaEstoque===false)fail('failed-precondition','A V1 exige produto físico com controle de estoque.');
       const ref=row.variantId?c.root.collection('productVariants').doc(row.variantId):parent.ref,source=row.variantId?(await tx.get(ref)).data():p;
       if(!source||row.variantId&&(source.parentProductId!==row.productId||source.businessId!==c.bid||(source.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)||!Model.active(source)||source.spaceId&&source.spaceId!==c.sale.spaceId)||Boolean(row.variantId)!==(p.productType==='variable'))fail('failed-precondition','Variação inválida.');
