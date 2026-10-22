@@ -1,4 +1,4 @@
-const CACHE='veconi-v194-compatible-rollback';
+const CACHE='veconi-v195-compatible-rollback';
 // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
 // Shared entitlement catalog (same source consumed by Cloud Functions).
 const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];
@@ -47,5 +47,5 @@ ARQUIVOS.push('./functions/src/shared/online-store.js','./js/online-store-ui.js'
 ARQUIVOS.push('./js/sale-exchanges.js','./css/sale-exchanges.css','./js/exchange-credit-checkout.js','./css/exchange-credit-checkout.css','./js/exchange-economics.js');
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ARQUIVOS))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE&&OBSOLETE_CACHE_PREFIXES.some(prefix=>key.startsWith(prefix))).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
-self.addEventListener('message',event=>{if(event.data==='SKIP_WAITING')self.skipWaiting();if(event.data==='GET_VERSION')event.ports?.[0]?.postMessage({cache:CACHE,release:'194'})});
+self.addEventListener('message',event=>{if(event.data==='SKIP_WAITING')self.skipWaiting();if(event.data==='GET_VERSION')event.ports?.[0]?.postMessage({cache:CACHE,release:'195'})});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET'||new URL(event.request.url).origin!==location.origin)return;const networkFirst=event.request.mode==='navigate'||['script','style'].includes(event.request.destination);if(networkFirst){event.respondWith(fetch(event.request,{cache:'no-store'}).then(async response=>{if(response.ok){const copy=response.clone();await caches.open(CACHE).then(cache=>cache.put(event.request,copy))}return response}).catch(async()=>{const cached=await caches.match(event.request,{ignoreSearch:true});if(cached)return cached;if(event.request.mode==='navigate'){const path=new URL(event.request.url).pathname,page=path.includes('/catalogo/')||path.endsWith('/catalogo.html')?'./catalogo.html':'./index.html';return caches.match(page)}return Response.error()}));return}event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request).then(async response=>{if(response.ok){const copy=response.clone();await caches.open(CACHE).then(cache=>cache.put(event.request,copy))}return response}).catch(()=>Response.error())))});

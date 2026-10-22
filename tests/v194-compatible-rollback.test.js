@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{execFileSync}=require('node:child_process');
 const candidate='4ae78b90bc9405fb9d8aaa66da652a3cb804268c';
+const scopeCandidate='55a4be9e972d766a3d44d8b7072ec72f8c8b1d4e';
 function harness(file,separator){
  const source=fs.readFileSync(file,'utf8'),prefix=source.slice(0,source.indexOf(separator)),m={exports:{}};
  assert.ok(prefix.length>500,'existing UI harness must be present');
@@ -9,16 +10,21 @@ function harness(file,separator){
 }
 const exchange=harness('tests/sale-exchanges-ui.test.js',"test('catalog"),credit=harness('tests/exchange-credit-checkout.test.js','const settle=');
 test('containment frontend has its own cache, build channel and entry URLs',()=>{
- assert.match(fs.readFileSync('service-worker.js','utf8'),/CACHE='veconi-v194-compatible-rollback'/);
+ assert.match(fs.readFileSync('service-worker.js','utf8'),/CACHE='veconi-v195-compatible-rollback'/);
  assert.match(fs.readFileSync('js/build-info.js','utf8'),/channel: "compatible-rollback"/);
  const html=fs.readFileSync('index.html','utf8');
- for(const file of ['sale-exchanges','exchange-credit-checkout','build-info'])assert.ok(html.includes(`/js/${file}.js?v=194-rb`));
+ for(const file of ['sale-exchanges','exchange-credit-checkout'])assert.ok(html.includes(`/js/${file}.js?v=194-rb`));
+ for(const file of ['exchange-economics','build-info'])assert.ok(html.includes(`/js/${file}.js?v=195-rb`));
+ assert.match(fs.readFileSync('js/build-info.js','utf8'),/release: "195"/);
 });
 test('rollback preserves Rules, financial projection, ledger guards, Sync and sensitive-field sanitation byte-for-byte',()=>{
- for(const file of ['firestore.rules','firestore.indexes.json','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js','functions/src/shared/exchange-product-scope.js','js/firebase/sync.js','js/fiados.js','js/storage.js','js/business-cache.js','js/exchange-economics.js','js/checkout.js','js/app.js','js/vendas.js','js/recibos.js']){
+ for(const file of ['firestore.rules','firestore.indexes.json','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js','functions/src/shared/exchange-product-scope.js','js/firebase/sync.js','js/fiados.js','js/storage.js','js/business-cache.js','js/checkout.js','js/app.js','js/vendas.js','js/recibos.js']){
   const before=execFileSync('git',['-c','core.bare=false','show',`${candidate}:${file}`],{encoding:'utf8'}).replace(/\r\n/g,'\n');
   assert.equal(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'),before,file);
  }
+ const economics=fs.readFileSync('js/exchange-economics.js','utf8').replace(/\r\n/g,'\n');
+ assert.equal(economics,execFileSync('git',['-c','core.bare=false','show',`${scopeCandidate}:js/exchange-economics.js`],{encoding:'utf8'}).replace(/\r\n/g,'\n'),'V195 scope must match the immutable release candidate');
+ assert.equal(require('node:crypto').createHash('sha256').update(economics).digest('hex'),'a6943863b0329664c23c95d5afbeb7288ab1153bd5b510f781ae1ac8a138e36e','V195 read-only scope fix must remain identical to the validated candidate');
 });
 test('new exchange form is paused and direct handlers cannot preserve or send a new operation',async()=>{
  const h=exchange();await h.open();assert.match(h.root.innerHTML,/Novas trocas temporariamente pausadas/);assert.doesNotMatch(h.root.innerHTML,/<form data-ex-form>/);

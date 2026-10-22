@@ -15,7 +15,7 @@
     commit,
     shortCommit,
     builtAt,
-    release: "194",
+    release: "195",
     channel: "compatible-rollback",
   });
 
