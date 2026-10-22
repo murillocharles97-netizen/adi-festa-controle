@@ -2,17 +2,29 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 const read=p=>fs.readFileSync(p,'utf8');
 test('normal V179 ships no timing activation, recorder, style or hooks',()=>{for(const p of ['js/sale-timing.js','js/sale-timing-access.js','js/sale-timing-policy.js','css/sale-timing.css'])assert.equal(fs.existsSync(p),false);for(const p of ['index.html','service-worker.js','js/checkout.js','js/firebase/sync.js'])assert.doesNotMatch(read(p),/VeconiSaleTiming|sale-timing|saleTimingWait|saleTimingContext/);});
-test('release cache and imports preserve the published V191 singleton; the next release must refresh changed entry points',()=>{
+test('release cache and imports refresh changed assets without duplicating preserved Sync singletons',()=>{
  const version=read('js/build-info.js').match(/release: "(\d+)"/)[1];assert.ok(Number(version)>=179);
  assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));assert.ok(read('service-worker.js').includes(`release:'${version}'`));
  // V191 intentionally shipped only Team UI/updateTeamMember and retained V190
  // Sync/Auth imports. This is the audited published baseline, not a new release.
- // Once the hotfix gets its new release number, require fresh URLs throughout.
- const syncVersion=version==='191'?'190':version;
+ // V195 changes reporting scope only. Auth, UI, Sync and checkout stay byte-
+ // identical to V194; changing their URLs would create an unnecessary singleton.
+ const syncVersion=version==='191'?'190':version==='195'?'194':version;
  for(const p of ['js/firebase/auth.js','js/firebase/firebase-ui.js'])assert.ok(read(p).includes(`import './sync.js?v=${syncVersion}'`));
  for(const asset of ['checkout','build-info','firebase/auth','firebase/firebase-ui']){
-  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):version;
+  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):version==='195'&&asset!=='build-info'?'194':version;
   assert.ok(read('index.html').includes(`./js/${asset}.js?v=${assetVersion}`));
+ }
+ if(version==='195'){
+  assert.ok(read('index.html').includes('./js/exchange-economics.js?v=195'));
+  const unchanged={
+   'js/firebase/sync.js':'21a39241f87ea731bf5ba5ce9543db9f04cba74d800e93568b56c677fe2cdcff',
+   'js/firebase/auth.js':'c3ac4ff9c298e817f7cfcb3378695c7563509f3663adc8c571db337f116fb453',
+   'js/firebase/firebase-ui.js':'1021a08e5adf5b4ba23acab217415afcf04bf84b79fec72940e98b062834830c',
+   'js/checkout.js':'a3e65318544319233393f5e7cce2c50c3b41f0ceeeb34408a3c96d9c03a8bc41',
+   'js/fiados.js':'c7cb87bcd230c67f48e0a4ef3dd02486b48a6eeb797f72835dc97ec28c8ed51e',
+  };
+  for(const [path,hash]of Object.entries(unchanged))assert.equal(crypto.createHash('sha256').update(read(path).replace(/\r\n/g,'\n')).digest('hex'),hash,path);
  }
 });
 test('normal checkout stays identical to V177 outside approved preferences and the isolated exchange-credit branch',()=>{
