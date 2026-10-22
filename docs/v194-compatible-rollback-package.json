@@ -1,11 +1,17 @@
 {
-  "artifact": "V194-compatible-rollback",
+  "artifact": "V194-compatible-rollback-single-space",
   "publicationAuthorized": false,
-  "candidateCommit": "c1f8b08bb141ba5feb9c4b2b6288fb6db4fd0293",
-  "branch": "codex/v194-compatible-rollback",
-  "artifactTag": "rollback/v194-compatible-sale-exchanges",
+  "candidateCommit": "4ae78b90bc9405fb9d8aaa66da652a3cb804268c",
+  "candidateTag": "candidate/v194-single-space",
+  "previousCandidateCommit": "c1f8b08bb141ba5feb9c4b2b6288fb6db4fd0293",
+  "previousContainmentCommit": "67c16811f557f674bc2b8d30b75711400681b1b7",
+  "previousContainmentTagPreserved": "rollback/v194-compatible-sale-exchanges",
+  "branch": "codex/v194-compatible-rollback-single-space",
+  "artifactTag": "rollback/v194-compatible-sale-exchanges-single-space",
   "purpose": "Contain new exchange/credit effects while preserving already issued records and their safety invariants; not a raw V193 restore",
   "deployment": {
+    "requiresOperationalSingleSpaceFixInstalled": true,
+    "requiredCreditCancellationFloor": "cancelExchangeCreditSale from 4ae78b90bc9405fb9d8aaa66da652a3cb804268c or a verified compatible successor",
     "phase1FunctionsOnly": ["confirmSaleExchange", "confirmExchangeCreditSale"],
     "phase2": "wait for both functions ready, then compatible frontend/PWA",
     "rules": "retain V194 byte-for-byte",
@@ -15,8 +21,19 @@
     "schedulerCreated": false,
     "migrations": false
   },
-  "preserved": ["ledger", "receipts", "IDs", "queues", "pending envelopes", "checksums", "specific credit-sale cancellation", "exchange-aware reporting", "reset block", "company/space isolation", "sensitive-field sanitation"],
+  "preserved": ["ledger", "receipts", "IDs", "queues", "pending envelopes", "checksums", "specific credit-sale cancellation", "strict canonical single_space product scope", "exchange-aware reporting", "reset block", "company/space isolation", "sensitive-field sanitation"],
   "notPermitted": ["blind V193 server/Rules/frontend deploy", "database snapshot restore", "collection deletion", "generation reset", "queue/cache cleanup", "automatic replay", "automatic compensation"],
   "knownBoundary": "Already admitted/in-flight transactions may finish atomically. Inspect the same receipt/IDs; do not assume their failure or repeat with new IDs.",
-  "resumeRequiresExplicitAuthorization": true
+  "resumeRequiresExplicitAuthorization": true,
+  "validation": {
+    "uiArtifactTests": 9,
+    "domainEconomicsProfitTests": 45,
+    "emulatorTests": 6,
+    "emulatorPort": 8197,
+    "oldContainmentSingleSpaceCancellationRejectedWithoutWrites": true,
+    "sameCancellationIdsRestoredExactlyOnceByUpdatedArtifact": true,
+    "lintJavaScriptFiles": 409,
+    "buildJavaScriptFiles": 409,
+    "productionCalls": 0
+  }
 }

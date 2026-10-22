@@ -8,6 +8,7 @@ const {computeAccess}=require('./subscription-service');
 const {stockKey}=require('./online-stock-reservation');
 const {salePlan}=require('../shared/exchange-credit');
 const Model=require('../shared/online-store');
+const {allowsExchangeProduct}=require('../shared/exchange-product-scope');
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const generation=value=>value?.workspaceGeneration??0;
@@ -57,7 +58,7 @@ function creditService(db){
       let parent=parents.get(productId);
       if(!parent){const ref=c.root.collection('products').doc(productId);parent={ref,data:(await tx.get(ref)).data(),delta:0};parents.set(productId,parent);}
       const product=parent.data;
-      if(!product||product.businessId!==c.bid||generation(product)!==generation(c.business)||!['all_spaces','selected_spaces'].includes(product.spaceAccessMode)||!Model.allows(product,c.spaceId)||product.spaceId&&product.spaceId!==c.spaceId)fail('permission-denied','Produto não autorizado no espaço.');
+      if(!product||product.businessId!==c.bid||generation(product)!==generation(c.business)||!allowsExchangeProduct(product,c.spaceId)||product.spaceId&&product.spaceId!==c.spaceId)fail('permission-denied','Produto não autorizado no espaço.');
       if(product.itemKind==='service'||product.productType==='recurring'||product.semControleEstoque||product.controlaEstoque===false)fail('failed-precondition','A V1 exige produto físico com controle de estoque.');
       const ref=variantId?c.root.collection('productVariants').doc(variantId):parent.ref,source=variantId?(await tx.get(ref)).data():product;
       if(!source||Boolean(variantId)!==(product.productType==='variable')||variantId&&(source.parentProductId!==productId||source.businessId!==c.bid||generation(source)!==generation(c.business)||!Model.active(source)||source.spaceId&&source.spaceId!==c.spaceId))fail('failed-precondition','Variação indisponível no espaço.');

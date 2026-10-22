@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{execFileSync}=require('node:child_process');
-const candidate='c1f8b08bb141ba5feb9c4b2b6288fb6db4fd0293';
+const candidate='4ae78b90bc9405fb9d8aaa66da652a3cb804268c';
 function harness(file,separator){
  const source=fs.readFileSync(file,'utf8'),prefix=source.slice(0,source.indexOf(separator)),m={exports:{}};
  assert.ok(prefix.length>500,'existing UI harness must be present');
@@ -15,7 +15,7 @@ test('containment frontend has its own cache, build channel and entry URLs',()=>
  for(const file of ['sale-exchanges','exchange-credit-checkout','build-info'])assert.ok(html.includes(`/js/${file}.js?v=194-rb`));
 });
 test('rollback preserves Rules, financial projection, ledger guards, Sync and sensitive-field sanitation byte-for-byte',()=>{
- for(const file of ['firestore.rules','firestore.indexes.json','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js','js/firebase/sync.js','js/fiados.js','js/storage.js','js/business-cache.js','js/exchange-economics.js','js/checkout.js','js/app.js','js/vendas.js','js/recibos.js']){
+ for(const file of ['firestore.rules','firestore.indexes.json','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js','functions/src/shared/exchange-product-scope.js','js/firebase/sync.js','js/fiados.js','js/storage.js','js/business-cache.js','js/exchange-economics.js','js/checkout.js','js/app.js','js/vendas.js','js/recibos.js']){
   const before=execFileSync('git',['-c','core.bare=false','show',`${candidate}:${file}`],{encoding:'utf8'}).replace(/\r\n/g,'\n');
   assert.equal(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'),before,file);
  }

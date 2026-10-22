@@ -5,21 +5,23 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {execFileSync}=require('node:child_process'),{createRequire,wrap}=require('node:module');
 const {initializeTestEnvironment}=require('@firebase/rules-unit-testing');
-const root=path.resolve(__dirname,'../..'),candidate='c1f8b08bb141ba5feb9c4b2b6288fb6db4fd0293';
+const root=path.resolve(__dirname,'../..'),candidate='4ae78b90bc9405fb9d8aaa66da652a3cb804268c',previousContainment='67c16811f557f674bc2b8d30b75711400681b1b7';
 const requireFunctions=createRequire(path.join(root,'functions/package.json'));
 const {initializeApp,deleteApp}=requireFunctions('firebase-admin/app'),{getFirestore}=requireFunctions('firebase-admin/firestore');
 const {saleExchangeService}=require('../../functions/src/services/sale-exchange-service');
 const {creditService}=require('../../functions/src/services/exchange-credit-service');
 const {financialIncomeService}=require('../../functions/src/services/financial-income-service');
-const originalSource=file=>execFileSync('git',['-c','core.bare=false','show',`${candidate}:${file}`],{cwd:root,encoding:'utf8'});
-function originalModule(file){
+const sourceAt=(revision,file)=>execFileSync('git',['-c','core.bare=false','show',`${revision}:${file}`],{cwd:root,encoding:'utf8'});
+const originalSource=file=>sourceAt(candidate,file);
+function originalModule(file,revision=candidate){
   const filename=path.join(root,file),module={exports:{}};
-  const load=vm.runInThisContext(wrap(originalSource(file)),{filename:`${filename} [immutable V194]`});
+  const load=vm.runInThisContext(wrap(sourceAt(revision,file)),{filename:`${filename} [immutable ${revision}]`});
   load(module.exports,createRequire(filename),module,filename,path.dirname(filename));
   return module.exports;
 }
 const originalExchangeFactory=originalModule('functions/src/services/sale-exchange-service.js').saleExchangeService;
 const originalCreditFactory=originalModule('functions/src/services/exchange-credit-service.js').creditService;
+const previousCreditFactory=originalModule('functions/src/services/exchange-credit-service.js',previousContainment).creditService;
 const enabled=/^(localhost|127\.0\.0\.1):\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||'');
 const t=(name,fn)=>test(name,{skip:!enabled},fn);
 let env,app,db,exchanges,credits,originalExchanges,originalCredits,serial=0;
@@ -42,7 +44,7 @@ async function setup({seller=false}={}){
   await db.doc(`financialSpaces/${spaceId}`).set({id:spaceId,businessId:bid,linkedBusinessId:bid,ownerUid:owner,active:true,type:'business',capabilities:{finance:true,sales:true},automation:{enabled:true,activatedAt:'2020-01-01T00:00:00Z',defaultIncomeFinancialAccountId:'cash',autoIncome:{sales:true}}});
   await db.doc(`financialSpaces/${spaceId}/financialAccounts/cash`).set({ownerUid:owner,active:true,accessMode:'single_space',defaultFinancialSpaceId:spaceId,currentBalanceCents:0});
   await business.collection('clients').doc('client-one').set({id:'client-one',businessId:bid,spaceId,workspaceGeneration:0,nome:'QA rollback',active:true,saldo:175});
-  for(const [id,stock,price]of [['original-item',0,80],['replacement-item',20,50],['future-item',20,30]])await business.collection('products').doc(id).set({id,businessId:bid,nome:`QA ${id}`,active:true,productType:'simple',estoqueAtual:stock,estoque:stock,totalStock:stock,preco:price,spaceAccessMode:'selected_spaces',allowedSpaceIds:[spaceId]});
+  for(const [id,stock,price]of [['original-item',0,80],['replacement-item',20,50],['future-item',20,30]])await business.collection('products').doc(id).set({id,businessId:bid,nome:`QA ${id}`,active:true,productType:'simple',estoqueAtual:stock,estoque:stock,totalStock:stock,preco:price,spaceAccessMode:'single_space',defaultSpaceId:spaceId,allowedSpaceIds:[spaceId],spaceScopeVersion:1});
   await business.collection('sales').doc('original-sale').set({id:'original-sale',businessId:bid,spaceId,workspaceGeneration:0,status:'pago',formaPagamento:'dinheiro',clienteId:'client-one',valorFinal:80,itens:[{produtoId:'original-item',nome:'QA original',quantidade:1,precoUnitario:80}]});
   const auth={uid},scope={businessId:bid,spaceId,workspaceGeneration:0,clientId:'client-one'};
   const quote={auth,data:{businessId:bid,workspaceGeneration:0,saleId:'original-sale',reason:'QA rollback',returns:[{line:0,quantity:1,restock:true}],replacements:[{productId:'replacement-item',quantity:1}],paymentMethod:'dinheiro'}};
@@ -68,7 +70,7 @@ async function creditRequest(c){
 const paused=error=>error.code==='failed-precondition'&&error.details?.reason==='exchange_new_commits_paused';
 
 test('containment preserves candidate Rules and canonical financial/reset helpers byte-for-byte',()=>{
-  for(const file of ['firestore.rules','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js'])assert.equal(fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n'),originalSource(file).replace(/\r\n/g,'\n'),file);
+  for(const file of ['firestore.rules','functions/src/services/financial-income-service.js','functions/src/services/workspace-reset-policy.js','functions/src/shared/exchange-product-scope.js'])assert.equal(fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n'),originalSource(file).replace(/\r\n/g,'\n'),file);
 });
 t('new or preserved exchange cannot commit in containment: owner and seller, zero writes and no request override',async()=>{
   for(const seller of [false,true]){
@@ -105,11 +107,14 @@ t('committed credit sale replay/status/ledger remain read-only; another actor ca
   await assert.rejects(credits.confirm({...request,auth:{uid:c.sellerUid}}),error=>error.code==='already-exists');
   assert.deepEqual(await snapshot(c),before);
 });
-t('specific cancellation stays active, restores credit/stock once and reverses only R$20, not Fiado',async()=>{
+t('old 67c16811 rejects single_space cancellation without writes; fixed containment restores once and reverses only R$20, not Fiado',async()=>{
   const c=await setup({seller:true});await seedExchange(c);const request=await creditRequest(c);await originalCredits.confirm(request);
   const saleRef=c.business.collection('sales').doc('future-sale'),sale=(await saleRef.get()).data(),finance=financialIncomeService(db);
   await finance.projectSale(c.bid,sale.id,sale);
   const cancel={auth:c.auth,data:{...c.scope,saleId:sale.id,operationId:'future-sale-cancel'}};
+  const beforePreviousContainment=await snapshot(c);
+  await assert.rejects(previousCreditFactory(db).cancel(cancel),error=>error.code==='permission-denied'&&/Produto não autorizado/.test(error.message));
+  assert.deepEqual(await snapshot(c),beforePreviousContainment,'old containment must fail closed without changing the same pending cancellation');
   assert.equal((await credits.cancel(cancel)).replayed,false);
   const cancelled=(await saleRef.get()).data();await finance.projectSale(c.bid,cancelled.id,cancelled,{before:sale});
   const beforeReplay=await snapshot(c);assert.equal((await credits.cancel(cancel)).replayed,true);assert.deepEqual(await snapshot(c),beforeReplay);
