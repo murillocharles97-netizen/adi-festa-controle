@@ -33,9 +33,11 @@ window.Modais=(()=>{
   }
   function paymentLabel(sale){
     const method=String(sale?.formaPagamento||'').toLowerCase();
+    if(sale?.source==='exchange_credit_checkout')return Number(sale.cashReceivedCents)>0?`Crédito de troca + ${paymentLabels[method]||'complemento'}`:'Crédito de troca';
     return sale?.status==='fiado'?'Fiado':paymentLabels[method]||'Pago';
   }
   function terminalPaymentMarkup(sale){
+    if(sale?.source==='exchange_credit_checkout')return`<div class="sale-terminal-payment-meta"><span>Crédito utilizado: ${dinheiro(Number(sale.exchangeCreditUsedCents||0)/100)}</span><small>Complemento recebido: ${dinheiro(Number(sale.cashReceivedCents||0)/100)}</small><small>Crédito separado do Fiado.</small></div>`;
     const payment=sale?.paymentMetadata;
     if(!payment||payment.channel!=='card_present')return'';
     const provider=({cielo:'Cielo',mercado_pago:'Mercado Pago',pagbank:'PagBank',mock:'SIMULADOR VECONI',simulator:'Simulador VECONI'})[payment.provider]||payment.provider||'Maquininha',method=payment.method==='debit'?'Débito':'Crédito',installments=payment.method==='credit'?` · ${Number(payment.installments||1)}x`:'';
@@ -60,6 +62,7 @@ window.Modais=(()=>{
       lines.push(`Segue o resumo da sua compra na ${businessName}:`,'','🛒 Valor da compra:',amount,'','💳 Forma de pagamento:','Fiado','','📄 Saldo anterior:',dinheiro(debt(balanceBefore??sale.saldoAnterior)),'','➕ Valor fiado nesta compra:',amount,'','💰 Total em aberto:',dinheiro(debt(balanceAfter??sale.saldoAtual)),'','Obrigado pela preferência! 💚','Qualquer dúvida, é só chamar.');
     }else{
       lines.push(guest?`A compra na ${businessName} foi registrada com sucesso.`:'Sua compra foi registrada com sucesso.','','🛒 Valor da compra:',amount,'','💳 Forma de pagamento:',paymentLabel(sale));
+      if(sale.source==='exchange_credit_checkout')lines.push('','Crédito de troca utilizado:',dinheiro(Number(sale.exchangeCreditUsedCents||0)/100),'Complemento recebido:',dinheiro(Number(sale.cashReceivedCents||0)/100));
       if(Number(sale.valorRecebido)>0)lines.push('','💵 Valor recebido:',dinheiro(sale.valorRecebido));
       if(Number(sale.troco)>0)lines.push('','↩️ Troco:',dinheiro(sale.troco));
       lines.push('','✅ Pagamento confirmado','','Obrigado pela preferência! 💚','Até a próxima.');
@@ -81,7 +84,7 @@ window.Modais=(()=>{
     const extraLines=itemLines.reduce((sum,lines)=>sum+Math.max(0,lines.length-1),0);
     const campaignLines=(sale.campaignReceiptSummary||[]).length;
     const renewalLines=recurringItems(sale).length;
-    const height=520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.observacao?70:0)+campaignLines*48;
+    const height=520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.source==='exchange_credit_checkout'?70:0)+(sale.observacao?70:0)+campaignLines*48;
     const canvas=document.createElement('canvas');canvas.width=width*scale;canvas.height=height*scale;
     const context=canvas.getContext('2d');context.scale(scale,scale);context.fillStyle='#fff';context.fillRect(0,0,width,height);context.textBaseline='alphabetic';
     context.fillStyle='#344052';context.textAlign='center';context.font='bold 27px Arial';context.fillText(business.receiptName||business.name,width/2,43);
@@ -101,6 +104,7 @@ window.Modais=(()=>{
     if(Number(sale.descontoTotal)>0){y+=25;context.fillStyle='#bd303b';context.fillText(`Desconto: -${dinheiro(sale.descontoTotal)}`,25,y)}
     y+=36;context.fillStyle='#344052';context.font='bold 19px Arial';context.fillText('VALOR FINAL',25,y);context.textAlign='right';context.fillText(dinheiro(value(sale)),width-25,y);
     y+=38;context.textAlign='center';context.fillStyle=sale.status==='fiado'?'#a86600':'#087d64';context.font='bold 15px Arial';context.fillText(`FORMA DE PAGAMENTO: ${paymentLabel(sale).toUpperCase()}`,width/2,y);
+    if(sale.source==='exchange_credit_checkout'){y+=30;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';context.fillText(`Crédito de troca: ${dinheiro(Number(sale.exchangeCreditUsedCents||0)/100)}`,35,y);y+=25;context.fillText(`Complemento recebido: ${dinheiro(Number(sale.cashReceivedCents||0)/100)}`,35,y)}
     if(sale.status==='fiado'){y+=36;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';context.fillText(`Saldo anterior: ${dinheiro(debt(sale.saldoAnterior))}`,35,y);y+=25;context.fillText(`Valor fiado nesta venda: ${dinheiro(value(sale))}`,35,y);y+=28;context.font='bold 16px Arial';context.fillText(`Total em aberto agora: ${dinheiro(debt(sale.saldoAtual))}`,35,y)}
     if((sale.campaignReceiptSummary||[]).length){y+=38;context.textAlign='left';context.fillStyle='#087d64';context.font='bold 14px Arial';context.fillText('BENEFÍCIOS DA COMPRA',25,y);for(const item of sale.campaignReceiptSummary){y+=23;context.fillStyle='#344052';context.font='13px Arial';wrapText(context,`${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`,390).slice(0,2).forEach(line=>{context.fillText(line,25,y);y+=17})}}
     if(sale.observacao){y+=38;context.textAlign='left';context.fillStyle='#697586';context.font='13px Arial';wrapText(context,`Observação: ${sale.observacao}`,390).slice(0,3).forEach(line=>{context.fillText(line,25,y);y+=18})}

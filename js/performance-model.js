@@ -1,7 +1,7 @@
 (function(root,factory){
-  const api=factory();
+  const api=factory(typeof module==='object'&&module.exports?require('./exchange-economics'):root.ExchangeEconomics);
   if(typeof module==='object'&&module.exports)module.exports=api;else root.PerformanceModel=api;
-})(typeof window==='undefined'?globalThis:window,function(){
+})(typeof window==='undefined'?globalThis:window,function(ExchangeEconomics){
   'use strict';
   const DAY=86400000,DEFAULT_ZONE='America/Sao_Paulo';
   const number=v=>Number.isFinite(Number(v))?Number(v):0;
@@ -44,7 +44,7 @@
   }
   const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,missingCost:0});
   function compare(current,previous,hasPrevious){return !hasPrevious||previous===0?null:(current-previous)/Math.abs(previous)*100;}
-  function build({sales=[],range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
+  function build({sales=[],exchanges=[],exchangeAdjustmentsReady=true,workspaceGeneration,range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
     const current=empty(),previous=empty(),points=new Map(),payments=new Map(),categories=new Map(),products=new Map(),bySpace=new Map(),seen=new Set();
     const names=new Map(spaces.map(s=>[String(s.id),s.name]));
     for(let key=r.start;key<=r.end;key=shift(key,1)){
@@ -76,16 +76,35 @@
         add(products,String(i.produtoId||i.productId||i.nome||'unknown'),{name:String(i.nome||i.productNameSnapshot||'Produto histórico')},amount,number(i.quantidade??i.quantity));
       });
     }
+    for(const row of ExchangeEconomics?.select(exchanges,{businessId,spaceId,allowedSpaceIds,workspaceGeneration})||[]){
+      const key=day(row.createdAt,r.zone);if(!key||key<r.previousStart||key>r.end)continue;
+      const active=key>=r.start,total=active?current:previous,amount=row.differenceCents;
+      total.revenue+=amount;total.exchangeAdjustment=(total.exchangeAdjustment||0)+amount;total.exchangeCount=(total.exchangeCount||0)+1;
+      // Cost of returned damaged goods needs its own canonical projection. Never
+      // manufacture a margin from unchanged historical sale costs.
+      if(canCost||canProfit)total.missingCost++;
+      if(!active)continue;
+      const p=parts(row.createdAt,r.zone),bucket=r.granularity==='hour'?`${key}T${p.hour}`:r.granularity==='month'?key.slice(0,7):key,point=points.get(bucket);
+      point.revenue+=amount;point.exchangeAdjustment=(point.exchangeAdjustment||0)+amount;point.exchangeCount=(point.exchangeCount||0)+1;
+      if(canCost||canProfit)point.missingCost++;
+      add(payments,'exchange_adjustment',{name:'Ajustes de troca',form:'ajuste'},amount);
+      add(categories,'exchange_adjustment',{name:'Ajustes de troca'},amount);
+      add(products,'exchange_adjustment',{name:'Ajustes de troca'},amount);
+      const space=add(bySpace,row.spaceId,{id:row.spaceId,name:names.get(row.spaceId)||'Espaço arquivado / indisponível',count:0,profit:0},amount);space.exchangeCount=(space.exchangeCount||0)+1;
+    }
     const finish=row=>{
       const result={...row,revenue:row.revenue/100};
+      if('exchangeAdjustment' in row)result.exchangeAdjustment=row.exchangeAdjustment/100;
       if('cost' in row){if(canCost)result.cost=row.cost/100;else delete result.cost;}
       if('profit' in row){if(canProfit)result.profit=row.profit/100;else delete result.profit;}
       if('count' in row)result.ticket=row.count?result.revenue/row.count:0;
       if(canProfit&&'profit' in result)result.margin=result.revenue?result.profit/result.revenue*100:0;
+      if(exchangeAdjustmentsReady!==true){result.exchangeProjectionPending=true;result.missingCost=(result.missingCost||0)+1;}
+      if(row.exchangeCount||exchangeAdjustmentsReady!==true){if(canCost&&'cost' in result)result.cost=null;if(canProfit&&'profit' in result){result.profit=null;result.margin=null;}}
       return result;
     };
     const result={current:finish(current),previous:finish(previous),points:[...points.values()].map(finish),payments:[...payments.values()].map(finish).sort((a,b)=>b.revenue-a.revenue),categories:[...categories.values()].map(finish).sort((a,b)=>b.revenue-a.revenue),products:[...products.values()].map(finish).sort((a,b)=>b.quantity-a.quantity||b.revenue-a.revenue),spaces:[...bySpace.values()].map(finish).sort((a,b)=>b.revenue-a.revenue)};
-    result.comparison={};for(const key of ['revenue','profit','ticket','count'])if(key in result.current)result.comparison[key]=compare(result.current[key],result.previous[key],result.previous.count>0&&(key!=='profit'||!current.missingCost&&!previous.missingCost));
+    result.comparison={};for(const key of ['revenue','profit','ticket','count'])if(key in result.current)result.comparison[key]=compare(result.current[key],result.previous[key],result.previous.count>0&&(key!=='profit'||exchangeAdjustmentsReady===true&&!current.missingCost&&!previous.missingCost));
     return result;
   }
   return{range,build,validSale,value,method,day,midnight,shift,compare};

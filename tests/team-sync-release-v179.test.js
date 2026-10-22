@@ -15,8 +15,19 @@ test('release cache and imports preserve the published V191 singleton; the next 
   assert.ok(read('index.html').includes(`./js/${asset}.js?v=${assetVersion}`));
  }
 });
-test('canonical checkout stays identical to clean V177 outside approved local client preferences and picker identity fencing',()=>{
+test('normal checkout stays identical to V177 outside approved preferences and the isolated exchange-credit branch',()=>{
  let checkout=read('js/checkout.js').replace(/\r\n/g,'\n');
+ // Trocas V1 adds an online tender branch. Reverse precisely that branch in
+ // memory; the historical digest still guards every unrelated normal-sale edit.
+ const removeOnce=(pattern,replacement='')=>{assert.equal((checkout.match(new RegExp(pattern.source,'g'))||[]).length,1,'exchange hook must be unique');checkout=checkout.replace(pattern,replacement);};
+ removeOnce(/    void window\.ExchangeCreditCheckout\?\.mount\?\.\(\{[\s\S]*?      onRecovered: completeRecoveredCreditSale,\n    \}\);\n/);
+ removeOnce(/\n  function completeRecoveredCreditSale\(sale\) \{[\s\S]*?\n  \}\n/);
+ removeOnce(/      if \(window\.ExchangeCreditCheckout\?\.hasPending\?\.\(\)\) return validationError\([^\n]+\n/);
+ removeOnce(/          const usingExchangeCredit = [^\n]+\n          if \(usingExchangeCredit[^\n]+\n            finishing = false;[^\n]+\n          \}\n/);
+ removeOnce(/            if \(usingExchangeCredit\) \{\n              sale = await window\.ExchangeCreditCheckout\.finish\(saleDraft\);\n            \} else \{\n/);
+ removeOnce(/(              sale = \{ \.\.\.sale, status: "fiado", formaPagamento: "fiado" \};\n)            \}\n/,'$1');
+ removeOnce(/          if \(usingExchangeCredit\) window\.ExchangeCreditCheckout\?\.reset\?\.\(\);\n/);
+ removeOnce(/const pendingSync = !usingExchangeCredit && \(navigator.onLine === false \|\| window.SyncFirebase\?\.isSalePending\?\.\(sale\)\);/,'const pendingSync = navigator.onLine === false || window.SyncFirebase?.isSalePending?.(sale);');
  // Revert only the approved preference read and its fenced picker write in memory.
  // The original full-file digest continues to reject every unrelated change.
  const restoreOnce=(current,legacy)=>{assert.equal(checkout.split(current).length-1,1,'approved checkout block must occur exactly once');checkout=checkout.replace(current,legacy);};

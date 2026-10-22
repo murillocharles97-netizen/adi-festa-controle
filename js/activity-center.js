@@ -803,6 +803,10 @@
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-detail-modal" role="dialog" aria-modal="true"><header class="modal-head"><div class="activity-detail-title tone-${meta.tone}"><span>${icon(meta.icon)}</span><div><small>${esc(meta.label)} · ${at(item.date).toLocaleString("pt-BR")}</small><h3>${esc(item.title)}</h3></div></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body">${item.type === "sale" ? saleDetail(item, db) : genericDetail(item)}</div></section></div>`;
     root.querySelector("[data-activity-close]").onclick = () =>
       (root.innerHTML = "");
+    const exchangeSaleId=root.querySelector('[data-history-receipt]')?.dataset.historyReceipt;
+    const creditSale=db.vendas?.find(s=>s.id===exchangeSaleId&&s.source==='exchange_credit_checkout');
+    if(creditSale)root.querySelector('.activity-detail-total')?.insertAdjacentHTML('afterend',`<section class="exchange-credit-card"><b>Pagamento com crédito de troca</b><p>Crédito utilizado: ${money(Number(creditSale.exchangeCreditUsedCents||0)/100)}</p><p>Complemento recebido: ${money(Number(creditSale.cashReceivedCents||0)/100)}</p><small>Crédito separado do Fiado e do novo recebimento.</small></section>`);
+    if(exchangeSaleId)window.SaleExchanges?.attach(root,db.vendas?.find(s=>s.id===exchangeSaleId));
     root
       .querySelector("[data-history-receipt]")
       ?.addEventListener("click", (event) => {

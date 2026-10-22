@@ -2,6 +2,7 @@
 
 const {HttpsError}=require('firebase-functions/v2/https');
 const BILLING_COLLECTIONS=new Set(['billingCheckoutAttempts','subscriptionIntents']);
+const EXCHANGE_EVIDENCE=new Set(['saleExchanges','saleExchangeSummaries','exchangeCredits','exchangeCreditEvents','saleExchangeMetrics']);
 const OPERATIONAL_COLLECTIONS=new Set([
   'saleRecoveryReviews','saleRecoveryOperations',
   'onlineStores','onlineStockReservations','onlineOrderReservations',
@@ -34,6 +35,7 @@ function assertWritable(business,expectedGeneration=0){
     throw new HttpsError('failed-precondition','Os dados deste aparelho pertencem a uma configuração anterior. Reabra a empresa.',{reason:'workspace-generation-mismatch'});
 }
 function classifyCollection(name){
+  if(EXCHANGE_EVIDENCE.has(name))throw new HttpsError('failed-precondition','Esta empresa possui trocas ou créditos preservados. A restauração simples está bloqueada; é necessário encerramento controlado.',{reason:'exchange-evidence-requires-controlled-reset',collection:name});
   if(BILLING_COLLECTIONS.has(name))return'preserve-billing';
   if(name==='members')return'preserve-owner-only';
   if(name==='workspaceResetJobs')return'preserve-reset-metadata';

@@ -1,0 +1,16 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {salePlan}=require('../functions/src/shared/exchange-credit');
+const catalog=[{productId:'product',variantId:null,priceCents:1000,name:'QA produto'}];
+const request=(quantity,creditCents,paymentMethod='dinheiro')=>({items:[{productId:'product',quantity}],creditCents,paymentMethod});
+const credits=[{id:'credit-one',remainingCents:2000},{id:'credit-two',remainingCents:3000}];
+test('R$50 em crédito, venda R$30: consome R$30 e preserva R$20',()=>{const p=salePlan(request(3,3000),catalog,credits);assert.equal(p.creditUsedCents,3000);assert.equal(p.cashReceivedCents,0);assert.deepEqual(p.allocations,[{creditId:'credit-one',amountCents:2000},{creditId:'credit-two',amountCents:1000}]);});
+test('R$50 em crédito, venda R$70: recebe só complemento R$20',()=>{const p=salePlan(request(7,5000,'pix'),catalog,credits);assert.equal(p.grossCents,7000);assert.equal(p.cashReceivedCents,2000);assert.equal(p.paymentMethod,'pix');});
+test('crédito e venda de R$50: sem complemento',()=>{const p=salePlan(request(5,5000),catalog,credits);assert.equal(p.cashReceivedCents,0);assert.equal(p.paymentMethod,null);});
+test('uso parcial explícito: R$15 em crédito numa venda de R$30',()=>{const p=salePlan(request(3,1500),catalog,credits);assert.equal(p.creditUsedCents,1500);assert.equal(p.cashReceivedCents,1500);});
+test('valor negativo, zero, fracionário ou acima do total é rejeitado',()=>{for(const amount of [-1,0,1.5,3001])assert.throws(()=>salePlan(request(3,amount),catalog,credits),/Crédito utilizado/);});
+test('saldo insuficiente não vira Fiado',()=>assert.throws(()=>salePlan(request(7,6000),catalog,credits),/insuficiente/));
+test('Fiado e pagamentos integrados não são inferidos',()=>{assert.throws(()=>salePlan(request(7,5000,'fiado'),catalog,credits),/Fiado/);assert.throws(()=>salePlan({...request(3,1000),paymentIntentId:'intent'},catalog,credits),/integração/);});
+test('quantidades e linhas duplicadas inválidas',()=>{assert.throws(()=>salePlan(request(0,1),catalog,credits),/Quantidade/);assert.throws(()=>salePlan({...request(3,1000),items:[...request(3,1000).items,...request(3,1000).items]},catalog,credits),/repetido/);});
+test('preço atual do catálogo é canônico; valor do cliente não é usado',()=>{const p=salePlan({...request(3,1000),items:[{productId:'product',quantity:3,priceCents:1}]},catalog,credits);assert.equal(p.grossCents,3000);});
+test('descontos e campanhas exigem modalidade específica',()=>{assert.throws(()=>salePlan({...request(3,1000),discountCents:1},catalog,credits),/desconto/);assert.throws(()=>salePlan({...request(3,1000),appliedCampaignIds:['campaign']},catalog,credits),/campanha/);});

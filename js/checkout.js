@@ -654,6 +654,24 @@ window.Checkout = (() => {
     refresh();
     saveDraft();
     window.lucide?.createIcons();
+    void window.ExchangeCreditCheckout?.mount?.({
+      clientId, spaceId: selectedSalesSpaceId(), totalCents: Math.round(t.final * 100),
+      onChange: () => { invalidateAttempt(); saveDraft(); },
+      onRecovered: completeRecoveredCreditSale,
+    });
+  }
+
+  function completeRecoveredCreditSale(sale) {
+    cart = [];
+    selectedCampaignIds.clear();
+    manual = false; discountKind = null; activeAttempt = null; activeConflict = null;
+    draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
+    clearDraft(); finishing = false;
+    window.ExchangeCreditCheckout?.reset?.();
+    setSubmissionState("success", "Venda confirmada na nuvem com crédito de troca.");
+    refreshClients(); closeCartSurface({ immediate: true });
+    try { Recibos.mostrar(sale, sale.clienteId ? clients().getById(sale.clienteId) : null); }
+    catch { toast("Venda confirmada. O recibo continua disponível no Histórico."); }
   }
 
   function drawCampaignBenefits() {
@@ -956,6 +974,7 @@ window.Checkout = (() => {
         toast(message, true);
         return false;
       };
+      if (window.ExchangeCreditCheckout?.hasPending?.()) return validationError("Há uma confirmação com crédito preservada. Use Consultar confirmação no cartão de crédito de troca. Não registre outra venda.");
       if (!cart.length) return validationError("Adicione ao menos um produto.");
       const pendingTerminal = window.TerminalPayments?.getCurrent?.();
       if (pendingTerminal && (window.TerminalPayments.ACTIVE_STATUSES.has(pendingTerminal.status) || pendingTerminal.status === "approved")) {
@@ -1005,6 +1024,10 @@ window.Checkout = (() => {
             appliedCampaignIds: [...selectedCampaignIds],
           };
           traceSale("[SALE] operation created", { operationId: attempt.operationId, saleId: attempt.saleId });
+          const usingExchangeCredit = Number(window.ExchangeCreditCheckout?.selectedCents?.() || 0) > 0;
+          if (usingExchangeCredit && (status === 'fiado' || paymentMethod === 'cartao_presencial')) {
+            finishing = false; return validationError('Crédito de troca exige venda à vista, sem pagamento integrado nesta V1.');
+          }
           if (paymentMethod === "cartao_presencial") {
             try {
               const started = await window.TerminalPayments.beginCheckout({
@@ -1025,6 +1048,9 @@ window.Checkout = (() => {
           }
           let sale;
           try {
+            if (usingExchangeCredit) {
+              sale = await window.ExchangeCreditCheckout.finish(saleDraft);
+            } else {
             if (status === "fiado")
               await window.SyncFirebase?.prepareCustomerForSale?.(clienteId);
             traceSale("[SALE] local write started", { operationId: attempt.operationId });
@@ -1034,6 +1060,7 @@ window.Checkout = (() => {
               sale = await window.SyncFirebase.confirmCreditSale(sale);
             if (status === "fiado" && sale.status !== "fiado")
               sale = { ...sale, status: "fiado", formaPagamento: "fiado" };
+            }
           } catch (error) {
             finishing = false;
             const message = error.message || "Não foi possível concluir a venda. Seu carrinho foi preservado.";
@@ -1056,7 +1083,8 @@ window.Checkout = (() => {
           clearDraft();
           activeAttempt = null;
           finishing = false;
-          const pendingSync = navigator.onLine === false || window.SyncFirebase?.isSalePending?.(sale);
+          if (usingExchangeCredit) window.ExchangeCreditCheckout?.reset?.();
+          const pendingSync = !usingExchangeCredit && (navigator.onLine === false || window.SyncFirebase?.isSalePending?.(sale));
           setSubmissionState("success", pendingSync
             ? "Venda salva no aparelho e aguardando sincronização."
             : "Venda concluída com sucesso.");

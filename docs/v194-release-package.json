@@ -1,0 +1,52 @@
+{
+  "release": "194",
+  "publicationAuthorized": false,
+  "baseline": {
+    "release": "193",
+    "commit": "3d9ef19f4b5df7a7534647185bf3a32d042ca065",
+    "rollbackTag": "rollback/v193-before-v194-sale-exchanges"
+  },
+  "deployment": {
+    "indexesChanged": false,
+    "rulesChanged": true,
+    "deleteFunctions": false,
+    "schedulerCreated": false,
+    "phase1": "firestore:rules",
+    "phase2Functions": [
+      "projectSaleFinancialIncome",
+      "projectExchangeIncome",
+      "requestBusinessReset",
+      "processBusinessReset"
+    ],
+    "phase3Functions": [
+      "quoteSaleExchange",
+      "confirmSaleExchange",
+      "listSaleExchanges",
+      "lookupSaleExchange",
+      "listSaleExchangeAdjustments",
+      "checkSaleExchangeUndo",
+      "getExchangeCreditBalance",
+      "quoteExchangeCreditSale",
+      "confirmExchangeCreditSale",
+      "getExchangeCreditSaleStatus",
+      "cancelExchangeCreditSale"
+    ],
+    "phase4": "frontend/PWA via manually authorized Pages workflow"
+  },
+  "rollback": {
+    "rawV193AllowedAfterAnyExchangeOrCredit": false,
+    "baselineTagIsHistoricalReferenceOnly": true,
+    "mustPreserveCollections": [
+      "saleExchanges", "saleExchangeSummaries", "exchangeCredits", "exchangeCreditEvents",
+      "saleExchangeMetrics", "processedOperations", "financialIncomeRoutes"
+    ],
+    "mustRetain": [
+      "V194 Rules fences", "cash-only financial projection for credit-funded sales",
+      "immutable receipts and scoped ledgers", "specific credit-sale cancellation",
+      "exchange-aware reporting and revision labels", "specific original-sale undo guard",
+      "explicit reset block for exchange evidence"
+    ],
+    "never": ["restore an old database snapshot", "delete new collections", "reset workspace generation", "clear local queues/cache", "replay historical operations", "deploy the V193 backend/Rules blindly"],
+    "compatibleRollbackBuildRequiredAfterFirstEffect": true
+  }
+}

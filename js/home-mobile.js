@@ -19,8 +19,11 @@
   function model(){
     const source=DB.carregar(),db=window.SpaceContext?.contextualData?.(source,'home')||source,selectionId=db.spaceSelectionId||window.SpaceContext?.ALL_SPACES||'all_spaces',isAllSpaces=selectionId===(window.SpaceContext?.ALL_SPACES||'all_spaces'),now=new Date(),todayKey=dayKey(now),yesterday=new Date(now);yesterday.setDate(yesterday.getDate()-1);
     const sales=(db.vendas||[]).filter(isValidSale),today=sales.filter(sale=>dayKey(sale.data||sale.createdAt)===todayKey),yesterdaySales=sales.filter(sale=>dayKey(sale.data||sale.createdAt)===dayKey(yesterday));
-    const sold=today.reduce((sum,sale)=>sum+saleValue(sale),0),cost=today.reduce((sum,sale)=>sum+saleCost(sale),0),profit=sold-cost;
-    const soldYesterday=yesterdaySales.reduce((sum,sale)=>sum+saleValue(sale),0),profitYesterday=yesterdaySales.reduce((sum,sale)=>sum+saleValue(sale)-saleCost(sale),0);
+    const adjustment=key=>window.ExchangeEconomics?.total?.(db,{key,dayKey})||0,exchangeAdjustment=adjustment(todayKey),exchangeCount=(window.ExchangeEconomics?.forData?.(db)||[]).filter(row=>dayKey(row.createdAt)===todayKey).length;
+    const exchangeProjectionPending=Boolean(window.ExchangeEconomics)&&window.ExchangeEconomics.state?.().ready!==true,
+      profitReview=exchangeProjectionPending?'Custos e lucro em revisão — ajustes de troca não confirmados':'Custos da troca em revisão',
+      sold=today.reduce((sum,sale)=>sum+saleValue(sale),0)+exchangeAdjustment,cost=exchangeCount||exchangeProjectionPending?null:today.reduce((sum,sale)=>sum+saleCost(sale),0),profit=cost===null?null:sold-cost;
+    const soldYesterday=yesterdaySales.reduce((sum,sale)=>sum+saleValue(sale),0)+adjustment(dayKey(yesterday)),previousHasExchange=(window.ExchangeEconomics?.forData?.(db)||[]).some(row=>dayKey(row.createdAt)===dayKey(yesterday)),profitYesterday=exchangeProjectionPending||previousHasExchange?null:yesterdaySales.reduce((sum,sale)=>sum+saleValue(sale)-saleCost(sale),0);
     const items=today.reduce((sum,sale)=>sum+(sale.itens||[]).reduce((subtotal,item)=>subtotal+Number(item.quantidade??item.quantity??0),0),0);
     const customers=new Set(today.map(sale=>sale.clienteId||sale.clientId).filter(Boolean)).size;
     const scopedClients=(db.clientes||[]).filter(client=>client.ativo!==false&&client.active!==false&&!client.deletedAt),newCustomers=scopedClients.filter(client=>dayKey(client.criadoEm||client.createdAt)===todayKey).length;
@@ -29,8 +32,8 @@
     const localRenewals=window.CustomerSubscriptions?.metrics?.(now.toISOString())||{dueToday:0,due7:0,forecastValue:0},renewals=isAllSpaces?(renewalCache.value||localRenewals):{dueToday:0,due7:0,forecastValue:0};
     const pendingOrders=(db.catalogOrders||[]).filter(order=>window.OnlineOrderModel?.isV2(order)&&!order.deletedAt&&['recebido','pendente','novo'].includes(String(order.orderStatus||order.status||'').toLowerCase()));
     const goal=Number(window.SpaceContext?.goalFor?.(db.config||{},selectionId)??db.config?.dashboard?.dailySalesGoal??db.config?.dailySalesGoal??0),goalPercent=goal>0?sold/goal*100:0;
-    const week=[];for(let offset=6;offset>=0;offset--){const date=new Date(now);date.setDate(date.getDate()-offset);const key=dayKey(date);week.push({date,key,label:date.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''),value:sales.filter(sale=>dayKey(sale.data||sale.createdAt)===key).reduce((sum,sale)=>sum+saleValue(sale),0),today:offset===0})}
-    return{db,now,sales,today,sold,cost,profit,margin:sold>0?profit/sold*100:0,soldYesterday,profitYesterday,items,customers,newCustomers,debtors,debt,clients:scopedClients,products,out,low,renewals,pendingOrders,goal,goalPercent,week,selectionId,isAllSpaces,unassignedLegacySales:Number(db.unassignedLegacySales||0)};
+    const week=[];for(let offset=6;offset>=0;offset--){const date=new Date(now);date.setDate(date.getDate()-offset);const key=dayKey(date);week.push({date,key,label:date.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''),value:sales.filter(sale=>dayKey(sale.data||sale.createdAt)===key).reduce((sum,sale)=>sum+saleValue(sale),0)+adjustment(key),today:offset===0})}
+    return{db,now,sales,today,sold,cost,profit,profitReview,exchangeProjectionPending,exchangeAdjustment,exchangeCount,margin:profit===null?null:sold>0?profit/sold*100:0,soldYesterday,profitYesterday,items,customers,newCustomers,debtors,debt,clients:scopedClients,products,out,low,renewals,pendingOrders,goal,goalPercent,week,selectionId,isAllSpaces,unassignedLegacySales:Number(db.unassignedLegacySales||0)};
   }
   function comparison(value,previous){const pct=percentage(value,previous);if(pct===null)return'<small>Sem comparação com ontem</small>';const up=pct>=0;return`<small class="${up?'positive':'negative'}">${icon(up?'trending-up':'trending-down')} ${up?'+':''}${pct.toFixed(0)}% vs. ontem</small>`}
   function goalCard(data){
@@ -39,9 +42,9 @@
     return`<section class="home-goal-card ${reached?'reached':''}"><header><span>${icon('target')} ${data.isAllSpaces?'Meta geral do dia':'Meta deste espaço'}</span><strong>${data.goalPercent.toFixed(0)}%</strong></header><div class="goal-values"><strong>${money(data.sold)}</strong><span>/ ${money(data.goal)}</span></div><div class="goal-progress" aria-label="${data.goalPercent.toFixed(0)}% da meta"><span style="--goal:${visual}%"></span></div><div class="goal-footer"><p>${reached?`${icon('circle-check')} Meta atingida!`:`${icon('trending-up')} Faltam ${money(Math.max(0,data.goal-data.sold))} para bater a meta.`}</p><button type="button" data-home-goal>${reached?'Detalhes':'Editar'} ${icon('chevron-right')}</button></div></section>`
   }
   function chart(data){
-    const width=640,height=150,padX=25,padTop=25,base=112,max=Math.max(...data.week.map(point=>point.value),1),step=(width-padX*2)/6;
-    const points=data.week.map((point,index)=>({x:padX+step*index,y:base-(point.value/max)*(base-padTop),...point}));
-    const line=points.map((point,index)=>`${index?'L':'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' '),area=`${line} L ${points.at(-1).x} ${base} L ${points[0].x} ${base} Z`;
+    const width=640,height=150,padX=25,padTop=25,base=112,max=Math.max(...data.week.map(point=>point.value),1),min=Math.min(...data.week.map(point=>point.value),0),y=value=>base-(value-min)/(max-min)*(base-padTop),step=(width-padX*2)/6;
+    const points=data.week.map((point,index)=>({x:padX+step*index,y:y(point.value),...point}));
+    const line=points.map((point,index)=>`${index?'L':'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' '),area=`${line} L ${points.at(-1).x} ${y(0)} L ${points[0].x} ${y(0)} Z`;
     return`<section class="home-chart"><header><h3>Vendas dos últimos 7 dias</h3></header><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Vendas dos últimos sete dias"><defs><linearGradient id="home-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#31d0ad" stop-opacity=".32"/><stop offset="1" stop-color="#31d0ad" stop-opacity=".03"/></linearGradient></defs><path class="area" d="${area}"/><path class="line" d="${line}"/>${points.map(point=>`<g class="${point.today?'today':''}"><circle cx="${point.x}" cy="${point.y}" r="6"/><text class="value" x="${point.x}" y="${Math.max(14,point.y-13)}">${point.value?Math.round(point.value):'0'}</text><text class="label" x="${point.x}" y="140">${esc(point.label)}</text></g>`).join('')}</svg></section>`
   }
   function attentionItems(data){
@@ -58,12 +61,12 @@
   }
   function render(){
     const data=model(),attentionList=attentionItems(data);
-    const main=`<div class="home-main-metrics"><article class="sold">${icon('circle-dollar-sign')}<span><small>Vendido hoje</small><strong>${money(data.sold)}</strong>${comparison(data.sold,data.soldYesterday)}</span></article>${window.TeamAccess?.has?.('profit.view')?`<article class="profit">${icon('trending-up')}<span><small>Lucro hoje</small><strong>${money(data.profit)}</strong><em>${data.margin.toFixed(0)}% de margem</em></span></article>`:''}</div>`;
+    const main=`<div class="home-main-metrics"><article class="sold">${icon('circle-dollar-sign')}<span><small>Vendido hoje</small><strong>${money(data.sold)}</strong>${comparison(data.sold,data.soldYesterday)}</span></article>${window.TeamAccess?.has?.('profit.view')?`<article class="profit">${icon('trending-up')}<span><small>Lucro hoje</small><strong>${data.profit===null?'Em revisão':money(data.profit)}</strong><em>${data.profit===null?esc(data.profitReview):data.margin.toFixed(0)+'% de margem'}</em></span></article>`:''}</div>`;
     const secondary=`<div class="home-secondary-scroller">${[['shopping-cart',data.today.length,'vendas'],['shopping-bag',data.items,'itens'],['users',data.customers,'clientes']].map(([symbol,value,label])=>`<article><button type="button" data-home-target="day-summary" aria-label="Ver resumo do dia: ${value} ${label}">${icon(symbol)}<strong>${value}</strong><span>${label}</span>${icon('chevron-right')}</button></article>`).join('')}</div>`;
     const attention=`<section class="home-attention"><header><h3>Prioridades de hoje</h3>${attentionList.length?`<span>${attentionList.length}</span>`:''}</header><div>${attentionList.length?attentionList.map(item=>`<button type="button" data-home-target="${item.target}" aria-label="${esc(item.title)}: ${esc(item.detail)}"><i class="${item.tone}">${icon(item.icon)}</i><span><b>${esc(item.title)}</b><small>${esc(item.detail)}</small>${item.meta?`<em>${esc(item.meta)}</em>`:''}</span><strong><span>${esc(item.action)}</span>${icon('chevron-right')}</strong></button>`).join(''):`<p>${icon('circle-check')}<span><b>Tudo em dia por aqui.</b><small>Nenhuma prioridade disponível neste contexto.</small></span></p>`}</div></section>`;
     const quick=`<section class="home-quick-summary"><h3>Resumo rápido</h3><div><button type="button" data-home-target="day-summary">${icon('chart-no-axes-column-increasing')}<span><small>Ticket médio do dia</small><strong>${data.today.length?money(data.sold/data.today.length):'—'}</strong></span>${icon('chevron-right')}</button><button type="button" data-home-target="week-summary">${icon('calendar-days')}<span><small>Últimos 7 dias</small><strong>${money(data.week.reduce((sum,day)=>sum+day.value,0))}</strong></span>${icon('chevron-right')}</button></div></section>`;
     const contextBar=window.SpaceContext?.renderBar?.('home')||'';
-    return`<section class="mobile-home-dashboard">${contextBar}${goalCard(data)}${main}${secondary}${attention}${quick}</section>`
+    return`<section class="mobile-home-dashboard">${contextBar}${goalCard(data)}${main}${window.ExchangeEconomics?`<p class="home-exchange-note" role="status">${esc(window.ExchangeEconomics.statusMessage())}${data.exchangeCount?` Ajustes de troca hoje: ${money(data.exchangeAdjustment)}.`:''}</p>`:''}${secondary}${attention}${quick}</section>`
   }
   function goalModal(){
     if(window.SpaceContext?.openGoalEditor)return window.SpaceContext.openGoalEditor();
@@ -97,6 +100,7 @@
   }
   function bind(){
     const page=$('.mobile-home-dashboard');if(!page||page.dataset.bound)return;page.dataset.bound='true';
+    void window.ExchangeEconomics?.refresh?.();
     page.querySelectorAll('[data-home-go]').forEach(button=>button.onclick=()=>Router.ir(button.dataset.homeGo));
     page.querySelectorAll('[data-home-target]').forEach(button=>button.onclick=()=>navigateTarget(button.dataset.homeTarget));
     page.querySelectorAll('[data-home-goal]').forEach(button=>button.onclick=goalModal);
@@ -115,4 +119,5 @@
     window.AppPageRuntime?.mount?.('inicio');
   });
   window.MobileHome={isMobile:()=>mq.matches,render,bind,refresh,model,attentionItems,loadRenewalAttention};
+  window.addEventListener?.('sale-exchange-metrics-updated',()=>refresh());
 })();

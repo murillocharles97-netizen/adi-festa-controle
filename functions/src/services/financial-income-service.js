@@ -85,6 +85,7 @@ const projectionFingerprint=source=>JSON.stringify([
   text(source.formaPagamento||source.paymentMethod),isTerminalPaymentSale(source),
   cents(source.reversedAmount??source.reversalAmount??source.effectiveReversalAmount),
   text(source.reversalOperationId||source.reversedByOperationId||source.cancelOperationId),
+  source.exchangeCreditUsedCents??null,source.cashReceivedCents??null,text(source.exchangeCreditRequestHash),
   iso(firstDate(source,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt'])),
 ]);
 const saleIsPaid=source=>PAID_SALE_STATUSES.has(lower(source?.status||source?.saleStatus));
@@ -157,11 +158,11 @@ function financialIncomeService(db){
 
   async function createOnce({space,businessId,eventKind,source={},...input}){
     let value;
-    const saleSource=input.sourceType.startsWith('sale_'),kind=saleSource?'sale':'customer_payment',reversal=input.direction==='out';
-    const route=routeRef(businessId,kind,input.sourceId),sourceRef=db.doc(`businesses/${businessId}/${saleSource?'sales':'payments'}/${input.sourceId}`);
+    const exchangeSource=input.sourceType==='exchange_receipt',saleSource=input.sourceType.startsWith('sale_'),kind=exchangeSource?'exchange':saleSource?'sale':'customer_payment',reversal=input.direction==='out';
+    const route=routeRef(businessId,kind,input.sourceId),sourceRef=db.doc(`businesses/${businessId}/${exchangeSource?'saleExchanges':saleSource?'sales':'payments'}/${input.sourceId}`);
     // Read-only compatibility guard, NEVER a routing fallback. A historical
     // entry in the former global destination must not be copied or corrected.
-    const legacySpaceId=`business_${businessId}`,originalId=saleSource?`sale_${input.sourceId}`:`credit_payment_${input.sourceId}`;
+    const legacySpaceId=`business_${businessId}`,originalId=exchangeSource?`exchange_${input.sourceId}`:saleSource?`sale_${input.sourceId}`:`credit_payment_${input.sourceId}`;
     const legacyRef=legacySpaceId!==space.id?entryRef(legacySpaceId,originalId):null;
     const ref=entryRef(space.id,input.id),event=eventRef(space.id,input.id);
     return projectInWorkspace(db,businessId,source,async transaction=>{
@@ -181,7 +182,7 @@ function financialIncomeService(db){
       if(!reversal){
         if(routeSnapshot.exists)return{skipped:'projection-receipt-without-entry'};
         if(!automation.enabled)return{skipped:'automation-disabled'};
-        if(!(saleSource?automation.sales:automation.customerPayments))return{skipped:'income-kind-disabled'};
+        if(!((saleSource||exchangeSource)?automation.sales:automation.customerPayments))return{skipped:'income-kind-disabled'};
         if(saleSource&&onlineOrderId(source)&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
         if(!afterActivation(automation,input.occurredAt))return{skipped:'before-activation'};
       }
@@ -194,6 +195,8 @@ function financialIncomeService(db){
         if(!amountCents)return{skipped:'already-reversed'};
       }
       value={...baseEntry({space:freshSpace,businessId,...input,amountCents}),workspaceGeneration:source.workspaceGeneration??0};
+      if(source.source==='exchange_credit_checkout')value={...value,merchandiseGrossCents:cents(source.valorFinal),exchangeCreditUsedCents:source.exchangeCreditUsedCents,cashReceivedCents:source.cashReceivedCents};
+      if(exchangeSource)value={...value,originalSaleId:source.originalSaleId,economicReturnCents:source.returnCents,replacementCents:source.newCents,exchangeCreditIssuedCents:source.creditCents||0};
       const accountHomeSpaceId=value.financialAccountId?text(value.financialAccountHomeSpaceId)||space.id:null,
         accountRef=value.financialAccountId?db.doc(`financialSpaces/${accountHomeSpaceId}/financialAccounts/${value.financialAccountId}`):null,
         accountSnapshot=accountRef?await transaction.get(accountRef):null,
@@ -249,7 +252,10 @@ function financialIncomeService(db){
   async function projectSale(businessId,saleId,sale={},options={}){
     const linked=await linkedSpace(businessId,sale,{requireEnabled:false});
     if(linked.skipped)return linked;
-    const {space,automation}=linked,status=lower(sale.status||sale.saleStatus),occurredAt=iso(firstDate(sale,['paidAt','receivedAt','data','createdAt'])),amountCents=cents(sale.valorFinal??sale.valorTotal??sale.total??sale.amount);
+    const {space,automation}=linked,status=lower(sale.status||sale.saleStatus),occurredAt=iso(firstDate(sale,['paidAt','receivedAt','data','createdAt']));
+    const grossCents=cents(sale.valorFinal??sale.valorTotal??sale.total??sale.amount),creditSale=sale.source==='exchange_credit_checkout';
+    if(creditSale&&(!Number.isSafeInteger(sale.exchangeCreditUsedCents)||sale.exchangeCreditUsedCents<=0||!Number.isSafeInteger(sale.cashReceivedCents)||sale.cashReceivedCents<0||sale.exchangeCreditUsedCents+sale.cashReceivedCents!==grossCents||!sale.exchangeCreditRequestHash))return{skipped:'exchange-credit-tender-invalid'};
+    const amountCents=creditSale?sale.cashReceivedCents:grossCents;
     const orderId=onlineOrderId(sale);
     if(INVALID_STATUSES.has(status)||sale.deletedAt||sale.active===false||sale.ativo===false){
       const reversedAt=firstDate(sale,['reversedAt','refundedAt','cancelledAt','canceledAt','deletedAt','updatedAt'])||new Date();
@@ -316,7 +322,12 @@ function financialIncomeService(db){
     return{skipped:'historical-reconciliation-requires-authorization',checked:0,created:0};
   }
 
-  return{linkedSpace,projectSale,projectPayment,reverseSource,reconcileBusiness};
+  async function projectExchange(businessId,id,source){
+    if(source?.status!=='completed'||!Number.isSafeInteger(source.receivedCents)||source.receivedCents<=0)return{skipped:'no-exchange-receipt'};
+    const linked=await linkedSpace(businessId,source);if(linked.skipped)return linked;
+    return createOnce({space:linked.space,businessId,source,id:`exchange_${id}`,sourceType:'exchange_receipt',sourceId:id,amountCents:source.receivedCents,occurredAt:iso(source.createdAt),description:'Complemento de troca',paymentMethodId:paymentMethod(source.paymentMethod),relatedSaleIds:[source.originalSaleId],eventKind:'exchange_receipt_recorded'});
+  }
+  return{linkedSpace,projectSale,projectPayment,projectExchange,reverseSource,reconcileBusiness};
 }
 
 module.exports={financialIncomeService,automationFor,paymentMethod,cents,signedCents,iso,entryIdentity,isTerminalPaymentSale,spaceRoutingIssue,onlineOrderId};

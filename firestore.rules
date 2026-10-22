@@ -883,6 +883,12 @@ service cloud.firestore {
     }
 
     match /businesses/{businessId} {
+      // Server-authorized exchange transactions only. No client replay or edits.
+      match /saleExchanges/{id} { allow read, write: if false; }
+      match /saleExchangeSummaries/{id} { allow read, write: if false; }
+      match /exchangeCredits/{id} { allow read, write: if false; }
+      match /exchangeCreditEvents/{id} { allow read, write: if false; }
+      match /saleExchangeMetrics/{id} { allow read, write: if false; }
       // Recovery intake is server-only. Payloads can contain private snapshots.
       // No direct client read/write, including owner. Callables scope each read.
       match /saleRecoveryReviews/{saleId} {
@@ -1073,6 +1079,7 @@ service cloud.firestore {
       match /processedOperations/{operationId} {
         allow read: if canReadCollection(businessId, 'processedOperations');
         allow create: if canRecordProcessedOperation(businessId)
+          && !(request.resource.data.get('eventKind','') in ['sale_exchange','sale_exchange_credit','sale_exchange_credit_cancel'])
           && !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(operationId))
           && request.resource.data.id == operationId
           && request.resource.data.idempotencyKey == operationId
@@ -1199,6 +1206,11 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /stockMovements/{movementId} {
+        function serverExchangeMovement(data) {
+          return data.keys().hasAny(['exchangeId'])
+            || data.get('source','') in ['sale_exchange','exchange_credit_checkout']
+            || data.get('tipo','') in ['exchange_return','exchange_issue'];
+        }
         function notRecoveryReplay() {
           let saleId = request.resource.data.get('vendaId', '');
           // A reviewed original is applied only by its owner decision transaction.
@@ -1213,7 +1225,9 @@ service cloud.firestore {
             (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
             && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'))
           ));
-        allow create, update: if notRecoveryReplay()
+        allow create, update: if !serverExchangeMovement(request.resource.data)
+          && (resource == null || !serverExchangeMovement(resource.data))
+          && notRecoveryReplay()
           && canWriteCollection(businessId, 'stockMovements')
           && (isOwner(businessId) || (request.resource.data.get('spaceId',null) != null && canAccessSpace(businessId,request.resource.data.spaceId)))
           && (isOwner(businessId) || canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.produtoId)).data))
@@ -1316,6 +1330,8 @@ service cloud.firestore {
             )
           );
         allow create: if notReconciledSale()
+          && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
+          && request.resource.data.get('source','') != 'exchange_credit_checkout'
           && canWriteCollection(businessId, 'sales')
           && validOnlineSale(businessId,saleId,request.resource.data)
           && validIntegratedPayment(request.resource.data)
@@ -1323,7 +1339,10 @@ service cloud.firestore {
           && (!memberExists(businessId) || request.resource.data.get('actorUid', '') == request.auth.uid)
           && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
           && validSaleSpace(request.resource.data, businessId);
-        allow update: if canWriteCollection(businessId, 'sales')
+        allow update: if exists(/databases/$(database)/documents/businesses/$(businessId)/saleExchangeSummaries/$(saleId)) ? false : (
+          resource.data.get('source','') != 'exchange_credit_checkout'
+          && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
+          && canWriteCollection(businessId, 'sales')
           && resource.data.get('onlineOrderId',null) == null && request.resource.data.get('onlineOrderId',null) == null
           && resource.data.get('paymentIntentId', null) == null
           && request.resource.data.get('paymentIntentId', null) == null
@@ -1348,7 +1367,7 @@ service cloud.firestore {
               !('spaceId' in resource.data)
               && (!('spaceId' in request.resource.data) || validSaleSpace(request.resource.data, businessId))
             )
-          );
+          ));
         allow delete: if false;
       }
       match /clients/{documentId} {

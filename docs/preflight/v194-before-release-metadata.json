@@ -1,0 +1,453 @@
+{
+  "generatedAt": "2026-10-22T03:24:24.553Z",
+  "node": "v23.3.0",
+  "baseline": {
+    "commit": "3d9ef19f4b5df7a7534647185bf3a32d042ca065",
+    "trackedChanges": false,
+    "exitCode": 1,
+    "counts": {
+      "tests": 931,
+      "failed": 34,
+      "passed": 897,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 931,
+      "suites": 0
+    },
+    "failures": [
+      {
+        "name": "Sync response after account switch cannot acknowledge, remove or change any queue in the new identity",
+        "file": "tests/cache-session-hotfix.test.js",
+        "line": 71,
+        "error": "refreshRecoveryResolutions is not defined"
+      },
+      {
+        "name": "a cadeia de módulos mantém versões explícitas na release 130",
+        "file": "tests/client-cross-device-sync.test.js",
+        "line": 194,
+        "error": "The input did not match the regular expression /import ['\"]\\.\\/sync\\.js\\?v=171['\"]/. Input:\n\n\"import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';\\r\\n\" +\n  \"import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut,EmailAuthProvider,reauthenticateWithCredential} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';\\r\\n\" +\n  \"import {d"
+      },
+      {
+        "name": "cache PWA publica a revisão da busca e das ações",
+        "file": "tests/crm-dashboard-segments.test.js",
+        "line": 191,
+        "error": "The input did not match the regular expression /veconi-v171-order-recovery-scoped-stock/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js',"
+      },
+      {
+        "name": "integração usa consulta limitada por cliente/vencimento e recibo não exibe custo",
+        "file": "tests/customer-subscriptions.test.js",
+        "line": 156,
+        "error": "The input did not match the regular expression /veconi-v171-order-recovery-scoped-stock/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js',"
+      },
+      {
+        "name": "diagnóstico é carregado antes do app e cache PWA publica a correção",
+        "file": "tests/desktop-post-shell-freeze.test.js",
+        "line": 48,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(\n    index.indexOf(\"runtime-diagnostics.js\") < index.indexOf(\"app.js?v=171\"),\n  )\n"
+      },
+      {
+        "name": "sincronização completa permanece disponível apenas em ações explícitas",
+        "file": "tests/desktop-post-shell-freeze.test.js",
+        "line": 41,
+        "error": "The input did not match the regular expression /function synchronizeNow\\(\\)/. Input:\n\n'import { auth, db, PROJECT_ID } from \"./firebase-config.js\";\\r\\n' +\n  'import {\\r\\n' +\n  '  collection,\\r\\n' +\n  '  deleteField,\\r\\n' +\n  '  doc,\\r\\n' +\n  '  getDoc,\\r\\n' +\n  '  getDocFromServer,\\r\\n' +\n  '  getDocs,\\r\\n' +\n  '  increment,\\r\\n' +\n  '  runTransaction,\\r\\n' +\n  '  serverTimestamp,\\r\\n' +\n  '  setDoc,\\r\\n' +\n  '} from"
+      },
+      {
+        "name": "publica os arquivos desktop e o identificador do build em cache novo",
+        "file": "tests/desktop-workspace-sync.test.js",
+        "line": 74,
+        "error": "The input did not match the regular expression /app\\.js\\?v=171/. Input:\n\n'<!doctype html>\\r\\n' +\n  '<html lang=\"pt-BR\">\\r\\n' +\n  '<head>\\r\\n' +\n  '  <meta charset=\"UTF-8\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/business-reset.css\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-recovery.css?v=183\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/performance-dashboard.css?v=161\">\\r\\n' +\n  '  <script defer "
+      },
+      {
+        "name": "release 136 mantém recursos financeiros globais no cache PWA",
+        "file": "tests/financial-module-v1.test.js",
+        "line": 113,
+        "error": "The input did not match the regular expression /release: \"173\"/. Input:\n\n'(() => {\\r\\n' +\n  '  \"use strict\";\\r\\n' +\n  '\\r\\n' +\n  '  const readMeta = (name) =>\\r\\n' +\n  '      document.querySelector(`meta[name=\"${name}\"]`)?.content?.trim() || \"\",\\r\\n' +\n  '    rawCommit = readMeta(\"adi-festa-build\"),\\r\\n' +\n  '    rawTime = readMeta(\"adi-festa-build-time\"),\\r\\n' +\n  '    validCommit = /^[0-9a-f]{7,40}$/i.test(rawCommi"
+      },
+      {
+        "name": "aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total aberto",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 97,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "detecção local assinala venda sem fila mesmo quando pendentes chega a zero",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 195,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "duas e três vendas offline mantêm snapshots, versões e uma fila por operação; recebimento mantém 110",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 118,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "falha ao gravar fila impede também recebimento e preserva o saldo da venda",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 143,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "falha após preparar fila preserva operação para diagnóstico, sem enviar venda inexistente",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 154,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "queda entre persistir dados e ativar fila retoma a operação existente sem duplicar",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 171,
+        "error": "The input did not match the regular expression /simulated storage failure/. Input:\n\n'ReferenceError: queueManualReviewReason is not defined'\n"
+      },
+      {
+        "name": "contratos estruturais preservam Financeiro, isolamento e exigem spaceId novo",
+        "file": "tests/global-spaces-v1.test.js",
+        "line": 198,
+        "error": "The input did not match the regular expression /spaces\\.js\\?v=171/. Input:\n\n'<!doctype html>\\r\\n' +\n  '<html lang=\"pt-BR\">\\r\\n' +\n  '<head>\\r\\n' +\n  '  <meta charset=\"UTF-8\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/business-reset.css\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-recovery.css?v=183\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/performance-dashboard.css?v=161\">\\r\\n' +\n  '  <script def"
+      },
+      {
+        "name": "Home Todos agrega e as visões Adi Festa/IPTV isolam vendas, clientes e produtos",
+        "file": "tests/global-spaces-v1.test.js",
+        "line": 99,
+        "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    'c-adi',\n+   'c-iptv',\n+   'c-old'\n  ]\n"
+      },
+      {
+        "name": "auditoria opcional falha sem invalidar sync concluído",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 57,
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'failed'\n"
+      },
+      {
+        "name": "divergência não corrige finanças e separa dados recebidos da integridade",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 63,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "manual vazio conclui e grava timestamp; duplo toque compartilha uma execução",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 33,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "quota em metadados de horário não invalida transferência confirmada",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 39,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "infraestrutura global publica safe areas e preserva botão existente",
+        "file": "tests/mobile-navigation-safe-area.test.js",
+        "line": 41,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./funct"
+      },
+      {
+        "name": "paged variant refresh aborts if business changes while awaiting the server",
+        "file": "tests/online-orders-v2.test.js",
+        "line": 37,
+        "error": "The input did not match the regular expression /empresa ou sessão/. Input:\n\n'Error: A empresa, sessão ou permissão ativa mudou.'\n"
+      },
+      {
+        "name": "tests/settings-logout.test.js",
+        "file": "tests/settings-logout.test.js",
+        "line": 1,
+        "error": "test failed"
+      },
+      {
+        "name": "transferência concluída é separada da severidade da auditoria",
+        "file": "tests/sync-reconciliation.test.js",
+        "line": 10,
+        "error": "The input did not match the regular expression /complete = counts\\.total === 0 && counts\\.errors === 0,/. Input:\n\n'import { auth, db, PROJECT_ID } from \"./firebase-config.js\";\\r\\n' +\n  'import {\\r\\n' +\n  '  collection,\\r\\n' +\n  '  deleteField,\\r\\n' +\n  '  doc,\\r\\n' +\n  '  getDoc,\\r\\n' +\n  '  getDocFromServer,\\r\\n' +\n  '  getDocs,\\r\\n' +\n  '  increment,\\r\\n' +\n  '  runTransaction,\\r\\n' +\n  '  serverTimestamp,\\r\\n' +\n "
+      },
+      {
+        "name": "session hotfix keeps app/SW version and both Sync singleton imports aligned",
+        "file": "tests/sync-session-alert.test.js",
+        "line": 7,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(read('service-worker.js').includes(`release:'${version}'`))\n"
+      },
+      {
+        "name": "technical hold is visible and the all-held bulk action is disabled, not a hidden retry",
+        "file": "tests/team-sale-review-hold.test.js",
+        "line": 10,
+        "error": "The input did not match the regular expression /held.length===items.length/. Input:\n\n\"import './sync.js?v=193';\\r\\n\" +\n  \"import '../sale-recovery-client.js?v=183';\\r\\n\" +\n  \"import '../sale-recovery-ui.js?v=183';\\r\\n\" +\n  '\\r\\n' +\n  'let unsubscribe=null,lastState=null;\\r\\n' +\n  `const escape=value=>String(value??'').replace(/[&<>'\"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',\"'\":'&#39;','\"':'&quot;'}[char]));\\r\\n`"
+      },
+      {
+        "name": "release cache and imports preserve the published V191 singleton; the next release must refresh changed entry points",
+        "file": "tests/team-sync-release-v179.test.js",
+        "line": 5,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(read('service-worker.js').includes(`release:'${version}'`))\n"
+      },
+      {
+        "name": "actual bootstrap ends old Sync/badge before starting replacements; stale mount cannot fire",
+        "file": "tests/v171-online-order-recovery.test.js",
+        "line": 48,
+        "error": "bindAccountExit is not defined"
+      },
+      {
+        "name": "authorized UI does not erase an optional Sync initialization failure from diagnostics",
+        "file": "tests/v171-online-order-recovery.test.js",
+        "line": 62,
+        "error": "bindAccountExit is not defined"
+      },
+      {
+        "name": "service worker V135 migra apenas caches do app e preserva os assets V133",
+        "file": "tests/veconi-pwa-branding-v133.test.js",
+        "line": 69,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./funct"
+      },
+      {
+        "name": "service worker v136 troca o cache e inclui os assets V133 da marca e do Financeiro",
+        "file": "tests/veconi-visual-system.test.js",
+        "line": 53,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./funct"
+      },
+      {
+        "name": "business isolation still applies to a correctly stamped queue",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 23,
+        "error": "localStorage is not defined"
+      },
+      {
+        "name": "old queued operation cannot be retagged during upload after a reset",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 15,
+        "error": "localStorage is not defined"
+      },
+      {
+        "name": "unstamped legacy queue belongs only to generation zero",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 11,
+        "error": "localStorage is not defined"
+      }
+    ]
+  },
+  "candidate": {
+    "commit": "3d9ef19f4b5df7a7534647185bf3a32d042ca065",
+    "trackedChanges": true,
+    "exitCode": 1,
+    "counts": {
+      "tests": 1006,
+      "failed": 34,
+      "passed": 972,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 1006,
+      "suites": 0
+    },
+    "failures": [
+      {
+        "name": "Sync response after account switch cannot acknowledge, remove or change any queue in the new identity",
+        "file": "tests/cache-session-hotfix.test.js",
+        "line": 71,
+        "error": "refreshRecoveryResolutions is not defined"
+      },
+      {
+        "name": "a cadeia de módulos mantém versões explícitas na release 130",
+        "file": "tests/client-cross-device-sync.test.js",
+        "line": 194,
+        "error": "The input did not match the regular expression /import ['\"]\\.\\/sync\\.js\\?v=171['\"]/. Input:\n\n\"import {auth,db,LEGACY_BUSINESS_ID} from './firebase-config.js';\\r\\n\" +\n  \"import {createUserWithEmailAndPassword,onAuthStateChanged,sendPasswordResetEmail,signInWithEmailAndPassword,signOut,EmailAuthProvider,reauthenticateWithCredential} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js';\\r\\n\" +\n  \"import {d"
+      },
+      {
+        "name": "cache PWA publica a revisão da busca e das ações",
+        "file": "tests/crm-dashboard-segments.test.js",
+        "line": 191,
+        "error": "The input did not match the regular expression /veconi-v171-order-recovery-scoped-stock/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Local Trocas V1 assets; release/cache version is bumped only in the approved publication package.\\r\\n' +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"con"
+      },
+      {
+        "name": "integração usa consulta limitada por cliente/vencimento e recibo não exibe custo",
+        "file": "tests/customer-subscriptions.test.js",
+        "line": 156,
+        "error": "The input did not match the regular expression /veconi-v171-order-recovery-scoped-stock/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Local Trocas V1 assets; release/cache version is bumped only in the approved publication package.\\r\\n' +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"con"
+      },
+      {
+        "name": "diagnóstico é carregado antes do app e cache PWA publica a correção",
+        "file": "tests/desktop-post-shell-freeze.test.js",
+        "line": 48,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(\n    index.indexOf(\"runtime-diagnostics.js\") < index.indexOf(\"app.js?v=171\"),\n  )\n"
+      },
+      {
+        "name": "sincronização completa permanece disponível apenas em ações explícitas",
+        "file": "tests/desktop-post-shell-freeze.test.js",
+        "line": 41,
+        "error": "The input did not match the regular expression /function synchronizeNow\\(\\)/. Input:\n\n'import { auth, db, PROJECT_ID } from \"./firebase-config.js\";\\r\\n' +\n  'import {\\r\\n' +\n  '  collection,\\r\\n' +\n  '  deleteField,\\r\\n' +\n  '  doc,\\r\\n' +\n  '  getDoc,\\r\\n' +\n  '  getDocFromServer,\\r\\n' +\n  '  getDocs,\\r\\n' +\n  '  increment,\\r\\n' +\n  '  runTransaction,\\r\\n' +\n  '  serverTimestamp,\\r\\n' +\n  '  setDoc,\\r\\n' +\n  '} from"
+      },
+      {
+        "name": "publica os arquivos desktop e o identificador do build em cache novo",
+        "file": "tests/desktop-workspace-sync.test.js",
+        "line": 74,
+        "error": "The input did not match the regular expression /app\\.js\\?v=171/. Input:\n\n'<!doctype html>\\r\\n' +\n  '<html lang=\"pt-BR\">\\r\\n' +\n  '<head>\\r\\n' +\n  '  <meta charset=\"UTF-8\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/business-reset.css\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-recovery.css?v=183\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-exchanges.css\">\\r\\n' +\n  '  <script defer src=\"./js/sal"
+      },
+      {
+        "name": "release 136 mantém recursos financeiros globais no cache PWA",
+        "file": "tests/financial-module-v1.test.js",
+        "line": 113,
+        "error": "The input did not match the regular expression /release: \"173\"/. Input:\n\n'(() => {\\r\\n' +\n  '  \"use strict\";\\r\\n' +\n  '\\r\\n' +\n  '  const readMeta = (name) =>\\r\\n' +\n  '      document.querySelector(`meta[name=\"${name}\"]`)?.content?.trim() || \"\",\\r\\n' +\n  '    rawCommit = readMeta(\"adi-festa-build\"),\\r\\n' +\n  '    rawTime = readMeta(\"adi-festa-build-time\"),\\r\\n' +\n  '    validCommit = /^[0-9a-f]{7,40}$/i.test(rawCommi"
+      },
+      {
+        "name": "aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total aberto",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 97,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "detecção local assinala venda sem fila mesmo quando pendentes chega a zero",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 195,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "duas e três vendas offline mantêm snapshots, versões e uma fila por operação; recebimento mantém 110",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 118,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "falha ao gravar fila impede também recebimento e preserva o saldo da venda",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 143,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "falha após preparar fila preserva operação para diagnóstico, sem enviar venda inexistente",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 154,
+        "error": "queueManualReviewReason is not defined"
+      },
+      {
+        "name": "queda entre persistir dados e ativar fila retoma a operação existente sem duplicar",
+        "file": "tests/financial-write-ahead-v146.test.js",
+        "line": 171,
+        "error": "The input did not match the regular expression /simulated storage failure/. Input:\n\n'ReferenceError: queueManualReviewReason is not defined'\n"
+      },
+      {
+        "name": "contratos estruturais preservam Financeiro, isolamento e exigem spaceId novo",
+        "file": "tests/global-spaces-v1.test.js",
+        "line": 198,
+        "error": "The input did not match the regular expression /spaces\\.js\\?v=171/. Input:\n\n'<!doctype html>\\r\\n' +\n  '<html lang=\"pt-BR\">\\r\\n' +\n  '<head>\\r\\n' +\n  '  <meta charset=\"UTF-8\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/business-reset.css\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-recovery.css?v=183\">\\r\\n' +\n  '  <link rel=\"stylesheet\" href=\"./css/sale-exchanges.css\">\\r\\n' +\n  '  <script defer src=\"./js/"
+      },
+      {
+        "name": "Home Todos agrega e as visões Adi Festa/IPTV isolam vendas, clientes e produtos",
+        "file": "tests/global-spaces-v1.test.js",
+        "line": 99,
+        "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    'c-adi',\n+   'c-iptv',\n+   'c-old'\n  ]\n"
+      },
+      {
+        "name": "auditoria opcional falha sem invalidar sync concluído",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 57,
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'failed'\n"
+      },
+      {
+        "name": "divergência não corrige finanças e separa dados recebidos da integridade",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 63,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "manual vazio conclui e grava timestamp; duplo toque compartilha uma execução",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 33,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "quota em metadados de horário não invalida transferência confirmada",
+        "file": "tests/global-sync-v155.test.js",
+        "line": 39,
+        "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+      },
+      {
+        "name": "infraestrutura global publica safe areas e preserva botão existente",
+        "file": "tests/mobile-navigation-safe-area.test.js",
+        "line": 41,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Local Trocas V1 assets; release/cache version is bumped only in the approved publication package.\\r\\n' +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUI"
+      },
+      {
+        "name": "paged variant refresh aborts if business changes while awaiting the server",
+        "file": "tests/online-orders-v2.test.js",
+        "line": 37,
+        "error": "The input did not match the regular expression /empresa ou sessão/. Input:\n\n'Error: A empresa, sessão ou permissão ativa mudou.'\n"
+      },
+      {
+        "name": "tests/settings-logout.test.js",
+        "file": "tests/settings-logout.test.js",
+        "line": 1,
+        "error": "test failed"
+      },
+      {
+        "name": "transferência concluída é separada da severidade da auditoria",
+        "file": "tests/sync-reconciliation.test.js",
+        "line": 10,
+        "error": "The input did not match the regular expression /complete = counts\\.total === 0 && counts\\.errors === 0,/. Input:\n\n'import { auth, db, PROJECT_ID } from \"./firebase-config.js\";\\r\\n' +\n  'import {\\r\\n' +\n  '  collection,\\r\\n' +\n  '  deleteField,\\r\\n' +\n  '  doc,\\r\\n' +\n  '  getDoc,\\r\\n' +\n  '  getDocFromServer,\\r\\n' +\n  '  getDocs,\\r\\n' +\n  '  increment,\\r\\n' +\n  '  runTransaction,\\r\\n' +\n  '  serverTimestamp,\\r\\n' +\n "
+      },
+      {
+        "name": "session hotfix keeps app/SW version and both Sync singleton imports aligned",
+        "file": "tests/sync-session-alert.test.js",
+        "line": 7,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(read('service-worker.js').includes(`release:'${version}'`))\n"
+      },
+      {
+        "name": "technical hold is visible and the all-held bulk action is disabled, not a hidden retry",
+        "file": "tests/team-sale-review-hold.test.js",
+        "line": 10,
+        "error": "The input did not match the regular expression /held.length===items.length/. Input:\n\n\"import './sync.js?v=193';\\r\\n\" +\n  \"import '../sale-recovery-client.js?v=183';\\r\\n\" +\n  \"import '../sale-recovery-ui.js?v=183';\\r\\n\" +\n  '\\r\\n' +\n  'let unsubscribe=null,lastState=null;\\r\\n' +\n  `const escape=value=>String(value??'').replace(/[&<>'\"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',\"'\":'&#39;','\"':'&quot;'}[char]));\\r\\n`"
+      },
+      {
+        "name": "release cache and imports preserve the published V191 singleton; the next release must refresh changed entry points",
+        "file": "tests/team-sync-release-v179.test.js",
+        "line": 5,
+        "error": "The expression evaluated to a falsy value:\n\n  assert.ok(read('service-worker.js').includes(`release:'${version}'`))\n"
+      },
+      {
+        "name": "actual bootstrap ends old Sync/badge before starting replacements; stale mount cannot fire",
+        "file": "tests/v171-online-order-recovery.test.js",
+        "line": 48,
+        "error": "bindAccountExit is not defined"
+      },
+      {
+        "name": "authorized UI does not erase an optional Sync initialization failure from diagnostics",
+        "file": "tests/v171-online-order-recovery.test.js",
+        "line": 62,
+        "error": "bindAccountExit is not defined"
+      },
+      {
+        "name": "service worker V135 migra apenas caches do app e preserva os assets V133",
+        "file": "tests/veconi-pwa-branding-v133.test.js",
+        "line": 69,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Local Trocas V1 assets; release/cache version is bumped only in the approved publication package.\\r\\n' +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUI"
+      },
+      {
+        "name": "service worker v136 troca o cache e inclui os assets V133 da marca e do Financeiro",
+        "file": "tests/veconi-visual-system.test.js",
+        "line": 53,
+        "error": "The input did not match the regular expression /veconi-v173-session-team-hotfix/. Input:\n\n\"const CACHE='veconi-v193-recovery-resolutions';\\r\\n\" +\n  '// Local Trocas V1 assets; release/cache version is bumped only in the approved publication package.\\r\\n' +\n  '// Shared entitlement catalog (same source consumed by Cloud Functions).\\r\\n' +\n  \"const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];\\r\\n\" +\n  \"const ARQUI"
+      },
+      {
+        "name": "business isolation still applies to a correctly stamped queue",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 23,
+        "error": "localStorage is not defined"
+      },
+      {
+        "name": "old queued operation cannot be retagged during upload after a reset",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 15,
+        "error": "localStorage is not defined"
+      },
+      {
+        "name": "unstamped legacy queue belongs only to generation zero",
+        "file": "tests/workspace-sync-queue.test.js",
+        "line": 11,
+        "error": "localStorage is not defined"
+      }
+    ]
+  },
+  "comparison": {
+    "exactSameFailureIdentities": true,
+    "introduced": [],
+    "resolved": [],
+    "newExchangeFailures": []
+  },
+  "note": "Falhas identificadas por arquivo+nome do teste; mensagens e linhas preservadas para inspeção. Totais do candidato podem mudar com novos testes ou correções explícitas de metadados da release."
+}

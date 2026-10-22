@@ -409,6 +409,7 @@ window.Vendas = (() => {
   };
   const desfazerUltima = (options = {}) => {
     if (window.TeamAccess && !window.TeamAccess.has("sales.cancel")) throw Error("Você não tem permissão para cancelar vendas.");
+    if (ultima()?.source === 'exchange_credit_checkout') throw Error('Esta venda usou crédito de troca. Cancele pelo fluxo online que restaura o crédito, uma única vez.');
     let removida;
     const operationId = Utils.uuid();
     DB.alterar((db) => {

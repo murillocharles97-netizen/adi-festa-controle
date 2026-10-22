@@ -76,17 +76,36 @@
       "Cancelar e registrar ajuste",
     );
   }
-  function requestSafeSaleUndo(saleId = "") {
+  async function requestSafeSaleUndo(saleId = "") {
     const latest = Vendas.ultima?.();
     if (!latest || (saleId && String(latest.id) !== String(saleId))) {
       toast("Somente a venda mais recente pode ser desfeita com segurança", true);
       return;
     }
+    const origin = JSON.stringify([window.FirebaseSession?.user?.uid, DB.getBusinessId?.(), DB.getWorkspaceGeneration?.()]);
+    const verify = async () => {
+      if (origin !== JSON.stringify([window.FirebaseSession?.user?.uid, DB.getBusinessId?.(), DB.getWorkspaceGeneration?.()])) throw Error('A sessão mudou. Reabra a venda na conta correta.');
+      if (navigator.onLine === false || !window.FirebaseCallable) throw Error('Conecte-se para verificar trocas e cancelar esta venda com segurança.');
+      const result = await window.FirebaseCallable('checkSaleExchangeUndo', {businessId:DB.getBusinessId(),workspaceGeneration:DB.getWorkspaceGeneration(),saleId:latest.id});
+      if (origin !== JSON.stringify([window.FirebaseSession?.user?.uid, DB.getBusinessId?.(), DB.getWorkspaceGeneration?.()])) throw Error('A sessão mudou. Nenhuma alteração local foi aplicada.');
+      if (!(result.data ?? result).allowed) throw Error('Esta venda possui troca vinculada. A venda original é preservada e não pode ser desfeita.');
+    };
+    if (latest.source !== 'exchange_credit_checkout') {
+      try { await verify(); } catch (error) { toast(error.message,true); return; }
+    }
     abrirFormulario(
       "Desfazer última venda",
-      "<p>O estoque, o saldo do cliente, as campanhas e as renovações vinculadas serão restaurados pelo fluxo seguro.</p>",
-      () => {
+      latest.source === 'exchange_credit_checkout'
+        ? '<p>O estoque será restaurado e exatamente o crédito de troca utilizado voltará ao cliente. Somente o pagamento complementar será revertido. Requer conexão.</p>'
+        : "<p>O estoque, o saldo do cliente, as campanhas e as renovações vinculadas serão restaurados pelo fluxo seguro.</p>",
+      async () => {
         try {
+          if (latest.source === 'exchange_credit_checkout') {
+            await window.ExchangeCreditCheckout.cancel(latest);
+            toast('Venda cancelada. Crédito e estoque restaurados uma única vez.');
+            return;
+          }
+          await verify();
           Vendas.desfazerUltima();
           toast("Venda desfeita com sucesso");
         } catch (error) {
@@ -101,20 +120,23 @@
   function resumoFechamento() {
     const base = DB.carregar(),
       d = window.SpaceContext?.contextualData?.(base, "home") || base,
-      vendas = d.vendas.filter((v) => Utils.hoje(v.data)),
+      vendas = d.vendas.filter((v) => Utils.hoje(v.data) && window.PerformanceModel?.validSale?.(v)!==false),
       pagamentos = d.pagamentos.filter((p) => Utils.hoje(p.data)),
+      exchangeRows=(window.ExchangeEconomics?.forData?.(d)||[]).filter(row=>Utils.hoje(row.createdAt)),
+      exchangeAdjustment=exchangeRows.reduce((sum,row)=>sum+row.differenceCents,0)/100,
       vendido = vendas.reduce(
         (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
         0,
-      ),
+      )+exchangeAdjustment,
       recebido = pagamentos.reduce((s, p) => s + Number(p.valor), 0),
       fiado = vendas
         .filter((v) => v.status === "fiado")
         .reduce((s, v) => s + Number(v.valorFinal ?? v.valorTotal), 0),
-      lucro = vendas.reduce((s, v) => s + Number(v.lucro || 0), 0),
+      lucro = exchangeRows.length||Boolean(window.ExchangeEconomics)&&window.ExchangeEconomics.state?.().ready!==true?null:vendas.reduce((s, v) => s + Number(v.lucro || 0), 0),
       clientes = new Set(vendas.map((v) => v.clienteId).filter(Boolean)).size;
     return {
       vendido,
+      exchangeAdjustment,
       recebido,
       fiado,
       lucro,
@@ -130,7 +152,7 @@
         `Total vendido: ${dinheiro(vendido)}`,
         window.TeamAccess?.has?.("financial.view") ? `Total recebido: ${dinheiro(recebido)}` : null,
         window.TeamAccess?.has?.("financial.view") ? `Total fiado: ${dinheiro(fiado)}` : null,
-        window.TeamAccess?.has?.("profit.view") ? `Lucro estimado: ${dinheiro(lucro)}` : null,
+        window.TeamAccess?.has?.("profit.view") ? `Lucro estimado: ${lucro===null?'Não disponível — custos da troca em revisão':dinheiro(lucro)}` : null,
         `Vendas: ${vendas.length}`,
         `Clientes atendidos: ${clientes}`,
       ].filter(Boolean).join("\n"),
@@ -170,12 +192,13 @@
   function inicio() {
     const base = DB.carregar(),
       d = window.SpaceContext?.contextualData?.(base, "home") || base,
-      hoje = d.vendas.filter((v) => Utils.hoje(v.data)),
+      hoje = d.vendas.filter((v) => Utils.hoje(v.data) && window.PerformanceModel?.validSale?.(v)!==false),
+      exchangeRows=(window.ExchangeEconomics?.forData?.(d)||[]).filter(row=>Utils.hoje(row.createdAt)),
       valorHoje = hoje.reduce(
         (s, v) => s + Number(v.valorFinal ?? v.valorTotal),
         0,
-      ),
-      lucroHoje = hoje.reduce((s, v) => s + Number(v.lucro || 0), 0),
+      )+exchangeRows.reduce((sum,row)=>sum+row.differenceCents,0)/100,
+      lucroHoje = exchangeRows.length||Boolean(window.ExchangeEconomics)&&window.ExchangeEconomics.state?.().ready!==true?null:hoje.reduce((s, v) => s + Number(v.lucro || 0), 0),
       fiado = d.clientes.reduce(
         (s, c) => s + Math.abs(Math.min(0, c.saldo)),
         0,
@@ -185,10 +208,10 @@
         .reduce((s, p) => s + p.valor, 0),
       f = resumoFechamento(),
       ultima = Vendas.ultima(),
-      profitMetrics = window.TeamAccess?.has?.("profit.view") ? metric("Lucro hoje", dinheiro(lucroHoje), "privado", "trending-up") : "",
+      profitMetrics = window.TeamAccess?.has?.("profit.view") ? metric("Lucro hoje", lucroHoje===null?'Não disponível':dinheiro(lucroHoje), "privado", "trending-up") : "",
       financialMetrics = window.TeamAccess?.has?.("financial.view") ? `${metric("Fiado em aberto", dinheiro(fiado), "saldo de clientes", "hand-coins")}${metric("Recebido no mês", dinheiro(recebido), "pagamentos", "wallet-cards")}` : "",
       closingFinancial = window.TeamAccess?.has?.("financial.view") ? `${metric("Recebido", dinheiro(f.recebido), "pagamentos", "wallet-cards")}${metric("Fiado", dinheiro(f.fiado), "novas contas", "hand-coins")}` : "",
-      closingProfit = window.TeamAccess?.has?.("profit.view") ? metric("Lucro estimado", dinheiro(f.lucro), "privado", "trending-up") : "";
+      closingProfit = window.TeamAccess?.has?.("profit.view") ? metric("Lucro estimado", f.lucro===null?'Não disponível':dinheiro(f.lucro), "privado", "trending-up") : "";
     return (
       cabecalho("Olá! Vamos vender?", "Seu resumo rápido do seu negócio.") +
       `<section class="metrics">${metric("Vendas hoje", hoje.length, "registros", "shopping-cart")}${metric("Vendido hoje", dinheiro(valorHoje), "valor final", "circle-dollar-sign")}${profitMetrics}${financialMetrics}${metric("Clientes", d.clientes.length, "cadastrados", "users")}${metric("Produtos", d.produtos.length, "cadastrados", "candy")}</section><section class="quick-actions"><button class="quick-card" data-go="vender"><span>${icon("plus")}</span><span><strong>Registrar venda</strong><small>Venda paga ou fiado</small></span></button>${window.TeamAccess?.has?.("customers.receiveDebt") ? `<button class="quick-card" data-go="fiados"><span>${icon("banknote-arrow-down")}</span><span><strong>Receber pagamento</strong><small>Baixar saldo do cliente</small></span></button>` : ""}</section>${blocoAlertasEstoque()}<section class="panel closing-panel"><div class="panel-head"><h3>Fechamento do dia</h3></div><div class="modal-body"><div class="closing-grid">${metric("Vendido", dinheiro(f.vendido), "hoje", "circle-dollar-sign")}${closingFinancial}${closingProfit}${metric("Vendas", f.vendas, "realizadas", "shopping-cart")}${metric("Clientes", f.clientes, "atendidos", "users")}</div><div class="closing-actions"><button class="btn btn-light" data-copy-closing>${icon("copy")} Copiar resumo</button><button class="btn btn-whatsapp" data-share-closing>${icon("message-circle")} Compartilhar no WhatsApp</button>${ultima && window.TeamAccess?.has?.("sales.cancel") ? `<button class="btn btn-danger undo-sale" data-undo-sale ${Vendas.podeDesfazer() ? "" : "disabled"}>${icon("undo-2")} Desfazer última venda</button>` : ""}</div></div></section>${historicoTabela([...d.vendas].reverse().slice(0, 5), "Vendas recentes")}`
@@ -1538,6 +1561,9 @@
     carrinho = [];
     $("#modal").innerHTML = "";
     document.body.classList.remove("sale-sheet-open");
+  });
+  addEventListener('sale-exchange-metrics-updated',()=>{
+    if(Router.atual()==='inicio'&&!window.MobileHome&&!window.DesktopDashboard)mountRoute('inicio');
   });
   addEventListener("clientes-import-csv", importarCSV);
   window.AppPageRuntime = pageRuntime;
