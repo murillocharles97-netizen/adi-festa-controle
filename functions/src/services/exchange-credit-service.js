@@ -105,6 +105,9 @@ function creditService(db){
       const c=await context(tx,request),saleRef=c.root.collection('sales').doc(saleId),markerRef=c.root.collection('processedOperations').doc(operationId);
       const [existing,marker]=await Promise.all([tx.get(saleRef),tx.get(markerRef)]);
       if(existing.exists||marker.exists){const s=existing.data(),m=marker.data();if(!s||!m||s.operationId!==operationId||s.actorUid!==c.uid||s.exchangeCreditRequestHash!==checksum||m.checksum!==checksum||m.eventKind!=='sale_exchange_credit'||m.saleId!==saleId||m.spaceId!==c.spaceId||m.businessId!==c.bid||generation(m)!==generation(c.business)||s.spaceId!==c.spaceId||s.businessId!==c.bid||generation(s)!==generation(c.business)||s.clienteId!==c.clientId)fail('already-exists','Identificador em uso ou recibo incompleto.');return {saleId,operationId,replayed:true,sale:safeSale(s),receipt:{operationId,checksum,status:'processed'}};}
+      // Containment build: only an already committed receipt can be replayed.
+      // No request flag, new ID or old pending envelope can bypass this fence.
+      throw new HttpsError('failed-precondition','Novos usos de crédito de troca estão temporariamente pausados. A tentativa original permanece preservada.',{reason:'exchange_new_commits_paused'});
       const p=await prepare(tx,c,d);
       if(d.fingerprint!==p.fingerprint)fail('failed-precondition','Preço, estoque ou crédito mudou. Revise novamente.');
       const now=Timestamp.now(),stamp={...scope(c),actorUid:c.uid,operationId,createdAt:now,updatedAt:now},sale={...stamp,id:saleId,idempotencyKey:operationId,ownerId:c.uid,updatedByUid:c.uid,entityType:'sales',schemaVersion:3,version:1,source:'exchange_credit_checkout',status:'pago',formaPagamento:p.plan.paymentMethod||'credito_troca',clienteId:c.clientId,clienteNome:c.client.nome||'Cliente',data:now,paidAt:now,

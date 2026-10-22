@@ -16,6 +16,7 @@
     shortCommit,
     builtAt,
     release: "194",
+    channel: "compatible-rollback",
   });
 
   if (!window.__adiFestaBuildLogged) {

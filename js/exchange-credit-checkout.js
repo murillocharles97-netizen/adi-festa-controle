@@ -1,6 +1,8 @@
 /* Scoped exchange tender. All commercial effects are performed by the server transaction. */
 window.ExchangeCreditCheckout = (() => {
   'use strict';
+  // Compiled containment artifact only. Server transactions independently enforce this pause.
+  const newOperationsPaused = true;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = cents => (Number(cents || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -21,6 +23,7 @@ window.ExchangeCreditCheckout = (() => {
   async function call(name, scope, data, sessionSignature) {
     if (sessionSignature !== signature()) throw Error('A sessão mudou. Consulte a confirmação na conta de origem.');
     if (!navigator.onLine) throw Error('Conecte-se para usar crédito de troca.');
+    if (newOperationsPaused && name === 'confirmExchangeCreditSale') throw Error('Novos usos de crédito estão temporariamente pausados. Consulte a confirmação existente; o saldo e a tentativa foram preservados.');
     if(['confirmExchangeCreditSale','cancelExchangeCreditSale'].includes(name))assertCausalQueue();
     const response = await window.FirebaseCallable(name, { ...data, businessId: scope.businessId, workspaceGeneration: scope.workspaceGeneration, spaceId: scope.spaceId, clientId: scope.clientId });
     if (sessionSignature !== signature()) throw Error('A sessão mudou. A tentativa foi preservada na conta de origem.');
@@ -68,14 +71,14 @@ window.ExchangeCreditCheckout = (() => {
     let rejected = false;
     try { rejected = pending && JSON.parse(localStorage.getItem(`${s.key}:review`) || 'null')?.operationId === pending.request.operationId; } catch { /* A malformed note never authorizes a new attempt. */ }
     const maximum = Math.min(s.availableCents || 0, s.totalCents || 0), blocked = document.querySelector('#sale-status')?.value === 'fiado';
-    s.selected = blocked && !pending ? 0 : Math.min(s.selected || 0, maximum);
-    s.host.innerHTML = `<section class="exchange-credit-card"><div class="exchange-credit-heading"><span class="exchange-credit-symbol" aria-hidden="true">↔</span><div><h4>Crédito de troca</h4><p>${s.loading ? 'Consultando saldo deste cliente…' : `Disponível neste espaço: <b>${money(s.availableCents)}</b>`}</p></div></div>${pending ? `<div class="exchange-credit-held"><b>Confirmação preservada</b><p>Consulte o resultado antes de registrar outra venda. Os IDs originais serão mantidos.</p><button type="button" data-credit-consult>Consultar confirmação</button><button type="button" data-credit-retry>Repetir mesma confirmação</button></div>` : blocked ? '<p>Crédito de troca não é utilizado em vendas Fiado nesta versão.</p>' : s.availableCents > 0 ? `<div class="exchange-credit-controls"><button type="button" data-credit-all ${s.loading || busy ? 'disabled' : ''}>Usar crédito</button><label>Valor a usar<input type="number" inputmode="decimal" min="0" max="${(maximum / 100).toFixed(2)}" step="0.01" value="${(s.selected / 100).toFixed(2)}" data-credit-amount ${s.loading || busy ? 'disabled' : ''}></label>${s.selected ? '<button type="button" class="exchange-credit-link" data-credit-remove>Não usar</button>' : ''}</div><div class="exchange-credit-breakdown"><span>Crédito nesta venda <b>${money(s.selected)}</b></span><span>Restante a cobrar <b>${money(Math.max(0, s.totalCents - s.selected))}</b></span><span>Saldo após o uso <b>${money(Math.max(0, s.availableCents - s.selected))}</b></span></div><small>Crédito separado do Fiado. Disponibilidade confirmada ao finalizar.</small>` : s.loading ? '' : '<p>Este cliente não possui crédito disponível neste espaço.</p>'}<p class="exchange-credit-error" role="alert">${esc(s.error || '')}</p></section>`;
+    s.selected = newOperationsPaused || blocked && !pending ? 0 : Math.min(s.selected || 0, maximum);
+    s.host.innerHTML = `<section class="exchange-credit-card"><div class="exchange-credit-heading"><span class="exchange-credit-symbol" aria-hidden="true">↔</span><div><h4>Crédito de troca</h4><p>${s.loading ? 'Consultando saldo deste cliente…' : `Disponível neste espaço: <b>${money(s.availableCents)}</b>`}</p></div></div>${pending ? `<div class="exchange-credit-held"><b>Confirmação preservada</b><p>Consulte o resultado antes de registrar outra venda. Os IDs originais serão mantidos.</p><button type="button" data-credit-consult>Consultar confirmação</button>${newOperationsPaused ? '' : '<button type="button" data-credit-retry>Repetir mesma confirmação</button>'}</div>` : newOperationsPaused ? '<p>Uso de crédito temporariamente pausado. Seu saldo permanece preservado; novas vendas sem crédito continuam disponíveis.</p>' : blocked ? '<p>Crédito de troca não é utilizado em vendas Fiado nesta versão.</p>' : s.availableCents > 0 ? `<div class="exchange-credit-controls"><button type="button" data-credit-all ${s.loading || busy ? 'disabled' : ''}>Usar crédito</button><label>Valor a usar<input type="number" inputmode="decimal" min="0" max="${(maximum / 100).toFixed(2)}" step="0.01" value="${(s.selected / 100).toFixed(2)}" data-credit-amount ${s.loading || busy ? 'disabled' : ''}></label>${s.selected ? '<button type="button" class="exchange-credit-link" data-credit-remove>Não usar</button>' : ''}</div><div class="exchange-credit-breakdown"><span>Crédito nesta venda <b>${money(s.selected)}</b></span><span>Restante a cobrar <b>${money(Math.max(0, s.totalCents - s.selected))}</b></span><span>Saldo após o uso <b>${money(Math.max(0, s.availableCents - s.selected))}</b></span></div><small>Crédito separado do Fiado. Disponibilidade confirmada ao finalizar.</small>` : s.loading ? '' : '<p>Este cliente não possui crédito disponível neste espaço.</p>'}<p class="exchange-credit-error" role="alert">${esc(s.error || '')}</p></section>`;
     const update = amount => { if (busy || !still(s) || pending) return; const n = Math.round(Number(amount) * 100); if (!integer(n) || n > maximum) { s.error = `Informe até ${money(maximum)}.`; refreshCard(s); return; } s.error = ''; s.selected = n; refreshCard(s); s.onChange?.(n); };
     const all = s.host.querySelector('[data-credit-all]'), input = s.host.querySelector('[data-credit-amount]'), remove = s.host.querySelector('[data-credit-remove]');
     if (all) all.onclick = () => update(maximum / 100);
     if (input) input.onchange = () => update(input.value);
     if (remove) remove.onclick = () => update(0);
-    if (rejected) s.host.querySelector('.exchange-credit-held')?.insertAdjacentHTML('beforeend','<button type="button" data-credit-revise>Revisar valores novamente</button>');
+    if (rejected && !newOperationsPaused) s.host.querySelector('.exchange-credit-held')?.insertAdjacentHTML('beforeend','<button type="button" data-credit-revise>Revisar valores novamente</button>');
     const revise = s.host.querySelector('[data-credit-revise]');
     if (revise) revise.onclick = async () => {
       if (busy || !still(s)) return;
@@ -114,9 +117,10 @@ window.ExchangeCreditCheckout = (() => {
     } catch (error) { if (state === s && still(s)) { s.availableCents = 0; s.selected = 0; s.error = error.message; } }
     finally { if (state === s && still(s)) { s.loading = false; refreshCard(s); } }
   }
-  const selectedCents = () => state && still(state) ? state.selected || 0 : 0;
+  const selectedCents = () => !newOperationsPaused && state && still(state) ? state.selected || 0 : 0;
   function hasPending() { if (!state || !still(state)) return false; try { return Boolean(read(state.key)); } catch { return true; } }
   async function resume(s, retry) {
+    if (newOperationsPaused && retry) return;
     if (busy || state !== s || !still(s)) return;
     busy = true; s.error = ''; refreshCard(s);
     try {
@@ -143,6 +147,7 @@ window.ExchangeCreditCheckout = (() => {
     finally { busy = false; if (state === s && still(s)) refreshCard(s); }
   }
   async function finish(draft) {
+    if (newOperationsPaused) throw Error('Novos usos de crédito estão temporariamente pausados. Os saldos existentes foram preservados.');
     assertCausalQueue();
     const s = state;
     if (!s || !still(s) || !s.selected) throw Error('Selecione o crédito de troca antes de finalizar.');

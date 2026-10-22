@@ -1,6 +1,8 @@
 /* Explicit online exchange transactions never enter the commercial Sync queue. */
 window.SaleExchanges = (() => {
   'use strict';
+  // Compiled containment artifact only. The server independently blocks new commits.
+  const newOperationsPaused = true;
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = v => (Number(v || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const identity = () => ({ uid: window.FirebaseSession?.user?.uid, businessId: DB.getBusinessId(), generation: DB.getWorkspaceGeneration(), access: window.TeamAccess?.operationalReadScopeKey?.() || '' });
@@ -40,14 +42,15 @@ window.SaleExchanges = (() => {
     const call = async (name, data) => {
       if (!current()) throw Error('A sessão mudou. Reabra a venda na conta de origem.');
       if (!navigator.onLine) throw Error('Conecte-se para consultar ou confirmar a troca.');
+      if (newOperationsPaused && name === 'confirmSaleExchange') throw Error('Novas trocas estão temporariamente pausadas. Consulte as confirmações existentes; a tentativa permanece preservada.');
       if(name==='confirmSaleExchange')assertCausalQueue();
       const r = await window.FirebaseCallable(name, { ...data, businessId: origin.businessId, workspaceGeneration: origin.generation, saleId: sale.id });
       if (!current()) throw Error('A sessão mudou. Consulte a troca na conta de origem.');
       return r.data ?? r;
     };
-    const blocked = sale.status === 'fiado' || sale.formaPagamento === 'fiado';
+    const blocked = sale.status === 'fiado' || sale.formaPagamento === 'fiado' || newOperationsPaused && !pending;
     modal.dataset.exchangeToken = token;
-    modal.innerHTML = `<div class="modal-bg"><section class="modal-box exchange-sheet" role="dialog" aria-modal="true" aria-labelledby="exchange-title"><header class="exchange-header"><div><span class="exchange-eyebrow">Histórico · venda #${esc(sale.id.slice(0, 8))}</span><h2 id="exchange-title">Trocar itens</h2><p>Receba, escolha e revise antes de confirmar.</p></div><button type="button" class="exchange-icon-button" data-ex-close aria-label="Fechar troca">×</button></header><div class="exchange-notice">A venda original permanece no histórico. A troca será registrada separadamente.</div><div data-ex-error role="alert" aria-live="assertive"></div>${blocked ? '<section class="exchange-caution"><h3>Troca de venda Fiado indisponível</h3><p>Nesta versão, trocas não alteram débitos de Fiado. Nenhum saldo será modificado.</p></section>' : `<form data-ex-form><div class="exchange-columns"><section><div class="exchange-section-title"><span class="exchange-step">1</span><div><h3>Você recebe</h3><p>Escolha os itens que o cliente está devolvendo.</p></div></div>${(sale.itens || []).map((i, n) => `<article class="exchange-return-row"><div class="exchange-product-info"><b>${esc(i.nome || i.produtoNome || i.produtoId)}</b><small>${esc(i.variantName || '')}</small><small data-return-remaining="${n}">${esc(i.quantidade)} un. comprada(s) · ${money(Math.round(Number(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco ?? 0) * 100))} / un.</small></div><label>Devolver<input type="number" min="0" max="${esc(i.quantidade)}" step="1" value="0" inputmode="numeric" data-return="${n}"></label><label class="exchange-check"><input type="checkbox" data-restock="${n}"><span>Apto para revenda<small>Desmarcado: registrar avaria, sem repor estoque.</small></span></label></article>`).join('')}</section><section><div class="exchange-section-title"><span class="exchange-step">2</span><div><h3>Cliente leva</h3><p>Preços e disponibilidade serão conferidos online.</p></div></div><div data-ex-new></div><button type="button" class="exchange-button-secondary" data-ex-add>+ Adicionar produto</button>${!catalog.length ? '<p class="exchange-caution">Nenhum produto elegível disponível neste espaço.</p>' : ''}</section></div><section><div class="exchange-section-title"><span class="exchange-step">3</span><div><h3>Motivo e diferença</h3><p>Registre o motivo e a forma de receber um eventual complemento.</p></div></div><div class="exchange-fields"><label>Motivo da troca<select name="reasonType" required><option value="">Selecione o motivo</option><option>Tamanho ou variação</option><option>Preferência do cliente</option><option>Defeito ou avaria</option><option>Produto diferente do solicitado</option><option>Outro motivo</option></select></label><label>Complemento, se houver<select name="paymentMethod"><option value="dinheiro">Dinheiro</option><option value="pix">Pix recebido manualmente</option><option value="cartao">Cartão em máquina externa</option></select></label></div><label>Detalhes do motivo <span class="exchange-optional">(opcional)</span><textarea name="reasonDetail" maxlength="400" rows="2" placeholder="Acrescente detalhes úteis para o histórico"></textarea></label><p class="exchange-help">Valor menor gera crédito de troca para o cliente da venda, válido apenas nesta empresa e espaço. O crédito fica separado do Fiado. Não há reembolso automático.</p></section><div data-ex-review aria-live="polite"></div><footer><span data-ex-footer-note>Confira os valores antes de confirmar.</span><button type="submit" data-ex-quote>Revisar troca <span aria-hidden="true">→</span></button><button type="button" data-ex-confirm hidden>Confirmar troca</button></footer></form>`}<section class="exchange-history" data-ex-history><h3>Trocas vinculadas</h3><p>Consultando histórico…</p></section></section></div>`;
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box exchange-sheet" role="dialog" aria-modal="true" aria-labelledby="exchange-title"><header class="exchange-header"><div><span class="exchange-eyebrow">Histórico · venda #${esc(sale.id.slice(0, 8))}</span><h2 id="exchange-title">Trocar itens</h2><p>Receba, escolha e revise antes de confirmar.</p></div><button type="button" class="exchange-icon-button" data-ex-close aria-label="Fechar troca">×</button></header><div class="exchange-notice">A venda original permanece no histórico. A troca será registrada separadamente.</div><div data-ex-error role="alert" aria-live="assertive"></div>${blocked ? newOperationsPaused ? '<section class="exchange-caution"><h3>Novas trocas temporariamente pausadas</h3><p>Histórico, comprovantes e créditos existentes permanecem preservados. Nenhuma tentativa será executada por esta tela.</p></section>' : '<section class="exchange-caution"><h3>Troca de venda Fiado indisponível</h3><p>Nesta versão, trocas não alteram débitos de Fiado. Nenhum saldo será modificado.</p></section>' : `<form data-ex-form><div class="exchange-columns"><section><div class="exchange-section-title"><span class="exchange-step">1</span><div><h3>Você recebe</h3><p>Escolha os itens que o cliente está devolvendo.</p></div></div>${(sale.itens || []).map((i, n) => `<article class="exchange-return-row"><div class="exchange-product-info"><b>${esc(i.nome || i.produtoNome || i.produtoId)}</b><small>${esc(i.variantName || '')}</small><small data-return-remaining="${n}">${esc(i.quantidade)} un. comprada(s) · ${money(Math.round(Number(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco ?? 0) * 100))} / un.</small></div><label>Devolver<input type="number" min="0" max="${esc(i.quantidade)}" step="1" value="0" inputmode="numeric" data-return="${n}"></label><label class="exchange-check"><input type="checkbox" data-restock="${n}"><span>Apto para revenda<small>Desmarcado: registrar avaria, sem repor estoque.</small></span></label></article>`).join('')}</section><section><div class="exchange-section-title"><span class="exchange-step">2</span><div><h3>Cliente leva</h3><p>Preços e disponibilidade serão conferidos online.</p></div></div><div data-ex-new></div><button type="button" class="exchange-button-secondary" data-ex-add>+ Adicionar produto</button>${!catalog.length ? '<p class="exchange-caution">Nenhum produto elegível disponível neste espaço.</p>' : ''}</section></div><section><div class="exchange-section-title"><span class="exchange-step">3</span><div><h3>Motivo e diferença</h3><p>Registre o motivo e a forma de receber um eventual complemento.</p></div></div><div class="exchange-fields"><label>Motivo da troca<select name="reasonType" required><option value="">Selecione o motivo</option><option>Tamanho ou variação</option><option>Preferência do cliente</option><option>Defeito ou avaria</option><option>Produto diferente do solicitado</option><option>Outro motivo</option></select></label><label>Complemento, se houver<select name="paymentMethod"><option value="dinheiro">Dinheiro</option><option value="pix">Pix recebido manualmente</option><option value="cartao">Cartão em máquina externa</option></select></label></div><label>Detalhes do motivo <span class="exchange-optional">(opcional)</span><textarea name="reasonDetail" maxlength="400" rows="2" placeholder="Acrescente detalhes úteis para o histórico"></textarea></label><p class="exchange-help">Valor menor gera crédito de troca para o cliente da venda, válido apenas nesta empresa e espaço. O crédito fica separado do Fiado. Não há reembolso automático.</p></section><div data-ex-review aria-live="polite"></div><footer><span data-ex-footer-note>Confira os valores antes de confirmar.</span><button type="submit" data-ex-quote>Revisar troca <span aria-hidden="true">→</span></button><button type="button" data-ex-confirm hidden>Confirmar troca</button></footer></form>`}<section class="exchange-history" data-ex-history><h3>Trocas vinculadas</h3><p>Consultando histórico…</p></section></section></div>`;
     const form = modal.querySelector('[data-ex-form]'), error = modal.querySelector('[data-ex-error]'), review = modal.querySelector('[data-ex-review]'), confirm = modal.querySelector('[data-ex-confirm]');
     const showError = e => { if (current()) error.textContent = e.message || 'Não foi possível concluir. Sua tentativa permanece preservada.'; };
     const note = message => { if (current() && form?.querySelector('[data-ex-footer-note]')) form.querySelector('[data-ex-footer-note]').textContent = message; };
@@ -85,9 +88,9 @@ window.SaleExchanges = (() => {
     function pendingView(message) {
       if (!current() || !form) return;
       quote = null; confirm.hidden = true; form.querySelector('[data-ex-quote]').hidden = true;
-      review.innerHTML = `<section class="exchange-caution"><h3>Confirmação preservada</h3><p>${esc(message || 'Uma confirmação anterior ainda precisa ser conferida. Consulte o resultado antes de continuar.')}</p><small>Identificador: ${esc(pending.request.operationId)}</small><div class="exchange-pending-actions"><button type="button" data-ex-consult>Consultar resultado</button><button type="button" class="exchange-button-secondary" data-ex-retry>Repetir a mesma confirmação</button>${knownUncommitted ? '<button type="button" class="exchange-button-secondary" data-ex-revise>Revisar valores novamente</button>' : ''}</div></section>`;
+      review.innerHTML = `<section class="exchange-caution"><h3>Confirmação preservada</h3><p>${esc(message || 'Uma confirmação anterior ainda precisa ser conferida. Consulte o resultado antes de continuar.')}</p><small>Identificador: ${esc(pending.request.operationId)}</small><div class="exchange-pending-actions"><button type="button" data-ex-consult>Consultar resultado</button>${newOperationsPaused ? '': '<button type="button" class="exchange-button-secondary" data-ex-retry>Repetir a mesma confirmação</button>'}${knownUncommitted && !newOperationsPaused ? '<button type="button" class="exchange-button-secondary" data-ex-revise>Revisar valores novamente</button>' : ''}</div></section>`;
       review.querySelector('[data-ex-consult]').onclick = () => consult();
-      review.querySelector('[data-ex-retry]').onclick = () => submitPending();
+      const retry = review.querySelector('[data-ex-retry]'); if (retry) retry.onclick = () => submitPending();
       const revise = review.querySelector('[data-ex-revise]');
       if (revise) revise.onclick = async () => {
         if (busy || !current()) return;
@@ -109,6 +112,12 @@ window.SaleExchanges = (() => {
       if (!current()) return;
       const id = result.id || result.operationId;
       if (!pending || id !== pending.request.operationId) throw Error('Resposta não corresponde à tentativa preservada. Consulte novamente.');
+      // Containment also retains the original completed request for audit.
+      const evidence = JSON.parse(localStorage.getItem(`${key}:attempts`) || '[]');
+      if (!Array.isArray(evidence)) throw Error('Não foi possível preservar o comprovante local. Mantenha esta tentativa.');
+      const archived = evidence.find(item => item.request?.operationId === id);
+      if (archived && JSON.stringify(archived.request) !== JSON.stringify(pending.request)) throw Error('A evidência local diverge. A tentativa atual foi mantida para análise.');
+      if (!archived) localStorage.setItem(`${key}:attempts`, JSON.stringify([...evidence, { ...pending, outcome: 'committed', receipt: result, confirmedAt: new Date().toISOString() }]));
       localStorage.removeItem(key); pending = null;
       form.classList?.remove('exchange-reviewing');
       window.dispatchEvent(new CustomEvent('sale-exchange-completed', { detail: { businessId: origin.businessId, spaceId: sale.spaceId, saleId: sale.id, operationId: id } }));
@@ -121,7 +130,7 @@ window.SaleExchanges = (() => {
       try {
         const status = await call('lookupSaleExchange', { operationId: pending.request.operationId });
         if (status.found) await completed(status.item);
-        else pendingView('Nenhuma troca foi encontrada com este identificador. Você pode repetir a mesma confirmação para obter uma resposta segura.');
+        else pendingView('Nenhuma troca foi encontrada com este identificador. Novas confirmações estão pausadas; sua tentativa permanece intacta para análise.');
       } catch (e) { showError(e); } finally { if (current()) lock(false); }
     }
     async function withTabLock(action) {
@@ -169,7 +178,7 @@ window.SaleExchanges = (() => {
       form.oninput = e => { if (!e.target.matches('[data-ex-received]')) invalidate(); };
       form.onchange = e => { if (!e.target.matches('[data-ex-received]')) invalidate(); };
       form.onsubmit = async e => {
-        e.preventDefault(); if (busy || pending || !current()) return;
+        e.preventDefault(); if (newOperationsPaused || busy || pending || !current()) return;
         if (!form.reportValidity()) return;
         error.textContent = ''; lock(true);
         try {
@@ -180,7 +189,7 @@ window.SaleExchanges = (() => {
         } catch (e) { showError(e); } finally { if (current()) lock(false); }
       };
       confirm.onclick = async () => {
-        if (busy || !current() || !quote || pending) return;
+        if (newOperationsPaused || busy || !current() || !quote || pending) return;
         if (quote.result.differenceCents > 0 && !form.querySelector('[data-ex-received]')?.checked) { showError(Error('Confirme o recebimento da diferença antes de concluir.')); return; }
         try { await withTabLock(async()=>{
           const other = readAttempt(key);
@@ -197,7 +206,7 @@ window.SaleExchanges = (() => {
   }
   function attach(root, sale) {
     if (!sale || !allowed() || root.querySelector('[data-sale-exchange]')) return;
-    const button = document.createElement('button'); button.className = 'btn btn-primary'; button.dataset.saleExchange = sale.id; button.textContent = 'Trocar itens / ver trocas'; button.onclick = () => open(sale);
+    const button = document.createElement('button'); button.className = 'btn btn-primary'; button.dataset.saleExchange = sale.id; button.textContent = 'Ver trocas / confirmações'; button.onclick = () => open(sale);
     root.querySelector('.activity-detail-actions')?.append(button);
   }
   return { open, attach };

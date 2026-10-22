@@ -72,6 +72,9 @@ function saleExchangeService(db) {
       const [existing,processed]=await Promise.all([tx.get(ref),tx.get(marker)]);
       if(existing.exists){const e=existing.data();if(e.requestHash!==requestHash||e.actorUid!==c.uid||e.originalSaleId!==c.sid)fail('already-exists','Identificador utilizado por outra troca.');const receipt=processed.data();if(!receipt||receipt.eventKind!=='sale_exchange'||receipt.checksum!==requestHash||receipt.businessId!==c.bid||receipt.spaceId!==c.sale.spaceId)fail('failed-precondition','Recibo incompleto; revisão necessária.');return {id,replayed:true};}
       if(processed.exists)fail('already-exists','Identificador de outra operação.');
+      // Containment build: committed receipts remain readable/idempotent, but
+      // preserved or newly submitted attempts must never produce new effects.
+      throw new HttpsError('failed-precondition','Novas trocas estão temporariamente pausadas. A tentativa original permanece preservada.',{reason:'exchange_new_commits_paused'});
       const p=await prepare(tx,c,input);
       if(input.fingerprint!==p.fingerprint)fail('failed-precondition','Estoque, preço ou troca anterior mudou. Revise novamente.');
       const now=Timestamp.now(),scope={businessId:c.bid,spaceId:c.sale.spaceId,workspaceGeneration:c.business.workspaceGeneration??0,actorUid:c.uid,operationId:id},event={...scope,id,originalSaleId:c.sid,requestHash,status:'completed',actorNameSnapshot:c.actorName,actorRoleSnapshot:c.member.role,createdAt:now,updatedAt:now,...p.plan};

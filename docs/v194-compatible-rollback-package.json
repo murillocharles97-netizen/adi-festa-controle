@@ -1,0 +1,22 @@
+{
+  "artifact": "V194-compatible-rollback",
+  "publicationAuthorized": false,
+  "candidateCommit": "c1f8b08bb141ba5feb9c4b2b6288fb6db4fd0293",
+  "branch": "codex/v194-compatible-rollback",
+  "artifactTag": "rollback/v194-compatible-sale-exchanges",
+  "purpose": "Contain new exchange/credit effects while preserving already issued records and their safety invariants; not a raw V193 restore",
+  "deployment": {
+    "phase1FunctionsOnly": ["confirmSaleExchange", "confirmExchangeCreditSale"],
+    "phase2": "wait for both functions ready, then compatible frontend/PWA",
+    "rules": "retain V194 byte-for-byte",
+    "financialProjection": "retain V194 byte-for-byte",
+    "indexesChanged": false,
+    "deleteFunctions": false,
+    "schedulerCreated": false,
+    "migrations": false
+  },
+  "preserved": ["ledger", "receipts", "IDs", "queues", "pending envelopes", "checksums", "specific credit-sale cancellation", "exchange-aware reporting", "reset block", "company/space isolation", "sensitive-field sanitation"],
+  "notPermitted": ["blind V193 server/Rules/frontend deploy", "database snapshot restore", "collection deletion", "generation reset", "queue/cache cleanup", "automatic replay", "automatic compensation"],
+  "knownBoundary": "Already admitted/in-flight transactions may finish atomically. Inspect the same receipt/IDs; do not assume their failure or repeat with new IDs.",
+  "resumeRequiresExplicitAuthorization": true
+}
