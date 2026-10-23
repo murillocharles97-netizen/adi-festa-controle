@@ -415,6 +415,10 @@ window.Vendas = (() => {
     DB.alterar((db) => {
       const venda = db.vendas[db.vendas.length - 1], actor = window.TeamAccess?.actor?.() || {};
       if (!venda) throw Error("Nenhuma venda para desfazer");
+      if (options.saleId && String(options.saleId) !== String(venda.id))
+        throw Error("A venda já foi cancelada ou não é mais a venda mais recente.");
+      if (venda.deletedAt || venda.active === false)
+        throw Error("Esta venda já foi cancelada.");
       if (venda.onlineOrderId)
         throw Error("Venda de pedido online concluído exige devolução específica. Não é possível desfazer por este atalho.");
       if (venda.paymentIntentId || venda.formaPagamento === "cartao_presencial")
@@ -423,9 +427,22 @@ window.Vendas = (() => {
         throw Error("O prazo de 5 minutos para desfazer terminou");
       const businessId = String(venda.businessId || DB.getBusinessId?.() || '');
       const spaceId = requiredSalesSpace(venda.spaceId || '');
+      const isCredit = venda.formaPagamento === "fiado" || venda.status === "fiado",
+        cliente = db.clientes.find((c) => c.id === venda.clienteId),
+        reversalAmount = Number(venda.valorFinal ?? venda.valorTotal);
+      if (isCredit) {
+        const allocated = (db.alocacoesPagamento || []).some((entry) =>
+          String(entry.saleId || entry.vendaId || "") === String(venda.id) && Number(entry.amount || entry.valor || 0) > 0);
+        if (Number(venda.creditPaidAmount || 0) > 0 || venda.creditSettled === true || allocated)
+          throw Error("Esta venda Fiado já possui recebimento. O cancelamento exige conciliação; nenhum pagamento será estornado por este atalho.");
+        if (!cliente || !Number.isFinite(reversalAmount) || reversalAmount <= 0 ||
+          Number(cliente.financialVersion || 0) !== Number(venda.financialVersionAnterior || 0) + 1 ||
+          cents(cliente.saldo) !== cents(venda.saldoAtual))
+          throw Error("O saldo do cliente foi alterado após esta venda ou não pôde ser confirmado. Faça a conciliação antes de cancelar; os lançamentos foram preservados.");
+      }
       if (!options.administrativeResolution)
         window.Campanhas?.validarReversaoVendaNoBanco?.(db, venda);
-      removida = { ...venda };
+      removida = { ...venda, cancelOperationId: operationId };
       db.vendas.pop();
       const agora = new Date().toISOString();
       venda.itens.forEach((i) => {
@@ -492,10 +509,9 @@ window.Vendas = (() => {
           ...actor,
         });
       });
-      const cliente = db.clientes.find((c) => c.id === venda.clienteId);
       if (cliente) {
-        if (venda.status === "fiado") {
-          cliente.saldo = Number(venda.saldoAnterior || 0);
+        if (isCredit) {
+          cliente.saldo = (cents(cliente.saldo) + cents(reversalAmount)) / 100;
           cliente.financialVersion =
             Math.max(0, Number(cliente.financialVersion || 0)) + 1;
         }

@@ -55,22 +55,24 @@
     aplicarInputModes(root);
     window.lucide?.createIcons();
   }
-  function abrirResolucaoCancelamento(error) {
+  function abrirResolucaoCancelamento(error, saleId = "") {
     const conflitos = error?.conflicts || [];
     abrirFormulario(
       "Benefícios já utilizados",
       `<section class="campaign-cancellation-warning">${icon("triangle-alert")}<div><h4>Esta venda gerou benefícios que já foram utilizados.</h4><p>O cancelamento será registrado sem apagar o histórico. O saldo utilizado ficará como dívida de pontos ou recompensa no progresso do cliente.</p></div></section><div class="campaign-cancellation-impact">${conflitos.map((item) => `<article><b>${escapar(item.campaignName || "Campanha")}</b><span>${item.pointsDebt ? `${Number(item.pointsDebt)} ponto(s) utilizados` : ""}${item.pointsDebt && item.rewardDebt ? " · " : ""}${item.rewardDebt ? `${Number(item.rewardDebt)} recompensa(s) utilizada(s)` : ""}</span></article>`).join("")}</div><div class="field"><label>Motivo da resolução administrativa</label><textarea name="campaignResolutionReason" required minlength="8" placeholder="Ex.: Venda cancelada após devolução do pedido"></textarea><small>Esta justificativa ficará registrada no histórico da campanha.</small></div><label class="campaign-resolution-consent"><input type="checkbox" name="confirmBenefitDebt" required> Entendo que o benefício já entregue será registrado como pendência no progresso do cliente.</label>`,
-      (form) => {
+      async (form) => {
         const reason = String(form.get("campaignResolutionReason") || "").trim();
         if (reason.length < 8) throw Error("Informe um motivo com pelo menos 8 caracteres.");
         if (!form.get("confirmBenefitDebt")) throw Error("Confirme o registro da pendência de benefício.");
-        Vendas.desfazerUltima({
+        const removed = Vendas.desfazerUltima({
+          saleId,
           administrativeResolution: {
             mode: "record_benefit_debt",
             reason,
             actorId: window.FirebaseSession?.profile?.uid || null,
           },
         });
+        await window.SyncFirebase?.confirmSaleUndo?.(removed);
         toast("Venda cancelada com ajuste de campanha registrado");
       },
       "Cancelar e registrar ajuste",
@@ -106,11 +108,15 @@
             return;
           }
           await verify();
-          Vendas.desfazerUltima();
+          if ((latest.formaPagamento === "fiado" || latest.status === "fiado") &&
+            typeof window.SyncFirebase?.confirmSaleUndo !== "function")
+            throw Error("A confirmação financeira não está pronta. Aguarde a inicialização antes de cancelar.");
+          const removed = Vendas.desfazerUltima({saleId:latest.id});
+          await window.SyncFirebase?.confirmSaleUndo?.(removed);
           toast("Venda desfeita com sucesso");
         } catch (error) {
           if (error?.code !== "campaign-redemption-conflict") throw error;
-          setTimeout(() => abrirResolucaoCancelamento(error), 0);
+          setTimeout(() => abrirResolucaoCancelamento(error, latest.id), 0);
         }
       },
       "Desfazer venda",

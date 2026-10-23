@@ -418,7 +418,7 @@ function financialEffectFromWrites(
       if (write.entityType !== "sales") return false;
       const current = { ...(write.before || {}), ...(write.data || {}) },
         isUndo = Boolean(write.data?.deletedAt || write.data?.active === false),
-        isCredit = String(current.status || "") === "fiado";
+        isCredit = current.formaPagamento === "fiado" || current.status === "fiado";
       return isCredit && (write.operation === "create" || isUndo);
     }),
     payment = writes.find(
@@ -439,7 +439,7 @@ function financialEffectFromWrites(
     const original = sale.before || {},
       current = { ...original, ...(sale.data || {}) },
       isUndo = Boolean(sale.data?.deletedAt || sale.data?.active === false),
-      isCredit = String(current.status || "") === "fiado";
+      isCredit = current.formaPagamento === "fiado" || current.status === "fiado";
     if (isCredit && (sale.operation === "create" || isUndo)) {
       source = sale;
       type = isUndo ? "credit_sale_reversal" : "credit_sale";
@@ -490,12 +490,32 @@ function financialEffectFromWrites(
     balanceDelta: delta,
     eventKind,
     sourceCreatedAt:
+      (type === "credit_sale_reversal" ? source.data?.deletedAt || now() : null) ||
       source.data?.data ||
       source.data?.createdAt ||
       source.before?.data ||
       source.before?.createdAt ||
       now(),
   };
+}
+function validateCreditSaleReversal(sale, client, debit, effect, clientWrite) {
+  const fail = () => { throw Object.assign(Error("O cancelamento Fiado exige conciliação: débito, recebimentos ou saldo atual não conferem. Nenhum efeito foi aplicado na nuvem."), {code:"credit-sale-reversal-conflict"}); };
+  const clientId = String(sale?.clienteId || sale?.customerId || "");
+  if (!sale || sale.deletedAt || sale.active === false ||
+    sale.businessId !== effect.businessId || !sale.spaceId ||
+    (sale.formaPagamento !== "fiado" && sale.status !== "fiado") ||
+    clientId !== effect.customerId ||
+    !sameFinancialMoney(sale.valorFinal ?? sale.valorTotal, effect.amount) ||
+    !debit || debit.businessId !== effect.businessId ||
+    debit.type !== "credit_sale" || debit.status !== "applied" ||
+    debit.sourceDocumentId !== effect.saleId ||
+    String(debit.customerId || debit.clientId || "") !== clientId ||
+    !sameFinancialMoney(debit.balanceDelta, -effect.amount) ||
+    !sameFinancialMoney(debit.amount, effect.amount) ||
+    Number(sale.creditPaidAmount || 0) > 0 || sale.creditSettled === true ||
+    !client || financialVersionOf(client) !== Number(sale.financialVersionAnterior || 0) + 1 ||
+    !sameFinancialMoney(client.saldo, sale.saldoAtual) ||
+    !sameFinancialMoney(Number(clientWrite?.data?.saldo) - Number(clientWrite?.before?.saldo), effect.amount)) fail();
 }
 const readSignalVersions = () => {
   try {
@@ -2324,6 +2344,8 @@ async function commitQueueItem(item) {
     for (const write of writes)
       if (
         (transactional && deltaEntities.includes(write.entityType)) ||
+        (financialEffect?.type === "credit_sale_reversal" &&
+          write.entityType === "sales" && String(write.entityId) === financialEffect.saleId) ||
         (IDEMPOTENT_EVENT_NAMES.has(write.entityType) && write.data?.operationId &&
           !(onlineClaim && write.entityType === 'stockMovements' &&
             write.operation === 'create' && write.data.vendaId === onlineClaim.saleId))
@@ -2659,6 +2681,13 @@ async function commitQueueItem(item) {
       }
     }
     if (financialEffectSnapshot?.exists() && !alreadyApplied) {
+      if (financialEffect.type === "credit_sale_reversal") {
+        const existing = financialEffectSnapshot.data();
+        if (existing.businessId !== businessId || existing.type !== financialEffect.type ||
+          existing.saleId !== financialEffect.saleId || existing.customerId !== financialEffect.customerId ||
+          !sameFinancialMoney(existing.balanceDelta, financialEffect.balanceDelta))
+          throw Object.assign(Error("O recibo de estorno não corresponde à venda. A operação foi preservada."), {code:"credit-sale-reversal-conflict"});
+      }
       transaction.set(
         marker,
         sanitizeForFirestore({
@@ -2699,6 +2728,17 @@ async function commitQueueItem(item) {
       );
       return;
     }
+    if (financialEffect?.type === "credit_sale_reversal") {
+      const saleWrite = writes.find(write => write.entityType === "sales" && String(write.entityId) === financialEffect.saleId),
+        remoteSale = snapshots.get(`sales:${financialEffect.saleId}`)?.data(),
+        remoteClient = snapshots.get(`clients:${financialEffect.customerId}`)?.data(),
+        clientWrite = writes.find(write => write.entityType === "clients" && String(write.entityId) === financialEffect.customerId),
+        debit = await transaction.get(doc(db, "businesses", businessId, "balanceEvents", balanceEffectId("credit_sale", financialEffect.saleId)));
+      validateCreditSaleReversal(remoteSale, remoteClient, debit.exists() ? debit.data() : null, financialEffect, clientWrite);
+      if (String(remoteSale.spaceId) !== String(saleWrite?.before?.spaceId) ||
+        String(remoteSale.operationId) !== String(saleWrite?.before?.operationId))
+        throw Object.assign(Error("A origem da venda Fiado mudou. Nenhum cancelamento foi aplicado."), {code:"credit-sale-reversal-conflict"});
+    }
     const creditClientWrite = financialEffect?.type === "credit_sale"
       ? writes.find((write) => write.entityType === "clients" &&
         String(write.entityId) === String(financialEffect.customerId)) : null,
@@ -2715,6 +2755,13 @@ async function commitQueueItem(item) {
         String(write.entityId),
       );
       let data = write.data;
+      if (financialEffect?.type === "credit_sale_reversal" && write.entityType === "sales" &&
+        String(write.entityId) === financialEffect.saleId) {
+        const original = snapshots.get(`sales:${financialEffect.saleId}`).data();
+        data = {...data, operationId:original.operationId, idempotencyKey:original.idempotencyKey || original.operationId,
+          actorUid:original.actorUid, actorNameSnapshot:original.actorNameSnapshot,
+          actorRoleSnapshot:original.actorRoleSnapshot};
+      }
       if (financialEffect?.type === "credit_sale" &&
         write.entityType === "sales" && write.operation === "create" &&
         String(write.entityId) === String(financialEffect.sourceDocumentId))
@@ -2878,6 +2925,13 @@ async function commitQueueItem(item) {
         financialEffectReference,
         sanitizeForFirestore({
           ...financialEffect,
+          ...(financialEffect.type === "credit_sale_reversal" ? {
+            reversesEventId: balanceEffectId("credit_sale", financialEffect.saleId),
+            balanceBefore: roundedMoney(snapshots.get(`clients:${financialEffect.customerId}`).data().saldo),
+            balanceAfter: roundedMoney(Number(snapshots.get(`clients:${financialEffect.customerId}`).data().saldo) + financialEffect.balanceDelta),
+            financialVersionBefore: financialVersionOf(snapshots.get(`clients:${financialEffect.customerId}`).data()),
+            financialVersionAfter: financialVersionOf(snapshots.get(`clients:${financialEffect.customerId}`).data()) + 1,
+          } : {}),
           ownerId: currentUser.uid,
           sourceDeviceId: item.deviceId || deviceId(),
           status: "applied",
@@ -2896,10 +2950,13 @@ async function commitQueueItem(item) {
           financialEffect.sourceDocumentId,
         ),
         {
-          financialAppliedAt: serverTimestamp(),
-          financialOperationId: financialEffect.id,
-          status: "applied",
-          applicationStatus: "applied",
+          ...(financialEffect.type === "credit_sale_reversal"
+            ? {financialReversedAt:serverTimestamp(), financialReversalEventId:financialEffect.id,
+                cancelOperationId:operationId, cancelledAt:serverTimestamp(), cancelledByUid:currentUser.uid}
+            : {financialAppliedAt:serverTimestamp(),financialOperationId:financialEffect.id,
+                applicationStatus:"applied",
+                // The application state is not the business/payment status of a sale.
+                ...(financialEffect.sourceCollection !== "sales" ? {status:"applied"} : {})}),
           updatedAt: serverTimestamp(),
         },
         { merge: true },
@@ -3555,6 +3612,37 @@ async function confirmCreditSale(sale) {
   if (clientSnapshot.exists())
     applyCloudCollection("clients", [{ id: sale.clienteId, ...clientSnapshot.data() }], { authoritative: true });
   return { ...sale, ...confirmed, status: "fiado", formaPagamento: "fiado" };
+}
+async function confirmSaleUndo(sale) {
+  if (sale?.formaPagamento !== "fiado" && sale?.status !== "fiado") return;
+  const generation = syncSessionGeneration, uid = currentUser?.uid, businessId = activeBusinessId(),
+    operationId = sale.cancelOperationId, saleId = String(sale.id), customerId = String(sale.clienteId);
+  const assertSession = () => {
+    if (!uid || uid !== currentUser?.uid || uid !== auth.currentUser?.uid || generation !== syncSessionGeneration || businessId !== activeBusinessId())
+      throw Object.assign(Error("A sessão mudou. O cancelamento foi preservado na conta de origem."), {code:"sync-session-retired"});
+  };
+  assertSession();
+  if (!navigator.onLine || !operationId) throw Error("Cancelamento preservado no aparelho, ainda sem confirmação financeira. Não repita a operação.");
+  await DB.flush?.();
+  await processSyncQueue({force:true});
+  assertSession();
+  const [marker, remoteSale, reversal, client] = await Promise.all([
+    getDocFromServer(doc(db,"businesses",businessId,"processedOperations",operationId)),
+    getDocFromServer(doc(db,"businesses",businessId,"sales",saleId)),
+    getDocFromServer(doc(db,"businesses",businessId,"balanceEvents",balanceEffectId("credit_sale_reversal",saleId))),
+    getDocFromServer(doc(db,"businesses",businessId,"clients",customerId)),
+  ]);
+  assertSession();
+  const event = reversal.exists() ? reversal.data() : null;
+  if (!marker.exists() || !["processed","recovered_existing"].includes(marker.data().status) ||
+    !remoteSale.exists() || remoteSale.data().active !== false || !client.exists() ||
+    !event || event.businessId !== businessId || event.saleId !== saleId || event.customerId !== customerId ||
+    event.type !== "credit_sale_reversal" || event.status !== "applied" || event.operationId !== operationId ||
+    !sameFinancialMoney(event.balanceDelta, sale.valorFinal ?? sale.valorTotal))
+    throw Error("Cancelamento preservado, mas o estorno Fiado ainda não foi confirmado na nuvem. Não refaça a venda nem o cancelamento; revise a sincronização.");
+  applyCloudCollection("sales", [{id:saleId,...remoteSale.data()}], {authoritative:true});
+  applyCloudCollection("clients", [{id:customerId,...client.data()}], {authoritative:true});
+  await DB.flush?.();
 }
 function cleanCloudItem(item) {
   const clean = normalizeFirestoreData(item);
@@ -6929,6 +7017,7 @@ window.SyncFirebase = {
   isSalePending,
   prepareCustomerForSale,
   confirmCreditSale,
+  confirmSaleUndo,
   synchronizeNow,
   syncAll: synchronizeNow,
   pushPendingOperations: processSyncQueue,

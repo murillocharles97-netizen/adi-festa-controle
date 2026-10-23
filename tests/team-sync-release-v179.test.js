@@ -12,7 +12,7 @@ test('release cache and imports refresh changed assets without duplicating prese
  const syncVersion=version==='191'?'190':preservesV194?'194':version;
  for(const p of ['js/firebase/auth.js','js/firebase/firebase-ui.js'])assert.ok(read(p).includes(`import './sync.js?v=${syncVersion}'`));
  for(const asset of ['checkout','build-info','firebase/auth','firebase/firebase-ui']){
-  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):preservesV194&&asset!=='build-info'?'194':version;
+  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):(preservesV194&&asset!=='build-info'||version==='197'&&asset==='checkout')?'194':version;
   assert.ok(read('index.html').includes(`./js/${asset}.js?v=${assetVersion}`));
  }
  if(preservesV194){
