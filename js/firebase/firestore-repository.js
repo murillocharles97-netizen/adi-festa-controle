@@ -8,6 +8,7 @@ import {
   endAt,
   getCountFromServer,
   getDoc,
+  getDocFromServer,
   getDocs,
   getDocsFromServer,
   limit,
@@ -249,6 +250,21 @@ export function createFirestoreRepository(collectionName) {
       return convert(
         await timed("read", collectionName, () => getDoc(documentRef(id))),
       );
+    },
+    async getSaleStatusFromServer(id) {
+      if (collectionName !== "sales") throw Error("History status requires a sale.");
+      const scopeKey = repositoryScopeKey();
+      const snapshot = await timed("read", "sales:history-status", () =>
+        getDocFromServer(documentRef(id)),
+      );
+      if (scopeKey !== repositoryScopeKey()) throw Error("A sessão ou permissão mudou durante a leitura.");
+      const sale = convert(snapshot);
+      if (!sale) return null;
+      // UI-only status projection, including logical tombstones; no financial data.
+      return Object.fromEntries([
+        "id", "businessId", "spaceId", "financialSpaceId", "workspaceGeneration",
+        "active", "deletedAt", "cancelledAt", "canceledAt", "status", "applicationStatus",
+      ].filter((key) => key in sale).map((key) => [key, sale[key]]));
     },
     async listWhere(field, value, max = 100, options = {}) {
       const variant = `where:${field}:${String(value)}:${max}`;

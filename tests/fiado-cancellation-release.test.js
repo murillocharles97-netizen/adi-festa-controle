@@ -1,10 +1,12 @@
 'use strict';
-const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{execFileSync}=require('node:child_process');
+const test=require('node:test'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
 const base='ea0d0d9457567442f298e02e84e74f782d9ef144';
+// Historical V197 package contract; newer presentation-only releases have their own allowlist.
+const target='d4f9703fc3c3416dbf1256648e55f04337e69c57';
 const git=(...args)=>execFileSync('git',['-c','core.bare=false',...args],{encoding:'utf8'}).replace(/\r\n/g,'\n');
-const read=p=>fs.readFileSync(p,'utf8').replace(/\r\n/g,'\n');
+const read=p=>git('show',target+':'+p);
 test('V197 preserves backend/Rules/permissions and the exact V196 exchange, checkout, payment and storage implementations',()=>{
- assert.equal(git('diff','--name-only',base,'--','functions','firestore.rules','firestore.indexes.json','storage.rules').trim(),'');
+ assert.equal(git('diff','--name-only',base,target,'--','functions','firestore.rules','firestore.indexes.json','storage.rules').trim(),'');
  for(const p of ['js/checkout.js','js/fiados.js','js/sale-exchanges.js','js/exchange-credit-checkout.js','js/exchange-economics.js','js/storage.js','js/business-cache.js','js/team-access.js','js/firebase/team-service.js','js/clientes-page.js'])assert.equal(read(p),git('show',base+':'+p),p);
 });
 test('V197 updates only the Auth/UI import URL, and both resolve the same corrected Sync singleton',()=>{
@@ -14,5 +16,5 @@ test('V197 updates only the Auth/UI import URL, and both resolve the same correc
 });
 test('release changes contain only the approved Fiado cancellation hotfix, PWA metadata, regression tests and technical notes',()=>{
  const allowed=new Set(['js/app.js','js/vendas.js','js/firebase/sync.js','js/firebase/auth.js','js/firebase/firebase-ui.js','js/build-info.js','index.html','service-worker.js','docs/fiado-cancellation-v196.md','tests/fiado-cancellation.test.js','tests/fiado-cancellation-release.test.js','tests/helpers/fiado-cancellation-harness.cjs','tests/emulator/fiado-cancellation.rules.test.js','tests/team-sync-release-v179.test.js']);
- for(const p of [...git('diff','--name-only',base).trim().split('\n'),...git('ls-files','--others','--exclude-standard').trim().split('\n')].filter(Boolean))assert.ok(allowed.has(p),p);
+ for(const p of git('diff','--name-only',base,target).trim().split('\n').filter(Boolean))assert.ok(allowed.has(p),p);
 });

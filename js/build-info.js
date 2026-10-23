@@ -15,7 +15,7 @@
     commit,
     shortCommit,
     builtAt,
-    release: "197",
+    release: "198",
   });
 
   if (!window.__adiFestaBuildLogged) {

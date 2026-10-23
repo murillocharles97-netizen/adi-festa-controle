@@ -9,10 +9,10 @@ test('release cache and imports refresh changed assets without duplicating prese
  // Sync/Auth imports. This is the audited published baseline, not a new release.
  // V195 reporting and V196 receipt sharing retain the V194 protected singletons.
  const preservesV194=version==='195'||version==='196';
- const syncVersion=version==='191'?'190':preservesV194?'194':version;
+ const syncVersion=version==='191'?'190':preservesV194?'194':version==='198'?'197':version;
  for(const p of ['js/firebase/auth.js','js/firebase/firebase-ui.js'])assert.ok(read(p).includes(`import './sync.js?v=${syncVersion}'`));
  for(const asset of ['checkout','build-info','firebase/auth','firebase/firebase-ui']){
-  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):(preservesV194&&asset!=='build-info'||version==='197'&&asset==='checkout')?'194':version;
+  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):version==='198'?({'checkout':'194','build-info':'198','firebase/auth':'197','firebase/firebase-ui':'197'}[asset]):(preservesV194&&asset!=='build-info'||version==='197'&&asset==='checkout')?'194':version;
   assert.ok(read('index.html').includes(`./js/${asset}.js?v=${assetVersion}`));
  }
  if(preservesV194){

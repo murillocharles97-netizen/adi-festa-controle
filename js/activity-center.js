@@ -32,6 +32,106 @@
     cloudBusinessId = "",
     stopCloudSubscription = null;
   const historyScopeKey=()=>window.TeamAccess?.operationalReadScopeKey?.()||JSON.stringify([window.BusinessContext?.get?.().businessId||'',window.FirebaseSession?.user?.uid||'']);
+  // Presentation-only confirmation. Never hydrate DB or enqueue a commercial write.
+  // Deleted sales are intentionally absent from DB.vendas, so absence is NOT cancellation.
+  const cancelledSaleStatuses = new Set([
+    "cancelado", "cancelada", "cancelled", "canceled", "desfeito", "desfeita",
+    "venda_desfeita", "estornado", "estornada", "refunded", "source_deleted",
+  ]);
+  const saleCancelled = (sale = {}) => Boolean(
+    sale.active === false || sale.deletedAt || sale.cancelledAt || sale.canceledAt ||
+    [sale.status, sale.applicationStatus].some((value) =>
+      cancelledSaleStatuses.has(String(value || "").toLowerCase())),
+  );
+  const saleStatusScopeKey = () => JSON.stringify([
+    historyScopeKey(), window.FirebaseSession?.user?.uid || "",
+    window.BusinessContext?.get?.().businessId || "",
+    window.SpaceContext?.homeId?.() || "", window.DB?.getWorkspaceGeneration?.() ?? 0,
+    window.BusinessContext?.get?.().access?.features?.basicSales,
+    window.SpaceContext?.salesSpaces?.().map((space) => space.id).sort(),
+  ]);
+  let saleStatusReads = null;
+  function clearSaleStatuses() { saleStatusReads = null; }
+  function currentSaleStatuses() {
+    const key = saleStatusScopeKey();
+    if (!saleStatusReads || saleStatusReads.key !== key)
+      saleStatusReads = { key, records: new Map(), jobs: [], active: 0 };
+    return saleStatusReads;
+  }
+  const currentStatusRead = (reads) =>
+    reads === saleStatusReads && reads.key === saleStatusScopeKey();
+  const saleStatusRevision = (event) => JSON.stringify([
+    event.sourceUpdatedAt || "", event.updatedAt || "", event.status || "",
+  ]);
+  function presentSaleStatus(item, event) {
+    if (item.type !== "sale") return item;
+    const record = currentSaleStatuses().records.get(String(item.resourceId));
+    if (saleCancelled(event) || record?.cancelled === true) {
+      item.status = "Cancelada";
+      item.statusTone = "danger";
+      item.subtitle = item.subtitle.replace(/^Venda registrada no fiado|^Venda concluída/, "Venda cancelada");
+    } else if (record && record.revision === saleStatusRevision(event) && record.state !== "confirmed") {
+      item.status = record.state === "pending" ? "Verificando status…" : "Status não confirmado";
+      item.statusTone = "info";
+    }
+    return item;
+  }
+  function readSaleStatuses() {
+    const repository = window.FirestoreRepositories?.sales,
+      context = window.BusinessContext?.get?.() || {},
+      uid = window.FirebaseSession?.user?.uid;
+    if (!uid || !context.businessId || window.TeamAccess?.canReadOperationalSales?.() === false) return;
+    const reads = currentSaleStatuses(), cloudIds = new Set(cloudEvents.map((event) => event.eventId || event.id));
+    const eligibleSpaces = window.SpaceContext?.salesSpaces?.();
+    let changed = false;
+    // Reuse the existing History visibility filters before issuing any source read.
+    for (const item of events()) {
+      if (item.type !== "sale" || !cloudIds.has(item.id) || saleCancelled(item.raw)) continue;
+      const id = String(item.resourceId || ""), revision = saleStatusRevision(item.raw);
+      if (!id || id.includes("/") || reads.records.get(id)?.revision === revision) continue;
+      const record = { revision, state: "pending", cancelled: false };
+      reads.records.set(id, record);
+      changed = true;
+      if (typeof repository?.getSaleStatusFromServer !== "function" || context.access?.features?.basicSales === false || eligibleSpaces &&
+          !eligibleSpaces.some((space) => space.id === (item.raw.spaceId || item.raw.financialSpaceId))) {
+        record.state = "unconfirmed";
+        continue;
+      }
+      reads.jobs.push({ id, record, event: item.raw });
+    }
+    const drain = () => {
+      if (!currentStatusRead(reads)) return;
+      while (reads.active < 4 && reads.jobs.length) {
+        const { id, record, event } = reads.jobs.shift();
+        reads.active++;
+        Promise.resolve().then(() => {
+          if (!currentStatusRead(reads)) return null;
+          return repository.getSaleStatusFromServer(id);
+        }).then((sale) => {
+          if (!currentStatusRead(reads) || reads.records.get(id) !== record) return;
+          const spaceId = event.spaceId || event.financialSpaceId || "";
+          if (!sale || String(sale.id) !== id || sale.businessId !== context.businessId ||
+              String(sale.spaceId || sale.financialSpaceId || "") !== spaceId ||
+              (sale.workspaceGeneration ?? 0) !== (event.workspaceGeneration ?? 0))
+            throw Object.assign(Error("History source scope mismatch"), { code: "history-source-mismatch" });
+          // Keep only the status bit, not the customer's data, prices or financial fields.
+          record.cancelled = saleCancelled(sale);
+          record.state = "confirmed";
+        }).catch((error) => {
+          if (!currentStatusRead(reads) || reads.records.get(id) !== record) return;
+          record.state = "unconfirmed";
+          console.warn("[History sale status]", { code: error?.code || "unknown" });
+        }).finally(() => {
+          reads.active--;
+          if (!currentStatusRead(reads)) return;
+          drain();
+          rerender();
+        });
+      }
+    };
+    drain();
+    if (changed) rerender();
+  }
   const TYPE_META = {
     sale: { label: "Venda", icon: "shopping-cart", tone: "green" },
     payment: { label: "Pagamento", icon: "wallet-cards", tone: "green" },
@@ -423,7 +523,7 @@
       item.status = "Cancelada";
       item.statusTone = "danger";
     }
-    return item;
+    return presentSaleStatus(item, event);
   }
   function pendingLocalEvents(db, cloudIds) {
     const pending = new Map(
@@ -640,6 +740,7 @@
       )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || cloudHasMore ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
   }
   function closeCloudSubscription() {
+    clearSaleStatuses();
     stopCloudSubscription?.();
     stopCloudSubscription = null;
     cloudBusinessId = "";
@@ -750,9 +851,13 @@
     window.lucide?.createIcons();
   }
   function saleDetail(item, db) {
+    if (item.status === "Cancelada")
+      return `<div class="activity-detail-empty">${icon("circle-alert")}<p>Esta venda foi cancelada. O registro permanece no histórico para consulta.</p></div>`;
     let sale = db.vendas?.find(
       (entry) => String(entry.id) === String(item.resourceId),
     );
+    if (sale && saleCancelled(sale))
+      return `<div class="activity-detail-empty">${icon("circle-alert")}<p>Esta venda foi cancelada. O registro permanece no histórico para consulta.</p></div>`;
     if (!sale)
       return `<div class="activity-detail-empty">${icon("circle-alert")}<p>Esta venda foi cancelada ou não está mais disponível. O evento permanece no histórico.</p></div>`;
     if (
@@ -778,11 +883,13 @@
         formaPagamento: `Cartão presencial · ${provider}${metadata.terminalNickname ? ` · ${metadata.terminalNickname}` : ""} · ${method}${installments > 1 ? ` ${installments}x` : ""}`,
       };
     }
-    const canCancel =
+    const statusConfirmed = !window.FirebaseSession?.user?.uid || !window.BusinessContext?.get?.().businessId ||
+        currentSaleStatuses().records.get(String(sale.id))?.state === "confirmed",
+      canCancel = statusConfirmed &&
         window.Vendas?.ultima?.()?.id === sale.id &&
         window.Vendas?.podeDesfazer?.(),
       items = sale.itens || [];
-    return `<section class="activity-sale-summary"><div><span>Cliente</span><b>${esc(sale.clienteNome || "Venda avulsa")}</b></div><div><span>Pagamento</span><b>${esc(sale.formaPagamento || sale.status || "Não informado")}</b></div><div><span>Data</span><b>${at(sale.data).toLocaleString("pt-BR")}</b></div></section><ul class="activity-sale-items">${items.map((entry) => `<li><span>${Number(entry.quantidade || 0)}× ${esc(entry.nome || entry.produtoNome || "Produto")}${entry.variantName ? ` <small>${esc(entry.variantName)}</small>` : ""}</span><b>${money(Number(entry.precoFinalUnitario ?? entry.precoUnitario ?? 0) * Number(entry.quantidade || 0))}</b></li>`).join("")}</ul>${sale.descontoTotal ? `<p class="activity-detail-line"><span>Desconto</span><b>− ${money(sale.descontoTotal)}</b></p>` : ""}<p class="activity-detail-total"><span>Total</span><b>${money(sale.valorFinal ?? sale.valorTotal)}</b></p>${sale.observacao ? `<p class="activity-detail-note"><b>Observação</b><br>${esc(sale.observacao)}</p>` : ""}<div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("undo-2")} Desfazer venda</button></div><small class="activity-cancel-note">${canCancel ? "Disponível por 5 minutos para a venda mais recente. Estoque, saldo, campanha e renovação serão revertidos pelo fluxo seguro." : "O cancelamento seguro só fica disponível para a venda mais recente durante 5 minutos."}</small>`;
+    return `<section class="activity-sale-summary"><div><span>Cliente</span><b>${esc(sale.clienteNome || "Venda avulsa")}</b></div><div><span>Pagamento</span><b>${esc(sale.formaPagamento || sale.status || "Não informado")}</b></div><div><span>Data</span><b>${at(sale.data).toLocaleString("pt-BR")}</b></div></section><ul class="activity-sale-items">${items.map((entry) => `<li><span>${Number(entry.quantidade || 0)}× ${esc(entry.nome || entry.produtoNome || "Produto")}${entry.variantName ? ` <small>${esc(entry.variantName)}</small>` : ""}</span><b>${money(Number(entry.precoFinalUnitario ?? entry.precoUnitario ?? 0) * Number(entry.quantidade || 0))}</b></li>`).join("")}</ul>${sale.descontoTotal ? `<p class="activity-detail-line"><span>Desconto</span><b>− ${money(sale.descontoTotal)}</b></p>` : ""}<p class="activity-detail-total"><span>Total</span><b>${money(sale.valorFinal ?? sale.valorTotal)}</b></p>${sale.observacao ? `<p class="activity-detail-note"><b>Observação</b><br>${esc(sale.observacao)}</p>` : ""}<div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("undo-2")} Desfazer venda</button></div><small class="activity-cancel-note">${!statusConfirmed ? "Cancelamento indisponível até confirmar o estado desta venda. Feche e abra o detalhe após reconectar para consultar novamente." : canCancel ? "Disponível por 5 minutos para a venda mais recente. Estoque, saldo, campanha e renovação serão revertidos pelo fluxo seguro." : "O cancelamento seguro só fica disponível para a venda mais recente durante 5 minutos."}</small>`;
   }
   function genericDetail(item) {
     const rows = Object.entries(item.raw || {})
@@ -844,6 +951,7 @@
     const root = $("[data-activity-root]");
     if (!root) return;
     ensureCloudSubscription();
+    readSaleStatuses();
     let timer;
     $("#activity-search", root)?.addEventListener("input", (event) => {
       clearTimeout(timer);
@@ -912,5 +1020,20 @@
     if (!event.detail?.businessId || cloudBusinessId && cloudBusinessId!==historyScopeKey()) closeCloudSubscription();
   });
   window.addEventListener?.('firebase-session-cleared',closeCloudSubscription);
+  window.addEventListener?.("cloud-data-updated", (event) => {
+    if (["sales", "userProfile", "businessProfile"].includes(event.detail?.collection)) {
+      clearSaleStatuses();
+      rerender();
+    }
+  });
+  window.addEventListener?.("online", () => {
+    clearSaleStatuses();
+    rerender();
+  });
+  for (const name of ["veconi-spaces-ready", "veconi-space-context-changed", "veconi-space-data-changed"])
+    window.addEventListener?.(name, () => {
+      clearSaleStatuses();
+      rerender();
+    });
   window.ActivityCenter = { render, bind, events, state };
 })();

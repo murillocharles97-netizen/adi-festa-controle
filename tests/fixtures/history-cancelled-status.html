@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QA V198 — Status do Histórico</title>
+<link rel="stylesheet" href="../../css/style.css"><link rel="stylesheet" href="../../css/activity-center.css">
+<style>body{margin:0;background:#f4f8fa;color:#142536;font-family:system-ui,sans-serif}.qa-page{max-width:1100px;margin:auto;padding:20px}.qa-notice{background:#e5f8f6;padding:16px;border-radius:16px;margin-bottom:20px}.qa-controls{display:flex;gap:12px;flex-wrap:wrap}.qa-controls label{display:grid;gap:6px}#qa-status{white-space:pre-wrap;font-size:13px;line-height:1.6}.activity-page{padding:0!important}@media(max-width:500px){.qa-page{padding:12px}}</style></head>
+<body><main class="qa-page"><section class="qa-notice"><h2>QA V198 — Histórico</h2><p>Somente dados fictícios em memória. Sem Firebase, filas, armazenamento local ou operações comerciais.</p>
+<div class="qa-controls"><label>Perfil de teste<select id="qa-profile"><option value="seller">Vendedor / Caixa</option><option value="owner">Owner</option></select></label><button class="btn btn-light" id="qa-sync">Simular atualização do Sync</button></div><p id="qa-status" role="status" aria-live="polite"></p></section><div id="qa-history"></div></main><div id="modal"></div>
+<script>
+  const qaDate='2026-10-23T08:20:39.451Z';let qaRole='seller',qaCallback,qaWrites=0,qaReads=0;
+  const qaSales={
+    'qa-credit-cancelled':{id:'qa-credit-cancelled',active:false,deletedAt:qaDate,cancelledAt:qaDate,formaPagamento:'fiado',status:'fiado',applicationStatus:'applied'},
+    'qa-cash-cancelled':{id:'qa-cash-cancelled',active:false,deletedAt:qaDate,formaPagamento:'dinheiro',status:'applied',applicationStatus:'applied'},
+    'qa-credit-pending':{id:'qa-credit-pending',active:true,formaPagamento:'fiado',status:'fiado'},
+  };
+  Object.values(qaSales).forEach(s=>Object.assign(s,{businessId:'qa-history',spaceId:'qa-space',clienteNome:'Cliente fictício',data:qaDate}));
+  const qaEvents=Object.values(qaSales).map((s,i)=>({id:'sale:'+s.id,eventId:'sale:'+s.id,type:'sale',entityId:s.id,businessId:'qa-history',spaceId:'qa-space',operationId:'qa-operation-'+i,actorUid:'qa-owner',actorNameSnapshot:'Operador QA',createdAt:qaDate,sourceUpdatedAt:qaDate,status:'confirmed',summary:{amount:[80,50,30][i],customerName:['QA Fiado cancelado','QA À vista cancelada','QA Fiado em aberto'][i],paymentMethod:s.formaPagamento}}));
+  function qaStatus(){document.querySelector('#qa-status').textContent=`Consultas de status simuladas: ${qaReads}\nEscritas comerciais: ${qaWrites}\nSaldo, estoque, vendas e recibos: nenhuma alteração`}
+  window.Utils={escapar:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))};
+  window.DB={carregar:()=>({vendas:[qaSales['qa-credit-pending']],movimentacoes:[],movimentacoesEstoque:[]}),getWorkspaceGeneration:()=>0,alterar:()=>{qaWrites++;qaStatus();throw Error('Escrita proibida neste QA')}};
+  window.BusinessContext={get:()=>({businessId:'qa-history',role:qaRole,spaceAccess:'selected',allowedSpaceIds:['qa-space']})};
+  window.FirebaseSession={user:{uid:'qa-'+qaRole}};window.SpaceContext={homeId:()=> 'qa-space'};
+  window.TeamAccess={has:p=>qaRole==='owner'||p==='sales.create',canReadOperationalSales:()=>true,operationalReadScopeKey:()=> 'qa-history:'+qaRole};
+  window.FirestoreRepositories={sales:{getSaleStatusFromServer:async id=>{qaReads++;qaStatus();return structuredClone(qaSales[id]||null)}}};
+  window.SyncFirebase={pendingActivityEvents:()=>[],subscribeRecentActivityEvents:fn=>{qaCallback=fn;queueMicrotask(()=>fn(structuredClone(qaEvents),{},{hasMore:false}));return()=>{}}};
+  window.Vendas={ultima:()=>null,podeDesfazer:()=>false};
+</script>
+<script src="../../js/activity-center.js?v=198"></script><script>
+  function qaRender(){document.querySelector('#qa-history').innerHTML=ActivityCenter.render();ActivityCenter.bind();qaStatus()}
+  document.querySelector('#qa-profile').onchange=e=>{qaRole=e.target.value;FirebaseSession.user.uid='qa-'+qaRole;dispatchEvent(new Event('firebase-session-cleared'));qaRender()};
+  document.querySelector('#qa-sync').onclick=()=>{dispatchEvent(new CustomEvent('cloud-data-updated',{detail:{collection:'sales'}}));qaCallback?.(structuredClone(qaEvents),{},{hasMore:false})};
+  qaRender();
+</script></body></html>
