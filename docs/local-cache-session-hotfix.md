@@ -1,6 +1,6 @@
 # Hotfix local de cache e troca de sessão
 
-Base: V184, commit dd2721e30ea63042ef68aa3f7a46c32de7bddf73. Release V185 preparada para publicação autorizada em 18/10/2026. Rollback: republicar a V184; nenhuma migração de schema ou de dados necessária.
+Base: V184, commit d0468ac5a80ecd2ef5b5052e17e4317445ea2931. Release V185 preparada para publicação autorizada em 18/10/2026. Rollback: republicar a V184; nenhuma migração de schema ou de dados necessária.
 
 ## Causa e proteção
 

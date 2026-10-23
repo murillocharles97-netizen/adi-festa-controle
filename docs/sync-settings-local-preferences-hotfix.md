@@ -1,6 +1,6 @@
 # Hotfix local — preferências, hidratação e configuração sem autorização
 
-Data: 20/10/2026. Base operacional V191, commit `e8c4cc7935abf3e3ba081531831d2702d69f6daa`, branch `codex/online-workspace-ux-v177`.
+Data: 20/10/2026. Base operacional V191, commit `1c0d48c96e2519b9c822beb39866e962c82879e7`, branch `codex/online-workspace-ux-v177`.
 
 Implementação local, sem commit ou deploy. Nenhum login, Sync/retry, alteração de permissão ou dado comercial real foi executado. Prévia independente da Loja V3 preservada e não utilizada.
 
@@ -124,6 +124,6 @@ Nenhuma alteração de `firestore.rules`, `storage.rules`, índices, Functions, 
 4. Repetir suíte dirigida/Emulator/lint/build/diff-check no pacote exato e apresentar commit/rollback para autorização.
 5. Publicar somente frontend/PWA. Sem Rules, Functions, índices, migração ou custo recorrente novo.
 6. Smoke seguro: owner configura somente QA, seller escolhe cliente, login/reload/troca de conta; confirmar ocorrência antiga preservada, zero aumento de tentativas, checksum estável e pulls funcionando. Não executar/reprocessar a operação antiga nem vendas reais.
-7. Rollback: V191, `e8c4cc7935abf3e3ba081531831d2702d69f6daa`, Hosting anterior. O sidecar usa o formato de quarentena já reconhecido pela V191; manter todos os dados locais. Rollback retorna o comportamento de preferências da versão anterior, não apaga evidência.
+7. Rollback: V191, `1c0d48c96e2519b9c822beb39866e962c82879e7`, Hosting anterior. O sidecar usa o formato de quarentena já reconhecido pela V191; manter todos os dados locais. Rollback retorna o comportamento de preferências da versão anterior, não apaga evidência.
 
 O conteúdo exato dos campos do pacote real ainda exige leitura do original antes de qualquer decisão definitiva de encerramento. A classificação por autorização não o declara inofensivo, resolvido ou descartável. Ele permanece preservado e sem replay.

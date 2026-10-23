@@ -1,8 +1,8 @@
 # Isolamento de receitas por empresa e espaço — correção local
 
-Escopo: código local sobre `6a1f81b15c6e5282de98999f469007f1a7268359`, sem deploy,
+Escopo: código local sobre `6a9bb4b97d326a8d159d1950be4de815dc20f2ef`, sem deploy,
 push, reprocessamento ou gravação em produção. Produção continua V169
-`e59b290b31d893e58f11b4ef40fe3bd4b77a26f9`. Não foi incrementada a versão.
+`b5c1aed4066c569d2665ad43749ecffd934b9f86`. Não foi incrementada a versão.
 
 ## Causa comprovada e caminhos auditados
 

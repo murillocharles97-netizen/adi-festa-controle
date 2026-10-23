@@ -1,7 +1,7 @@
 # V172 — recebimento explícito de pedidos por espaço
 
 Preparação local em 15/10/2026. **Sem deploy e sem ativação de pedidos reais.**
-Base/rollback: V171 `7ba6453034106e767849f0106bc2f53b359811d6`.
+Base/rollback: V171 `f8207dd70f2546fcbff04b1201b8662238bff44d`.
 Branch de preparação: `codex/store-order-reception-v172`.
 
 ## Causa comprovada em produção — somente leitura

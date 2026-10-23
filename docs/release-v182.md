@@ -1,6 +1,6 @@
 # V182 — decisões de recuperação
 
-Base/rollback de frontend: V181, commit `6eff006199b95003572ebf5b3df110f58940b35a`.
+Base/rollback de frontend: V181, commit `41a107fcc673393a16cf1d5da3780df259f7b5a8`.
 
 Inclui somente decisões explícitas de recuperação, área Resolvidas, proteção transacional/idempotente/replay e atualização dos identificadores de versão/cache. Não inclui a otimização de Fiado pendente em `js/firebase/sync.js`.
 

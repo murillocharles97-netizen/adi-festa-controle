@@ -1,6 +1,6 @@
 # Reset operacional — auditoria e barreiras de publicação
 
-Base: V159 / 91a6114cefdcadf9483e428a6720c10c05a76d83.
+Base: V159 / 4f87dc58091d3901eb4a082cfd4bd8476cfd5284.
 Nenhum reset de produção autorizado por esta tarefa: implementar e testar em
 empresas isoladas no Emulator. A ação futura será explícita pelo proprietário.
 
@@ -82,7 +82,7 @@ como apagamento físico imediato. Não criar backup/snapshot de aplicação.
 ## Situação
 
 Implementação parcial local em 02/10/2026. **NÃO PUBLICADO, NÃO HABILITADO.**
-Produção permanece V159 / `91a6114cefdcadf9483e428a6720c10c05a76d83`.
+Produção permanece V159 / `4f87dc58091d3901eb4a082cfd4bd8476cfd5284`.
 Callables, worker e UI já existem localmente. O serviço exige readiness explícita
 e permanece desabilitado por padrão em produção (`VECONI_WORKSPACE_RESET_ENABLED`).
 Nenhum dado de produção foi removido.
@@ -262,7 +262,7 @@ Habilitação somente no backend (`VECONI_WORKSPACE_RESET_ENABLED=true` no ambie
 de produção); não existe flag frontend capaz de autorizar a exclusão. Auth,
 owner canônico, autenticação recente e confirmação continuam obrigatórios.
 
-Rollback de interface: V159 / `91a6114cefdcadf9483e428a6720c10c05a76d83`.
+Rollback de interface: V159 / `4f87dc58091d3901eb4a082cfd4bd8476cfd5284`.
 Depois que existir qualquer reset real, **não restaurar Rules/backend antigos
 sem as barreiras de geração**: isso permitiria ressuscitar dados antigos. Para
 conter uma falha, desabilitar novas solicitações no backend e manter as barreiras;

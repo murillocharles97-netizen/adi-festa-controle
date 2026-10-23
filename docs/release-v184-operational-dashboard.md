@@ -1,6 +1,6 @@
 # V184 — Dashboard operacional compartilhado
 
-Base e rollback: V183, `4d1ae2e63858087827a787ee1438cbb77ca83d3b`.
+Base e rollback: V183, `9d097dd31cec4f683ddda1e18c4498058d54eb5d`.
 
 ## Escopo
 

@@ -1,6 +1,6 @@
 # V181 — acesso à recuperação da equipe
 
-Rollback: V180 / 2cd4ec0af33b25e60191340dd7d39701da644208.
+Rollback: V180 / 5ba9719a52c25dfb1e29634449c3dd1cdc7e03ad.
 Tag: rollback/v180-before-v181-recovery-access.
 
 ## Publicação autorizada

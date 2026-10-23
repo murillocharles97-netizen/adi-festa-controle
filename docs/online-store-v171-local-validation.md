@@ -6,8 +6,8 @@ Nenhum deploy/push, acesso administrativo à produção, reprocessamento finance
 
 ## Base e rollback
 
-- Base V170: `5ff8f898b9f6fa559b92a5a2b7ab7cbd011be080`.
-- Rollback adicional V169: `e59b290b31d893e58f11b4ef40fe3bd4b77a26f9` (`rollback/v169-before-v170`).
+- Base V170: `46f4affd2bc79aec7c429c734aa741a601817aa7`.
+- Rollback adicional V169: `b5c1aed4066c569d2665ad43749ecffd934b9f86` (`rollback/v169-before-v170`).
 - Trabalho isolado em `codex/online-store-v2-no-legacy`, worktree `domain-release`; checkout original preservado.
 - Rollback de código não desfaz vendas/pedidos. Não excluir reserva, fila ou evidências QA ao voltar uma versão.
 

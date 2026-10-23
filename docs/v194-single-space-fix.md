@@ -35,7 +35,7 @@ O último usa stocksFor({restore:true}) e precisa ser atualizado para restaurar 
 
 ## V193 e produção
 
-O HTML do domínio continua com SHA V193 `3d9ef19f4b5df7a7534647185bf3a32d042ca065`. A sessão owner pública abriu Produtos normalmente, mostrou o único produto QA já criado com estoque20 e Nuvem com0pendências. Os testes de Rules confirmam venda manual normal e cancelamento autorizado de owner/seller com as Rules já publicadas. Isso não significa teste de venda real em produção: nenhuma foi executada.
+O HTML do domínio continua com SHA V193 `41b192c49d60279a7b621d60db50683f334732ac`. A sessão owner pública abriu Produtos normalmente, mostrou o único produto QA já criado com estoque20 e Nuvem com0pendências. Os testes de Rules confirmam venda manual normal e cancelamento autorizado de owner/seller com as Rules já publicadas. Isso não significa teste de venda real em produção: nenhuma foi executada.
 
 ## Rollback e smoke
 

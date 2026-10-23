@@ -2,7 +2,7 @@
   "generatedAt": "2026-10-22T03:25:12.184Z",
   "node": "v23.3.0",
   "baseline": {
-    "commit": "3d9ef19f4b5df7a7534647185bf3a32d042ca065",
+    "commit": "41b192c49d60279a7b621d60db50683f334732ac",
     "trackedChanges": false,
     "exitCode": 1,
     "counts": {
@@ -223,7 +223,7 @@
     ]
   },
   "candidate": {
-    "commit": "3d9ef19f4b5df7a7534647185bf3a32d042ca065",
+    "commit": "41b192c49d60279a7b621d60db50683f334732ac",
     "trackedChanges": true,
     "exitCode": 1,
     "counts": {

@@ -2,7 +2,7 @@
 
 ## Base e rollback
 
-- Base V190: `db080d6a3c4c0b426e751a1765e2ad856d9e1477`.
+- Base V190: `27469d3afceb6a7e2e44f817904f2b4586c04209`.
 - Referência de rollback prevista: `rollback/v190-before-v191-team-permissions`.
 - Publicação aguarda autorização separada. Não há push, workflow ou deploy nesta preparação.
 - Não há migração de usuários, permissões, espaços ou dados comerciais.

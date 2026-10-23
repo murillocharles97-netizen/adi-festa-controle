@@ -1,7 +1,7 @@
 # Loja Online — encerramento do modelo global, sem migração
 
 Auditoria em 14/10/2026, exclusivamente na empresa `adi-festa`. Base local V169
-e59b290b31d893e58f11b4ef40fe3bd4b77a26f9. Sem deploy autorizado nesta etapa.
+b5c1aed4066c569d2665ad43749ecffd934b9f86. Sem deploy autorizado nesta etapa.
 
 ## Classificação anterior à exclusão
 

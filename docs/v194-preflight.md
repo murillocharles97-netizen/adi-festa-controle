@@ -4,7 +4,7 @@ Data: 22/10/2026, America/Sao_Paulo. Publicação NÃO autorizada nesta etapa. N
 
 ## 1. Comparação das falhas globais
 
-O checkout separado `sync-resolved-reviews` permanece no commit publicado V193 `3d9ef19f4b5df7a7534647185bf3a32d042ca065`, sem alterações rastreadas. O mesmo executável Node e o mesmo reporter foram usados nos dois checkouts.
+O checkout separado `sync-resolved-reviews` permanece no commit publicado V193 `41b192c49d60279a7b621d60db50683f334732ac`, sem alterações rastreadas. O mesmo executável Node e o mesmo reporter foram usados nos dois checkouts.
 
 - V193: 931 testes, 897 aprovados, 34 falhas.
 - V194 antes de atualizar metadados de release: 1006 testes, 972 aprovados, **as mesmas 34 falhas**, por arquivo + nome. Nenhuma identidade de falha introduzida ou removida.

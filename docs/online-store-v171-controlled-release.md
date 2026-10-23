@@ -1,9 +1,9 @@
 # V171 — candidata a piloto, publicação controlada
 
 Autorização do proprietário em 15/10/2026. Base funcional aprovada:
-`593c9197ef99f1d8d3d979cb877b0f4b3284dd41`.
+`7d28491149ff147c9c6d7782b5e677592ef573be`.
 
-Rollback V170: `5ff8f898b9f6fa559b92a5a2b7ab7cbd011be080`, tag remota/local
+Rollback V170: `46f4affd2bc79aec7c429c734aa741a601817aa7`, tag remota/local
 `rollback/v170-before-v171`. Não apagar dados nem restaurar caches/filas ao voltar
 frontend. As Rules V171 mantêm os mesmos critérios de segurança da V170.
 

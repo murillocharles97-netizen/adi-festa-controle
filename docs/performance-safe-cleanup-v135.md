@@ -1,6 +1,6 @@
 # Auditoria de performance conservadora — VECONI v135
 
-Base: `origin/main` em `3ad72a3c0623430ee82c874b7df04a2483cf1547`. Branch: `codex/performance-safe-cleanup`. O site é estático, sem bundler: “bundle inicial” abaixo significa arquivos JS/CSS declarados no HTML ou efetivamente pedidos pelo navegador; “total” significa os arquivos web versionados em `js/`, `css/`, `assets/` e HTML/SW/manifest da raiz. Os valores são bytes locais sem compressão e excluem os módulos Firebase externos do CDN.
+Base: `origin/main` em `5a65a33023e9a0c7dd5e3a389ba0c3c8233548fc`. Branch: `codex/performance-safe-cleanup`. O site é estático, sem bundler: “bundle inicial” abaixo significa arquivos JS/CSS declarados no HTML ou efetivamente pedidos pelo navegador; “total” significa os arquivos web versionados em `js/`, `css/`, `assets/` e HTML/SW/manifest da raiz. Os valores são bytes locais sem compressão e excluem os módulos Firebase externos do CDN.
 
 | Métrica | Base | v135 | Diferença |
 | --- | ---: | ---: | ---: |

@@ -1,6 +1,6 @@
 # Desempenho V161 — auditoria e contrato
 
-Base/rollback: V160 / 4b4e269cd93d2e695c88763da85364a6edb691a9. Release: V161. Este documento acompanha o commit coeso da implementação; o SHA definitivo é o commit que contém este arquivo. Publicação após as verificações abaixo.
+Base/rollback: V160 / 9c0e976b26d42850ec94ae5c378618c0823bddf4. Release: V161. Este documento acompanha o commit coeso da implementação; o SHA definitivo é o commit que contém este arquivo. Publicação após as verificações abaixo.
 
 ## Arquitetura encontrada
 

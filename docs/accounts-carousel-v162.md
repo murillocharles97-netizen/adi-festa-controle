@@ -45,4 +45,4 @@ Novos componentes: `js/financial-accounts-carousel.js`, `css/financial-accounts-
 
 Um único commit final e um único push de frontend. Não é necessário deploy de Firebase. APP_VERSION 162; cache `veconi-v162-accounts-carousel`. O commit da entrega é aquele que contém este relatório. O resultado do deploy e SHA são informados na conversa após verificação pública, sem declarar publicação antecipadamente neste documento.
 
-Rollback: frontend V161, `a52d937055d07c17929aac13a8631c95afa063e3`. Sem downgrade de Rules/backend ou geração de workspace. URL: https://murillocharles97-netizen.github.io/adi-festa-controle/
+Rollback: frontend V161, `4872e299bb6549cfcfd3fc27fc939981e1c46d7b`. Sem downgrade de Rules/backend ou geração de workspace. URL: https://murillocharles97-netizen.github.io/adi-festa-controle/

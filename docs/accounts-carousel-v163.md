@@ -4,7 +4,7 @@
 
 Somente a seção Contas e cartões e seus metadados visuais. Resumo, cálculos,
 lançamentos, saldos, faturas, limites, espaços e IDs mantêm o contrato anterior.
-Base/rollback do frontend: V162, `d335a9a4afca64464764f8e080b34abed000d664`.
+Base/rollback do frontend: V162, `b1146bbffe4012878630e0e4784d432bb964788b`.
 
 ## Carrossel
 

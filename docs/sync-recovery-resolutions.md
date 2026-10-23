@@ -1,6 +1,6 @@
 # Revisões de recuperação resolvidas — hotfix local sobre V192
 
-Base: c821855d4cf9376862d214d3e64f2cad5685c6f2. Worktree independente de Trocas, da Loja V3 e da otimização de Fiado. Sem commit ou deploy nesta etapa.
+Base: cfee4bc8a76769ec80deeaab1848f9f5842f4737. Worktree independente de Trocas, da Loja V3 e da otimização de Fiado. Sem commit ou deploy nesta etapa.
 
 ## Comportamento
 
@@ -35,4 +35,4 @@ Lint/build/diff-check executados. A validação local não alterou as quatro ope
 
 Após autorização, preparar V193 sobre V192. Publicar somente a Function existente `listSaleRecoveryReviews` e frontend/PWA. Não publicar Rules ou outras Functions. Nenhum índice, migração, mudança de permissão, retry ou job é necessário.
 
-Preservar rollback V192 / c821855d4cf9376862d214d3e64f2cad5685c6f2 para frontend e callable. Implantar primeiro a callable, que mantém o contrato anterior; depois frontend/PWA. Antes de sua publicação, a versão antiga da callable pode rejeitar a consulta nova: o cliente mantém revisão pendente, sem replay. Depois, conferir no aparelho da funcionária os quatro hashes/IDs, contadores, tentativas e checksum após reload e Sync manual. Sem vendas, reprocessamento ou decisões adicionais.
+Preservar rollback V192 / cfee4bc8a76769ec80deeaab1848f9f5842f4737 para frontend e callable. Implantar primeiro a callable, que mantém o contrato anterior; depois frontend/PWA. Antes de sua publicação, a versão antiga da callable pode rejeitar a consulta nova: o cliente mantém revisão pendente, sem replay. Depois, conferir no aparelho da funcionária os quatro hashes/IDs, contadores, tentativas e checksum após reload e Sync manual. Sem vendas, reprocessamento ou decisões adicionais.

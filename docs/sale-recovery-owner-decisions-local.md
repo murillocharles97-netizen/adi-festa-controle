@@ -1,6 +1,6 @@
 # Recuperação — decisão explícita do proprietário (local)
 
-Base: V181, `6eff006199b95003572ebf5b3df110f58940b35a`. Sem commit/deploy, alteração de versão ou acesso às quatro operações reais.
+Base: V181, `41a107fcc673393a16cf1d5da3780df259f7b5a8`. Sem commit/deploy, alteração de versão ou acesso às quatro operações reais.
 
 ## Fluxo
 

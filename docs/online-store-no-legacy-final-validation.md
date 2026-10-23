@@ -1,7 +1,7 @@
 # Loja Online V2 sem legado — validação final local
 
-14/10/2026, America/Sao_Paulo. Base de retirada do legado: f23a8757bca6d72db959ffd8dfea86115c0ffe02.
-Correção de histórico somente leitura: 70a74431dcfa73059f2b05017e6b64b95660db7e.
+14/10/2026, America/Sao_Paulo. Base de retirada do legado: 88cf8e97aff93b6c50a9c66b49bc1858e7eb67bf.
+Correção de histórico somente leitura: 1ac5279efcaef7823d1feda176a18ffcf792a4d2.
 Nenhum deploy, migração ou gravação de teste em produção nesta validação.
 
 ## Decisão
@@ -126,7 +126,7 @@ anterior tem auditoria separada em legacy-store-retirement-audit.md.
 ## Versão e rollback
 
 Bloqueador resolvido e testes locais repetidos; detalhes no relatório complementar. APP/SW ainda 169.
-Sem push/deploy. Produção V169: e59b290b31d893e58f11b4ef40fe3bd4b77a26f9.
+Sem push/deploy. Produção V169: b5c1aed4066c569d2665ad43749ecffd934b9f86.
 Rollback frontend: V169. Não restaurar dados globais excluídos nem fazer rollback cego
 de Rules/handlers após pedidos V2: pausar checkout mantendo reservas, recuperação,
 expiração e histórico. Nenhum rollback deve apagar registros.

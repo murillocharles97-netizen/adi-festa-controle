@@ -1,6 +1,6 @@
 # V187 — operações em quarentena
 
-Base de rollback: V186 `53ae5e184c4e166328dc75d92d5de1a6cf29a273`.
+Base de rollback: V186 `948a3307eb7cf8074fa34a952da1662420fcc22a`.
 
 Pacotes retidos recebem classificação efetiva `quarantined` em metadados separados. O pacote comercial permanece intacto, incluindo payload, IDs, erro, tentativas e checksum. A evidência local é imutável; divergências são bloqueadas. A quarentena impede migração, reescrita, remoção e envio, inclusive pela sincronização forçada.
 

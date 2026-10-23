@@ -1,6 +1,6 @@
 # V178 — diagnóstico temporário de latência do Fiado
 
-Base e rollback: V177, `f47156616414b132411f168aded766717733a30f`.
+Base e rollback: V177, `22dbaa951d136089e3dc171f4ec948592dccff26`.
 Frontend somente, sem deploy Firebase/backend/Rules, migração ou alteração de dados.
 
 ## Flag e acesso

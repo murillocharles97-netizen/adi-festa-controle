@@ -1,6 +1,6 @@
 # Confirmação de recebimento — WhatsApp sem telefone
 
-V196 preparada na branch `codex/receipt-whatsapp-ux`, base/rollback frontend V195 `55a4be9e972d766a3d44d8b7072ec72f8c8b1d4e`. Publicação autorizada pelo owner após isolamento e testes. O incidente de bootstrap Android é uma investigação separada e não foi incorporado.
+V196 preparada na branch `codex/receipt-whatsapp-ux`, base/rollback frontend V195 `ebe49c9a58623192440f27cc999ae9d42220b10a`. Publicação autorizada pelo owner após isolamento e testes. O incidente de bootstrap Android é uma investigação separada e não foi incorporado.
 
 ## Causa e comportamento
 
@@ -32,6 +32,6 @@ Respostas/handlers são vinculados à conta, empresa, geração e escopo de aces
 
 ## Publicação futura
 
-Somente frontend/PWA. Atualizadas as URLs de clientes-page JS/CSS e build-info e os metadados/cache da release V196. Imports de Auth/Sync e código de Trocas/Fiado preservados. Functions e Rules não são necessários. Rollback deste ajuste visual usa V195, sem restaurar dados nem remover telefones cadastrados legitimamente. O rollback compatível de Trocas `df6ed696a8eeb4b455b135dd0661061e7002e793` e anteriores continuam preservados.
+Somente frontend/PWA. Atualizadas as URLs de clientes-page JS/CSS e build-info e os metadados/cache da release V196. Imports de Auth/Sync e código de Trocas/Fiado preservados. Functions e Rules não são necessários. Rollback deste ajuste visual usa V195, sem restaurar dados nem remover telefones cadastrados legitimamente. O rollback compatível de Trocas `038725b34b0930e1f6f468e68611fc7da7e1720f` e anteriores continuam preservados.
 
 Tag proposta antes da publicação: `rollback/v195-before-v196-payment-sharing`.

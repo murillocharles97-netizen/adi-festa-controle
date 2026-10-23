@@ -1,6 +1,6 @@
 # V177 — UX de Catálogo/Pedidos e diagnóstico de Sync
 
-Release exclusivamente de frontend. Base/rollback: V176, commit `e10d8226687e66001baa91c8211736d943bd41f3`; tag `rollback/v176-before-v177`.
+Release exclusivamente de frontend. Base/rollback: V176, commit `a0096b8299f811e551c32e220cd563df6cbd0bd2`; tag `rollback/v176-before-v177`.
 
 Inclui o refinamento aprovado dos cards, ícones, abas, resumo de produtos, ações e prévia mobile do Catálogo, sem “Ações rápidas”; resumo/filtros/contador/status/cards de Pedidos. Operações continuam nos detalhes canônicos existentes. Métricas sem medição continuam sem números inventados.
 

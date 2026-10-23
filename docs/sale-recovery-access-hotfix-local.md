@@ -1,7 +1,7 @@
 # Recuperação acessível à equipe — correção local após V180
 
 Estado: somente local, sem commit/deploy e sem envio das quatro operações reais.
-Base: V180, `2cd4ec0af33b25e60191340dd7d39701da644208`.
+Base: V180, `5ba9719a52c25dfb1e29634449c3dd1cdc7e03ad`.
 
 ## Auditoria somente leitura (17/10/2026)
 

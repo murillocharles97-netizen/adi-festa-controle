@@ -11,7 +11,7 @@ controlado. Não há estorno nesta V1; o cancelamento comum de venda integrada �
 bloqueado. Nenhuma venda ou alteração financeira de produção foi usada no QA.
 
 Rollback identificado antes da publicação: V158,
-`c6d0016265f66f598d50f0daf8ea6ab0d047ddc6`. Um rollback completo também precisa
+`44cc44c9b576e679d8ff20da983df5958c33bf5e`. Um rollback completo também precisa
 considerar Functions e Rules, não apenas os arquivos do GitHub Pages. Não apagar
 intents, recebíveis ou vendas já criados. URL:
 https://murillocharles97-netizen.github.io/adi-festa-controle/

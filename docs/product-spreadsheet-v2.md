@@ -2,7 +2,7 @@
 
 ## Preparação da publicação V168 — 11/10/2026
 
-Base de produção preservada: V167, `441ebce87f07fec80f6de8ec0f517ac94b878051`.
+Base de produção preservada: V167, `2d1cd49ff2fb37b6d1a6c582a9ffd84acfd045b0`.
 Domínio oficial permanece `https://veconi.app.br/`. Nenhuma migração de dados.
 Release visível 168; cache `veconi-v168-product-import`.
 

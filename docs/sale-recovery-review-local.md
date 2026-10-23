@@ -1,6 +1,6 @@
 # Preservação de vendas retidas — implementação local, sem deploy
 
-Base publicada: V179 / 1670a3c6445e3c3a2183075d0ed54707fa438374.
+Base publicada: V179 / 216493be7d718b2edc68e81f78edfaeff4633d2e.
 Nenhuma captura ou transmissão das quatro operações reais nesta implementação.
 
 ## Arquivos desta entrega

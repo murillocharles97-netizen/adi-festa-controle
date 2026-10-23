@@ -52,7 +52,7 @@ Android físico, WhatsApp externo real e dois aparelhos reais dependem do novo
 teste do usuário após publicar; nenhum envio real ou venda de QA em produção.
 
 APP_VERSION=157; SW=veconi-v157-integrity-audit. Deploy somente frontend pelo
-GitHub Pages. Rollback V156: `0e2fe3f514cdb8a57cbd2ff3a4ad8479e5a1179b`.
+GitHub Pages. Rollback V156: `1c5b012968f5add947450506f3c6c2deb04d9beb`.
 URL: https://murillocharles97-netizen.github.io/adi-festa-controle/
 No Android: confirmar V157, Sincronizar agora, esperar auditoria e exportar
 diagnóstico. Não limpar armazenamento nem restaurar backup. Os originais dos
@@ -112,7 +112,7 @@ referência financeira nem fila e com ausência remota confirmada, mantendo cóp
 local reversível e histórico das sequências. Nenhum saldo, venda, pagamento ou
 efeito financeiro real deve ser criado/alterado para esta correção.
 
-Estado histórico ANTES da implementação: análise do código da produção V156 (`0e2fe3f514cdb8a57cbd2ff3a4ad8479e5a1179b`).
+Estado histórico ANTES da implementação: análise do código da produção V156 (`1c5b012968f5add947450506f3c6c2deb04d9beb`).
 O teste físico informado pelo usuário confirma a correção de armazenamento.
 Não reabrir a migração IndexedDB. Nenhuma alteração de dados, backfill, limpeza,
 commit ou deploy V157 foi executado nesta investigação.

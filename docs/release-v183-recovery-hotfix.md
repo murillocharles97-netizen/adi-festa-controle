@@ -1,6 +1,6 @@
 # V183 — encerramento de revisão e patches parciais
 
-Base/rollback: V182, `82709db6cbcc092a25756ee231dee8d7492e3985`.
+Base/rollback: V182, `69e97d845bac0c4bad401e410189fbea690f910c`.
 
 - Decisão explícita do proprietário: “Não recuperar / encerrada sem efeitos”.
 - Original/IDs imutáveis; responsável, horário e decisão auditados; nenhuma venda,

@@ -64,5 +64,5 @@ Testes novos: `tests/home-mobile-v158.test.js`, `scripts/audit-home-v158.cjs`.
 As demais mudanças em testes somente acompanham APP_VERSION/SW cache.
 
 APP_VERSION=158; SW/cache=`veconi-v158-home`. Publicação somente frontend.
-Rollback: V157 `fa43f7d0cea1ce7d326addb9ba6e75bd9202b147`.
+Rollback: V157 `ed27aa499803da185a9a0d0b7d775b2c4f8dccbd`.
 URL: https://murillocharles97-netizen.github.io/adi-festa-controle/

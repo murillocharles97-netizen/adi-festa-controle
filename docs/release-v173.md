@@ -23,7 +23,7 @@ ativação de lojas, ajuste de estoque ou reprocessamento financeiro.
 Firestore Emulator de Equipe/Rules; lint, build e git diff --check aprovados.
 Não corresponde a auditoria ampla da Loja Online ou teste físico Android.
 
-Rollback: V172, commit `a95a96758a162e22bac3162c33e5297188c21ccc`, referência
+Rollback: V172, commit `7535d71528119fee9ae6e43ff6ec0bee6d3699fa`, referência
 `rollback/v172-before-v173`. Restaurar somente código; não restaurar dados.
 O erro intermitente de permissão anterior não foi reproduzido na investigação;
 não afirmar que sua causa está resolvida. Novos incidentes ficam diagnosticáveis.

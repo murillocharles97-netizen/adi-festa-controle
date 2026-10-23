@@ -2,7 +2,7 @@
 // Local-only upgrade rehearsal using the actual registration/update handler and both SW versions.
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process'),puppeteer=require('puppeteer');
-const root=process.cwd(),oldWorker=execFileSync('git',['show','c91756b2ede54eb180b914a9e5e6ea25e36b279e:service-worker.js'],{encoding:'utf8'});
+const root=process.cwd(),oldWorker=execFileSync('git',['show','be5d2aca918cb4b818b87b92b39b1e773d6b158f:service-worker.js'],{encoding:'utf8'});
 const app=fs.readFileSync('js/app.js','utf8').replace(/\r\n/g,'\n'),start=app.indexOf('    navigator.serviceWorker\n'),end=app.indexOf('  let appRouterStarted',start);
 assert.ok(start>0&&end>start,'Existing update handler must be found');
 const handler=app.slice(start,end),newWorker=fs.readFileSync('service-worker.js','utf8');let phase='163';

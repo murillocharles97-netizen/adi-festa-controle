@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{execFileSync}=require('node:child_process');
-const base='d4f9703fc3c3416dbf1256648e55f04337e69c57';
+const base='234f144b93092ebd5fcf9c774007b8a122349e55';
 const git=(...args)=>execFileSync('git',['-c','core.bare=false',...args],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 const read=p=>fs.readFileSync(p,'utf8').replace(/\r\n/g,'\n');
 test('V198 runtime is exclusively History presentation + PWA metadata, preserving every V197 financial/Sync guard',()=>{

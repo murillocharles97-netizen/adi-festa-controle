@@ -62,7 +62,7 @@ test('permanent errors cannot retry from time alone or be rewritten by compatibi
  const pending={...legitimate(),lastErrorCode:'unavailable',lastAttemptAt:'2020-01-01'},network=harness([pending]);await network.run(false);assert.deepEqual(network.committed,['legitimate']);
 });
 test('V186 reproducer: elapsed error retries automatically; compatibility adds event metadata and converts syncing to pending',()=>{
- const old=execFileSync('git',['show','53ae5e184c4e166328dc75d92d5de1a6cf29a273:js/firebase/sync.js'],{encoding:'utf8',maxBuffer:2e6}),p=phantom(),h=harness([p],old);
+ const old=execFileSync('git',['show','948a3307eb7cf8074fa34a952da1662420fcc22a:js/firebase/sync.js'],{encoding:'utf8',maxBuffer:2e6}),p=phantom(),h=harness([p],old);
  assert.equal(h.attempt(p),true);
  vm.runInContext(section(old,'const stableComparable =','const containsInvalidFirestoreValue')+'\nthis.reproChecksum=checksumValue;',h.c);
  h.setQueue([{...p,status:'syncing'}]);const before=h.c.reproChecksum(p.payload);h.migrate();assert.equal(h.queue()[0].status,'pending');assert.equal(h.queue()[0].lastErrorCode,null);assert.notEqual(h.c.reproChecksum(h.queue()[0].payload),before);assert.equal(h.queue()[0].payload.writes.find(w=>w.entityType==='sales').data.operationId,p.operationId);

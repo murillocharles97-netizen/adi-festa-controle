@@ -1,6 +1,6 @@
 # V179 — hotfix Equipe/Sync e retenção segura de vendas antigas
 
-Base e rollback: V178, `d6c97fa1ab704beecb8fe4b02d96368ebdb25815`.
+Base e rollback: V178, `94784cb2ec89f3b700875867b6d93d4a7e8f7ac1`.
 Tag de referência: `rollback/v178-before-v179-team-sync`.
 
 ## Escopo publicado

@@ -109,7 +109,7 @@ Release em `js/build-info.js`: 164. Cache: `veconi-v164-product-spreadsheet`.
 O script `scripts/audit-pwa-update-v164.cjs` valida a atualização da V163, o aviso
 existente, ativação, reload offline e preservação de IndexedDB/localStorage e cache
 de outro projeto. Alterações preexistentes não relacionadas ficam fora do commit.
-Rollback de referência: V163, `c91756b2ede54eb180b914a9e5e6ea25e36b279e`.
+Rollback de referência: V163, `be5d2aca918cb4b818b87b92b39b1e773d6b158f`.
 Nenhum deploy de Firebase Functions, Rules, índices ou Firebase Hosting é necessário.
 
 ## Roteiro no celular, após publicação

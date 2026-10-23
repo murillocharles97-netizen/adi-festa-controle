@@ -97,7 +97,7 @@ test('local canonical tombstone also blocks a second-cancel button without sourc
   const h=harness({events:[event()]});h.setData({vendas:[sale('sale-1',{active:false})]});await h.start();h.cards[0].onclick();assert.match(h.modal.innerHTML,/Esta venda foi cancelada\./);assert.doesNotMatch(h.modal.innerHTML,/data-history-cancel-sale/);
 });
 test('exact V197 reproduction stays pending; same input is cancelled with the presentation hotfix',async()=>{
-  const {execFileSync}=require('node:child_process'),legacy=execFileSync('git',['-c','core.bare=false','show','d4f9703fc3c3416dbf1256648e55f04337e69c57:js/activity-center.js'],{encoding:'utf8'});
+  const {execFileSync}=require('node:child_process'),legacy=execFileSync('git',['-c','core.bare=false','show','234f144b93092ebd5fcf9c774007b8a122349e55:js/activity-center.js'],{encoding:'utf8'});
   const setup={rows:{'sale-1':sale('sale-1',{active:false,deletedAt:date,cancelledAt:date,applicationStatus:'applied'})}};
   const old=harness({...setup,code:legacy});await old.start();assert.equal(old.c.ActivityCenter.events()[0].status,'Pendente');
   const fixed=harness(setup);await fixed.start();assert.equal(fixed.c.ActivityCenter.events()[0].status,'Cancelada');assert.deepEqual(fixed.writes,[]);

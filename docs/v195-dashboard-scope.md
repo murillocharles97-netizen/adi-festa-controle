@@ -1,6 +1,6 @@
 # V195 — escopo de consulta dos ajustes de Trocas
 
-Preparação local, sem autorização de deploy. Base publicada: V194 `4ae78b90bc9405fb9d8aaa66da652a3cb804268c`. Branch: `codex/v195-exchange-dashboard-scope`.
+Preparação local, sem autorização de deploy. Base publicada: V194 `ebf8e7b56c67bc2dc47f45702b79db60971a835b`. Branch: `codex/v195-exchange-dashboard-scope`.
 
 ## Causa
 
@@ -70,7 +70,7 @@ Parar em qualquer conflito, erro financeiro, escopo indevido ou efeito inesperad
 
 ## Rollback
 
-Preservar imutável o rollback compatível `2d77ebe723338f6d88994800bf1ae41846b7f979` e sua tag. Ele mantém ledger, recibos, guards, projetores, cancelamento específico e pausa novas operações, mas seu frontend antigo contém o aviso de escopo V194.
+Preservar imutável o rollback compatível `e1ad2665e09caf44fe991a2dc697e1ff974a458f` e sua tag. Ele mantém ledger, recibos, guards, projetores, cancelamento específico e pausa novas operações, mas seu frontend antigo contém o aviso de escopo V194.
 
 Para conter operações sem reintroduzir esse aviso, o sucessor local usa a referência `rollback/v195-compatible-sale-exchanges`, derivada de `2d77ebe` com o core corrigido e metadados V195. Não mover tags antigas, restaurar banco, excluir créditos/eventos ou retornar integralmente à V193.
 

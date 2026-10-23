@@ -1,7 +1,7 @@
 # Loja Online V2 — disponibilidade pública após reserva/liberação/baixa
 
 14/10/2026 (America/Sao_Paulo). Correção LOCAL explicitamente autorizada pelo owner.
-Base d458bde8d3529dfa975516cdcce5f1bcfbccc843. Nenhum push/deploy ou escrita em produção.
+Base 2b4dd47c1825dbc3633df5b749750ab629a299a9. Nenhum push/deploy ou escrita em produção.
 
 ## Resultado
 
@@ -130,5 +130,5 @@ Rules, autenticação, assinaturas, pagamentos e infraestrutura de produção n�
   QA explícita via callable owner validada. Não alegar teste visual nativo que não foi executado.
 - Scheduler real/30min reais e latência/retry de Eventarc em nuvem ainda exigem smoke controlado.
 - Autorização para publicar obrigatória. Não preparar um deploy que deixe só frontend atualizado
-  sem os dois gatilhos backend. Rollback frontend V169 e59b290b31d893e58f11b4ef40fe3bd4b77a26f9;
+  sem os dois gatilhos backend. Rollback frontend V169 b5c1aed4066c569d2665ad43749ecffd934b9f86;
   não restaurar legado nem reverter cegamente Rules/reservas/expiração de pedidos V2.

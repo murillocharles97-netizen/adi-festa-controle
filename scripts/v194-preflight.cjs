@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:
 const root=path.resolve(__dirname,'..'),baseline=path.resolve(process.argv[2]||''),output=path.resolve(process.argv[3]||path.join(root,'docs/preflight/v194-test-comparison.json'));
 if(!process.argv[2]||baseline===root)throw Error('Informe um checkout V193 separado e intacto.');
 const git=(cwd,args)=>{const r=spawnSync('git',['-c','core.bare=false',...args],{cwd,encoding:'utf8'});if(r.status!==0)throw Error(r.stderr);return r.stdout.trim();};
-const baseCommit='3d9ef19f4b5df7a7534647185bf3a32d042ca065';
+const baseCommit='41b192c49d60279a7b621d60db50683f334732ac';
 if(git(baseline,['rev-parse','HEAD'])!==baseCommit||git(baseline,['status','--porcelain','--untracked-files=no']))throw Error('A base V193 precisa estar no commit publicado, sem alterações rastreadas.');
 function run(cwd){
  const r=spawnSync(process.execPath,['--test',`--test-reporter=${pathToFileURL(path.join(root,'scripts/release-test-reporter.cjs')).href}`,'tests/*.test.js'],{cwd,encoding:'utf8',maxBuffer:32*1024*1024});

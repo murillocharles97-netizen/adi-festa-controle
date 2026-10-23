@@ -1,6 +1,6 @@
 # Trocas V1 — arquitetura e validação local
 
-Base operacional: V193, `3d9ef19f4b5df7a7534647185bf3a32d042ca065`. Proposta: V194, sujeita à autorização de publicação. Nenhum deploy, commit, migração ou operação real neste trabalho.
+Base operacional: V193, `41b192c49d60279a7b621d60db50683f334732ac`. Proposta: V194, sujeita à autorização de publicação. Nenhum deploy, commit, migração ou operação real neste trabalho.
 
 ## Auditoria e decisões
 
@@ -129,6 +129,6 @@ O [preflight final](v194-preflight.md) e o [manifesto de publicação](v194-rele
 
 O preflight também fechou a janela de lucro incorreto durante consulta de ajustes ainda não confirmada, em andamento, com falha ou offline. Custos/lucro/margem ficam em revisão nessas situações e nos períodos com troca.
 
-Preparação local autorizada, **sem deploy ou push**. Base histórica V193 `3d9ef19f4b5df7a7534647185bf3a32d042ca065`; rollback integral para essa base só é seguro antes de qualquer efeito V194. Depois de emitir troca/crédito, exige pacote compatível preservando fences, ledger, recibos e projeções. Esse build compatível ainda precisa ser preparado e validado; não confundir a tag histórica com uma reversão integral segura.
+Preparação local autorizada, **sem deploy ou push**. Base histórica V193 `41b192c49d60279a7b621d60db50683f334732ac`; rollback integral para essa base só é seguro antes de qualquer efeito V194. Depois de emitir troca/crédito, exige pacote compatível preservando fences, ledger, recibos e projeções. Esse build compatível ainda precisa ser preparado e validado; não confundir a tag histórica com uma reversão integral segura.
 
 Nenhum dado real foi alterado. Loja V3 independente e operações reais preservadas de recuperação/Sync não foram tocadas.

@@ -1,6 +1,6 @@
 # V197 — cancelamento Fiado sobre V196
 
-Base publicada: V196, `ea0d0d9457567442f298e02e84e74f782d9ef144`. Preparação de commit/pacote autorizada. Publicação e reconciliação comercial ainda NÃO autorizadas.
+Base publicada: V196, `5bd03fcbab892fcec3d7090c9f13aef127be94b1`. Preparação de commit/pacote autorizada. Publicação e reconciliação comercial ainda NÃO autorizadas.
 
 ## Causa reproduzida
 
@@ -45,7 +45,7 @@ Publicação futura: enviar exatamente este commit ao pipeline estático existen
 - Preserva a leitura dos eventos novos, o estorno idempotente, o ledger, as filas e todos os fluxos de Trocas/crédito da V196. Pausa somente a criação de NOVOS cancelamentos Fiado no frontend de contenção. Operações legítimas já existentes continuam com seus IDs e validação transacional, sem limpeza/reprocessamento coletivo.
 - Não equivale a restaurar dados. Requer publicação explícita do frontend de contenção e atualização normal do PWA; não muda um bloqueio no servidor e não interrompe magicamente uma aba que ainda execute o candidato anterior.
 - Referência de origem preservada: `rollback/v196-before-v197-fiado-cancellation`, somente para rastreabilidade. Retornar cegamente ao frontend V196 reintroduziria o defeito e NÃO é a opção recomendada.
-- Rollback compatível de Trocas `df6ed696a8eeb4b455b135dd0661061e7002e793` e referências anteriores permanecem preservados. Não usar rollback integral incompatível com ledger/créditos.
+- Rollback compatível de Trocas `038725b34b0930e1f6f468e68611fc7da7e1720f` e referências anteriores permanecem preservados. Não usar rollback integral incompatível com ledger/créditos.
 
 Reconciliação de incidente real é uma autorização separada, com releitura canônica, recibo determinístico e pré-condições exatas. Não reenviar o cancelamento antigo: seu estoque já foi devolvido.
 

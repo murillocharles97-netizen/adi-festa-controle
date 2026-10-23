@@ -1,6 +1,6 @@
 # V188 — aviso de Sync e arquivo permanente de incidente
 
-Base / rollback de frontend: V187, `05ae375e5872fd06b8703da2bcc98dcf1d237571`.
+Base / rollback de frontend: V187, `8e060324af3473ffbf2e348dac8a93dd7a1a18d4`.
 
 - Quarentena conhecida e arquivo resolvido não são contados como pendência enviável ou erro ativo. Falhas reais e vendas legítimas retidas continuam alertando.
 - Arquivamento somente após confirmação na conta autenticada de origem, com empresa, vínculo, geração, espaços e hashes validados.

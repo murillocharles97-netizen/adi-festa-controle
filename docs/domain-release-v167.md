@@ -1,7 +1,7 @@
 # V167 — domínio oficial
 
 Publicação restrita à migração para https://veconi.app.br em 11/10/2026.
-Base/rollback: V166, 803705b110eddb19e15a46eb07e21ac3ea2e1e30.
+Base/rollback: V166, 29c9977b307f2e8a6a8bb2363ddd1be7c4af2342.
 
 ## Alterações
 

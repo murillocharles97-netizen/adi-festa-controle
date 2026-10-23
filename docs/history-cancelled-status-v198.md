@@ -4,7 +4,7 @@
 
 A venda cancelada continua fisicamente presente em `sales`, com `active=false`, `deletedAt` e, nas novas operações V197, `cancelledAt`. O projetor existente de `activityEvents` só considera remoção física e prioriza `applicationStatus=applied`, mantendo o evento como `confirmed`. A UI interpreta pagamento Fiado como “Pendente”. A ausência em `DB.vendas` não prova cancelamento: o cache também pode não conter vendas antigas.
 
-Um teste reproduz o problema com o arquivo exato da V197 (`d4f9703fc3c3416dbf1256648e55f04337e69c57`) e prova que a mesma entrada fica “Cancelada” na V198.
+Um teste reproduz o problema com o arquivo exato da V197 (`234f144b93092ebd5fcf9c774007b8a122349e55`) e prova que a mesma entrada fica “Cancelada” na V198.
 
 ## Correção isolada
 
@@ -44,6 +44,6 @@ Custo adicional: uma leitura de status por venda carregada/revisão na abertura 
 
 Publicação futura: somente frontend/PWA do candidato aprovado; sem deploy Firebase. Smoke inicialmente só leitura (abrir Histórico QA de venda já cancelada e outra ativa, filtros, reload e Sync sem replay).
 
-Rollback compatível: frontend V197 `d4f9703fc3c3416dbf1256648e55f04337e69c57`, tag local `rollback/v198-compatible-history-status`. Reverte apenas a apresentação, preservando estorno idempotente V197 e todas as estruturas de Trocas/crédito. O rollback de contenção `0a5a25d5613ef747a0a95f4a0cec987a9eec4d19` e suas tags anteriores permanecem preservados. Nenhum rollback envolve restauração/apagamento de dados.
+Rollback compatível: frontend V197 `234f144b93092ebd5fcf9c774007b8a122349e55`, tag local `rollback/v198-compatible-history-status`. Reverte apenas a apresentação, preservando estorno idempotente V197 e todas as estruturas de Trocas/crédito. O rollback de contenção `e0555eda4f3084bcdce69f3ff9ab1e6389e12a76` e suas tags anteriores permanecem preservados. Nenhum rollback envolve restauração/apagamento de dados.
 
 **Não publicar sem autorização explícita.**

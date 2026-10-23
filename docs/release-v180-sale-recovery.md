@@ -1,6 +1,6 @@
 # V180 — preservação de vendas retidas para revisão
 
-Rollback: V179 / 1670a3c6445e3c3a2183075d0ed54707fa438374.
+Rollback: V179 / 216493be7d718b2edc68e81f78edfaeff4633d2e.
 Tag prevista: rollback/v179-before-v180-sale-review.
 
 ## Escopo

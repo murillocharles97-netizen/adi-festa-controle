@@ -4,7 +4,7 @@
 
 ## Base / rollback
 
-Produção anterior: V168, `9110001568028754a6f45d63426f0083ecff489c`.
+Produção anterior: V168, `4ee41c356eac55c4f5b1f928bb1b0cc2a3965d0b`.
 URL oficial preservada: https://veconi.app.br/.
 
 Reversão de interface: publicar o artefato desse commit pelo mesmo workflow Pages.

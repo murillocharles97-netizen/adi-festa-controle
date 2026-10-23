@@ -1,6 +1,6 @@
 # V186 — hidratação sem operações comerciais
 
-Base/rollback: V185, `1b5157d77ebb5ec2a537de6dae49d1c98cfe3421`.
+Base/rollback: V185, `c69707c8a77b5bad3c7750af526535b6351644b4`.
 
 ## Escopo
 

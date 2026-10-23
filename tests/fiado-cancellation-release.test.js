@@ -1,8 +1,8 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
-const base='ea0d0d9457567442f298e02e84e74f782d9ef144';
+const base='5bd03fcbab892fcec3d7090c9f13aef127be94b1';
 // Historical V197 package contract; newer presentation-only releases have their own allowlist.
-const target='d4f9703fc3c3416dbf1256648e55f04337e69c57';
+const target='234f144b93092ebd5fcf9c774007b8a122349e55';
 const git=(...args)=>execFileSync('git',['-c','core.bare=false',...args],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 const read=p=>git('show',target+':'+p);
 test('V197 preserves backend/Rules/permissions and the exact V196 exchange, checkout, payment and storage implementations',()=>{

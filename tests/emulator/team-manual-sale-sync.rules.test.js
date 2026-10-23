@@ -4,7 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {execFileSync}=require('node:child_process');
 if(!/^(localhost|127\.0\.0\.1):/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Local Emulator required');
 const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
-const source=fs.readFileSync('js/firebase/sync.js','utf8'),published=execFileSync('git',['show','d6c97fa1ab704beecb8fe4b02d96368ebdb25815:js/firebase/sync.js'],{encoding:'utf8',maxBuffer:2e6});
+const source=fs.readFileSync('js/firebase/sync.js','utf8'),published=execFileSync('git',['show','94784cb2ec89f3b700875867b6d93d4a7e8f7ac1:js/firebase/sync.js'],{encoding:'utf8',maxBuffer:2e6});
 const section=(s,a,b)=>s.slice(s.indexOf(a),s.indexOf(b,s.indexOf(a)));
 const bid='team-manual-'+Date.now().toString(36),a=bid+'-a',b=bid+'-b',owner='audit-owner',seller='audit-seller',cashier='audit-cashier';
 let env,sanitizer,sequence=0;

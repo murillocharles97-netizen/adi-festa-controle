@@ -1,11 +1,11 @@
 # V170 — publicação controlada por espaço
 
 Autorizada em 15/10/2026. Produção: https://veconi.app.br/.
-Código funcional aprovado: `ea35647b558b96541dd4eaeb4f5d5560e3019045`.
+Código funcional aprovado: `4afed246f2ed1b889477175ce8958417920baeed`.
 
 ## Rollback e segurança
 
-Base preservada: V169, `e59b290b31d893e58f11b4ef40fe3bd4b77a26f9`.
+Base preservada: V169, `b5c1aed4066c569d2665ad43749ecffd934b9f86`.
 Tag local `rollback/v169-before-v170` aponta exatamente para essa base.
 Frontend pode voltar ao artefato V169 pelo workflow Pages existente, sem apagar dados.
 Não reativar catálogo global nem restaurar cegamente Rules/checkout/financeiro antigos:

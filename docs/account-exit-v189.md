@@ -1,6 +1,6 @@
 # V189 — saída de conta acessível a todas as funções
 
-Base e rollback: V188, `e000e97e41f2a30a6801724c51b59f3440c7afb7`.
+Base e rollback: V188, `8760afc2cf7616ec07b0db5df077dc9a9a8d632a`.
 
 - Avatar do cabeçalho é um botão acessível, com nome “Sair ou trocar de conta”.
 - Abre a confirmação existente “Sair da conta?”, sem depender de Configurações ou permissões comerciais.

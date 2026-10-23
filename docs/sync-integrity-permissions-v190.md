@@ -1,6 +1,6 @@
 # V190 — integridade no escopo autorizado
 
-Base / rollback de frontend: V189, `7dd7583cfba8dceca6703a1e3f0bcbce7b5a63a5`.
+Base / rollback de frontend: V189, `456c7d00b0bd6598755ee30041dbe065033e6a0e`.
 
 - Auditoria usa permissões efetivas e omite fontes não autorizadas, inclusive quando há prefetch.
 - Seller sem acesso financeiro não consulta `payments`, `balanceAdjustments` ou `balanceEvents`. Exibe “Financeiro não auditado neste perfil”, sem certificar saldo zero nem apontar divergência financeira por falta esperada de acesso.

@@ -3,7 +3,7 @@
 ## Status de entrega
 
 Implementação local na branch `codex/sync-team-v155`. **Não publicada.**
-Produção continua na V154, commit `be5f10d540d5d1dc5ac6b1eaf0a35a56c1459f3d`.
+Produção continua na V154, commit `22efbc3f95803bf70959753b59932e3ef8022076`.
 O erro específico do celular ainda precisa do diagnóstico do aparelho. Não declarar a sincronização global corrigida nem o teste multidispositivo físico aprovado apenas com os testes locais abaixo.
 
 ## Sincronização: evidências e correções

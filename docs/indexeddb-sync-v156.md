@@ -129,7 +129,7 @@ APP_VERSION/release 156; cache SW `veconi-v156-indexeddb-cache`. Publicação so
 do frontend via um push/uma execução GitHub Pages. URL:
 https://murillocharles97-netizen.github.io/adi-festa-controle/
 
-Base anterior V155: `00965cf818e811814716f59cb3908e88a92cd32a`.
+Base anterior V155: `63de6f32732305bb8bc1956d04f12b00077cb78c`.
 **Atenção a rollback:** V155 não entende a nova persistência. Depois da migração,
 retornar apenas o código pode ocultar registros locais ainda não enviados.
 Preservar IndexedDB, exportar diagnóstico/backup e planejar recuperação; preferir
