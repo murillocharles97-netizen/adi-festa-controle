@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build:public": "node scripts/build-public-site.cjs",
+    "test:public-containment": "node --test tests/public-site-containment.test.cjs tests/static-containment-worker.test.cjs",
     "lint": "node scripts/check-project.js",
     "test": "node --test tests/*.test.js",
     "test:desktop-browser": "node scripts/audit-desktop-browser.cjs",

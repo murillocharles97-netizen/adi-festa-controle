@@ -23,6 +23,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Stamp build metadata
@@ -31,10 +35,14 @@ jobs:
           BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           sed -i -E "s/(name=\"adi-festa-build\" content=\")[^\"]+/\1${GITHUB_SHA}/" index.html
           sed -i -E "s/(name=\"adi-festa-build-time\" content=\")[^\"]+/\1${BUILD_TIME}/" index.html
+      - name: Test static containment
+        run: npm run test:public-containment
+      - name: Build allowlisted public package
+        run: npm run build:public
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist-public
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
