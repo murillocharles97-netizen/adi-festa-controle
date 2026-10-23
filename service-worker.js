@@ -1,4 +1,4 @@
-const CACHE='veconi-v197-fiado-cancellation';
+const CACHE='veconi-v197-fiado-cancellation-safe-rollback';
 // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
 // Shared entitlement catalog (same source consumed by Cloud Functions).
 const OBSOLETE_CACHE_PREFIXES=['veconi-','adi-festa-'];

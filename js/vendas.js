@@ -431,6 +431,8 @@ window.Vendas = (() => {
         cliente = db.clientes.find((c) => c.id === venda.clienteId),
         reversalAmount = Number(venda.valorFinal ?? venda.valorTotal);
       if (isCredit) {
+        // Compatible frontend containment: retain validated ledgers/retries, pause only NEW Fiado cancellations.
+        throw Object.assign(Error("Cancelamento de Fiado temporariamente pausado. O saldo, a venda e o histórico foram preservados; não refaça a venda."), {code:"fiado-cancellation-paused"});
         const allocated = (db.alocacoesPagamento || []).some((entry) =>
           String(entry.saleId || entry.vendaId || "") === String(venda.id) && Number(entry.amount || entry.valor || 0) > 0);
         if (Number(venda.creditPaidAmount || 0) > 0 || venda.creditSettled === true || allocated)
