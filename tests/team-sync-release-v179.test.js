@@ -7,15 +7,15 @@ test('release cache and imports refresh changed assets without duplicating prese
  assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));assert.ok(read('service-worker.js').includes(`release:'${version}'`));
  // V191 intentionally shipped only Team UI/updateTeamMember and retained V190
  // Sync/Auth imports. This is the audited published baseline, not a new release.
- // V195 changes reporting scope only. Auth, UI, Sync and checkout stay byte-
- // identical to V194; changing their URLs would create an unnecessary singleton.
- const syncVersion=version==='191'?'190':version==='195'?'194':version;
+ // V195 reporting and V196 receipt sharing retain the V194 protected singletons.
+ const preservesV194=version==='195'||version==='196';
+ const syncVersion=version==='191'?'190':preservesV194?'194':version;
  for(const p of ['js/firebase/auth.js','js/firebase/firebase-ui.js'])assert.ok(read(p).includes(`import './sync.js?v=${syncVersion}'`));
  for(const asset of ['checkout','build-info','firebase/auth','firebase/firebase-ui']){
-  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):version==='195'&&asset!=='build-info'?'194':version;
+  const assetVersion=version==='191'?({'checkout':'187','build-info':'191','firebase/auth':'190','firebase/firebase-ui':'190'}[asset]):preservesV194&&asset!=='build-info'?'194':version;
   assert.ok(read('index.html').includes(`./js/${asset}.js?v=${assetVersion}`));
  }
- if(version==='195'){
+ if(preservesV194){
   assert.ok(read('index.html').includes('./js/exchange-economics.js?v=195'));
   const unchanged={
    'js/firebase/sync.js':'21a39241f87ea731bf5ba5ce9543db9f04cba74d800e93568b56c677fe2cdcff',
@@ -25,6 +25,10 @@ test('release cache and imports refresh changed assets without duplicating prese
    'js/fiados.js':'c7cb87bcd230c67f48e0a4ef3dd02486b48a6eeb797f72835dc97ec28c8ed51e',
   };
   for(const [path,hash]of Object.entries(unchanged))assert.equal(crypto.createHash('sha256').update(read(path).replace(/\r\n/g,'\n')).digest('hex'),hash,path);
+ }
+ if(version==='196'){
+  assert.ok(read('index.html').includes('./js/clientes-page.js?v=196'));
+  assert.ok(read('index.html').includes('./css/clientes-page.css?v=196'));
  }
 });
 test('normal checkout stays identical to V177 outside approved preferences and the isolated exchange-credit branch',()=>{
