@@ -37,10 +37,11 @@ const renewal = (businessId, id = "renewal-1") => ({
   updatedAt: "2026-08-14T12:00:00.000Z", schemaVersion: 13,
 });
 
-test("proprietário grava e consulta vigência indexada somente na própria empresa", async () => {
+test("vigência é escrita somente pelo servidor e consultada na própria empresa", async () => {
   const db = env.authenticatedContext("owner-a").firestore();
   const ref = doc(db, "businesses", businessA, "customerSubscriptions", "renewal-1");
-  await assertSucceeds(setDoc(ref, renewal(businessA)));
+  await assertFails(setDoc(ref, renewal(businessA)));
+  await env.withSecurityRulesDisabled(ctx=>setDoc(doc(ctx.firestore(),'businesses',businessA,'customerSubscriptions','renewal-1'),renewal(businessA)));
   assert.equal((await assertSucceeds(getDoc(ref))).data().contractedPrice, 25.9);
   const result = await assertSucceeds(getDocs(query(
     collection(db, "businesses", businessA, "customerSubscriptions"),
@@ -56,13 +57,15 @@ test("proprietário grava e consulta vigência indexada somente na própria empr
 test("ledger de renovação é imutável e isolado entre empresas", async () => {
   const db = env.authenticatedContext("owner-a").firestore(), eventId = "renewal-1:activation:sale-1";
   const ref = doc(db, "businesses", businessA, "customerSubscriptionEvents", eventId);
-  await assertSucceeds(setDoc(ref, {
+  const value={
     id: eventId, operationId: eventId, businessId: businessA,
     subscriptionId: "renewal-1", clientId: "client-1", productId: "iptv",
     variantId: null, transition: "activation", sourceType: "sale", sourceId: "sale-1",
     previous: null, next: renewal(businessA), note: "", createdAt: "2026-08-14T12:00:00.000Z",
     schemaVersion: 13,
-  }));
+  };
+  await assertFails(setDoc(ref,value));
+  await env.withSecurityRulesDisabled(ctx=>setDoc(doc(ctx.firestore(),'businesses',businessA,'customerSubscriptionEvents',eventId),value));
   await assertFails(updateDoc(ref, { note: "alterado" }));
   await assertFails(setDoc(
     doc(db, "businesses", businessB, "customerSubscriptions", "foreign"),

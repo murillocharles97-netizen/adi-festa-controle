@@ -10,7 +10,8 @@
     'createTerminalPayment','dispatchTerminalPayment','getTerminalPaymentStatus','cancelTerminalPayment',
     'refundTerminalPayment','claimTerminalPaymentFinalization','acknowledgeTerminalPaymentSale',
     'getActiveTerminalPayment','createTeamInvite','updateTeamMember','migrateSensitiveTeamData',
-    'reconcileBusinessActivityEvents','reconcileBusinessFinancialIncome','deleteUnusedFinancialAccount','deleteUnusedCreditCard','deleteWorkspaceAsset']);
+    'reconcileBusinessActivityEvents','reconcileBusinessFinancialIncome','deleteUnusedFinancialAccount','deleteUnusedCreditCard','deleteWorkspaceAsset',
+    'commitOperationalSync','getOperationalSyncReceipt','commitFinancialMaintenance']);
   function payload(name,data,runtime){
     if(!operational.has(name)||!runtime)return data;
     const origin=runtime.capture();

@@ -68,6 +68,13 @@ const visibilityConstraints = (collectionName,spaceIds=null) => {
     }
     return filters;
   }
+  if(['payments','balanceAdjustments','balanceEvents','paymentAllocations','charges'].includes(collectionName)){
+    const context=window.BusinessContext?.get?.()||{};
+    if(context.role==='owner')return [];
+    const ids=spaceIds||(context.spaceAccess==='all'?(window.SpaceContext?.salesSpaces?.()||[]).map(s=>s.id):context.allowedSpaceIds||[]);
+    if(ids.length>30)throw Error('Consulta financeira requer divisão por espaços autorizados.');
+    return [where('spaceId','in',ids.length?ids:['__no_authorized_space__'])];
+  }
   return [];
 };
 // A history OR doubles Firestore's disjunction count. Keep each bounded query

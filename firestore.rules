@@ -84,7 +84,8 @@ service cloud.firestore {
     }
     function isOwner(businessId) {
       return belongsToBusiness(businessId)
-        && roleForBusiness(businessId) == 'owner';
+        && roleForBusiness(businessId) == 'owner'
+        && (memberExists(businessId) || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid);
     }
     function isAdmin(businessId) {
       return belongsToBusiness(businessId) && roleForBusiness(businessId) in ['owner', 'admin', 'manager'];
@@ -92,12 +93,11 @@ service cloud.firestore {
     function permissionGranted(businessId, permission) {
       let modern = memberExists(businessId);
       let actor = modern ? teamMember(businessId) : userProfile();
-      return actor.role in ['owner', 'platform_admin']
+      return (actor.role == 'owner' && (modern || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid))
         || (modern ? actor.get('permissions', {}).get(permission, false) == true
           : ((actor.role in ['admin', 'manager'] && permission != 'exportCRM')
-            || actor.get('permissions', {}).get(permission, false) == true
-            || (permission == 'reports.view' && actor.get('permissions', {}).get('viewCRM', false) == true)
-            || (permission == 'settings.manage' && actor.get('permissions', {}).get('manageOperationSettings', false) == true)));
+            // Self-editable legacy grant maps are not an authorization source.
+            || (actor.role == 'cashier' && permission in ['sales.create','customers.view','customers.edit','customers.receiveDebt','products.view','inventory.view'])));
     }
     function hasPermission(businessId, permission) {
       return belongsToBusiness(businessId) && permissionGranted(businessId, permission);
@@ -197,12 +197,7 @@ service cloud.firestore {
     function canReadCollection(businessId, collectionName) {
       return (
         (
-          legacyMember(businessId)
-          && activeBusiness(businessId)
-          && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || permissionGranted(businessId, 'reports.view'))
-        )
-        || (
-          activeMember(businessId)
+          (activeMember(businessId) || legacyMember(businessId))
           && activeBusiness(businessId)
           && (
             collectionName == 'settings'
@@ -244,6 +239,29 @@ service cloud.firestore {
         && request.resource.data.businessId == businessId
         && (collectionName != 'customerSegments' || permissionGranted(businessId, 'reports.view'))
         && (collectionName != 'settings' || documentId != 'operation' || permissionGranted(businessId, 'settings.manage'));
+    }
+    function unchangedBalance() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'saldo','financialVersion','openBalance','financialRevision','financialReconciledAt',
+        'totalComprado','quantidadeVendas','ultimaCompra','legacyBalance','legacyBalanceRemaining','campaignFinanceVersion'
+      ]);
+    }
+    function zeroInitialBalance() {
+      return request.resource.data.get('saldo',0) == 0 && request.resource.data.get('financialVersion',0) == 0
+        && request.resource.data.get('totalComprado',0) == 0 && request.resource.data.get('quantidadeVendas',0) == 0
+        && request.resource.data.get('openBalance',0) == 0;
+    }
+    function unchangedStock() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'estoqueAtual','estoque','totalStock','stock','onlineReservedStock','onlineOrderFinalizationId'
+      ]);
+    }
+    function zeroInitialStock() {
+      return request.resource.data.get('estoqueAtual',0) == 0 && request.resource.data.get('estoque',0) == 0
+        && request.resource.data.get('totalStock',0) == 0 && request.resource.data.get('stock',0) == 0;
+    }
+    function scopedFinancialDocument(businessId, data) {
+      return isOwner(businessId) || (data.get('spaceId',null) is string && canAccessSpace(businessId,data.spaceId));
     }
     function canUpdateGenericDocument(businessId, collectionName, documentId) {
       return canWriteCollection(businessId, collectionName)
@@ -744,6 +762,10 @@ service cloud.firestore {
           'uid', 'name', 'phone', 'role', 'permissions', 'onboardingCompleted',
           'lastLoginAt', 'migrationVersion', 'migratedAt', 'updatedAt', 'tutorialVersions'
         ])
+        // Compatibility only for the existing bootstrap's empty initialization;
+        // no user (modern or legacy) can grant/change their own permissions.
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['permissions'])
+          || (!('permissions' in resource.data) && request.resource.data.permissions == []))
         && (
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tutorialVersions'])
           || (
@@ -891,6 +913,9 @@ service cloud.firestore {
       match /saleExchangeMetrics/{id} { allow read, write: if false; }
       // Recovery intake is server-only. Payloads can contain private snapshots.
       // No direct client read/write, including owner. Callables scope each read.
+      match /financialMaintenanceAudits/{operationId} {
+        allow read, write: if false;
+      }
       match /saleRecoveryReviews/{saleId} {
         allow read, write: if false;
         match /{document=**} { allow read, write: if false; }
@@ -1050,7 +1075,7 @@ service cloud.firestore {
         allow read: if hasPermission(businessId, 'products.view')
           && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
           && (!resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
-        allow create: if canWriteCollection(businessId, 'productVariants')
+        allow create: if zeroInitialStock() && canWriteCollection(businessId, 'productVariants')
           && canAccessProduct(businessId,parentProduct(request.resource.data.parentProductId).data)
           && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
           && joinsProductImportFence(businessId)
@@ -1058,7 +1083,7 @@ service cloud.firestore {
           && validVariant(request.resource.data)
           && (!request.resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId))
           && parentProduct(request.resource.data.parentProductId).data.businessId == businessId;
-        allow update: if canWriteCollection(businessId, 'productVariants')
+        allow update: if unchangedStock() && canWriteCollection(businessId, 'productVariants')
           && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
           && preservesOnlineStock(businessId,request.resource.data,resource.data,'stock','v_'+variantId)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sku','codigo','barcode','active','deleted','deletedAt']) || joinsProductImportFence(businessId))
@@ -1078,7 +1103,7 @@ service cloud.firestore {
       }
       match /processedOperations/{operationId} {
         allow read: if canReadCollection(businessId, 'processedOperations');
-        allow create: if canRecordProcessedOperation(businessId)
+        allow create: if false && canRecordProcessedOperation(businessId)
           && !(request.resource.data.get('eventKind','') in ['sale_exchange','sale_exchange_credit','sale_exchange_credit_cancel'])
           && !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(operationId))
           && request.resource.data.id == operationId
@@ -1101,7 +1126,7 @@ service cloud.firestore {
       }
       match /campaignEvents/{eventId} {
         allow read: if belongsToBusiness(businessId);
-        allow create: if canWriteCollection(businessId, 'campaignEvents')
+        allow create: if false && canWriteCollection(businessId, 'campaignEvents')
           && request.resource.data.id == eventId
           && request.resource.data.businessId == businessId
           && request.resource.data.engineVersion == 2
@@ -1113,7 +1138,7 @@ service cloud.firestore {
       }
       match /campaignRedemptions/{redemptionId} {
         allow read: if belongsToBusiness(businessId);
-        allow create: if canWriteCollection(businessId, 'campaignRedemptions')
+        allow create: if false && canWriteCollection(businessId, 'campaignRedemptions')
           && request.resource.data.id == redemptionId
           && request.resource.data.businessId == businessId
           && request.resource.data.engineVersion == 2
@@ -1123,8 +1148,8 @@ service cloud.firestore {
         allow update, delete: if false;
       }
       match /paymentAllocations/{allocationId} {
-        allow read: if belongsToBusiness(businessId);
-        allow create: if canWriteCollection(businessId, 'paymentAllocations')
+        allow read: if canReadCollection(businessId, 'payments') && scopedFinancialDocument(businessId,resource.data);
+        allow create: if false && canWriteCollection(businessId, 'paymentAllocations')
           && request.resource.data.id == allocationId
           && request.resource.data.businessId == businessId
           && request.resource.data.engineVersion == 2
@@ -1137,7 +1162,7 @@ service cloud.firestore {
       }
       match /customerSubscriptionEvents/{eventId} {
         allow read: if belongsToBusiness(businessId);
-        allow create: if canWriteCollection(businessId, 'customerSubscriptionEvents')
+        allow create: if false && canWriteCollection(businessId, 'customerSubscriptionEvents')
           && request.resource.data.id == eventId
           && request.resource.data.businessId == businessId
           && request.resource.data.subscriptionId is string
@@ -1225,7 +1250,7 @@ service cloud.firestore {
             (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
             && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'))
           ));
-        allow create, update: if !serverExchangeMovement(request.resource.data)
+        allow create, update: if false && !serverExchangeMovement(request.resource.data)
           && (resource == null || !serverExchangeMovement(resource.data))
           && notRecoveryReplay()
           && canWriteCollection(businessId, 'stockMovements')
@@ -1247,7 +1272,7 @@ service cloud.firestore {
         allow read: if hasPermission(businessId, 'products.view')
           && (resource == null || canAccessProduct(businessId,resource.data))
           && (resource == null || !resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
-        allow create: if canWriteCollection(businessId, 'products')
+        allow create: if zeroInitialStock() && canWriteCollection(businessId, 'products')
           && canAssignProductScope(businessId,request.resource.data)
           && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
           && joinsProductImportFence(businessId)
@@ -1256,7 +1281,7 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductSpaceScope(request.resource.data, businessId);
-        allow update: if canAccessProduct(businessId,resource.data)
+        allow update: if unchangedStock() && canAccessProduct(businessId,resource.data)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
           && (preservesProductSpaceScope(request.resource.data,resource.data) || canAssignProductScope(businessId,request.resource.data))
           && preservesOnlineStock(businessId,request.resource.data,resource.data,'estoqueAtual','p_'+productId)
@@ -1329,7 +1354,7 @@ service cloud.firestore {
               && (!resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view') || permissionGranted(businessId, 'profit.view'))
             )
           );
-        allow create: if notReconciledSale()
+        allow create: if false && notReconciledSale()
           && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
           && request.resource.data.get('source','') != 'exchange_credit_checkout'
           && canWriteCollection(businessId, 'sales')
@@ -1339,7 +1364,7 @@ service cloud.firestore {
           && (!memberExists(businessId) || request.resource.data.get('actorUid', '') == request.auth.uid)
           && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
           && validSaleSpace(request.resource.data, businessId);
-        allow update: if exists(/databases/$(database)/documents/businesses/$(businessId)/saleExchangeSummaries/$(saleId)) ? false : (
+        allow update: if false && (exists(/databases/$(database)/documents/businesses/$(businessId)/saleExchangeSummaries/$(saleId)) ? false : (
           // A stale legacy undo must not replay stock after canonical cancellation.
           resource.data.get('cancellationMode','') != 'canonical_transaction'
           &&
@@ -1370,20 +1395,20 @@ service cloud.firestore {
               !('spaceId' in resource.data)
               && (!('spaceId' in request.resource.data) || validSaleSpace(request.resource.data, businessId))
             )
-          ));
+          )));
         allow delete: if false;
       }
       match /clients/{documentId} {
         allow read: if canReadCollection(businessId, 'clients');
-        allow create: if canCreateGenericDocument(businessId, 'clients', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'clients', documentId);
+        allow create: if zeroInitialBalance() && canCreateGenericDocument(businessId, 'clients', documentId);
+        allow update: if unchangedBalance() && canUpdateGenericDocument(businessId, 'clients', documentId);
         allow delete: if false;
       }
       match /payments/{documentId} {
-        allow read: if canReadCollection(businessId, 'payments');
-        allow create: if (request.resource.data.get('spaceId',null) == null || validSaleSpace(request.resource.data, businessId))
+        allow read: if canReadCollection(businessId, 'payments') && scopedFinancialDocument(businessId,resource.data);
+        allow create: if false && (request.resource.data.get('spaceId',null) == null || validSaleSpace(request.resource.data, businessId))
           && canCreateGenericDocument(businessId, 'payments', documentId);
-        allow update: if (resource.data.get('spaceId',null) == null
+        allow update: if false && (resource.data.get('spaceId',null) == null
             ? request.resource.data.get('spaceId',null) == null
             : preservesSaleSpaceAssignment(request.resource.data, resource.data, businessId)
               && canAccessSpace(businessId, resource.data.spaceId))
@@ -1396,29 +1421,26 @@ service cloud.firestore {
         allow write: if false;
       }
       match /balanceAdjustments/{documentId} {
-        allow read: if canReadCollection(businessId, 'balanceAdjustments');
-        allow create: if canCreateGenericDocument(businessId, 'balanceAdjustments', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'balanceAdjustments', documentId);
+        allow read: if canReadCollection(businessId, 'balanceAdjustments') && scopedFinancialDocument(businessId,resource.data);
+        allow create, update: if false;
         allow delete: if false;
       }
       match /balanceEvents/{documentId} {
-        allow read: if canReadCollection(businessId, 'balanceEvents');
-        allow create: if canCreateGenericDocument(businessId, 'balanceEvents', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'balanceEvents', documentId);
+        allow read: if canReadCollection(businessId, 'balanceEvents') && scopedFinancialDocument(businessId,resource.data);
+        allow create, update: if false;
         allow delete: if false;
       }
       match /campaigns/{documentId} {
         allow read: if canReadCollection(businessId, 'campaigns');
-        allow create: if canCreateGenericDocument(businessId, 'campaigns', documentId)
+        allow create: if false && canCreateGenericDocument(businessId, 'campaigns', documentId)
           && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
-        allow update: if canUpdateGenericDocument(businessId, 'campaigns', documentId)
+        allow update: if false && canUpdateGenericDocument(businessId, 'campaigns', documentId)
           && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
         allow delete: if false;
       }
       match /campaignProgress/{documentId} {
         allow read: if canReadCollection(businessId, 'campaignProgress');
-        allow create: if canCreateGenericDocument(businessId, 'campaignProgress', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'campaignProgress', documentId);
+        allow create, update: if false;
         allow delete: if false;
       }
       match /rewards/{documentId} {
@@ -1428,7 +1450,7 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /charges/{documentId} {
-        allow read: if canReadCollection(businessId, 'charges');
+        allow read: if canReadCollection(businessId, 'charges') && scopedFinancialDocument(businessId,resource.data);
         allow create: if canCreateGenericDocument(businessId, 'charges', documentId);
         allow update: if canUpdateGenericDocument(businessId, 'charges', documentId);
         allow delete: if false;
@@ -1460,8 +1482,7 @@ service cloud.firestore {
       }
       match /customerSubscriptions/{documentId} {
         allow read: if canReadCollection(businessId, 'customerSubscriptions');
-        allow create: if canCreateGenericDocument(businessId, 'customerSubscriptions', documentId);
-        allow update: if canUpdateGenericDocument(businessId, 'customerSubscriptions', documentId);
+        allow create, update: if false;
         allow delete: if false;
       }
       match /catalogOrders/{documentId} {

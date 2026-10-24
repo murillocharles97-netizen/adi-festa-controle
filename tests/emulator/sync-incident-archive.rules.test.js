@@ -73,12 +73,18 @@ test('archive/raw are inaccessible and immutable to direct clients, including ow
  const own=await get('qa-incident-main',owner);assert.equal(own.actorUid,seller);assert.equal('originalPacketJson' in own,false);assert.equal('payload' in own,false);
  await assert.rejects(get('qa-incident-main',other),{code:'permission-denied'});await assert.rejects(get('qa-incident-main',seller,'qa-foreign'),{code:'permission-denied'});
 });
-test('persistent fence rejects old/manual direct replay, even owner; legitimate different operation still permitted',async()=>{
+test('persistent fence rejects old/direct replay; a different legitimate operation uses authenticated server commit',async()=>{
  const client=env.authenticatedContext(owner).firestore(),base={id:'qa-blocked-replay',businessId:bid,spaceId:space,actorUid:owner,formaPagamento:'dinheiro',status:'pago',valorFinal:10,operationId:'qa-incident-main'};
  await assertFails(sdk.setDoc(sdk.doc(client,'businesses',bid,'sales',base.id),base));
  const marker=sdk.doc(client,'businesses',bid,'processedOperations','qa-incident-main');await assertFails(sdk.deleteDoc(marker));await assertFails(sdk.updateDoc(marker,{status:'processed'}));
- await sdk.setDoc(sdk.doc(client,'businesses',bid,'sales','qa-legitimate-new'),{...base,id:'qa-legitimate-new',operationId:'qa-legitimate-new-op'});
- assert.equal((await ref('products','qa-product').get()).data().estoqueAtual,6);
+ await assertFails(sdk.setDoc(sdk.doc(client,'businesses',bid,'sales','qa-legitimate-new'),{...base,id:'qa-legitimate-new',operationId:'qa-legitimate-new-op'}));
+ const operationId='qa-legitimate-new-op',saleId='qa-legitimate-new',product=(await ref('products','qa-product').get()).data();
+ await require('../../functions/src/services/operational-commit-service').operationalCommitService(db).commit({auth:{uid:owner},data:{businessId:bid,item:{operationId,businessId:bid,userId:owner,workspaceGeneration:0,payload:{eventKind:'sale',writes:[
+  {entityType:'sales',entityId:saleId,operation:'create',data:{...base,id:saleId,operationId,itens:[{produtoId:'qa-product',quantidade:1,precoFinalUnitario:10}]}},
+  {entityType:'products',entityId:'qa-product',operation:'update',before:product,data:{estoqueAtual:5,estoque:5,totalStock:5}},
+  {entityType:'stockMovements',entityId:'qa-legitimate-move',operation:'create',data:{businessId:bid,spaceId:space,operationId,vendaId:saleId,produtoId:'qa-product',tipo:'saida_venda',quantidade:-1,estoqueAnterior:6,estoqueNovo:5}},
+ ]}}}});
+ assert.equal((await ref('products','qa-product').get()).data().estoqueAtual,5);
 });
 test('new collections have no commercial trigger, and originals/markers have no client deletion path',()=>{
  const src=fs.readFileSync('functions/src/index.js','utf8');for(const match of src.matchAll(/document:\s*['"]([^'"]+)['"]/g))assert.doesNotMatch(match[1],/syncIncidentArchives|processedOperations/);

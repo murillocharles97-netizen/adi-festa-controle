@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "./workspace-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=184";
+import { createFirestoreRepository } from "./firestore-repository.js?v=202";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -117,7 +117,7 @@ function canPullSource(name) {
   if (["productFinancials", "variantFinancials", "stockMovementFinancials"].includes(name))
     return has("cost.view");
   if (name === "saleFinancials") return has("cost.view") || has("profit.view");
-  if (["payments", "balanceAdjustments", "charges"].includes(name))
+  if (["payments", "balanceAdjustments", "charges", "paymentAllocations"].includes(name))
     return has("financial.view") || has("customers.receiveDebt") || has("customers.adjustBalance");
   if (["campaigns", "campaignProgress", "rewards", "campaignEvents", "campaignRedemptions", "paymentAllocations", "customerSubscriptions", "customerSubscriptionEvents", "messageHistory", "messageTemplates", "messageSequences", "clientContacts", "catalogOrders"].includes(name))
     return has("sales.create") || has("reports.view");
@@ -293,7 +293,7 @@ const activeBusinessId = () => {
   return id;
 };
 const errorCode = (error) =>
-  String(error?.code || "").replace("firestore/", "");
+  String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
 const friendlyError = (error) =>
   ({
     "local-storage-quota": "Não foi possível atualizar o armazenamento local da VECONI. Veja os detalhes da sincronização.",
@@ -715,7 +715,7 @@ const queueDiagnostics = () =>
     resolution: readRecoveryResolution(item),
     reviewState: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     reviewReason: queueQuarantineReason(item) || null,
-    canArchive: queueQuarantineReason(item) !== "settings_permission_required",
+    canArchive: !['settings_permission_required','sync_protocol_upgrade_review'].includes(queueQuarantineReason(item)),
     archive: readQueueArchive(item),
     payloadChecksum: checksumValue(item.payload || {}),
     payloadVersion: Number(item.payloadVersion || 1),
@@ -773,6 +773,7 @@ function readRecoveryResolution(item){
   let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
   if(!value||!Array.isArray(item.payload?.writes))return null;
   const sale=item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
+  if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
 }
 async function refreshRecoveryResolutions(isCurrent){
@@ -813,6 +814,8 @@ function readQueueArchive(item) {
 }
 function preservedQueueMessage(counts = queueCounts()) {
   if (counts.active || counts.corrupt) return "";
+  if (Number(window.AdiFestaBuild?.release)>=202 && readQueue().some(item=>queueQuarantineReason(item)==='sync_protocol_upgrade_review'))
+    return 'Operações de versão anterior preservadas para revisão. Nenhuma será reenviada automaticamente. Não refaça vendas; solicite análise da fila.';
   if (counts.quarantined) return `${counts.quarantined} ocorrência${counts.quarantined === 1 ? " preservada" : "s preservadas"} para análise. Nenhuma sincronização pendente.`;
   if (counts.archived) return `Nenhuma sincronização pendente. ${counts.archived} ocorrência${counts.archived === 1 ? " resolvida preservada" : "s resolvidas preservadas"} para auditoria.`;
   return "";
@@ -898,6 +901,8 @@ function queueQuarantineReason(item) {
     return "explicit_manual_review";
   if (isHistoricalProjectionBatch(item)) return "historical_projection_without_user_action";
   if (settingsQueueRequiresPermission(item)) return "settings_permission_required";
+  if (Number(window.AdiFestaBuild?.release)>=202 && item.syncProtocolVersion!==1)
+    return 'sync_protocol_upgrade_review';
   return "";
 }
 function queueManualReviewReason(item) {
@@ -935,8 +940,8 @@ async function archiveQuarantinedOperation(operationId) {
     const item = readQueueStrict().find(entry => entry.operationId === operationId);
     if (!item || item.userId !== uid || item.businessId !== businessId || !queueQuarantineReason(item))
       throw Error("Somente uma ocorrência em quarentena da conta atual pode ser arquivada.");
-    if (queueQuarantineReason(item) === "settings_permission_required")
-      throw Error("Esta configuração está preservada para análise de autorização. Não será arquivada nem reenviada por esta ação.");
+    if (['settings_permission_required','sync_protocol_upgrade_review'].includes(queueQuarantineReason(item)))
+      throw Error("Esta operação está preservada para análise de autorização ou versão. Não será arquivada nem reenviada por esta ação.");
     preserveQueueQuarantine(item);
     const evidence = readQueueReview(item), originalPacketJson = evidence.originalPacketJson;
     if (JSON.stringify(item) !== originalPacketJson) throw Error("O pacote difere da evidência original. O arquivamento foi interrompido.");
@@ -1339,6 +1344,7 @@ const diagnostic = () => {
     usage = usageSnapshot();
   return {
     projectId: PROJECT_ID,
+    operationalProtocol: state.operationalProtocol || {status:'not_verified'},
     databaseId: "(default)",
     authReady: state.authReady,
     authenticated: Boolean(auth.currentUser),
@@ -1497,11 +1503,10 @@ function reportError(error, context = "Firebase", extra = {}) {
 }
 function enrich(name, item) {
   const clean = sanitizeForFirestore(item) || {};
-  if (name === "clients")
-    Object.assign(clean, {
-      nomeNormalizado: normalizeText(clean.nome),
-      telefoneNormalizado: String(clean.telefone || "").replace(/\D/g, ""),
-    });
+  if (name === "clients") {
+    if (Object.hasOwn(clean,'nome')) clean.nomeNormalizado=normalizeText(clean.nome);
+    if (Object.hasOwn(clean,'telefone')) clean.telefoneNormalizado=String(clean.telefone||'').replace(/\D/g,'');
+  }
   if (name === "products") {
     if (Object.hasOwn(clean, 'nome')) clean.nomeNormalizado = normalizeText(clean.nome);
     if (Object.hasOwn(clean, 'semControleEstoque')) clean.controlaEstoque = !clean.semControleEstoque;
@@ -1788,6 +1793,7 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
+  if (window.location || window.AdiFestaBuild) assertSyncProtocolBundle();
   if (writes.some(write => write.entityType === "settings") && !canWriteSharedSettings())
     throw Object.assign(Error("Este perfil não pode alterar configurações da empresa. Nenhuma configuração foi enfileirada."),
       {code:"settings-permission-required",syncDetail:{stage:"settings_permission_preflight",
@@ -1828,6 +1834,8 @@ function queueWrites(
       action,
       payload: { writes: part, eventKind },
       payloadVersion: PAYLOAD_VERSION,
+      syncProtocolVersion: 1,
+      clientRelease: 202,
       businessId,
       workspaceGeneration:workspaceOrigin.workspaceGeneration,
       userId: currentUser.uid,
@@ -2048,6 +2056,11 @@ function diffWrites(before, after) {
           operation: exists ? "update" : "create",
           before: previous.get(id) || null,
           data: exists ? changedFields(previous.get(id), item) : item,
+          // Captured at the USER ACTION, never inferred from the UI at upload
+          // or used to rewrite any previously persisted operation.
+          ...(!exists&&['products','productVariants'].includes(name)&&Number(name==='products'?item.estoqueAtual:item.stock)>0&&item.productType!=='variable'
+            ? {initialStockSpaceId:window.SpaceContext?.stockMovementOrigin?.(name==='products'?item:(after.produtos||[]).find(p=>p.id===item.parentProductId))?.spaceId}
+            : {}),
         });
       }
     for (const [id, item] of previous)
@@ -2217,10 +2230,36 @@ async function testFirestoreConnection() {
     throw error;
   }
 }
+let verifiedProtocolSession='';
+function assertSyncProtocolBundle() {
+  if (!Number.isInteger(Number(window.AdiFestaBuild?.release)) || Number(window.AdiFestaBuild.release)<202 || !window.FirebaseCallable)
+    throw Object.assign(Error('Atualize a VECONI para continuar com segurança. As filas foram preservadas. Não refaça vendas.'),{code:'sync-update-required'});
+}
+async function verifyOperationalProtocol() {
+  assertSyncProtocolBundle();
+  const generation=syncSessionGeneration,uid=currentUser?.uid,businessId=activeBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
+  const key=JSON.stringify([generation,uid,businessId,workspaceGeneration]);
+  if(verifiedProtocolSession===key&&state.operationalProtocol?.status==='verified')return state.operationalProtocol;
+  const current=()=>generation===syncSessionGeneration&&uid===currentUser?.uid&&uid===auth.currentUser?.uid&&businessId===activeBusinessId()&&workspaceGeneration===(DB.getWorkspaceGeneration?.()??0);
+  const result=await window.FirebaseCallable('getOperationalSyncReceipt',{businessId,workspaceGeneration,kind:'sync_protocol'});
+  if(!current())throw Object.assign(Error('A sessão foi substituída; a fila original foi preservada.'),{code:'sync-session-retired'});
+  const protocol=result.data;
+  if(protocol?.protocolVersion!==1||protocol.channel!=='commitOperationalSync'||protocol.businessId!==businessId||protocol.workspaceGeneration!==workspaceGeneration||!Number.isInteger(protocol.minClientRelease)||protocol.minClientRelease<202||Number(window.AdiFestaBuild.release)<protocol.minClientRelease)
+    throw Object.assign(Error('Atualize a VECONI. O canal de sincronização ainda não foi confirmado; nenhuma operação foi enviada.'),{code:'sync-update-required'});
+  state.operationalProtocol={status:'verified',protocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release),confirmedAt:now()};
+  verifiedProtocolSession=key;
+  return protocol;
+}
 async function commitQueueItem(item) {
   const generation=syncSessionGeneration,uid=currentUser?.uid;
   const assertSession=()=>{if(generation!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid)throw Object.assign(Error('A sessão da operação foi substituída. A fila original foi preservada.'),{code:'sync-session-retired'});};
   assertSession();
+  if(window.location || window.AdiFestaBuild){
+    assertSyncProtocolBundle();
+    if(item.syncProtocolVersion!==1)throw Object.assign(Error('Operação de versão anterior preservada para revisão. Não será reenviada automaticamente.'),{code:'sync-protocol-upgrade-review'});
+    await verifyOperationalProtocol();
+    assertSession();
+  }
   window.WorkspaceRuntime.capture();
   const preflight=queuePreflight(item);
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
@@ -2232,6 +2271,26 @@ async function commitQueueItem(item) {
         code:"settings-permission-required",collection:"settings",request:"queue_preflight",
         path:`businesses/${activeBusinessId()}/settings/${settingsWrite.entityId}`,
         message:"A configuração exige autorização explícita de settings.manage."}});
+  // No fallback to direct commercial writes on Function/network failure. The
+  // durable original envelope, IDs and checksum remain in their UID namespace.
+  if (window.FirebaseCallable) {
+    let result;
+    try { result = await window.FirebaseCallable('commitOperationalSync', {
+      businessId: activeBusinessId(),
+      syncProtocolVersion:1,clientRelease:202,
+      item: {...item, operationId:stableLegacyOperationId(item),
+        workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0},
+    }); } catch(error) {
+      assertSession();
+      error.code=errorCode(error);
+      error.syncDetail={stage:'server_operational_commit',service:'Cloud Functions',code:error.code,
+        request:'authenticated_commit',path:`businesses/${activeBusinessId()}`,
+        message:'O servidor não confirmou esta operação. O envelope local original foi preservado.'};
+      throw error;
+    }
+    assertSession();
+    return result.data?.outcome || null;
+  }
   const businessId = activeBusinessId(),
     operationId = stableLegacyOperationId(item),
     marker = doc(
@@ -3030,6 +3089,14 @@ async function verifySaleQueueCommit(item) {
       { code: "sale-remote-ack-missing", saleId, operationId });
   const credit = saleWrite.data?.status === "fiado" || saleWrite.data?.formaPagamento === "fiado";
   if (!credit) return;
+  if (window.FirebaseCallable) {
+    const result=await window.FirebaseCallable('getOperationalSyncReceipt',{
+      businessId,workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0,
+      operationId,saleId,spaceId:remote.spaceId,
+    });
+    if(result.data?.confirmed!==true)throw Object.assign(Error('Confirmação financeira pendente; operação preservada.'),{code:'sale-financial-ack-missing'});
+    return;
+  }
   const effect = await getDocFromServer(doc(db, "businesses", businessId,
     "balanceEvents", balanceEffectId("credit_sale", saleId)));
   const clientId = String(saleWrite.data?.clienteId || saleWrite.data?.customerId || ""),
@@ -3226,6 +3293,8 @@ async function processSyncQueue(options = {}) {
         paused: true,
       };
     await validateUser();
+    assertSession();
+    if(window.location || window.AdiFestaBuild)await verifyOperationalProtocol();
     assertSession();
     await refreshRecoveryResolutions(current);
     assertSession();
@@ -3626,6 +3695,19 @@ async function confirmSaleUndo(sale) {
   await DB.flush?.();
   await processSyncQueue({force:true});
   assertSession();
+  if(window.FirebaseCallable){
+    const ack=await window.FirebaseCallable('getOperationalSyncReceipt',{businessId,workspaceGeneration:DB.getWorkspaceGeneration?.()??0,operationId,saleId,spaceId:sale.spaceId,kind:'sale_undo'});
+    assertSession();
+    if(ack.data?.confirmed!==true)throw Error('Cancelamento preservado; confirmação financeira pendente. Não repita.');
+    const [remote,client]=await Promise.all([
+      getDocFromServer(doc(db,'businesses',businessId,'sales',saleId)),
+      getDocFromServer(doc(db,'businesses',businessId,'clients',customerId)),
+    ]);
+    assertSession();
+    if(remote.exists())applyCloudCollection('sales',[{id:saleId,...remote.data()}],{authoritative:true});
+    if(client.exists())applyCloudCollection('clients',[{id:customerId,...client.data()}],{authoritative:true});
+    await DB.flush?.();return;
+  }
   const [marker, remoteSale, reversal, client] = await Promise.all([
     getDocFromServer(doc(db,"businesses",businessId,"processedOperations",operationId)),
     getDocFromServer(doc(db,"businesses",businessId,"sales",saleId)),
@@ -4724,7 +4806,8 @@ function financialLedgerEntry(name, item = {}) {
       ? roundedMoney(item.saldoNovo)
       : roundedMoney(before + amount);
   } else if (name === "balanceAdjustments") {
-    type = "balance_adjustment";
+    type = item.subtipo==='pagamento_duplicado_revertido'&&item.duplicatePaymentId
+      ? "payment_reversal" : "balance_adjustment";
     before = roundedMoney(item.saldoAnterior);
     after = roundedMoney(item.saldoNovo);
     amount = Math.abs(roundedMoney(after - before));
@@ -4738,10 +4821,10 @@ function financialLedgerEntry(name, item = {}) {
     return null;
   return {
     customerId,
-    sourceCollection: name,
-    sourceDocumentId,
+    sourceCollection: type==='payment_reversal'?"payments":name,
+    sourceDocumentId: type==='payment_reversal'?String(item.duplicatePaymentId):sourceDocumentId,
     operationId,
-    effectId: balanceEffectId(type, sourceDocumentId),
+    effectId: balanceEffectId(type, type==='payment_reversal'?String(item.duplicatePaymentId):sourceDocumentId),
     type,
     amount,
     balanceDelta: roundedMoney(after - before),
@@ -4917,12 +5000,14 @@ async function performDeviceComparison(options = {}) {
   }
   // A ledger audit needs all its sources. Missing authorization is not an empty
   // ledger, a zero balance, a remote absence, or permission to repair anything.
-  const financialAudited=allowed('payments')&&['clients','sales','payments','balanceAdjustments'].every(name=>Boolean(raw[name]));
+  const financialCompanyScope=window.BusinessContext?.get?.();
+  const fullFinancialScope=financialCompanyScope?.role==='owner'||financialCompanyScope?.spaceAccess==='all';
+  const financialAudited=fullFinancialScope&&allowed('payments')&&['clients','sales','payments','balanceAdjustments'].every(name=>Boolean(raw[name]));
   const remoteFinancialEffects = financialAudited
       ? await syncStep("orphan_comparison", () => financialEffectsRepository.listAllPaged(200), {service: "Firestore", collection: "balanceEvents", businessId, request: "listAllPaged"})
       : [];
   assertAuditSession();
-  if(!financialAudited)skippedCollections.push({name:'balanceEvents',reason:allowed('payments')?'incomplete_authorized_sources':'permission_scope'});
+  if(!financialAudited)skippedCollections.push({name:'balanceEvents',reason:allowed('payments')?!fullFinancialScope?'partial_space_scope':'incomplete_authorized_sources':'permission_scope'});
   const balanceAudit = financialAudited?buildFinancialBalanceAudit(raw, remoteFinancialEffects):null;
   const balanceScope=financialAudited?window.IntegrityAudit.balanceScope(data.clientes,raw.clients.remoteItems):null,
     localBalance = financialAudited?(data.clientes || []).reduce(
@@ -4989,7 +5074,7 @@ async function performDeviceComparison(options = {}) {
           ...collections.balanceAdjustments.possibleDuplicates.remote,
         ],
         balanceAudit,
-      }:{status:'not_audited',reason:allowed('payments')?'incomplete_authorized_sources':'permission_scope',message:'Financeiro não auditado neste perfil'},
+      }:{status:'not_audited',reason:allowed('payments')&&!fullFinancialScope?'partial_space_scope':allowed('payments')?'incomplete_authorized_sources':'permission_scope',message:allowed('payments')&&!fullFinancialScope?'Reconciliação financeira global não auditada: este perfil acessa apenas alguns espaços.':'Financeiro não auditado neste perfil'},
       queue: queueCounts(),
       integrity: window.IntegrityAudit.severity(collections,balanceAudit),
       fixtureCleanup: data.localFixtureCleanup || null,
@@ -5301,158 +5386,39 @@ async function reviewOnlyLocalSale(saleId, reason) {
   localStorage.setItem(orphanReviewKey(), JSON.stringify(reviews));
   return { saleId: String(saleId), reviewedAt: reviews[String(saleId)].reviewedAt };
 }
-function archiveResolvedSaleQueue(saleId, operationId, resolutionId) {
-  const queue = readQueueStrict(), removed = queue.filter((item) =>
-      String(item.operationId || "") === String(operationId || "") ||
-      (item.payload?.writes || []).some((write) => write.entityType === "sales" &&
-        String(write.entityId) === String(saleId))),
-    remaining = queue.filter((item) => !removed.includes(item));
-  if (!removed.length) return 0;
-  localStorage.setItem(`adiFestaSyncQueueResolvedArchive_${Date.now()}`, JSON.stringify({
-    reason: "resolved_by_reconciliation", resolutionId, saleId, operationId,
-    archivedAt: now(), businessId: activeBusinessId(), userId: currentUser?.uid || "",
-    queue: removed,
-  }));
-  saveQueue(remaining);
-  return removed.length;
+async function invokeFinancialMaintenance(command, payload) {
+  await validateUser();
+  if (!currentUser || readOnlyMode || !navigator.onLine || !["owner","admin"].includes(String(state.userProfile?.role||"")))
+    throw Object.assign(Error("A manutenção exige proprietário/administrador e conexão."),{code:"permission-denied"});
+  const generation=syncSessionGeneration,uid=currentUser.uid,businessId=activeBusinessId(),scope=namespace();
+  const assertCurrent=()=>{if(generation!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||businessId!==activeBusinessId()||scope!==namespace())
+    throw Object.assign(Error("A sessão mudou. O resultado pertence ao namespace original."),{code:"sync-session-retired"});};
+  const response=await window.FirebaseCallable("commitFinancialMaintenance",{...payload,command,confirmed:true,businessId,workspaceGeneration:DB.getWorkspaceGeneration?.()??0});
+  assertCurrent();
+  const result=response.data??response,targets=[["clients",result.clientId],["sales",result.saleId],["payments",result.duplicatePaymentId],["balanceAdjustments",result.adjustmentId]],batch=[];
+  for(const [name,id]of targets){if(!id)continue;const snap=await getDocFromServer(doc(db,"businesses",businessId,name,id));assertCurrent();if(snap.exists())batch.push({name,documents:[cleanCloudItem({id,...snap.data()})],options:{authoritative:true}});}
+  assertCurrent();if(batch.length)applyCloudCollectionBatch(batch);
+  if(['reconcile_only_local_balance','recover_only_local_sale'].includes(command)&&result.businessId===businessId&&result.workspaceGeneration===(DB.getWorkspaceGeneration?.()??0)&&/^[a-f0-9]{64}$/.test(result.auditHash||'')&&result.resolvedByUid===uid&&result.resolvedAt){
+    for(const item of readQueueStrict()){
+      const sales=(item.payload?.writes||[]).filter(w=>w.entityType==='sales'&&w.operation==='create');
+      if(item.userId!==uid||item.businessId!==businessId||item.operationId!==(result.originalOperationId||result.operationId)||sales.length!==1||sales[0].entityId!==result.saleId)continue;
+      localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({channel:'financial_maintenance',status:'resolved',operationId:item.operationId,saleId:result.saleId,businessId,spaceId:sales[0].data.spaceId,actorUid:item.userId,workspaceGeneration:item.workspaceGeneration??0,payloadChecksum:checksumValue(item.payload),auditHash:result.auditHash,resolutionId:result.operationId,resolvedByUid:uid,resolvedAt:result.resolvedAt}));
+    }
+  }
+  return result;
 }
 async function reconcileOnlyLocalSaleBalance(saleId, correctOpenDebt, reason) {
-  if (!currentUser || readOnlyMode || !navigator.onLine ||
-    !["owner", "admin"].includes(String(state.userProfile?.role || "")))
-    throw Error("A reconciliação exige owner/admin, acesso de escrita e conexão com a nuvem.");
-  const id = String(saleId || ""), debt = roundedMoney(correctOpenDebt),
-    explanation = String(reason || "").trim();
-  if (!id || !Number.isFinite(debt) || debt < 0 || debt > 999999999)
-    throw Error("Informe um saldo correto em aberto.");
-  if (explanation.length < 5)
-    throw Error("Informe o motivo da reconciliação.");
   await compareDeviceWithCloud();
-  const preview = onlyLocalSaleReport().find((item) => item.saleId === id),
-    local = (DB.carregar().vendas || []).find((sale) => String(sale.id) === id);
-  if (!preview || !local) throw Error("A venda antiga não foi encontrada após comparar com a nuvem.");
-  const businessId = activeBusinessId(), clientId = String(local.clienteId || local.customerId || ""),
-    originalOperationId = String(local.operationId || "");
-  if (!clientId || !originalOperationId)
-    throw Error("A operação antiga não possui cliente ou identificador suficientes para uma reconciliação segura.");
-  const operationId = legacyReconciliationOperationId(id),
-    targetBalance = debt === 0 ? 0 : -debt,
-    requestedAt = now(),
-    adjustmentRef = doc(db, "businesses", businessId, "balanceAdjustments", operationId),
-    markerRef = doc(db, "businesses", businessId, "processedOperations", operationId),
-    clientRef = doc(db, "businesses", businessId, "clients", clientId),
-    saleRef = doc(db, "businesses", businessId, "sales", id),
-    originalEffectRef = doc(db, "businesses", businessId, "balanceEvents",
-      balanceEffectId("credit_sale", id)),
-    adjustmentEffectId = balanceEffectId("balance_adjustment", operationId),
-    adjustmentEffectRef = doc(db, "businesses", businessId, "balanceEvents", adjustmentEffectId);
+  const id=String(saleId||""),preview=onlyLocalSaleReport().find(v=>v.saleId===id),sale=(DB.carregar().vendas||[]).find(v=>String(v.id)===id),debt=Number(correctOpenDebt);
+  if(!preview||!sale||!Number.isFinite(debt)||debt<0||String(reason||"").trim().length<5)throw Error("Reveja a venda, o saldo e o motivo antes de confirmar.");
   automaticRecoveryBackup();
-  let outcome;
-  await runTransaction(db, async (transaction) => {
-    const [adjustmentSnapshot, markerSnapshot, clientSnapshot, saleSnapshot,
-      originalEffectSnapshot, adjustmentEffectSnapshot] = await Promise.all([
-      transaction.get(adjustmentRef), transaction.get(markerRef), transaction.get(clientRef),
-      transaction.get(saleRef), transaction.get(originalEffectRef), transaction.get(adjustmentEffectRef),
-    ]);
-    if (adjustmentSnapshot.exists()) {
-      const existing = adjustmentSnapshot.data() || {};
-      if (existing.resolutionStatus !== "resolved_by_reconciliation" ||
-        String(existing.resolvedSaleId || "") !== id ||
-        String(existing.resolvedOperationId || "") !== originalOperationId)
-        throw Error("Existe outra operação usando o identificador desta reconciliação.");
-      outcome = { idempotent: true, operationId, clientId,
-        clientName: existing.clienteNome || preview.customer,
-        balanceBefore: roundedMoney(existing.saldoAnterior),
-        balanceAfter: roundedMoney(existing.saldoNovo),
-        financialVersionAfter: Number(existing.financialVersionAfter || 0),
-        adjustmentId: operationId };
-      return;
-    }
-    if (markerSnapshot.exists() || adjustmentEffectSnapshot.exists())
-      throw Error("A reconciliação possui estado remoto incompleto. Revise antes de repetir.");
-    if (saleSnapshot.exists() || originalEffectSnapshot.exists())
-      throw Error("A venda original ou seu efeito financeiro já apareceu na nuvem. Refaça a auditoria.");
-    if (!clientSnapshot.exists()) throw Error("Cliente não encontrado na nuvem.");
-    const client = clientSnapshot.data() || {}, currentBalance = roundedMoney(client.saldo || 0),
-      currentVersion = financialVersionOf(client), delta = roundedMoney(targetBalance - currentBalance);
-    if (!sameFinancialMoney(currentBalance, preview.remoteCurrentBalance) ||
-      currentVersion !== Number(preview.remoteFinancialVersion || 0))
-      throw Error("O saldo do cliente mudou depois da prévia. Compare novamente antes de confirmar.");
-    const nextVersion = currentVersion + (sameFinancialMoney(delta, 0) ? 0 : 1),
-      adjustment = sanitizeForFirestore({
-        id: operationId, operationId, idempotencyKey: operationId,
-        businessId, ownerId: currentUser.uid, actorUid: currentUser.uid,
-        clienteId: clientId, clientId, clienteNome: client.nome || preview.customer || "",
-        tipo: "ajuste_saldo", subtipo: "reconciliacao_operacao_legada",
-        adjustmentType: "reconciliation", reasonCode: "legacy_sale_not_synced",
-        source: "owner_manual_reconciliation", motivo: explanation,
-        saldoAnterior: currentBalance, saldoNovo: targetBalance, valor: delta,
-        expectedFinancialVersion: currentVersion, financialVersionAfter: nextVersion,
-        resolvedSaleId: id, resolvedOperationId: originalOperationId,
-        resolvedCustomerId: clientId, resolvedSaleAmount: preview.amount,
-        resolvedSaleDate: preview.date || null, resolvedSaleStatus: preview.status || "",
-        resolutionStatus: "resolved_by_reconciliation", resolvedAt: serverTimestamp(),
-        data: requestedAt, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-        schemaVersion: 3, version: 1,
-      });
-    if (!sameFinancialMoney(delta, 0))
-      transaction.set(clientRef, {
-        businessId, ownerId: currentUser.uid, saldo: targetBalance,
-        openBalance: Math.abs(Math.min(0, targetBalance)),
-        financialVersion: nextVersion, financialRevision: operationId,
-        financialReconciledAt: serverTimestamp(), updatedAt: serverTimestamp(),
-        version: increment(1),
-      }, { merge: true });
-    transaction.set(adjustmentRef, adjustment);
-    if (!sameFinancialMoney(delta, 0)) transaction.set(adjustmentEffectRef,
-      sanitizeForFirestore({
-        id: adjustmentEffectId, operationId, idempotencyKey: adjustmentEffectId,
-        businessId, ownerId: currentUser.uid, customerId: clientId, clientId,
-        sourceCollection: "balanceAdjustments", sourceDocumentId: operationId,
-        type: "balance_adjustment", direction: delta < 0 ? "debit" : "credit",
-        amount: Math.abs(delta), balanceDelta: delta, eventKind: "balance_reconciliation",
-        reasonCode: "legacy_sale_not_synced", source: "owner_manual_reconciliation",
-        status: "applied", sourceCreatedAt: requestedAt, appliedAt: serverTimestamp(),
-        createdAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 3,
-      }));
-    transaction.set(markerRef, sanitizeForFirestore({
-      id: operationId, idempotencyKey: operationId, businessId,
-      ownerId: currentUser.uid, status: "processed", eventKind: "balance_reconciliation",
-      processedAt: serverTimestamp(), createdAtLocal: requestedAt, schemaVersion: 3,
-    }));
-    outcome = { idempotent: false, operationId, clientId,
-      clientName: client.nome || preview.customer || "", balanceBefore: currentBalance,
-      balanceAfter: targetBalance, financialVersionAfter: nextVersion,
-      adjustmentId: operationId };
-  });
-  const [confirmedClientSnapshot, confirmedAdjustmentSnapshot] = await Promise.all([
-    getDocFromServer(clientRef), getDocFromServer(adjustmentRef),
-  ]), confirmedClient = confirmedClientSnapshot.exists()
-      ? cleanCloudItem({ id: clientId, ...confirmedClientSnapshot.data() }) : null,
-    confirmedAdjustment = confirmedAdjustmentSnapshot.exists()
-      ? cleanCloudItem({ id: operationId, ...confirmedAdjustmentSnapshot.data() }) : null;
-  if (!confirmedClient || !confirmedAdjustment ||
-    confirmedAdjustment.resolutionStatus !== "resolved_by_reconciliation" ||
-    String(confirmedAdjustment.resolvedSaleId || "") !== id ||
-    !sameFinancialMoney(confirmedClient.saldo, outcome.balanceAfter))
-    throw Error("A reconciliação foi enviada, mas a confirmação remota não pôde ser validada.");
-  applyCloudCollectionBatch([
-    { name: "clients", documents: [confirmedClient], options: { authoritative: true } },
-    { name: "balanceAdjustments", documents: [confirmedAdjustment], options: { authoritative: true } },
-  ]);
-  const reviews = readOrphanReviews();
-  reviews[id] = { saleId: id, operationId: originalOperationId,
-    checksum: checksumValue(local), decision: "resolved_by_reconciliation",
-    reason: explanation, reviewedAt: requestedAt, reviewedBy: currentUser.uid,
-    resolutionId: operationId, localBalanceAtReview: outcome.balanceAfter,
-    remoteBalanceAtReview: outcome.balanceAfter };
-  localStorage.setItem(orphanReviewKey(), JSON.stringify(reviews));
-  archiveResolvedSaleQueue(id, originalOperationId, operationId);
-  dispatchEvent(new CustomEvent("financial-state-updated", {
-    detail: { collection: "clients", clientId, operationId, source: "owner_manual_reconciliation" },
-  }));
-  await safePublishSyncSignal(["clients", "balanceAdjustments"]);
-  return { ...outcome, saleId: id, originalOperationId,
-    correctOpenDebt: Math.abs(Math.min(0, Number(outcome.balanceAfter || 0))) };
+  const result=await invokeFinancialMaintenance("reconcile_only_local_balance",{sale,clientId:String(sale.clienteId||sale.customerId||""),operationId:legacyReconciliationOperationId(id),expectedBalance:preview.remoteCurrentBalance,expectedFinancialVersion:preview.remoteFinancialVersion,targetBalance:debt===0?0:-roundedMoney(debt),reason:String(reason).trim()});
+  // Original packet, checksum, attempts and namespace stay untouched. The
+  // canonical adjustment fences replay, rather than deleting a local queue.
+  const reviews=readOrphanReviews();
+  reviews[id]={saleId:id,operationId:sale.operationId,checksum:checksumValue(sale),decision:"resolved_by_reconciliation",resolutionId:result.operationId,reason:String(reason).trim(),reviewedAt:now(),reviewedBy:currentUser.uid};
+  localStorage.setItem(orphanReviewKey(),JSON.stringify(reviews));
+  return {...result,originalOperationId:sale.operationId,correctOpenDebt:Math.abs(Math.min(0,result.balanceAfter))};
 }
 async function recoverMissingNonFinancial() {
   const audit = currentAuditOrThrow(),
@@ -5509,354 +5475,30 @@ async function recoverMissingFinancialMovements() {
     { code: "bulk-financial-recovery-disabled" });
 }
 async function recoverOnlyLocalSale(saleId) {
-  if (!currentUser || readOnlyMode || !navigator.onLine ||
-    !["owner", "admin"].includes(String(state.userProfile?.role || "")))
-    throw Error("A recuperação individual exige owner/admin, acesso de escrita e conexão com a nuvem.");
-  const id = String(saleId || "");
-  if (!id) throw Error("Selecione uma venda para recuperar.");
   await compareDeviceWithCloud();
-  const audit = currentAuditOrThrow(),
-    local = (DB.carregar().vendas || []).find((sale) => String(sale.id) === id),
-    remote = (audit.raw.sales.remoteItems || []).find((sale) => String(sale.id) === id);
-  if (!local || (local.businessId && String(local.businessId) !== activeBusinessId()))
-    throw Error("A venda não pertence a este aparelho/negócio.");
-  if (remote) {
-    if (String(remote.operationId || "") !== String(local.operationId || ""))
-      throw Error("O saleId já pertence a outra operação na nuvem. Revisão manual obrigatória.");
-    if (local.formaPagamento === "fiado" || local.status === "fiado") {
-      const effect = (audit.remoteFinancialEffects || []).find((item) =>
-        String(item.id) === balanceEffectId("credit_sale", id));
-      if (!remote.financialAppliedAt || !effect ||
-        String(effect.operationId || "") !== String(local.operationId || "") ||
-        String(effect.sourceDocumentId || "") !== id)
-        throw Error("A venda existe na nuvem, mas a confirmação financeira está incompleta. Revisão manual obrigatória.");
-    }
-    return { saleId: id, operationId: local.operationId, idempotent: true, recovered: false };
-  }
-  const preview = onlyLocalSaleReport().find((sale) => sale.saleId === id);
-  if (preview?.resolved)
-    throw Error("Esta operação já foi conciliada manualmente.");
-  if (preview?.classification !== "A" || !preview.recoveryMode)
-    throw Error(`Esta venda exige revisão manual. ${preview?.reason || "Não há evidência suficiente."}`);
-  const businessId = activeBusinessId(), operationId = String(local.operationId),
-    clientId = String(local.clienteId || local.customerId || ""),
-    credit = local.formaPagamento === "fiado" || local.status === "fiado",
-    amount = roundedMoney(local.valorFinal ?? local.valorTotal),
-    saleRef = doc(db, "businesses", businessId, "sales", id),
-    effectId = balanceEffectId("credit_sale", id),
-    effectRef = doc(db, "businesses", businessId, "balanceEvents", effectId),
-    resolutionRef = doc(db, "businesses", businessId, "balanceAdjustments",
-      legacyReconciliationOperationId(id)),
-    markerRef = doc(db, "businesses", businessId, "processedOperations", operationId),
-    clientRef = clientId ? doc(db, "businesses", businessId, "clients", clientId) : null;
+  const id=String(saleId||""),sale=(DB.carregar().vendas||[]).find(v=>String(v.id)===id),preview=onlyLocalSaleReport().find(v=>v.saleId===id),audit=currentAuditOrThrow();
+  if(!sale||!preview||preview.resolved||preview.classification!=="A"||!preview.recoveryMode)throw Error("A recuperação exige evidência individual válida e não resolvida.");
+  const client=(audit.raw.clients?.remoteItems||[]).find(c=>String(c.id)===String(sale.clienteId||sale.customerId));
+  if(!client&&(sale.clienteId||sale.customerId||sale.formaPagamento==='fiado'))throw Error("Confirme o cliente na nuvem antes da recuperação.");
   automaticRecoveryBackup();
-  const transactionResult = await runTransaction(db, async (transaction) => {
-    const saleSnapshot = await transaction.get(saleRef),
-      markerSnapshot = await transaction.get(markerRef),
-      effectSnapshot = credit ? await transaction.get(effectRef) : null,
-      resolutionSnapshot = await transaction.get(resolutionRef),
-      clientSnapshot = credit && clientRef ? await transaction.get(clientRef) : null,
-      effect = effectSnapshot?.exists() ? effectSnapshot.data() : null,
-      client = clientSnapshot?.exists() ? clientSnapshot.data() : null;
-    if (resolutionSnapshot.exists() &&
-      resolutionSnapshot.data()?.resolutionStatus === "resolved_by_reconciliation")
-      throw Error("Esta operação já foi conciliada manualmente.");
-    if (saleSnapshot.exists()) {
-      if (String(saleSnapshot.data()?.operationId || "") !== operationId)
-        throw Error("O saleId foi usado por outra operação durante a recuperação.");
-      return { idempotent: true };
-    }
-    if (preview.recoveryMode === "publish_only") {
-      if (!effect || String(effect.operationId || "") !== operationId ||
-        String(effect.sourceDocumentId || "") !== id ||
-        String(effect.customerId || effect.clientId || "") !== clientId ||
-        !sameFinancialMoney(effect.balanceDelta, -amount))
-        throw Error("O efeito financeiro mudou. Refaça a auditoria antes de recuperar.");
-    } else {
-      if (markerSnapshot.exists() || effect)
-        throw Error("A operação já tem marcador ou efeito remoto. Revisão manual obrigatória.");
-      if (preview.recoveryMode === "apply_financial" && (!client ||
-        !sameFinancialMoney(client.saldo, local.saldoAnterior) ||
-        financialVersionOf(client) !== Number(local.financialVersionAnterior) ||
-        !sameFinancialMoney(local.saldoAtual, Number(local.saldoAnterior) - amount)))
-        throw Error("O saldo ou a versão do cliente mudou. Nenhum débito foi aplicado.");
-    }
-    const appliedAt = preview.recoveryMode === "publish_only"
-      ? effect.appliedAt || serverTimestamp() : serverTimestamp(),
-      saleData = { ...local, operationId, idempotencyKey: operationId,
-        recoverySource: "reviewed_only_local_sale", recoveryMode: preview.recoveryMode,
-        recoveryChecksum: checksumValue(local), recoveredAt: serverTimestamp(),
-        syncConfirmedAt: serverTimestamp(),
-        ...(credit ? { status: "applied", applicationStatus: "applied",
-          financialAppliedAt: appliedAt, financialOperationId: effectId } : {}) };
-    transaction.set(saleRef, cloudPayload("sales", id, saleData, true));
-    if (preview.recoveryMode === "apply_financial") {
-      transaction.set(clientRef, {
-        saldo: roundedMoney(Number(client.saldo) - amount),
-        financialVersion: financialVersionOf(client) + 1,
-        totalComprado: roundedMoney(Number(client.totalComprado || 0) + amount),
-        quantidadeVendas: Number(client.quantidadeVendas || 0) + 1,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      transaction.set(effectRef, sanitizeForFirestore({
-        id: effectId, operationId, idempotencyKey: effectId, businessId,
-        ownerId: currentUser.uid, sourceDeviceId: deviceId(),
-        customerId: clientId, clientId, saleId: id,
-        sourceCollection: "sales", sourceDocumentId: id,
-        type: "credit_sale", direction: "debit", amount, balanceDelta: -amount,
-        eventKind: "sale", status: "applied", appliedAt: serverTimestamp(),
-        sourceCreatedAt: local.data || local.createdAt || now(),
-        createdAt: local.data || local.createdAt || serverTimestamp(),
-        updatedAt: serverTimestamp(), schemaVersion: 3,
-      }));
-    }
-    if (!markerSnapshot.exists()) transaction.set(markerRef, sanitizeForFirestore({
-      id: operationId, idempotencyKey: operationId, businessId, ownerId: currentUser.uid,
-      eventKind: "sale", status: "processed", createdAtLocal: local.data || local.createdAt || now(),
-      processedAt: serverTimestamp(), schemaVersion: 3,
-    }));
-    return { idempotent: false };
-  });
-  const confirmedSaleSnapshot = await getDocFromServer(saleRef),
-    confirmedSale = confirmedSaleSnapshot.exists()
-      ? cleanCloudItem({ id, ...confirmedSaleSnapshot.data() }) : null;
-  if (!confirmedSale || String(confirmedSale.operationId || "") !== operationId ||
-    (credit && !confirmedSale.financialAppliedAt))
-    throw Error("A transação foi enviada, mas a confirmação remota não foi verificada. Não repita com outro ID.");
-  applyCloudCollection("sales", [confirmedSale], { authoritative: true });
-  if (credit && clientRef) {
-    const confirmedClient = await getDocFromServer(clientRef);
-    if (confirmedClient.exists())
-      applyCloudCollection("clients", [{ id: clientId, ...confirmedClient.data() }], { authoritative: true });
-  }
-  await compareDeviceWithCloud();
-  return { saleId: id, operationId, idempotent: transactionResult.idempotent,
-    recovered: !transactionResult.idempotent, recoveryMode: preview.recoveryMode };
+  const result=await invokeFinancialMaintenance("recover_only_local_sale",{sale,operationId:sale.operationId,clientId:client?.id||null,expectedBalance:Number(client?.saldo||0),expectedFinancialVersion:financialVersionOf(client||{})});
+  await compareDeviceWithCloud();return result;
 }
 async function reconcileFinancialBalances() {
   await compareDeviceWithCloud();
-  const audit = currentAuditOrThrow(),
-    businessId = activeBusinessId(),
-    balanceAudit = audit.report.financial.balanceAudit,
-    repairs = [
-      ...(balanceAudit?.safeRepairs || []),
-      ...(balanceAudit?.effectBackfills || []),
-    ],
-    applied = [],
-    blocked = [];
-  if (audit.report.products.onlyLocal || audit.report.clients.onlyLocal)
-    throw Object.assign(
-      new Error(
-        "Confirme primeiro os produtos e clientes ausentes antes de reconciliar saldos.",
-      ),
-      { code: "non-financial-recovery-required" },
-    );
-  if (!repairs.length)
-    return {
-      backupCreated: false,
-      applied,
-      blocked: balanceAudit?.unsafe || [],
-      audit: balanceAudit,
-      estimatedReads: 0,
-    };
-  const backupId = automaticRecoveryBackup();
-  let estimatedReads = 0;
-  for (const repair of repairs) {
-    const reconciliationId = `balance-reconcile:${checksumValue({
-        businessId,
-        clientId: repair.clientId,
-        latestOperationId: repair.latestOperationId,
-        expectedBalance: repair.expectedBalance,
-      }).slice(-8)}`,
-      marker = doc(
-        db,
-        "businesses",
-        businessId,
-        "processedOperations",
-        reconciliationId,
-      ),
-      clientReference = doc(
-        db,
-        "businesses",
-        businessId,
-        "clients",
-        repair.clientId,
-      );
-    try {
-      const result = await runTransaction(db, async (transaction) => {
-        const markerSnapshot = await transaction.get(marker),
-          clientSnapshot = await transaction.get(clientReference);
-        estimatedReads += 2;
-        if (markerSnapshot.exists()) return { idempotent: true };
-        if (!clientSnapshot.exists())
-          throw Object.assign(new Error("Cliente não encontrado na nuvem."), {
-            code: "financial-client-missing",
-          });
-        const currentClient = normalizeFirestoreData(clientSnapshot.data());
-        if (!sameMoney(currentClient.saldo || 0, repair.actualBalance))
-          throw Object.assign(
-            new Error(
-              "O saldo mudou depois da prévia. Execute uma nova auditoria.",
-            ),
-            { code: "financial-preview-stale" },
-          );
-        const confirmations = [];
-        for (const event of repair.missingEffects) {
-          const effectReference = doc(
-              db,
-              "businesses",
-              businessId,
-              "balanceEvents",
-              event.effectId,
-            ),
-            sourceReference = doc(
-              db,
-              "businesses",
-              businessId,
-              event.sourceCollection,
-              event.sourceDocumentId,
-            ),
-            effectSnapshot = await transaction.get(effectReference),
-            sourceSnapshot = await transaction.get(sourceReference);
-          estimatedReads += 2;
-          if (effectSnapshot.exists())
-            throw Object.assign(
-              new Error(
-                "Um movimento já foi aplicado depois da prévia. Execute novamente.",
-              ),
-              { code: "financial-preview-stale" },
-            );
-          if (
-            !sourceSnapshot.exists() ||
-            checksumValue(normalizeFirestoreData(sourceSnapshot.data())) !==
-              event.sourceChecksum
-          )
-            throw Object.assign(
-              new Error(
-                "A operação de origem mudou depois da prévia. Nenhum saldo foi alterado.",
-              ),
-              { code: "financial-preview-stale" },
-            );
-          confirmations.push({ event, effectReference, sourceReference });
-        }
-        for (const { event, effectReference, sourceReference } of confirmations) {
-          transaction.set(
-            effectReference,
-            sanitizeForFirestore({
-              id: event.effectId,
-              operationId: event.operationId,
-              idempotencyKey: event.effectId,
-              businessId,
-              ownerId: currentUser.uid,
-              customerId: event.customerId,
-              clientId: event.customerId,
-              saleId:
-                event.sourceCollection === "sales"
-                  ? event.sourceDocumentId
-                  : null,
-              sourceCollection: event.sourceCollection,
-              sourceDocumentId: event.sourceDocumentId,
-              type: event.type,
-              direction: event.balanceDelta < 0 ? "debit" : "credit",
-              amount: event.amount,
-              balanceDelta: event.balanceDelta,
-              sourceDeviceId: deviceId(),
-              status: "applied_by_reconciliation",
-              sourceCreatedAt: event.date,
-              appliedAt: serverTimestamp(),
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              schemaVersion: 3,
-            }),
-          );
-          transaction.set(
-            sourceReference,
-            {
-              financialAppliedAt: serverTimestamp(),
-              financialOperationId: event.effectId,
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
-        const missingSales = repair.missingEffects.filter(
-            (event) => event.type === "credit_sale",
-          ),
-          reversedSales = repair.missingEffects.filter(
-            (event) => event.type === "credit_sale_reversal",
-          ),
-          purchaseValueDelta = roundedMoney(
-            missingSales.reduce((sum, event) => sum + event.amount, 0) -
-              reversedSales.reduce((sum, event) => sum + event.amount, 0),
-          ),
-          purchaseCountDelta = missingSales.length - reversedSales.length,
-          latestPurchaseAt = missingSales
-            .map((event) => event.date)
-            .filter(Boolean)
-            .sort()
-            .at(-1),
-          clientPatch = {
-            saldo: roundedMoney(repair.expectedBalance),
-            openBalance: Math.abs(
-              Math.min(0, roundedMoney(repair.expectedBalance)),
-            ),
-            financialRevision: repair.latestOperationId,
-            financialReconciledAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            revision: increment(1),
-          };
-        if (purchaseValueDelta && !repair.balanceAlreadyApplied)
-          clientPatch.totalComprado = increment(purchaseValueDelta);
-        if (purchaseCountDelta && !repair.balanceAlreadyApplied)
-          clientPatch.quantidadeVendas = increment(purchaseCountDelta);
-        if (latestPurchaseAt && !repair.balanceAlreadyApplied)
-          clientPatch.ultimaCompra = latestPurchaseAt;
-        transaction.set(clientReference, clientPatch, { merge: true });
-        transaction.set(
-          marker,
-          sanitizeForFirestore({
-            id: reconciliationId,
-            idempotencyKey: reconciliationId,
-            businessId,
-            ownerId: currentUser.uid,
-            status: "processed",
-            eventKind: "balance_reconciliation",
-            processedAt: serverTimestamp(),
-            createdAtLocal: now(),
-            schemaVersion: 3,
-          }),
-        );
-        return { idempotent: false };
-      });
-      applied.push({
-        clientId: repair.clientId,
-        reconciliationId,
-        expectedBalance: repair.expectedBalance,
-        effects: repair.missingEffects.length,
-        idempotent: Boolean(result?.idempotent),
-      });
-    } catch (error) {
-      blocked.push({
-        clientId: repair.clientId,
-        code: errorCode(error) || error.code || "unknown",
-        message: String(error.message || "Falha na reconciliação.").slice(0, 240),
-      });
-    }
+  const audit=currentAuditOrThrow(),balanceAudit=audit.report.financial.balanceAudit;
+  if(!audit.report.auditScope.financialAudited)throw Error("Reconciliação exige todas as fontes financeiras autorizadas da empresa.");
+  if(audit.report.products.onlyLocal||audit.report.clients.onlyLocal)throw Error("Confirme primeiro os cadastros ausentes.");
+  const repairs=[...(balanceAudit?.safeRepairs||[]),...(balanceAudit?.effectBackfills||[])],applied=[],blocked=[];
+  const backupId=repairs.length?automaticRecoveryBackup():null;
+  for(const repair of repairs){
+    const client=(audit.raw.clients.remoteItems||[]).find(c=>String(c.id)===repair.clientId);
+    const operationId=`balance-reconcile:${checksumValue({businessId:activeBusinessId(),clientId:repair.clientId,latestOperationId:repair.latestOperationId,expectedBalance:repair.expectedBalance}).slice(-8)}`;
+    try{const result=await invokeFinancialMaintenance("reconcile_balances",{operationId,clientId:repair.clientId,expectedBalance:repair.actualBalance,expectedFinancialVersion:financialVersionOf(client),targetBalance:repair.expectedBalance,effectIds:repair.missingEffects.map(e=>e.effectId)});
+      applied.push({clientId:repair.clientId,reconciliationId:operationId,expectedBalance:result.balanceAfter,effects:result.effects,idempotent:result.idempotent});
+    }catch(error){if(error.code==="sync-session-retired")throw error;blocked.push({clientId:repair.clientId,code:errorCode(error),message:String(error.message||"Não confirmado.").slice(0,240)});}
   }
-  if (applied.length)
-    await safePublishSyncSignal(
-      ["clients", "sales", "payments", "balanceAdjustments"],
-      blocked.length ? "error" : "ok",
-    );
-  const comparison = await compareDeviceWithCloud();
-  return {
-    backupCreated: true,
-    backupId,
-    applied,
-    blocked,
-    estimatedReads,
-    comparison,
-  };
+  return{backupCreated:!!backupId,backupId,applied,blocked,comparison:await compareDeviceWithCloud()};
 }
 async function refreshSafelyFromServer() {
   const audit = currentAuditOrThrow(),
@@ -6333,388 +5975,10 @@ async function auditSuspiciousPayments(options = {}) {
   };
 }
 async function reverseDuplicatePayment(options = {}) {
-  const session = await validateUser();
-  if (!["owner", "admin"].includes(String(session.profile?.role || "")))
-    throw Object.assign(
-      new Error("Somente proprietário ou administrador pode executar a reversão."),
-      { code: "permission-denied" },
-    );
-  const businessId = activeBusinessId(),
-    clientId = String(options.clientId || ""),
-    legitimatePaymentId = String(options.legitimatePaymentId || ""),
-    duplicatePaymentId = String(options.duplicatePaymentId || ""),
-    expectedBalance = roundedMoney(options.expectedBalance),
-    targetBalance = roundedMoney(options.targetBalance),
-    reason =
-      String(options.reason || "").trim() ||
-      "duplicate_payment_from_stale_projection",
-    operationId = String(
-      options.operationId ||
-        `duplicate-payment-reversal:${duplicatePaymentId}`,
-    ),
-    effectId = `payment_received:${duplicatePaymentId}`,
-    reversalEffectId = `payment_reversal:${duplicatePaymentId}`,
-    requestedAt = now();
-  if (!clientId || !legitimatePaymentId || !duplicatePaymentId)
-    throw Object.assign(
-      new Error("Informe cliente, pagamento legítimo e pagamento duplicado."),
-      { code: "invalid-argument" },
-    );
-  const markerReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "processedOperations",
-      operationId,
-    ),
-    clientReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "clients",
-      clientId,
-    ),
-    legitimateReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "payments",
-      legitimatePaymentId,
-    ),
-    duplicateReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "payments",
-      duplicatePaymentId,
-    ),
-    effectReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "balanceEvents",
-      effectId,
-    ),
-    reversalEffectReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "balanceEvents",
-      reversalEffectId,
-    ),
-    adjustmentReference = doc(
-      db,
-      "businesses",
-      businessId,
-      "balanceAdjustments",
-      operationId,
-    );
-  let outcome = null;
-  await runTransaction(db, async (transaction) => {
-    const markerSnapshot = await transaction.get(markerReference);
-    if (markerSnapshot.exists()) {
-      outcome = {
-        idempotent: true,
-        operationId,
-        clientId,
-        duplicatePaymentId,
-        legitimatePaymentId,
-        balanceBefore: expectedBalance,
-        balanceAfter: targetBalance,
-        amount: roundedMoney(expectedBalance - targetBalance),
-        reversalEffectId,
-      };
-      return;
-    }
-    const [
-        clientSnapshot,
-        legitimateSnapshot,
-        duplicateSnapshot,
-        effectSnapshot,
-        reversalEffectSnapshot,
-        adjustmentSnapshot,
-      ] = await Promise.all([
-        transaction.get(clientReference),
-        transaction.get(legitimateReference),
-        transaction.get(duplicateReference),
-        transaction.get(effectReference),
-        transaction.get(reversalEffectReference),
-        transaction.get(adjustmentReference),
-      ]),
-      client = clientSnapshot.exists() ? clientSnapshot.data() || {} : null,
-      legitimate = legitimateSnapshot.exists()
-        ? legitimateSnapshot.data() || {}
-        : null,
-      duplicate = duplicateSnapshot.exists()
-        ? duplicateSnapshot.data() || {}
-        : null,
-      effect = effectSnapshot.exists() ? effectSnapshot.data() || {} : null;
-    if (!client || !legitimate || !duplicate || !effect)
-      throw Object.assign(
-        new Error("Os documentos financeiros necessários não foram encontrados."),
-        { code: "not-found" },
-      );
-    const amount = roundedMoney(duplicate.valor ?? duplicate.amount),
-      currentBalance = roundedMoney(client.saldo || 0),
-      correctedBalance = roundedMoney(currentBalance - amount),
-      financialVersionBefore = financialVersionOf(client);
-    if (
-      amount <= 0 ||
-      effect.type !== "payment_received" ||
-      String(effect.sourceDocumentId || "") !== duplicatePaymentId ||
-      effect.status !== "applied" ||
-      !sameFinancialMoney(effect.amount, amount) ||
-      String(effect.customerId || effect.clientId || "") !== clientId
-    )
-      throw Object.assign(
-        new Error("O efeito aplicado não corresponde ao pagamento duplicado."),
-        { code: "financial-effect-mismatch" },
-      );
-    if (
-      String(legitimate.clienteId || legitimate.clientId || "") !== clientId ||
-      String(duplicate.clienteId || duplicate.clientId || "") !== clientId ||
-      !sameFinancialMoney(
-        legitimate.valor ?? legitimate.amount,
-        amount,
-      )
-    )
-      throw Object.assign(
-        new Error("Os pagamentos não correspondem ao cliente e valor auditados."),
-        { code: "failed-precondition" },
-      );
-    if (
-      !sameFinancialMoney(currentBalance, expectedBalance) ||
-      !sameFinancialMoney(correctedBalance, targetBalance)
-    )
-      throw Object.assign(
-        new Error("O saldo mudou depois da prévia da reversão."),
-        {
-          code: "financial-preview-stale",
-          currentBalance,
-          expectedBalance,
-        },
-      );
-    if (
-      duplicate.status === "reversed" ||
-      reversalEffectSnapshot.exists() ||
-      adjustmentSnapshot.exists()
-    )
-      throw Object.assign(
-        new Error("A reversão já existe sem o marcador idempotente esperado."),
-        { code: "financial-reversal-state-conflict" },
-      );
-    if (
-      (duplicate.allocations || []).length ||
-      (duplicate.campaignConfirmations || []).length
-    )
-      throw Object.assign(
-        new Error("O pagamento possui efeitos de campanha e exige revisão manual."),
-        { code: "payment-campaign-reversal-required" },
-      );
-    const adjustment = sanitizeForFirestore({
-        id: operationId,
-        operationId,
-        idempotencyKey: operationId,
-        businessId,
-        ownerId: currentUser.uid,
-        clienteId: clientId,
-        clientId,
-        clienteNome: client.nome || duplicate.clienteNome || "",
-        tipo: "ajuste_saldo",
-        subtipo: "pagamento_duplicado_revertido",
-        valor: -amount,
-        saldoAnterior: currentBalance,
-        saldoNovo: correctedBalance,
-        motivo: "Pagamento registrado duas vezes em dispositivos diferentes.",
-        reversalReason: reason,
-        duplicatePaymentId,
-        duplicateOf: legitimatePaymentId,
-        reversesEffectId: effectId,
-        data: requestedAt,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        schemaVersion: 3,
-        version: 1,
-      }),
-      reversalEffect = sanitizeForFirestore({
-        id: reversalEffectId,
-        operationId,
-        idempotencyKey: reversalEffectId,
-        businessId,
-        ownerId: currentUser.uid,
-        customerId: clientId,
-        clientId,
-        sourceCollection: "payments",
-        sourceDocumentId: duplicatePaymentId,
-        type: "payment_reversal",
-        direction: "debit",
-        amount,
-        balanceDelta: -amount,
-        eventKind: "duplicate_payment_reversal",
-        reversesEffectId: effectId,
-        duplicateOf: legitimatePaymentId,
-        status: "applied",
-        sourceCreatedAt: requestedAt,
-        appliedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        schemaVersion: 3,
-      });
-    transaction.set(
-      clientReference,
-      {
-        businessId,
-        ownerId: currentUser.uid,
-        saldo: correctedBalance,
-        openBalance: Math.abs(Math.min(0, correctedBalance)),
-        financialVersion: financialVersionBefore + 1,
-        financialRevision: operationId,
-        financialReconciledAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        version: increment(1),
-      },
-      { merge: true },
-    );
-    transaction.set(
-      duplicateReference,
-      {
-        businessId,
-        ownerId: currentUser.uid,
-        status: "reversed",
-        applicationStatus: "reversed",
-        reversalReason: reason,
-        reversedAt: serverTimestamp(),
-        reversedByOperationId: operationId,
-        duplicateOf: legitimatePaymentId,
-        reversalEffectId,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-    transaction.set(
-      effectReference,
-      {
-        businessId,
-        ownerId: currentUser.uid,
-        status: "reversed",
-        reversalReason: reason,
-        reversedAt: serverTimestamp(),
-        reversedByOperationId: operationId,
-        reversalEffectId,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-    transaction.set(reversalEffectReference, reversalEffect);
-    transaction.set(adjustmentReference, adjustment);
-    transaction.set(
-      markerReference,
-      sanitizeForFirestore({
-        id: operationId,
-        idempotencyKey: operationId,
-        businessId,
-        ownerId: currentUser.uid,
-        status: "processed",
-        eventKind: "duplicate_payment_reversal",
-        processedAt: serverTimestamp(),
-        createdAtLocal: requestedAt,
-        schemaVersion: 3,
-      }),
-    );
-    outcome = {
-      idempotent: false,
-      operationId,
-      clientId,
-      clientName: client.nome || duplicate.clienteNome || "",
-      duplicatePaymentId,
-      legitimatePaymentId,
-      balanceBefore: currentBalance,
-      balanceAfter: correctedBalance,
-      amount,
-      financialVersionBefore,
-      financialVersionAfter: financialVersionBefore + 1,
-      reversalEffectId,
-      adjustmentId: operationId,
-      totalComprado: Number(client.totalComprado || 0),
-      quantidadeVendas: Number(client.quantidadeVendas || 0),
-      ultimaCompra: client.ultimaCompra || null,
-    };
-  });
-  if (outcome && originalAlter) {
-    applyingCloud = true;
-    try {
-      originalAlter((data) => {
-        const client = (data.clientes || []).find(
-            (entry) => String(entry.id) === clientId,
-          ),
-          duplicate = (data.pagamentos || []).find(
-            (entry) => String(entry.id) === duplicatePaymentId,
-          );
-        if (client) {
-          client.saldo = outcome.balanceAfter;
-          if (Number.isFinite(Number(outcome.financialVersionAfter)))
-            client.financialVersion = Number(outcome.financialVersionAfter);
-          client.openBalance = Math.abs(
-            Math.min(0, Number(outcome.balanceAfter || 0)),
-          );
-          client.financialRevision = operationId;
-        }
-        if (duplicate)
-          Object.assign(duplicate, {
-            status: "reversed",
-            applicationStatus: "reversed",
-            reversalReason: reason,
-            reversedAt: requestedAt,
-            reversedByOperationId: operationId,
-            duplicateOf: legitimatePaymentId,
-            reversalEffectId,
-          });
-        const duplicateMovement = (data.movimentacoes || []).find(
-          (entry) => String(entry.id) === duplicatePaymentId,
-        );
-        if (duplicateMovement)
-          Object.assign(duplicateMovement, {
-            status: "reversed",
-            applicationStatus: "reversed",
-            reversalReason: reason,
-            reversedAt: requestedAt,
-            reversedByOperationId: operationId,
-            duplicateOf: legitimatePaymentId,
-          });
-        if (
-          !outcome.idempotent &&
-          !(data.movimentacoes || []).some(
-            (entry) => String(entry.id) === operationId,
-          )
-        )
-          data.movimentacoes.push({
-            id: operationId,
-            operationId,
-            businessId,
-            clienteId: clientId,
-            clientId,
-            clienteNome: outcome.clientName,
-            tipo: "ajuste_saldo",
-            subtipo: "pagamento_duplicado_revertido",
-            valor: -outcome.amount,
-            saldoAnterior: outcome.balanceBefore,
-            saldoNovo: outcome.balanceAfter,
-            motivo: "Pagamento registrado duas vezes em dispositivos diferentes.",
-            reversalReason: reason,
-            duplicatePaymentId,
-            duplicateOf: legitimatePaymentId,
-            data: requestedAt,
-            schemaVersion: 3,
-          });
-      });
-    } finally {
-      applyingCloud = false;
-    }
-    notifyCloudCollectionChange("clients", 1);
-    notifyCloudCollectionChange("payments", 1);
-    notifyCloudCollectionChange("balanceAdjustments", 1);
-  }
-  return outcome;
+  const client=(DB.carregar().clientes||[]).find(c=>String(c.id)===String(options.clientId));
+  if(!client)throw Error("Cliente não carregado para revisão.");
+  automaticRecoveryBackup();
+  return invokeFinancialMaintenance("reverse_duplicate_payment",{operationId:`duplicate-payment-reversal:${options.duplicatePaymentId}`,clientId:String(options.clientId||""),legitimatePaymentId:String(options.legitimatePaymentId||""),duplicatePaymentId:String(options.duplicatePaymentId||""),expectedBalance:Number(options.expectedBalance),targetBalance:Number(options.targetBalance),expectedFinancialVersion:financialVersionOf(client),reason:String(options.reason||"duplicate_payment_from_stale_projection")});
 }
 async function safeRestoreBackupData(prepared, mode = "merge") {
   try {
@@ -6760,6 +6024,7 @@ function setUser(user, profile = null, business = null, {reason = "session_updat
   let pendingBefore = null;
   try { pendingBefore = queueCounts().total; } catch { /* Diagnostic only. Never modify the queue. */ }
   syncSessionGeneration++;
+  state.operationalProtocol={status:'not_verified'};
   processingPromise = null; // The retired promise is fenced; it must not own the next identity's queue.
   // Diagnostics are memory-only and must not be exposed to the next account.
   if (user && previousUid !== user.uid) {

@@ -8,10 +8,10 @@ const mobile = fs.readFileSync("js/configuracoes-mobile.js", "utf8");
 const ui = fs.readFileSync("js/firebase/firebase-ui.js", "utf8");
 
 test("transferência concluída é separada da severidade da auditoria", () => {
-  assert.match(sync, /complete = counts\.total === 0 && counts\.errors === 0,/);
+  assert.match(sync, /complete = counts\.active === 0 && counts\.errors === 0 && !state\.syncFailure/);
   assert.match(sync, /result\.integrity=audit\.integrity/);
   assert.match(sync, /pullCloudCollections\(\{ force: true, full: true \}\)/);
-  assert.match(sync, /status: complete \? "success" : "error"/);
+  assert.match(sync, /status: result\.syncFailure \|\| counts\.errors \? "error" : complete \? "success" : "waiting"/);
   assert.match(sync, /if \(complete\) writeSyncTime\(lastCompleteKey\(\), time\)/);
   assert.match(desktop, /SyncFirebase\.describeResult/);
   assert.match(mobile, /SyncFirebase\.describeResult/);
@@ -91,8 +91,8 @@ test("venda fiado confirma movimento, saldo e marcador na mesma transação", ()
   assert.match(sync, /financialEffectFromWrites/);
   assert.match(sync, /"balanceEvents"/);
   assert.match(sync, /type = "credit_sale"/);
-  assert.match(sync, /financialAppliedAt: serverTimestamp\(\)/);
-  assert.match(sync, /financialOperationId: financialEffect\.id/);
+  assert.match(sync, /financialAppliedAt:\s*serverTimestamp\(\)/);
+  assert.match(sync, /financialOperationId:\s*financialEffect\.id/);
   assert.match(sync, /financial-composite-incomplete/);
   assert.match(sync, /financial-reconciliation-required/);
 });
@@ -102,9 +102,12 @@ test("reconciliação financeira usa cadeia de movimentos e prévia idempotente"
   assert.match(sync, /safe_missing_effects/);
   assert.match(sync, /safe_effect_backfill/);
   assert.match(sync, /balanceAlreadyApplied/);
-  assert.match(sync, /financial-preview-stale/);
+  const maintenance=fs.readFileSync('functions/src/services/financial-maintenance-service.js','utf8');
+  assert.match(maintenance,/Saldo ou versão mudou após a prévia/);
+  assert.match(maintenance,/buildFinancialBalanceAudit\(raw/);
+  assert.match(sync,/invokeFinancialMaintenance\("reconcile_balances"/);
   assert.match(sync, /reconcileFinancialBalances/);
-  assert.match(sync, /balance_reconciliation/);
+  assert.match(maintenance, /balance_reconciliation/);
   assert.doesNotMatch(ui, />Reconciliar saldos<|>Corrigir tudo</);
   assert.match(ui, /não reaplicar saldo/);
   assert.match(ui, /Aplicar somente as correções seguras/);

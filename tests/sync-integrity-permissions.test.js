@@ -25,7 +25,9 @@ test('owner complete audit retains payments, adjustments, projections and canoni
 test('effective permissions, not seller role label, decide audit scope',async()=>{
   for(const permission of ['financial.view','customers.receiveDebt','customers.adjustBalance']){
     const h=harness({permissions:[...operational,permission],documents}),report=await h.compare();
-    assert.equal(report.auditScope.financialAudited,true);assert.equal(h.reads.includes('payments'),true);
+    assert.equal(report.auditScope.financialAudited,false);assert.equal(report.financial.reason,'partial_space_scope');assert.equal(h.reads.includes('payments'),true);
+    assert.equal(h.reads.includes('balanceEvents'),false);
+    h.context.spaceAccess='all';h.reads.length=0;const full=await h.compare();assert.equal(full.auditScope.financialAudited,true);
     assert.equal(h.reads.includes('balanceEvents'),true);assert.equal(h.reads.includes('productFinancials'),false);
   }
 });
@@ -107,7 +109,7 @@ test('authorized owner financial denials are still reported with exact collectio
   }
 });
 test('financial read without all authorized ledger sources is explicitly incomplete and never invents a balanced ledger',async()=>{
-  const h=harness({permissions:['products.view','financial.view'],documents}),report=await h.compare();
+  const h=harness({permissions:['products.view','financial.view'],documents});h.context.spaceAccess='all';const report=await h.compare();
   assert.equal(report.financial.status,'not_audited');assert.equal(report.financial.reason,'incomplete_authorized_sources');
   assert.equal(report.financial.balanceAudit,undefined);assert.equal(h.reads.includes('balanceEvents'),false);
 });

@@ -71,7 +71,7 @@ test('new cache never falls back to any older cache during offline reload', asyn
   h.cache.set('./index.html', new Response('CURRENT_SAFE_INDEX'));
   const response = await h.request('/new-route', {mode: 'navigate'});
   assert.equal(await response.text(), 'CURRENT_SAFE_INDEX');
-  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => call[1] === 'veconi-v201-cancellation-payment-options'));
+  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => /^veconi-v202-authorized-sync(?:-compatible-floor)?$/.test(call[1])));
 });
 test('catalog route keeps its current offline fallback', async () => {
   const h = harness({offline: true});
@@ -95,9 +95,9 @@ test('cross-origin Firestore/Auth requests and non-GET mutations are not interce
   assert.equal(await h.request('/operation', {method: 'POST'}), undefined);
   assert.deepEqual(h.calls, []);
 });
-test('worker reports V201 without changing commercial code or login state', () => {
+test('worker reports V202 without changing commercial code or login state', () => {
   const h = harness(); let version;
   h.events.message({data: 'GET_VERSION', ports: [{postMessage: value => { version = value; }}]});
-  assert.equal(version.release, '201');
+  assert.equal(version.release, '202');
   h.events.message({data: 'SKIP_WAITING'}); assert.equal(h.skipped, 1);
 });

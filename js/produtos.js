@@ -29,6 +29,10 @@ window.Produtos=(()=>{
   const salvar=d=>{if(window.TeamAccess&&!window.TeamAccess.has('products.edit'))throw Error('Você não tem permissão para editar produtos.');if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateProduct(),'criar novos produtos');const existente=d.id?obter(d.id):null,barcode=window.normalizeBarcode?.(d.barcode!==undefined?d.barcode:existente?.barcode)||'',barcodeType=barcode?(d.barcodeType||existente?.barcodeType||window.BarcodeIndex?.inferType?.(barcode)||null):null;window.BarcodeIndex?.assertAvailable?.(barcode,d.id);let salvo;DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
     const v=window.ProductModel.build(d,atual,{agora,barcode,barcodeType,normalizeProductAccess:window.SpaceEngine?.normalizeProductAccess});
+    // Validate origin before adding a new positive-stock record. Capture in
+    // diffWrites then makes that choice durable; retry never consults the UI.
+    if(!atual&&v.productType!=='variable'&&productControlsStock(v)&&Number(v.estoqueAtual)>0)
+      window.SpaceContext?.stockMovementOrigin?.(v);
     if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{const result=DB.alterar(db=>{db.produtos=db.produtos.filter(p=>p.id!==id);db.variacoesProdutos=(db.variacoesProdutos||[]).filter(v=>v.parentProductId!==id)});window.BarcodeIndex?.invalidate?.();return result};

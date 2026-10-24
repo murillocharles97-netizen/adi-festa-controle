@@ -57,6 +57,11 @@ service firebase.storage {
           (
             financialSpace(spaceId).type == 'business'
             && canAccess(financialSpace(spaceId).linkedBusinessId)
+            && permitted(financialSpace(spaceId).linkedBusinessId,'financial.view')
+            && (!modernAccess(financialSpace(spaceId).linkedBusinessId)
+              || member(financialSpace(spaceId).linkedBusinessId).get('role','') == 'owner'
+              || member(financialSpace(spaceId).linkedBusinessId).get('spaceAccess','') == 'all'
+              || spaceId in member(financialSpace(spaceId).linkedBusinessId).get('allowedSpaceIds',[]))
           )
           || (
             financialSpace(spaceId).type in ['personal', 'other']

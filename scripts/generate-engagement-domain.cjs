@@ -1,0 +1,6 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),root=path.resolve(__dirname,'..');
+const source=['js/product-variations.js','js/campaign-engine-v2.js','js/customer-subscriptions.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8').replaceAll('\r\n','\n')).join('\n');
+const output=`'use strict';\n// GENERATED: same pure domain functions as the V2 consumer. No eval/runtime fetch.\nmodule.exports=function engagementDomain(data,{businessId,uid,uuid,at}={}){\n const NativeDate=globalThis.Date;\n const Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[at||NativeDate.now()]));}static now(){return at?new NativeDate(at).getTime():NativeDate.now();}};\n const window={FirebaseSession:{businessId,user:{uid}},crypto:{randomUUID:uuid}},DB={getBusinessId:()=>businessId,carregar:()=>data,alterar:fn=>fn(data)},Utils={uuid};\n const structuredClone=globalThis.structuredClone;\n${source}\n return{campaigns:window.CampaignEngineV2,subscriptions:window.CustomerSubscriptions};\n};\n`;
+const target=path.join(root,'functions/src/shared/engagement-domain.js');
+if(process.argv.includes('--check')){if(fs.readFileSync(target,'utf8')!==output)throw Error('Regenerate engagement domain');}else fs.writeFileSync(target,output);

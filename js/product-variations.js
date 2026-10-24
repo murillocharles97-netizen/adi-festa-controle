@@ -205,6 +205,8 @@
         next.minStock = existing ? num(existing.minStock) : 0;
         next.allowNegativeStock = false;
       }
+      if (!existing && controlsStock && num(next.stock)>0)
+        window.SpaceContext?.stockMovementOrigin?.(product);
       if (existing) Object.assign(existing, next);
       else data.variacoesProdutos.push(next);
       saved = existing || next;
@@ -240,6 +242,8 @@
         itemKind !== "service" &&
         !product.semControleEstoque &&
         product.controlaEstoque !== false;
+    if(controlsStock&&variants.some(v=>num(v.stock)>0))
+      window.SpaceContext?.stockMovementOrigin?.(product);
     let created;
     DB.alterar((data) => {
       const timestamp = now(),

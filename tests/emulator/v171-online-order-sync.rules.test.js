@@ -4,6 +4,7 @@ if(!/^(localhost|127\.0\.0\.1):/.test(process.env.FIRESTORE_EMULATOR_HOST||''))t
 const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
 const req=require('node:module').createRequire(require('node:path').resolve('functions/package.json')),{initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore}=req('firebase-admin/firestore');
 const {onlineStoreService}=require('../../functions/src/services/online-store-service'),{onlineOrderService}=require('../../functions/src/services/online-order-service'),{onlineStoreStockProjection}=require('../../functions/src/services/online-store-stock-projection');
+const {operationalCommitService}=require('../../functions/src/services/operational-commit-service');
 const source=fs.readFileSync('js/firebase/sync.js','utf8'),section=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 const stamp=Date.now().toString(36),bid=`v171-${stamp}`,owner=`owner-${stamp}`,seller=`seller-${stamp}`,a=`a-${stamp}`,b=`b-${stamp}`;
 let env,app,db,stores,orders,sanitizer,seq=0;
@@ -33,12 +34,13 @@ async function pipeline(order,uid=owner,{v170=false,stripProof=false}={}){
  for(const file of ['functions/src/shared/online-order.js','js/product-variations.js','js/vendas.js'])vm.runInContext(fs.readFileSync(file,'utf8'),c);
  const vmSdk={...sdk,runTransaction:(database,fn)=>sdk.runTransaction(database,tx=>fn({get:r=>tx.get(r),set:(r,d,o)=>tx.set(r,bridge(d),o),update:(r,d)=>tx.update(r,bridge(d)),delete:r=>tx.delete(r)}))};
  const writer=require('../../js/workspace-writer.js').create({sdk:vmSdk,runtime:()=>c.WorkspaceRuntime});c.runTransaction=writer.runTransaction;
+ Object.assign(c,{syncSessionGeneration:1,auth:{currentUser:{uid}},errorCode:e=>String(e.code||'unknown').replace(/^functions\//,''),FirebaseCallable:async(name,data)=>{assert.equal(name,'commitOperationalSync');return{data:await operationalCommitService(db).commit({auth:{uid},data})};}});
  vm.runInContext(fs.readFileSync('js/firebase/product-import-fence.js','utf8').replace('export ',''),c);
  vm.runInContext(section('function enrich(','function archiveQueue(')+section('function changedFields(','function captureChanges(')+section('function financialEffectFromWrites(','const readSignalVersions')+section('async function commitQueueItem(','async function verifySaleQueueCommit('),c);
- if(stripProof){const enrich=c.enrich;c.enrich=(name,data)=>{const result=enrich(name,data);delete result.onlineOrderFinalizationId;return result;};}
  const sale=c.Vendas.registrar({id:order.saleId,operationId:order.finalizationOperationId,businessId:bid,spaceId:order.spaceId,onlineOrderId:order.id,onlineOrderItems:order.items,status:'pago',formaPagamento:'dinheiro',itens:order.items.map(i=>({produtoId:i.productId,variantId:i.variantId,quantidade:i.quantity,precoOriginal:25,precoFinalUnitario:25}))});
  const writes=bridge(c.diffWrites(before,data));if(v170)for(const w of writes)if(w.entityType==='stockMovements'){delete w.data.spaceId;delete w.data.businessId;}
  const packet={operationId:sale.operationId,businessId:bid,userId:uid,payloadVersion:4,payload:{eventKind:'sale',writes}};
+ if(stripProof)delete packet.payload.writes.find(w=>w.entityType==='sales').data.onlineOrderId;
  return{packet,client,commit:()=>c.commitQueueItem(structuredClone(packet))};
 }
 test.before(async()=>{env=await initializeTestEnvironment({projectId:'adi-festa-variations-test',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});app=initializeApp({projectId:'adi-festa-variations-test'},'v171-'+stamp);db=getFirestore(app);stores=onlineStoreService(db);orders=onlineOrderService(db);sanitizer=(await import('data:text/javascript,'+encodeURIComponent(fs.readFileSync('js/firebase/firestore-utils.js','utf8')))).sanitizeForFirestore;await root().set({ownerId:owner,active:true,workspaceGeneration:0,legacyAccessDisabled:true,subscription:{planId:'internal',status:'active'}});for(const uid of [owner,seller]){await db.doc('users/'+uid).set({uid,businessId:bid,active:true,role:uid===owner?'owner':'seller'});await root().collection('members').doc(uid).set({uid,status:'active',role:uid===owner?'owner':'seller',spaceAccess:uid===owner?'all':'selected',allowedSpaceIds:uid===owner?[]:[a],permissions:{'sales.create':true,'sales.viewAll':true,'sales.cancel':true,'products.view':true,'inventory.view':true}});}for(const id of [a,b])await db.doc('financialSpaces/'+id).set({businessId:bid,linkedBusinessId:bid,ownerUid:owner,type:'business',active:true,capabilities:{sales:true,products:true,inventory:true,finance:false,goals:true}});});
@@ -65,11 +67,11 @@ test('other-space stock receipts remain denied for read/update/delete',async()=>
  const legacy=await root().collection('stockMovements').add({businessId:bid,produtoId:'legacy',quantidade:1});
  assert.equal((await sdk.getDoc(sdk.doc(env.authenticatedContext(owner).firestore(),legacy.path))).exists(),true);await assertFails(sdk.getDoc(sdk.doc(client,legacy.path)));
 });
-for(const variable of [false,true])test(`Rules reject missing reservation proof atomically: ${variable?'variant':'simple'}`,async()=>{
+for(const variable of [false,true])test(`authorized gateway rejects missing canonical reservation claim atomically: ${variable?'variant':'simple'}`,async()=>{
  const id=await seedProduct(variable),{order:fresh}=await submit(id,{variable}),order=await ready(fresh),p=await pipeline(order,owner,{stripProof:true});
  // Simple has two units; reserve the second too, so a missing proof must fail.
  if(!variable)await submit(id,{variable});
- await assertFails(p.commit());assert.equal((await root().collection('sales').doc(order.saleId).get()).exists,false);assert.equal((await root().collection('stockMovements').where('operationId','==',order.finalizationOperationId).get()).size,0);assert.equal((await root().collection('products').doc(id).get()).data().estoqueAtual,2);
+ await assert.rejects(p.commit(),{code:'online-stock-reserved'});assert.equal((await root().collection('sales').doc(order.saleId).get()).exists,false);assert.equal((await root().collection('stockMovements').where('operationId','==',order.finalizationOperationId).get()).size,0);assert.equal((await root().collection('products').doc(id).get()).data().estoqueAtual,2);
 });
 test('recovery refuses an explicit wrong-space receipt and leaves durable packet/reservation intact',async()=>{
  const id=await seedProduct(true),{order:fresh}=await submit(id,{variable:true}),order=await ready(fresh),p=await pipeline(order);
@@ -81,4 +83,11 @@ test('restricted stock-only sale cannot edit variant prices or catalog ownership
  const write=p.packet.payload.writes.find(w=>w.entityType==='productVariants');write.data.price=1;
  await assertFails(p.commit());assert.equal((await root().collection('sales').doc(order.saleId).get()).exists,false);
  delete write.data.price;await p.commit();const parent=(await root().collection('products').doc(id).get()).data(),variant=(await root().collection('productVariants').doc(id+'-red').get()).data();assert.equal(parent.ownerId,owner);assert.equal(parent.schemaVersion,3);assert.equal(variant.ownerId,owner);assert.equal(variant.price,25);await orders.acknowledge(request({id:order.id},seller));
+});
+for(const mode of ['item','method','customer'])test(`online frozen finalization rejects ${mode} replacement BEFORE any sale/stock effect`,async()=>{
+ const id=await seedProduct(false),{order:fresh}=await submit(id),order=await ready(fresh),p=await pipeline(order),sale=p.packet.payload.writes.find(w=>w.entityType==='sales');
+ if(mode==='item')sale.data.itens[0].produtoId=await seedProduct(false);
+ if(mode==='method')sale.data.formaPagamento='pix';
+ if(mode==='customer'){await root().collection('clients').doc('qa-other-client').set({businessId:bid,active:true,saldo:0});sale.data.clienteId='qa-other-client';}
+ await assert.rejects(p.commit(),{code:'permission-denied'});assert.equal((await root().collection('sales').doc(order.saleId).get()).exists,false);assert.equal((await root().collection('products').doc(id).get()).data().estoqueAtual,2);assert.equal((await root().collection('stockMovements').where('operationId','==',order.finalizationOperationId).get()).size,0);
 });
