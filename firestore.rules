@@ -1340,6 +1340,9 @@ service cloud.firestore {
           && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
           && validSaleSpace(request.resource.data, businessId);
         allow update: if exists(/databases/$(database)/documents/businesses/$(businessId)/saleExchangeSummaries/$(saleId)) ? false : (
+          // A stale legacy undo must not replay stock after canonical cancellation.
+          resource.data.get('cancellationMode','') != 'canonical_transaction'
+          &&
           resource.data.get('source','') != 'exchange_credit_checkout'
           && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
           && canWriteCollection(businessId, 'sales')
