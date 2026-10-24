@@ -8,6 +8,7 @@ const paused=()=>read('functions/src/index.js').includes('allowNewCancellations:
 test('V200 package descends from sanitized V199 and contains only approved cancellation/release files',()=>{
  git('merge-base','--is-ancestor',base,'HEAD');
  const allowed=new Set(['firestore.rules','functions/src/index.js','functions/src/services/sale-cancellation-service.js','index.html','js/activity-center.js','js/build-info.js','js/sale-cancellation.js','public-site.manifest.json','service-worker.js','tests/emulator/sale-cancellation.rules.test.js','tests/sale-cancellation-ui.test.js','tests/sale-cancellation-release.test.cjs','tests/static-containment-worker.test.cjs','tests/public-site-containment.test.cjs','docs/sale-cancellation-audit.md','docs/release-v200-sale-cancellation.md']);
+ for(const file of ['tests/sale-cancellation-dom.test.cjs','tests/sale-cancellation-v201-release.test.cjs','docs/release-v201-payment-options.md'])allowed.add(file);
  const changed=[...git('diff','--name-only',base).trim().split('\n'),...git('ls-files','--others','--exclude-standard').trim().split('\n')].filter(Boolean);
  for(const p of changed)assert.ok(allowed.has(p),'Unexpected release file: '+p);
 });
@@ -30,11 +31,11 @@ test('Rules only add the restrictive canonical-cancellation fence; no grants or 
  assert.equal(read('firestore.rules').replace(fence,''),git('show',base+':firestore.rules'));
 });
 
-test('V200 PWA version is consistent and explicit public allowlist never includes backend or fixtures',()=>{
- assert.match(read('js/build-info.js'),/release: "200"/);
- assert.match(read('service-worker.js'),/veconi-v200-safe-sale-cancellation(?:-rollback)?/);
- assert.match(read('service-worker.js'),/release: '200'/);
- assert.match(read('index.html'),/build-info\.js\?v=200/);
+test('V201 PWA version is consistent and explicit public allowlist never includes backend or fixtures',()=>{
+ assert.match(read('js/build-info.js'),/release: "201"/);
+ assert.match(read('service-worker.js'),/veconi-v201-cancellation-payment-options/);
+ assert.match(read('service-worker.js'),/release: '201'/);
+ assert.match(read('index.html'),/build-info\.js\?v=201/);
  const now=JSON.parse(read('public-site.manifest.json')).files,before=JSON.parse(git('show',base+':public-site.manifest.json')).files;
  assert.deepEqual(now.filter(p=>p!=='js/sale-cancellation.js'),before);
  assert.equal(now.includes('js/sale-cancellation.js'),!paused());
