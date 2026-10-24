@@ -44,7 +44,7 @@ initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
 const saleRecoveries=require('./services/sale-recovery-service').saleRecoveryService(db,{FieldValue});
 const RECOVERY_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:3};
-const saleCancellations=require('./services/sale-cancellation-service').saleCancellationService(db,{allowNewCancellations:true,projectFinancial:(businessId,saleId,sale)=>financialIncomeService(db).projectSale(businessId,saleId,sale)});
+const saleCancellations=require('./services/sale-cancellation-service').saleCancellationService(db,{allowNewCancellations:false,projectFinancial:(businessId,saleId,sale)=>financialIncomeService(db).projectSale(businessId,saleId,sale)});
 exports.previewSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.preview(request));
 exports.confirmSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.confirm(request));
 const exchanges=require('./services/sale-exchange-service').saleExchangeService(db);

@@ -885,15 +885,11 @@
     }
     const statusConfirmed = !window.FirebaseSession?.user?.uid || !window.BusinessContext?.get?.().businessId ||
         currentSaleStatuses().records.get(String(sale.id))?.state === "confirmed",
-      canUndo = statusConfirmed && window.TeamAccess?.has?.('sales.cancel') === true &&
+      canCancel = statusConfirmed &&
         window.Vendas?.ultima?.()?.id === sale.id &&
         window.Vendas?.podeDesfazer?.(),
-      canCancel = statusConfirmed && window.TeamAccess?.has?.('sales.cancel') === true,
       items = sale.itens || [];
-    return `<section class="activity-sale-summary"><div><span>Cliente</span><b>${esc(sale.clienteNome || "Venda avulsa")}</b></div><div><span>Pagamento</span><b>${esc(sale.formaPagamento || sale.status || "Não informado")}</b></div><div><span>Data</span><b>${at(sale.data).toLocaleString("pt-BR")}</b></div></section><ul class="activity-sale-items">${items.map((entry) => `<li><span>${Number(entry.quantidade || 0)}× ${esc(entry.nome || entry.produtoNome || "Produto")}${entry.variantName ? ` <small>${esc(entry.variantName)}</small>` : ""}</span><b>${money(Number(entry.precoFinalUnitario ?? entry.precoUnitario ?? 0) * Number(entry.quantidade || 0))}</b></li>`).join("")}</ul>${sale.descontoTotal ? `<p class="activity-detail-line"><span>Desconto</span><b>− ${money(sale.descontoTotal)}</b></p>` : ""}<p class="activity-detail-total"><span>Total</span><b>${money(sale.valorFinal ?? sale.valorTotal)}</b></p>${sale.observacao ? `<p class="activity-detail-note"><b>Observação</b><br>${esc(sale.observacao)}</p>` : ""}
-      <div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("ban")} Cancelar venda</button></div>
-      <small class="activity-cancel-note">${!statusConfirmed ? "Cancelamento indisponível até confirmar o estado desta venda. Feche e abra o detalhe após reconectar para consultar novamente." : !window.TeamAccess?.has?.('sales.cancel') ? "Seu perfil não tem permissão para cancelar vendas." : "Cancelar venda não tem limite de 5 minutos: exige conexão, motivo e conferência das dependências. Reembolso não é automático."}</small>
-      <button class="btn btn-light mobile-button" type="button" data-history-undo-sale="${esc(sale.id)}" ${canUndo ? "" : "disabled"}>${icon("undo-2")} Desfazer (atalho de 5 minutos)</button><small class="activity-cancel-note">O atalho rápido continua restrito à venda mais recente. Para vendas antigas, use Cancelar venda.</small>`;
+    return `<section class="activity-sale-summary"><div><span>Cliente</span><b>${esc(sale.clienteNome || "Venda avulsa")}</b></div><div><span>Pagamento</span><b>${esc(sale.formaPagamento || sale.status || "Não informado")}</b></div><div><span>Data</span><b>${at(sale.data).toLocaleString("pt-BR")}</b></div></section><ul class="activity-sale-items">${items.map((entry) => `<li><span>${Number(entry.quantidade || 0)}× ${esc(entry.nome || entry.produtoNome || "Produto")}${entry.variantName ? ` <small>${esc(entry.variantName)}</small>` : ""}</span><b>${money(Number(entry.precoFinalUnitario ?? entry.precoUnitario ?? 0) * Number(entry.quantidade || 0))}</b></li>`).join("")}</ul>${sale.descontoTotal ? `<p class="activity-detail-line"><span>Desconto</span><b>− ${money(sale.descontoTotal)}</b></p>` : ""}<p class="activity-detail-total"><span>Total</span><b>${money(sale.valorFinal ?? sale.valorTotal)}</b></p>${sale.observacao ? `<p class="activity-detail-note"><b>Observação</b><br>${esc(sale.observacao)}</p>` : ""}<div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("undo-2")} Desfazer venda</button></div><small class="activity-cancel-note">${!statusConfirmed ? "Cancelamento indisponível até confirmar o estado desta venda. Feche e abra o detalhe após reconectar para consultar novamente." : canCancel ? "Disponível por 5 minutos para a venda mais recente. Estoque, saldo, campanha e renovação serão revertidos pelo fluxo seguro." : "O cancelamento seguro só fica disponível para a venda mais recente durante 5 minutos."}</small>`;
   }
   function genericDetail(item) {
     const rows = Object.entries(item.raw || {})
@@ -930,15 +926,12 @@
         if (sale) window.Recibos?.mostrar?.(sale, client);
       });
     root
-      .querySelector("[data-history-undo-sale]")
+      .querySelector("[data-history-cancel-sale]")
       ?.addEventListener("click", (event) =>
         window.requestSafeSaleUndo?.(
-          event.currentTarget.dataset.historyUndoSale,
+          event.currentTarget.dataset.historyCancelSale,
         ),
       );
-    root.querySelector('[data-history-cancel-sale]')?.addEventListener('click', event => {
-      window.SaleCancellation?.open(event.currentTarget.dataset.historyCancelSale).catch(error => window.Utils?.toast?.(error.message, true));
-    });
     root
       .querySelector("[data-history-resource]")
       ?.addEventListener("click", (event) => {

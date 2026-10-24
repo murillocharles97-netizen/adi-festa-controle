@@ -71,7 +71,7 @@ test('new cache never falls back to any older cache during offline reload', asyn
   h.cache.set('./index.html', new Response('CURRENT_SAFE_INDEX'));
   const response = await h.request('/new-route', {mode: 'navigate'});
   assert.equal(await response.text(), 'CURRENT_SAFE_INDEX');
-  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => call[1] === 'veconi-v200-safe-sale-cancellation'));
+  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => call[1] === 'veconi-v200-safe-sale-cancellation-rollback'));
 });
 test('catalog route keeps its current offline fallback', async () => {
   const h = harness({offline: true});

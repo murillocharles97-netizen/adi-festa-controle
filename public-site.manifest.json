@@ -202,7 +202,6 @@
     "js/router.js",
     "js/runtime-access.js",
     "js/runtime-diagnostics.js",
-    "js/sale-cancellation.js",
     "js/sale-exchanges.js",
     "js/sale-recovery-client.js",
     "js/sale-recovery-ui.js",

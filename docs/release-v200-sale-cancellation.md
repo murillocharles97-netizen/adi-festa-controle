@@ -52,3 +52,9 @@ Preparar em branch/tag local separadas `rollback/v200-compatible-sale-cancellati
 - Para efetivar rollback após autorização: suspender primeiro as duas Functions e depois publicar frontend do commit de rollback. Sem restauração ou exclusão de dados.
 
 Os SHAs exatos do candidato e do rollback serão fornecidos após os testes, no relatório externo e na entrega. Nenhum push ou deploy faz parte desta etapa.
+
+### Rollback local validado
+
+Este commit de rollback deriva diretamente do candidato `5d60e5f5fa159001da39b6b50bcd438129f93fb6`. Mantém o serviço, a Rule restritiva e os demais caminhos comerciais intactos. Apenas suspende novas chamadas de cancelamento e retira a entrada nova do frontend/publicação.
+
+Validação do rollback: **153 testes Node e 75 Emulator aprovados**, lint, build, diff-check e pacote público de 223 arquivos aprovados. O serviço pausado reconhece o recibo de uma solicitação já confirmada e rejeita novas operações sem aplicar efeitos. Cache PWA próprio, sem limpeza do armazenamento dos usuários. Logs: `v200-node-rollback-final.log`, `v200-emulator-rollback.log`, `v200-lint-rollback.log` e `v200-build-rollback.log` na pasta privada de evidências.

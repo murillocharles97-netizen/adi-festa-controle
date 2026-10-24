@@ -51,6 +51,7 @@ test('compatible rollback pauses new server effects but keeps original receipts,
  assert.match(read('functions/src/index.js'),/projectFinancial:.*financialIncomeService\(db\)\.projectSale/);
  if(paused()){
   assert.doesNotMatch(read('index.html'),/src="\.\/js\/sale-cancellation\.js/);
-  assert.doesNotMatch(read('js/activity-center.js'),/data-history-cancel-sale/);
+  assert.doesNotMatch(read('js/activity-center.js'),/window\.SaleCancellation/);
+  assert.equal(read('js/activity-center.js'),git('show',base+':js/activity-center.js'));
  }
 });
