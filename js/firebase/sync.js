@@ -3991,7 +3991,7 @@ function startCloudSubscriptions() {
   if (!currentUser) return;
   const scope=captureCloudReadScope(),uid=currentUser.uid,businessId=activeBusinessId(),
     generation=DB.getWorkspaceGeneration?.()??0,pendingKey='adiFesta:'+namespace()+':pendingReadInvalidations:v204',
-    signalPath='businesses/'+businessId+'/syncMetadata/last-sync',backoff=[1000,3000,10000,30000];
+    signalPath='businesses/'+businessId+'/syncMetadata/last-sync',backoff=[];
   let stopped=false,inFlight=false,attempt=0,lastFailure=null;
   const permanentFailure=()=>lastFailure&&['permission-denied','unauthenticated','invalid-argument','failed-precondition',
     'sync-read-page-limit','local-cache-conflict'].includes(lastFailure.code);
