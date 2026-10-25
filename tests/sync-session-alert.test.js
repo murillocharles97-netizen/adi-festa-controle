@@ -8,7 +8,7 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   const read=p=>fs.readFileSync(p,'utf8'),auth=read('js/firebase/auth.js'),ui=read('js/firebase/firebase-ui.js'),index=read('index.html');
   const version=read('js/build-info.js').match(/release:\s*"(\d+)"/)[1];assert.ok(Number(version)>=173);
   assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));
-  assert.ok(read('service-worker.js').includes(`release:'${version}'`));
+  assert.match(read('service-worker.js'),new RegExp(`release:\\s*'${version}'`));
   // Published V191 intentionally retained the V190 Sync/Auth asset URLs.
   // The next release, which actually changes Sync, must bump all these URLs.
   const syncVersion=version==='191'?'190':version;
@@ -20,6 +20,8 @@ function runtime() {
   let starts = 0, stops = 0;
   const c = {console:{error(){},warn(){}}, Date, structuredClone, currentUser:null, syncSessionGeneration:0,
     state:{status:'idle',message:'Sessão encerrada',syncTrace:[],syncFailureHistory:[],sessionTrace:[]},
+    DB:{getWorkspaceGeneration:()=>0},cloudReadController:null,cloudReadRestartTimer:null,signalCollections:new Set(),signalVersions:new Map(),signalPullTimer:null,
+    addEventListener(){},removeEventListener(){},setTimeout,clearTimeout,localStorage:{getItem:()=>null,setItem(){}},
     canonicalClientSnapshots:new Map(),lastDataAuditRaw:null,cloudPaused:false,readOnlyMode:false,lastUserValidationAt:0,
     lastError:'',lastErrorCode:'',currentPath:'',auth:{currentUser:{uid:'owner'}},
     now:()=>new Date().toISOString(),friendlyError:e=>e.code,errorCode:e=>e.code,
@@ -33,7 +35,7 @@ function runtime() {
   };
   vm.createContext(c);
   vm.runInContext(section('const permissionSignature =', 'const queueKey ='),c);
-  vm.runInContext(section('function reportError(', 'function enrich(')+section('function setUser(', 'function pendingActivityEvents(')+section('function registerRealtimeCollection(', 'function startCloudSubscriptions('),c);
+  vm.runInContext(section('function reportError(', 'function enrich(')+section('function setUser(', 'function pendingActivityEvents(')+section('function captureCloudReadScope(', 'function startCloudSubscriptions('),c);
   const start=(uid='owner')=>{c.auth.currentUser={uid};c.setUser({uid},{uid,businessId:'qa-business'},{id:'qa-business',active:true,ownerId:uid});};
   return {c,start,queues,status:()=>({starts,stops}),identity:()=>vm.runInContext('namespace()',c)};
 }

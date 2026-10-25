@@ -105,7 +105,16 @@ function operationalCommitService(db){
    if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1});
    for(const p of plan.values())tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
    const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'))];
-   if(names.length)tx.set(root.collection('syncMetadata').doc('last-sync'),{businessId:c.bid,workspaceGeneration:gen(c.business),revision:new Date().toISOString(),updatedAt:FieldValue.serverTimestamp(),changedCollections:names,collectionVersions:Object.fromEntries(names.map(n=>[n,new Date().toISOString()]))},{merge:true});
+   if(names.length){
+    const revision='server:'+item.operationId;
+    // Never inherit a browser's source identity through merge. Older V202/V203
+    // receivers must also see this authorized server commit as an external signal.
+    tx.set(root.collection('syncMetadata').doc('last-sync'),{businessId:c.bid,workspaceGeneration:gen(c.business),
+     publisher:'operational_server',sourceSessionId:'server:'+item.operationId,sourceOperationId:item.operationId,
+     ownerId:c.uid,actorUid:c.uid,sourceUid:c.uid,sourceDeviceId:FieldValue.delete(),
+     revision,updatedAt:FieldValue.serverTimestamp(),changedCollections:names,
+     collectionVersions:Object.fromEntries(names.map(n=>[n,revision]))},{merge:true});
+   }
    return{operationId:item.operationId,outcome,replayed:false};
   });
  }

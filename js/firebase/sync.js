@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "./workspace-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=202";
+import { createFirestoreRepository } from "./firestore-repository.js?v=204";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -202,6 +202,8 @@ let currentUser = null,
   cloudPaused = false,
   readOnlyMode = false,
   signalPullTimer = null,
+  cloudReadController = null,
+  cloudReadRestartTimer = null,
   signalCollections = new Set(),
   signalVersions = new Map(),
   canonicalClientSnapshots = new Map(),
@@ -252,12 +254,15 @@ function traceSync(stage, detail = {}) {
   if (window.__VECONI_DEV__ || ["localhost", "127.0.0.1"].includes(location.hostname)) console.info("[SYNC]", entry);
 }
 async function syncStep(stage, operation, detail = {}) {
+  const readScopeToken=captureCloudReadScope();
   traceSync(stage, detail);
   try {
     const result = await operation();
+    assertCloudReadScope(readScopeToken);
     traceSync(`${stage}:completed`, detail);
     return result;
   } catch (error) {
+    if(readScopeToken!==captureCloudReadScope())throw Object.assign(Error('A sessão mudou durante a operação. A fila original foi preservada.'),{code:'sync-session-retired'});
     if (!error.syncDetail) error.syncDetail = {
       stage, ...detail, code: error.code || (error.name === "QuotaExceededError" ? (detail.service === "IndexedDB" ? "indexeddb-quota" : "local-storage-quota") : errorCode(error) || error.name || "unknown"),
       message: String(error.technicalMessage || error.message || "Falha sem mensagem").slice(0, 600),
@@ -1345,6 +1350,7 @@ const diagnostic = () => {
   return {
     projectId: PROJECT_ID,
     operationalProtocol: state.operationalProtocol || {status:'not_verified'},
+    remoteReadRefresh: state.remoteReadRefresh || {pending:0,status:'idle'},
     databaseId: "(default)",
     authReady: state.authReady,
     authenticated: Boolean(auth.currentUser),
@@ -1433,6 +1439,10 @@ const emit = (patch) => {
       manualReviewPending: counts.manualReview-counts.quarantined,
       details: diagnostic(),
     };
+  if(state.status==='success'&&state.remoteReadRefresh?.pending&&!counts.errors&&!state.syncFailure){
+    snapshot.status=state.status='waiting';
+    snapshot.message=state.message='Há dados da loja aguardando atualização de leitura. Nenhuma venda será reenviada por essa atualização.';
+  }
   snapshot.orphanOperations = snapshot.details.orphanOperations ||
     (state.dataAudit ? 0 : "Não verificado");
   subscribers.forEach((callback) => callback(snapshot));
@@ -2154,6 +2164,7 @@ function installOfflineFirstStorage() {
 }
 
 async function validateUser() {
+  const readScopeToken=captureCloudReadScope();
   if (PROJECT_ID !== "adi-festa-controle")
     throw Object.assign(new Error("Projeto Firebase incorreto."), {
       code: "failed-precondition",
@@ -2174,6 +2185,7 @@ async function validateUser() {
       businessId: state.userProfile.businessId,
     };
   const snapshot = await syncStep("auth_profile", () => getDoc(doc(db, "users", user.uid)), {service: "Firestore", collection: "users", request: "getDoc"});
+  assertCloudReadScope(readScopeToken);
   if (!snapshot.exists())
     throw Object.assign(new Error("Perfil não encontrado."), {
       code: "permission-denied",
@@ -2194,9 +2206,13 @@ async function validateUser() {
   return { user, profile, businessId: profile.businessId };
 }
 async function ensureBusinessDocument() {
-  const { user, businessId } = await validateUser(),
+  const readScopeToken=captureCloudReadScope();
+  const { user, businessId } = await validateUser();
+  assertCloudReadScope(readScopeToken);
+  const
     reference = doc(db, "businesses", businessId),
     snapshot = await syncStep("business_validation", () => getDoc(reference), {service: "Firestore", collection: "businesses", businessId, request: "getDoc"});
+  assertCloudReadScope(readScopeToken);
   if (!snapshot.exists())
     throw Object.assign(
       new Error("O negócio vinculado ao perfil não existe."),
@@ -2216,16 +2232,20 @@ async function ensureBusinessDocument() {
   return reference;
 }
 async function testFirestoreConnection() {
+  const readScopeToken=captureCloudReadScope();
   emit({ status: "testing", message: "Verificando a nuvem…" });
   try {
     await validateUser();
+    assertCloudReadScope(readScopeToken);
     await ensureBusinessDocument();
+    assertCloudReadScope(readScopeToken);
     lastError = "";
     lastErrorCode = "";
     currentPath = "";
     emit({ testPassed: true, status: "success", message: "Nuvem verificada" });
     return true;
   } catch (error) {
+    if(readScopeToken!==captureCloudReadScope())throw error;
     reportError(error, "Connection test", { path: currentPath });
     throw error;
   }
@@ -3909,12 +3929,28 @@ function applyCloudCollectionBatch(entries) {
     notifyCloudCollectionChange(name, changed);
   return total;
 }
+// Downloads have their own identity and retry lifecycle, never a queue owner.
+function captureCloudReadScope() {
+  const context=window.BusinessContext?.get?.()||{};
+  let businessId='';try{businessId=activeBusinessId();}catch{/* signed-out scope is still fenceable */}
+  return JSON.stringify([syncSessionGeneration,currentUser?.uid||'',auth.currentUser?.uid||'',businessId,
+    DB.getWorkspaceGeneration?.()??0,context.role||'',context.permissionSignature||'',
+    [...(context.permissions||[])].sort(),context.spaceAccess||'', [...(context.allowedSpaceIds||[])].sort(),
+    window.SpaceContext?.homeId?.()||'',window.SpaceContext?.salesId?.()||'']);
+}
+function assertCloudReadScope(scope) {
+  if(scope!==captureCloudReadScope())throw Object.assign(Error('A sessão ou o espaço mudou durante a leitura. Nenhuma confirmação foi aplicada.'),{code:'sync-session-retired'});
+}
+function salesReadScope() {
+  const scope=window.TeamAccess?.operationalReadScopeKey?.();
+  return scope?'read-hydration-v204:'+scope:null;
+}
 function registerRealtimeCollection(name, mode = "all") {
   const key = `${activeBusinessId()}:${name}:${mode}`;
   if (listenerRegistry.has(key)) return listenerRegistry.get(key);
-  const generation = syncSessionGeneration, subscriptionUid = currentUser?.uid || "",
+  const scope = captureCloudReadScope(), subscriptionUid = currentUser?.uid || "",
     path = `businesses/${activeBusinessId()}/${name}${mode === "document" ? "/default" : ""}`,
-    isCurrent = () => generation === syncSessionGeneration && currentUser?.uid === subscriptionUid;
+    isCurrent = () => scope === captureCloudReadScope();
   const onDocuments = (documents, metadata) => {
       if (!isCurrent()) return;
       const list = Array.isArray(documents)
@@ -3953,112 +3989,141 @@ function registerRealtimeCollection(name, mode = "all") {
 function startCloudSubscriptions() {
   stopCloudSubscriptions();
   if (!currentUser) return;
-  const generation = syncSessionGeneration, subscriptionUid = currentUser.uid,
-    signalPath = `businesses/${activeBusinessId()}/syncMetadata/last-sync`,
-    isCurrent = () => generation === syncSessionGeneration && currentUser?.uid === subscriptionUid;
+  const scope=captureCloudReadScope(),uid=currentUser.uid,businessId=activeBusinessId(),
+    generation=DB.getWorkspaceGeneration?.()??0,pendingKey='adiFesta:'+namespace()+':pendingReadInvalidations:v204',
+    signalPath='businesses/'+businessId+'/syncMetadata/last-sync',backoff=[1000,3000,10000,30000];
+  let stopped=false,inFlight=false,attempt=0,lastFailure=null;
+  const permanentFailure=()=>lastFailure&&['permission-denied','unauthenticated','invalid-argument','failed-precondition',
+    'sync-read-page-limit','local-cache-conflict'].includes(lastFailure.code);
+  const isCurrent=()=>{try{return !stopped&&scope===captureCloudReadScope();}catch{return false;}};
+  const allowed=name=>SIGNAL_NAMES.includes(name)&&
+    (['businessProfile','userProfile'].includes(name)||canPullSource(name));
+  const pending=()=>[...signalCollections];
+  const publishState=(status,nextRetryAt=null)=>emit({remoteReadRefresh:{
+    pending:signalCollections.size,status,attempt,nextRetryAt,lastErrorCode:lastFailure?.code||'',updatedAt:now()}});
+  const persist=()=>{
+    if(!isCurrent())return;
+    localStorage.setItem(pendingKey,JSON.stringify({version:1,businessId,uid,workspaceGeneration:generation,
+      versions:Object.fromEntries([...signalVersions].filter(([name])=>allowed(name)))}));
+  };
+  const schedule=(delay=120)=>{
+    if(!isCurrent()||!signalCollections.size||inFlight||!navigator.onLine||permanentFailure()||attempt>backoff.length)return;
+    clearTimeout(signalPullTimer);signalPullTimer=setTimeout(download,delay);
+  };
+  const fail=error=>{
+    if(!isCurrent()||error.code==='sync-session-retired')return;
+    lastFailure={code:errorCode(error)||'unknown'};attempt++;
+    const permanent=permanentFailure();
+    const delay=!permanent&&attempt<=backoff.length?backoff[attempt-1]:null;
+    publishState(delay===null?'blocked':'retry_wait',delay===null?null:new Date(Date.now()+delay).toISOString());
+    if(!state.syncFailure||state.syncFailure.readRefreshKey===pendingKey)
+      reportError(Object.assign(Error('Não foi possível atualizar os dados da loja. As operações comerciais não foram reenviadas.'),{
+        code:lastFailure.code,syncDetail:{...(error.syncDetail||{}),stage:'remote_read_refresh',
+          sourceStage:error.syncDetail?.stage||'',code:lastFailure.code,readRefreshKey:pendingKey,
+          path:signalPath,at:now(),message:'Falha na atualização somente de leitura.'}}),'Realtime sync signal',{collections:pending()});
+    if(delay!==null)schedule(delay);
+  };
+  async function download() {
+    signalPullTimer=null;
+    if(!isCurrent()||inFlight||!signalCollections.size||!navigator.onLine)return;
+    inFlight=true;
+    const changed=pending(),versions=Object.fromEntries(changed.map(name=>[name,signalVersions.get(name)]));
+    try {
+      publishState('reading');
+      const cloudNames=changed.filter(name=>CLOUD_NAMES.includes(name)&&!REALTIME_NAMES.has(name)&&allowed(name));
+      if(cloudNames.length)await pullCloudCollections({force:true,names:cloudNames});
+      if(!isCurrent())return;
+      if(changed.includes('businessProfile'))await refreshBusinessContext();
+      if(!isCurrent())return;
+      if(changed.includes('userProfile'))await refreshUserContext();
+      if(!isCurrent())return;
+      await DB.flush?.();
+      if(!isCurrent())return;
+      const time=now();
+      saveSignalVersions({...readSignalVersions(),...versions});
+      writeSyncTime(lastSyncKey(),time);
+      await DB.flush?.();
+      if(!isCurrent())return;
+      for(const name of changed)if(signalVersions.get(name)===versions[name]){
+        signalCollections.delete(name);signalVersions.delete(name);
+      }
+      persist();await DB.flush?.();
+      if(!isCurrent())return;
+      attempt=0;lastFailure=null;
+      if(state.syncFailure?.readRefreshKey===pendingKey)state.syncFailure=null;
+      publishState(signalCollections.size?'waiting':'idle');
+      const counts=queueCounts();
+      if(!counts.active&&!counts.errors&&!state.syncFailure&&!state.dataAudit?.integrity?.actionable)
+        emit({status:signalCollections.size?'waiting':'success',
+          message:signalCollections.size?'Atualizando dados recebidos da loja…':preservedQueueMessage(counts)||'Dados da loja atualizados.',
+          lastSync:time});
+      else updateQueueState();
+    } catch(error) {
+      if(isCurrent())for(const name of changed)if(!signalVersions.has(name)){
+        signalCollections.add(name);signalVersions.set(name,versions[name]);
+      }
+      if(isCurrent())try{persist();}catch{/* write protection remains intact */}
+      inFlight=false;fail(error);return;
+    } finally {inFlight=false;}
+    if(isCurrent()&&signalCollections.size)schedule();
+  }
+  const enqueue=(name,revision)=>{
+    if(!allowed(name))return;
+    signalCollections.add(name);signalVersions.set(name,String(revision||'unversioned').slice(0,256));
+  };
+  const wake=()=>{
+    if(!isCurrent())return;
+    if(permanentFailure())return;
+    attempt=0;
+    if(!signalCollections.size&&canPullSource('sales')){
+      enqueue('sales',readSignalVersions().sales||'read-catchup-v204');
+      try{persist();}catch(error){fail(error);return;}
+    }
+    schedule();
+  };
+  const resume=()=>{if(document.visibilityState==='visible')wake();};
+  try{
+    const saved=JSON.parse(localStorage.getItem(pendingKey)||'null');
+    if(saved?.version===1&&saved.businessId===businessId&&saved.uid===uid&&saved.workspaceGeneration===generation)
+      for(const [name,revision] of Object.entries(saved.versions||{}))if(typeof revision==='string')enqueue(name,revision);
+  }catch{/* malformed read metadata cannot touch commercial storage */}
+  // Read-only catch-up once per policy/ACL. Never edit or send the original queue.
+  if(canPullSource('sales')&&readPullState()[businessId+':sales:readScope']!==salesReadScope())
+    enqueue('sales','read-hydration-v204');
+  cloudReadController={scope,wake,stop(){stopped=true;clearTimeout(signalPullTimer);
+    removeEventListener('online',wake);removeEventListener('visibilitychange',resume);}};
+  addEventListener('online',wake);addEventListener('visibilitychange',resume);
   if(canPullSource("products"))registerRealtimeCollection("products");
   if(canPullSource("productFinancials"))registerRealtimeCollection("productFinancials");
-  registerRealtimeCollection("settings", "document");
-  const unsubscribe = syncSignalRepository.subscribeById(
-    "last-sync",
-    (signal, metadata) => {
-      if (!isCurrent()) return;
-      rememberSnapshotMetadata("syncMetadata", metadata);
-      const revision = String(
-        signal?.revision || signal?.updatedAt || signal?.syncedAt || "",
-      ),
-        storedVersions = readSignalVersions(),
-        remoteVersions =
-          signal?.collectionVersions &&
-          typeof signal.collectionVersions === "object"
-            ? signal.collectionVersions
-            : Object.fromEntries(
-                (signal?.changedCollections || []).map((name) => [
-                  name,
-                  revision,
-                ]),
-              );
-      emit({ listenerConnected: true });
-      if (!signal) return;
-      if (signal.sourceSessionId === syncSessionId) {
-        const ownVersions = Object.fromEntries(
-          (signal.changedCollections || [])
-            .filter((name) => SIGNAL_NAMES.includes(name))
-            .map((name) => [name, remoteVersions[name] || revision]),
-        );
-        saveSignalVersions({ ...storedVersions, ...ownVersions });
-        return;
-      }
-      const names = Object.entries(remoteVersions)
-          .filter(
-            ([name, version]) =>
-              SIGNAL_NAMES.includes(name) &&
-              String(storedVersions[name] || "") !==
-                String(version || revision),
-          )
-          .map(([name]) => name),
-        pendingNames = names.length
-          ? names
-          : !Object.keys(remoteVersions).length && revision
-            ? (signal.changedCollections || DEFAULT_PULL_NAMES).filter((name) =>
-                SIGNAL_NAMES.includes(name),
-              )
-            : [];
-      pendingNames.forEach((name) => {
-        signalCollections.add(name);
-        signalVersions.set(name, remoteVersions[name] || revision);
-      });
-      if (!pendingNames.length) return;
-      clearTimeout(signalPullTimer);
-      signalPullTimer = setTimeout(async () => {
-        if (!isCurrent()) return;
-        const changed = [...signalCollections],
-          cloudNames = changed.filter(
-            (name) => CLOUD_NAMES.includes(name) && !REALTIME_NAMES.has(name),
-          ),
-          versions = Object.fromEntries(
-            changed.map((name) => [name, signalVersions.get(name) || revision]),
-          );
-        signalCollections.clear();
-        changed.forEach((name) => signalVersions.delete(name));
-        if (!changed.length || !currentUser || !navigator.onLine) return;
-        try {
-          if (cloudNames.length)
-            await pullCloudCollections({ force: true, names: cloudNames });
-          if (changed.includes("businessProfile"))
-            await refreshBusinessContext();
-          if (changed.includes("userProfile")) await refreshUserContext();
-          const time = now();
-          writeSyncTime(lastSyncKey(), time);
-          saveSignalVersions({ ...readSignalVersions(), ...versions });
-          await DB.flush?.();
-          emit({
-            status: "success",
-            message: "Alterações recebidas de outro dispositivo.",
-            lastSync: time,
-          });
-        } catch (error) {
-          reportError(error, "Realtime sync signal", {
-            collections: changed,
-          });
-        }
-      }, 120);
-    },
-    (error) => {
-      if (!isCurrent()) return;
-      reportError(error, "Realtime sync signal listener", {
-        collection: "syncMetadata/last-sync",
-        operation: "listen", path: signalPath, subscriptionUid,
-      });
-    },
-  );
-  unsubscribers.push(unsubscribe);
-  emit({
-    activeListeners: usageSnapshot().activeListeners,
-    listenerConnected: false,
+  registerRealtimeCollection("settings","document");
+  const unsubscribe=syncSignalRepository.subscribeById('last-sync',(signal,metadata)=>{
+    if(!isCurrent())return;
+    rememberSnapshotMetadata('syncMetadata',metadata);emit({listenerConnected:true});
+    if(!signal||signal.businessId&&signal.businessId!==businessId||
+      signal.workspaceGeneration!==undefined&&signal.workspaceGeneration!==generation)return;
+    const revision=String(signal.revision||signal.updatedAt||signal.syncedAt||''),
+      stored=readSignalVersions(),remote=signal.collectionVersions&&typeof signal.collectionVersions==='object'
+        ?signal.collectionVersions:Object.fromEntries((signal.changedCollections||[]).map(name=>[name,revision]));
+    // No sourceSessionId shortcut: even old server signals can inherit an
+    // arbitrary browser identity. Only a durably read revision is a no-op.
+    for(const [name,value] of Object.entries(remote))if(String(stored[name]||'')!==String(value||revision))
+      enqueue(name,value||revision);
+    if(!Object.keys(remote).length&&revision)
+      for(const name of signal.changedCollections||DEFAULT_PULL_NAMES)enqueue(name,revision);
+    if(!signalCollections.size)return;
+    try{persist();publishState('waiting');schedule();}catch(error){fail(error);}
+  },error=>{
+    if(!isCurrent())return;
+    reportError(error,'Realtime sync signal listener',{collection:'syncMetadata/last-sync',
+      operation:'listen',path:signalPath,subscriptionUid:uid});
   });
+  unsubscribers.push(unsubscribe);
+  try{if(signalCollections.size){persist();publishState('waiting');schedule();}}catch(error){fail(error);}
+  emit({activeListeners:usageSnapshot().activeListeners,listenerConnected:false});
 }
 function stopCloudSubscriptions() {
+  cloudReadController?.stop();cloudReadController=null;
+  clearTimeout(cloudReadRestartTimer);cloudReadRestartTimer=null;
   clearTimeout(signalPullTimer);
   signalPullTimer = null;
   signalCollections.clear();
@@ -4077,12 +4142,15 @@ function stopCloudSubscriptions() {
 }
 
 async function publishSyncSignal(collections, status = "ok") {
+  const readScopeToken=captureCloudReadScope();
   const changedCollections = [
     ...new Set(
       (collections || []).filter((name) => SIGNAL_NAMES.includes(name)),
     ),
   ];
-  if (!changedCollections.length && status === "ok") return false;
+  // A health-only publication must never erase collection versions from a
+  // previously committed server notification.
+  if (!changedCollections.length) return false;
   const businessId = activeBusinessId(),
     revision = crypto.randomUUID(),
     collectionVersions = Object.fromEntries(
@@ -4105,13 +4173,17 @@ async function publishSyncSignal(collections, status = "ok") {
     },
     { merge: true },
   );
-  saveSignalVersions({ ...readSignalVersions(), ...collectionVersions });
+  assertCloudReadScope(readScopeToken);
+  // Publishing is not proof of a completed read. The listener acknowledges
+  // only after hydration, including another operator's concurrent changes.
   return true;
 }
 async function safePublishSyncSignal(collections, status = "ok") {
+  const readScopeToken=captureCloudReadScope();
   try {
     return await publishSyncSignal(collections, status);
   } catch (error) {
+    if(readScopeToken!==captureCloudReadScope())return false;
     lastErrorCode = errorCode(error) || "signal-publish-failed";
     lastError = friendlyError(error);
     console.error("[Sync signal publish]", {
@@ -4123,7 +4195,9 @@ async function safePublishSyncSignal(collections, status = "ok") {
 }
 
 async function refreshBusinessContext() {
+  const scope=captureCloudReadScope();
   const snapshot = await getDoc(doc(db, "businesses", activeBusinessId()));
+  assertCloudReadScope(scope);
   if (!snapshot.exists()) return false;
   const business = normalizeFirestoreData({
       id: snapshot.id,
@@ -4148,7 +4222,9 @@ async function refreshBusinessContext() {
 
 async function refreshUserContext() {
   if (!currentUser?.uid) return false;
+  const scope=captureCloudReadScope();
   const snapshot = await getDoc(doc(db, "users", currentUser.uid));
+  assertCloudReadScope(scope);
   if (!snapshot.exists()) return false;
   const profile = normalizeFirestoreData({
       id: snapshot.id,
@@ -4172,9 +4248,11 @@ async function refreshUserContext() {
   return true;
 }
 async function pullCloudCollections(options = {}) {
+  const readScopeToken=captureCloudReadScope();
   await validateUser();
+  assertCloudReadScope(readScopeToken);
   const sessionGeneration=syncSessionGeneration,sessionUid=currentUser?.uid,sessionBusiness=activeBusinessId(),
-    assertPullSession=()=>{if(sessionGeneration!==syncSessionGeneration||sessionUid!==currentUser?.uid||sessionBusiness!==activeBusinessId())throw Object.assign(Error('A sessão mudou durante a leitura. Nenhum cursor foi avançado.'),{code:'sync-session-retired'});};
+    assertPullSession=()=>{assertCloudReadScope(readScopeToken);if(sessionGeneration!==syncSessionGeneration||sessionUid!==currentUser?.uid||sessionBusiness!==activeBusinessId())throw Object.assign(Error('A sessão mudou durante a leitura. Nenhum cursor foi avançado.'),{code:'sync-session-retired'});};
   const hydrateStartedAt = performance.now();
   const force = Boolean(options.force),
     full = Boolean(options.full),
@@ -4197,7 +4275,7 @@ async function pullCloudCollections(options = {}) {
     documentsRead = 0;
   for (const name of names) {
     const markerKey = `${businessId}:${name}`,
-      readScope = name==='sales' ? window.TeamAccess?.operationalReadScopeKey?.() : null,
+      readScope = name==='sales' ? salesReadScope() : null,
       scopeChanged = Boolean(readScope && pullState[`${markerKey}:readScope`]!==readScope),
       completeRead = full || INITIAL_FULL_NAMES.has(name) || scopeChanged,
       since = full || scopeChanged ? "" : pullState[markerKey] || "",
@@ -4281,7 +4359,7 @@ async function pullCloudCollections(options = {}) {
       collections: initialCollections,
       documents: documentsRead,
     });
-  await syncStep("saving_pull_cursor", async () => { writePullState(pullState); await DB.flush?.(); }, { service: "IndexedDB" });
+  await syncStep("saving_pull_cursor", async () => { assertPullSession();writePullState(pullState);await DB.flush?.();assertPullSession(); }, { service: "IndexedDB" });
   if (full) lastFullPullForAudit = {businessId, sessionScope:namespace(), entries: pendingApplications};
   lastPullAt = Date.now();
   emit({
@@ -4301,7 +4379,9 @@ async function pullCloudCollections(options = {}) {
   return received;
 }
 async function ensureClientProjection(options = {}) {
+  const readScopeToken=captureCloudReadScope();
   await validateUser();
+  assertCloudReadScope(readScopeToken);
   if (!navigator.onLine)
     return {
       checked: false,
@@ -4336,6 +4416,7 @@ async function ensureClientProjection(options = {}) {
   let remoteCount = null;
   if (!epochRequired || force)
     remoteCount = await repositories.clients.countFromServer();
+  assertCloudReadScope(readScopeToken);
   rememberSnapshotMetadata(
     "clients:count",
     repositories.clients.getLastReadMetadata?.(),
@@ -4350,6 +4431,7 @@ async function ensureClientProjection(options = {}) {
     projectedCount = expectedLocalCount;
   if (needsRepair) {
     documents = await repositories.clients.listAllPaged(200);
+    assertCloudReadScope(readScopeToken);
     const metadata = repositories.clients.getLastReadMetadata?.();
     rememberSnapshotMetadata("clients", metadata);
     rememberCanonicalClients(documents, metadata);
@@ -4399,6 +4481,7 @@ async function ensureClientProjection(options = {}) {
   return result;
 }
 async function readCanonicalClient(clientId, options = {}) {
+  const readScopeToken=captureCloudReadScope();
   const id = String(clientId || "").trim();
   if (!id)
     throw Object.assign(new Error("CustomerId não informado."), {
@@ -4456,6 +4539,7 @@ async function readCanonicalClient(clientId, options = {}) {
   });
   try {
     await validateUser();
+    assertCloudReadScope(readScopeToken);
   } catch (error) {
     error.stage ||= "session-validation";
     error.path ||= path;
@@ -4466,6 +4550,7 @@ async function readCanonicalClient(clientId, options = {}) {
   let snapshot;
   try {
     snapshot = await getDocFromServer(doc(db, "businesses", businessId, "clients", id));
+    assertCloudReadScope(readScopeToken);
   } catch (error) {
     error.stage ||= "client-document-read";
     error.path ||= path;
@@ -4584,7 +4669,9 @@ async function publishConfirmedMessage(event) {
   return { id: event.id };
 }
 async function queryClientsPage(options = {}) {
+  const readScopeToken=captureCloudReadScope();
   await validateUser();
+  assertCloudReadScope(readScopeToken);
   const max = Math.min(50, Math.max(1, Number(options.limit || 20))),
     filter = String(options.filter || "todos"),
     sort = String(options.sort || "nomeAsc"),
@@ -4612,6 +4699,7 @@ async function queryClientsPage(options = {}) {
       cursor: options.cursor || null,
       max,
     });
+    assertCloudReadScope(readScopeToken);
     rememberCanonicalClients(result.items, result.metadata);
     applyCloudCollection("clients", result.items, {
       authoritative: true,
@@ -4647,6 +4735,7 @@ async function queryClientsPage(options = {}) {
     cursor: options.cursor || null,
     max,
   });
+  assertCloudReadScope(readScopeToken);
   rememberCanonicalClients(result.items, result.metadata);
   applyCloudCollection("clients", result.items, {
     authoritative: true,
@@ -5145,6 +5234,8 @@ async function exportLocalDiagnostic() {
     );
   return {
     diagnosticVersion: 6,
+    operationalProtocol: structuredClone(state.operationalProtocol||{status:'not_verified'}),
+    remoteReadRefresh: structuredClone(state.remoteReadRefresh||{pending:0,status:'idle'}),
     generatedAt: now(),
     build: window.AdiFestaBuild || null,
     bootstrap: {state: window.FirebaseBootstrap?.state || "unknown",
@@ -5594,17 +5685,21 @@ function describeSyncResult(result = {}) {
 }
 function synchronizeNow(options = {}) {
   if (manualSyncPromise) return manualSyncPromise;
-  manualSyncPromise = (async () => {
+  const readScopeToken=captureCloudReadScope();
+  const task = (async () => {
     if (automaticSyncPromise) await automaticSyncPromise;
+    assertCloudReadScope(readScopeToken);
     state.syncFailure = null;
     state.syncTrace = [];
     traceSync("manual_sync_started", {authenticated: Boolean(auth.currentUser), online: navigator.onLine});
     try { return await syncStep("manual_sync", () => runManualSync(options)); }
-    catch(error) { reportError(error, "Manual sync"); throw error; }
-  })().finally(() => { manualSyncPromise = null; });
-  return manualSyncPromise;
+    catch(error) { if(readScopeToken===captureCloudReadScope())reportError(error, "Manual sync"); throw error; }
+  })().finally(() => { if(manualSyncPromise===task)manualSyncPromise = null; });
+  manualSyncPromise=task;
+  return task;
 }
 async function runManualSync({manualRetry = false} = {}) {
+  const readScopeToken=captureCloudReadScope();
   const attemptTime = now();
   writeSyncTime(lastAttemptKey(), attemptTime);
   emit({ lastAttempt: attemptTime });
@@ -5624,14 +5719,20 @@ async function runManualSync({manualRetry = false} = {}) {
   cloudPaused = false;
   emit({status: "syncing", message: "Sincronizando dados…"});
   await syncStep("auth_state", validateUser);
+  assertCloudReadScope(readScopeToken);
   const context = window.BusinessContext?.get?.() || {};
   traceSync("member_state", {businessId: activeBusinessId(), role: context.role || "unknown", status: context.member?.status || "unknown", spaceAccess: context.member?.spaceAccess || "unknown"});
   if (!state.testPassed) await testFirestoreConnection();
+  assertCloudReadScope(readScopeToken);
   await DB.flush?.();
+  assertCloudReadScope(readScopeToken);
   const migration = await syncStep("queue_migration", migrateScopedQueueCompatibility, {service: "IndexedDB"});
+  assertCloudReadScope(readScopeToken);
   await syncStep("queue_ownership", validateQueueOwnership);
+  assertCloudReadScope(readScopeToken);
   traceSync("queue_state", queueCounts());
   const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true, manualRetry }), {service: "Firestore"});
+  assertCloudReadScope(readScopeToken);
   if (push.paused && push.reason !== "subscription_read_only") {
       const counts = queueCounts(),
       result = {
@@ -5648,9 +5749,12 @@ async function runManualSync({manualRetry = false} = {}) {
     return result;
   }
   const received = await syncStep("downloading_changes", () => pullCloudCollections({ force: true, full: true }));
+  assertCloudReadScope(readScopeToken);
   await cleanupConfirmedLegacyFixtures(lastFullPullForAudit);
+  assertCloudReadScope(readScopeToken);
+  const comparison = await compareLocalAndCloud();
+  assertCloudReadScope(readScopeToken);
   const
-    comparison = await compareLocalAndCloud(),
     counts = queueCounts(),
     complete = counts.active === 0 && counts.errors === 0 && !state.syncFailure,
     time = now(),
@@ -5672,9 +5776,11 @@ async function runManualSync({manualRetry = false} = {}) {
     };
   if (push.sent || counts.errors)
     await safePublishSyncSignal(push.collections, counts.errors ? "error" : "ok");
+  assertCloudReadScope(readScopeToken);
   if (result.dataSynced) writeSyncTime(lastSyncKey(), time);
   if (complete) writeSyncTime(lastCompleteKey(), time);
   await DB.flush?.();
+  assertCloudReadScope(readScopeToken);
   lastError = ""; lastErrorCode = "";
   traceSync("data_sync_completed", {dataSynced: result.dataSynced, countSummariesMatch: comparison.ok, sent: push.sent, received});
   emit({
@@ -5692,9 +5798,11 @@ async function runManualSync({manualRetry = false} = {}) {
   if (result.dataSynced) {
     try {
       const audit=await compareDeviceWithCloud({prefetched: lastFullPullForAudit});
+      assertCloudReadScope(readScopeToken);
       result.integrity=audit.integrity;
       result.integrityStatus = "completed";
     } catch {
+      assertCloudReadScope(readScopeToken);
       result.integrityStatus = "failed";
     }
     emit({status:result.syncFailure?'error':result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
@@ -5706,15 +5814,19 @@ async function runAutomaticSync() {
   quickTimer = null;
   if (!currentUser || !navigator.onLine || processingPromise || manualSyncPromise || cloudPaused)
     return;
+  const readScopeToken=captureCloudReadScope();
   window.AppBootDiagnostics?.count?.("initialSyncCount");
   try {
     if (!state.testPassed) await testFirestoreConnection();
-    const push = await syncStep("automatic_upload", () => processSyncQueue()),
-      projection =
+    assertCloudReadScope(readScopeToken);
+    const push = await syncStep("automatic_upload", () => processSyncQueue());
+    assertCloudReadScope(readScopeToken);
+    const projection =
         document.visibilityState === "visible"
           ? await syncStep("client_projection", () => ensureClientProjection())
-          : null,
-      received =
+          : null;
+    assertCloudReadScope(readScopeToken);
+    const received =
         document.visibilityState === "visible"
           ? await pullCloudCollections({
               names: projection?.repaired
@@ -5722,8 +5834,10 @@ async function runAutomaticSync() {
                 : undefined,
             })
           : 0;
+    assertCloudReadScope(readScopeToken);
     if (push.sent || push.errors)
       await safePublishSyncSignal(push.collections, push.errors ? "error" : "ok");
+    assertCloudReadScope(readScopeToken);
     if (push.sent || received || projection?.repaired) {
       const time = now(),
         counts = queueCounts(),
@@ -5734,6 +5848,7 @@ async function runAutomaticSync() {
         writeSyncTime(lastCompleteKey(), time);
       }
       await DB.flush?.();
+      assertCloudReadScope(readScopeToken);
       emit({
         status: state.syncFailure ? "error" : complete ? "success" : counts.errors ? "error" : "waiting",
         message: state.syncFailure ? describeSyncResult({syncFailure:state.syncFailure}) : complete
@@ -5754,16 +5869,18 @@ async function runAutomaticSync() {
       });
     } else updateQueueState();
   } catch (error) {
+    if(readScopeToken!==captureCloudReadScope())return;
     if (errorCode(error) === "resource-exhausted") cloudPaused = true;
     reportError(error, "Automatic sync");
   }
 }
 function automaticSync() {
   if (automaticSyncPromise) return automaticSyncPromise;
-  automaticSyncPromise = runAutomaticSync().finally(() => {
-    automaticSyncPromise = null;
+  const task = runAutomaticSync().finally(() => {
+    if(automaticSyncPromise===task)automaticSyncPromise = null;
   });
-  return automaticSyncPromise;
+  automaticSyncPromise=task;
+  return task;
 }
 function scheduleImmediate() {
   clearTimeout(quickTimer);
@@ -6025,7 +6142,9 @@ function setUser(user, profile = null, business = null, {reason = "session_updat
   try { pendingBefore = queueCounts().total; } catch { /* Diagnostic only. Never modify the queue. */ }
   syncSessionGeneration++;
   state.operationalProtocol={status:'not_verified'};
+  state.remoteReadRefresh={pending:0,status:'idle'};
   processingPromise = null; // The retired promise is fenced; it must not own the next identity's queue.
+  automaticSyncPromise=null;manualSyncPromise=null;
   // Diagnostics are memory-only and must not be exposed to the next account.
   if (user && previousUid !== user.uid) {
     state.syncFailureHistory = (state.syncFailureHistory || []).filter(entry => entry.actorUid === user.uid);
@@ -6183,6 +6302,20 @@ function subscribeRecentActivityEvents(callback, onError, max = 100) {
   };
   return wrapped;
 }
+function restartCloudReadsIfScopeChanged() {
+  if(!currentUser||!cloudReadController)return;
+  if(cloudReadController.scope===captureCloudReadScope())return;
+  clearTimeout(cloudReadRestartTimer);
+  cloudReadRestartTimer=setTimeout(()=>{
+    cloudReadRestartTimer=null;
+    const context=window.BusinessContext?.get?.()||{};
+    if(currentUser&&context.businessId===activeBusinessId()&&auth.currentUser?.uid===currentUser.uid)
+      startCloudSubscriptions();
+  },0);
+}
+addEventListener('business-context-changed',restartCloudReadsIfScopeChanged);
+addEventListener('veconi-space-context-changed',restartCloudReadsIfScopeChanged);
+addEventListener('veconi-spaces-ready',restartCloudReadsIfScopeChanged);
 addEventListener("online", () => {
   emit({ status: "waiting", message: "Conexão recuperada. Sincronizando…" });
   scheduleImmediate();

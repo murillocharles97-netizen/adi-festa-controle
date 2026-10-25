@@ -90,11 +90,11 @@ test('shared history bounds OR queries/listeners to 15 spaces per group, avoidin
 });
 function pullRuntime(){
  const r=runtime(),s=r.s;let saved={},failFlush=false,full=0,delta=0,applied=0;
- Object.assign(s,{currentUser:{uid:'seller-a'},syncSessionGeneration:1,validateUser:async()=>{},activeBusinessId:()=> 'biz',canPullSource:()=>true,DEFAULT_PULL_NAMES:['sales'],CLOUD_NAMES:['sales'],INITIAL_FULL_NAMES:new Set(),INITIAL_RECENT_LIMITS:{sales:200},PULL_TTL_MS:300000,lastPullAt:0,
+ Object.assign(s,{auth:{currentUser:{uid:'seller-a'}},currentUser:{uid:'seller-a'},syncSessionGeneration:1,validateUser:async()=>{},activeBusinessId:()=> 'biz',canPullSource:()=>true,DEFAULT_PULL_NAMES:['sales'],CLOUD_NAMES:['sales'],INITIAL_FULL_NAMES:new Set(),INITIAL_RECENT_LIMITS:{sales:200},PULL_TTL_MS:300000,lastPullAt:0,
   readPullState:()=>structuredClone(saved),writePullState:state=>{saved=structuredClone(state);},performance,now:()=>now,syncStep:async(_stage,fn)=>fn(),state:{cloudCounts:{},cloudNewest:{}},rememberSnapshotMetadata(){},newestTimestamp:docs=>docs.at(-1)?.updatedAt||'',emit(){},
   applyCloudCollectionBatch:()=>{applied++;return 8;},repositories:{sales:{listAllPaged:async()=>{full++;return fixture().vendas;},listChangedSince:async()=>{delta++;return[];},getLastReadMetadata:()=>({})}}});
  s.DB.flush=async()=>{if(failFlush)throw Error('durability failed');};r.login('seller-a');
- vm.runInContext(slice(read('js/firebase/sync.js'),'async function pullCloudCollections(','async function ensureClientProjection(')+'\nwindow.pullCloudCollections=pullCloudCollections;',s);
+ vm.runInContext(slice(read('js/firebase/sync.js'),'function captureCloudReadScope(','function registerRealtimeCollection(')+slice(read('js/firebase/sync.js'),'async function pullCloudCollections(','async function ensureClientProjection(')+'\nwindow.pullCloudCollections=pullCloudCollections;',s);
  saved['biz:sales']=now;
  return{...r,pull:()=>s.pullCloudCollections({force:true,names:['sales']}),saved:()=>structuredClone(saved),counts:()=>({full,delta,applied}),failFlush:()=>{failFlush=true;}};
 }

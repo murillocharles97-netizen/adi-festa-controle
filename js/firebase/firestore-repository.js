@@ -162,7 +162,7 @@ export function createFirestoreRepository(collectionName) {
     const scopeKey=repositoryScopeKey(),assertScope=()=>{if(scopeKey!==repositoryScopeKey())throw Error('A empresa, sessão ou permissão ativa mudou.');};
     const merge=docs=>{
       assertScope();const unique=[...new Map(docs.map(d=>[d.id,d])).values()],val=d=>sort==='__name__'?d.id:d.data()[sort]?.toMillis?.()??d.data()[sort];
-      unique.sort((a,b)=>{const x=val(a),y=val(b);return ((x<y?-1:x>y?1:0)*(direction==='desc'?-1:1))||a.id.localeCompare(b.id);});
+      unique.sort((a,b)=>{const x=val(a),y=val(b);return ((x<y?-1:x>y?1:0)*(direction==='desc'?-1:1))||(a.id<b.id?-1:a.id>b.id?1:0);});
       const selected=max?unique.slice(0,max):unique;return {docs:selected,size:selected.length,metadata:{fromCache:false,hasPendingWrites:false}};
     };
     const groups=collectionName==='activityEvents'?activityGroups():null;
@@ -358,13 +358,29 @@ export function createFirestoreRepository(collectionName) {
     },
     async listChangedSince(since, max = 200) {
       if (!since) return this.list({ force: true });
-      const readCursor=value=>readVisible([...visibilityConstraints(collectionName),where('updatedAt','>=',value),orderBy('updatedAt','asc'),limit(max)],{sort:'updatedAt',max});
-      const snapshot=rememberMetadata(await timed('read',collectionName,()=>readCursor(Timestamp.fromDate(new Date(since)))),'server');
-      // Compatibility read only for legacy order dates, without rewriting old
-      // documents or changing the global Timestamp contract. No new listener.
-      const legacy=collectionName==='catalogOrders'?await timed('read',collectionName,()=>readCursor(new Date(since).toISOString())):null;
-      const unique=new Map([...snapshot.docs,...(legacy?.docs||[])].map(d=>[d.id,convert(d)]));
-      if(legacy)lastReadMetadata={...lastReadMetadata,documents:unique.size};
+      const scopeKey=repositoryScopeKey(),pageSize=Math.min(500,Math.max(1,Number(max)||200)),unique=new Map();
+      const assertScope=()=>{if(scopeKey!==repositoryScopeKey())throw Object.assign(Error('A sessão ou permissão mudou durante a leitura.'),{code:'sync-session-retired'});};
+      const readPages=async value=>{
+        let cursor=null;
+        for(let page=0;page<20;page++){
+          assertScope();
+          const constraints=[...visibilityConstraints(collectionName),where('updatedAt','>=',value),orderBy('updatedAt','asc')];
+          // A DocumentSnapshot cursor includes the document key: ties cannot
+          // repeat the same first 500 rows. No new composite field/index.
+          if(cursor)constraints.push(startAfter(cursor));
+          constraints.push(limit(pageSize));
+          const snapshot=rememberMetadata(await timed('read',collectionName,()=>readVisible(constraints,{sort:'updatedAt',max:pageSize})),'server');
+          assertScope();snapshot.docs.forEach(d=>unique.set(d.id,convert(d)));
+          if(snapshot.docs.length<pageSize)return;
+          cursor=snapshot.docs.at(-1);
+        }
+        // Fail closed: the caller cannot apply a partial batch or advance its
+        // cursor. This is a bounded read failure, never a commercial retry.
+        throw Object.assign(Error('A leitura excedeu o limite seguro de páginas. Nenhum cursor foi avançado.'),{code:'sync-read-page-limit'});
+      };
+      await readPages(Timestamp.fromDate(new Date(since)));
+      if(collectionName==='catalogOrders')await readPages(new Date(since).toISOString());
+      if(lastReadMetadata)lastReadMetadata={...lastReadMetadata,documents:unique.size};
       return [...unique.values()].sort((a,b)=>new Date(a.updatedAt)-new Date(b.updatedAt));
     },
     async listPage(cursor = null, max = 50) {
