@@ -1,0 +1,257 @@
+{
+  "generatedAt": "2026-10-25T18:46:28.516Z",
+  "scope": "Local, headless, fictitious data; all external requests blocked",
+  "zoomMethod": "CSS viewport divided by zoom + matching device pixel density; mobile keyboard via viewport resize. Physical Android not exercised.",
+  "results": [
+    {
+      "scenario": "V202 baseline reproduces inaccessible initial receipt footer",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt desktop 100% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt desktop 125% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt desktop 150% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt desktop 200% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt notebook 100% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt notebook 125% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt notebook 150% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt notebook 200% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt compact 100% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt compact 125% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt compact 150% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt compact 200% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt tablet 100% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt tablet 125% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt tablet 150% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt tablet 200% reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt mobile 320px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt mobile 360px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt mobile 390px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt mobile 430px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "zoom changes while the receipt remains open preserve desktop actions",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt print keeps all 45 lines; canvas and WhatsApp content are preserved",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "receipt keyboard focus is contained; share/edit follows visible viewport",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "cancel fixed actions 390px; real form retained",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "cancel fixed actions 1366px; real form retained",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "exchange fixed actions 390px; real form retained",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "exchange fixed actions 1366px; real form retained",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "exchange review/edit preserves form handlers and fixed actions",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "payment receipt and phone form remain reachable with keyboard viewport",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice clear",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice resolved",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice pending",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice pagination",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice failure",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice local",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery notice mismatch",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery permanent access in History; resolved notice stays hidden after reload",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "stale owner response cannot contaminate seller/space; no writes",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview login 320px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview recover 320px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview loading 320px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview error 320px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview login 360px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview recover 360px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview loading 360px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview error 360px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview login 390px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview recover 390px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview loading 390px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview error 390px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview login 430px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview recover 430px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview loading 430px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview error 430px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview login 1440px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview recover 1440px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview loading 1440px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview error 1440px",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview show password, autofill, humanized error, recovery and loading paths",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview keyboard resize and reduced motion",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "login preview AA contrast for form copy, links and primary action",
+      "status": "Aprovado"
+    }
+  ],
+  "passed": 62,
+  "failed": 0
+}

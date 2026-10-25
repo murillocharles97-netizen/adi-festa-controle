@@ -17,3 +17,8 @@
 .sale-recovery-resolution{border-left:3px solid #009f95;background:#f1fbf8;padding:12px;margin:12px 0;border-radius:8px}
 .sale-recovery-modal button:focus-visible,.sale-recovery-banner button:focus-visible{outline:3px solid #008e87;outline-offset:3px}
 @media(max-width:600px){.sale-recovery-banner{align-items:stretch;flex-direction:column;padding:14px}.sale-recovery-actions{display:grid;grid-template-columns:1fr}.sale-recovery-actions .btn{white-space:normal}.sale-recovery-modal .modal-head,.sale-recovery-modal .modal-foot{gap:8px;flex-wrap:wrap}.sale-recovery-modal .modal-body{padding:14px}.sale-recovery-modal .modal-foot .btn{flex:1;white-space:normal}}
+.sale-recovery-banner.is-compact{padding:10px 14px;gap:12px;border-radius:12px;margin-bottom:12px;font-size:.88rem}
+.sale-recovery-banner.is-compact p{font-size:.8rem;margin-top:3px}
+.sale-recovery-entry{display:flex;justify-content:flex-end;margin-bottom:12px}
+.sale-recovery-entry .btn{min-height:44px;white-space:normal}
+@media(max-width:600px){.sale-recovery-banner.is-compact{gap:8px}.sale-recovery-banner.is-compact .sale-recovery-actions{display:flex}.sale-recovery-banner.is-compact .btn{flex:1}.sale-recovery-entry .btn{width:100%}}

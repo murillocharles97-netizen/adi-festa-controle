@@ -1,0 +1,134 @@
+{
+  "generatedAt": "2026-10-25T18:48:49.691Z",
+  "sdk": "10.13.2, exact production version",
+  "auth": "Local Auth Emulator only, demo-veconi-login-v203",
+  "businessServices": "mocked; no production bootstrap/Firestore/Sync calls",
+  "zoom": "equivalent CSS reflow; keyboard via viewport resize, not physical-device validation",
+  "signInRequestMethods": [
+    "OPTIONS",
+    "POST",
+    "POST",
+    "POST",
+    "POST"
+  ],
+  "results": [
+    {
+      "scenario": "mobile-320 real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "mobile-360 real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "mobile-390 real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "mobile-430 real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "tablet real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "tablet-landscape real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "notebook real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "desktop real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "short-desktop real integrated login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "notebook zoom 100% equivalent reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "notebook zoom 125% equivalent reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "notebook zoom 150% equivalent reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "notebook zoom 200% equivalent reflow",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "keyboard viewport, natural scrolling and focus sequence",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "real SDK login on Enter, no duplicate POST and local session persists on reload",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "seller QA uses the same real Auth entry and retains its own session on reload",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "invalid password: humanized error, preserved email and retry",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "disabled Auth account remains denied",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "network error never hides failure or locks recovery",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "real SDK password reset, generic response and no account enumeration",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "real signup SDK through preserved three-step registration; onboarding mocked only",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "employee invite retains email, alternate creation and no public plans",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "plans navigation uses existing binding and returns to login",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "loading presentation 1440",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "loading presentation 390",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "bootstrap-error presentation 1440",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "bootstrap-error presentation 390",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "recovery presentation 1440",
+      "status": "Aprovado"
+    },
+    {
+      "scenario": "reduced motion and form contrast",
+      "status": "Aprovado"
+    }
+  ],
+  "passed": 29,
+  "failed": 0
+}

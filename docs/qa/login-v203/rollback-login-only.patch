@@ -1,0 +1,188 @@
+diff --git b/css/firebase.css a/css/firebase.css
+index 7b224f3..7ee617e 100644
+--- b/css/firebase.css
++++ a/css/firebase.css
+@@ -10,97 +10,3 @@ button.avatar:focus-visible{outline:3px solid #009e91;outline-offset:3px}
+ .legacy-resolution-sheet .modal-head small{display:block;margin-bottom:.2rem;color:#68758a}.legacy-resolution-sheet .modal-head h3{margin:0}.legacy-resolution-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin:1rem 0}.legacy-resolution-summary>span,.legacy-cloud-balance{display:grid;gap:.2rem;padding:.75rem;border:1px solid #dfe7e5;border-radius:12px;background:#f8fffd}.legacy-resolution-summary small,.legacy-cloud-balance small{color:#68758a}.legacy-resolution-summary b,.legacy-cloud-balance strong{color:#17243b}.legacy-cloud-balance{margin-bottom:1rem}.legacy-resolution-sheet .field>small{display:block;margin-top:.35rem;color:#68758a;font-size:.78rem}.sync-technical-ids{margin-top:1rem}.sync-technical-ids code{display:block;margin-top:.4rem;overflow-wrap:anywhere;color:#68758a}.legacy-resolution-sheet .backup-warning{margin-top:1rem}@media(max-width:560px){.legacy-resolution-summary{grid-template-columns:1fr}.legacy-resolution-sheet .modal-foot .btn{flex:1 1 100%}}
+ .sale-conflict-actions{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.6rem}.sale-conflict-actions button{border:1px solid currentColor;border-radius:8px;padding:.45rem .7rem;background:#fff;color:#9f2633;font-weight:800}.sale-conflict-actions button:first-child{background:#9f2633;color:#fff}.sale-submit-feedback.error:has(.sale-conflict-actions){display:block}
+ .sync-financial-audit{margin-top:1rem;padding-top:1rem;border-top:1px solid #dfe7e5}.sync-financial-audit>p{margin:.75rem 0;color:#526176}.sync-financial-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}.sync-financial-preview article{display:grid;gap:.2rem;padding:.7rem;border:1px solid #dce5e3;border-left:4px solid #1caf8c;border-radius:10px;background:#fff}.sync-financial-preview article.is-warning{border-left-color:#e39a21}.sync-financial-preview span,.sync-financial-preview small{font-size:.8rem;color:#637086}@media(max-width:767px){.sync-financial-preview{grid-template-columns:1fr}}
+-
+-/* V203 login: presentation only; existing Auth, bootstrap and session handlers remain canonical. */
+-#auth-gate[hidden],#auth-gate [hidden]{display:none!important}
+-html.auth-pending #auth-gate:not([hidden]){box-sizing:border-box;position:relative;width:100%;min-height:100vh;min-height:100dvh;height:auto;max-height:none;overflow:visible;padding:max(28px,env(safe-area-inset-top)) max(28px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(28px,env(safe-area-inset-left));background:radial-gradient(ellipse at -12% -10%,#00b8b250,transparent 48%),radial-gradient(ellipse at 100% 110%,#008c8b35,transparent 46%),linear-gradient(130deg,#062c34,#03181f 62%,#073039);color:#142b3d}
+-html.auth-pending #auth-gate:not([hidden])::before{position:absolute;inset:0;z-index:-1;background:radial-gradient(ellipse 120% 85% at -30% -15%,transparent 60%,#28c6c61a 60.1%,transparent 60.5%),radial-gradient(ellipse 150% 110% at 0% -15%,transparent 68%,#00b7b51a 68.1%,transparent 68.4%);pointer-events:none}
+-html.auth-pending #auth-gate.auth-entry-layout:not([hidden]){display:block}
+-#auth-gate .auth-access-layout{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(360px,1fr);align-items:center;gap:clamp(40px,6vw,88px);width:100%;max-width:1200px;min-height:calc(100vh - 56px);min-height:calc(100dvh - 56px);margin:0 auto;padding:0}
+-#auth-gate .auth-identity{color:#f2ffff;max-width:510px;padding:16px 0}
+-#auth-gate .auth-identity-logo{display:flex;align-items:center;color:white}
+-#auth-gate .auth-identity-logo .veconi-logo img{width:94px;height:94px}
+-#auth-gate .auth-identity-logo .veconi-wordmark b{font-size:68px;font-weight:850}
+-#auth-gate .auth-identity-logo .veconi-wordmark small{font-size:17px;opacity:1;color:#c0d8dd;margin-top:10px;font-weight:450}
+-#auth-gate .auth-identity h2{font-size:clamp(30px,3.15vw,43px);line-height:1.17;letter-spacing:-1.3px;font-weight:620;margin:38px 0 30px;max-width:480px;color:#f0fcfc}
+-#auth-gate .auth-benefits{display:grid;gap:20px;list-style:none;margin:0;padding:0}
+-#auth-gate .auth-benefits li{display:flex;align-items:flex-start;gap:13px;color:#c3d9dd;font-size:15px;line-height:1.6}
+-#auth-gate .auth-benefits svg{width:21px;height:21px;flex:0 0 21px;color:#30d7ca;stroke-width:1.7;margin-top:2px}
+-#auth-gate .auth-form-area{display:flex;justify-content:center;min-width:0}
+-#auth-gate .auth-card.auth-entry-card{box-sizing:border-box;width:100%;max-width:460px;padding:44px 40px 30px;border:1px solid #e5edef;border-radius:28px;background:#fff;box-shadow:0 24px 64px #0005;text-align:left;color-scheme:light}
+-#auth-gate .auth-entry-brand{display:none}
+-#auth-gate .auth-entry-heading h1{margin:0;color:#0c2132;font-size:36px;font-weight:730;line-height:1.18;letter-spacing:-1px}
+-#auth-gate .auth-entry-heading p{color:#657587;margin:10px 0 30px;font-size:15px;line-height:1.5}
+-#auth-gate .auth-entry-card form{display:grid;gap:0;text-align:left}
+-#auth-gate .auth-entry-card label{display:grid;gap:8px;margin-bottom:17px;font-size:14px;line-height:1.4;font-weight:650;color:#12283b}
+-#auth-gate .auth-input-wrap{display:block;position:relative;min-width:0}
+-#auth-gate .auth-input-wrap>svg{position:absolute;z-index:1;left:15px;top:50%;transform:translateY(-50%);width:20px;height:20px;stroke-width:1.7;color:#728598;pointer-events:none}
+-#auth-gate .auth-entry-card input{box-sizing:border-box;width:100%;height:52px;min-height:52px;padding:12px 14px 12px 45px;border:1px solid #d4dfe7;border-radius:12px;background:#fff;color:#132d40;font:inherit;font-size:16px;font-weight:400;line-height:1.4;box-shadow:0 1px 2px #15384e04;scroll-margin-block:24px}
+-#auth-gate .auth-entry-card input::placeholder{color:#7d8d9e;opacity:1}
+-#auth-gate .auth-entry-card input:focus{border-color:#008c84;outline:2px solid #008c8450;outline-offset:2px}
+-#auth-gate .auth-entry-card .password-field input{padding-right:54px}
+-#auth-gate .auth-entry-card label[for="login-password"]{margin-bottom:8px}
+-#auth-gate .auth-entry-card .password-field{margin-bottom:17px}
+-#auth-gate .password-field #toggle-password{position:absolute;right:4px;top:4px;display:grid;place-items:center;width:44px;height:44px;min-height:44px;border:0;border-radius:9px;background:transparent;color:#526c7e;cursor:pointer}
+-#auth-gate #toggle-password svg{width:21px;height:21px;stroke-width:1.8}
+-#auth-gate .auth-entry-card .auth-link{min-height:44px;font-size:14px;font-weight:600;color:#007d78;border:0;background:transparent;cursor:pointer;line-height:1.4}
+-#auth-gate .auth-entry-card .auth-link:hover{text-decoration:underline;text-underline-offset:4px}
+-#auth-gate .auth-entry-card .auth-forgot{width:max-content;max-width:100%;justify-self:end;margin:-11px 0 14px;padding:6px 0}
+-#auth-gate .auth-entry-card .auth-error{min-height:0!important;margin:0 0 16px!important;padding:11px 13px;border:1px solid #edc0c6;border-radius:10px;background:#fff4f5;color:#a62c3b!important;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+-#auth-gate .auth-entry-card .auth-error:empty{display:none}
+-#auth-gate .auth-entry-card .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;padding:12px 18px;border-radius:12px;font-size:15px;font-weight:670;line-height:1.4;white-space:normal;overflow-wrap:anywhere;cursor:pointer}
+-#auth-gate .auth-entry-card .btn-primary{border:1px solid #00bfb2;background:#06c8b9;color:#092936;box-shadow:none}
+-#auth-gate .auth-entry-card .btn-primary:hover:not(:disabled){background:#16d6c5}
+-#auth-gate #login-submit>span{flex:1}
+-#auth-gate #login-submit>svg{flex:0 0 20px;width:20px;height:20px}
+-#auth-gate .auth-entry-card .btn-light{margin-top:14px;border:1px solid #d4dfe7;background:white;color:#172c3e}
+-#auth-gate .auth-entry-card .btn:disabled{cursor:wait;opacity:.72}
+-#auth-gate .auth-entry-card .auth-plans{justify-self:center;min-height:44px;margin-top:13px;padding:8px 14px}
+-#auth-gate :is(button,a,input,select,textarea,summary):focus-visible{outline:3px solid #008c84;outline-offset:3px}
+-#auth-gate .auth-recovery-card .auth-entry-heading h1{font-size:30px}
+-#auth-gate #recovery-result{text-align:center;color:#526b7d}
+-#auth-gate #recovery-result h2{font-size:25px;color:#142b3d;margin:18px 0 10px}
+-#auth-gate #recovery-result p{font-size:14px;line-height:1.7;margin:0 0 25px}
+-#auth-gate .auth-recovery-check{display:grid;place-items:center;width:58px;height:58px;margin:10px auto;background:#e5f9f5;border-radius:18px;color:#007e76}
+-#auth-gate .auth-recovery-check svg{width:28px;height:28px}
+-#auth-gate .auth-loading{gap:8px;max-width:430px;padding:32px 24px}
+-#auth-gate .auth-loading .auth-branding{position:relative;margin-bottom:10px;padding-bottom:30px}
+-#auth-gate .auth-loading .auth-branding::after{content:"";position:absolute;bottom:0;left:calc(50% - 10px);width:20px;height:20px;border:2px solid #d4e6e5;border-top-color:#008b83;border-radius:50%;animation:auth-access-spin 1s linear infinite}
+-#auth-gate .auth-loading>p{font-size:15px;line-height:1.6;color:#52697b;margin:10px 0 18px}
+-#auth-gate .auth-loading .btn,#auth-gate .auth-blocked-card .btn{margin-top:10px}
+-#auth-gate .auth-technical-details{max-width:100%;text-align:left;overflow-wrap:anywhere}
+-@keyframes auth-access-spin{to{transform:rotate(360deg)}}
+-@media(max-width:959px){
+- html.auth-pending #auth-gate:not([hidden]){padding:max(18px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+- #auth-gate .auth-access-layout{display:flex;justify-content:center;align-items:center;min-height:calc(100vh - 36px);min-height:calc(100dvh - 36px)}
+- #auth-gate .auth-identity{display:none}
+- #auth-gate .auth-form-area{width:100%}
+- #auth-gate .auth-card.auth-entry-card{max-width:420px;padding:28px 26px 20px;border-radius:24px}
+- #auth-gate .auth-entry-brand{display:flex;justify-content:center;margin:0 auto 26px;color:#102638}
+- #auth-gate .auth-entry-brand .veconi-logo img{width:58px;height:58px}
+- #auth-gate .auth-entry-brand .veconi-wordmark b{font-size:40px}
+- #auth-gate .auth-entry-brand .veconi-wordmark small{margin-top:7px;color:#657587;font-size:12px;font-weight:450;opacity:1}
+- #auth-gate .auth-entry-heading{text-align:center}
+- #auth-gate .auth-entry-heading h1{font-size:30px;letter-spacing:-.6px}
+- #auth-gate .auth-entry-heading p{font-size:14px;margin:8px 0 26px}
+-}
+-@media(max-width:360px){
+- #auth-gate .auth-card.auth-entry-card{padding:24px 20px 16px}
+- #auth-gate .auth-entry-brand{margin-bottom:22px}
+- #auth-gate .auth-entry-brand .veconi-logo img{width:50px;height:50px}
+- #auth-gate .auth-entry-brand .veconi-wordmark b{font-size:35px}
+- #auth-gate .auth-entry-brand .veconi-wordmark small{font-size:11px}
+- #auth-gate .auth-entry-card input,#auth-gate .auth-entry-card .btn{min-height:48px;height:auto}
+- #auth-gate .auth-entry-card input{height:50px}
+- #auth-gate .auth-entry-heading h1{font-size:28px}
+-}
+-@media(max-height:650px){
+- #auth-gate .auth-card.auth-entry-card{padding-top:26px;padding-bottom:18px}
+- #auth-gate .auth-entry-heading p{margin-bottom:20px}
+- #auth-gate .auth-entry-card label{margin-bottom:13px}
+- #auth-gate .auth-entry-card .password-field{margin-bottom:13px}
+- #auth-gate .auth-entry-brand{margin-bottom:20px}
+- #auth-gate .auth-identity h2{margin-top:25px;margin-bottom:24px;font-size:34px}
+- #auth-gate .auth-benefits{gap:15px}
+-}
+-@media(prefers-reduced-motion:reduce){#auth-gate *,#auth-gate *::before,#auth-gate *::after{animation:none!important;transition:none!important}}
+diff --git b/index.html a/index.html
+index 6a7d511..fd17200 100644
+--- b/index.html
++++ a/index.html
+@@ -47,7 +47,7 @@
+   <link rel="stylesheet" href="./css/mobile.css?v=140">
+   <link rel="stylesheet" href="./css/import.css">
+   <link rel="stylesheet" href="./css/visual.css">
+-  <link rel="stylesheet" href="./css/firebase.css?v=203-login-local">
++  <link rel="stylesheet" href="./css/firebase.css?v=189">
+   <link rel="stylesheet" href="./css/firebase-audit.css">
+   <link rel="stylesheet" href="./css/backup.css">
+   <link rel="stylesheet" href="./css/clientes-page.css?v=196">
+@@ -201,7 +201,7 @@
+   <script src="./js/visual-ui.js?v=133"></script>
+   <script src="./js/client-smart-mode.js?v=57"></script>
+   <script>window.startPrivateUI=()=>{if(window.privateUIStarted)return;window.privateUIStarted=true;window.VisualUI&&VisualUI.start()};addEventListener('firebase-auth-ready',window.startPrivateUI);</script>
+-  <script type="module" src="./js/firebase/auth.js?v=203-login-local"></script>
++  <script type="module" src="./js/firebase/auth.js?v=202"></script>
+   <script type="module" src="./js/firebase/team-service.js?v=191"></script>
+   <script type="module" src="./js/firebase/space-service.js?v=151"></script>
+   <script type="module" src="./js/firebase/firebase-ui.js?v=202"></script>
+diff --git b/js/firebase/auth.js a/js/firebase/auth.js
+index 1b7efc1..c445ba0 100644
+--- b/js/firebase/auth.js
++++ a/js/firebase/auth.js
+@@ -31,18 +31,7 @@ const brandMarkup=()=>`<div class="auth-branding">${window.VeconiBrand?.markup?.
+ const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/email-already-in-use':'Este e-mail já possui uma conta. Entre com sua senha.','auth/weak-password':'Use uma senha mais forte, com pelo menos 6 caracteres.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-disabled':'Esta conta está desativada.','auth/too-many-requests':'Muitas tentativas. Aguarde e tente novamente.','auth/network-request-failed':'Não foi possível conectar. Verifique sua internet.','permission-denied':'A operação foi bloqueada pelas regras de segurança.','resource-exhausted':'O limite temporário do Firebase foi atingido. Tente novamente mais tarde.'}[String(code||'').replace(/^(firestore|functions)\//,'')]||'Não foi possível concluir agora. Tente novamente.');
+ const businessIdFor=user=>`biz_${user.uid}`;
+ const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
+-function entryShell(card){
+-  const logo=window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup();
+-  return `<main class="auth-access-layout"><aside class="auth-identity" aria-label="Conheça a VECONI"><div class="auth-identity-logo">${logo}</div><h2>Tudo o que sua empresa precisa, em um só lugar.</h2><ul class="auth-benefits"><li><i data-lucide="trending-up" aria-hidden="true"></i><span>Vendas que impulsionam seus resultados.</span></li><li><i data-lucide="package-check" aria-hidden="true"></i><span>Estoque sempre sob controle.</span></li><li><i data-lucide="users-round" aria-hidden="true"></i><span>Clientes e CRM para relacionamentos duradouros.</span></li><li><i data-lucide="wallet" aria-hidden="true"></i><span>Financeiro simples e eficiente.</span></li></ul></aside><div class="auth-form-area">${card}</div></main>`;
+-}
+-function screen(html,entry=false){
+-  gate.classList.toggle('auth-entry-layout',entry);
+-  gate.innerHTML=entry?entryShell(html):html;gate.hidden=false;
+-  document.documentElement.classList.add('auth-pending');
+-  const status=gate.querySelector('.auth-loading>p');
+-  if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');}
+-  window.lucide?.createIcons();
+-}
++function screen(html){gate.innerHTML=html;gate.hidden=false;document.documentElement.classList.add('auth-pending');window.lucide?.createIcons()}
+ function workspaceBlockedScreen(detail={}){
+   readyUid='';
+   setBootstrapState('temporary_unavailable',{code:detail.code||'workspace-reset-locked',workspaceStatus:detail.status||null});
+@@ -88,36 +77,12 @@ function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapS
+
+ function login(message='',presetEmail=''){
+   const invited=Boolean(INVITE_TOKEN),preview=invitePreviewCache;
+-  const logo=window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup();
+-  screen(`<section class="auth-card auth-entry-card" aria-labelledby="auth-entry-title"><div class="auth-entry-brand">${logo}</div><header class="auth-entry-heading"><h1 id="auth-entry-title">${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Acesse sua conta para continuar.'}</p></header><form id="login-form"><label for="login-email">E-mail<span class="auth-input-wrap"><i data-lucide="mail" aria-hidden="true"></i><input id="login-email" name="email" type="email" autocomplete="username" required inputmode="email" autocapitalize="none" spellcheck="false" placeholder="seu@email.com"></span></label><label for="login-password">Senha</label><span class="password-field auth-input-wrap"><i data-lucide="lock-keyhole" aria-hidden="true"></i><input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="Sua senha"><button type="button" id="toggle-password" aria-label="Mostrar senha" aria-pressed="false"><i data-lucide="eye" aria-hidden="true"></i></button></span><button class="auth-link auth-forgot" type="button" id="show-password-recovery">Esqueci minha senha</button><p class="auth-error" id="auth-error" role="alert" aria-live="assertive">${esc(message)}</p><button class="btn btn-primary" id="login-submit" type="submit"><span>Entrar${invited?' e aceitar convite':''}</span><i data-lucide="arrow-right" aria-hidden="true"></i></button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link auth-plans" type="button" data-show-plans>Ver planos</button>'}</form></section>`,true);
++  screen(`<section class="auth-card auth-entry-card">${brandMarkup()}<h1>${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Vendas, estoque, clientes, CRM e financeiro em um só lugar.'}</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha"><i data-lucide="eye"></i></button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar${invited?' e aceitar convite':''}</button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link" type="button" data-show-plans>Ver planos</button>'}</form></section>`);
+   const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
+-  document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('#login-password'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.setAttribute('aria-pressed',String(visible));event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}" aria-hidden="true"></i>`;window.lucide?.createIcons()};
++  document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('[name=password]'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}"></i>`;window.lucide?.createIcons()};
+   document.querySelector('#show-register').onclick=()=>{if(invited)return inviteRegister();registerState.step=1;register()};
+   document.querySelector('[data-show-plans]')?.addEventListener('click',()=>plansScreen(false));
+-  document.querySelector('#show-password-recovery').onclick=()=>passwordRecovery(loginEmail.value);
+-  document.querySelector('#login-form').onsubmit=async event=>{
+-    event.preventDefault();const node=event.currentTarget,button=node.querySelector('#login-submit');if(button.disabled)return;
+-    const form=new FormData(node),email=String(form.get('email')).trim();setButtonLoading(button,true,'Entrando…');
+-    try{await signInWithEmailAndPassword(auth,email,form.get('password'))}
+-    catch(error){if(node.isConnected)login(friendly(error.code),email)}
+-  };
+-}
+-function passwordRecovery(presetEmail=''){
+-  screen(`<section class="auth-card auth-entry-card auth-recovery-card" aria-labelledby="auth-recovery-title"><div class="auth-entry-brand">${window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup()}</div><header class="auth-entry-heading"><h1 id="auth-recovery-title">Recuperar acesso</h1><p>Informe seu e-mail para receber as orientações de recuperação.</p></header><form id="password-recovery-form"><label for="recovery-email">E-mail<span class="auth-input-wrap"><i data-lucide="mail" aria-hidden="true"></i><input id="recovery-email" name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="seu@email.com"></span></label><p class="auth-error" id="recovery-error" role="alert" aria-live="assertive"></p><button class="btn btn-primary" id="recovery-submit" type="submit">Enviar orientações</button><button class="btn btn-light" id="recovery-back" type="button">Voltar para entrar</button></form><div id="recovery-result" role="status" aria-live="polite" hidden><span class="auth-recovery-check" aria-hidden="true"><i data-lucide="mail-check"></i></span><h2>Confira seu e-mail</h2><p>Se houver uma conta com esse e-mail, você receberá as orientações para recuperar o acesso. Confira também o spam.</p><button class="btn btn-primary" id="recovery-done" type="button">Voltar para entrar</button></div></section>`,true);
+-  const form=document.querySelector('#password-recovery-form'),email=form.elements.email,error=document.querySelector('#recovery-error');
+-  email.value=presetEmail;
+-  const back=()=>login('',email.value);
+-  document.querySelector('#recovery-back').onclick=back;document.querySelector('#recovery-done').onclick=back;
+-  form.onsubmit=async event=>{
+-    event.preventDefault();const button=form.querySelector('#recovery-submit');if(button.disabled)return;
+-    setButtonLoading(button,true,'Enviando…');error.textContent='';
+-    try{
+-      try{await sendPasswordResetEmail(auth,email.value.trim())}catch(failure){if(failure.code!=='auth/user-not-found')throw failure;}
+-      if(!form.isConnected)return;
+-      form.hidden=true;document.querySelector('#recovery-result').hidden=false;document.querySelector('#recovery-done').focus();
+-    }catch(failure){if(form.isConnected){error.textContent=friendly(failure.code);setButtonLoading(button,false,'Enviar orientações');}}
+-  };
+-  email.focus();
++  document.querySelector('#login-form').onsubmit=async event=>{event.preventDefault();const button=document.querySelector('#login-submit'),form=new FormData(event.currentTarget);setButtonLoading(button,true,'Entrando…');try{await signInWithEmailAndPassword(auth,String(form.get('email')).trim(),form.get('password'))}catch(error){login(friendly(error.code))}};
+ }
+
+ async function loadInvitePreview(){

@@ -43,8 +43,9 @@ window.ClientesPage=(()=>{
     function mount(title,body,back){
       if(!current())return false;
       root=$('#modal');if(!root)return false;
-      root.innerHTML=`<div class="modal-bg"><section class="modal-box payment-confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="payment-confirmation-title" tabindex="-1"><header class="modal-head"><h2 id="payment-confirmation-title">${title}</h2><button type="button" class="icon-btn" data-payment-back aria-label="${back?'Voltar à confirmação do pagamento':'Fechar confirmação'}">${icon('x')}</button></header><div class="modal-body">${body}</div></section></div>`;
+      root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box payment-confirmation-dialog viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="payment-confirmation-title" tabindex="-1"><header class="modal-head"><h2 id="payment-confirmation-title">${title}</h2><button type="button" class="icon-btn" data-payment-back aria-label="${back?'Voltar à confirmação do pagamento':'Fechar confirmação'}">${icon('x')}</button></header><div class="modal-body viewport-scroll">${body}</div></section></div>`;
       dialog=$('.payment-confirmation-dialog',root);
+      window.Modais?.layout?.(dialog);
       $('[data-payment-back]',dialog).onclick=()=>{if(!busy)(back||finish)()};
       dialog.onkeydown=event=>{
         if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(!busy)(back||finish)();return}

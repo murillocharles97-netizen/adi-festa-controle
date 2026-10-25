@@ -31,7 +31,18 @@ const brandMarkup=()=>`<div class="auth-branding">${window.VeconiBrand?.markup?.
 const friendly=code=>({'auth/invalid-email':'Informe um e-mail válido.','auth/email-already-in-use':'Este e-mail já possui uma conta. Entre com sua senha.','auth/weak-password':'Use uma senha mais forte, com pelo menos 6 caracteres.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-disabled':'Esta conta está desativada.','auth/too-many-requests':'Muitas tentativas. Aguarde e tente novamente.','auth/network-request-failed':'Não foi possível conectar. Verifique sua internet.','permission-denied':'A operação foi bloqueada pelas regras de segurança.','resource-exhausted':'O limite temporário do Firebase foi atingido. Tente novamente mais tarde.'}[String(code||'').replace(/^(firestore|functions)\//,'')]||'Não foi possível concluir agora. Tente novamente.');
 const businessIdFor=user=>`biz_${user.uid}`;
 const pendingKey=uid=>`${PENDING_PREFIX}${uid}`;
-function screen(html){gate.innerHTML=html;gate.hidden=false;document.documentElement.classList.add('auth-pending');window.lucide?.createIcons()}
+function entryShell(card){
+  const logo=window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup();
+  return `<main class="auth-access-layout"><aside class="auth-identity" aria-label="Conheça a VECONI"><div class="auth-identity-logo">${logo}</div><h2>Tudo o que sua empresa precisa, em um só lugar.</h2><ul class="auth-benefits"><li><i data-lucide="trending-up" aria-hidden="true"></i><span>Vendas que impulsionam seus resultados.</span></li><li><i data-lucide="package-check" aria-hidden="true"></i><span>Estoque sempre sob controle.</span></li><li><i data-lucide="users-round" aria-hidden="true"></i><span>Clientes e CRM para relacionamentos duradouros.</span></li><li><i data-lucide="wallet" aria-hidden="true"></i><span>Financeiro simples e eficiente.</span></li></ul></aside><div class="auth-form-area">${card}</div></main>`;
+}
+function screen(html,entry=false){
+  gate.classList.toggle('auth-entry-layout',entry);
+  gate.innerHTML=entry?entryShell(html):html;gate.hidden=false;
+  document.documentElement.classList.add('auth-pending');
+  const status=gate.querySelector('.auth-loading>p');
+  if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');}
+  window.lucide?.createIcons();
+}
 function workspaceBlockedScreen(detail={}){
   readyUid='';
   setBootstrapState('temporary_unavailable',{code:detail.code||'workspace-reset-locked',workspaceStatus:detail.status||null});
@@ -77,12 +88,36 @@ function assertCurrentRun(token){if(token.cancelled||token.sequence!==bootstrapS
 
 function login(message='',presetEmail=''){
   const invited=Boolean(INVITE_TOKEN),preview=invitePreviewCache;
-  screen(`<section class="auth-card auth-entry-card">${brandMarkup()}<h1>${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Vendas, estoque, clientes, CRM e financeiro em um só lugar.'}</p><form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="email" required inputmode="email"></label><label>Senha<div class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" id="toggle-password" aria-label="Mostrar senha"><i data-lucide="eye"></i></button></div></label><p class="auth-error" id="auth-error">${esc(message)}</p><button class="btn btn-primary" id="login-submit">Entrar${invited?' e aceitar convite':''}</button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link" type="button" data-show-plans>Ver planos</button>'}</form></section>`);
+  const logo=window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup();
+  screen(`<section class="auth-card auth-entry-card" aria-labelledby="auth-entry-title"><div class="auth-entry-brand">${logo}</div><header class="auth-entry-heading"><h1 id="auth-entry-title">${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Acesse sua conta para continuar.'}</p></header><form id="login-form"><label for="login-email">E-mail<span class="auth-input-wrap"><i data-lucide="mail" aria-hidden="true"></i><input id="login-email" name="email" type="email" autocomplete="username" required inputmode="email" autocapitalize="none" spellcheck="false" placeholder="seu@email.com"></span></label><label for="login-password">Senha</label><span class="password-field auth-input-wrap"><i data-lucide="lock-keyhole" aria-hidden="true"></i><input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="Sua senha"><button type="button" id="toggle-password" aria-label="Mostrar senha" aria-pressed="false"><i data-lucide="eye" aria-hidden="true"></i></button></span><button class="auth-link auth-forgot" type="button" id="show-password-recovery">Esqueci minha senha</button><p class="auth-error" id="auth-error" role="alert" aria-live="assertive">${esc(message)}</p><button class="btn btn-primary" id="login-submit" type="submit"><span>Entrar${invited?' e aceitar convite':''}</span><i data-lucide="arrow-right" aria-hidden="true"></i></button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link auth-plans" type="button" data-show-plans>Ver planos</button>'}</form></section>`,true);
   const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
-  document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('[name=password]'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}"></i>`;window.lucide?.createIcons()};
+  document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('#login-password'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.setAttribute('aria-pressed',String(visible));event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}" aria-hidden="true"></i>`;window.lucide?.createIcons()};
   document.querySelector('#show-register').onclick=()=>{if(invited)return inviteRegister();registerState.step=1;register()};
   document.querySelector('[data-show-plans]')?.addEventListener('click',()=>plansScreen(false));
-  document.querySelector('#login-form').onsubmit=async event=>{event.preventDefault();const button=document.querySelector('#login-submit'),form=new FormData(event.currentTarget);setButtonLoading(button,true,'Entrando…');try{await signInWithEmailAndPassword(auth,String(form.get('email')).trim(),form.get('password'))}catch(error){login(friendly(error.code))}};
+  document.querySelector('#show-password-recovery').onclick=()=>passwordRecovery(loginEmail.value);
+  document.querySelector('#login-form').onsubmit=async event=>{
+    event.preventDefault();const node=event.currentTarget,button=node.querySelector('#login-submit');if(button.disabled)return;
+    const form=new FormData(node),email=String(form.get('email')).trim();setButtonLoading(button,true,'Entrando…');
+    try{await signInWithEmailAndPassword(auth,email,form.get('password'))}
+    catch(error){if(node.isConnected)login(friendly(error.code),email)}
+  };
+}
+function passwordRecovery(presetEmail=''){
+  screen(`<section class="auth-card auth-entry-card auth-recovery-card" aria-labelledby="auth-recovery-title"><div class="auth-entry-brand">${window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup()}</div><header class="auth-entry-heading"><h1 id="auth-recovery-title">Recuperar acesso</h1><p>Informe seu e-mail para receber as orientações de recuperação.</p></header><form id="password-recovery-form"><label for="recovery-email">E-mail<span class="auth-input-wrap"><i data-lucide="mail" aria-hidden="true"></i><input id="recovery-email" name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="seu@email.com"></span></label><p class="auth-error" id="recovery-error" role="alert" aria-live="assertive"></p><button class="btn btn-primary" id="recovery-submit" type="submit">Enviar orientações</button><button class="btn btn-light" id="recovery-back" type="button">Voltar para entrar</button></form><div id="recovery-result" role="status" aria-live="polite" hidden><span class="auth-recovery-check" aria-hidden="true"><i data-lucide="mail-check"></i></span><h2>Confira seu e-mail</h2><p>Se houver uma conta com esse e-mail, você receberá as orientações para recuperar o acesso. Confira também o spam.</p><button class="btn btn-primary" id="recovery-done" type="button">Voltar para entrar</button></div></section>`,true);
+  const form=document.querySelector('#password-recovery-form'),email=form.elements.email,error=document.querySelector('#recovery-error');
+  email.value=presetEmail;
+  const back=()=>login('',email.value);
+  document.querySelector('#recovery-back').onclick=back;document.querySelector('#recovery-done').onclick=back;
+  form.onsubmit=async event=>{
+    event.preventDefault();const button=form.querySelector('#recovery-submit');if(button.disabled)return;
+    setButtonLoading(button,true,'Enviando…');error.textContent='';
+    try{
+      try{await sendPasswordResetEmail(auth,email.value.trim())}catch(failure){if(failure.code!=='auth/user-not-found')throw failure;}
+      if(!form.isConnected)return;
+      form.hidden=true;document.querySelector('#recovery-result').hidden=false;document.querySelector('#recovery-done').focus();
+    }catch(failure){if(form.isConnected){error.textContent=friendly(failure.code);setButtonLoading(button,false,'Enviar orientações');}}
+  };
+  email.focus();
 }
 
 async function loadInvitePreview(){

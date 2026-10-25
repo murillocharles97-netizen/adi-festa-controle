@@ -1,0 +1,22 @@
+'use strict';
+// Local visual showcase of the real Auth controller. No real SDK/network/accounts here.
+// The separate audit uses the exact SDK with the Auth Emulator.
+const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),folder='/docs/qa/login-v203/';
+const auth=fs.readFileSync(path.join(root,'js/firebase/auth.js'),'utf8');
+const names=[...auth.matchAll(/^import\s*\{([^}]+)\}.*$/gm)].flatMap(m=>m[1].split(',').map(x=>x.trim()));
+const moduleSource=`import {${[...new Set(names)].join(',')}} from '/qa/auth-deps.js';\n`+auth.replace(/^import .*\r?\n/gm,'')+`\nwindow.QAAuthUI={login,passwordRecovery,register,screen,brandMarkup,bootstrapErrorScreen};window.qaUIReady=true;`;
+const mockSDK=`const initializeApp=()=>({}),getAuth=()=>({currentUser:null}),connectAuthEmulator=()=>{},setPersistence=()=>Promise.resolve(),browserLocalPersistence='mock-memory';
+const observe=(_auth,callback)=>{queueMicrotask(()=>callback(null));return()=>{};};
+const createUserWithEmailAndPassword=async()=>{throw {code:'preview-only'};},signInWithEmailAndPassword=async()=>{throw {code:'auth/invalid-credential'};},sendPasswordResetEmail=async()=>true,signOut=async()=>{},EmailAuthProvider={credential:()=>({})},reauthenticateWithCredential=async()=>{};\n`;
+const deps=mockSDK+fs.readFileSync(path.join(root,'tests/fixtures/login-auth-deps-v203.mjs'),'utf8').replace(/^import .*\r?\n/gm,'');
+const picker=`<style>.qa-preview-note{height:32px;display:flex;align-items:center;justify-content:center;gap:10px;font:11px system-ui;background:#07232a;color:#d3e8e9}.qa-preview-note a{color:#41dfd1}html.auth-pending body{display:block}html.auth-pending #auth-gate:not([hidden]),#auth-gate .auth-access-layout{min-height:calc(100dvh - 32px)!important}</style><div class="qa-preview-note">Prévia local · não use credenciais reais <a href="/docs/qa/login-v203/index.html">Galeria</a></div><script>const qaWait=setInterval(()=>{if(!window.qaUIReady||!document.querySelector('#login-form'))return;clearInterval(qaWait);const state=new URLSearchParams(location.search).get('state');if(state==='error')QAAuthUI.login('E-mail ou senha incorretos.','teste@exemplo.test');if(state==='recovery')QAAuthUI.passwordRecovery('');if(state==='loading'){QAAuthUI.screen('<section class="auth-card auth-loading">'+QAAuthUI.brandMarkup()+'<p>Preparando seu ambiente…</p><button class="btn btn-light" id="bootstrap-loading-logout" type="button">Sair da conta</button></section>');document.querySelector('#bootstrap-loading-logout').onclick=()=>QAAuthUI.login();}if(state==='bootstrap-error')QAAuthUI.bootstrapErrorScreen(null,'network_error','Não foi possível conectar agora. Seus dados continuam preservados.',{details:{code:'QA_NETWORK_UNAVAILABLE'}});},20);</script>`;
+const allowed=new Set(['/tests/fixtures/login-integrated-v203.html','/js/veconi-brand.js','/assets/veconi-symbol.svg','/assets/lucide.min.js',...['style','design-system/tokens','visual','firebase','design-system/veconi-theme'].map(n=>'/css/'+n+'.css'),folder+'index.html',folder+'README.md',folder+'results.json']);
+const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.json':'application/json; charset=utf-8','.md':'text/plain; charset=utf-8'};
+http.createServer((req,res)=>{
+ const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname);let body,type=types[path.extname(name)]||'text/plain; charset=utf-8';
+ try{if(name==='/'){res.writeHead(302,{Location:folder+'index.html'}).end();return;}if(name==='/qa/auth-module.js')body=moduleSource;else if(name==='/qa/auth-deps.js')body=deps;else if(allowed.has(name)||/^\/docs\/qa\/login-v203\/screenshots\/[a-z0-9-]+\.png$/.test(name))body=fs.readFileSync(path.join(root,name));else{res.writeHead(404).end();return;}
+  if(name.endsWith('login-integrated-v203.html'))body=body.toString().replace('<body>','<body>'+picker);
+  res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; connect-src 'none'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"});res.end(body);
+ }catch{res.writeHead(404).end();}
+}).listen(Number(process.argv[2]||0),'127.0.0.1',function(){console.log('Login integrado / galeria: http://127.0.0.1:'+this.address().port+'/');});

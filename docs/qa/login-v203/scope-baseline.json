@@ -1,0 +1,17 @@
+{
+  "base": "c80da0fffb0106aea4d23cf097ee33896522f07c",
+  "operationalChangesPreserved": {
+    "css/sale-recovery.css": "f7a614044e391e7cfe7a642b031c8a4030fc8296c94fe6709ebd8d2ed38801e2",
+    "css/style.css": "24f42eec7ad2743333aaa33ba6b7a03336d73777517dbdb95707b02320623ad3",
+    "js/clientes-page.js": "5640babff3be0a19313b15e218eb75786e165faa7d7c02ab97152a24eae08841",
+    "js/recibos.js": "eb003b76982726f1ab2bae235182aa6b28acbbe05d5ad937b7240a89fa531d01",
+    "js/sale-cancellation.js": "f3f842806b623574188a005771a5df1f3b29dd724374c450b872f53b5b132f8a",
+    "js/sale-exchanges.js": "2afbd29c15a5675e99796f93b47fb305e4c4880d53ba8198c1efa1cb37e7a8ac",
+    "js/sale-recovery-ui.js": "72882290b6451d8967fe9f5a0659fa2ed10dd72d7c457a352400d640049597b0"
+  },
+  "loginProductionFiles": [
+    "js/firebase/auth.js",
+    "css/firebase.css",
+    "index.html"
+  ]
+}

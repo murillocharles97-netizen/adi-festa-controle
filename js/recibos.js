@@ -1,5 +1,28 @@
 window.Modais=(()=>{
   const root=()=>document.querySelector('#modal');
+  // Presentation only: follow the visible viewport, including the mobile keyboard.
+  const viewport=()=>{
+    const node=root(),view=window.visualViewport;if(!node?.style?.setProperty)return;
+    for(const [name,value] of Object.entries({height:view?.height??window.innerHeight,width:view?.width??window.innerWidth,top:view?.offsetTop??0,left:view?.offsetLeft??0})){
+      const next=`${value}px`;if(node.style.getPropertyValue(`--modal-vv-${name}`)!==next)node.style.setProperty(`--modal-vv-${name}`,next);
+    }
+  };
+  window.visualViewport?.addEventListener?.('resize',viewport);
+  window.visualViewport?.addEventListener?.('scroll',viewport);
+  window.addEventListener?.('resize',viewport);viewport();
+  const layout=(panel)=>{
+    if(!panel)return;
+    panel.classList.add('viewport-dialog');panel.parentElement.classList.add('viewport-modal');
+    const form=panel.querySelector('form'),footer=form?.querySelector('footer');
+    if(form&&footer){
+      const content=document.createElement('div');content.className='viewport-scroll viewport-form-content';
+      for(const child of [...form.children])if(child!==footer)content.append(child);
+      // Keep controls in the original form: validation and handlers are unchanged.
+      form.prepend(content);form.classList.add('viewport-form');
+      const history=panel.querySelector('[data-ex-history]');if(history)content.append(history);
+      if(form.parentElement!==panel)form.parentElement.classList.add('viewport-form-host');
+    }
+  };
   const fechar=()=>root().innerHTML='';
   const confirmar=(nome,acao)=>{
     root().innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Excluir ${nome}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="modal-body confirm-copy"><div class="confirm-icon"><i data-lucide="triangle-alert"></i></div><h3>Tem certeza que deseja excluir este item?</h3><p class="muted">Essa ação não poderá ser desfeita.</p></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-danger yes">Excluir</button></footer></section></div>`;
@@ -7,7 +30,7 @@ window.Modais=(()=>{
     root().querySelector('.yes').onclick=()=>{acao();fechar()};
     window.lucide?.createIcons();
   };
-  return{fechar,confirmar};
+  return{fechar,confirmar,layout};
 })();
 
 (function(){
@@ -142,15 +165,15 @@ window.Modais=(()=>{
   }
   function mobileMarkup(sale,customer,business){
     const date=new Date(sale.data);
-    return`<div class="modal-bg sale-completion-bg"><section class="modal-box mobile-sale-completion" role="dialog" aria-modal="true" aria-labelledby="sale-completion-title"><header class="sale-completion-head"><span class="sale-success-icon"><i data-lucide="check"></i></span><div><h2 id="sale-completion-title">Venda concluída</h2><p>Pedido #${publicSaleNumber(sale)} · ${date.toLocaleDateString('pt-BR')} às ${date.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p></div><button class="icon-btn" data-sale-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="sale-completion-body"><div class="receipt-preview">${receiptMarkup(sale,customer,business)}</div>${statusMarkup(sale)}<section class="mobile-sale-success" aria-label="Próxima ação"><button data-sale-next="new"><i data-lucide="shopping-bag"></i>Nova venda</button><button data-sale-next="same" ${sale.clienteId?'':'disabled'}><i data-lucide="user-round"></i>Mesmo cliente</button><button data-sale-next="repeat"><i data-lucide="repeat-2"></i>Repetir itens</button></section></div><footer class="sale-completion-actions"><button class="btn btn-primary" data-sale-share><i data-lucide="share-2"></i>Compartilhar venda</button><button class="btn btn-light" data-sale-close>Fechar</button></footer></section></div>`;
+    return`<div class="modal-bg sale-completion-bg viewport-modal"><section class="modal-box mobile-sale-completion viewport-dialog" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="sale-completion-title"><header class="sale-completion-head"><span class="sale-success-icon"><i data-lucide="check"></i></span><div><h2 id="sale-completion-title">Venda concluída</h2><p>Pedido #${publicSaleNumber(sale)} · ${date.toLocaleDateString('pt-BR')} às ${date.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p></div><button class="icon-btn" data-sale-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="sale-completion-body viewport-scroll" tabindex="0" role="region" aria-label="Itens e totais do recibo"><div class="receipt-preview">${receiptMarkup(sale,customer,business)}</div>${statusMarkup(sale)}<section class="mobile-sale-success" aria-label="Próxima ação"><button data-sale-next="new"><i data-lucide="shopping-bag"></i>Nova venda</button><button data-sale-next="same" ${sale.clienteId?'':'disabled'}><i data-lucide="user-round"></i>Mesmo cliente</button><button data-sale-next="repeat"><i data-lucide="repeat-2"></i>Repetir itens</button></section></div><footer class="sale-completion-actions"><button class="btn btn-primary" data-sale-share><i data-lucide="share-2"></i>Compartilhar venda</button><button class="btn btn-light" data-sale-close>Fechar</button></footer></section></div>`;
   }
   function desktopMarkup(sale,customer,business){
     const phone=normalizeSalePhone(customer?.telefone);
-    return`<div class="modal-bg"><section class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sale-completion-title"><header class="modal-head"><div><h3 id="sale-completion-title">Venda concluída</h3><small>Pedido #${publicSaleNumber(sale)}</small></div><button class="icon-btn" data-sale-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="receipt-preview">${receiptMarkup(sale,customer,business)}</div><footer class="modal-foot receipt-actions"><button class="btn btn-light" data-sale-download><i data-lucide="download"></i>Baixar recibo</button><button class="btn btn-whatsapp" data-sale-whatsapp ${phone?'':'disabled'}><i data-lucide="message-circle"></i>Enviar pelo WhatsApp</button><button class="btn btn-primary" data-sale-share><i data-lucide="share-2"></i>Compartilhar</button><button class="btn btn-light" data-sale-close>Concluir</button></footer></section></div>`;
+    return`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="sale-completion-title" tabindex="-1"><header class="modal-head"><div><h3 id="sale-completion-title">Venda concluída</h3><small>Pedido #${publicSaleNumber(sale)}</small></div><button class="icon-btn" data-sale-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="receipt-preview viewport-scroll" tabindex="0" role="region" aria-label="Itens e totais do recibo">${receiptMarkup(sale,customer,business)}</div><footer class="modal-foot receipt-actions"><button class="btn btn-light" data-sale-download><i data-lucide="download"></i>Baixar recibo</button><button class="btn btn-whatsapp" data-sale-whatsapp ${phone?'':'disabled'}><i data-lucide="message-circle"></i>Enviar pelo WhatsApp</button><button class="btn btn-primary" data-sale-share><i data-lucide="share-2"></i>Compartilhar</button><button class="btn btn-light" data-sale-close>Concluir</button></footer></section></div>`;
   }
   function shareMarkup(){
     const message=buildSaleShareMessage(active);
-    return`<div class="modal-bg sale-share-bg"><section class="modal-box sale-share-sheet" role="dialog" aria-modal="true" aria-labelledby="sale-share-title" tabindex="-1"><span class="sale-sheet-handle"></span><header class="modal-head"><div><h3 id="sale-share-title">Compartilhar venda</h3><small>Escolha como deseja compartilhar</small></div><button class="icon-btn" data-share-cancel aria-label="Cancelar compartilhamento"><i data-lucide="x"></i></button></header><div class="sale-share-body"><div class="sale-share-modes"><button class="active" data-share-mode="text"><i data-lucide="message-square-text"></i><span><b>Resumo em texto</b><small>Recomendado para WhatsApp</small></span></button><button data-share-mode="visual"><i data-lucide="image"></i><span><b>Recibo visual</b><small>Imagem sem salvar na galeria</small></span></button></div><label class="sale-share-preview"><span>Prévia da mensagem</span><textarea id="sale-share-message" readonly>${escapar(message)}</textarea></label><div class="sale-share-tools"><button data-share-edit><i data-lucide="pencil"></i>Editar mensagem</button><button data-share-copy><i data-lucide="copy"></i>Copiar mensagem</button><button data-share-system><i data-lucide="share"></i>Compartilhar pelo sistema</button></div><div class="sale-share-feedback" role="status" aria-live="polite"></div><div class="sale-share-fallback" hidden></div></div><footer class="modal-foot sale-share-actions"><button class="btn btn-light" data-share-cancel>Cancelar</button><button class="btn btn-primary" data-share-submit><i data-lucide="send"></i>Compartilhar</button></footer></section></div>`;
+    return`<div class="modal-bg sale-share-bg viewport-modal"><section class="modal-box sale-share-sheet viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="sale-share-title" tabindex="-1"><span class="sale-sheet-handle"></span><header class="modal-head"><div><h3 id="sale-share-title">Compartilhar venda</h3><small>Escolha como deseja compartilhar</small></div><button class="icon-btn" data-share-cancel aria-label="Cancelar compartilhamento"><i data-lucide="x"></i></button></header><div class="sale-share-body viewport-scroll"><div class="sale-share-modes"><button class="active" data-share-mode="text"><i data-lucide="message-square-text"></i><span><b>Resumo em texto</b><small>Recomendado para WhatsApp</small></span></button><button data-share-mode="visual"><i data-lucide="image"></i><span><b>Recibo visual</b><small>Imagem sem salvar na galeria</small></span></button></div><label class="sale-share-preview"><span>Prévia da mensagem</span><textarea id="sale-share-message" readonly>${escapar(message)}</textarea></label><div class="sale-share-tools"><button data-share-edit><i data-lucide="pencil"></i>Editar mensagem</button><button data-share-copy><i data-lucide="copy"></i>Copiar mensagem</button><button data-share-system><i data-lucide="share"></i>Compartilhar pelo sistema</button></div><div class="sale-share-feedback" role="status" aria-live="polite"></div><div class="sale-share-fallback" hidden></div></div><footer class="modal-foot sale-share-actions"><button class="btn btn-light" data-share-cancel>Cancelar</button><button class="btn btn-primary" data-share-submit><i data-lucide="send"></i>Compartilhar</button></footer></section></div>`;
   }
   function restoreCompletion(){
     if(!active)return;document.querySelector('#modal').innerHTML=isMobile()?mobileMarkup(active.sale,active.customer,active.business):desktopMarkup(active.sale,active.customer,active.business);bindCompletion();
@@ -202,7 +225,15 @@ window.Modais=(()=>{
   function show(sale,customer){
     if(!sale?.id)throw Error('A venda precisa estar concluída antes de exibir o recibo.');
     active={saleCompleted:true,saleId:sale.id,sale,customer:customer||null,business:currentBusiness(),balanceBefore:sale.saldoAnterior,balanceAfter:sale.saldoAtual,shareStatus:'idle',receiptStatus:'idle',lastAction:'opened',busy:false,trigger:document.activeElement};
-    active.escapeHandler=event=>{if(event.key==='Escape')closeCompletion(true)};document.addEventListener('keydown',active.escapeHandler);restoreCompletion();
+    active.escapeHandler=event=>{
+      if(event.key==='Escape')closeCompletion(true);
+      if(event.key==='Tab'){
+        const panel=document.querySelector('#modal [role="dialog"]'),nodes=[...(panel?.querySelectorAll('button:not(:disabled),textarea,a[href],[tabindex="0"]')||[])].filter(node=>node.getClientRects().length);
+        if(!nodes.length)return;
+        if(event.shiftKey&&(document.activeElement===nodes[0]||document.activeElement===panel)){event.preventDefault();nodes.at(-1).focus();}
+        else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0].focus();}
+      }
+    };document.addEventListener('keydown',active.escapeHandler);restoreCompletion();
   }
   window.Recibos={mostrar:show,criarCanvas:(sale,customer)=>createSaleReceiptCanvas({sale,customer,business:currentBusiness()}),buildSaleShareMessage,generateSaleReceiptBlob,normalizeSalePhone,publicSaleNumber,estado:()=>active?{saleCompleted:active.saleCompleted,saleId:active.saleId,shareStatus:active.shareStatus,receiptStatus:active.receiptStatus,lastAction:active.lastAction,busy:active.busy}:null};
 })();

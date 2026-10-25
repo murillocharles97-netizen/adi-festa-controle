@@ -6,6 +6,47 @@ const notice='Registro preservado para análise. Nenhum efeito comercial foi apl
 const context=()=>window.BusinessContext?.get?.()||{};
 const identity=()=>{const c=context();return `${c.uid||window.FirebaseSession?.user?.uid||''}:${c.businessId||''}:${c.business?.workspaceGeneration??0}`;};
 let count=0,busy=false,unsubscribe=null,lastIdentity='',message='',refreshSequence=0,scanError='';
+let reviewSummary={key:'',state:'unknown',pending:0,checkedAt:0},summaryFlight=null,summaryTimer=null;
+const summaryKey=()=>`${identity()}:${context().role||''}:${selectedSpace()||'all'}`;
+function confirmedHistorical(packet,initial,diagnostics){
+  const diagnostic=diagnostics.find(item=>item.operationId===packet.operationId&&item.businessId===initial.businessId);
+  if(!diagnostic||typeof window.SyncFirebase?.checksumValue!=='function')return false;
+  if(diagnostic.payloadChecksum!==window.SyncFirebase.checksumValue(packet.payload||{}))return false;
+  const value=diagnostic.resolution||diagnostic.archive;
+  if(!value||value.operationId!==packet.operationId||value.businessId!==initial.businessId||value.actorUid!==initial.uid||
+    value.workspaceGeneration!==initial.workspaceGeneration||value.payloadChecksum!==diagnostic.payloadChecksum)return false;
+  const sale=packet.payload?.writes?.filter(w=>w.entityType==='sales'&&w.operation==='create')||[];
+  if(diagnostic.reviewState==='resolved')return sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&
+    ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&Boolean(value.resolvedAt&&value.resolvedByUid);
+  return diagnostic.reviewState==='archived'&&value.status==='archived'&&value.commercialEffectsApplied===false;
+}
+async function checkReviews(){
+  if(context().role!=='owner'||!recoveryIdentity()||!['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio'))return;
+  const key=summaryKey();
+  if(reviewSummary.key===key&&Date.now()-reviewSummary.checkedAt<60000)return;
+  if(summaryFlight?.key===key)return summaryFlight.promise;
+  reviewSummary={key,state:'checking',pending:0,checkedAt:0};mount();
+  const flight={key};
+  flight.promise=(async()=>{
+    try{
+      let cursor=null;const cursors=new Set();
+      // The existing endpoint filters after pagination. An empty page is NOT an all-clear.
+      for(let page=0;page<50;page++){
+        const response=await call('listSaleRecoveryReviews',{spaceId:selectedSpace(),view:'pending',cursor}),result=response.data??response;
+        if(summaryKey()!==key||!recoveryIdentity())return;
+        if(!Array.isArray(result.items))throw Error('Resposta de revisão incompleta.');
+        const pending=result.items.filter(item=>item.status==='awaiting_review').length;
+        if(pending||!result.nextCursor){reviewSummary={key,state:pending?'pending':'clear',pending,checkedAt:Date.now()};return;}
+        if(cursors.has(result.nextCursor))throw Error('Paginação de revisão inconclusiva.');
+        cursor=result.nextCursor;cursors.add(cursor);
+      }
+      throw Error('Consulta de revisão ainda incompleta.');
+    }catch{
+      if(summaryKey()===key)reviewSummary={key,state:'unknown',pending:0,checkedAt:Date.now()};
+    }finally{if(summaryFlight===flight)summaryFlight=null;mount();}
+  })();
+  summaryFlight=flight;return flight.promise;
+}
 function recoveryIdentity(){
   const c=context(),uid=window.FirebaseSession?.user?.uid,bootstrap=window.FirebaseBootstrap?.state;
   if(!uid||c.userProfile?.uid!==uid||c.userProfile.active!==true||c.member?.status!=='active'||c.business?.active!==true||!c.businessId||
@@ -17,7 +58,9 @@ async function capture(){
   if(!initial)throw Error('Entre na conta de origem para enviar os dados.');
   const sources=await window.DB.businessCache.recoverySources(initial);
   if(identity()!==session||!recoveryIdentity())throw Error('A sessão mudou. Seus dados continuam preservados.');
-  return{identity:initial,sources};
+  const diagnostics=window.SyncFirebase?.getQueueDiagnostics?.()||[];
+  // Read verified metadata only. Original packets, queue and evidence are never modified.
+  return{identity:initial,sources:sources.map(source=>({...source,packets:(source.packets||[]).filter(packet=>!confirmedHistorical(packet,initial,diagnostics))}))};
 }
 const call=(name,data)=>{
   const c=context();
@@ -28,7 +71,7 @@ const sender=window.SaleRecoveryClient.create({snapshot:capture,call,onProgress:
 function modal(title,body,footer=''){
   const root=document.querySelector('#modal');if(!root)return null;
   const prior=document.activeElement;
-  root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg"><section class="modal-box sale-recovery-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
+  root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg viewport-modal"><section class="modal-box sale-recovery-modal viewport-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body viewport-scroll">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
   const panel=root.querySelector('section');
   const close=()=>{if(busy)return;root.replaceChildren();prior?.isConnected&&prior.focus();};
   root.querySelectorAll('[data-recovery-close]').forEach(b=>b.onclick=close);
@@ -93,6 +136,7 @@ function confirmDecision(item,action,match,view){
       if(identity()!==session||!panel.isConnected)return;
       panel.querySelector('[data-decision-result]').textContent=action==='dismiss_match'?'Sugestão descartada. O original continua aguardando decisão.':action==='close_without_effects'?'Encerrada sem efeitos. Nenhuma venda, movimento de estoque ou receita foi criada. O original permanece preservado.':`${recoveryStatus(result.status)}. Venda vinculada: ${result.linkedSaleId}.`;
       button.remove();panel.querySelector('[data-decision-back]').textContent='Voltar aos registros';
+      reviewSummary.checkedAt=0;void refresh();
     }catch(error){
       if(identity()===session&&panel.isConnected){
         const code=String(error.code||'').replace(/^functions\//,'');
@@ -142,31 +186,46 @@ async function openReviews(view='pending'){
   await page();
 }
 function mount(){
-  // Outside commercial route content: a denied route/readonly plan does not
-  // hide the original actor's evidence intake. Auth/membership gates still apply.
+  // Outside commercial content: retained evidence remains accessible when modules are blocked.
   const app=document.querySelector('#app'),root=app?.parentElement;if(!root)return;
-  const c=context(),key=identity();
+  const c=context(),key=identity(),route=location.hash.replace('#/','').split('?')[0]||'inicio';
   if(lastIdentity!==key){message='';lastIdentity=key;document.querySelector('.sale-recovery-modal-bg')?.remove();}
-  let bar=root.querySelector('[data-sale-recovery-bar]');
-  const ownerArea=c.role==='owner'&&['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio');
-  if(!recoveryIdentity()||(!count&&!ownerArea&&!scanError)){bar?.remove();return;}
-  if(!bar){bar=document.createElement('section');bar.className='sale-recovery-banner';bar.dataset.saleRecoveryBar='';app.before(bar);}
-  const html=`<div><strong>${scanError?'Vendas preservadas neste aparelho':count?`Há ${count} vendas preservadas neste aparelho`:'Vendas aguardando revisão'}</strong><p role="status" aria-live="polite">${esc(scanError||message||'O envio preserva os registros sem refazer vendas. Consulte a revisão para acompanhar as decisões do responsável.')}</p></div><div class="sale-recovery-actions">${count&&!scanError?`<button type="button" class="btn btn-primary" data-send-recovery ${busy?'disabled':''}>${busy?'Enviando…':'Enviar dados para recuperação'}</button>`:''}<button type="button" class="btn btn-light" data-view-recovery>${c.role==='owner'?'Vendas aguardando revisão':'Ver situação do envio'}</button></div>`;
+  let bar=root.querySelector('[data-sale-recovery-bar]'),link=app.querySelector('[data-recovery-entry]');
+  const ownerArea=c.role==='owner'&&['inicio','historico'].includes(route),authorized=Boolean(recoveryIdentity());
+  // Permanent access belongs in History, not a permanent warning on the Dashboard.
+  if(authorized&&c.role==='owner'&&route==='historico'){
+    if(!link){link=document.createElement('nav');link.dataset.recoveryEntry='';link.className='sale-recovery-entry';link.setAttribute('aria-label','Revisão de vendas');link.innerHTML='<button type="button" class="btn btn-light">Revisões de vendas · em revisão e resolvidas</button>';link.firstElementChild.onclick=()=>openReviews();app.prepend(link);}
+  }else link?.remove();
+  const summary=reviewSummary.key===summaryKey()?reviewSummary:{state:'checking',pending:0};
+  if(!authorized||(!count&&!scanError&&(!ownerArea||summary.state==='clear'))){bar?.remove();return;}
+  if(!bar){bar=document.createElement('section');bar.className='sale-recovery-banner is-compact';bar.dataset.saleRecoveryBar='';bar.setAttribute('aria-label','Situação das revisões de vendas');app.before(bar);}
+  const title=scanError?'Conferência dos registros preservados pendente':count?(count===1?'Há 1 venda aguardando análise':`Há ${count} vendas aguardando análise`):summary.state==='pending'?'Há vendas aguardando revisão':summary.state==='unknown'?'Revisões: confirmação pendente':'Conferindo revisões de vendas…';
+  const detail=scanError||message||(count?'Envie os dados preservados para análise, sem refazer a venda.':summary.state==='unknown'?'Não foi possível confirmar a situação. Consulte as revisões; nenhum registro foi reenviado.':summary.state==='pending'?'Confira os registros antes de decidir. Nenhuma recuperação é automática.':'Consulta segura, sem alterar vendas ou estoque.');
+  const html=`<div><strong>${esc(title)}</strong><p role="status" aria-live="polite">${esc(detail)}</p></div><div class="sale-recovery-actions">${count&&!scanError?`<button type="button" class="btn btn-primary" data-send-recovery ${busy?'disabled':''}>${busy?'Enviando…':'Enviar dados para recuperação'}</button>`:''}<button type="button" class="btn btn-light" data-view-recovery>${c.role==='owner'?'Revisar vendas':'Ver situação do envio'}</button></div>`;
   if(bar.recoveryMarkup!==html){bar.recoveryMarkup=html;bar.innerHTML=html;bar.querySelector('[data-send-recovery]')?.addEventListener('click',confirmSend);bar.querySelector('[data-view-recovery]').onclick=()=>openReviews();}
 }
 async function refresh(){
   const sequence=++refreshSequence,session=identity();
-  if(!recoveryIdentity()){count=0;scanError='';mount();return;}
+  clearTimeout(summaryTimer);
+  if(!recoveryIdentity()){count=0;scanError='';reviewSummary={key:'',state:'unknown',pending:0,checkedAt:0};mount();return;}
+  // Clear the previous session/space presentation before awaiting any reads.
+  if(lastIdentity!==session){count=0;scanError='';}mount();
   try{const snapshot=await capture();if(sequence!==refreshSequence||identity()!==session)return;count=window.SaleRecoveryClient.entries(snapshot).length;scanError='';}
   catch(error){if(sequence!==refreshSequence||identity()!==session)return;count=0;scanError=error.message||'Não foi possível consultar os registros preservados. Nenhum dado foi alterado.';}
-  mount();
+  mount();await checkReviews();
+  clearTimeout(summaryTimer);
+  if(context().role==='owner'&&recoveryIdentity()&&document.visibilityState!=='hidden'&&['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio'))summaryTimer=setTimeout(()=>{void refresh();},60000);
 }
 function start(){unsubscribe?.();unsubscribe=window.SyncFirebase?.subscribe?.(()=>{void refresh();});void refresh();}
 addEventListener('firebase-auth-ready',start);
 addEventListener('hashchange',refresh);
-addEventListener('business-context-changed',refresh);
+addEventListener('business-context-changed',()=>{reviewSummary.checkedAt=0;void refresh();});
+addEventListener('veconi-space-context-changed',refresh);
 addEventListener('firebase-bootstrap-state',refresh);
 addEventListener('firebase-session-cleared',refresh);
+addEventListener('focus',refresh);
+addEventListener('online',refresh);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')void refresh();else clearTimeout(summaryTimer);});
 // Reattach to the existing panel after normal route renders, no cloud listener.
 let scheduled=false;
 new MutationObserver(()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;mount();});}).observe(document.querySelector('main')||document.body,{childList:true,subtree:true});
