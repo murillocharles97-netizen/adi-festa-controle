@@ -3,7 +3,7 @@
 const {createHash}=require('node:crypto');
 const {HttpsError}=require('firebase-functions/v2/https');
 const {validId}=require('./workspace-reset-policy');
-const CUSTOMER_RECOVERY_ENABLED=true;
+const CUSTOMER_RECOVERY_ENABLED=false;
 const fail=message=>{throw new HttpsError('failed-precondition',message);};
 const canonical=value=>JSON.stringify((function sort(v){return Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])])):v;})(value));
 const hash=value=>createHash('sha256').update(canonical(value)).digest('hex');
