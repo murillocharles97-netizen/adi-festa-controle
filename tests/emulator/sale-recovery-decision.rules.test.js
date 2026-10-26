@@ -166,7 +166,9 @@ t('variable recovery uses current variant stock and parent aggregate, with origi
 t('Rules fence old clients at pending/resolved reviews without financial permission or exposing the review payload',async()=>{
  const c=await setup('fence');await c.upload();
  const client=env.authenticatedContext(c.seller).firestore(),sale={...c.originals[0].localSale};sale.itens=sale.itens.map(({custoUnitario,...i})=>i);
- await assertSucceeds(sdk.setDoc(sdk.doc(client,'businesses',c.bid,'sales','control-sale'),{...sale,id:'control-sale',operationId:'control-operation'}));
+ // Since V202 all commercial writes require the authorized gateway, even when
+ // no recovery review exists. This control must no longer allow a direct sale.
+ await assertFails(sdk.setDoc(sdk.doc(client,'businesses',c.bid,'sales','control-sale'),{...sale,id:'control-sale',operationId:'control-operation'}));
  for(const phase of ['pending','resolved']){
   if(phase==='resolved')await c.decision(0,'link_existing',{linkedSaleId:await c.manager()});
   const batch=sdk.writeBatch(client);batch.set(sdk.doc(client,'businesses',c.bid,'sales',sale.id),sale);batch.update(sdk.doc(client,'businesses',c.bid,'products','shared-product'),{estoqueAtual:2,estoque:2});

@@ -7,6 +7,7 @@ const Model=require('../shared/online-store');
 const {stockKey}=require('./online-stock-reservation');
 const {computeAccess}=require('./subscription-service');
 const {belongsToWorkspace}=require('./workspace-reset-policy');
+const {paidClientPlan}=require('./sale-recovery-customer');
 const fail=message=>{throw new HttpsError('failed-precondition',message);};
 const number=value=>typeof value==='number'&&Number.isFinite(value);
 const key=i=>`${i.productId||i.produtoId}:${i.variantId||''}`;
@@ -23,8 +24,8 @@ function recoveryPlan(v){
   if(items.length>40||new Set(items.map(key)).size!==items.length)fail('Itens repetidos ou limite excedido. O original permanece preservado.');
   const sum=items.reduce((total,i)=>total+i.quantity*i.unitPrice,0);
   if(items.some(i=>i.quantity>999)||Math.abs(sum-v.total)>0.011)fail('O valor e as quantidades não conferem com os itens originais.');
-  if(sale.clienteId||sale.clientId||sale.customerId)fail('Venda com cliente vinculado exige revisão dos seus efeitos auxiliares.');
-  const supported=new Set(['sales','stockMovements','products','productVariants']);
+  const clientPlan=paidClientPlan(v);
+  const supported=new Set(['sales','stockMovements','products','productVariants',...(clientPlan?['clients']:[])]);
   if(writes.some(w=>!supported.has(w.entityType)))fail('O pacote contém efeitos auxiliares que exigem revisão técnica. Nenhum dado foi alterado.');
   if(new Set(writes.map(w=>`${w.entityType}:${w.entityId}`)).size!==writes.length)fail('O pacote possui gravações repetidas.');
   const movements=writes.filter(w=>w.entityType==='stockMovements');
@@ -52,7 +53,7 @@ function recoveryPlan(v){
     }
     if(!changed)fail('Patch sem a baixa de estoque correspondente aos itens.');
   }
-  return{movements};
+  return{movements,clientPlan};
 }
 
 async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
@@ -61,6 +62,13 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
   const originalActor=(await tx.get(root.collection('members').doc(v.sale.actorUid))).data();
   const profile=(await tx.get(db.doc(`users/${v.sale.actorUid}`))).data();
   if(!originalActor||originalActor.status!=='active'||profile?.active!==true||originalActor.role!=='owner'&&originalActor.permissions?.['sales.create']!==true||originalActor.role!=='owner'&&originalActor.spaceAccess!=='all'&&!originalActor.allowedSpaceIds?.includes(v.spaceId))fail('O ator original não possui vínculo/permissão no espaço.');
+  let recoveredClient=null;
+  if(plan.clientPlan){
+    const cp=plan.clientPlan,clientRef=root.collection('clients').doc(cp.clientId),[client,receipt]=await Promise.all([tx.get(clientRef),tx.get(root.collection('saleRecoveryOperations').doc(cp.dependency.operationId))]),data=client.data(),ack=receipt.data();
+    if(!client.exists||data.businessId!==c.businessId||(data.workspaceGeneration??0)!==generation||data.deletedAt||data.active===false||data.ativo===false||data.customerRecoveryHash!==cp.dependency.payloadHash||ack?.kind!=='client_dependency'||ack.status!=='client_confirmed'||ack.clientId!==cp.clientId||ack.actorUid!==v.sale.actorUid||ack.payloadHash!==cp.dependency.payloadHash||ack.workspaceGeneration!==generation)fail('Confirme primeiro a dependência de cadastro pelo responsável. Nenhuma venda foi recuperada.');
+    if(!number(data.totalComprado)||data.totalComprado<0||!Number.isSafeInteger(data.quantidadeVendas)||data.quantidadeVendas<0)fail('Projeção atual do cliente inconsistente.');
+    recoveredClient={ref:clientRef,data};
+  }
   const stock=[],parents=new Map();
   for(const productId of new Set(v.items.map(i=>i.productId))){
     const ref=root.collection('products').doc(productId),p=(await tx.get(ref)).data();
@@ -99,6 +107,10 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
   ]);
   const expected=await Promise.all(plan.movements.map(w=>tx.get(root.collection('stockMovements').doc(w.entityId))));
   if(sale.exists||marker.exists||!byOp.empty||!bySale.empty||financial.exists||expected.some(s=>s.exists)||financialEvidence.some(s=>s.exists))fail('Já existem efeitos ou IDs na nuvem. Não será feita recuperação parcial ou segunda baixa.');
+  if(recoveredClient)for(const collection of ['payments','balanceEvents','balanceAdjustments']){
+    const evidence=await tx.get(root.collection(collection).where('operationId','==',v.operationId).limit(1));
+    if(!evidence.empty)fail('Já existe efeito financeiro da operação original. A recuperação foi interrompida.');
+  }
   // Parent aggregate must be recomputed from current variants, not old snapshots.
   let variantBudget=500;
   for(const [id,p]of parents)if(p.variant){
@@ -114,6 +126,10 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
     itens:v.sale.itens.map(operational),createdAt:v.sale.createdAt||v.originalSaleAt,
     recoveredFromReview:true,recoveryContentHash:v.contentHash,recoveredAt:at,recoveredByUid:c.uid};
   return{movementIds:plan.movements.map(w=>w.entityId),commit(){
+    if(recoveredClient){
+      const before=recoveredClient.data,previous=before.ultimaCompra||'',last=String(previous)>v.originalSaleAt?previous:v.originalSaleAt;
+      tx.update(recoveredClient.ref,{totalComprado:Math.round((before.totalComprado+v.total)*100)/100,quantidadeVendas:before.quantidadeVendas+1,ultimaCompra:last,updatedAt:at,atualizadoEm:at,version:FieldValue.increment(1)});
+    }
     for(const change of stock){
       const update={[change.field]:change.after,updatedAt:at,version:FieldValue.increment(1)};
       if(change.field==='estoqueAtual'&&Object.hasOwn(change.source,'estoque'))update.estoque=change.after;
@@ -126,8 +142,8 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
     tx.create(root.collection('sales').doc(v.saleId),saleData);
     tx.create(root.collection('processedOperations').doc(v.operationId),{id:v.operationId,idempotencyKey:v.operationId,businessId:c.businessId,spaceId:v.spaceId,ownerId:c.uid,actorUid:v.sale.actorUid,status:'processed',eventKind:'sale',schemaVersion:3,workspaceGeneration:generation,processedAt:at,createdAtLocal:v.originalSaleAt,recoveryContentHash:v.contentHash});
     // Same incremental Sync signal as canonical cloud writes; no replay job.
-    const names=['sales','products','productVariants','stockMovements'];
-    tx.set(root.collection('syncMetadata').doc('last-sync'),{businessId:c.businessId,revision:at.toDate().toISOString(),updatedAt:at,changedCollections:names,collectionVersions:Object.fromEntries(names.map(n=>[n,at.toDate().toISOString()]))},{merge:true});
+    const names=['sales','products','productVariants','stockMovements',...(recoveredClient?['clients']:[])];
+    tx.set(root.collection('syncMetadata').doc('last-sync'),{businessId:c.businessId,publisher:'operational_server',sourceUid:c.uid,actorUid:c.uid,sourceDeviceId:FieldValue.delete(),sourceSessionId:'server:recovery:'+v.operationId,revision:'server:recovery:'+v.operationId,updatedAt:at,changedCollections:names,collectionVersions:Object.fromEntries(names.map(n=>[n,at.toDate().toISOString()]))},{merge:true});
   }};
 }
 module.exports={recoveryPlan,prepareRecoveredSale};

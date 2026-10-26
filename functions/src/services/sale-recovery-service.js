@@ -4,6 +4,7 @@ const {createHash}=require('node:crypto');
 const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable,validId,belongsToWorkspace}=require('./workspace-reset-policy');
 const {prepareRecoveredSale}=require('./sale-recovery-decision');
+const CustomerRecovery=require('./sale-recovery-customer');
 const MAX_BYTES=500*1024;
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -16,7 +17,7 @@ function validateOriginal(input,uid,businessId){
   // Reject credentials, never silently remove fields from an original packet.
   const inspect=(value,depth=0)=>{if(depth>35)fail('invalid-argument','Estrutura do pacote excede o limite seguro.');if(!value||typeof value!=='object')return;for(const [key,child]of Object.entries(value)){if(/^(password|senha|authorization|auth_?token|api_?key|access_?token|refresh_?token|id_?token|secret|credential)$/i.test(key))fail('invalid-argument','O pacote contém campo protegido e não foi enviado.');inspect(child,depth+1);}};
   inspect(original);
-  if(!original||typeof original!=='object'||Object.keys(original).some(k=>!['packet','localSale','localMovements'].includes(k)))fail('invalid-argument','Conteúdo de recuperação não suportado.');
+  if(!original||typeof original!=='object'||Object.keys(original).some(k=>!['packet','localSale','localMovements','clientDependencies'].includes(k)))fail('invalid-argument','Conteúdo de recuperação não suportado.');
   const packet=original.packet,writes=packet?.payload?.writes;
   if(!packet||packet.businessId!==businessId||packet.userId!==uid||!Array.isArray(writes)||!writes.length||writes.length>350)fail('permission-denied','Origem do pacote não autorizada.');
   if(!['permission-denied','sale-recovery-review-required'].includes(packet.lastErrorCode))fail('failed-precondition','Esta operação não está retida para análise.');
@@ -44,7 +45,8 @@ function validateOriginal(input,uid,businessId){
   });
   const total=Number(sale.valorFinal??sale.total),originalSaleAt=date(sale.data||sale.createdAt);
   if(!Number.isFinite(total)||total<0||!originalSaleAt)fail('invalid-argument','Valor ou horário original inválido.');
-  return{packet,sale,saleId,operationId,spaceId,items,total,originalSaleAt,original};
+  const clientDependencies=CustomerRecovery.dependencies(original,businessId,uid,sale,packet.workspaceGeneration??0);
+  return{packet,sale,saleId,operationId,spaceId,items,total,originalSaleAt,original,clientDependencies};
 }
 function similarSales(review,sales){
   const signature=items=>items.map(i=>`${i.productId||i.produtoId}|${i.variantId||''}|${Number(i.quantity??i.quantidade)}`).sort().join(';');
@@ -97,6 +99,7 @@ function saleRecoveryService(db,{FieldValue}){
       const movementIds=v.packet.payload.writes.filter(w=>w.entityType==='stockMovements').map(w=>w.entityId);
       const [existingSale,marker,...movements]=await Promise.all([tx.get(ref(businessId,'sales',v.saleId)),tx.get(ref(businessId,'processedOperations',v.operationId)),...movementIds.map(id=>tx.get(ref(businessId,'stockMovements',id)))]);
       const data={saleId:v.saleId,operationId:v.operationId,businessId,spaceId:v.spaceId,spaceName:String(s.name||s.nome||v.spaceId).slice(0,160),actorUid:c.uid,actorName:String(v.sale.actorNameSnapshot||c.member.name||c.profile?.name||'Usuário').slice(0,120),actorRole:String(v.sale.actorRoleSnapshot||c.member.role),roleAtSubmission:String(c.member.role),originalSaleAt:v.originalSaleAt,total:v.total,paymentMethod:String(v.sale.formaPagamento||''),items:v.items,status:'awaiting_review',commercialEffectsApplied:false,source:'retained_local_sale',contentHash:request.data.contentHash,workspaceGeneration:c.business.workspaceGeneration??0,receivedAt:FieldValue.serverTimestamp(),errorCode:v.packet.lastErrorCode,errorMessage:cleanError(v.packet.lastErrorMessage),retryCount:Number(v.packet.retryCount??v.packet.attempts??0),remoteEvidence:{saleExists:existingSale.exists,operationExists:marker.exists,movementIdsPresent:movements.filter(d=>d.exists).map(d=>d.id)}};
+      if(v.clientDependencies.length)data.clientDependencies=v.clientDependencies.map(d=>({clientId:d.clientId,operationId:d.operationId,related:d.related,payloadHash:d.payloadHash,name:String(d.data.nome).slice(0,200),phone:String(d.data.telefone||'').slice(0,40),status:'awaiting_approval'}));
       // These are the ONLY write targets. Never call commercial services here.
       tx.create(reviewRef,data);
       tx.create(rawRef,{originalJson:request.data.originalJson,contentHash:request.data.contentHash,formatVersion:1});
@@ -110,6 +113,16 @@ function saleRecoveryService(db,{FieldValue}){
     if(!Array.isArray(checks)||checks.length>20)fail('invalid-argument','Limite de consultas excedido.');
     const items=[];
     for(const check of checks){
+      if(check.kind==='client_dependency'){
+        const operationId=validId(check.operationId,'Operação'),clientId=validId(check.clientId,'Cliente'),index=(await ref(c.businessId,'saleRecoveryOperations',operationId).get()).data();
+        if(!index){items.push({operationId,clientId,status:'unconfirmed'});continue;}
+        if(index.kind!=='client_dependency'||index.actorUid!==c.uid||index.businessId!==c.businessId||index.clientId!==clientId||index.operationId!==operationId||index.workspaceGeneration!==(c.business.workspaceGeneration??0)||index.payloadHash!==check.payloadHash)fail('permission-denied','Origem da dependência divergente.');
+        await space(reader,c,index.spaceId);
+        const [raw,client,marker]=await Promise.all([ref(c.businessId,'saleRecoveryReviews',index.originSaleId).collection('original').doc('payload').get(),ref(c.businessId,'clients',clientId).get(),ref(c.businessId,'processedOperations',operationId).get()]);
+        const parsed=raw.exists&&validateOriginal(raw.data(),c.uid,c.businessId),dependency=parsed?.clientDependencies.find(d=>d.operationId===operationId&&d.clientId===clientId);
+        if(!dependency||dependency.payloadHash!==index.payloadHash||raw.data().contentHash!==index.contentHash||index.status!=='client_confirmed'||!index.resolvedAt||!index.resolvedByUid||!client.exists||client.data().businessId!==c.businessId||(client.data().workspaceGeneration??0)!==index.workspaceGeneration||client.data().customerRecoveryHash!==index.payloadHash||marker.data()?.customerRecoveryHash!==index.payloadHash||marker.data().businessId!==c.businessId||marker.data().operationId!==operationId||marker.data().status!=='processed')fail('failed-precondition','Confirmação canônica do cadastro divergente.');
+        items.push({...index,status:'client_confirmed',resolvedAt:date(index.resolvedAt)});continue;
+      }
       const saleId=validId(check.saleId,'Venda'),operationId=validId(check.operationId,'Operação');
       const review=(await ref(c.businessId,'saleRecoveryReviews',saleId).get()).data();
       if(!review){items.push({saleId,operationId,status:'unconfirmed'});continue;}
@@ -141,6 +154,14 @@ function saleRecoveryService(db,{FieldValue}){
     const items=[];
     for(const doc of docs){
       const value=doc.data();await space(reader,c,value.spaceId);
+      if(value.clientDependencies?.length){
+        const checked=[];
+        for(const dep of value.clientDependencies){
+          const approval=(await ref(c.businessId,'saleRecoveryOperations',dep.operationId).get()).data();
+          checked.push({...dep,status:approval?.kind==='client_dependency'&&approval.clientId===dep.clientId&&approval.actorUid===value.actorUid&&approval.payloadHash===dep.payloadHash&&approval.workspaceGeneration===value.workspaceGeneration&&approval.status==='client_confirmed'?'client_confirmed':'awaiting_approval'});
+        }
+        value.clientDependencies=checked;
+      }
       if(value.workspaceGeneration!==(c.business.workspaceGeneration??0))fail('failed-precondition','Registro de uma configuração anterior.');
       let possibleMatches=[];
       if(c.owner&&value.status==='awaiting_review'){
@@ -169,7 +190,7 @@ function saleRecoveryService(db,{FieldValue}){
   }
   async function decide(request){
     const input=request.data||{},action=input.action;
-    const confirmations={link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR',close_without_effects:'ENCERRAR_SEM_EFEITOS'};
+    const confirmations={link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR',close_without_effects:'ENCERRAR_SEM_EFEITOS',approve_client:'APROVAR_CADASTRO'};
     if(!confirmations[action]||input.confirmation!==confirmations[action])fail('invalid-argument','Confirme explicitamente a decisão.');
     return db.runTransaction(async tx=>{
       const c=await context(tx,request);if(!c.owner)fail('permission-denied','Somente o proprietário pode decidir sobre a recuperação.');
@@ -177,7 +198,7 @@ function saleRecoveryService(db,{FieldValue}){
       if(!snapshot.exists)fail('not-found','Registro não encontrado.');
       const s=await space(tx,c,review.spaceId);
       if(review.workspaceGeneration!==(c.business.workspaceGeneration??0)||review.contentHash!==input.contentHash)fail('failed-precondition','O registro mudou ou pertence a outra geração. Reabra a revisão.');
-      const target=action==='close_without_effects'?null:action==='recover_original'?saleId:validId(input.linkedSaleId,'Venda do gestor');
+      const target=['close_without_effects','approve_client'].includes(action)?null:action==='recover_original'?saleId:validId(input.linkedSaleId,'Venda do gestor');
       if(review.status!=='awaiting_review'){
         if(review.decision===action&&review.linkedSaleId===target)return{saleId,status:review.status,linkedSaleId:target,idempotent:true};
         fail('failed-precondition','Esta revisão já foi resolvida com outra decisão.');
@@ -191,6 +212,11 @@ function saleRecoveryService(db,{FieldValue}){
       const v=validateOriginal(raw,review.actorUid,c.businessId);v.contentHash=review.contentHash;
       const opRef=ref(c.businessId,'saleRecoveryOperations',v.operationId),op=(await tx.get(opRef)).data();
       if(v.saleId!==saleId||v.operationId!==review.operationId||v.spaceId!==review.spaceId||(v.packet.workspaceGeneration??0)!==review.workspaceGeneration||op?.contentHash!==review.contentHash||op.saleId!==saleId||op.actorUid!==v.sale.actorUid||op.spaceId!==v.spaceId||op.workspaceGeneration!==review.workspaceGeneration)fail('failed-precondition','Índices e autoria do pacote divergem.');
+      if(action==='approve_client'){
+        const approval=await CustomerRecovery.prepareApproval({db,tx,c,v,reviewRef,clientOperationId:input.clientOperationId,FieldValue});
+        if(!approval.idempotent){approval.commit();tx.update(reviewRef,{clientDependencies:(review.clientDependencies||[]).map(d=>d.operationId===approval.operationId?{...d,status:'client_confirmed'}:d)});}
+        return{saleId,status:'awaiting_review',clientId:approval.clientId,clientOperationId:approval.operationId,idempotent:approval.idempotent};
+      }
       let linked=null,prepared=null,candidate=null;
       if(action==='link_existing'||action==='dismiss_match'){
         candidate=(await tx.get(ref(c.businessId,'sales',target))).data();
@@ -206,6 +232,7 @@ function saleRecoveryService(db,{FieldValue}){
           const evidence=await Promise.all([tx.get(ref(c.businessId,'sales',saleId)),tx.get(ref(c.businessId,'processedOperations',v.operationId)),...movementIds.map(id=>tx.get(ref(c.businessId,'stockMovements',id))),...movementIds.map(id=>tx.get(ref(c.businessId,'stockMovementFinancials',id))),tx.get(ref(c.businessId,'saleFinancials',saleId)),tx.get(db.doc(`financialSpaces/${v.spaceId}/entries/sale_${saleId}`)),tx.get(ref(c.businessId,'financialIncomeRoutes',digest(`sale:${saleId}`))),tx.get(db.collection(`businesses/${c.businessId}/stockMovements`).where('operationId','==',v.operationId).limit(1)),tx.get(db.collection(`businesses/${c.businessId}/stockMovements`).where('vendaId','==',saleId).limit(1))]);
           if(evidence.some(s=>s.exists||s.empty===false))fail('failed-precondition','A operação original já possui efeitos na nuvem. É necessária revisão técnica antes de encerrar ou vincular.');
       }else if(action==='recover_original'){
+        if((v.sale.clienteId||v.sale.clientId||v.sale.customerId)&&(!input.operationalEvidence||input.operationalEvidence.goodsDelivered!==true||input.operationalEvidence.paymentReceived!==true||input.operationalEvidence.notRecreated!==true))fail('failed-precondition','Confirme explicitamente entrega, pagamento recebido fora do app e ausência de venda recriada. Não será efetuada cobrança ou confirmação presumida.');
         // Preserve causal order where held operations share a product/variant.
         const earlier=await tx.get(db.collection(`businesses/${c.businessId}/saleRecoveryReviews`).limit(501));
         if(earlier.size>500)fail('failed-precondition','Muitos registros para conferir a ordem causal. Solicite revisão técnica.');
@@ -215,7 +242,8 @@ function saleRecoveryService(db,{FieldValue}){
       }
       const at=FieldValue.serverTimestamp(),revision=(review.revision??0)+1;
       const audit=reviewRef.collection('decisions').doc(String(revision));
-      tx.create(audit,{action,actorUid:c.uid,actorName:String(c.profile.name||c.profile.nome||'Proprietário').slice(0,120),at,contentHash:review.contentHash,linkedSaleId:target,businessId:c.businessId,spaceId:review.spaceId});
+      tx.create(audit,{action,actorUid:c.uid,actorName:String(c.profile.name||c.profile.nome||'Proprietário').slice(0,120),at,contentHash:review.contentHash,linkedSaleId:target,businessId:c.businessId,spaceId:review.spaceId,
+        ...(action==='recover_original'&&(v.sale.clienteId||v.sale.clientId||v.sale.customerId)?{operationalEvidence:{goodsDelivered:true,paymentReceived:true,notRecreated:true},paymentEvidenceSource:'explicit_owner_attestation_no_collection'}:{})});
       if(action==='dismiss_match'){
         if(dismissed.length>=100)fail('failed-precondition','Limite de sugestões revisadas atingido.');
         tx.update(reviewRef,{dismissedMatchIds:[...dismissed,target],revision});

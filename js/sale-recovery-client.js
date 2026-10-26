@@ -14,10 +14,22 @@
   }
   function entries(snapshot){
     const found=new Map(),identity=snapshot.identity;
+    const dependencies=new Map();
+    for(const source of snapshot.sources||[{packets:snapshot.packets}])for(const p of source.packets||[]){
+      const writes=p.payload?.writes||[];
+      if(p.businessId!==identity.businessId||p.userId!==identity.uid||(p.workspaceGeneration??0)!==identity.workspaceGeneration||p.status!=='error'||p.lastErrorCode!=='permission-denied'||writes.length!==1||writes[0].entityType!=='clients'||writes[0].operation!=='create')continue;
+      const previous=dependencies.get(p.operationId);
+      if(previous&&canonical(previous.packet)!==canonical(p))throw Error('Há cópias diferentes de um cadastro retido. Os originais foram preservados; nenhum envio foi iniciado.');
+      dependencies.set(p.operationId,{packet:p});
+    }
     for(const source of snapshot.sources||[{packets:snapshot.packets,local:snapshot.local}]){
       for(const packet of eligible(source.packets||[],identity)){
         const saleIds=new Set(packet.payload.writes.filter(w=>w.entityType==='sales').map(w=>w.entityId));
+        const sale=packet.payload.writes.find(w=>w.entityType==='sales').data;
         const local={vendas:(source.local?.vendas||[]).filter(s=>saleIds.has(s.id)),movimentacoesEstoque:(source.local?.movimentacoesEstoque||[]).filter(m=>m.operationId===packet.operationId||saleIds.has(m.vendaId))};
+        const clientId=sale.clienteId||sale.clientId||sale.customerId;
+        if(clientId&&[...dependencies.values()].some(d=>d.packet.payload.writes[0].entityId===clientId))
+          local.clientDependencies=[...dependencies.values()].filter(d=>!d.packet.payload.writes[0].data?.spaceId||d.packet.payload.writes[0].data.spaceId===sale.spaceId);
         const prior=found.get(packet.operationId);
         if(prior){
           if(canonical(prior.packet)!==canonical(packet))throw Error('Existem cópias diferentes de uma operação preservada. Nenhum envio foi iniciado; os originais continuam intactos.');
@@ -35,7 +47,7 @@
     const sales=packet.payload.writes.filter(w=>w.entityType==='sales');
     if(sales.length!==1)throw Error('A operação precisa de revisão técnica antes do envio.');
     const saleId=sales[0].entityId;
-    const originalJson=canonical({packet,localSale:(local.vendas||[]).find(s=>s.id===saleId)||null,localMovements:(local.movimentacoesEstoque||[]).filter(m=>m.operationId===packet.operationId||m.vendaId===saleId)});
+    const originalJson=canonical({packet,localSale:(local.vendas||[]).find(s=>s.id===saleId)||null,localMovements:(local.movimentacoesEstoque||[]).filter(m=>m.operationId===packet.operationId||m.vendaId===saleId),...(local.clientDependencies?.length?{clientDependencies:local.clientDependencies}:{})});
     const bytes=new TextEncoder().encode(originalJson);
     if(bytes.length>500*1024)throw Error('O pacote excede o limite seguro. Seus dados continuam preservados.');
     const hash=await cryptoApi.subtle.digest('SHA-256',bytes),contentHash=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');

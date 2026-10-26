@@ -307,8 +307,11 @@ window.Checkout = (() => {
         .map((id) => all.find((c) => c.id === id))
         .filter(Boolean);
     const modal = document.querySelector("#modal");
+    const customerAction = window.Clientes?.canEdit?.() === false
+      ? '<p class="muted" role="note">Seu perfil pode selecionar clientes existentes. Novos cadastros precisam do responsável.</p>'
+      : '<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button>';
     modal.innerHTML =
-      `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>${options.title || "Selecionar cliente"}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button><div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
+      `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>${options.title || "Selecionar cliente"}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}${customerAction}<div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
     const input = document.querySelector("#client-picker-search"),
       results = document.querySelector("#client-result-list"),
       more = document.querySelector("#client-result-more");
@@ -424,11 +427,17 @@ window.Checkout = (() => {
     return recurringConfiguration(product, null, source);
   }
   function quickClient() {
+    try { window.Clientes?.assertCanEdit?.(); } catch (error) { toast(error.message, true); return; }
+    const origin = [DB.getBusinessId(), DB.getPrincipal(), DB.getWorkspaceGeneration()].join(':');
     document.querySelector("#modal").innerHTML =
       `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
     document.querySelector(".cancel").onclick = () => picker();
     document.querySelector("#quick-client-form").onsubmit = (e) => {
       e.preventDefault();
+      if (origin !== [DB.getBusinessId(), DB.getPrincipal(), DB.getWorkspaceGeneration()].join(':')) {
+        toast('A conta mudou. Reabra o cadastro na conta atual.', true); return;
+      }
+      try {
       clients().create(Object.fromEntries(new FormData(e.currentTarget)));
       const c = clients().list().at(-1),
         sel = document.querySelector("#sale-client");
@@ -437,7 +446,8 @@ window.Checkout = (() => {
       sel.dispatchEvent(new Event("change"));
       document.querySelector("#modal").innerHTML = "";
       refresh();
-      toast("Cliente salvo e selecionado");
+      toast(window.SyncFirebase ? "Cliente salvo neste aparelho. Aguarde a confirmação na nuvem antes de vender para ele." : "Cliente salvo e selecionado");
+      } catch (error) { toast(error.message || 'Não foi possível cadastrar o cliente.', true); }
     };
   }
   function enhance() {
@@ -999,6 +1009,18 @@ window.Checkout = (() => {
         return validationError("Venda com renovação exige um cliente.");
       if (cart.some((item) => item.productType === "recurring" && item.recurringActivation?.clientIdSnapshot !== clienteId))
         return validationError("Revise as renovações: o cliente da sacola foi alterado.");
+      if(clienteId&&Number(window.AdiFestaBuild?.release)>=205&&!window.SyncFirebase?.prepareSaleCustomer)
+        return validationError('Atualize o aplicativo para conferir o cliente antes de iniciar a venda ou cobrança. O carrinho foi preservado.');
+      if (clienteId && window.SyncFirebase?.prepareSaleCustomer) {
+        const customerCheckOrigin=JSON.stringify([DB.getPrincipal?.(),businessId,DB.getWorkspaceGeneration?.(),spaceId,clienteId,cart]);
+        finishing=true;setSubmissionState('processing','Conferindo o cliente na nuvem…');
+        try {
+          await window.SyncFirebase.prepareSaleCustomer(clienteId, {spaceId});
+          if (customerCheckOrigin!==JSON.stringify([DB.getPrincipal?.(),DB.getBusinessId?.(),DB.getWorkspaceGeneration?.(),selectedSalesSpaceId(),document.querySelector('#sale-client')?.value||null,cart]))
+            return validationError('O cliente ou espaço mudou. Revise o carrinho antes de confirmar.');
+        } catch (error) { return validationError(error.message || 'O cliente ainda não foi confirmado. O carrinho foi preservado.'); }
+        finally{finishing=false;}
+      }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },

@@ -720,7 +720,7 @@ const queueDiagnostics = () =>
     resolution: readRecoveryResolution(item),
     reviewState: readRecoveryResolution(item) ? "resolved" : readQueueArchive(item) ? "archived" : queueQuarantineReason(item) ? "quarantined" : (saleQueueRequiresReview(item) ? "manual_review" : null),
     reviewReason: queueQuarantineReason(item) || null,
-    canArchive: !['settings_permission_required','sync_protocol_upgrade_review'].includes(queueQuarantineReason(item)),
+    canArchive: !['settings_permission_required','sync_protocol_upgrade_review','customer_permission_required'].includes(queueQuarantineReason(item)),
     archive: readQueueArchive(item),
     payloadChecksum: checksumValue(item.payload || {}),
     payloadVersion: Number(item.payloadVersion || 1),
@@ -751,6 +751,8 @@ const retryDelay = (attempts, code = "") =>
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
 const canAttempt = (item, force = false, manualRetry = false) =>
   !queueManualReviewReason(item) &&
+  !(item.payload?.writes?.length===1 && item.payload.writes[0].entityType==='clients' &&
+    ['create','update'].includes(item.payload.writes[0].operation) && window.TeamAccess?.has?.('customers.edit')===false) &&
   !(Array.isArray(item.payload?.writes) && item.payload.writes.some(write => write.entityType === "settings") &&
     !canWriteSharedSettings()) &&
   (manualRetry || item.status !== "error") &&
@@ -777,19 +779,25 @@ function recoveryResolutionKey(item){return `${queueKey()}:recoveryResolution:${
 function readRecoveryResolution(item){
   let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
   if(!value||!Array.isArray(item.payload?.writes))return null;
+  if(value.channel==='client_dependency'){
+    const writes=item.payload.writes;
+    return value.status==='client_confirmed'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create'&&writes[0].entityId===value.clientId&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&value.resolvedAt&&value.resolvedByUid?value:null;
+  }
   const sale=item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
 }
 async function refreshRecoveryResolutions(isCurrent){
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
-  const held=readQueue().filter(i=>saleQueueRequiresReview(i)&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
+  const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
+  const held=readQueue().filter(i=>(saleQueueRequiresReview(i)||clientDependency(i))&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
   for(let offset=0;offset<held.length;offset+=20){
     const batch=held.slice(offset,offset+20),key=queueKey();
     try{
       const checks=await Promise.all(batch.map(async item=>{
         const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(window.SaleRecoveryClient.canonical(item.payload)));
-        return {operationId:item.operationId,saleId:item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create').entityId,payloadHash:Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('')};
+        const payloadHash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+        return clientDependency(item)?{kind:'client_dependency',operationId:item.operationId,clientId:item.payload.writes[0].entityId,payloadHash}:{operationId:item.operationId,saleId:item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create').entityId,payloadHash};
       }));
       if(!isCurrent())return;
       const response=await window.FirebaseCallable('listSaleRecoveryReviews',{businessId:activeBusinessId(),workspaceGeneration:window.DB?.getWorkspaceGeneration?.()??0,resolutionChecks:checks});
@@ -797,6 +805,11 @@ async function refreshRecoveryResolutions(isCurrent){
       const result=response.data??response;
       for(const item of batch){
         const check=checks.find(c=>c.operationId===item.operationId),r=result.items?.find(r=>r.operationId===item.operationId);
+        if(clientDependency(item)){
+          if(!r||r.kind!=='client_dependency'||r.status!=='client_confirmed'||r.clientId!==check.clientId||r.payloadHash!==check.payloadHash||r.businessId!==item.businessId||r.actorUid!==item.userId||r.workspaceGeneration!==(item.workspaceGeneration??0)||!r.resolvedAt||!r.resolvedByUid||!/^[a-f0-9]{64}$/.test(r.contentHash||''))continue;
+          const live=readQueue().find(q=>q.operationId===item.operationId);if(!live||checksumValue(live.payload)!==checksumValue(item.payload))continue;
+          localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({...r,channel:'client_dependency',payloadChecksum:checksumValue(item.payload),verifiedAt:now()}));continue;
+        }
         const sale=item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create');
         if(!r||!['already_recreated','recovered','closed_without_effects'].includes(r.status)||r.payloadHash!==check.payloadHash||r.saleId!==check.saleId||r.businessId!==item.businessId||r.actorUid!==item.userId||r.spaceId!==sale.data.spaceId||r.workspaceGeneration!==(item.workspaceGeneration??0)||!r.resolvedAt||!r.resolvedByUid||!/^[a-f0-9]{64}$/.test(r.contentHash||''))continue;
         const live=readQueue().find(q=>q.operationId===item.operationId);
@@ -906,6 +919,8 @@ function queueQuarantineReason(item) {
     return "explicit_manual_review";
   if (isHistoricalProjectionBatch(item)) return "historical_projection_without_user_action";
   if (settingsQueueRequiresPermission(item)) return "settings_permission_required";
+  if(item.lastErrorCode==='permission-denied'&&item.payload?.writes?.length===1&&item.payload.writes[0].entityType==='clients'&&item.payload.writes[0].operation==='create')
+    return 'customer_permission_required';
   if (Number(window.AdiFestaBuild?.release)>=202 && item.syncProtocolVersion!==1)
     return 'sync_protocol_upgrade_review';
   return "";
@@ -945,7 +960,7 @@ async function archiveQuarantinedOperation(operationId) {
     const item = readQueueStrict().find(entry => entry.operationId === operationId);
     if (!item || item.userId !== uid || item.businessId !== businessId || !queueQuarantineReason(item))
       throw Error("Somente uma ocorrência em quarentena da conta atual pode ser arquivada.");
-    if (['settings_permission_required','sync_protocol_upgrade_review'].includes(queueQuarantineReason(item)))
+    if (['settings_permission_required','sync_protocol_upgrade_review','customer_permission_required'].includes(queueQuarantineReason(item)))
       throw Error("Esta operação está preservada para análise de autorização ou versão. Não será arquivada nem reenviada por esta ação.");
     preserveQueueQuarantine(item);
     const evidence = readQueueReview(item), originalPacketJson = evidence.originalPacketJson;
@@ -1051,11 +1066,56 @@ const rememberSnapshotMetadata = (name, metadata) => {
 };
 const canonicalClientSnapshotKey = (businessId, clientId) =>
   `${currentUser?.uid || "anonymous"}:${businessId}:${String(clientId || "")}`;
+// Presence evidence is session/tenant/generation scoped metadata, never a commercial patch.
+const customerPresenceCache=new Map();
+const customerPresenceKey = id => `customerPresence:v205:${encodeURIComponent(currentUser?.uid||'')}:${encodeURIComponent(activeBusinessId())}:${DB.getWorkspaceGeneration?.()??0}:${encodeURIComponent(id)}`;
+function rememberCustomerPresence(client) {
+  if (!client?.id || client.deletedAt || client.active === false || client.ativo === false) return;
+  const key=customerPresenceKey(client.id),value={uid:currentUser?.uid,businessId:activeBusinessId(),workspaceGeneration:DB.getWorkspaceGeneration?.()??0,clientId:String(client.id),readAt:now(),source:'server'};
+  customerPresenceCache.set(key,value);try{localStorage.setItem(key,JSON.stringify(value));}catch{/* Presence may remain in this session; no business write is lost. */}
+}
+function assertCustomerForSale(clientId) {
+  const id=String(clientId||''),client=(DB.carregar().clientes||[]).find(c=>String(c.id)===id);
+  if (!id) return;
+  if (!currentUser || !client || client.deletedAt || client.active===false || client.ativo===false || client.businessId&&client.businessId!==activeBusinessId())
+    throw Object.assign(Error('Cliente indisponível nesta empresa. Nenhuma venda foi registrada.'),{code:'customer-unconfirmed'});
+  const creation=readQueue().find(p=>!readRecoveryResolution(p)&&(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
+  // Preserve the legitimate ordered offline flow for a NEW authorized draft.
+  // Previously denied/held or pre-protocol packets never qualify, even after a grant changes.
+  if(creation&&window.TeamAccess?.has?.('customers.edit')===true&&creation.userId===currentUser.uid&&creation.businessId===activeBusinessId()&&(creation.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&creation.syncProtocolVersion===1&&creation.status==='pending'&&!creation.lastErrorCode&&!queueManualReviewReason(creation))return;
+  if(creation)throw Object.assign(Error(window.TeamAccess?.has?.('customers.edit')===true
+    ? 'O cadastro deste cliente ainda aguarda confirmação na nuvem. Aguarde; o carrinho foi preservado.'
+    : 'Este cliente existe apenas no aparelho e seu perfil não pode cadastrá-lo. Peça ao responsável para analisar o registro. Não refaça a venda.'),{code:'customer-dependency-blocked',customerId:id});
+  if(readQueue().some(p=>saleQueueRequiresReview(p)&&!readRecoveryResolution(p)&&(p.payload?.writes||[]).some(w=>w.entityType==='sales'&&String(w.data?.clienteId||'')===id)))
+    throw Object.assign(Error('Há uma venda deste cliente aguardando revisão. Aguarde a decisão do responsável; nenhuma nova venda foi registrada.'),{code:'customer-dependency-blocked',customerId:id});
+  let proof=customerPresenceCache.get(customerPresenceKey(id));try{proof ||= JSON.parse(localStorage.getItem(customerPresenceKey(id))||'null');}catch{}
+  if(!proof||proof.source!=='server'||proof.uid!==currentUser.uid||proof.businessId!==activeBusinessId()||proof.workspaceGeneration!==(DB.getWorkspaceGeneration?.()??0)||proof.clientId!==id)
+    throw Object.assign(Error('Este cliente ainda não foi confirmado na nuvem nesta conta. Conecte-se e confira o cliente antes de vender. O carrinho foi preservado.'),{code:'customer-unconfirmed',customerId:id});
+}
+async function prepareSaleCustomer(clientId,options={}) {
+  if(!clientId)return {source:'guest'};
+  const id=String(clientId),scope=captureCloudReadScope(),spaceId=options.spaceId||window.SpaceContext?.salesId?.();
+  if(!currentUser||!canPullSource('clients'))throw Error('A consulta deste cliente não está autorizada.');
+  const newDraft=readQueue().find(p=>(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
+  if(newDraft&&window.TeamAccess?.has?.('customers.edit')===true){assertCustomerForSale(id);return{source:'authorized-ordered-local-dependency',clientId:id};}
+  if(navigator.onLine===false){assertCustomerForSale(id);return{source:'confirmed-local-presence'};}
+  // Read only. In particular, do NOT flush or retry any old customer or sale operation here.
+  const snapshot=await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
+  assertCloudReadScope(scope);
+  if(spaceId&&window.SpaceContext?.salesId&&window.SpaceContext.salesId()!==spaceId)throw Error('O espaço mudou. Revise o cliente na conta atual.');
+  if(!snapshot.exists()||snapshot.metadata?.fromCache||snapshot.metadata?.hasPendingWrites)
+    throw Object.assign(Error('Cliente não confirmado na nuvem. Peça ao responsável para analisar o cadastro; nenhuma venda foi registrada.'),{code:'customer-unconfirmed',customerId:id});
+  const remote=snapshot.data();
+  if(remote.businessId&&remote.businessId!==activeBusinessId()||remote.workspaceGeneration!==undefined&&remote.workspaceGeneration!==(DB.getWorkspaceGeneration?.()??0)||remote.deletedAt||remote.active===false||remote.ativo===false)
+    throw Object.assign(Error('Cliente indisponível nesta empresa. Nenhuma venda foi registrada.'),{code:'customer-unconfirmed'});
+  rememberCustomerPresence({...remote,id});assertCustomerForSale(id);return{source:'server',clientId:id};
+}
 function rememberCanonicalClients(documents, metadata = {}) {
-  if (metadata.fromCache || metadata.source !== "server") return;
+  if (metadata.fromCache || metadata.hasPendingWrites || metadata.source !== "server") return;
   const businessId = activeBusinessId(),
     readAt = metadata.readAt || now();
   for (const client of documents || []) {
+    rememberCustomerPresence(client);
     const clientId = String(client?.id || "").trim(),
       balance = Number(client?.saldo);
     if (!clientId || !Number.isFinite(balance) || client.deletedAt) continue;
@@ -2285,6 +2345,8 @@ async function commitQueueItem(item) {
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
     ...(queueSettingsDiagnostic(item) ? {syncDetail:{...queueSettingsDiagnostic(item),service:"Firestore",request:"queue_preflight"}} : {})});
   const settingsWrite = item.payload?.writes?.find(write => write.entityType === "settings");
+  if(item.payload?.writes?.length===1&&item.payload.writes[0].entityType==='clients'&&window.TeamAccess?.has?.('customers.edit')===false)
+    throw Object.assign(Error('O cadastro exige customers.edit. O original foi preservado; solicite análise ao responsável.'),{code:'customer-edit-permission-required'});
   if (settingsWrite && !canWriteSharedSettings())
     throw Object.assign(Error("A autorização para alterar configurações não está disponível. Nenhum envio foi permitido."),
       {code:"settings-permission-required",syncDetail:{stage:"settings_permission_preflight",service:"Firestore",
@@ -3530,7 +3592,7 @@ async function processSyncQueue(options = {}) {
 function pendingIds(name) {
   const ids = new Set();
   for (const item of readQueue())
-    if (!isHistoricalProjectionBatch(item) &&
+    if (!(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required"))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
@@ -6411,6 +6473,8 @@ window.SyncFirebase = {
   createSaleOperation,
   createPaymentOperation,
   assertSaleTracked,
+  prepareSaleCustomer,
+  assertCustomerForSale,
   assertPaymentTracked,
   isSalePending,
   prepareCustomerForSale,

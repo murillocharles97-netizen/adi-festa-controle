@@ -84,6 +84,11 @@ window.Vendas = (() => {
     if ((window.SyncFirebase || window.FirebaseSession?.user) &&
       (!window.SyncFirebase?.isReady?.() || DB.__firebaseSyncWrapped !== true))
       throw Error("A sincronização ainda não está pronta. Aguarde e tente a venda novamente.");
+    if (d.clienteId) {
+      if (window.SyncFirebase?.assertCustomerForSale) window.SyncFirebase.assertCustomerForSale(d.clienteId);
+      else if (window.FirebaseSession?.user && Number(window.AdiFestaBuild?.release) >= 205)
+        throw Error('Atualize o aplicativo para confirmar o cliente. Nenhuma venda foi registrada.');
+    }
     const customerBalance = d.status === "fiado"
       ? getCurrentCustomerBalance(d.clienteId, currentData) : null;
     if (requestedFinancialSpaceId && requestedFinancialSpaceId !== spaceId)

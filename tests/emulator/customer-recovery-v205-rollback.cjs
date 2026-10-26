@@ -1,0 +1,26 @@
+'use strict';
+// Run ONLY on the compatible rollback checkout, with a loopback demo Emulator.
+const test=require('node:test'),assert=require('node:assert/strict'),{createRequire}=require('node:module'),req=createRequire(require('node:path').resolve('functions/package.json'));
+if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Loopback Emulator required');
+const {initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore,FieldValue}=req('firebase-admin/firestore'),{saleRecoveryService}=require('../../functions/src/services/sale-recovery-service'),customer=require('../../functions/src/services/sale-recovery-customer'),f=require('../helpers/customer-recovery-v205.cjs');
+test('compatible rollback pauses new customer decisions while acknowledging existing receipts and retaining ordinary paid recovery',async()=>{
+ assert.equal(customer.CUSTOMER_RECOVERY_ENABLED,false,'Run only on reviewed rollback');const app=initializeApp({projectId:'demo-veconi-v205-rollback'},'rollback');
+ try{
+  const db=getFirestore(app),svc=saleRecoveryService(db,{FieldValue}),root=db.doc('businesses/'+f.bid),o=f.sample().original,dep=o.clientDependencies[0],sale=o.localSale;
+  await root.set({active:true,ownerId:f.owner,workspaceGeneration:0,subscription:{planId:'internal',status:'active'}});
+  for(const [uid,role]of [[f.owner,'owner'],[f.seller,'seller']]){await db.doc('users/'+uid).set({uid,active:true});await root.collection('members').doc(uid).set({uid,status:'active',role,permissions:{'sales.create':true,'customers.view':true},spaceAccess:role==='owner'?'all':'selected',allowedSpaceIds:[f.spaceId]});}
+  await db.doc('financialSpaces/'+f.spaceId).set({id:f.spaceId,active:true,businessId:f.bid,linkedBusinessId:f.bid,ownerUid:f.owner,capabilities:{sales:true,products:true,inventory:true,finance:false}});
+  await root.collection('products').doc('shared-product').set({id:'shared-product',businessId:f.bid,estoqueAtual:6,estoque:6,totalStock:6,active:true,productType:'simple',spaceAccessMode:'single_space',allowedSpaceIds:[f.spaceId],defaultSpaceId:f.spaceId});
+  const request=(data,uid=f.owner)=>({auth:{uid},data:{businessId:f.bid,workspaceGeneration:0,...data}}),env=f.envelope(o),decide=(action)=>svc.decide(request({saleId:sale.id,contentHash:env.contentHash,revision:0,action,confirmation:action==='approve_client'?'APROVAR_CADASTRO':'RECUPERAR',operationalEvidence:{goodsDelivered:true,paymentReceived:true,notRecreated:true}}));
+  await svc.submit(request(env,f.seller));await assert.rejects(decide('approve_client'),/temporariamente pausada/);assert.equal((await root.collection('clients').get()).size,0);
+  // Synthetic pre-rollback committed approval, not a new approval after pausing.
+  const client=dep.packet.payload.writes[0],hash=customer.hash(dep.packet.payload),receipt={kind:'client_dependency',status:'client_confirmed',clientId:client.entityId,operationId:dep.packet.operationId,businessId:f.bid,spaceId:f.spaceId,actorUid:f.seller,workspaceGeneration:0,payloadHash:hash,originSaleId:sale.id,contentHash:env.contentHash,resolvedByUid:f.owner,resolvedAt:FieldValue.serverTimestamp()};
+  await root.collection('clients').doc(client.entityId).set({...client.data,customerRecoveryHash:hash});await root.collection('saleRecoveryOperations').doc(receipt.operationId).set(receipt);await root.collection('processedOperations').doc(receipt.operationId).set({...receipt,status:'processed',customerRecoveryHash:hash});
+  const before=(await root.collection('clients').doc(client.entityId).get()).updateTime.toMillis(),ack=await svc.list(request({resolutionChecks:[{kind:'client_dependency',operationId:receipt.operationId,clientId:client.entityId,payloadHash:hash}]},f.seller));assert.equal(ack.items[0].status,'client_confirmed');
+  await assert.rejects(decide('recover_original'),/temporariamente pausada/);assert.equal((await root.collection('sales').get()).size,0);assert.equal((await root.collection('stockMovements').get()).size,0);assert.equal((await root.collection('clients').doc(client.entityId).get()).updateTime.toMillis(),before);
+  const anonymous=structuredClone(o);delete anonymous.localSale.clienteId;delete anonymous.packet.payload.writes[0].data.clienteId;anonymous.packet.payload.writes=anonymous.packet.payload.writes.filter(w=>w.entityType!=='clients');delete anonymous.clientDependencies;
+  const other=JSON.parse(JSON.stringify(anonymous).replaceAll(sale.id,'qa-compatible-anonymous-sale').replaceAll(o.packet.operationId,'qa-compatible-anonymous-op').replaceAll('movement-0-0','qa-compatible-anonymous-movement')),env2=f.envelope(other);
+  await svc.submit(request(env2,f.seller));const result=await svc.decide(request({saleId:other.localSale.id,contentHash:env2.contentHash,revision:0,action:'recover_original',confirmation:'RECUPERAR'}));assert.equal(result.status,'recovered');assert.equal((await root.collection('products').doc('shared-product').get()).data().estoqueAtual,5);
+  assert.equal((await root.collection('saleRecoveryReviews').doc(sale.id).collection('original').doc('payload').get()).data().originalJson,env.originalJson);assert.equal((await root.collection('balanceEvents').get()).size,0);assert.equal((await root.collection('payments').get()).size,0);
+ }finally{await deleteApp(app);}
+});

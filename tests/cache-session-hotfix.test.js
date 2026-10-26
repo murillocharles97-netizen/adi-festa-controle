@@ -65,6 +65,9 @@ function queueRuntime(){
   DB:{flush:async()=>{}},queueCounts:()=>({corrupt:false,total:queues.get(s.currentUser?.uid)?.length||0,errors:0}),readQueue:()=>structuredClone(queues.get(s.currentUser.uid)),saveQueue:q=>queues.set(s.currentUser.uid,structuredClone(q)),
   validateUser:async()=>{},updateQueueState(){},activeBusinessId:()=> 'qa-business',saleQueueRequiresReview:()=>false,queueManualReviewReason:()=>'',preserveQueueQuarantine:()=>false,queuePreflight:()=>({ok:true}),canAttempt:()=>true,now:()=> '2026-10-18T00:00:00Z',emit(){},
   commitQueueItem:async()=>{entered();return new Promise(r=>complete=r);},verifySaleQueueCommit:async()=>{throw Error('old verification must not run');},markLocalSaleConfirmed:()=>{throw Error('old ack must not run');},markLocalPaymentConfirmed(){},errorCode:e=>e.code,queueErrorBreakdown:()=>({}),CLOUD_NAMES:[],reportError:()=>{throw Error('old error must not affect new session');}};
+ // Current V202+ runner checks the browser session and the read-only recovery
+ // acknowledgements before sending. This old harness omitted both globals.
+ s.window=s;s.refreshRecoveryResolutions=async()=>{};
  vm.createContext(s);vm.runInContext(source.slice(source.indexOf('async function processSyncQueue('),source.indexOf('function pendingIds(')),s);
  return{s,queues,entered:enteredPromise,finish:()=>complete({})};
 }
