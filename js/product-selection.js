@@ -57,7 +57,7 @@
     scheduled = false;
     const app = $('#app'); if (!app) return;
     const key = currentKey();
-    if (!onPage() || !key || scopeKey && scopeKey !== key) {
+    if (!onPage() || !key || scopeKey && scopeKey !== key || dialog && dialog.key !== key) {
       afterRelease = null;
       closeDialog(); cancelPress(); enabled = false; selected.clear();
       scopeKey = key; releaseBack();
@@ -150,7 +150,7 @@
     } catch (error) { if (key === currentKey()) Utils.toast(error.message, true); }
     finally { if (button?.isConnected) button.disabled = false; }
   }
-  function open(ids, kind = 'delete') {
+  async function open(ids, kind = 'delete') {
     if (releasing) { const key = currentKey(); afterRelease = () => { if (key && currentKey() === key) open(ids, kind); }; return; }
     if (dialog) return;
     if (!allowed() || !onPage() || !currentKey()) return Utils.toast('Seu perfil não pode alterar produtos.', true);
@@ -169,34 +169,63 @@
     $$('[data-product-confirm-close]', overlay).forEach(button => button.onclick = () => { if (!dialog?.busy) closeDialog(); });
     $('[data-product-confirm-close]', overlay).focus();
     const instance = dialog;
+    const submit = $('[data-product-confirm-submit]', overlay), resultBox = $('.product-action-results', overlay);
+    submit.disabled = true; submit.textContent = 'Conferindo seleção…';
+    overlay.setAttribute('aria-busy', 'true');
+    let plan;
+    const finished = () => {
+      overlay.setAttribute('aria-busy', 'false');
+      // Remove, rather than only hide, a terminal action: generic .btn display
+      // styles can override the browser's default [hidden] rule on Android.
+      submit.textContent = 'Concluído'; submit.disabled = true; submit.remove();
+      const close = $$('[data-product-confirm-close]', overlay).at(-1);
+      close.textContent = 'Fechar resultados'; close.disabled = false;
+    };
+    try {
+      plan = await ProductActions.preflight(ids, kind);
+      if (dialog !== instance || currentKey() !== instance.key) return;
+      if (plan.key !== instance.key) throw Error('O acesso mudou durante a conferência. Reabra a seleção.');
+      const labels = {ready:'Apto', regularization:'Regularizar espaço', forbidden:'Sem permissão', pending:'Confirmação anterior pendente', inactive:'Já inativo', unavailable:'Conferência indisponível'};
+      $('.product-confirm-list', overlay).innerHTML = plan.items.map(p => `<li data-product-eligibility="${esc(p.status)}"><b>${esc(p.name)}</b><small>${esc(labels[p.status] || 'Bloqueado')}: ${esc(p.message)}</small></li>`).join('');
+      $('.product-confirm-note', overlay).textContent = `${plan.eligibleIds.length} de ${ids.length} aptos. Somente os aptos serão alterados após sua confirmação. O vínculo de cada produto é conferido na nuvem; o filtro do Início não redefine o catálogo da empresa.`;
+      overlay.setAttribute('aria-busy', 'false');
+      if (!plan.eligibleIds.length) { finished(); resultBox.textContent = 'Nenhuma alteração iniciada. Resolva os itens indicados antes de tentar novamente.'; return; }
+      submit.disabled = false; submit.textContent = `${verb}${plan.eligibleIds.length !== ids.length ? ` ${plan.eligibleIds.length} apto(s)` : ''}`;
+    } catch (error) {
+      if (dialog !== instance) return;
+      resultBox.textContent = error.message; resultBox.setAttribute('role', 'alert'); finished(); return;
+    }
     $('[data-product-confirm-submit]', overlay).onclick = async event => {
       if (instance.busy || dialog !== instance) return;
       instance.busy = true;
+      overlay.setAttribute('aria-busy', 'true');
       $$('button', overlay).forEach(b => b.disabled = true);
       event.currentTarget.textContent = 'Aguardando confirmação…';
       const names = new Map(products.map(p => [p.id, p.nome]));
       const show = results => {
         if (dialog !== instance || currentKey() !== instance.key) return;
         const done = results.filter(r => r.status === 'confirmed').length;
-        $('.product-action-results', overlay).innerHTML = `<b>${done} de ${ids.length} confirmado${done === 1 ? '' : 's'} na nuvem</b><ul>${results.map(r => `<li class="${r.status}"><b>${esc(names.get(r.id))}</b><span>${r.status === 'confirmed' ? 'Confirmado' : esc(r.message || 'Confirmação pendente')}</span></li>`).join('')}</ul>`;
+        $('.product-action-results', overlay).innerHTML = `<b>${done} de ${plan.eligibleIds.length} confirmado${done === 1 ? '' : 's'} na nuvem</b><ul>${results.map(r => `<li class="${esc(r.status)}"><b>${esc(names.get(r.id))}</b><span>${r.status === 'confirmed' ? 'Confirmado' : esc(r.message || 'Confirmação pendente')}</span></li>`).join('')}</ul>`;
       };
       try {
-        const results = await ProductActions.batch(ids, kind, show);
+        const results = await ProductActions.batch(plan.eligibleIds, kind, show);
         if (dialog !== instance || currentKey() !== instance.key) return;
-        if (results.every(r => r.status === 'confirmed')) {
+        if (!Array.isArray(results) || results.length !== plan.eligibleIds.length || new Set(results.map(r => r.id)).size !== results.length || results.some(r => !plan.eligibleIds.includes(r.id)))
+          throw Error('O resultado está incompleto. Confira as confirmações preservadas antes de iniciar outra ação.');
+        if (results.every(r => r.status === 'confirmed') && plan.eligibleIds.length === ids.length) {
           closeDialog(); cancelSelection(); refresh();
           Utils.toast(`${results.length === 1 ? 'Produto' : `${results.length} produtos`} ${kind === 'archive' ? 'arquivado' : 'excluído'}${results.length === 1 ? '' : 's'}. Confirmado na nuvem.`);
           return;
         }
         show(results);
         results.filter(r => r.status === 'confirmed').forEach(r => selected.delete(r.id));
-        $('[data-product-confirm-submit]', overlay).hidden = true;
-        const cancel = $$('[data-product-confirm-close]', overlay).at(-1); cancel.textContent = 'Fechar resultados';
+        finished();
         refresh();
       } catch (error) {
-        if (dialog === instance) $('.product-action-results', overlay).textContent = error.message;
+        if (dialog === instance) { resultBox.textContent = error.message; resultBox.setAttribute('role', 'alert'); finished(); }
       } finally {
         instance.busy = false;
+        overlay.setAttribute('aria-busy', 'false');
         $$('[data-product-confirm-close]', overlay).forEach(b => b.disabled = false);
         if (dialog === instance) $$('[data-product-confirm-close]', overlay).at(-1)?.focus();
       }

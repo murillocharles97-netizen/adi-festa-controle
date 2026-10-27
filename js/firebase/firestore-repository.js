@@ -283,10 +283,29 @@ export function createFirestoreRepository(collectionName) {
       const product = convert(snapshot);
       if (!product) return null;
       // Server-only confirmation, including tombstones. Never expose costs.
-      return Object.fromEntries([
+      const status = Object.fromEntries([
         "id", "businessId", "workspaceGeneration", "spaceAccessMode", "allowedSpaceIds", "defaultSpaceId",
         "spaceId", "financialSpaceId", "spaceScopeVersion", "active", "ativo", "deletedAt", "archivedAt", "catalogAction",
       ].filter(key => key in product).map(key => [key, product[key]]));
+      if (product.availability && typeof product.availability === 'object')
+        status.availability = Object.fromEntries(['spaceAccessMode','allowedSpaceIds','defaultSpaceId','spaceScopeVersion'].filter(k => k in product.availability).map(k => [k,product.availability[k]]));
+      return status;
+    },
+    async getProductActionSpacesFromServer(ids) {
+      if (collectionName !== "products") throw Error("Product action scope requires a product.");
+      const key = repositoryScopeKey(), values = [...new Set(ids)];
+      if (values.length > 30 || values.some(id => typeof id !== 'string' || !id || id.includes('/') || ['all','all_spaces'].includes(id)))
+        throw Error('Vínculo de espaço inválido. Peça a conferência do responsável.');
+      const spaces = await Promise.all(values.map(async id => {
+        const snapshot = await timed('read', 'products:action-space', () => getDocFromServer(doc(db, 'financialSpaces', id)));
+        if (key !== repositoryScopeKey()) throw Error('A sessão ou permissão mudou durante a leitura.');
+        if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) throw Error('Aguarde a confirmação do espaço na nuvem.');
+        if (!snapshot.exists()) return null;
+        const s = normalizeFirestoreData(snapshot.data());
+        return {id, ...Object.fromEntries(['businessId','linkedBusinessId','active','status'].filter(f => f in s).map(f => [f,s[f]]))};
+      }));
+      if (key !== repositoryScopeKey()) throw Error('A sessão ou permissão mudou durante a leitura.');
+      return spaces.filter(Boolean);
     },
     async listWhere(field, value, max = 100, options = {}) {
       const variant = `where:${field}:${String(value)}:${max}`;

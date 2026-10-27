@@ -23,23 +23,72 @@
     const scope = {uid, businessId: c.businessId, generation: env.DB.getWorkspaceGeneration(),
       principal: env.DB.getPrincipal(), spaceId: env.SpaceContext.homeId(),
       permissions: env.TeamAccess.operationalReadScopeKey(), origin};
-    scope.key = JSON.stringify([scope.uid, scope.businessId, scope.generation, scope.principal, scope.spaceId, scope.permissions]);
+    scope.key = JSON.stringify([scope.uid, scope.businessId, scope.generation, scope.principal, scope.spaceId, scope.permissions,
+      c.role, c.spaceAccess, [...(c.allowedSpaceIds || [])].sort()]);
     return scope;
   }
   const assertCurrent = scope => {
     if (identity().key !== scope.key || env.WorkspaceRuntime.capture() !== scope.origin)
       throw failure('session-changed', 'A conta ou o espaço mudou. A operação foi preservada na conta de origem.');
   };
-  function assertProduct(product, scope) {
-    const c = context();
+  function assertOrigin(product, scope) {
     if (!product || product.businessId !== scope.businessId || (product.workspaceGeneration ?? 0) !== scope.generation)
       throw failure('product-origin', 'Produto não confirmado nesta empresa. Aguarde a sincronização.');
-    const ids = c.role === 'owner' || c.spaceAccess === 'all'
-      ? (env.SpaceContext.homeSpaces?.() || []).map(s => s.id) : (c.allowedSpaceIds || []);
-    const target = ['all', 'all_spaces'].includes(scope.spaceId) ? null : scope.spaceId;
-    const allows = id => env.SpaceEngine.productAllowsSpace(product, id);
-    if (target ? !ids.includes(target) || !allows(target) : !ids.some(allows))
-      throw failure('space-denied', 'O produto não pertence a um espaço autorizado nesta seleção.');
+  }
+  const scopeFields = ['spaceAccessMode','allowedSpaceIds','defaultSpaceId','spaceScopeVersion'];
+  const binding = product => JSON.stringify([...['businessId','workspaceGeneration','spaceAccessMode','allowedSpaceIds','defaultSpaceId','spaceId','financialSpaceId'].map(k => product[k] ?? null), product.availability ? scopeFields.map(k => product.availability[k] ?? null) : null]);
+  async function assertProduct(product, scope) {
+    assertOrigin(product, scope);
+    const c = context(), owner = c.role === 'owner', unrestricted = owner || c.spaceAccess === 'all';
+    const source = product.availability || product, mode = source.spaceAccessMode;
+    const ids = Array.isArray(source.allowedSpaceIds) ? [...new Set(source.allowedSpaceIds)] : [];
+    const direct = [...new Set([product.spaceId, product.financialSpaceId].filter(Boolean))];
+    const regularize = () => { throw failure('space-regularization', 'O responsável precisa regularizar o vínculo de espaço deste produto. Nenhum vínculo será presumido ou alterado por esta ação.'); };
+    if (!unrestricted && product.availability && product.spaceAccessMode !== mode) regularize();
+    let targets;
+    if (mode === 'all_spaces') {
+      if (unrestricted) return; // Explicit business-wide catalog, not the Home filter.
+      targets = c.allowedSpaceIds || [];
+    } else if (mode === 'single_space' || mode === 'selected_spaces') {
+      if (!ids.length || ids.length > 30 || ids.some(id => typeof id !== 'string' || !id || id.includes('/') || ['all','all_spaces'].includes(id)) ||
+        source.defaultSpaceId && !ids.includes(source.defaultSpaceId) || direct.some(id => !ids.includes(id)) ||
+        mode === 'single_space' && (ids.length !== 1 || source.defaultSpaceId !== ids[0])) regularize();
+      targets = ids;
+    } else {
+      // Existing owner metadata path can retire an unambiguous legacy binding.
+      // Never normalize an unknown/absent binding into "all spaces".
+      if (mode || !owner || direct.length !== 1) regularize();
+      targets = direct;
+    }
+    if (targets.some(id => typeof id !== 'string' || !id || id.includes('/') || ['all','all_spaces'].includes(id))) regularize();
+    if (!unrestricted && !targets.some(id => c.allowedSpaceIds?.includes(id)))
+      throw failure('space-denied', 'Seu perfil não pode gerenciar o espaço deste produto.');
+    if (!repository()?.getProductActionSpacesFromServer)
+      throw failure('not-ready', 'Aguarde a conferência dos espaços na nuvem.');
+    const checkedIds = unrestricted ? targets : targets.filter(id => c.allowedSpaceIds?.includes(id));
+    let spaces;
+    try { spaces = await repository().getProductActionSpacesFromServer(checkedIds); }
+    catch (error) {
+      assertCurrent(scope);
+      // Existing Rules intentionally deny reading inactive/missing spaces. Do
+      // not bypass them or treat an owner's unresolved binding as an edit grant.
+      if (owner && String(error.code || '').replace('firestore/','') === 'permission-denied') regularize();
+      throw error;
+    }
+    assertCurrent(scope);
+    const own = s => s && (s.businessId || s.linkedBusinessId) === scope.businessId &&
+      (!s.businessId || s.businessId === scope.businessId) && (!s.linkedBusinessId || s.linkedBusinessId === scope.businessId);
+    const active = s => s.active !== false && s.status !== 'archived';
+    if (mode === 'all_spaces') {
+      if (!spaces.some(s => own(s) && active(s) && c.allowedSpaceIds?.includes(s.id)))
+        throw failure('space-denied', 'Nenhum espaço autorizado deste produto foi confirmado.');
+    } else {
+      if (checkedIds.some(id => !own(spaces.find(s => s.id === id)))) regularize();
+      if (!unrestricted && !spaces.some(s => active(s) && c.allowedSpaceIds?.includes(s.id)))
+        throw failure('space-denied', 'O espaço deste produto não está ativo para seu perfil.');
+    }
+    // Only logical catalog metadata is allowed here, including an owner's
+    // archived own space. No stock origin or product binding is changed.
   }
   const journalKey = scope => `adiFesta:productActions:${scope.businessId}:${scope.uid}:generation:${scope.generation}`;
   function journal(scope) {
@@ -66,7 +115,7 @@
     if (!repository()?.getProductStatusFromServer) throw failure('not-ready', 'Aguarde o carregamento da conexão com a nuvem.');
     const product = await repository().getProductStatusFromServer(id);
     assertCurrent(scope);
-    assertProduct(product, scope);
+    await assertProduct(product, scope);
     return product;
   }
   function conflictingQueue(productId, ownOperationId = '') {
@@ -121,7 +170,9 @@
           env.DB.alterar(data => {
             assertCurrent(scope);
             const local = data.produtos.find(p => p.id === id);
-            assertProduct(local, scope);
+            assertOrigin(local, scope);
+            if (binding(local) !== binding(product))
+              throw failure('product-origin', 'O vínculo local difere do produto confirmado. Aguarde a atualização antes de continuar.');
             Object.assign(local, {active: false, ativo: false, operationId,
               catalogAction: {operationId, kind, actorUid: scope.uid, at},
               ...(kind === 'delete' ? {deletedAt: at} : {archivedAt: at})});
@@ -167,6 +218,30 @@
     }
     return results;
   }
+  async function preflight(ids, kind = 'delete') {
+    const scope = identity(), records = Object.values(journal(scope)), items = [];
+    if (!['delete','archive'].includes(kind)) throw failure('invalid-action', 'Ação inválida.');
+    for (const id of new Set(ids)) {
+      assertCurrent(scope);
+      const name = env.Produtos.obter(id)?.nome || 'Produto';
+      const held = records.find(r => r.productId === id && r.status !== 'confirmed');
+      if (held || conflictingQueue(id)) {
+        items.push({id, name, status:'pending', message:'Há uma alteração anterior aguardando confirmação. Use Verificar confirmação; nada será reenviado.'});
+        continue;
+      }
+      try {
+        const product = await read(scope, id);
+        if (product.deletedAt || product.active === false || product.ativo === false)
+          items.push({id, name, status:'inactive', message:'Produto já inativo na nuvem. Atualize a listagem.'});
+        else items.push({id, name, status:'ready', message:'Vínculo e acesso confirmados. Exclusão lógica, sem apagar histórico.'});
+      } catch (error) {
+        assertCurrent(scope);
+        items.push({id, name, status:error.code === 'space-regularization' ? 'regularization' : ['space-denied','permission-denied','product-origin'].includes(error.code) ? 'forbidden' : 'unavailable', message:error.message});
+      }
+    }
+    assertCurrent(scope);
+    return {key:scope.key, kind, items, eligibleIds:items.filter(r => r.status === 'ready').map(r => r.id)};
+  }
   async function checkPending() {
     const scope = identity(), results = [];
     for (const intent of Object.values(journal(scope)).filter(r => r.status !== 'confirmed')) {
@@ -189,5 +264,5 @@
     try { held = new Map(pending().map(r => [r.productId, r.operationId])); } catch { /* Keep the original projection; header reports evidence error. */ }
     return rows.map(p => p.ativo === false && held.has(p.id) && held.get(p.id) === p.catalogAction?.operationId ? {...p, ativo:true} : p);
   }
-  return Object.freeze({perform, batch, pending, checkPending, identity, isPending, displayProducts});
+  return Object.freeze({perform, batch, preflight, pending, checkPending, identity, isPending, displayProducts});
 });

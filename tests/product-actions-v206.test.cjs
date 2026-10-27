@@ -27,7 +27,7 @@ function runtime(options = {}) {
       },
       flush: async () => { flushes++; if (options.onFlush) await options.onFlush(env); }},
     SyncFirebase: {getQueueDiagnostics: () => queue},
-    FirestoreRepositories: {products: {getProductStatusFromServer: async id => {
+    FirestoreRepositories: {products: {getProductActionSpacesFromServer: async ids => ids.map(id => ({id,businessId:'qa-business',active:true})),getProductStatusFromServer: async id => {
       readCount++; if (options.read) return options.read(id, remote, env, readCount);
       return structuredClone(remote.get(id));
     }}},
@@ -62,7 +62,7 @@ test('seller authorized only for QA can archive without financial privileges', a
 });
 test('cross-space, foreign business and generation rejected before local change', async () => {
   for (const field of ['space','business','generation']) {
-    const r = runtime(); if (field === 'space') r.changeScope('other-space');
+    const r = runtime(); if (field === 'space') r.env.BusinessContext.get = () => ({businessId:'qa-business',role:'seller',spaceAccess:'selected',allowedSpaceIds:['other-space']});
     if (field === 'business') r.remote.get('qa-product').businessId = 'foreign';
     if (field === 'generation') r.remote.get('qa-product').workspaceGeneration = 1;
     await assert.rejects(r.api.perform('qa-product')); assert.equal(r.writes.length, 0);
