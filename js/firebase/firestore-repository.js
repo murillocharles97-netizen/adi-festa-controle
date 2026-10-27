@@ -273,6 +273,21 @@ export function createFirestoreRepository(collectionName) {
         "active", "deletedAt", "cancelledAt", "canceledAt", "status", "applicationStatus",
       ].filter((key) => key in sale).map((key) => [key, sale[key]]));
     },
+    async getProductStatusFromServer(id) {
+      if (collectionName !== "products") throw Error("Product status requires a product.");
+      const scopeKey = repositoryScopeKey();
+      const snapshot = await timed("read", "products:action-status", () => getDocFromServer(documentRef(id)));
+      if (scopeKey !== repositoryScopeKey()) throw Error("A sessão ou permissão mudou durante a leitura.");
+      if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites)
+        throw Error("Aguarde a confirmação efetiva do produto na nuvem.");
+      const product = convert(snapshot);
+      if (!product) return null;
+      // Server-only confirmation, including tombstones. Never expose costs.
+      return Object.fromEntries([
+        "id", "businessId", "workspaceGeneration", "spaceAccessMode", "allowedSpaceIds", "defaultSpaceId",
+        "spaceId", "financialSpaceId", "spaceScopeVersion", "active", "ativo", "deletedAt", "archivedAt", "catalogAction",
+      ].filter(key => key in product).map(key => [key, product[key]]));
+    },
     async listWhere(field, value, max = 100, options = {}) {
       const variant = `where:${field}:${String(value)}:${max}`;
       const key = cacheKey(requireBusinessId(), collectionName, variant);

@@ -35,7 +35,7 @@ window.Produtos=(()=>{
       window.SpaceContext?.stockMovementOrigin?.(v);
     if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
-  const excluir=id=>{const result=DB.alterar(db=>{db.produtos=db.produtos.filter(p=>p.id!==id);db.variacoesProdutos=(db.variacoesProdutos||[]).filter(v=>v.parentProductId!==id)});window.BarcodeIndex?.invalidate?.();return result};
+  const excluir=id=>{if(!window.ProductActions)throw Error('Aguarde o carregamento das ações de produtos.');return window.ProductActions.perform(id,'delete')};
   const entrada=(produtoId,quantidade,custoUnitario,observacao,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');

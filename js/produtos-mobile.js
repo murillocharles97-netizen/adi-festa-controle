@@ -55,7 +55,7 @@
       .map((word) => word[0])
       .join("")
       .toUpperCase();
-  const products = () => dataCache || (dataCache = DB.carregar());
+  const products = () => dataCache || (dataCache = {...DB.carregar(), produtos:window.ProductActions?.displayProducts?.(DB.carregar().produtos) || DB.carregar().produtos});
   const status = (product) => getProductStockStatus(product);
   const statusInfo = (product) =>
     ({
@@ -812,6 +812,13 @@
     state.filtersOpen = false;
     refresh();
   }
+  function dismissSheets() {
+    state.menuId = null;
+    state.filtersOpen = false;
+    $(".product-action-sheet")?.remove();
+    $(".product-filter-sheet")?.remove();
+    $(".product-sheet-overlay")?.remove();
+  }
   function performSwipe(action, id) {
     action === "entry" ? stockEntry(id) : productForm(id);
   }
@@ -831,6 +838,7 @@
       setTimeout(() => (card.style.transition = ""), 250);
     };
     card.addEventListener("pointerdown", (event) => {
+      if (window.ProductSelection?.active?.()) return;
       if (event.target.closest("button,input,a,select")) return;
       startX = event.clientX;
       startY = event.clientY;
@@ -841,6 +849,7 @@
       card.setPointerCapture?.(pointer);
     });
     card.addEventListener("pointermove", (event) => {
+      if (window.ProductSelection?.active?.()) { dragging = false; reset(); return; }
       if (!dragging || event.pointerId !== pointer) return;
       const dx = event.clientX - startX,
         dy = event.clientY - startY;
@@ -864,6 +873,7 @@
       );
     });
     const end = (event) => {
+      if (window.ProductSelection?.active?.()) { dragging = false; reset(); return; }
       if (!dragging || event.pointerId !== pointer) return;
       dragging = false;
       if (horizontal && Math.abs(delta) >= card.offsetWidth * 0.4) {
@@ -995,21 +1005,7 @@
     );
     $$("[data-product-delete]").forEach(
       (button) =>
-        (button.onclick = () =>
-          Modais.confirmar("produto", () => {
-            ProductImages.deleteProduct(button.dataset.productDelete)
-              .then(() => {
-                state.menuId = null;
-                refresh();
-                Utils.toast("Produto e imagens excluídos.");
-              })
-              .catch((error) =>
-                Utils.toast(
-                  error.message || "Não foi possível excluir o produto",
-                  true,
-                ),
-              );
-          })),
+        (button.onclick = () => window.ProductSelection.open([button.dataset.productDelete], 'delete')),
     );
     $$("[data-product-shell]").forEach(bindSwipe);
     observer?.disconnect();
@@ -1104,6 +1100,7 @@
     render,
     bind,
     refresh,
+    dismissSheets,
     applyFilter,
     search,
     productForm,

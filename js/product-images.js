@@ -847,9 +847,9 @@
   async function deleteProduct(productId) {
     const product = window.Produtos?.obter?.(productId);
     if (!product) throw Error("Produto não encontrado.");
-    const variants = window.ProductVariations?.list?.(productId) || [];
-    await removeProductAssets(product, variants);
-    window.Produtos.excluir(productId);
+    // Logical deactivation preserves images and historical references. The
+    // existing authorized Sync must confirm the metadata change on the server.
+    return window.Produtos.excluir(productId);
   }
 
   window.getProductDisplayImage = getProductDisplayImage;

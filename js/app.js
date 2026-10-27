@@ -271,7 +271,7 @@
           (match) => [match.product.id, match.match],
         ),
       );
-    return Produtos.listar()
+    return (window.ProductActions?.displayProducts?.(Produtos.listar()) || Produtos.listar())
       .filter((product) => product.ativo !== false)
       .filter((product) => {
         if (!query) return true;
@@ -296,7 +296,7 @@
       );
   }
   function desktopProductCounts() {
-    const products = Produtos.listar().filter((product) => product.ativo !== false);
+    const products = (window.ProductActions?.displayProducts?.(Produtos.listar()) || Produtos.listar()).filter((product) => product.ativo !== false);
     return {
       todos: products.length,
       disponivel: products.filter((product) => Produtos.status(product) === "disponivel").length,
@@ -760,18 +760,7 @@
           refreshDesktopProducts();
         }
         if (b.dataset.deleteProduct)
-          Modais.confirmar("produto", () => {
-            const id = b.dataset.deleteProduct;
-            window.ProductImages
-              ?.deleteProduct?.(id)
-              .then(() => {
-                toast("Produto e imagens excluídos");
-                mountRoute(route);
-              })
-              .catch((error) =>
-                toast(error.message || "Não foi possível excluir o produto", true),
-              );
-          });
+          window.ProductSelection.open([b.dataset.deleteProduct], 'delete');
       };
     }
     if (route === "cobrancas") bindCobrancas();
