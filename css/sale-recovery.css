@@ -4,6 +4,12 @@
 .sale-recovery-actions{display:flex;gap:8px;flex-wrap:wrap}
 .sale-recovery-modal{width:min(740px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}
 .sale-recovery-modal-bg{z-index:6001}
+.sale-recovery-evidence{display:grid;gap:12px;min-width:0;margin:16px 0;padding:14px;border:1px solid #c9dedb;border-radius:12px}
+.sale-recovery-evidence label{display:flex;align-items:flex-start;gap:10px;min-height:44px;line-height:1.5;cursor:pointer}
+.sale-recovery-evidence input{flex:0 0 22px;width:22px;height:22px;margin:2px 0;accent-color:#008c83}
+[data-decision-result]:not(:empty){padding:12px;border:1px solid #bce6df;border-radius:10px;background:#f1fbf8;overflow-wrap:anywhere}
+[data-decision-result].is-error{background:#fff4ef;border-color:#d68a64;color:#712e18}
+#modal .sale-recovery-modal.viewport-dialog{overflow:hidden}
 .sale-recovery-modal .modal-head h2{margin:0;font-size:1.15rem}
 .sale-recovery-warning{padding:12px;border:1px solid #d5e4e0;border-radius:10px;background:#f3faf7;line-height:1.5}
 .sale-recovery-card{padding:16px;margin:12px 0;border:1px solid #dce5eb;border-radius:14px;overflow-wrap:anywhere}

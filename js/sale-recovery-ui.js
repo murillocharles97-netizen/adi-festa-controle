@@ -73,6 +73,7 @@ function modal(title,body,footer=''){
   const prior=document.activeElement;
   root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg viewport-modal"><section class="modal-box sale-recovery-modal viewport-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body viewport-scroll">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
   const panel=root.querySelector('section');
+  panel.dataset.recoveryContext=summaryKey();
   const close=()=>{if(busy)return;root.replaceChildren();prior?.isConnected&&prior.focus();};
   root.querySelectorAll('[data-recovery-close]').forEach(b=>b.onclick=close);
   panel.onkeydown=e=>{
@@ -114,7 +115,7 @@ function selectedSpace(){
   return c.role!=='owner'&&c.spaceAccess!=='all'&&c.allowedSpaceIds?.length===1?c.allowedSpaceIds[0]:null;
 }
 const recoveryStatus=value=>({awaiting_review:'Aguardando revisão',already_recreated:'Já recriada pelo gestor',recovered:'Recuperada',closed_without_effects:'Encerrada sem efeitos'}[value]||'Aguardando revisão');
-function confirmDecision(item,action,match,view){
+function confirmDecision(item,action,match,view,returnState={}){
   if(busy||context().role!=='owner')return;
   const titles={link_existing:'Confirmar: já foi registrada',dismiss_match:'Não é a mesma venda',recover_original:'Recuperar venda original',close_without_effects:'Não recuperar / encerrada sem efeitos',approve_client:'Aprovar cadastro original'};
   const explanations={
@@ -124,14 +125,21 @@ function confirmDecision(item,action,match,view){
     dismiss_match:'Somente esta sugestão será descartada. A venda original continuará aguardando decisão, sem nenhum efeito comercial.',
     recover_original:'Confirme que esta venda NÃO foi registrada pelo gestor. O estoque e os vínculos serão revalidados. Se tudo conferir, a mesma operação original será executada uma única vez, com os IDs preservados. Ela passará a contar em vendas/metas e na automação financeira do espaço, quando habilitada. Falta de estoque ou conflito bloqueará a recuperação.'
   };
-  const needsEvidence=action==='recover_original'&&item.clientDependencies?.some(d=>d.related);
-  const evidence=needsEvidence?'<fieldset><legend>Conferência operacional obrigatória</legend><label><input type="checkbox" data-evidence="goodsDelivered"> Confirmei que as mercadorias foram entregues.</label><label><input type="checkbox" data-evidence="paymentReceived"> Confirmei que o pagamento indicado já foi recebido fora do aplicativo. Não cobrar novamente.</label><label><input type="checkbox" data-evidence="notRecreated"> Conferi que esta venda não foi registrada novamente com outro ID.</label></fieldset>':'';
+  // The server requires these attestations for EVERY customer-linked sale,
+  // not just for a newly approved dependency. Ask for all original recoveries
+  // as a safe fallback when an older backend does not expose the contract yet.
+  const needsEvidence=action==='recover_original';
+  const evidence=needsEvidence?'<fieldset class="sale-recovery-evidence"><legend>Conferência operacional obrigatória</legend><label><input type="checkbox" data-evidence="goodsDelivered"> Confirmei que as mercadorias foram entregues.</label><label><input type="checkbox" data-evidence="paymentReceived"> Confirmei que o pagamento indicado já foi recebido fora do aplicativo. Não cobrar novamente.</label><label><input type="checkbox" data-evidence="notRecreated"> Conferi que esta venda não foi registrada novamente com outro ID.</label></fieldset>':'';
   const panel=modal(titles[action],`<p><strong>${money(item.total)}</strong> · ${esc(when(item.originalSaleAt))}</p><p>${explanations[action]}</p>${evidence}<p>O pacote original e a fila do aparelho serão preservados para auditoria.</p><p data-decision-result role="status" aria-live="polite"></p>`,`<button class="btn btn-light" type="button" data-decision-back>Voltar</button><button class="btn btn-primary" type="button" data-decision-confirm>Confirmar decisão</button>`);
   if(!panel)return;
-  panel.querySelector('[data-decision-back]').onclick=()=>{if(!busy)void openReviews(view);};
+  const showResult=(text,error=false)=>{
+    const result=panel.querySelector('[data-decision-result]');result.textContent=text;result.classList.toggle('is-error',error);result.setAttribute('role',error?'alert':'status');result.tabIndex=-1;result.focus({preventScroll:true});result.scrollIntoView?.({block:'nearest'});
+  };
+  panel.querySelector('[data-decision-back]').onclick=()=>{if(!busy)void openReviews(view,returnState);};
   panel.querySelector('[data-decision-confirm]').onclick=async()=>{
-    if(needsEvidence&&[...panel.querySelectorAll('[data-evidence]')].some(input=>!input.checked)){panel.querySelector('[data-decision-result]').textContent='Confira entrega, recebimento e ausência de venda recriada antes de continuar.';return;}
-    if(busy)return;const session=identity();busy=true;
+    if(busy)return;
+    if(needsEvidence&&[...panel.querySelectorAll('[data-evidence]')].some(input=>!input.checked)){showResult('Confira entrega, recebimento e ausência de venda recriada antes de continuar.',true);return;}
+    const session=summaryKey();busy=true;
     const button=panel.querySelector('[data-decision-confirm]');button.disabled=true;button.textContent='Validando…';
     try{
       const response=await call('decideSaleRecovery',{saleId:item.saleId,contentHash:item.contentHash,revision:item.revision??0,action,linkedSaleId:match?.saleId,
@@ -139,34 +147,40 @@ function confirmDecision(item,action,match,view){
         ...(needsEvidence?{operationalEvidence:Object.fromEntries([...panel.querySelectorAll('[data-evidence]')].map(input=>[input.dataset.evidence,input.checked]))}:{}),
         confirmation:{link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR',close_without_effects:'ENCERRAR_SEM_EFEITOS',approve_client:'APROVAR_CADASTRO'}[action]});
       const result=response.data??response;
-      if(identity()!==session||!panel.isConnected)return;
-      panel.querySelector('[data-decision-result]').textContent=action==='approve_client'?'Cadastro confirmado. A venda permanece aguardando decisão, sem estoque ou cobrança aplicada.':action==='dismiss_match'?'Sugestão descartada. O original continua aguardando decisão.':action==='close_without_effects'?'Encerrada sem efeitos. Nenhuma venda, movimento de estoque ou receita foi criada. O original permanece preservado.':`${recoveryStatus(result.status)}. Venda vinculada: ${result.linkedSaleId}.`;
+      if(summaryKey()!==session||!panel.isConnected)return;
+      const expected={approve_client:'awaiting_review',dismiss_match:'awaiting_review',close_without_effects:'closed_without_effects',link_existing:'already_recreated',recover_original:'recovered'}[action];
+      if(result.saleId!==item.saleId||result.status!==expected||action==='recover_original'&&result.linkedSaleId!==item.saleId||action==='link_existing'&&result.linkedSaleId!==match.saleId||action==='approve_client'&&(result.clientId!==match.clientId||result.clientOperationId!==match.operationId))throw Error('A resposta não confirmou esta decisão. Volte aos registros e consulte a situação antes de tentar novamente.');
+      showResult(action==='approve_client'?'Cadastro confirmado. A venda permanece aguardando decisão, sem estoque ou cobrança aplicada.':action==='dismiss_match'?'Sugestão descartada. O original continua aguardando decisão.':action==='close_without_effects'?'Encerrada sem efeitos. Nenhuma venda, movimento de estoque ou receita foi criada. O original permanece preservado.':`${recoveryStatus(result.status)}. Venda vinculada: ${result.linkedSaleId}.`);
       button.remove();panel.querySelector('[data-decision-back]').textContent='Voltar aos registros';
       reviewSummary.checkedAt=0;void refresh();
     }catch(error){
-      if(identity()===session&&panel.isConnected){
+      if(summaryKey()===session&&panel.isConnected){
         const code=String(error.code||'').replace(/^functions\//,'');
-        panel.querySelector('[data-decision-result]').textContent=['unavailable','deadline-exceeded','internal'].includes(code)?'Não foi possível confirmar a resposta. Reabra os registros para consultar o estado antes de repetir. A mesma decisão é idempotente.':error.message||'A recuperação não pôde ser confirmada. O registro permanece preservado.';
-        button.textContent='Confirmar a mesma decisão';button.disabled=false;
+        const uncertain=['unavailable','deadline-exceeded','internal'].includes(code);
+        showResult(uncertain?'Não foi possível confirmar a resposta. Volte aos registros e consulte a situação antes de repetir. Nenhuma nova cobrança será iniciada.':error.message||'A recuperação não pôde ser confirmada. O registro permanece preservado.',true);
+        button.textContent=uncertain?'Consultar situação nos registros':code==='aborted'?'Atualizar registros':'Confirmar decisão';button.disabled=false;
+        if(uncertain||code==='aborted')button.onclick=()=>{if(!busy)void openReviews(view,returnState);};
       }
     }finally{busy=false;}
   };
 }
-async function openReviews(view='pending'){
+async function openReviews(view='pending',returnState={}){
   const session=identity(),spaceId=selectedSpace(),panel=modal('Vendas aguardando revisão',`<p class="sale-recovery-warning">Registros preservados com decisões explícitas. Vincular uma venda existente não aplica efeitos comerciais. Recuperar a original exige confirmação e validação transacional.</p><nav class="sale-recovery-tabs" aria-label="Situação da recuperação"><button class="btn ${view==='pending'?'btn-primary':'btn-light'}" aria-pressed="${view==='pending'}" data-review-pending>Em revisão</button><button class="btn ${view==='resolved'?'btn-primary':'btn-light'}" aria-pressed="${view==='resolved'}" data-review-resolved>Resolvidas</button></nav><div data-recovery-list role="status">Carregando registros…</div>`,`<button class="btn btn-light" type="button" data-recovery-close>Fechar</button>`);
   if(!panel)return;
   panel.querySelector('[data-review-pending]').onclick=()=>{if(!busy)void openReviews('pending');};
   panel.querySelector('[data-review-resolved]').onclick=()=>{if(!busy)void openReviews('resolved');};
-  let cursor=null,loading=false;
+  let cursor=null,loading=false,loadedPages=0;
+  const position=()=>({pages:loadedPages,scrollTop:panel.querySelector('.modal-body').scrollTop});
   async function page(){
     if(loading)return;loading=true;
     try{
       const response=await call('listSaleRecoveryReviews',{spaceId,cursor,view}),result=response.data??response;
-      if(identity()!==session||!panel.isConnected)return;
+      if(identity()!==session||panel.dataset.recoveryContext!==summaryKey()||!panel.isConnected)return;
       const list=panel.querySelector('[data-recovery-list]');
       if(!cursor)list.replaceChildren();
-      for(const item of result.items){
+      for(const item of [...result.items].sort((a,b)=>String(a.originalSaleAt).localeCompare(String(b.originalSaleAt)))){
         const article=document.createElement('article');article.className='sale-recovery-card';
+        article.dataset.saleId=item.saleId;
         const pending=item.status==='awaiting_review',owner=context().role==='owner',matches=item.possibleMatches||[];
         article.innerHTML=`<header><strong>${money(item.total)}</strong><span class="sale-recovery-status">${recoveryStatus(item.status)}</span></header><p><time>${esc(when(item.originalSaleAt))}</time> · ${esc(item.actorName)} · ${esc(item.spaceName)}</p><p>Origem: venda retida no aparelho de origem · ${esc(item.paymentMethod||'Pagamento não informado')}</p><ul>${item.items.map(i=>`<li>${esc(i.quantity)} × ${esc(i.name)}${i.variantName?` — ${esc(i.variantName)}`:''}</li>`).join('')}</ul><p class="sale-recovery-warning">${item.status==='recovered'?'Venda original recuperada com os mesmos IDs. Efeitos aplicados uma única vez; automações seguem a configuração do espaço.':notice}</p>${matches.length?`<div class="sale-recovery-warning"><strong>Possível venda semelhante registrada pelo gestor</strong>${matches.map((m,index)=>`<section class="sale-recovery-match"><p>${esc(when(m.at))} · ${money(m.total)} · ${esc(m.paymentMethod)}<br><small>Venda ${esc(m.saleId)} · ${m.sameTotal?'mesmo valor':'valor diferente'} · ${m.samePaymentMethod?'mesmo pagamento':'pagamento diferente'}</small></p>${pending&&owner?`<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-link-match="${index}">Confirmar: já foi registrada</button><button type="button" class="btn btn-light" data-dismiss-match="${index}">Não é a mesma venda</button></div>`:''}</section>`).join('')}</div>`:''}${item.comparisonScope?`<small>${esc(item.comparisonScope)}</small>`:''}${pending&&(item.remoteEvidence?.saleExists||item.remoteEvidence?.operationExists||item.remoteEvidence?.movementIdsPresent?.length)?'<p class="sale-recovery-warning">Já existem registros relacionados na nuvem. Conferência manual necessária; nenhum efeito foi aplicado por este envio.</p>':''}${item.conflictCount?'<p class="sale-recovery-warning">Foi recebido conteúdo diferente para estes IDs. O original permanece preservado para análise.</p>':''}${!pending?`<div class="sale-recovery-resolution"><strong>${recoveryStatus(item.status)}</strong><p>Decisão em ${esc(when(item.resolvedAt))}<br>Responsável: ${esc(item.resolvedByName||item.resolvedByUid)}<br>Venda vinculada: <strong>${esc(item.linkedSaleId)}</strong>${item.linkedSale?`<br>${esc(when(item.linkedSale.at))} · ${money(item.linkedSale.total)} · ${esc(item.linkedSale.paymentMethod)}`:''}</p><p>A operação original permanece preservada e bloqueada para reenvio comercial.</p></div>`:''}<details><summary>Identificação do registro</summary><p>Venda original: ${esc(item.saleId)}<br>Operação original: ${esc(item.operationId)}</p></details>${pending&&owner?'<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-recover-original>Recuperar venda original</button></div>':''}`;
         if(pending&&owner){
@@ -174,38 +188,47 @@ async function openReviews(view='pending'){
             const box=document.createElement('section');box.className='sale-recovery-warning';
             const text=document.createElement('p');text.textContent=`Cadastro original ${dependency.clientId} · ${dependency.name||'Cliente preservado'} · ${dependency.related?'vinculado a esta venda':'outro cadastro retido da mesma origem'} · ${dependency.status==='client_confirmed'?'confirmado':'aguardando aprovação'}`;box.append(text);
             if(dependency.status!=='client_confirmed'){
-              const approve=document.createElement('button');approve.type='button';approve.className='btn btn-light';approve.textContent='Analisar e aprovar cadastro original';approve.onclick=()=>confirmDecision(item,'approve_client',dependency,view);box.append(approve);
+              const approve=document.createElement('button');approve.type='button';approve.className='btn btn-light';approve.textContent='Analisar e aprovar cadastro original';approve.onclick=()=>confirmDecision(item,'approve_client',dependency,view,position());box.append(approve);
             }
             article.querySelector('[data-recover-original]').parentElement.before(box);
           }
           if(item.clientDependencies?.some(d=>d.related&&d.status!=='client_confirmed')){
             const recover=article.querySelector('[data-recover-original]');recover.disabled=true;recover.title='Confirme primeiro o cadastro vinculado. A venda continua preservada.';
+            const explanation=document.createElement('p');explanation.className='sale-recovery-warning';explanation.textContent='Antes de recuperar esta venda, analise e aprove o cadastro vinculado acima.';recover.parentElement.before(explanation);
+          }
+          if(item.customerConfirmation?.state==='awaiting_dependency_evidence'){
+            const recover=article.querySelector('[data-recover-original]');recover.disabled=true;recover.title='Falta a evidência original do cadastro.';
+            const explanation=document.createElement('p');explanation.className='sale-recovery-warning';explanation.textContent='Cliente ainda não confirmado. No aparelho da funcionária atualizado, toque em Enviar dados para recuperação → Confirmar. Isso apenas complementa as evidências; depois aprove o cadastro aqui antes de recuperar a venda.';recover.parentElement.before(explanation);
           }
           const close=document.createElement('button');close.type='button';close.className='btn btn-light';close.textContent='Não recuperar / encerrada sem efeitos';
-          close.onclick=()=>confirmDecision(item,'close_without_effects',null,view);
+          close.onclick=()=>confirmDecision(item,'close_without_effects',null,view,position());
           article.querySelector('[data-recover-original]').parentElement.append(close);
         }
         if(item.status==='closed_without_effects'){
           article.querySelector('.sale-recovery-resolution p').textContent=`Decisão em ${when(item.resolvedAt)} · Responsável: ${item.resolvedByName||item.resolvedByUid}. Nenhuma venda vinculada. Nenhum efeito comercial aplicado.`;
         }
-        article.querySelectorAll('[data-link-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'link_existing',matches[Number(b.dataset.linkMatch)],view));
-        article.querySelectorAll('[data-dismiss-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'dismiss_match',matches[Number(b.dataset.dismissMatch)],view));
-        article.querySelector('[data-recover-original]')?.addEventListener('click',()=>confirmDecision(item,'recover_original',null,view));
+        article.querySelectorAll('[data-link-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'link_existing',matches[Number(b.dataset.linkMatch)],view,position()));
+        article.querySelectorAll('[data-dismiss-match]').forEach(b=>b.onclick=()=>confirmDecision(item,'dismiss_match',matches[Number(b.dataset.dismissMatch)],view,position()));
+        article.querySelector('[data-recover-original]')?.addEventListener('click',()=>confirmDecision(item,'recover_original',null,view,position()));
         list.append(article);
       }
       if(!list.children.length)list.textContent=view==='resolved'?'Nenhuma recuperação resolvida nesta página/contexto.':'Nenhuma venda aguardando revisão nesta página/contexto.';
       cursor=result.nextCursor;
+      loadedPages++;
       panel.querySelector('[data-recovery-more]')?.remove();
       if(cursor){const more=document.createElement('button');more.type='button';more.className='btn btn-light';more.dataset.recoveryMore='';more.textContent='Carregar mais';more.onclick=page;list.after(more);}
     }catch{if(identity()===session&&panel.isConnected)panel.querySelector('[data-recovery-list]').textContent='Não foi possível consultar os registros. Verifique sua conexão e o espaço selecionado.';}
     finally{loading=false;}
   }
   await page();
+  while(panel.isConnected&&identity()===session&&cursor&&loadedPages<Math.min(Number(returnState.pages)||1,50)){const before=loadedPages;await page();if(loadedPages===before)break;}
+  if(panel.isConnected&&identity()===session)panel.querySelector('.modal-body').scrollTop=Number(returnState.scrollTop)||0;
 }
 function mount(){
   // Outside commercial content: retained evidence remains accessible when modules are blocked.
   const app=document.querySelector('#app'),root=app?.parentElement;if(!root)return;
   const c=context(),key=identity(),route=location.hash.replace('#/','').split('?')[0]||'inicio';
+  const openPanel=document.querySelector('.sale-recovery-modal');if(openPanel&&openPanel.dataset.recoveryContext!==summaryKey())openPanel.parentElement.remove();
   if(lastIdentity!==key){message='';lastIdentity=key;document.querySelector('.sale-recovery-modal-bg')?.remove();}
   let bar=root.querySelector('[data-sale-recovery-bar]'),link=app.querySelector('[data-recovery-entry]');
   const ownerArea=c.role==='owner'&&['inicio','historico'].includes(route),authorized=Boolean(recoveryIdentity());

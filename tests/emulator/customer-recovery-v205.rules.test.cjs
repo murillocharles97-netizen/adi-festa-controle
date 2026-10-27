@@ -51,9 +51,55 @@ test('possible duplicate by phone, email or normalized name blocks creation; no 
  for(const field of ['telefone','email','nome']){const c=await setup(),data=c.dependency.packet.payload.writes[0].data;if(field==='email')data.email='qa@example.test';await c.root.collection('clients').doc('existing-different-id').set({businessId:c.bid,nome:field==='nome'?'PESSOA FICTÍCIA 0':'Outra QA',...(field==='telefone'?{telefone:'+55 '+data.telefone}:{}),...(field==='email'?{email:'QA@example.test'}:{})});await c.upload();await assert.rejects(c.decide('approve_client'),e=>e.details?.reason==='customer-possible-duplicate');assert.equal(await count(c,'clients'),1);assert.equal(await count(c,'processedOperations'),0);}
 });
 test('stock shortage, missing dependency approval and real side effect all stop before sale creation',async()=>{
- const missing=await setup();await missing.upload();await assert.rejects(missing.decide('recover_original'),/Confirme primeiro/);assert.equal(await count(missing,'sales'),0);
+ const missing=await setup();await missing.upload();await assert.rejects(missing.decide('recover_original'),/Cliente não confirmado|Confirme primeiro/);assert.equal(await count(missing,'sales'),0);
  const shortage=await setup({stock:0});await shortage.upload();await shortage.decide('approve_client');await assert.rejects(shortage.decide('recover_original'),/insuficiente/);assert.equal(await count(shortage,'sales'),0);assert.equal(await count(shortage,'stockMovements'),0);
  const effect=await setup();await effect.upload();await effect.decide('approve_client');await effect.root.collection('balanceEvents').doc('unexpected').set({operationId:effect.original.packet.operationId,businessId:effect.bid});await assert.rejects(effect.decide('recover_original'),/efeito financeiro/);assert.equal(await count(effect,'sales'),0);
+});
+
+test('V207 existing confirmed customer without denied-create packet: attestations required and same-ID recovery once',async()=>{
+ const c=await setup({finance:true});delete c.original.clientDependencies;
+ const id=c.dependency.packet.payload.writes[0].entityId;
+ await c.root.collection('clients').doc(id).set({...c.dependency.packet.payload.writes[0].data,totalComprado:80,quantidadeVendas:2,ultimaCompra:'2026-10-26T00:00:00Z'});
+ await c.upload();const listing=await service.list(c.request({view:'pending',spaceId:c.space}));assert.equal(listing.items[0].operationalEvidenceRequired,true);assert.equal(listing.items[0].customerConfirmation.state,'confirmed');
+ await assert.rejects(c.decide('recover_original',{operationalEvidence:undefined}),/Confirme explicitamente/);
+ await c.decide('recover_original');assert.equal((await c.decide('recover_original')).idempotent,true);
+ const customer=(await c.root.collection('clients').doc(id).get()).data();assert.equal(customer.totalComprado,104.9);assert.equal(customer.quantidadeVendas,3);assert.equal(customer.ultimaCompra,'2026-10-26T00:00:00Z');assert.equal(customer.saldo,0);
+ assert.equal(await count(c,'sales'),1);assert.equal(await count(c,'stockMovements'),1);assert.equal(await count(c,'processedOperations'),1);assert.equal(await count(c,'clients'),1);
+});
+
+test('V207 compatible rollback pauses new decisions but preserves listing, originals, final receipts and idempotent acknowledgements',async()=>{
+ const c=await setup();await c.upload();const paused=saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled:false});
+ const request=action=>c.request({saleId:c.original.localSale.id,contentHash:c.envelope().contentHash,revision:0,action,confirmation:action==='approve_client'?'APROVAR_CADASTRO':'RECUPERAR',operationalEvidence:{goodsDelivered:true,paymentReceived:true,notRecreated:true}});
+ for(const action of ['approve_client','recover_original'])await assert.rejects(paused.decide(request(action)),/temporariamente pausadas/);
+ assert.equal((await paused.list(c.request({view:'pending',spaceId:c.space}))).items.length,1);assert.equal(await count(c,'sales'),0);
+ await c.decide('approve_client');await c.decide('recover_original');assert.equal((await paused.decide(request('recover_original'))).idempotent,true);assert.equal(await count(c,'sales'),1);assert.equal(await count(c,'stockMovements'),1);
+ assert.equal((await c.root.collection('saleRecoveryReviews').doc(c.original.localSale.id).collection('original').doc('payload').get()).data().originalJson,c.envelope().originalJson);
+});
+
+test('V207 legacy upload receives immutable customer supplement; original hash/packet untouched and no commercial effects until owner decides',async()=>{
+ const c=await setup(),complete=structuredClone(c.original);delete c.original.clientDependencies;const base=c.envelope();await c.upload();
+ const before=(await c.root.collection('saleRecoveryReviews').doc(c.original.localSale.id).collection('original').doc('payload').get()).data();
+ assert.equal((await service.list(c.request({view:'pending',spaceId:c.space}))).items[0].customerConfirmation.state,'awaiting_dependency_evidence');
+ await assert.rejects(c.decide('recover_original'),/Cliente não confirmado/);
+ const upload=()=>service.submit(c.request({...f.envelope(complete),businessId:c.bid},c.seller));
+ const results=await concurrentDecision(upload);assert.equal(results.filter(r=>!r.duplicate).length,1);const receipt=await upload();assert.equal(receipt.evidenceOnly,true);assert.equal(receipt.contentHash,base.contentHash);assert.equal(receipt.receivedContentHash,f.envelope(complete).contentHash);
+ assert.deepEqual((await c.root.collection('saleRecoveryReviews').doc(c.original.localSale.id).collection('original').doc('payload').get()).data(),before);
+ assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'clients'),0);assert.equal(await count(c,'stockMovements'),0);
+ await c.decide('approve_client');await c.decide('recover_original');assert.equal((await c.decide('recover_original')).idempotent,true);
+ const dependency=c.dependency.packet,ack=await service.list(c.request({resolutionChecks:[{kind:'client_dependency',operationId:dependency.operationId,clientId:dependency.payload.writes[0].entityId,payloadHash:require('../../functions/src/services/sale-recovery-customer').hash(dependency.payload)}]},c.seller));assert.equal(ack.items[0].status,'client_confirmed');
+ assert.equal(await count(c,'sales'),1);assert.equal(await count(c,'stockMovements'),1);assert.equal(await count(c,'processedOperations'),2);
+ assert.deepEqual((await c.root.collection('saleRecoveryReviews').doc(c.original.localSale.id).collection('original').doc('payload').get()).data(),before);
+ await assert.rejects(upload(),/não aceita novas evidências/);
+});
+
+test('V207 customer evidence cannot overwrite supplement, cross actor/space, change sale, or bypass canonical customer guards',async()=>{
+ const c=await setup(),complete=structuredClone(c.original);delete c.original.clientDependencies;await c.upload();
+ const submit=o=>service.submit(c.request({...f.envelope(o),businessId:c.bid},c.seller));await submit(complete);
+ const changed=structuredClone(complete);changed.clientDependencies[0].packet.payload.writes[0].data.nome='Cadastro alterado';await assert.rejects(submit(changed),/com conteúdo diferente/);
+ for(const mutate of [o=>o.clientDependencies[0].packet.userId='another',o=>o.clientDependencies[0].packet.payload.writes[0].data.spaceId=c.other]){const x=structuredClone(complete);mutate(x);await assert.rejects(submit(x));}
+ const originalChanged=structuredClone(complete);originalChanged.packet.attempts++;assert.equal((await submit(originalChanged)).status,'content_conflict');await assert.rejects(c.decide('approve_client'),/conflitantes/);
+ assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'clients'),0);assert.equal(await count(c,'stockMovements'),0);
+ for(const override of [{businessId:'another'},{workspaceGeneration:1},{active:false}]){const d=await setup();delete d.original.clientDependencies;await d.root.collection('clients').doc(d.dependency.packet.payload.writes[0].entityId).set({...d.dependency.packet.payload.writes[0].data,...override});await d.upload();await assert.rejects(d.decide('recover_original'),/não está ativo/);assert.equal(await count(d,'sales'),0);}
 });
 test('explicit payment/fulfilment/nonduplicate decision is mandatory; Fiado and extra effects stay blocked',async()=>{
  const c=await setup();await c.upload();await c.decide('approve_client');await assert.rejects(c.decide('recover_original',{operationalEvidence:{goodsDelivered:true,paymentReceived:false,notRecreated:true}}),/Confirme explicitamente/);assert.equal(await count(c,'sales'),0);
@@ -75,14 +121,18 @@ test('seven fictitious originals: four denied customers, three dependent sales, 
   const customer=o.packet.payload.writes.find(w=>w.entityType==='clients');customer.before=structuredClone(deps[n].packet.payload.writes[0].data);customer.data.ultimaCompra=o.localSale.data;packets.push(o);
  }
  const before=JSON.stringify(packets),env=o=>({...f.envelope(o),businessId:c.bid});
- const decide=(o,action,extra={})=>service.decide(c.request({saleId:o.localSale.id,contentHash:env(o).contentHash,revision:0,action,confirmation:action==='approve_client'?'APROVAR_CADASTRO':'RECUPERAR',operationalEvidence:{goodsDelivered:true,paymentReceived:true,notRecreated:true},...extra}));
- for(const o of packets)await service.submit(c.request(env(o),c.seller));assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'clients'),0);
+ const legacyHashes=[];
+ const decide=(o,action,extra={})=>service.decide(c.request({saleId:o.localSale.id,contentHash:legacyHashes[packets.indexOf(o)],revision:0,action,confirmation:action==='approve_client'?'APROVAR_CADASTRO':'RECUPERAR',operationalEvidence:{goodsDelivered:true,paymentReceived:true,notRecreated:true},...extra}));
+ // Exact incident shape: immutable sales received before customer evidence.
+ for(const o of packets){const legacy=structuredClone(o);delete legacy.clientDependencies;const e=env(legacy);legacyHashes.push(e.contentHash);await service.submit(c.request(e,c.seller));}
+ for(const [i,o]of packets.entries()){const receipt=await service.submit(c.request(env(o),c.seller));assert.equal(receipt.contentHash,legacyHashes[i]);assert.equal(receipt.evidenceOnly,true);}
+ assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'clients'),0);
  for(const d of deps)await decide(packets[0],'approve_client',{clientOperationId:d.packet.operationId});
  assert.equal(await count(c,'clients'),4);assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'balanceEvents'),0);
  await assert.rejects(decide(packets[2],'recover_original'),/Resolva primeiro/);
  for(const o of packets){await decide(o,'recover_original');assert.equal((await decide(o,'recover_original')).idempotent,true);}
  assert.equal(await count(c,'sales'),3);assert.equal(await count(c,'stockMovements'),3);assert.equal(await count(c,'processedOperations'),7);assert.equal((await c.root.collection('products').doc('shared-product').get()).data().estoqueAtual,3);
- for(const o of packets){assert.equal((await c.root.collection('sales').doc(o.localSale.id).get()).data().operationId,o.packet.operationId);assert.equal((await c.root.collection('saleRecoveryReviews').doc(o.localSale.id).collection('original').doc('payload').get()).data().originalJson,env(o).originalJson);}
+ for(const [i,o]of packets.entries()){assert.equal((await c.root.collection('sales').doc(o.localSale.id).get()).data().operationId,o.packet.operationId);const raw=(await c.root.collection('saleRecoveryReviews').doc(o.localSale.id).collection('original').doc('payload').get()).data();assert.equal(raw.contentHash,legacyHashes[i]);assert.equal(JSON.parse(raw.originalJson).clientDependencies,undefined);}
  const confirmations=await service.list(c.request({resolutionChecks:deps.map(d=>({kind:'client_dependency',operationId:d.packet.operationId,clientId:d.packet.payload.writes[0].entityId,payloadHash:require('../../functions/src/services/sale-recovery-customer').hash(d.packet.payload)}))},c.seller));assert.equal(confirmations.items.length,4);assert.ok(confirmations.items.every(i=>i.status==='client_confirmed'));
  assert.equal(JSON.stringify(packets),before);assert.equal(await count(c,'payments'),0);assert.equal(await count(c,'balanceAdjustments'),0);assert.equal(await count(c,'balanceEvents'),0);
  const signal=(await c.root.collection('syncMetadata').doc('last-sync').get()).data();assert.ok(signal.sourceSessionId.startsWith('server:'));assert.ok(signal.collectionVersions.clients);

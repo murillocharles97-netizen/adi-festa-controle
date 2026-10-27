@@ -64,8 +64,13 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
   if(!originalActor||originalActor.status!=='active'||profile?.active!==true||originalActor.role!=='owner'&&originalActor.permissions?.['sales.create']!==true||originalActor.role!=='owner'&&originalActor.spaceAccess!=='all'&&!originalActor.allowedSpaceIds?.includes(v.spaceId))fail('O ator original não possui vínculo/permissão no espaço.');
   let recoveredClient=null;
   if(plan.clientPlan){
-    const cp=plan.clientPlan,clientRef=root.collection('clients').doc(cp.clientId),[client,receipt]=await Promise.all([tx.get(clientRef),tx.get(root.collection('saleRecoveryOperations').doc(cp.dependency.operationId))]),data=client.data(),ack=receipt.data();
-    if(!client.exists||data.businessId!==c.businessId||(data.workspaceGeneration??0)!==generation||data.deletedAt||data.active===false||data.ativo===false||data.customerRecoveryHash!==cp.dependency.payloadHash||ack?.kind!=='client_dependency'||ack.status!=='client_confirmed'||ack.clientId!==cp.clientId||ack.actorUid!==v.sale.actorUid||ack.payloadHash!==cp.dependency.payloadHash||ack.workspaceGeneration!==generation)fail('Confirme primeiro a dependência de cadastro pelo responsável. Nenhuma venda foi recuperada.');
+    const cp=plan.clientPlan,clientRef=root.collection('clients').doc(cp.clientId),client=await tx.get(clientRef),data=client.data();
+    if(!client.exists)fail('Cliente não confirmado. Na conta de origem atualizada, use Enviar dados para recuperação e confirme; depois o responsável deve aprovar o cadastro antes de recuperar a venda.');
+    if(data.businessId!==c.businessId||(data.workspaceGeneration??0)!==generation||data.deletedAt||data.active===false||data.ativo===false)fail('O cliente original não está ativo nesta empresa/geração. Nenhuma venda foi recuperada.');
+    if(cp.dependency){
+      const ack=(await tx.get(root.collection('saleRecoveryOperations').doc(cp.dependency.operationId))).data();
+      if(data.customerRecoveryHash!==cp.dependency.payloadHash||ack?.kind!=='client_dependency'||ack.status!=='client_confirmed'||ack.clientId!==cp.clientId||ack.actorUid!==v.sale.actorUid||ack.payloadHash!==cp.dependency.payloadHash||ack.businessId!==c.businessId||ack.spaceId!==v.spaceId||ack.workspaceGeneration!==generation)fail('Confirme primeiro a dependência de cadastro pelo responsável. Nenhuma venda foi recuperada.');
+    }
     if(!number(data.totalComprado)||data.totalComprado<0||!Number.isSafeInteger(data.quantidadeVendas)||data.quantidadeVendas<0)fail('Projeção atual do cliente inconsistente.');
     recoveredClient={ref:clientRef,data};
   }

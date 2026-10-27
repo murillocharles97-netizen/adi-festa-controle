@@ -30,7 +30,10 @@ function paidClientPlan(v){
  const clientId=String(v.sale.clienteId||v.sale.clientId||v.sale.customerId||'');if(!clientId)return null;
  if(!CUSTOMER_RECOVERY_ENABLED)fail('Recuperação de vendas com dependência de cliente temporariamente pausada. Os originais e recibos permanecem preservados.');
  if(['clienteId','clientId','customerId'].some(k=>v.sale[k]&&String(v.sale[k])!==clientId))fail('Identificadores de cliente divergentes.');
- const dep=v.clientDependencies?.find(d=>d.clientId===clientId);if(!dep)fail('Falta o pacote original do cadastro deste cliente. Envie a dependência para análise; nenhum efeito será aplicado.');
+ // A client that already exists canonically does not need a denied-create
+ // packet. Its same ID, active workspace and current counters are checked
+ // transactionally below; this never creates or remaps a client.
+ const dep=v.clientDependencies?.find(d=>d.clientId===clientId)||null;
  const writes=v.packet.payload.writes.filter(w=>w.entityType==='clients');
  if(writes.length!==1||writes[0].entityId!==clientId||writes[0].operation!=='update'||!writes[0].before)fail('A projeção original do cliente precisa de revisão técnica.');
  const w=writes[0],before=w.before,after={...before,...w.data};

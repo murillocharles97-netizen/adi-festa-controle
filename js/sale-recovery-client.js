@@ -72,7 +72,8 @@
           const data=prepared[index];
           const result=await call('submitSaleRecovery',data),receipt=result.data??result;
           if(receipt.status==='content_conflict')throw Error('Há dados diferentes para esta venda. Os registros foram preservados para análise.');
-          if(!['awaiting_review','already_recreated','recovered','closed_without_effects'].includes(receipt.status)||receipt.operationId!==packet.operationId||receipt.contentHash!==data.contentHash)throw Error('Não foi possível confirmar o recebimento. Seus dados continuam preservados.');
+          if(!['awaiting_review','already_recreated','recovered','closed_without_effects'].includes(receipt.status)||receipt.operationId!==packet.operationId||receipt.saleId!==undefined&&receipt.saleId!==packet.payload.writes.find(w=>w.entityType==='sales').entityId||
+            (receipt.evidenceOnly===true?receipt.receivedContentHash:receipt.contentHash)!==data.contentHash||!receipt.contentHash)throw Error('Não foi possível confirmar o recebimento. Seus dados continuam preservados.');
           sent++;onProgress({sent,total:selected.length});
         }
         return{sent,total:selected.length};
