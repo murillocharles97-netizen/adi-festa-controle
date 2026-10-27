@@ -8,7 +8,7 @@ const CustomerRecovery=require('./sale-recovery-customer');
 const MAX_BYTES=500*1024;
 // Compatible rollback can pause new decisions without removing evidence,
 // receipts, restrictive guards or acknowledging an unexecuted sale.
-const RECOVERY_DECISIONS_ENABLED=true;
+const RECOVERY_DECISIONS_ENABLED=false;
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const canonical=value=>JSON.stringify((function sort(v){return Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])])):v;})(value));
