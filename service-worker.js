@@ -1,4 +1,4 @@
-const CACHE='veconi-v207-recovery-confirmation';
+const CACHE='veconi-v208-customer-evidence';
 // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
 // Shared entitlement catalog (same source consumed by Cloud Functions).
 const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./functions/src/shared/online-order.js','./css/online-orders.css','./','./index.html','./catalogo.html','./404.html','./manifest.json','./css/style.css','./css/finance.css','./css/mobile.css','./css/import.css','./css/visual.css','./css/firebase.css','./css/firebase-audit.css','./css/backup.css','./css/clientes-page.css','./css/clientes-mobile.css','./css/produtos-mobile.css','./css/product-images.css','./css/produtos-desktop.css','./css/home-mobile.css','./css/checkout-mobile.css','./css/mobile-fixes.css','./css/mensagens-mobile.css','./css/visitas.css','./css/campanhas.css','./css/catalogo.css','./assets/veconi-icon-v133.svg','./assets/veconi-icon-192-v133.png','./assets/veconi-icon-512-v133.png','./assets/lucide.min.js','./js/utils.js','./js/storage.js','./js/backup.js','./js/financial-concurrency.js','./js/clientes.js','./js/produtos.js','./js/product-images.js','./js/campanhas.js','./js/campanhas-ui.js','./js/vendas.js','./js/fiados.js','./js/cobrancas.js','./js/mensagens.js','./js/visitas.js','./js/router.js','./js/csvImport.js','./js/recibos.js','./js/repositories.js','./js/checkout.js','./js/checkout-mobile.js','./js/clientes-page.js','./js/mensagens-mobile.js','./js/clientes-mobile.js','./js/produtos-mobile.js','./js/home-mobile.js','./js/visual-ui.js','./js/app.js','./js/catalog-portal.js','./js/catalogo-publico.js','./js/firebase/firebase-config.js','./js/firebase/business-context.js','./js/firebase/firestore-utils.js','./js/firebase/firestore-repository.js','./js/firebase/usage-monitor.js','./js/firebase/sync.js','./js/firebase/auth.js','./js/firebase/firebase-ui.js','./js/firebase/catalog-bridge.js','./js/firebase/product-image-storage.js'];
@@ -67,7 +67,7 @@ self.addEventListener('install', event => event.waitUntil(
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '207'});
+  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '208'});
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);

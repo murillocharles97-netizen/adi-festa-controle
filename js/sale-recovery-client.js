@@ -53,7 +53,46 @@
     const hash=await cryptoApi.subtle.digest('SHA-256',bytes),contentHash=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
     return{businessId:identity.businessId,workspaceGeneration:identity.workspaceGeneration,originalJson,contentHash};
   }
-  function create({snapshot,call,cryptoApi=globalThis.crypto,onProgress=()=>{}}){
+  const sha=async(value,cryptoApi)=>Array.from(new Uint8Array(await cryptoApi.subtle.digest('SHA-256',new TextEncoder().encode(canonical(value)))),b=>b.toString(16).padStart(2,'0')).join('');
+  async function intakeSummary(prepared,receipts,identity,readReviews,cryptoApi){
+    const newClients=new Set(),oldClients=new Set(),expected=new Map();
+    const evidence={salesReceived:0,salesAlreadyReceived:0,supplementsReceived:0,supplementsAlreadyReceived:0,customersReceived:0,customersAlreadyReceived:0,verification:'not_requested',missingCustomers:null,customersAwaitingApproval:null,remoteCustomerPackets:null,packets:[]};
+    for(const [i,data]of prepared.entries()){
+      const original=JSON.parse(data.originalJson),sale=original.packet.payload.writes.find(w=>w.entityType==='sales').data,r=receipts[i],deps=original.clientDependencies||[];
+      const kind=r.evidenceOnly===true?(r.duplicate?'supplement_already_received':'supplement_received'):(r.duplicate?'sale_already_received':'sale_received');
+      if(kind==='sale_received')evidence.salesReceived++;else evidence.salesAlreadyReceived++;
+      if(kind==='supplement_received')evidence.supplementsReceived++;if(kind==='supplement_already_received')evidence.supplementsAlreadyReceived++;
+      for(const d of deps){const p=d.packet;(r.duplicate?oldClients:newClients).add(p.operationId);expected.set(p.operationId,{clientId:p.payload.writes[0].entityId,payloadHash:await sha(p.payload,cryptoApi)});}
+      evidence.packets.push({saleId:original.packet.payload.writes.find(w=>w.entityType==='sales').entityId,operationId:original.packet.operationId,spaceId:sale.spaceId,clientId:sale.clienteId||sale.clientId||sale.customerId||null,contentHash:r.contentHash,submittedContentHash:data.contentHash,kind,customerOperationIds:deps.map(d=>d.packet.operationId)});
+    }
+    evidence.customersReceived=newClients.size;evidence.customersAlreadyReceived=[...oldClients].filter(id=>!newClients.has(id)).length;
+    if(typeof readReviews!=='function')return evidence;
+    try{
+      const reviews=await readReviews({identity,packets:evidence.packets}),missing=new Set(),pending=new Set(),remoteCustomers=new Set();
+      for(const packet of evidence.packets){
+        const matches=reviews.filter(r=>r.saleId===packet.saleId);if(matches.length!==1)throw Error('Revisão não confirmada.');const r=matches[0];
+        if(r.businessId!==identity.businessId||r.actorUid!==identity.uid||(r.workspaceGeneration??0)!==identity.workspaceGeneration||r.operationId!==packet.operationId||r.spaceId!==packet.spaceId||r.contentHash!==packet.contentHash)throw Error('Identidade ou hash da revisão divergente.');
+        if(packet.kind.startsWith('supplement_')&&r.dependencyEvidenceHash!==packet.submittedContentHash)throw Error('Hash do complemento divergente.');
+        for(const op of packet.customerOperationIds){const d=r.clientDependencies?.find(d=>d.operationId===op),want=expected.get(op);if(!d||d.clientId!==want.clientId||d.payloadHash!==want.payloadHash)throw Error('Cadastro não confirmado no complemento.');}
+        for(const d of r.clientDependencies||[]){remoteCustomers.add(d.operationId);if(d.status!=='client_confirmed')pending.add(d.operationId);}
+        if(r.status==='awaiting_review'&&packet.clientId){
+          if(r.customerConfirmation?.clientId!==packet.clientId||!['confirmed','awaiting_approval','awaiting_dependency_evidence'].includes(r.customerConfirmation.state))throw Error('Situação do cliente não confirmada.');
+          if(r.customerConfirmation.state==='awaiting_dependency_evidence')missing.add(packet.clientId);
+        }else if(!['awaiting_review','already_recreated','recovered','closed_without_effects'].includes(r.status))throw Error('Situação da revisão não confirmada.');
+      }
+      evidence.verification='verified';evidence.missingCustomers=missing.size;evidence.customersAwaitingApproval=pending.size;evidence.remoteCustomerPackets=remoteCustomers.size;
+    }catch{evidence.verification='pending';}
+    return evidence;
+  }
+  function describe(result){
+    const e=result.evidence;if(!e)return 'Recebimento dos cadastros ainda não conferido. Consulte a situação; não refaça as vendas.';
+    const sales=`Pacotes de vendas: ${e.salesReceived} novos; ${e.salesAlreadyReceived} já recebidos.`;
+    if(e.verification!=='verified')return sales+' O recebimento dos cadastros ainda não pôde ser conferido remotamente. Não considere os complementos confirmados; consulte a situação antes de repetir o envio.';
+    const text=sales+` Cadastros originais: ${e.customersReceived} recebidos neste envio; ${e.customersAlreadyReceived} já recebidos.`;
+    if(e.missingCustomers)return text+` Ainda faltam dados originais de ${e.missingCustomers} cliente(s). A recuperação continua bloqueada; nenhum efeito comercial foi aplicado.`;
+    return text+` Conferência remota concluída: ${e.remoteCustomerPackets} cadastro(s) preservado(s); ${e.customersAwaitingApproval} aguardando aprovação do responsável. Isso não recuperou vendas nem iniciou cobranças.`;
+  }
+  function create({snapshot,call,cryptoApi=globalThis.crypto,onProgress=()=>{},readReviews}){
     let inFlight=null;
     function send(){
       if(inFlight)return inFlight;
@@ -64,7 +103,7 @@
         // Validate/hash every original before the first request. A local conflict
         // cannot result in a partially uploaded set of evidence.
         const prepared=await Promise.all(selected.map(({packet,local})=>envelope(packet,local,identity,cryptoApi)));
-        let sent=0;
+        let sent=0;const receipts=[];
         for(const [index,{packet}] of selected.entries()){
           const current=await snapshot();
           if(current.identity.uid!==identity.uid||current.identity.businessId!==identity.businessId||current.identity.workspaceGeneration!==identity.workspaceGeneration)throw Error('A sessão mudou. Seus dados continuam preservados.');
@@ -74,13 +113,15 @@
           if(receipt.status==='content_conflict')throw Error('Há dados diferentes para esta venda. Os registros foram preservados para análise.');
           if(!['awaiting_review','already_recreated','recovered','closed_without_effects'].includes(receipt.status)||receipt.operationId!==packet.operationId||receipt.saleId!==undefined&&receipt.saleId!==packet.payload.writes.find(w=>w.entityType==='sales').entityId||
             (receipt.evidenceOnly===true?receipt.receivedContentHash:receipt.contentHash)!==data.contentHash||!receipt.contentHash)throw Error('Não foi possível confirmar o recebimento. Seus dados continuam preservados.');
-          sent++;onProgress({sent,total:selected.length});
+          receipts.push(receipt);sent++;onProgress({sent,total:selected.length});
         }
-        return{sent,total:selected.length};
+        const evidence=await intakeSummary(prepared,receipts,identity,readReviews,cryptoApi),current=await snapshot();
+        if(current.identity.uid!==identity.uid||current.identity.businessId!==identity.businessId||current.identity.workspaceGeneration!==identity.workspaceGeneration)throw Error('A sessão mudou. Consulte o recebimento na conta de origem; seus dados permanecem preservados.');
+        return{sent,total:selected.length,evidence};
       })().finally(()=>{inFlight=null;});
       return inFlight;
     }
     return{send};
   }
-  return Object.freeze({canonical,held,eligible,envelope,entries,create});
+  return Object.freeze({canonical,held,eligible,envelope,entries,create,describe});
 });

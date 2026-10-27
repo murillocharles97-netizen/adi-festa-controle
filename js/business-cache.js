@@ -318,8 +318,14 @@
     };
     const queueField=signature=>`adiFesta:${businessId}:${uid}:${signature}${workspaceGeneration>0?`:generation:${workspaceGeneration}`:''}:syncQueue`;
     const parseQueue=raw=>{const value=JSON.parse(raw||'[]');if(value===null)return[];if(!Array.isArray(value))throw Error('invalid queue');return value;};
-    const retained=packets=>packets.filter(p=>p&&p.businessId===businessId&&p.userId===uid&&(p.workspaceGeneration??0)===workspaceGeneration&&
-      ['permission-denied','sale-recovery-review-required'].includes(p.lastErrorCode)&&p.payload?.writes?.some(w=>w.entityType==='sales'&&w.operation==='create'));
+    const retained=packets=>packets.filter(p=>{
+      if(!p||p.businessId!==businessId||p.userId!==uid||(p.workspaceGeneration??0)!==workspaceGeneration)return false;
+      const writes=p.payload?.writes||[];
+      // Evidence intake, never a Sync/replay eligibility change. Include the
+      // exact denied-create packet so entries() can associate it with a sale.
+      return ['permission-denied','sale-recovery-review-required'].includes(p.lastErrorCode)&&writes.some(w=>w.entityType==='sales'&&w.operation==='create')||
+        p.status==='error'&&p.lastErrorCode==='permission-denied'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create';
+    });
     // Never hydrate another permission cache or import it into the active queue.
     // Key cursors avoid reading old financial/customer/private collections.
     const sources=await DB.localRecords.transaction('readonly',(store,done,fail)=>{
@@ -336,7 +342,7 @@
             // Ordinary sales/history are not read on every Sync status change.
             // Only scopes containing retained evidence need related snapshots.
             const wanted=dataKeys.filter(({scope,key})=>{
-              const source=byScope.get(scope);if(!source)return false;
+              const source=byScope.get(scope);if(!source||!source.packets.some(p=>p.payload.writes.some(w=>w.entityType==='sales'&&w.operation==='create')))return false;
               return key.length===3||key[2]==='movimentacoesEstoque'||source.packets.some(p=>p.payload.writes.some(w=>w.entityType==='sales'&&w.entityId===key[3]));
             });
             const finish=()=>done(scoped.map(source=>{const decoded=decode(rows.filter(r=>r.scope===source.scope));return{...source,local:{vendas:decoded.data.vendas||[],movimentacoesEstoque:decoded.data.movimentacoesEstoque||[]}};}));
