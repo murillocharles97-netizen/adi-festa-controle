@@ -5,14 +5,9 @@ const {computeAccess}=require('./subscription-service');
 const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable}=require('./workspace-reset-policy');
 const {workspaceWriteFence}=require('./workspace-write-fence');
+const Policy=require('../shared/permission-policy');
 
-const PERMISSIONS=Object.freeze([
-  'sales.create','sales.cancel','sales.viewAll',
-  'customers.view','customers.edit','customers.receiveDebt','customers.adjustBalance',
-  'products.view','products.edit','inventory.view','inventory.adjust',
-  'financial.view','reports.view','profit.view','cost.view',
-  'team.view','team.manage','settings.manage','billing.manage','spaces.manage',
-]);
+const PERMISSIONS=Policy.KEYS;
 const ROLE_PRESETS=Object.freeze({
   owner:Object.freeze(Object.fromEntries(PERMISSIONS.map(key=>[key,true]))),
   manager:Object.freeze({
@@ -28,7 +23,7 @@ const ROLE_PRESETS=Object.freeze({
 });
 const VALID_ROLES=new Set(Object.keys(ROLE_PRESETS));
 const VALID_STATUSES=new Set(['active','invited','disabled']);
-const ACCESS_SNAPSHOT_KEYS=Object.freeze(['role','status','spaceAccess','allowedSpaceIds','permissions']);
+const ACCESS_SNAPSHOT_KEYS=Object.freeze(['role','status','spaceAccess','allowedSpaceIds','permissions','permissionsVersion']);
 // Compare the stored access shape, not normalized presets: absent, false,
 // array-form grants and map-form grants must remain distinguishable.
 function canonicalAccessSnapshot(value){
@@ -46,18 +41,27 @@ const email=value=>text(value,320).toLowerCase();
 const tokenHash=value=>crypto.createHash('sha256').update(String(value||'')).digest('hex');
 // Kept explicit instead of clever mapping so malformed objects can never
 // introduce an unknown permission key.
-function normalizedPermissions(role,input={}){
-  const preset=ROLE_PRESETS[role]||ROLE_PRESETS.seller,source=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
-  return Object.fromEntries(PERMISSIONS.map(key=>[key,Boolean(source[key]??preset[key])]));
+function normalizedPermissions(role,input,permissionsVersion=1){
+  return Policy.effective({role,permissions:input===undefined?ROLE_PRESETS[role]||{}:input,permissionsVersion});
 }
-const hasPermission=(member,key)=>member?.role==='owner'||member?.permissions?.[key]===true;
+const hasPermission=Policy.has;
 const publicMember=(id,data={})=>({
   uid:id,name:text(data.name,120),email:email(data.email),role:data.role,status:data.status,
   spaceAccess:data.spaceAccess==='all'?'all':'selected',allowedSpaceIds:Array.isArray(data.allowedSpaceIds)?data.allowedSpaceIds.map(String):[],
-  permissions:normalizedPermissions(data.role,data.permissions),terminalId:data.terminalId||null,terminalSpaceId:data.terminalSpaceId||null,
+  permissions:data.permissions||{},...(data.permissionsVersion!==undefined?{permissionsVersion:data.permissionsVersion}:{}),terminalId:data.terminalId||null,terminalSpaceId:data.terminalSpaceId||null,
 });
 
 function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
+  async function refreshActor(transaction,context,businessId){
+    const [snapshot,profileSnapshot]=await Promise.all([transaction.get(memberRef(businessId,context.uid)),transaction.get(db.doc(`users/${context.uid}`))]);
+    const member=snapshot.data(),profile=profileSnapshot.data();
+    if(!snapshot.exists||member.status!=='active'||profile?.active!==true||profile.businessId!==businessId||!hasPermission(member,'team.manage'))throw new HttpsError('permission-denied',Policy.MESSAGE);
+    context.member=member;
+  }
+  function assertDelegatedSpaces(context,spaceAccess,ids){
+    if(context.member.role==='owner'||context.member.spaceAccess==='all')return;
+    if(spaceAccess==='all'||ids.some(id=>!context.member.allowedSpaceIds?.includes(id)))throw new HttpsError('permission-denied','Você não pode conceder acesso a espaços que não administra.');
+  }
   const writeFence=(request,businessId)=>workspaceWriteFence(db,{businessId,workspaceGeneration:request.data?.workspaceGeneration??0});
   const memberRef=(businessId,uid)=>db.doc(`businesses/${businessId}/members/${uid}`);
   const businessRef=businessId=>db.doc(`businesses/${businessId}`);
@@ -138,11 +142,18 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const businessId=text(request.data?.businessId,128),context=await actorContext(request,businessId),role=text(request.data?.role,40).toLowerCase(),inviteEmail=email(request.data?.email),name=text(request.data?.name,120),spaceAccess=request.data?.spaceAccess==='all'?'all':'selected';
     if(!VALID_ROLES.has(role)||!/^\S+@\S+\.\S+$/.test(inviteEmail)||!name)throw new HttpsError('invalid-argument','Preencha nome, e-mail válido e cargo.');
     if(role==='owner'&&context.member.role!=='owner')throw new HttpsError('permission-denied','Somente um proprietário pode convidar outro proprietário.');
-    const allowedSpaceIds=await validateSpaces(businessId,spaceAccess,request.data?.allowedSpaceIds),permissions=normalizedPermissions(role,request.data?.permissions),raw=crypto.randomBytes(32).toString('base64url'),hash=tokenHash(raw),inviteId=hash.slice(0,28),now=Timestamp.now(),expiresAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000),ref=db.doc(`businesses/${businessId}/teamInvites/${inviteId}`);
+    const permissionsVersion=request.data?.permissionsVersion??1;
+    if(![1,2].includes(permissionsVersion))throw new HttpsError('invalid-argument','Versão de permissões inválida.');
+    if(permissionsVersion===2&&(!request.data?.permissions||typeof request.data.permissions!=='object'||Array.isArray(request.data.permissions)))throw new HttpsError('invalid-argument','Revise e confirme as permissões explícitas do convite.');
+    const allowedSpaceIds=await validateSpaces(businessId,spaceAccess,request.data?.allowedSpaceIds),permissions=normalizedPermissions(role,request.data?.permissions,permissionsVersion),raw=crypto.randomBytes(32).toString('base64url'),hash=tokenHash(raw),inviteId=hash.slice(0,28),now=Timestamp.now(),expiresAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000),ref=db.doc(`businesses/${businessId}/teamInvites/${inviteId}`);
+    if(permissionsVersion===2&&['customers.create','customers.edit','customers.archive'].some(key=>permissions[key]&&!permissions['customers.view']))throw new HttpsError('invalid-argument','Ative Ver clientes antes das ações de clientes.');
     if(context.member.role!=='owner'&&PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key)))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
     const replaceInviteId=text(request.data?.replaceInviteId,128);
     if(replaceInviteId&& !/^[a-zA-Z0-9_-]+$/.test(replaceInviteId))throw new HttpsError('invalid-argument','Convite inválido.');
     await writeFence(request,businessId).runTransaction(async transaction=>{
+    await refreshActor(transaction,context,businessId);
+    assertDelegatedSpaces(context,spaceAccess,allowedSpaceIds);
+    if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied',Policy.MESSAGE);
     const duplicate=await transaction.get(db.collection(`businesses/${businessId}/members`).where('email','==',inviteEmail).where('status','==','active').limit(1));
     if(!duplicate.empty)throw new HttpsError('already-exists','Este e-mail já pertence à equipe ativa.');
     const [activeMembers,pendingInvites]=await Promise.all([
@@ -158,7 +169,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     if(Number.isFinite(limit)&&limit>=0&&seats>=limit)throw new HttpsError('resource-exhausted',`Seu plano permite até ${limit} membro(s) de equipe.`);
     const batch=transaction;
     if(replacing)batch.update(replacing.ref,{status:'replaced',replacedBy:inviteId,updatedAt:now});
-    batch.set(ref,{id:inviteId,businessId,workspaceGeneration:request.data?.workspaceGeneration??0,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,permissions,tokenHash:hash,expiresAt,createdAt:now,createdBy:context.uid,updatedAt:now,schemaVersion:1});
+    batch.set(ref,{id:inviteId,businessId,workspaceGeneration:request.data?.workspaceGeneration??0,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,permissions,permissionsVersion,tokenHash:hash,expiresAt,createdAt:now,createdBy:context.uid,updatedAt:now,schemaVersion:1});
     batch.set(db.doc(`teamInviteTokens/${hash}`),{businessId,inviteId,expiresAt,createdAt:now},{merge:false});
     batch.set(db.doc(`businesses/${businessId}/auditLogs/team_invite_${inviteId}`),{id:`team_invite_${inviteId}`,businessId,type:'team_invite_created',actorUid:context.uid,inviteId,emailHash:tokenHash(inviteEmail).slice(0,16),createdAt:now,schemaVersion:1});
     });
@@ -181,9 +192,9 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
       assertWritable(businessSnapshot.data(),invite.workspaceGeneration??0);
       if(invite.tokenHash!==hash||invite.status!=='pending'||invite.expiresAt?.toMillis?.()<=Date.now())throw new HttpsError('failed-precondition','Este convite expirou ou já foi utilizado.');
       if(email(invite.email)!==authEmail)throw new HttpsError('permission-denied','Entre usando o mesmo e-mail que recebeu o convite.');
-      const now=FieldValue.serverTimestamp(),member={uid,name:text(invite.name||profile.name||request.auth.token?.name,120)||authEmail,email:authEmail,role:invite.role,status:'active',spaceAccess:invite.spaceAccess==='all'?'all':'selected',allowedSpaceIds:Array.isArray(invite.allowedSpaceIds)?invite.allowedSpaceIds:[],permissions:normalizedPermissions(invite.role,invite.permissions),createdAt:memberSnapshot.data()?.createdAt||now,createdBy:invite.createdBy,acceptedAt:now,updatedAt:now,schemaVersion:1};
+      const now=FieldValue.serverTimestamp(),member={uid,name:text(invite.name||profile.name||request.auth.token?.name,120)||authEmail,email:authEmail,role:invite.role,status:'active',spaceAccess:invite.spaceAccess==='all'?'all':'selected',allowedSpaceIds:Array.isArray(invite.allowedSpaceIds)?invite.allowedSpaceIds:[],permissionsVersion:invite.permissionsVersion??1,permissions:normalizedPermissions(invite.role,invite.permissions,invite.permissionsVersion??1),createdAt:memberSnapshot.data()?.createdAt||now,createdBy:invite.createdBy,acceptedAt:now,updatedAt:now,schemaVersion:1};
       transaction.set(targetMemberRef,member,{merge:true});
-      transaction.set(profileRef,{uid,email:authEmail,name:member.name,active:true,businessId:pointer.businessId,previousBusinessId:profile.businessId&&profile.businessId!==pointer.businessId?profile.businessId:profile.previousBusinessId||null,role:member.role,permissions:member.permissions,onboardingCompleted:true,createdAt:profile.createdAt||now,updatedAt:now,lastLoginAt:now},{merge:true});
+      transaction.set(profileRef,{uid,email:authEmail,name:member.name,active:true,businessId:pointer.businessId,previousBusinessId:profile.businessId&&profile.businessId!==pointer.businessId?profile.businessId:profile.previousBusinessId||null,role:member.role,permissions:member.permissions,permissionsVersion:member.permissionsVersion,onboardingCompleted:true,createdAt:profile.createdAt||now,updatedAt:now,lastLoginAt:now},{merge:true});
       transaction.set(db.doc(`memberships/${pointer.businessId}_${uid}`),{id:`${pointer.businessId}_${uid}`,businessId:pointer.businessId,uid,email:authEmail,role:member.role,active:true,status:'active',createdAt:profile.createdAt||now,updatedAt:now},{merge:true});
       transaction.set(inviteRef,{status:'accepted',acceptedBy:uid,acceptedAt:now,updatedAt:now},{merge:true});
       transaction.delete(indexRef);
@@ -197,6 +208,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     return writeFence(request,businessId).runTransaction(async transaction=>{
       const targetSnapshot=await transaction.get(targetRef);
       if(!targetSnapshot.exists)throw new HttpsError('not-found','Funcionário não encontrado.');
+      await refreshActor(transaction,context,businessId);
       const current=targetSnapshot.data(),expectedAccess=request.data?.expectedAccess;
       if(expectedAccess!==undefined){
         if(!expectedAccess||typeof expectedAccess!=='object'||Array.isArray(expectedAccess))throw new HttpsError('invalid-argument','Snapshot de acesso inválido.');
@@ -216,11 +228,18 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
         if(spaces.some(snapshot=>!snapshot.exists||snapshot.data()?.active===false||String(snapshot.data()?.businessId||snapshot.data()?.linkedBusinessId||'')!==businessId))
           throw new HttpsError('invalid-argument','Um dos espaços selecionados não pertence a esta empresa.');
       }else allowedSpaceIds=[];
-      const permissions=normalizedPermissions(role,request.data?.permissions??current.permissions);
+      assertDelegatedSpaces(context,spaceAccess,allowedSpaceIds);
+      const version=request.data?.permissionsVersion??current.permissionsVersion??1;
+      if(![1,2].includes(version)||Number(current.permissionsVersion||1)>version)throw new HttpsError('invalid-argument','Versão de permissões inválida. Atualize o aplicativo.');
+      // Old editors cannot silently erase granular grants or re-enable inherited access.
+      const incoming=request.data?.permissions,source=incoming===undefined?current.permissions:incoming;
+      if(incoming&&current.permissionsVersion===2&&request.data?.permissionsVersion!==2&&['customers.create','customers.archive'].some(key=>!Object.hasOwn(incoming,key)))throw new HttpsError('failed-precondition','Atualize a VECONI para editar permissões V2. Nenhuma alteração foi salva.');
+      const permissions=incoming===undefined&&Array.isArray(source)?source:normalizedPermissions(role,source??{},version);
+      for(const key of ['customers.create','customers.edit','customers.archive'])if(permissions[key]&&!permissions['customers.view'])throw new HttpsError('invalid-argument','Ative Ver clientes antes das ações de clientes.');
       if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
-      const now=FieldValue.serverTimestamp(),patch={name:text(request.data?.name??current.name,120),role,status,spaceAccess,allowedSpaceIds,permissions,updatedAt:now,updatedBy:context.uid};
+      const now=FieldValue.serverTimestamp(),patch={name:text(request.data?.name??current.name,120),role,status,spaceAccess,allowedSpaceIds,permissions,permissionsVersion:version,updatedAt:now,updatedBy:context.uid};
       transaction.set(targetRef,patch,{merge:true});
-      transaction.set(db.doc(`users/${targetUid}`),{name:patch.name,role,permissions,active:status==='active',updatedAt:now},{merge:true});
+      transaction.set(db.doc(`users/${targetUid}`),{name:patch.name,role,permissions,permissionsVersion:version,active:status==='active',updatedAt:now},{merge:true});
       transaction.set(db.doc(`memberships/${businessId}_${targetUid}`),{role,status,active:status==='active',updatedAt:now},{merge:true});
       transaction.set(db.doc(`businesses/${businessId}/auditLogs/team_member_${targetUid}_${Date.now()}`),{businessId,type:status==='disabled'?'team_member_disabled':'team_member_updated',actorUid:context.uid,targetUid,role,status,createdAt:now,schemaVersion:1});
       return{member:publicMember(targetUid,{...current,...patch})};

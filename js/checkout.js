@@ -307,7 +307,7 @@ window.Checkout = (() => {
         .map((id) => all.find((c) => c.id === id))
         .filter(Boolean);
     const modal = document.querySelector("#modal");
-    const customerAction = window.Clientes?.canEdit?.() === false
+    const customerAction = window.Clientes?.canCreate?.() === false
       ? '<p class="muted" role="note">Seu perfil pode selecionar clientes existentes. Novos cadastros precisam do responsável.</p>'
       : '<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button>';
     modal.innerHTML =
@@ -427,7 +427,7 @@ window.Checkout = (() => {
     return recurringConfiguration(product, null, source);
   }
   function quickClient() {
-    try { window.Clientes?.assertCanEdit?.(); } catch (error) { toast(error.message, true); return; }
+    try { window.Clientes?.assertCanCreate?.(); } catch (error) { toast(error.message, true); return; }
     const origin = [DB.getBusinessId(), DB.getPrincipal(), DB.getWorkspaceGeneration()].join(':');
     document.querySelector("#modal").innerHTML =
       `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;

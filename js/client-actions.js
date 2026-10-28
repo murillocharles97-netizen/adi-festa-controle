@@ -13,13 +13,16 @@
     { id: "promise", group: "financial", label: "Promessa de pagamento", icon: "calendar-check" },
     { id: "history", group: "registration", label: "Histórico", description: "Compras, pagamentos e contatos", icon: "history" },
     { id: "edit", group: "registration", label: "Editar cliente", description: "Dados e informações do cliente", icon: "pencil" },
-    { id: "delete", group: "danger", label: "Excluir cliente", description: "Remover cliente do sistema", icon: "trash-2", danger: true },
+    { id: "delete", group: "danger", label: "Desativar cliente", description: "Preserva o cadastro, as dívidas e o histórico", icon: "archive", danger: true },
   ];
   const groupLabels = { main: "Principais", financial: "Financeiro", registration: "Cadastro", danger: "Perigo" };
   const digits = (value) => String(value || "").replace(/\D/g, "");
+  const inactive = client => client.ativo === false || client.active === false;
+  const actionLabel = (action, client) => action.id === 'delete' && inactive(client) ? 'Reativar cliente' : action.label;
 
   function disabled(action, client) {
     return Boolean(
+      ({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id] && window.TeamAccess && !window.TeamAccess.has({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id])) ||
       (action.requiresDebt && Number(client?.saldo || 0) >= 0) ||
         (action.requiresPhone && digits(client?.telefone).length < 10),
     );
@@ -30,7 +33,7 @@
       .filter((action) => action.id !== "profile")
       .map(
         (action) =>
-          `<button ${action.danger ? 'class="danger"' : ""} type="button" data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)} ${action.label}</button>`,
+          `<button ${action.danger ? 'class="danger"' : ""} type="button" data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)} ${actionLabel(action,client)}</button>`,
       )
       .join("");
   }
@@ -51,7 +54,7 @@
               return `<section class="client-action-group group-${group}"><h3>${groupLabels[group]}</h3>${items
                 .map(
                   (action) =>
-                    `<button type="button" ${action.danger ? 'class="danger"' : ""} data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)}<span><b>${action.label}</b>${action.description ? `<small>${action.description}</small>` : ""}</span></button>`,
+                    `<button type="button" ${action.danger ? 'class="danger"' : ""} data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)}<span><b>${actionLabel(action,client)}</b>${action.description ? `<small>${action.description}</small>` : ""}</span></button>`,
                 )
                 .join("")}</section>`;
             })
@@ -65,7 +68,35 @@
     if (root?.querySelector(".client-action-sheet")) root.innerHTML = "";
   }
 
+  function confirmStatus(client) {
+    const root = document.querySelector('#modal'), enabled = inactive(client), verb = enabled ? 'Reativar' : 'Desativar';
+    const session = window.TeamAccess?.captureSession?.(), previousFocus = document.activeElement;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box" role="alertdialog" aria-modal="true" aria-labelledby="client-status-title" aria-describedby="client-status-copy"><header class="modal-head"><h3 id="client-status-title">${verb} cliente</h3></header><div class="modal-body"><p id="client-status-copy">${verb} ${esc(client.nome)}? O cadastro, as dívidas e o histórico serão preservados. Nenhum saldo será alterado.</p><p role="alert" data-status-error></p></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-status-close>Cancelar</button><button type="button" class="btn btn-primary" data-status-confirm>${verb}</button></footer></section></div>`;
+    const dismiss = () => { root.innerHTML = ''; previousFocus?.isConnected && previousFocus.focus(); };
+    root.querySelector('[data-status-close]').onclick = dismiss;
+    const confirm = root.querySelector('[data-status-confirm]');
+    confirm.onclick = () => {
+      if (confirm.disabled) return;
+      confirm.disabled = true;
+      try {
+        if (session) window.TeamAccess.assertSession(session);
+        Clientes.setActive(client.id, enabled);
+        dismiss(); window.ClientesPage?.refresh?.();
+      } catch (error) {
+        root.querySelector('[data-status-error]').textContent = error.message;
+        confirm.disabled = false;
+      }
+    };
+    root.querySelector('[data-status-close]').focus();
+    root.querySelector('section').onkeydown = event => {
+      if (event.key === 'Escape') dismiss();
+      if (event.key === 'Tab') { event.preventDefault(); (document.activeElement === confirm ? root.querySelector('[data-status-close]') : confirm).focus(); }
+    };
+  }
+
   async function run(action, clientId) {
+    const permission={sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action];
+    if(permission&&window.TeamAccess&&!window.TeamAccess.has(permission))return Utils.toast(window.VeconiPermissionPolicy.MESSAGE,true);
     const page = window.ClientesPage;
     const client = Clientes.obter(clientId);
     if (!client) return Utils.toast("Cliente não encontrado.", true);
@@ -89,11 +120,7 @@
     }
     if (action === "promise") return page?.promise?.(clientId);
     if (action === "edit") return page?.clientForm?.(clientId);
-    if (action === "delete")
-      return Modais.confirmar("cliente", () => {
-        Clientes.excluir(clientId);
-        page?.refresh?.();
-      });
+    if (action === "delete") return confirmStatus(client);
   }
 
   function openSheet(clientId) {

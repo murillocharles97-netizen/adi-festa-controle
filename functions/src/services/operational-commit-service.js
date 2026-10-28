@@ -10,13 +10,14 @@ const {stockKey}=require('./online-stock-reservation');
 const execute=require('../shared/commercial-commit-engine');
 const {validateEngagement}=require('./operational-engagement-validation');
 const {operationalId}=require('../shared/operational-id');
+const Policy=require('../shared/permission-policy');
 const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message);};
 const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteger(Math.round(n*100)))fail('Valor inválido.','invalid-argument');return Math.round(n*100);};
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
 const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
 const gen=v=>v?.workspaceGeneration??0;
 const financialFields=['saldo','financialVersion','openBalance','financialRevision','financialReconciledAt'];
-const stockFields=['estoqueAtual','estoque','totalStock','stock','onlineReservedStock','onlineOrderFinalizationId'];
+const stockFields=['estoqueAtual','estoque','totalStock','stock','onlineReservedStock','onlineOrderFinalizationId','hasAvailableStock'];
 const counterFields=['totalComprado','quantidadeVendas','ultimaCompra','legacyBalance','legacyBalanceRemaining','campaignFinanceVersion'];
 const envelope=['id','businessId','ownerId','createdAt','updatedAt','updatedByUid','actorUid','actorNameSnapshot','actorRoleSnapshot','schemaVersion','version','workspaceGeneration','workspaceWriteId','operationId','idempotencyKey','action','entityType'];
 const permissions={clients:'customers.edit',products:'products.edit',productVariants:'products.edit',settings:'settings.manage',campaigns:'reports.view',campaignProgress:'sales.create',campaignEvents:'sales.create',campaignRedemptions:'sales.create',rewards:'sales.create',customerSubscriptions:'sales.create',customerSubscriptionEvents:'sales.create',customerMetrics:'reports.view',customerMonthlyMetrics:'reports.view',customerSegments:'reports.view',visits:'reports.view',charges:'customers.edit',messageHistory:'customers.edit',messageTemplates:'customers.edit',messageSequences:'customers.edit',clientContacts:'customers.edit',productFinancials:'cost.view',variantFinancials:'cost.view',saleFinancials:'cost.view',stockMovementFinancials:'cost.view'};
@@ -44,8 +45,8 @@ function operationalCommitService(db){
   const role=member?.role||user.role,owner=ms.exists?member.role==='owner':business.ownerId===uid&&role==='owner';
   // Legacy grants in editable profile maps are NOT an authorization source.
   // Only the immutable legacy role/canonical owner retains its previous duties.
-  const legacyCashier=new Set(['sales.create','customers.view','customers.edit','customers.receiveDebt','products.view','inventory.view']);
-  const has=p=>owner||(ms.exists?member.permissions?.[p]===true:role==='cashier'?legacyCashier.has(p):['admin','manager'].includes(role)&&p!=='exportCRM');
+  const legacyCashier=Object.fromEntries(['sales.create','customers.view','customers.edit','customers.receiveDebt','products.view','inventory.view'].map(key=>[key,true]));
+  const has=p=>owner||(ms.exists?Policy.has(member,p):role==='cashier'?Policy.has({permissions:legacyCashier},p):['admin','manager'].includes(role)&&p!=='exportCRM');
   const c={uid,bid,business,user,member,owner,role,has,access};
   c.space=async id=>{
    validId(id,'Espaço');const value=(await tx.get(db.doc(`financialSpaces/${id}`))).data();
@@ -122,13 +123,14 @@ function operationalCommitService(db){
   const planned=(col,id)=>plan.get(ref(c.bid,col,id).path)?.data;
   const old=async(col,id)=>(await get(ref(c.bid,col,id))).data();
   const effective=async(col,id)=>({...await old(col,id),...planned(col,id)});
-  const variantTotals=new Map();let variantBudget=350;
+  const variantTotals=new Map(),variantAvailability=new Map();let variantBudget=350;
   async function variantTotal(pid){
    if(variantTotals.has(pid))return variantTotals.get(pid);
    const rows=await tx.get(ref(c.bid,'productVariants','__none__').parent.where('parentProductId','==',pid).limit(variantBudget+1));if(rows.size>variantBudget)fail('Limite seguro de variações excedido.','failed-precondition');variantBudget-=rows.size;
    const values=new Map(rows.docs.map(d=>[d.id,{...d.data(),...planned('productVariants',d.id)}]));
    for(const p of plan.values())if(p.ref.parent.id==='productVariants'&&p.data.parentProductId===pid&&!values.has(p.ref.id))values.set(p.ref.id,p.data);
-   let total=0;for(const v of values.values())if(Model.active(v)){if(!numeric(v.stock)||v.stock<0&&!v.allowNegativeStock)fail('Estoque de variação inválido.');total+=v.stock;}
+   let total=0,available=false;for(const v of values.values())if(Model.active(v)){if(!numeric(v.stock)||v.stock<0&&!v.allowNegativeStock)fail('Estoque de variação inválido.');total+=v.stock;available=available||v.allowNegativeStock===true||v.stock>0;}
+   variantAvailability.set(pid,available);
    variantTotals.set(pid,total);return total;
   }
   const events=writes.filter(w=>w.entityType==='sales'),createSales=events.filter(w=>w.operation==='create'),cancels=events.filter(w=>w.operation!=='create'&&(w.data.active===false||w.data.deletedAt));
@@ -275,11 +277,13 @@ function operationalCommitService(db){
     if(expected&&expected.balance!==0){const e=planned('balanceEvents',expectedEvent+':'+primary.entityId);if(!e)fail('Evento financeiro obrigatório ausente.');}
     if(expected&&expected.balance!==0){patch.openBalance=Math.abs(Math.min(0,Number(before.saldo)+expected.balance));patch.financialRevision=item.operationId;}
     if(!expected&&!before&&(Number(patch.saldo||0)!==0||Number(patch.financialVersion||0)!==0))fail('Cadastro não pode criar saldo.');
+    if(!expected&&!before&&[...financialFields,...counterFields].some(key=>!['saldo','financialVersion'].includes(key)&&patch[key]!=null&&patch[key]!==0))fail('Cadastro não pode criar projeções comerciais ou financeiras.');
     if(expected){for(const [field,delta]of [['totalComprado',expected.amount],['quantidadeVendas',expected.count]])if(Object.hasOwn(patch,field)&&!same(Number(patch[field])-Number(before?.[field]||0),delta))fail('Contador não corresponde à venda.');}
     if(expected&&createSales.length&&credit){const legacy=before.legacyBalance??Math.abs(Math.min(0,Number(before.saldo)));if(Object.hasOwn(patch,'legacyBalance')&&!same(patch.legacyBalance,legacy)||Object.hasOwn(patch,'legacyBalanceRemaining')&&!same(patch.legacyBalanceRemaining,before.legacyBalanceRemaining??legacy))fail('Saldo histórico não pode ser reescrito pela venda.');}
     if(!expected&&before&&changed(patch,before,counterFields).length)fail('Cadastro não pode alterar projeções comerciais.');
     const metadata=changed(patch,before,Object.keys(patch)).filter(k=>!envelope.includes(k)&&!financialFields.includes(k)&&!counterFields.includes(k)&&!['atualizadoEm'].includes(k));
-    if((metadata.length||!before)&&!c.has('customers.edit'))fail('Sem permissão para editar o cadastro do cliente.');
+    const statusFields=['active','ativo','deletedAt'],statusChanged=metadata.some(k=>statusFields.includes(k));
+    if(!before&&!c.has('customers.create')||before&&statusChanged&&!c.has('customers.archive')||before&&metadata.some(k=>!statusFields.includes(k))&&!c.has('customers.edit'))fail(Policy.MESSAGE);
     continue;
    }
    if(col==='products'||col==='productVariants'){
@@ -289,13 +293,18 @@ function operationalCommitService(db){
     if(col==='productVariants'&&before&&patch.parentProductId&&patch.parentProductId!==before.parentProductId)fail('Variação não pode mudar de produto.');
     if(col==='products'&&(!before||changed(patch,before,['spaceAccessMode','allowedSpaceIds','defaultSpaceId']).length)){
      const scoped={...before,...patch},ids=scoped.allowedSpaceIds;
+     if(!c.owner&&c.member?.spaceAccess!=='all'&&(scoped.spaceAccessMode==='all_spaces'||!Array.isArray(ids)||!ids.length||ids.some(id=>!c.member?.allowedSpaceIds?.includes(id))))fail('Não é permitido ampliar o vínculo do produto para espaços não autorizados.');
      if(!['single_space','selected_spaces','all_spaces'].includes(scoped.spaceAccessMode)||!Array.isArray(ids)||ids.length>30||scoped.spaceAccessMode!=='all_spaces'&&!ids.length||scoped.spaceAccessMode==='single_space'&&(ids.length!==1||ids[0]!==scoped.defaultSpaceId))fail('Vínculo de espaço inválido.');
      for(const sid of ids)await c.space(sid);
      if(scoped.defaultSpaceId)await c.space(scoped.defaultSpaceId);
     }
     const idKey=col==='products'?id+':':(patch.parentProductId||before?.parentProductId)+':'+id;
     const variableSummary=col==='products'&&parent.productType==='variable';
-    if(variableSummary){const total=await variantTotal(id);for(const f of ['estoqueAtual','estoque','totalStock'])if(Object.hasOwn(patch,f)&&!same(patch[f],total))fail('Resumo do produto não corresponde às variações.');}
+    if(variableSummary){const total=await variantTotal(id);for(const f of ['estoqueAtual','estoque','totalStock'])if(Object.hasOwn(patch,f)&&!same(patch[f],total))fail('Resumo do produto não corresponde às variações.');
+     const controlsStock=parent.itemKind!=='service'&&!parent.semControleEstoque&&parent.controlaEstoque!==false;
+     if(changed(patch,before,['hasAvailableStock']).length&&!c.has('products.edit')&&![...deltas.keys()].some(key=>key.startsWith(id+':')))fail('Disponibilidade exige o movimento autorizado do produto.');
+     if(Object.hasOwn(patch,'hasAvailableStock')&&patch.hasAvailableStock!==(!controlsStock||variantAvailability.get(id)))fail('Disponibilidade não corresponde às variações canônicas.');
+    }
     if(before&&changed(patch,before,stockFields).length&&!deltas.has(idKey)&&!variableSummary)fail('Estoque sem movimento autorizado.');
     if(!before&&!variableSummary&&stockFields.some(f=>numeric(patch[f])&&patch[f]!==0)){
      if(item.source==='recovery_local_orphan'||patch.source==='recovery_local_orphan')fail('Estoque histórico ausente exige revisão de origem; nenhuma entrada inicial será inventada.','failed-precondition');
@@ -341,6 +350,7 @@ function operationalCommitService(db){
  }
  async function scopeProduct(c,p,spaceId){
   if(!p||p.businessId!==c.bid||gen(p)!==gen(c.business))fail('Produto de outra empresa/geração.');
+  if(!c.owner&&c.member?.spaceAccess!=='all'&&!c.member?.allowedSpaceIds?.length)fail('Nenhum espaço autorizado para este produto.');
   if(spaceId){if(!Model.allows(p,spaceId)||p.spaceAccessMode==='single_space'&&(p.defaultSpaceId!==spaceId||p.allowedSpaceIds?.length!==1||p.allowedSpaceIds[0]!==spaceId||p.spaceId&&p.spaceId!==spaceId))fail('Produto de outro espaço ou com vínculo ambíguo.');}
   else if(!c.owner&&c.member?.spaceAccess!=='all'&&p.spaceAccessMode!=='all_spaces'&&!(p.allowedSpaceIds||[]).some(id=>c.member?.allowedSpaceIds?.includes(id)))fail('Produto fora dos espaços autorizados.');
  }
@@ -348,7 +358,7 @@ function operationalCommitService(db){
   return db.runTransaction(async tx=>{
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
-   if(d.kind==='sync_protocol')return{protocolVersion:1,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='sync_protocol')return{protocolVersion:1,permissionsVersion:2,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
    const sid=validId(d.saleId,'Venda'),op=operationalId(d.operationId,'Operação'),s=(await tx.get(ref(c.bid,'sales',sid))).data();
    const reversal=d.kind==='sale_undo';

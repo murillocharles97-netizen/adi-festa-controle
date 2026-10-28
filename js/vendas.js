@@ -56,7 +56,7 @@ window.Vendas = (() => {
       })
       .filter(Boolean);
   const registrar = (d) => {
-    if (window.TeamAccess && !window.TeamAccess.has("sales.create")) throw Error("Você não tem permissão para criar vendas.");
+    if (window.TeamAccess && !window.TeamAccess.has("sales.create")) throw window.VeconiPermissionPolicy?.denied("sales.create")||Error("Você não tem permissão para criar vendas.");
     const explicitSpaceId = String(d.spaceId || "").trim();
     if (!explicitSpaceId && typeof document !== "undefined")
       throw Error("Informe explicitamente o espaço desta venda.");
@@ -413,7 +413,7 @@ window.Vendas = (() => {
     );
   };
   const desfazerUltima = (options = {}) => {
-    if (window.TeamAccess && !window.TeamAccess.has("sales.cancel")) throw Error("Você não tem permissão para cancelar vendas.");
+    if (window.TeamAccess && !window.TeamAccess.has("sales.cancel")) throw window.VeconiPermissionPolicy?.denied("sales.cancel")||Error("Você não tem permissão para cancelar vendas.");
     if (ultima()?.source === 'exchange_credit_checkout') throw Error('Esta venda usou crédito de troca. Cancele pelo fluxo online que restaura o crédito, uma única vez.');
     let removida;
     const operationId = Utils.uuid();

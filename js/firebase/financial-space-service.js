@@ -2897,7 +2897,12 @@ const FinancialSpaceService = {
 const spaceMetadataMethods=new Set(['listSpaces','listCachedSpaces','selectedSpaceId','selectSpace','createSpace','archiveSpace','automationState','getReadStats']);
 for(const name of Object.keys(FinancialSpaceService).filter(name=>!spaceMetadataMethods.has(name))){
   const original=FinancialSpaceService[name];if(typeof original!=='function')continue;
-  FinancialSpaceService[name]=function(...args){if(window.PlanLimitService)window.PlanLimitService.assert(PlanLimitService.canUseFeature('financeAdvanced'),'usar o financeiro completo');return original.apply(this,args);};
+  FinancialSpaceService[name]=function(...args){
+    window.TeamAccess?.assert?.('financial.view');
+    if(window.TeamAccess&&!window.TeamAccess.has('financial.view'))throw window.VeconiPermissionPolicy.denied('financial.view');
+    if(window.PlanLimitService)window.PlanLimitService.assert(PlanLimitService.canUseFeature('financeAdvanced'),'usar o financeiro completo');
+    return original.apply(this,args);
+  };
 }
 window.FinancialSpaceService = FinancialSpaceService;
 addEventListener("veconi-spaces-ready", (event) => {

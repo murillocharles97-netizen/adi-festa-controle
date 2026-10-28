@@ -11,6 +11,7 @@ function harness({role='seller',permissions=operational,documents={},localDocume
   const s={console,Date,Promise,Map,Set,JSON,Math,Number,String,Error,Object,structuredClone,navigator:{onLine:true},currentUser:{uid:role},auth:{currentUser:{uid:role}},syncSessionGeneration:1,lastDataAuditRaw:null,
     document:{querySelectorAll:()=>[],documentElement:{dataset:{}}},addEventListener(){},queueMicrotask(){},BusinessContext:{get:()=>context},
     IntegrityAudit:audit,DB:{carregar:()=>local,flush:async()=>{}},activeBusinessId:()=>context.businessId,namespace:()=>[context.businessId,s.currentUser.uid,context.role,...context.permissions].join(':'),
+    captureCloudReadScope:()=>s.namespace(),assertCloudReadScope:scope=>{if(scope!==s.namespace())throw Object.assign(Error('Sessão de leitura substituída'),{code:'sync-read-scope-retired'});},
     validateUser:async()=>{},readQueue:()=>queue,queueCounts:()=>({pending:0,errors:0,active:0,total:1,archived:1,quarantined:0,manualReview:0}),updateQueueState(){},
     now:()=> '2026-10-19T12:00:00Z',deviceId:()=> 'qa-device',knownOrphanKey:()=>s.namespace()+':diagnostic-orphans',localStorage:{setItem:(key,value)=>diagnosticCache.set(key,value)},
     sourceItems:(data,name)=>{localReads.push(name);return data[keys[name]]||[];},

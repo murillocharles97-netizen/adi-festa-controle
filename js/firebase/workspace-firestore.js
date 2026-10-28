@@ -36,6 +36,6 @@ async function resolveExternalScope(ref,data,{reader,writes=[],origin}={}){
   }
   return parent(parentPath,parts.length===2?data:{});
 }
-const writer=window.WorkspaceWriterFactory.create({sdk,runtime:()=>window.WorkspaceRuntime,
+const writer=window.WorkspaceWriterFactory.create({sdk,runtime:()=>window.WorkspaceRuntime,permissionContext:()=>window.TeamAccess,
   legacyGeneration:()=>window.BusinessContext?.get?.().business?.workspaceGeneration??0,resolveExternalScope});
 export const {setDoc,updateDoc,deleteDoc,writeBatch,runTransaction}=writer;

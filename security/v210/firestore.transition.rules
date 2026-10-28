@@ -1,0 +1,2013 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function profileExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function validRole(role) {
+      return role in ['owner', 'admin', 'manager', 'cashier', 'viewer', 'platform_admin'];
+    }
+    function activeUser() {
+      return profileExists() && userProfile().active == true && validRole(userProfile().role);
+    }
+    function memberExists(businessId) {
+      return signedIn() && exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+    }
+    function teamMember(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data;
+    }
+    function activeMember(businessId) {
+      return memberExists(businessId) && teamMember(businessId).status == 'active';
+    }
+    function legacyMember(businessId) {
+      return !memberExists(businessId) && activeUser() && userProfile().businessId == businessId
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.get('legacyAccessDisabled', false) != true;
+    }
+    function roleForBusiness(businessId) {
+      return memberExists(businessId) ? teamMember(businessId).role : userProfile().role;
+    }
+    function currentBusinessId() {
+      return userProfile().businessId;
+    }
+    function businessExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    }
+    function activeBusiness(businessId) {
+      return businessExists(businessId)
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.active == true;
+    }
+    function subscriptionAllowsWrites(businessId) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let subscription = business.subscription;
+      return business.active == true
+        && (subscription.get('catalogVersion',1) >= 2 || !subscription.get('legacyPlan',false) || subscription.get('legacyTransition',{}).get('paidThroughAt',null) == null || subscription.legacyTransition.paidThroughAt > request.time)
+        && (
+          (subscription.planId == 'internal' && subscription.status == 'active')
+          || (subscription.get('catalogVersion',1) < 2 && subscription.get('legacyPlan',false) && subscription.get('legacyTransition',{}).get('paidThroughAt',null) != null && subscription.legacyTransition.paidThroughAt > request.time)
+          || subscription.status == 'active'
+          || (subscription.status in ['trial', 'trialing'] && subscription.trialEndsAt > request.time)
+          || (
+            subscription.status == 'grace_period'
+            && (!('gracePeriodEndsAt' in subscription) || subscription.gracePeriodEndsAt > request.time)
+          )
+        );
+    }
+    // Catalog v2 projection. Contract tests compare these tiers with plan-catalog.js.
+    function planAllowsFeature(businessId, feature) {
+      let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
+      let id = subscription.planId;
+      let tier = {'essential':1, 'professional':2, 'trial':2, 'premium':3, 'internal':99}.get(id,0);
+      let required = {'simpleCampaigns':1, 'messageCenter':1, 'crmAdvanced':2, 'advancedCampaigns':2, 'customerSubscriptions':2, 'onlineOrders':2, 'financeAdvanced':2, 'spreadsheetImport':2, 'teamManagement':3, 'paymentTerminalIntegration':3, 'fiscalIntegration':3}.get(feature,99);
+      let legacy = subscription.get('hasPaidSubscription',false) && subscription.get('catalogVersion',1) < 2 && id in ['essential','professional','premium'];
+      return legacy ? subscription.get('legacyTransition',{}).get('features',{}).get(feature,true) : tier >= required && tier > 0;
+    }
+    function planAllowsCollection(businessId, collectionName) {
+      let subscription = get(/databases/$(database)/documents/businesses/$(businessId)).data.subscription;
+      return !(collectionName in [
+          'campaignProgress',
+          'campaignRedemptions', 'rewards',
+          'customerSubscriptions', 'customerSubscriptionEvents',
+          'customerSegments', 'visits', 'catalogOrders'
+        ])
+        || subscription.planId in ['internal', 'trial', 'professional', 'premium'];
+    }
+    function belongsToBusiness(businessId) {
+      return signedIn()
+        && (activeMember(businessId) || legacyMember(businessId))
+        && activeBusiness(businessId);
+    }
+    function isOwner(businessId) {
+      return belongsToBusiness(businessId)
+        && roleForBusiness(businessId) == 'owner';
+    }
+    function isAdmin(businessId) {
+      return belongsToBusiness(businessId) && roleForBusiness(businessId) in ['owner', 'admin', 'manager'];
+    }
+    function permissionGranted(businessId, permission) {
+      let modern = memberExists(businessId);
+      let actor = modern ? teamMember(businessId) : userProfile();
+      return actor.role in ['owner', 'platform_admin']
+        || (modern ? actor.get('permissions', {}).get(permission, false) == true
+          : ((actor.role in ['admin', 'manager'] && permission != 'exportCRM')
+            || actor.get('permissions', {}).get(permission, false) == true
+            || (permission == 'reports.view' && actor.get('permissions', {}).get('viewCRM', false) == true)
+            || (permission == 'settings.manage' && actor.get('permissions', {}).get('manageOperationSettings', false) == true)));
+    }
+    // V210: granular members write clients through the authorized gateway only.
+    function browserClientWritesAllowed(businessId) {
+      return signedIn() && (!memberExists(businessId) || teamMember(businessId).get('permissionsVersion',1) < 2);
+    }
+    function hasPermission(businessId, permission) {
+      return belongsToBusiness(businessId) && permissionGranted(businessId, permission);
+    }
+    function canAccessSpace(businessId, spaceId) {
+      let modern = memberExists(businessId);
+      let member = modern ? teamMember(businessId) : {};
+      return belongsToBusiness(businessId)
+        && spaceId is string
+        && !(spaceId in ['all', 'all_spaces'])
+        && (
+          !modern
+          || member.role == 'owner'
+          || member.spaceAccess == 'all'
+          || (
+            member.allowedSpaceIds is list
+            && spaceId in member.allowedSpaceIds
+          )
+        );
+    }
+    function legacyCanWriteCollection(businessId, collectionName) {
+      return !memberExists(businessId) && (
+        userProfile().role in ['owner', 'admin', 'manager']
+        || (
+          userProfile().role == 'cashier'
+          && collectionName in [
+            'clients', 'sales', 'payments', 'balanceEvents',
+            'charges', 'messageHistory', 'clientContacts', 'catalogOrders',
+            'campaignProgress', 'campaignEvents', 'campaignRedemptions',
+            'paymentAllocations', 'customerSubscriptions',
+            'customerSubscriptionEvents'
+          ]
+        )
+      );
+    }
+    function legacySensitiveFieldsAllowed(businessId) {
+      return !memberExists(businessId)
+        && roleForBusiness(businessId) in ['owner', 'admin', 'manager'];
+    }
+    function workspaceWriteAllowed(businessId) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let generation = business.get('workspaceGeneration', 0);
+      return business.get('workspaceReset', {}).get('status', 'COMPLETED') == 'COMPLETED'
+        && (generation == 0 || (
+          request.resource != null
+          && request.resource.data.get('workspaceGeneration', -1) == generation
+          && request.resource.data.get('workspaceWriteId', '') is string
+          && request.resource.data.get('workspaceWriteId', '').size() >= 16
+          && request.resource.data.get('workspaceWriteId', '').size() <= 100
+          // A merge from an old app must not inherit a current generation/nonce.
+          && (resource == null || request.resource.data.diff(resource.data).affectedKeys().hasAny(['workspaceWriteId']))
+        ));
+    }
+    function notArchivedSyncOperation(businessId) {
+      let id = request.resource == null ? '' : request.resource.data.get('operationId', '');
+      return !(id is string) || id == ''
+        || !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(id));
+    }
+    function canWriteCollection(businessId, collectionName) {
+      let modern = memberExists(businessId);
+      let member = modern ? teamMember(businessId) : {};
+      let privileged = member.get('role','') in ['owner','platform_admin'];
+      let grants = member.get('permissions',{});
+      return workspaceWriteAllowed(businessId)
+        && notArchivedSyncOperation(businessId)
+        && subscriptionAllowsWrites(businessId)
+        && planAllowsCollection(businessId, collectionName)
+        && (
+          (!modern && legacyMember(businessId) && activeBusiness(businessId) && legacyCanWriteCollection(businessId, collectionName))
+          || (modern &&
+            member.status == 'active'
+            && activeBusiness(businessId)
+            && (
+              (collectionName == 'sales' && ((privileged || grants.get('sales.create',false) == true) || (privileged || grants.get('sales.cancel',false) == true)))
+              || (collectionName in ['products', 'productVariants'] && ((privileged || grants.get('products.edit',false) == true) || (privileged || grants.get('inventory.adjust',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'stockMovements' && ((privileged || grants.get('inventory.adjust',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'clients' && ((privileged || grants.get('customers.edit',false) == true) || (privileged || grants.get('customers.receiveDebt',false) == true) || (privileged || grants.get('customers.adjustBalance',false) == true) || (privileged || grants.get('sales.create',false) == true)))
+              || (collectionName == 'payments' && (privileged || grants.get('customers.receiveDebt',false) == true))
+              || (collectionName == 'balanceAdjustments' && (privileged || grants.get('customers.adjustBalance',false) == true))
+              || (collectionName in ['balanceEvents', 'processedOperations'] && ((privileged || grants.get('sales.create',false) == true) || (privileged || grants.get('customers.receiveDebt',false) == true) || (privileged || grants.get('customers.adjustBalance',false) == true)))
+              || (collectionName in ['campaignProgress', 'campaignEvents', 'campaignRedemptions', 'paymentAllocations', 'customerSubscriptions', 'customerSubscriptionEvents', 'rewards'] && (privileged || grants.get('sales.create',false) == true))
+              || (collectionName == 'campaigns' && (privileged || grants.get('reports.view',false) == true))
+              || (collectionName in ['charges', 'messageHistory', 'messageTemplates', 'messageSequences', 'clientContacts', 'catalogOrders'] && (privileged || grants.get('customers.edit',false) == true))
+              || (collectionName == 'customerSegments' && (privileged || grants.get('reports.view',false) == true))
+              || (collectionName == 'settings' && (privileged || grants.get('settings.manage',false) == true))
+              || collectionName == 'syncMetadata'
+            )
+          )
+        );
+    }
+    function canReadOperationalSales(businessId) {
+      // Operational store totals/history are shared by authorized sellers.
+      // This does not grant financial/private reads or administrative writes.
+      return permissionGranted(businessId, 'sales.create')
+        || permissionGranted(businessId, 'sales.viewAll');
+    }
+    function canReadCollection(businessId, collectionName) {
+      return (
+        (
+          legacyMember(businessId)
+          && activeBusiness(businessId)
+          && (!(collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments']) || permissionGranted(businessId, 'reports.view'))
+        )
+        || (
+          activeMember(businessId)
+          && activeBusiness(businessId)
+          && (
+            collectionName == 'settings'
+            || (collectionName == 'clients' && permissionGranted(businessId, 'customers.view'))
+            || (collectionName in ['products', 'productVariants'] && permissionGranted(businessId, 'products.view'))
+            || (collectionName == 'stockMovements' && permissionGranted(businessId, 'inventory.view'))
+            || (collectionName == 'sales' && canReadOperationalSales(businessId))
+            || (collectionName in ['payments', 'balanceAdjustments', 'balanceEvents', 'charges', 'paymentAllocations'] && (permissionGranted(businessId, 'financial.view') || permissionGranted(businessId, 'customers.receiveDebt') || permissionGranted(businessId, 'customers.adjustBalance')))
+            || (collectionName in ['campaigns', 'campaignProgress', 'campaignEvents', 'campaignRedemptions', 'rewards', 'customerSubscriptions', 'customerSubscriptionEvents', 'messageHistory', 'messageTemplates', 'messageSequences', 'clientContacts', 'catalogOrders'] && (permissionGranted(businessId, 'sales.create') || permissionGranted(businessId, 'reports.view')))
+            || (collectionName in ['customerMetrics', 'customerMonthlyMetrics', 'customerSegments', 'visits'] && permissionGranted(businessId, 'reports.view'))
+            || collectionName == 'syncMetadata'
+            || (collectionName == 'processedOperations' && (permissionGranted(businessId, 'sales.create') || permissionGranted(businessId, 'inventory.adjust')))
+          )
+        )
+      );
+    }
+    function canRecordProcessedOperation(businessId) {
+      return workspaceWriteAllowed(businessId) && subscriptionAllowsWrites(businessId)
+        && activeBusiness(businessId)
+        && (
+          (
+            legacyMember(businessId)
+            && userProfile().role in ['owner', 'admin', 'manager', 'cashier']
+          )
+          || (
+            activeMember(businessId)
+            && (
+              roleForBusiness(businessId) == 'owner'
+              || teamMember(businessId).get('permissions', {}).get('sales.create', false) == true
+              || teamMember(businessId).get('permissions', {}).get('inventory.adjust', false) == true
+              || teamMember(businessId).get('permissions', {}).get('customers.receiveDebt', false) == true
+              || teamMember(businessId).get('permissions', {}).get('customers.adjustBalance', false) == true
+            )
+          )
+        );
+    }
+    function canCreateGenericDocument(businessId, collectionName, documentId) {
+      return canWriteCollection(businessId, collectionName)
+        && request.resource.data.businessId == businessId
+        && (collectionName != 'customerSegments' || permissionGranted(businessId, 'reports.view'))
+        && (collectionName != 'settings' || documentId != 'operation' || permissionGranted(businessId, 'settings.manage'));
+    }
+    function canUpdateGenericDocument(businessId, collectionName, documentId) {
+      return canWriteCollection(businessId, collectionName)
+        && (resource.data.businessId == businessId || (businessId == 'adi-festa' && !('businessId' in resource.data)))
+        && request.resource.data.businessId == businessId
+        && (collectionName != 'customerSegments' || permissionGranted(businessId, 'reports.view'))
+        && (collectionName != 'settings' || documentId != 'operation' || permissionGranted(businessId, 'settings.manage'));
+    }
+    function validSpaceCapabilities(capabilities) {
+      return capabilities is map
+        && capabilities.keys().hasAll(['finance', 'sales', 'products', 'inventory', 'goals'])
+        && capabilities.keys().hasOnly(['finance', 'sales', 'products', 'inventory', 'goals'])
+        && capabilities.finance is bool
+        && capabilities.sales is bool
+        && capabilities.products is bool
+        && capabilities.inventory is bool
+        && capabilities.goals is bool;
+    }
+    function hasOperationalSpaceCapabilities(capabilities) {
+      return capabilities.sales
+        || capabilities.products
+        || capabilities.inventory
+        || capabilities.goals;
+    }
+    function validGlobalSpaceFields(space, spaceId) {
+      return space.keys().hasAll([
+          'id', 'type', 'linkedBusinessId', 'businessId', 'operationalType',
+          'active', 'status', 'capabilities', 'isDefault', 'globalSpaceSchemaVersion',
+          'ownerUid'
+        ])
+        && space.id == spaceId
+        && space.operationalType in ['unit', 'operation', 'personal', 'other']
+        && space.status in ['active', 'archived']
+        && space.active is bool
+        && (
+          (space.status == 'active' && space.active == true)
+          || (space.status == 'archived' && space.active == false)
+        )
+        && space.isDefault is bool
+        && space.globalSpaceSchemaVersion == 1
+        && validSpaceCapabilities(space.capabilities)
+        && (
+          space.businessId == null
+          || (
+            space.businessId is string
+            && (ownsActiveBusiness(space.businessId) || belongsToBusiness(space.businessId))
+          )
+        )
+        && (
+          space.businessId != null
+          || !(space.capabilities.sales || space.capabilities.products || space.capabilities.inventory || space.capabilities.goals)
+        )
+        && (
+          !hasOperationalSpaceCapabilities(space.capabilities)
+          || (
+            space.businessId is string
+            && subscriptionAllowsWrites(space.businessId)
+            && (
+              ownsActiveBusiness(space.businessId)
+              || hasPermission(space.businessId, 'spaces.manage')
+            )
+          )
+        )
+        && (!(space.operationalType in ['unit', 'operation']) || space.businessId is string)
+        && (space.type != 'business' || space.businessId == space.linkedBusinessId);
+    }
+    function validOperationalSalesSpace(space, businessId) {
+      return (!('active' in space) || space.active == true)
+        && (!('status' in space) || space.status == 'active')
+        && (
+          (space.type == 'business' && space.linkedBusinessId == businessId)
+          || (
+            space.type in ['personal', 'other']
+            && space.globalSpaceSchemaVersion == 1
+            && space.businessId == businessId
+          )
+        )
+        && (
+          (!('capabilities' in space) && space.type == 'business')
+          || (space.capabilities is map && space.capabilities.sales == true)
+        );
+    }
+    function operationalSalesSpaceBelongsToBusiness(spaceId, businessId) {
+      return !(spaceId in ['all', 'all_spaces'])
+        && spaceId.size() > 0
+        && exists(/databases/$(database)/documents/financialSpaces/$(spaceId))
+        && validOperationalSalesSpace(
+          get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data,
+          businessId
+        );
+    }
+    function validProductSpaceIds(spaceIds) {
+      return spaceIds.size() <= 50
+        && !('all' in spaceIds)
+        && !('all_spaces' in spaceIds);
+    }
+    function validProductItemKind(product) {
+      return !('itemKind' in product) || product.itemKind in ['product', 'service'];
+    }
+    // Once the catalog fence exists, pre-V2 clients cannot restore a stale identity.
+    // Stock-only operations remain untouched. Updated clients join the same
+    // transaction fence as the backend; old queues are retained on denial.
+    function joinsProductImportFence(businessId) {
+      let lock = /databases/$(database)/documents/businesses/$(businessId)/productImportIdentifiers/catalog-revision;
+      return !exists(lock) || getAfter(lock).data.get('commitToken', '') != get(lock).data.get('commitToken', '');
+    }
+    function validProductSpaceScope(product, businessId) {
+      return validProductItemKind(product)
+        && (
+          (!('spaceAccessMode' in product) && !('allowedSpaceIds' in product) && !('defaultSpaceId' in product) && !('spaceScopeVersion' in product))
+          || (
+            product.spaceAccessMode in ['all_spaces', 'selected_spaces', 'single_space']
+            && product.allowedSpaceIds is list
+            && validProductSpaceIds(product.allowedSpaceIds)
+            && product.spaceScopeVersion == 1
+            && (
+              (
+                product.spaceAccessMode == 'all_spaces'
+                && product.allowedSpaceIds.size() == 0
+                && product.defaultSpaceId == null
+              )
+              || (
+                product.spaceAccessMode == 'selected_spaces'
+                && product.allowedSpaceIds.size() > 0
+                && product.defaultSpaceId is string
+                && product.defaultSpaceId in product.allowedSpaceIds
+                && operationalSalesSpaceBelongsToBusiness(product.defaultSpaceId, businessId)
+              )
+              || (
+                product.spaceAccessMode == 'single_space'
+                && product.allowedSpaceIds.size() == 1
+                && product.defaultSpaceId is string
+                && product.allowedSpaceIds[0] == product.defaultSpaceId
+                && operationalSalesSpaceBelongsToBusiness(product.defaultSpaceId, businessId)
+              )
+            )
+          )
+        );
+    }
+    function preservesProductSpaceScope(product, persistedProduct) {
+      return !product.diff(persistedProduct).affectedKeys().hasAny([
+        'spaceAccessMode', 'allowedSpaceIds', 'defaultSpaceId', 'spaceScopeVersion'
+      ]);
+    }
+    // Legacy unscoped products are owner-review only. Shared products are
+    // explicit; a restricted operator may never widen their scope.
+    function canAccessProduct(businessId, product) {
+      return (
+        roleForBusiness(businessId) == 'owner'
+        || (product.businessId == businessId && (
+          product.spaceAccessMode == 'all_spaces'
+          || (product.spaceAccessMode in ['selected_spaces','single_space'] && (
+              teamMember(businessId).get('spaceAccess','selected') == 'all'
+              || product.allowedSpaceIds.hasAny(teamMember(businessId).allowedSpaceIds)
+            ))
+        ))
+      );
+    }
+    function canAssignProductScope(businessId, product) {
+      return roleForBusiness(businessId) == 'owner'
+        || (teamMember(businessId).get('spaceAccess','selected') == 'all' && canAccessProduct(businessId,product))
+        || (product.get('spaceAccessMode','') in ['selected_spaces','single_space']
+          && product.get('allowedSpaceIds',[]).size() > 0
+          && product.allowedSpaceIds.hasOnly(teamMember(businessId).get('allowedSpaceIds',[])));
+    }
+    function onlyOperationalProductStockChanged(product, persistedProduct) {
+      return product.diff(persistedProduct).affectedKeys().hasOnly([
+        'estoqueAtual', 'estoque', 'totalStock', 'hasAvailableStock', 'onlineOrderFinalizationId',
+        'updatedAt', 'updatedByUid', 'actorUid', 'actorNameSnapshot',
+        'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
+      ]);
+    }
+    function onlyOperationalVariantStockChanged(variant, persistedVariant) {
+      return variant.diff(persistedVariant).affectedKeys().hasOnly([
+        'stock', 'onlineOrderFinalizationId', 'updatedAt', 'updatedByUid', 'actorUid',
+        'actorNameSnapshot', 'actorRoleSnapshot', 'version', 'workspaceGeneration', 'workspaceWriteId'
+      ]);
+    }
+    function onlineReservationAllowance(businessId,data,key) {
+      let id=data.get('onlineOrderFinalizationId',null);
+      let order=id != null ? get(/databases/$(database)/documents/businesses/$(businessId)/catalogOrders/$(id)).data : {};
+      let sale=id != null ? getAfter(/databases/$(database)/documents/businesses/$(businessId)/sales/$(order.saleId)).data : {};
+      return id == null ? 0 : (order.finalizationStatus == 'pending'
+        && order.finalizationActorUid == request.auth.uid
+        && !exists(/databases/$(database)/documents/businesses/$(businessId)/sales/$(order.saleId))
+        && sale.onlineOrderId == id && sale.operationId == order.finalizationOperationId
+        && sale.spaceId == order.spaceId && sale.actorUid == request.auth.uid
+        ? order.reservedQuantities.get(key,0) : -1);
+    }
+    function preservesOnlineStock(businessId,data,before,field,key) {
+      let held=before.get('onlineReservedStock',0);
+      return data.get('onlineReservedStock',0) == held
+        && (held == 0 || data.get(field,0) >= before.get(field,0)
+          || data.get(field,0) >= held || before.get('allowNegativeStock',false)
+          || (data.get('onlineOrderFinalizationId',null) != null
+            && data.get(field,0) >= held-onlineReservationAllowance(businessId,data,key)));
+    }
+    function validOnlineSale(businessId,saleId,data) {
+      let id=data.get('onlineOrderId',null);
+      let order=id != null ? get(/databases/$(database)/documents/businesses/$(businessId)/catalogOrders/$(id)).data : {};
+      return id == null || (order.finalizationStatus == 'pending' && order.saleId == saleId
+        && order.finalizationOperationId == data.operationId && order.spaceId == data.spaceId
+        && order.finalizationActorUid == request.auth.uid && data.actorUid == request.auth.uid
+        && data.status == order.saleStatus && data.formaPagamento == order.paymentMethod
+        && data.get('clienteId',null) == order.clientId && math.round(data.valorFinal*100) == math.round(order.total*100)
+        && data.itens == order.saleItems);
+    }
+    function preservesSaleActor(sale, persistedSale) {
+      return (
+          'actorUid' in persistedSale
+          && sale.get('actorUid', '') == persistedSale.actorUid
+        )
+        || (
+          !('actorUid' in persistedSale)
+          && sale.get('actorUid', '') == request.auth.uid
+        );
+    }
+    function validSaleSpace(sale, businessId) {
+      return sale.spaceId is string
+        && sale.spaceId.size() > 0
+        && sale.spaceId != 'all_spaces'
+        && canAccessSpace(businessId, sale.spaceId)
+        && operationalSalesSpaceBelongsToBusiness(sale.spaceId, businessId)
+        && (!('financialSpaceId' in sale) || sale.financialSpaceId == sale.spaceId);
+    }
+    function persistedSpaceBelongsToBusiness(spaceId, businessId) {
+      return spaceId is string
+        && !(spaceId in ['all', 'all_spaces'])
+        && spaceId.size() > 0
+        && exists(/databases/$(database)/documents/financialSpaces/$(spaceId))
+        && (
+          (
+            get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.type == 'business'
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.linkedBusinessId == businessId
+          )
+          || (
+            get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.type in ['personal', 'other']
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.globalSpaceSchemaVersion == 1
+            && get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.businessId == businessId
+          )
+        );
+    }
+    function preservesSaleSpaceAssignment(sale, persistedSale, businessId) {
+      return 'spaceId' in sale
+        && sale.spaceId == persistedSale.spaceId
+        && persistedSpaceBelongsToBusiness(sale.spaceId, businessId)
+        && (
+          !('financialSpaceId' in sale)
+          || sale.financialSpaceId == sale.spaceId
+          || (
+            'financialSpaceId' in persistedSale
+            && sale.financialSpaceId == persistedSale.financialSpaceId
+          )
+        );
+    }
+    function financialSpace(spaceId) {
+      return get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data;
+    }
+    function ownsActiveBusiness(businessId) {
+      return activeUser()
+        && activeBusiness(businessId)
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+    function canReadFinancialSpace(spaceId) {
+      let space = financialSpace(spaceId);
+      return signedIn() && space.active != false && financialPlanAllows(spaceId) && (
+        (
+          space.type == 'business'
+          && (
+            ownsActiveBusiness(space.linkedBusinessId)
+            || (canAccessSpace(space.linkedBusinessId, spaceId) && permissionGranted(space.linkedBusinessId, 'financial.view'))
+          )
+        )
+        || (
+          space.type in ['personal', 'other']
+          && space.ownerUid == request.auth.uid
+        )
+      );
+    }
+    function canManageFinancialSpaceMetadata(spaceId) {
+      let space = financialSpace(spaceId);
+      let businessOwner = space.type == 'business' && ownsActiveBusiness(space.linkedBusinessId);
+      return signedIn() && space.active != false && financialWorkspaceWritable(space) && (
+        (
+          space.type == 'business'
+          && (businessOwner || canAccessSpace(space.linkedBusinessId, spaceId))
+          && subscriptionAllowsWrites(space.linkedBusinessId)
+          && (businessOwner || permissionGranted(space.linkedBusinessId, 'financial.view'))
+        )
+        || (
+          space.type in ['personal', 'other']
+          && space.ownerUid == request.auth.uid
+        )
+      );
+    }
+    function canManageFinancialSpace(spaceId) {
+      return financialPlanAllows(spaceId) && canManageFinancialSpaceMetadata(spaceId);
+    }
+    function financialPlanAllows(spaceId) {
+      let space = financialSpace(spaceId);
+      let businessId = space.get('businessId',null) != null ? space.businessId
+        : (space.get('linkedBusinessId',null) != null ? space.linkedBusinessId : userProfile().get('businessId',null));
+      return businessId == null || planAllowsFeature(businessId,'financeAdvanced');
+    }
+    function financialWorkspaceWritable(space) {
+      let businessId = space.get('businessId', null);
+      let linkedId = space.get('linkedBusinessId', null);
+      let scope = businessId != null ? businessId : linkedId;
+      return (businessId == null || linkedId == null || businessId == linkedId)
+        && (scope == null || workspaceWriteAllowed(scope));
+    }
+    function creditCardAt(homeSpaceId, cardId) {
+      return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/creditCards/$(cardId)).data;
+    }
+    function canCustomizeFinancialPresentation(spaceId) {
+      let space = financialSpace(spaceId);
+      // All callers already require canManageFinancialSpace. Do not expand it
+      // twice: membership/generation checks otherwise exhaust Rules' budget.
+      return (
+        (space.type == 'business'
+          && roleForBusiness(space.linkedBusinessId) in ['owner', 'manager', 'admin'])
+        || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid
+          && activeUser() && userProfile().role in ['owner', 'manager', 'admin'])
+      );
+    }
+    function validFinancialPresentation(p) {
+      return p is map && p.keys().hasOnly(['displayName', 'cardNickname', 'color', 'gradientVariant'])
+        && p.get('displayName', '') is string && p.get('displayName', '').size() <= 80
+        && p.get('cardNickname', '') is string && p.get('cardNickname', '').size() <= 80
+        && (p.get('color', '') == '' || (p.color is string && p.color.matches('^#[0-9a-fA-F]{6}$')))
+        && p.get('gradientVariant', 'solid') in ['solid', 'gradient'];
+    }
+    function financialPresentationWriteAllowed(spaceId) {
+      return resource == null
+        ? (!('presentation' in request.resource.data) || (canCustomizeFinancialPresentation(spaceId)
+          && validFinancialPresentation(request.resource.data.presentation)))
+        : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+          || (canCustomizeFinancialPresentation(spaceId)
+            && validFinancialPresentation(request.resource.data.get('presentation', {}))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'presentation', 'presentationUpdatedAt', 'workspaceGeneration', 'workspaceWriteId'
+            ])));
+    }
+    function financialAccountAt(homeSpaceId, accountId) {
+      return get(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/financialAccounts/$(accountId)).data;
+    }
+    function validFinancialAccountAccess(account, homeSpaceId) {
+      return (
+        !('accessMode' in account)
+        && account.financialSpaceId == homeSpaceId
+      ) || (
+        account.accountHomeSpaceId == homeSpaceId
+        && account.accessMode in ['all_spaces', 'selected_spaces', 'single_space']
+        && account.allowedFinancialSpaceIds is list
+        && account.allowedFinancialSpaceIds.size() <= 50
+        && account.defaultFinancialSpaceId is string
+        && account.defaultFinancialSpaceId.size() > 0
+        && (
+          (account.accessMode == 'all_spaces' && account.allowedFinancialSpaceIds.size() == 0)
+          || (account.accessMode == 'selected_spaces' && account.allowedFinancialSpaceIds.size() > 0)
+          || (account.accessMode == 'single_space' && account.allowedFinancialSpaceIds.size() == 1 && account.allowedFinancialSpaceIds[0] == account.defaultFinancialSpaceId)
+        )
+      );
+    }
+    function financialAccountAllowsSpace(account, targetSpaceId) {
+      let target = financialSpace(targetSpaceId);
+      return account.active == true
+        && account.ownerUid == target.ownerUid
+        && (
+          (!('accessMode' in account) && account.financialSpaceId == targetSpaceId)
+          || account.accessMode == 'all_spaces'
+          || (account.accessMode == 'selected_spaces' && targetSpaceId in account.allowedFinancialSpaceIds)
+          || (account.accessMode == 'single_space' && account.defaultFinancialSpaceId == targetSpaceId)
+        );
+    }
+    function validCrossSpaceFinancialAccountUse(targetSpaceId, homeSpaceId, accountId) {
+      let account = financialAccountAt(homeSpaceId, accountId);
+      return exists(/databases/$(database)/documents/financialSpaces/$(homeSpaceId)/financialAccounts/$(accountId))
+        && financialAccountAllowsSpace(account, targetSpaceId)
+        && (homeSpaceId == targetSpaceId || request.auth.uid == account.ownerUid);
+    }
+    function validFinancialEntryAccount(spaceId, entry) {
+      return !('financialAccountId' in entry) || entry.financialAccountId == null
+        ? true
+        : entry.financialAccountId is string
+          && (
+            'financialAccountHomeSpaceId' in entry
+              ? entry.financialAccountHomeSpaceId is string
+                && validCrossSpaceFinancialAccountUse(spaceId, entry.financialAccountHomeSpaceId, entry.financialAccountId)
+              : exists(/databases/$(database)/documents/financialSpaces/$(spaceId)/financialAccounts/$(entry.financialAccountId))
+          );
+    }
+    function financialAccountScopeUpdateAllowed(before, after, homeSpaceId) {
+      return !after.diff(before).affectedKeys().hasAny([
+          'accountHomeSpaceId', 'accessMode', 'allowedFinancialSpaceIds', 'defaultFinancialSpaceId', 'active'
+        ])
+        || (
+          request.auth.uid == before.ownerUid
+          && validFinancialAccountAccess(after, homeSpaceId)
+        );
+    }
+    function validCreditCardAccess(card, homeSpaceId) {
+      return card.cardHomeSpaceId == homeSpaceId
+        && card.accessMode in ['all_spaces', 'selected_spaces', 'single_space']
+        && card.allowedFinancialSpaceIds is list
+        && card.allowedFinancialSpaceIds.size() <= 50
+        && card.defaultFinancialSpaceId is string
+        && card.defaultFinancialSpaceId.size() > 0
+        && (
+          (card.accessMode == 'all_spaces' && card.allowedFinancialSpaceIds.size() == 0)
+          || (card.accessMode == 'selected_spaces' && card.allowedFinancialSpaceIds.size() > 0)
+          || (card.accessMode == 'single_space' && card.allowedFinancialSpaceIds.size() == 1 && card.allowedFinancialSpaceIds[0] == card.defaultFinancialSpaceId)
+        );
+    }
+    function creditCardAllowsSpace(card, targetSpaceId) {
+      let target = financialSpace(targetSpaceId);
+      return card.active == true
+        && card.ownerUid == target.ownerUid
+        && (
+          (!('accessMode' in card) && card.financialSpaceId == targetSpaceId)
+          || card.accessMode == 'all_spaces'
+          || (card.accessMode == 'selected_spaces' && targetSpaceId in card.allowedFinancialSpaceIds)
+          || (card.accessMode == 'single_space' && card.defaultFinancialSpaceId == targetSpaceId)
+        );
+    }
+    function validCrossSpaceCardUse(targetSpaceId, cardHomeSpaceId, cardId) {
+      let card = creditCardAt(cardHomeSpaceId, cardId);
+      return exists(/databases/$(database)/documents/financialSpaces/$(cardHomeSpaceId)/creditCards/$(cardId))
+        && creditCardAllowsSpace(card, targetSpaceId)
+        && (
+          cardHomeSpaceId == targetSpaceId
+          || request.auth.uid == card.ownerUid
+        );
+    }
+    function validFinancialEntryCreditPayment(spaceId, entry) {
+      return !('paymentMethod' in entry)
+        || entry.paymentMethod != 'credit_card'
+        || (
+          entry.status in ['paid', 'reversed']
+          && entry.creditCardId is string
+          && entry.cardHomeSpaceId is string
+          && entry.creditCardInvoiceId is string
+          && validCrossSpaceCardUse(spaceId, entry.cardHomeSpaceId, entry.creditCardId)
+          && existsAfter(/databases/$(database)/documents/financialSpaces/$(entry.cardHomeSpaceId)/creditCardInvoices/$(entry.creditCardInvoiceId))
+          && getAfter(/databases/$(database)/documents/financialSpaces/$(entry.cardHomeSpaceId)/creditCardInvoices/$(entry.creditCardInvoiceId)).data.creditCardId == entry.creditCardId
+        );
+    }
+    function creditCardScopeUpdateAllowed(before, after, homeSpaceId) {
+      return !after.diff(before).affectedKeys().hasAny([
+          'cardHomeSpaceId', 'accessMode', 'allowedFinancialSpaceIds', 'defaultFinancialSpaceId', 'active'
+        ])
+        || (
+          request.auth.uid == before.ownerUid
+          && validCreditCardAccess(after, homeSpaceId)
+        );
+    }
+    match /plans/{planId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      // O primeiro perfil é criado apenas pela completeBusinessOnboarding.
+      allow create: if false;
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && (
+          request.resource.data.uid == resource.data.uid
+          || (
+            resource.data.businessId == 'adi-festa'
+            && !('uid' in resource.data)
+            && request.resource.data.uid == request.auth.uid
+          )
+        )
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.businessId == resource.data.businessId
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'migrationVersion', 'migratedAt'
+          ])
+          || (
+            resource.data.businessId == 'adi-festa'
+            && get(/databases/$(database)/documents/businesses/adi-festa).data.ownerId == request.auth.uid
+          )
+        )
+        && (
+          request.resource.data.role == resource.data.role
+          || (
+            resource.data.businessId == 'adi-festa'
+            && resource.data.role == 'admin'
+            && request.resource.data.role == 'owner'
+            && get(/databases/$(database)/documents/businesses/adi-festa).data.ownerId == request.auth.uid
+          )
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'uid', 'name', 'phone', 'role', 'permissions', 'onboardingCompleted',
+          'lastLoginAt', 'migrationVersion', 'migratedAt', 'updatedAt', 'tutorialVersions'
+        ])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tutorialVersions'])
+          || (
+            request.resource.data.tutorialVersions is map
+            && request.resource.data.tutorialVersions.keys().hasOnly([
+              'appIntro', 'financial', 'selling', 'products', 'clients',
+              'crm', 'campaigns', 'catalog', 'orders', 'settings'
+            ])
+            && request.resource.data.tutorialVersions.get('appIntro', 0) is int
+            && request.resource.data.tutorialVersions.get('appIntro', 0) >= 0
+            && request.resource.data.tutorialVersions.get('appIntro', 0) <= 100
+          )
+        );
+      allow delete: if false;
+    }
+
+    // Preferências de visualização são pessoais e contêm somente referências
+    // para espaços que serão novamente autorizados pelas regras de cada espaço.
+    match /financialViewProfiles/{profileUid} {
+      allow read: if signedIn() && request.auth.uid == profileUid;
+      allow create, update: if signedIn()
+        && request.auth.uid == profileUid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.customViews is list
+        && request.resource.data.customViews.size() <= 30
+        && request.resource.data.favoriteViewIds is list
+        && request.resource.data.favoriteViewIds.size() <= 50
+        && request.resource.data.schemaVersion == 1
+        // A reset prunes only the removed business references and advances this
+        // revision. Old cached profiles may not overwrite that cleanup.
+        && (resource == null || resource.data.get('profileRevision', 0) == 0
+          || request.resource.data.get('profileRevision', -1) == resource.data.profileRevision + 1)
+        && request.resource.data.get('profileRevision', 0) is int
+        && request.resource.data.get('profileRevision', 0) >= 0
+        && request.resource.data.keys().hasOnly([
+          'ownerUid', 'customViews', 'favoriteViewIds', 'defaultViewId',
+          'lastViewId', 'schemaVersion', 'updatedAt', 'profileRevision'
+        ]);
+      allow delete: if false;
+    }
+
+    match /publicCatalogSlugs/{slug} {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+    match /catalogStoreBindings/{token} {
+      allow get: if signedIn() && (resource == null || (belongsToBusiness(resource.data.businessId)
+        && canAccessSpace(resource.data.businessId, resource.data.spaceId)));
+      allow list, create, update, delete: if false;
+    }
+    function boundCatalog(token) {
+      return exists(/databases/$(database)/documents/catalogStoreBindings/$(token))
+        || (exists(/databases/$(database)/documents/publicCatalogs/$(token))
+          && get(/databases/$(database)/documents/publicCatalogs/$(token)).data.get('legacyStoreRetired',false));
+    }
+    function scopedCatalogOrder(businessId, order) {
+      let business = get(/databases/$(database)/documents/businesses/$(businessId)).data;
+      let modern = exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+      let actor = modern ? get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data : userProfile();
+      let space = order.get('spaceId','');
+      let active = modern ? actor.get('status','') == 'active' : !business.get('legacyAccessDisabled',false) && actor.get('businessId','') == businessId && actor.get('active',false);
+      return signedIn() && business.active == true && active && (actor.role == 'owner'
+        || (space is string && space != '' && !(space in ['all','all_spaces'])
+          && (actor.get('permissions',{}).get('sales.viewAll',false) || (!modern && actor.role in ['admin','manager']))
+          && (!modern || actor.get('spaceAccess','selected') == 'all' || space in actor.get('allowedSpaceIds',[]))));
+    }
+    match /publicCatalogs/{visitToken} {
+      allow get: if resource == null || !resource.data.get('legacyStoreRetired',false)
+        || (signedIn() && belongsToBusiness(resource.data.businessId));
+      allow list: if false;
+      // Old links remain readable; only the server may publish after explicit
+      // owner association. Stale PWAs cannot recreate a mixed global catalog.
+      allow create, update: if false;
+      allow delete: if false;
+
+      match /orders/{orderId} {
+        function catalog() {
+          return get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data;
+        }
+        // Pedidos públicos são validados e gravados exclusivamente pela
+        // Cloud Function submitCatalogOrder. O Admin SDK ignora estas regras.
+        allow create: if false;
+        allow get: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
+        allow list: if signedIn() && scopedCatalogOrder(catalog().businessId, resource.data);
+        // Archived orders are read-only; V2 transitions use validated callables.
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /campaignProgress/{phoneHash} {
+        allow get: if !boundCatalog(visitToken);
+        allow list: if false;
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /phoneIndex/{phoneHash} {
+        // A busca por telefone passa pela função com rate limit e resposta uniforme.
+        allow get: if false;
+        allow list: if false;
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /portalProfiles/{clientRefToken} {
+        allow get: if !boundCatalog(visitToken);
+        allow list: if false;
+        allow create, update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /portalSessions/{sessionHash} {
+        allow get: if !boundCatalog(visitToken);
+        allow list: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow create: if false;
+        allow update: if !boundCatalog(visitToken) && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+      match /redemptionRequests/{requestId} {
+        allow create: if !boundCatalog(visitToken) && request.resource.data.id == requestId
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && request.resource.data.status == 'solicitado'
+          && request.resource.data.businessId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId
+          && request.resource.data.visitId == get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.visitId
+          && request.resource.data.clientRefToken is string
+          && request.resource.data.portalSessionHash is string
+          && exists(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash))
+          && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.active == true
+          && get(/databases/$(database)/documents/publicCatalogs/$(visitToken)/portalSessions/$(request.resource.data.portalSessionHash)).data.clientRefToken == request.resource.data.clientRefToken;
+        allow get: if !boundCatalog(visitToken);
+        allow list: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow update: if !boundCatalog(visitToken) && signedIn() && belongsToBusiness(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId)
+          && workspaceWriteAllowed(get(/databases/$(database)/documents/publicCatalogs/$(visitToken)).data.businessId);
+        allow delete: if false;
+      }
+    }
+
+    match /businesses/{businessId} {
+      // Server-authorized exchange transactions only. No client replay or edits.
+      match /saleExchanges/{id} { allow read, write: if false; }
+      match /saleExchangeSummaries/{id} { allow read, write: if false; }
+      match /exchangeCredits/{id} { allow read, write: if false; }
+      match /exchangeCreditEvents/{id} { allow read, write: if false; }
+      match /saleExchangeMetrics/{id} { allow read, write: if false; }
+      // Recovery intake is server-only. Payloads can contain private snapshots.
+      // No direct client read/write, including owner. Callables scope each read.
+      match /saleRecoveryReviews/{saleId} {
+        allow read, write: if false;
+        match /{document=**} { allow read, write: if false; }
+      }
+      match /saleRecoveryOperations/{operationId} {
+        allow read, write: if false;
+      }
+      match /onlineStores/{storeId} {
+        allow get: if hasPermission(businessId, 'products.edit') && canAccessSpace(businessId, resource.data.spaceId);
+        allow list, create, update, delete: if false;
+      }
+      match /onlineStockReservations/{reservationId} {
+        allow read, write: if false;
+      }
+      match /onlineOrderReservations/{orderId} {
+        allow read, write: if false;
+      }
+      match /workspaceResetJobs/{operationId} {
+        allow read: if isOwner(businessId)
+          && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+        allow write: if false;
+      }
+      // Empresas e trials iniciais são provisionados exclusivamente pelo backend.
+      allow create: if false;
+      allow read: if belongsToBusiness(businessId);
+      allow update: if workspaceWriteAllowed(businessId) && ((
+        isOwner(businessId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.slug == resource.data.slug
+          && request.resource.data.subscription == resource.data.subscription
+          && request.resource.data.limits == resource.data.limits
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'legalName', 'document', 'phone', 'email', 'businessType',
+            'city', 'state', 'address', 'receiptName', 'active',
+            'onboardingCompleted', 'updatedAt', 'workspaceWriteId'
+          ])
+        )
+        || (
+          signedIn()
+          && businessId == 'adi-festa'
+          && resource.data.ownerId == request.auth.uid
+          && request.resource.data.ownerId == resource.data.ownerId
+          && (
+            (
+              !('subscription' in resource.data)
+              && request.resource.data.subscription.planId == 'internal'
+              && request.resource.data.subscription.status == 'active'
+            )
+            || request.resource.data.subscription == resource.data.subscription
+          )
+          && (
+            !('limits' in resource.data)
+            || request.resource.data.limits == resource.data.limits
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'slug', 'onboardingCompleted', 'businessType', 'subscription',
+            'limits', 'migrationVersion', 'migratedAt', 'updatedAt', 'workspaceWriteId'
+          ])
+        ));
+      allow delete: if false;
+
+      match /billingCheckoutAttempts/{attemptId} {
+        allow read: if isOwner(businessId)
+          && resource.data.businessId == businessId
+          && resource.data.requestedBy == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+      match /subscriptionIntents/{intentId} {
+        allow read: if isOwner(businessId);
+        allow create, update, delete: if false;
+      }
+      match /paymentIntents/{intentId} {
+        allow get: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view')
+            || (permissionGranted(businessId, 'sales.create')
+              && resource.data.createdByUid == request.auth.uid
+              && canAccessSpace(businessId, resource.data.spaceId)))
+          && resource.data.businessId == businessId;
+        allow list: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'));
+        allow create, update, delete: if false;
+
+        match /events/{eventId} {
+          allow read: if belongsToBusiness(businessId)
+            && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'))
+            && get(/databases/$(database)/documents/businesses/$(businessId)/paymentIntents/$(intentId)).data.businessId == businessId;
+          allow create, update, delete: if false;
+        }
+      }
+      match /paymentTerminals/{terminalId} {
+        allow get: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'))
+          && resource.data.businessId == businessId;
+        allow list: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'));
+        allow create, update, delete: if false;
+      }
+      match /paymentProviderConfigs/{providerId} {
+        allow read: if isAdmin(businessId)
+          && resource.data.businessId == businessId;
+        allow create, update, delete: if false;
+      }
+      match /paymentReceivables/{receivableId} {
+        allow get: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'))
+          && resource.data.businessId == businessId;
+        allow list: if belongsToBusiness(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'financial.view'));
+        allow create, update, delete: if false;
+      }
+      match /invites/{inviteId} {
+        allow read: if isAdmin(businessId);
+        allow create: if workspaceWriteAllowed(businessId) && isOwner(businessId)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == 'pending';
+        allow update: if workspaceWriteAllowed(businessId) && isOwner(businessId);
+        allow delete: if false;
+      }
+      match /auditLogs/{logId} {
+        allow read: if isOwner(businessId) || hasPermission(businessId, 'team.view');
+        allow create: if workspaceWriteAllowed(businessId) && belongsToBusiness(businessId)
+          && request.resource.data.businessId == businessId;
+        allow update, delete: if false;
+      }
+      match /productVariants/{variantId} {
+        function parentProduct(productId) {
+          // A criação de um produto variável grava o pai e suas variações na
+          // mesma transação offline-first. getAfter também enxerga o produto
+          // pai que será criado por essa transação; get enxergava apenas o
+          // estado anterior e rejeitava toda a operação com permission-denied.
+          return getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId));
+        }
+        function validVariant(data) {
+          return data.id == variantId
+            && data.businessId == businessId
+            && data.parentProductId is string
+            && data.displayName is string
+            && data.attributeValues is map
+            && data.price is number
+            && data.stock is number
+            && data.active is bool
+            && data.keys().hasOnly([
+              'id', 'businessId', 'ownerId', 'parentProductId',
+              'attributeValues', 'displayName', 'displayNameNormalized',
+              'searchTokens', 'sku', 'barcode', 'price', 'stock',
+              'cost', 'custo', 'minStock', 'active', 'catalogVisible', 'allowNegativeStock', 'onlineReservedStock', 'onlineOrderFinalizationId',
+              'durationValue', 'durationUnit',
+              'image', 'imageMode', 'imageUrl', 'imageStoragePath',
+              'imageThumbUrl', 'imageThumbStoragePath', 'imageUpdatedAt',
+              'imageUploadStatus', 'imageOperationId',
+              'createdAt', 'updatedAt', 'updatedByUid', 'actorUid',
+              'actorNameSnapshot', 'actorRoleSnapshot', 'schemaVersion', 'version', 'workspaceGeneration', 'workspaceWriteId'
+            ]);
+        }
+        allow read: if hasPermission(businessId, 'products.view')
+          && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
+          && (!resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
+        allow create: if canWriteCollection(businessId, 'productVariants')
+          && canAccessProduct(businessId,parentProduct(request.resource.data.parentProductId).data)
+          && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
+          && joinsProductImportFence(businessId)
+          && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
+          && validVariant(request.resource.data)
+          && (!request.resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId))
+          && parentProduct(request.resource.data.parentProductId).data.businessId == businessId;
+        allow update: if canWriteCollection(businessId, 'productVariants')
+          && canAccessProduct(businessId,parentProduct(resource.data.parentProductId).data)
+          && preservesOnlineStock(businessId,request.resource.data,resource.data,'stock','v_'+variantId)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sku','codigo','barcode','active','deleted','deletedAt']) || joinsProductImportFence(businessId))
+          && (
+            !memberExists(businessId)
+            || permissionGranted(businessId, 'products.edit')
+            || (
+              (permissionGranted(businessId, 'inventory.adjust') || permissionGranted(businessId, 'sales.create'))
+              && onlyOperationalVariantStockChanged(request.resource.data, resource.data)
+            )
+          )
+          && validVariant(request.resource.data)
+          && (!request.resource.data.keys().hasAny(['cost', 'custo']) || legacySensitiveFieldsAllowed(businessId))
+          && request.resource.data.parentProductId == resource.data.parentProductId
+          && request.resource.data.businessId == resource.data.businessId;
+        allow delete: if false;
+      }
+      match /processedOperations/{operationId} {
+        allow read: if canReadCollection(businessId, 'processedOperations');
+        allow create: if canRecordProcessedOperation(businessId)
+          && !(request.resource.data.get('eventKind','') in ['sale_exchange','sale_exchange_credit','sale_exchange_credit_cancel'])
+          && !exists(/databases/$(database)/documents/businesses/$(businessId)/syncIncidentArchives/$(operationId))
+          && request.resource.data.id == operationId
+          && request.resource.data.idempotencyKey == operationId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.status in ['processed', 'recovered_existing']
+          && request.resource.data.schemaVersion == 3
+          && request.resource.data.keys().hasOnly([
+            'id', 'idempotencyKey', 'businessId', 'ownerId', 'status',
+            'eventKind', 'processedAt', 'createdAtLocal', 'schemaVersion', 'workspaceGeneration', 'workspaceWriteId'
+          ]);
+        allow update, delete: if false;
+      }
+      // Originals may contain private historical snapshots. Only authenticated
+      // callable services expose a scoped receipt; clients cannot edit evidence.
+      match /syncIncidentArchives/{operationId} {
+        allow read, write: if false;
+        match /{document=**} { allow read, write: if false; }
+      }
+      match /campaignEvents/{eventId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'campaignEvents')
+          && request.resource.data.id == eventId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.campaignId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.sourceType in ['sale', 'payment', 'cancellation', 'redemption', 'expiration']
+          && request.resource.data.transition in ['earned', 'confirmed', 'reversed', 'redeemed', 'expired'];
+        allow update, delete: if false;
+      }
+      match /campaignRedemptions/{redemptionId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'campaignRedemptions')
+          && request.resource.data.id == redemptionId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.campaignId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.status == 'redeemed';
+        allow update, delete: if false;
+      }
+      match /paymentAllocations/{allocationId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'paymentAllocations')
+          && request.resource.data.id == allocationId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.engineVersion == 2
+          && request.resource.data.paymentId is string
+          && request.resource.data.saleId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+        allow update, delete: if false;
+      }
+      match /customerSubscriptionEvents/{eventId} {
+        allow read: if belongsToBusiness(businessId);
+        allow create: if canWriteCollection(businessId, 'customerSubscriptionEvents')
+          && request.resource.data.id == eventId
+          && request.resource.data.businessId == businessId
+          && request.resource.data.subscriptionId is string
+          && request.resource.data.clientId is string
+          && request.resource.data.productId is string
+          && request.resource.data.transition in ['activation', 'renewal', 'paused', 'reactivated', 'expired', 'cancelled', 'sale_reversed', 'price_changed', 'plan_changed'];
+        allow update, delete: if false;
+      }
+      match /members/{memberUid} {
+        // O próprio usuário pode ler somente o seu vínculo, inclusive quando
+        // desativado, para que a interface explique o bloqueio sem encerrar a
+        // sessão do Firebase. O acesso ao restante da empresa continua
+        // condicionado a belongsToBusiness/activeMember.
+        allow read: if (signedIn() && request.auth.uid == memberUid)
+          || (belongsToBusiness(businessId) && hasPermission(businessId, 'team.view'));
+        allow create, update, delete: if false;
+      }
+      match /teamInvites/{inviteId} {
+        allow read: if hasPermission(businessId, 'team.view');
+        allow create, update, delete: if false;
+      }
+      match /productFinancials/{productId} {
+        allow read: if hasPermission(businessId, 'cost.view')
+          && canAccessProduct(businessId,get(/databases/$(database)/documents/businesses/$(businessId)/products/$(resource.data.productId)).data);
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId)).data)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.productId == productId;
+        allow delete: if false;
+      }
+      match /variantFinancials/{variantId} {
+        function scopedVariant(id) {
+          let variant=get(/databases/$(database)/documents/businesses/$(businessId)/productVariants/$(id)).data;
+          return canAccessProduct(businessId,get(/databases/$(database)/documents/businesses/$(businessId)/products/$(variant.parentProductId)).data);
+        }
+        allow read: if hasPermission(businessId, 'cost.view') && scopedVariant(resource.data.variantId);
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedVariant(variantId))
+          && request.resource.data.businessId == businessId
+          && request.resource.data.variantId == variantId;
+        allow delete: if false;
+      }
+      match /saleFinancials/{saleId} {
+        function scopedSale(id) {
+          let sale=get(/databases/$(database)/documents/businesses/$(businessId)/sales/$(id)).data;
+          return isOwner(businessId) || (sale.get('spaceId',null) != null && canAccessSpace(businessId,sale.spaceId)
+            && (permissionGranted(businessId,'sales.viewAll') || sale.get('actorUid','') == request.auth.uid));
+        }
+        allow read: if (hasPermission(businessId, 'cost.view') || hasPermission(businessId, 'profit.view')) && scopedSale(resource.data.saleId);
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedSale(saleId))
+          && request.resource.data.businessId == businessId
+          && request.resource.data.saleId == saleId;
+        allow delete: if false;
+      }
+      match /stockMovementFinancials/{movementId} {
+        function scopedMovement(id) {
+          let movement=get(/databases/$(database)/documents/businesses/$(businessId)/stockMovements/$(id)).data;
+          return isOwner(businessId) || (movement.get('spaceId',null) != null && canAccessSpace(businessId,movement.spaceId));
+        }
+        allow read: if hasPermission(businessId, 'cost.view') && scopedMovement(resource.data.stockMovementId);
+        allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
+          && (isOwner(businessId) || scopedMovement(movementId))
+          && request.resource.data.businessId == businessId
+          && request.resource.data.stockMovementId == movementId;
+        allow delete: if false;
+      }
+      match /stockMovements/{movementId} {
+        function serverExchangeMovement(data) {
+          return data.keys().hasAny(['exchangeId'])
+            || data.get('source','') in ['sale_exchange','exchange_credit_checkout']
+            || data.get('tipo','') in ['exchange_return','exchange_issue'];
+        }
+        function notRecoveryReplay() {
+          let saleId = request.resource.data.get('vendaId', '');
+          // A reviewed original is applied only by its owner decision transaction.
+          // Legitimate later reversals use venda_desfeita and remain unchanged.
+          return saleId == '' || request.resource.data.get('tipo', '') == 'venda_desfeita'
+            || !exists(/databases/$(database)/documents/businesses/$(businessId)/saleRecoveryReviews/$(saleId));
+        }
+        allow read: if hasPermission(businessId, 'inventory.view')
+          // A new movement is read for idempotency before the same transaction
+          // creates it. Missing docs contain no private or other-space data.
+          && (resource == null || (
+            (isOwner(businessId) || (resource.data.get('spaceId',null) != null && canAccessSpace(businessId,resource.data.spaceId)))
+            && (!resource.data.keys().hasAny(['custoUnitario', 'costUnit']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'))
+          ));
+        allow create, update: if !serverExchangeMovement(request.resource.data)
+          && (resource == null || !serverExchangeMovement(resource.data))
+          && notRecoveryReplay()
+          && canWriteCollection(businessId, 'stockMovements')
+          && (isOwner(businessId) || (request.resource.data.get('spaceId',null) != null && canAccessSpace(businessId,request.resource.data.spaceId)))
+          && (isOwner(businessId) || canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.produtoId)).data))
+          && request.resource.data.businessId == businessId
+          && !request.resource.data.keys().hasAny(['custoUnitario', 'costUnit']);
+        allow delete: if false;
+      }
+      match /activityEvents/{eventId} {
+        allow read: if belongsToBusiness(businessId)
+          && (permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid
+            || (resource.data.get('type', '') == 'sale' && canReadOperationalSales(businessId)
+              && canAccessSpace(businessId, resource.data.get('spaceId', ''))))
+          && (!('spaceId' in resource.data) || canAccessSpace(businessId, resource.data.spaceId));
+        allow create, update, delete: if false;
+      }
+      match /products/{productId} {
+        allow read: if hasPermission(businessId, 'products.view')
+          && (resource == null || canAccessProduct(businessId,resource.data))
+          && (resource == null || !resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
+        allow create: if canWriteCollection(businessId, 'products')
+          && canAssignProductScope(businessId,request.resource.data)
+          && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
+          && joinsProductImportFence(businessId)
+          && !request.resource.data.keys().hasAny(['spreadsheetImportOperationId'])
+          && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
+          && request.resource.data.businessId == businessId
+          && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
+          && validProductSpaceScope(request.resource.data, businessId);
+        allow update: if canAccessProduct(businessId,resource.data)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
+          && (preservesProductSpaceScope(request.resource.data,resource.data) || canAssignProductScope(businessId,request.resource.data))
+          && preservesOnlineStock(businessId,request.resource.data,resource.data,'estoqueAtual','p_'+productId)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['codigo','barcode','alternateBarcodes','spaceAccessMode','allowedSpaceIds','active','ativo','deleted','deletedAt']) || joinsProductImportFence(businessId))
+          && canWriteCollection(businessId, 'products')
+          && (
+            !memberExists(businessId)
+            || permissionGranted(businessId, 'products.edit')
+            || (
+              (permissionGranted(businessId, 'inventory.adjust') || permissionGranted(businessId, 'sales.create'))
+              && onlyOperationalProductStockChanged(request.resource.data, resource.data)
+            )
+          )
+          && (resource.data.businessId == businessId || (businessId == 'adi-festa' && !('businessId' in resource.data)))
+          && request.resource.data.businessId == businessId
+          && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
+          && validProductItemKind(request.resource.data)
+          && (
+            preservesProductSpaceScope(request.resource.data, resource.data)
+            || validProductSpaceScope(request.resource.data, businessId)
+          );
+        allow delete: if false;
+      }
+      // Import receipts are server-owned; a client cannot forge a completed creation.
+      match /productImportOperations/{operationId} {
+        allow read, write: if false;
+      }
+      match /productImportIdentifiers/{identifierId} {
+        allow read: if hasPermission(businessId, 'products.view');
+        allow create, update: if identifierId == 'catalog-revision'
+          && hasPermission(businessId, 'products.edit') && workspaceWriteAllowed(businessId)
+          && request.resource.data.businessId == businessId
+          && request.resource.data.revision is int
+          // MVCC validates the read version. Do not compare to the concurrently
+          // changed value here: that returns permission-denied before SDK retry.
+          && request.resource.data.revision > 0
+          && request.resource.data.commitToken is string
+          && request.resource.data.commitToken.size() == 36
+          && request.resource.data.keys().hasOnly(['businessId','revision','commitToken','updatedAt','workspaceGeneration','workspaceWriteId']);
+        allow delete: if false;
+      }
+      match /sales/{saleId} {
+        function notReconciledSale() {
+          // Evaluate the private tombstone here, without granting its contents
+          // to sellers/cashiers. Direct writes and old clients use this fence too.
+          let resolution = /databases/$(database)/documents/businesses/$(businessId)/balanceAdjustments/$(('legacy_reconciliation:' + saleId));
+          // Once preserved for review, only the owner decision callable may
+          // materialize the original. This also fences old/offline clients.
+          let review = /databases/$(database)/documents/businesses/$(businessId)/saleRecoveryReviews/$(saleId);
+          return !exists(review) && (!exists(resolution)
+            || get(resolution).data.get('resolutionStatus', '') != 'resolved_by_reconciliation');
+        }
+        function validIntegratedPayment(data) {
+          let integrated = data.get('formaPagamento', '') == 'cartao_presencial' || data.get('paymentIntentId', null) != null;
+          let intent = integrated ? get(/databases/$(database)/documents/businesses/$(businessId)/paymentIntents/$(data.paymentIntentId)).data : {};
+          return !integrated || (intent.businessId == businessId && intent.status == 'approved'
+            && intent.saleId == saleId && intent.spaceId == data.spaceId
+            && intent.createdByUid == data.actorUid && data.actorUid == request.auth.uid
+            && intent.finalizationOperationId == data.operationId
+            && data.status == 'pago' && data.paymentState == 'paid'
+            && math.round(data.valorFinal * 100) == intent.amountCents);
+        }
+        allow read: if belongsToBusiness(businessId)
+          && (
+            resource == null
+            || (
+              (!memberExists(businessId) || permissionGranted(businessId, 'sales.viewAll') || resource.data.get('actorUid', '') == request.auth.uid
+                || (canReadOperationalSales(businessId) && canAccessSpace(businessId, resource.data.get('spaceId', ''))))
+              && (!('spaceId' in resource.data) || canAccessSpace(businessId, resource.data.spaceId))
+              && (!resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view') || permissionGranted(businessId, 'profit.view'))
+            )
+          );
+        allow create: if notReconciledSale()
+          && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
+          && request.resource.data.get('source','') != 'exchange_credit_checkout'
+          && canWriteCollection(businessId, 'sales')
+          && validOnlineSale(businessId,saleId,request.resource.data)
+          && validIntegratedPayment(request.resource.data)
+          && request.resource.data.businessId == businessId
+          && (!memberExists(businessId) || request.resource.data.get('actorUid', '') == request.auth.uid)
+          && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
+          && validSaleSpace(request.resource.data, businessId);
+        allow update: if exists(/databases/$(database)/documents/businesses/$(businessId)/saleExchangeSummaries/$(saleId)) ? false : (
+          // A stale legacy undo must not replay stock after canonical cancellation.
+          resource.data.get('cancellationMode','') != 'canonical_transaction'
+          &&
+          resource.data.get('source','') != 'exchange_credit_checkout'
+          && !request.resource.data.keys().hasAny(['exchangeCreditUsedCents','cashReceivedCents','exchangeCreditAllocations','exchangeCreditRequestHash','exchangeCreditRestoredCents'])
+          && canWriteCollection(businessId, 'sales')
+          && resource.data.get('onlineOrderId',null) == null && request.resource.data.get('onlineOrderId',null) == null
+          && resource.data.get('paymentIntentId', null) == null
+          && request.resource.data.get('paymentIntentId', null) == null
+          && request.resource.data.get('formaPagamento', '') != 'cartao_presencial'
+          && (
+            !memberExists(businessId)
+            || (
+              permissionGranted(businessId, 'sales.cancel')
+              && (roleForBusiness(businessId) == 'owner' || canAccessSpace(businessId, resource.data.get('spaceId', '')))
+              && preservesSaleActor(request.resource.data, resource.data)
+            )
+          )
+          && (resource.data.businessId == businessId || (businessId == 'adi-festa' && !('businessId' in resource.data)))
+          && request.resource.data.businessId == businessId
+          && (!request.resource.data.keys().hasAny(['custoTotal', 'lucro']) || legacySensitiveFieldsAllowed(businessId))
+          && (
+            (
+              'spaceId' in resource.data
+              && preservesSaleSpaceAssignment(request.resource.data, resource.data, businessId)
+            )
+            || (
+              !('spaceId' in resource.data)
+              && (!('spaceId' in request.resource.data) || validSaleSpace(request.resource.data, businessId))
+            )
+          ));
+        allow delete: if false;
+      }
+      match /clients/{documentId} {
+        allow read: if canReadCollection(businessId, 'clients');
+        allow create: if browserClientWritesAllowed(businessId) && canCreateGenericDocument(businessId, 'clients', documentId);
+        allow update: if browserClientWritesAllowed(businessId) && canUpdateGenericDocument(businessId, 'clients', documentId);
+        allow delete: if false;
+      }
+      match /payments/{documentId} {
+        allow read: if canReadCollection(businessId, 'payments');
+        allow create: if (request.resource.data.get('spaceId',null) == null || validSaleSpace(request.resource.data, businessId))
+          && canCreateGenericDocument(businessId, 'payments', documentId);
+        allow update: if (resource.data.get('spaceId',null) == null
+            ? request.resource.data.get('spaceId',null) == null
+            : preservesSaleSpaceAssignment(request.resource.data, resource.data, businessId)
+              && canAccessSpace(businessId, resource.data.spaceId))
+          && canUpdateGenericDocument(businessId, 'payments', documentId);
+        allow delete: if false;
+      }
+      match /financialIncomeRoutes/{documentId} {
+        // Projection receipts are server-owned; clients cannot move/replay income.
+        allow read: if isOwner(businessId);
+        allow write: if false;
+      }
+      match /balanceAdjustments/{documentId} {
+        allow read: if canReadCollection(businessId, 'balanceAdjustments');
+        allow create: if canCreateGenericDocument(businessId, 'balanceAdjustments', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'balanceAdjustments', documentId);
+        allow delete: if false;
+      }
+      match /balanceEvents/{documentId} {
+        allow read: if canReadCollection(businessId, 'balanceEvents');
+        allow create: if canCreateGenericDocument(businessId, 'balanceEvents', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'balanceEvents', documentId);
+        allow delete: if false;
+      }
+      match /campaigns/{documentId} {
+        allow read: if canReadCollection(businessId, 'campaigns');
+        allow create: if canCreateGenericDocument(businessId, 'campaigns', documentId)
+          && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
+        allow update: if canUpdateGenericDocument(businessId, 'campaigns', documentId)
+          && (planAllowsFeature(businessId,'advancedCampaigns') || (request.resource.data.type == 'quantity_discount' && request.resource.data.eligibility.audienceType == 'all'));
+        allow delete: if false;
+      }
+      match /campaignProgress/{documentId} {
+        allow read: if canReadCollection(businessId, 'campaignProgress');
+        allow create: if canCreateGenericDocument(businessId, 'campaignProgress', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'campaignProgress', documentId);
+        allow delete: if false;
+      }
+      match /rewards/{documentId} {
+        allow read: if canReadCollection(businessId, 'rewards');
+        allow create: if canCreateGenericDocument(businessId, 'rewards', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'rewards', documentId);
+        allow delete: if false;
+      }
+      match /charges/{documentId} {
+        allow read: if canReadCollection(businessId, 'charges');
+        allow create: if canCreateGenericDocument(businessId, 'charges', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'charges', documentId);
+        allow delete: if false;
+      }
+      match /messageHistory/{documentId} {
+        allow read: if canReadCollection(businessId, 'messageHistory')
+          || (belongsToBusiness(businessId) && permissionGranted(businessId, 'customers.view') && permissionGranted(businessId, 'customers.edit'));
+        allow create: if canCreateGenericDocument(businessId, 'messageHistory', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'messageHistory', documentId);
+        allow delete: if false;
+      }
+      match /messageTemplates/{documentId} {
+        allow read: if canReadCollection(businessId, 'messageTemplates');
+        allow create: if canCreateGenericDocument(businessId, 'messageTemplates', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'messageTemplates', documentId);
+        allow delete: if false;
+      }
+      match /messageSequences/{documentId} {
+        allow read: if canReadCollection(businessId, 'messageSequences');
+        allow create: if canCreateGenericDocument(businessId, 'messageSequences', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'messageSequences', documentId);
+        allow delete: if false;
+      }
+      match /clientContacts/{documentId} {
+        allow read: if canReadCollection(businessId, 'clientContacts');
+        allow create: if canCreateGenericDocument(businessId, 'clientContacts', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'clientContacts', documentId);
+        allow delete: if false;
+      }
+      match /customerSubscriptions/{documentId} {
+        allow read: if canReadCollection(businessId, 'customerSubscriptions');
+        allow create: if canCreateGenericDocument(businessId, 'customerSubscriptions', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'customerSubscriptions', documentId);
+        allow delete: if false;
+      }
+      match /catalogOrders/{documentId} {
+        allow read: if scopedCatalogOrder(businessId, resource.data);
+        allow create, update: if false;
+        allow delete: if false;
+      }
+      match /customerMetrics/{documentId} {
+        allow read: if canReadCollection(businessId, 'customerMetrics');
+        allow create: if canCreateGenericDocument(businessId, 'customerMetrics', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'customerMetrics', documentId);
+        allow delete: if false;
+      }
+      match /customerMonthlyMetrics/{documentId} {
+        allow read: if canReadCollection(businessId, 'customerMonthlyMetrics');
+        allow create: if canCreateGenericDocument(businessId, 'customerMonthlyMetrics', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'customerMonthlyMetrics', documentId);
+        allow delete: if false;
+      }
+      match /customerSegments/{documentId} {
+        allow read: if canReadCollection(businessId, 'customerSegments');
+        allow create: if canCreateGenericDocument(businessId, 'customerSegments', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'customerSegments', documentId);
+        allow delete: if false;
+      }
+      match /visits/{documentId} {
+        allow read: if canReadCollection(businessId, 'visits');
+        allow create: if canCreateGenericDocument(businessId, 'visits', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'visits', documentId);
+        allow delete: if false;
+      }
+      match /settings/{documentId} {
+        function preservesStoreRetirement() {
+          return resource == null || !resource.data.get('legacyStoreRetired',false)
+            || (request.resource.data.get('legacyStoreRetired',false) == true
+              && !request.resource.data.keys().hasAny(['catalogSettings']));
+        }
+        allow read: if canReadCollection(businessId, 'settings');
+        allow create: if preservesStoreRetirement() && (canCreateGenericDocument(businessId, 'settings', documentId)
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && request.resource.data.businessId == businessId));
+        allow update: if preservesStoreRetirement() && (canUpdateGenericDocument(businessId, 'settings', documentId)
+          || (documentId == 'operation' && workspaceWriteAllowed(businessId) && hasPermission(businessId, 'settings.manage') && resource.data.businessId == businessId && request.resource.data.businessId == businessId));
+        allow delete: if false;
+      }
+      match /syncMetadata/{documentId} {
+        allow read: if canReadCollection(businessId, 'syncMetadata');
+        allow create: if canCreateGenericDocument(businessId, 'syncMetadata', documentId);
+        allow update: if canUpdateGenericDocument(businessId, 'syncMetadata', documentId);
+        allow delete: if false;
+      }
+    }
+
+    match /financialSpaces/{spaceId} {
+      allow read: if signedIn() && resource.data.active != false && (
+        (
+          resource.data.type == 'business'
+          && (
+            ownsActiveBusiness(resource.data.linkedBusinessId)
+            || canAccessSpace(resource.data.linkedBusinessId, spaceId)
+          )
+        )
+        || (
+          resource.data.type in ['personal', 'other']
+          && resource.data.ownerUid == request.auth.uid
+        )
+      );
+      allow create: if signedIn()
+        && financialWorkspaceWritable(request.resource.data)
+        && !(spaceId in ['all', 'all_spaces'])
+        && request.resource.data.id == spaceId
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.type in ['business', 'personal', 'other']
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && (
+          (
+            request.resource.data.type == 'business'
+            && request.resource.data.linkedBusinessId is string
+            && subscriptionAllowsWrites(request.resource.data.linkedBusinessId)
+            && (
+              ownsActiveBusiness(request.resource.data.linkedBusinessId)
+              || (
+                belongsToBusiness(request.resource.data.linkedBusinessId)
+                && permissionGranted(request.resource.data.linkedBusinessId, 'spaces.manage')
+              )
+            )
+          )
+          || (
+            request.resource.data.type in ['personal', 'other']
+            && request.resource.data.linkedBusinessId == null
+            && (request.resource.data.get('businessId', null) == null
+              || ownsActiveBusiness(request.resource.data.businessId)
+              || belongsToBusiness(request.resource.data.businessId))
+          )
+        )
+        && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId));
+      allow update: if canManageFinancialSpaceMetadata(spaceId)
+        && (
+          resource.data.type in ['personal', 'other']
+          || ownsActiveBusiness(resource.data.linkedBusinessId)
+          || hasPermission(resource.data.linkedBusinessId, 'spaces.manage')
+        )
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId
+        && (resource.data.get('businessId', null) == null
+          || request.resource.data.get('businessId', null) == resource.data.businessId)
+        && (
+          (
+            !('globalSpaceSchemaVersion' in resource.data)
+            && !('globalSpaceSchemaVersion' in request.resource.data)
+          )
+          || validGlobalSpaceFields(request.resource.data, spaceId)
+        );
+      allow delete: if false;
+
+      match /entries/{entryId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == entryId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.operationId is string
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.currency == 'BRL'
+          && request.resource.data.direction in ['in', 'out']
+          && (!('autoGenerated' in request.resource.data) || request.resource.data.autoGenerated != true)
+          && validFinancialEntryAccount(spaceId, request.resource.data)
+          && validFinancialEntryCreditPayment(spaceId, request.resource.data)
+          && request.resource.data.status in ['pending', 'paid', 'cancelled', 'reversed'];
+        allow update: if canManageFinancialSpace(spaceId)
+          && (!('autoGenerated' in resource.data) || resource.data.autoGenerated != true)
+          && (!('autoGenerated' in request.resource.data) || request.resource.data.autoGenerated != true)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && (
+            request.resource.data.amountCents == resource.data.amountCents
+            || (
+              resource.data.status == 'pending'
+              && request.resource.data.status == 'pending'
+              && request.resource.data.amountCents is int
+              && request.resource.data.amountCents > 0
+            )
+          )
+          && request.resource.data.currency == resource.data.currency
+          && request.resource.data.direction == resource.data.direction
+          && request.resource.data.sourceType == resource.data.sourceType
+          && request.resource.data.sourceId == resource.data.sourceId
+          && validFinancialEntryAccount(spaceId, request.resource.data)
+          && validFinancialEntryCreditPayment(spaceId, request.resource.data)
+          && request.resource.data.status in ['pending', 'paid', 'cancelled', 'reversed'];
+        allow delete: if false;
+      }
+      match /events/{eventId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == eventId
+          && request.resource.data.operationId == eventId
+          && request.resource.data.financialSpaceId == spaceId
+          && (!('autoGenerated' in request.resource.data) || request.resource.data.autoGenerated != true)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data == resource.data;
+        allow delete: if false;
+      }
+      match /categories/{categoryId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == categoryId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.ownerUid == get(/databases/$(database)/documents/financialSpaces/$(spaceId)).data.ownerUid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60
+          && request.resource.data.type in ['category', 'subcategory']
+          && request.resource.data.isDefault == false
+          && request.resource.data.active == true
+          && (
+            (request.resource.data.type == 'category' && request.resource.data.parentCategoryId == null)
+            || (
+              request.resource.data.type == 'subcategory'
+              && request.resource.data.parentCategoryId is string
+              && request.resource.data.parentCategoryId.size() > 0
+              && (
+                request.resource.data.parentCategoryId.matches('^default_(business|personal)_[a-z0-9_]+$')
+                || (
+                  exists(/databases/$(database)/documents/financialSpaces/$(spaceId)/categories/$(request.resource.data.parentCategoryId))
+                  && get(/databases/$(database)/documents/financialSpaces/$(spaceId)/categories/$(request.resource.data.parentCategoryId)).data.type == 'category'
+                )
+              )
+            )
+          );
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.parentCategoryId == resource.data.parentCategoryId
+          && request.resource.data.isDefault == resource.data.isDefault
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60;
+        allow delete: if false;
+      }
+      match /recurrences/{recurrenceId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == recurrenceId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid;
+        allow delete: if false;
+      }
+      match /financialAccounts/{accountId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && financialPresentationWriteAllowed(spaceId)
+          && request.resource.data.id == accountId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.type in ['cash', 'checking', 'wallet', 'savings', 'other', 'bank_account', 'digital_wallet', 'cash_wallet', 'investment_account', 'other_account']
+          && request.resource.data.initialBalanceCents is int
+          && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
+          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool)
+          && validFinancialAccountAccess(request.resource.data, spaceId)
+          && request.resource.data.active == true;
+        allow update: if canManageFinancialSpace(spaceId)
+          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+            ? financialPresentationWriteAllowed(spaceId)
+            : (
+          request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.initialBalanceCents is int
+          && (!('currentBalanceCents' in request.resource.data) || request.resource.data.currentBalanceCents is int)
+          && (!('includeInAvailableBalance' in request.resource.data) || request.resource.data.includeInAvailableBalance is bool)
+          && request.resource.data.active is bool
+          && financialAccountScopeUpdateAllowed(resource.data, request.resource.data, spaceId)));
+        allow delete: if false;
+      }
+      match /creditCards/{cardId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && financialPresentationWriteAllowed(spaceId)
+          && request.resource.data.id == cardId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && (
+            request.resource.data.last4 == null
+            || (request.resource.data.last4 is string && request.resource.data.last4.matches('^[0-9]{4}$'))
+          )
+          && request.resource.data.limitCents is int
+          && request.resource.data.limitCents >= 0
+          && request.resource.data.committedCents == 0
+          && request.resource.data.closingDay is int
+          && request.resource.data.closingDay >= 1
+          && request.resource.data.closingDay <= 31
+          && request.resource.data.dueDay is int
+          && request.resource.data.dueDay >= 1
+          && request.resource.data.dueDay <= 31
+          && validCreditCardAccess(request.resource.data, spaceId)
+          && request.resource.data.active == true;
+        allow update: if canManageFinancialSpace(spaceId)
+          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['presentation', 'presentationUpdatedAt'])
+            ? financialPresentationWriteAllowed(spaceId)
+            : (
+          request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && (
+            request.resource.data.last4 == null
+            || (request.resource.data.last4 is string && request.resource.data.last4.matches('^[0-9]{4}$'))
+          )
+          && request.resource.data.limitCents is int
+          && request.resource.data.limitCents >= 0
+          && request.resource.data.committedCents is int
+          && request.resource.data.committedCents >= 0
+          && request.resource.data.closingDay is int
+          && request.resource.data.closingDay >= 1
+          && request.resource.data.closingDay <= 31
+          && request.resource.data.dueDay is int
+          && request.resource.data.dueDay >= 1
+          && request.resource.data.dueDay <= 31
+          && request.resource.data.active is bool
+          && creditCardScopeUpdateAllowed(resource.data, request.resource.data, spaceId)));
+        allow delete: if false;
+      }
+      match /creditCardInvoices/{invoiceId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == invoiceId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && exists(/databases/$(database)/documents/financialSpaces/$(spaceId)/creditCards/$(request.resource.data.creditCardId))
+          && request.resource.data.spaceTotals is map
+          && request.resource.data.categoryTotals is map
+          && request.resource.data.spacesUsedIds is list
+          && request.resource.data.referenceYear is int
+          && request.resource.data.referenceMonth is int
+          && request.resource.data.referenceMonth >= 1
+          && request.resource.data.referenceMonth <= 12
+          && request.resource.data.purchasesTotalCents is int
+          && request.resource.data.purchasesTotalCents >= 0
+          && request.resource.data.adjustmentsTotalCents is int
+          && request.resource.data.paidTotalCents is int
+          && request.resource.data.paidTotalCents >= 0
+          && request.resource.data.remainingCents is int
+          && request.resource.data.remainingCents >= 0
+          && request.resource.data.status in ['open', 'closed', 'paid', 'overdue', 'cancelled'];
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.creditCardId == resource.data.creditCardId
+          && (!('cardHomeSpaceId' in request.resource.data) || request.resource.data.cardHomeSpaceId == spaceId)
+          && (!('spaceTotals' in request.resource.data) || request.resource.data.spaceTotals is map)
+          && (!('categoryTotals' in request.resource.data) || request.resource.data.categoryTotals is map)
+          && (!('spacesUsedIds' in request.resource.data) || request.resource.data.spacesUsedIds is list)
+          && request.resource.data.referenceYear == resource.data.referenceYear
+          && request.resource.data.referenceMonth == resource.data.referenceMonth
+          && request.resource.data.openingDate == resource.data.openingDate
+          && request.resource.data.closingDate == resource.data.closingDate
+          && request.resource.data.dueDate == resource.data.dueDate
+          && request.resource.data.purchasesTotalCents is int
+          && request.resource.data.purchasesTotalCents >= resource.data.purchasesTotalCents
+          && request.resource.data.adjustmentsTotalCents is int
+          && request.resource.data.paidTotalCents is int
+          && request.resource.data.paidTotalCents >= resource.data.paidTotalCents
+          && request.resource.data.remainingCents is int
+          && request.resource.data.remainingCents >= 0
+          && request.resource.data.status in ['open', 'closed', 'paid', 'overdue', 'cancelled'];
+        allow delete: if false;
+      }
+      match /creditCardPurchases/{purchaseId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == purchaseId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardId is string
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.cardHomeSpaceId is string
+          && validCrossSpaceCardUse(spaceId, request.resource.data.cardHomeSpaceId, request.resource.data.creditCardId)
+          && existsAfter(/databases/$(database)/documents/financialSpaces/$(request.resource.data.cardHomeSpaceId)/creditCardInvoices/$(request.resource.data.creditCardInvoiceId))
+          && getAfter(/databases/$(database)/documents/financialSpaces/$(request.resource.data.cardHomeSpaceId)/creditCardInvoices/$(request.resource.data.creditCardInvoiceId)).data.creditCardId == request.resource.data.creditCardId
+          && request.resource.data.installmentGroupId is string
+          && request.resource.data.installmentNumber is int
+          && request.resource.data.installmentNumber >= 1
+          && request.resource.data.installmentCount is int
+          && request.resource.data.installmentCount >= request.resource.data.installmentNumber
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.status == 'posted';
+        allow update: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.financialSpaceId == resource.data.financialSpaceId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.operationId == resource.data.operationId
+          && request.resource.data.creditCardId == resource.data.creditCardId
+          && request.resource.data.creditCardInvoiceId == resource.data.creditCardInvoiceId
+          && request.resource.data.cardHomeSpaceId == resource.data.cardHomeSpaceId
+          && request.resource.data.installmentGroupId == resource.data.installmentGroupId
+          && request.resource.data.installmentNumber == resource.data.installmentNumber
+          && request.resource.data.installmentCount == resource.data.installmentCount
+          && request.resource.data.amountCents == resource.data.amountCents
+          && resource.data.status == 'posted'
+          && request.resource.data.status == 'voided'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'voidedAt', 'voidedByOperationId', 'updatedAt', 'workspaceGeneration', 'workspaceWriteId'
+          ]);
+        allow delete: if false;
+      }
+      match /creditCardInvoicePayments/{paymentId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == paymentId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.creditCardId is string
+          && request.resource.data.financialAccountId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && request.resource.data.paymentFinancialSpaceId is string
+          && canManageFinancialSpace(request.resource.data.paymentFinancialSpaceId)
+          && validCrossSpaceCardUse(request.resource.data.paymentFinancialSpaceId, spaceId, request.resource.data.creditCardId)
+          && (
+            'financialAccountHomeSpaceId' in request.resource.data
+              ? request.resource.data.financialAccountHomeSpaceId is string
+                && validCrossSpaceFinancialAccountUse(request.resource.data.paymentFinancialSpaceId, request.resource.data.financialAccountHomeSpaceId, request.resource.data.financialAccountId)
+              : exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.paymentFinancialSpaceId)/financialAccounts/$(request.resource.data.financialAccountId))
+          )
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.paymentMethod in ['cash', 'pix', 'debit_card', 'automatic_debit', 'transfer', 'other']
+          && request.resource.data.status == 'confirmed';
+        allow update, delete: if false;
+      }
+      match /creditCardAdjustments/{adjustmentId} {
+        allow read: if canReadFinancialSpace(spaceId);
+        allow create: if canManageFinancialSpace(spaceId)
+          && request.resource.data.id == adjustmentId
+          && request.resource.data.financialSpaceId == spaceId
+          && request.resource.data.ownerUid == financialSpace(spaceId).ownerUid
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.creditCardInvoiceId is string
+          && request.resource.data.creditCardId is string
+          && request.resource.data.cardHomeSpaceId == spaceId
+          && (
+            (
+              request.resource.data.kind == 'opening_balance'
+              && !('creditCardPurchaseId' in request.resource.data)
+              && !('purchaseFinancialSpaceId' in request.resource.data)
+            )
+            || (
+              request.resource.data.kind in ['refund', 'credit', 'fee', 'bill_payment_void']
+              && request.resource.data.purchaseFinancialSpaceId is string
+              && canManageFinancialSpace(request.resource.data.purchaseFinancialSpaceId)
+              && validCrossSpaceCardUse(request.resource.data.purchaseFinancialSpaceId, spaceId, request.resource.data.creditCardId)
+              && exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.purchaseFinancialSpaceId)/creditCardPurchases/$(request.resource.data.creditCardPurchaseId))
+            )
+          )
+          && request.resource.data.amountCents is int
+          && request.resource.data.amountCents > 0
+          && request.resource.data.effectCents is int
+          && request.resource.data.status == 'confirmed';
+        allow update, delete: if false;
+      }
+    }
+
+    // Catálogo global do proprietário: a consulta collectionGroup sempre deve
+    // incluir ownerUid == request.auth.uid. A regra não concede essa visão
+    // consolidada a membros de empresa nem atravessa proprietários.
+    match /{path=**}/creditCards/{cardId} {
+      allow read: if signedIn() && planAllowsFeature(currentBusinessId(),'financeAdvanced') && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /{path=**}/financialAccounts/{accountId} {
+      allow read: if signedIn() && planAllowsFeature(currentBusinessId(),'financeAdvanced') && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /financialTransfers/{transferId} {
+      allow read: if signedIn()
+        && canReadFinancialSpace(resource.data.fromSpaceId)
+        && canReadFinancialSpace(resource.data.toSpaceId);
+      allow create: if signedIn()
+        && request.resource.data.id == transferId
+        && request.resource.data.operationId == transferId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amountCents is int
+        && request.resource.data.amountCents > 0
+        && (
+          request.resource.data.fromSpaceId != request.resource.data.toSpaceId
+          || (
+            request.resource.data.fromFinancialAccountId is string
+            && request.resource.data.toFinancialAccountId is string
+            && request.resource.data.fromFinancialAccountId != request.resource.data.toFinancialAccountId
+          )
+        )
+        && canManageFinancialSpace(request.resource.data.fromSpaceId)
+        && canManageFinancialSpace(request.resource.data.toSpaceId)
+        && (
+          !('fromFinancialAccountId' in request.resource.data) || request.resource.data.fromFinancialAccountId == null
+            ? true
+            : 'fromFinancialAccountHomeSpaceId' in request.resource.data
+              ? request.resource.data.fromFinancialAccountHomeSpaceId is string
+                && validCrossSpaceFinancialAccountUse(request.resource.data.fromSpaceId, request.resource.data.fromFinancialAccountHomeSpaceId, request.resource.data.fromFinancialAccountId)
+              : exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.fromSpaceId)/financialAccounts/$(request.resource.data.fromFinancialAccountId))
+        )
+        && (
+          !('toFinancialAccountId' in request.resource.data) || request.resource.data.toFinancialAccountId == null
+            ? true
+            : 'toFinancialAccountHomeSpaceId' in request.resource.data
+              ? request.resource.data.toFinancialAccountHomeSpaceId is string
+                && validCrossSpaceFinancialAccountUse(request.resource.data.toSpaceId, request.resource.data.toFinancialAccountHomeSpaceId, request.resource.data.toFinancialAccountId)
+              : exists(/databases/$(database)/documents/financialSpaces/$(request.resource.data.toSpaceId)/financialAccounts/$(request.resource.data.toFinancialAccountId))
+        );
+      allow update, delete: if false;
+    }
+
+    match /subscriptionIndex/{subscriptionId} {
+      allow read, write: if false;
+    }
+    match /billingOrderIndex/{orderId} {
+      allow read, write: if false;
+    }
+    match /billingPaymentEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // Cupons, cotações, contadores, resgates e auditoria são acessados apenas
+    // pelas Cloud Functions. Nem a conta interna altera valores diretamente.
+    match /adminCoupons/{couponId} {
+      allow read, write: if false;
+    }
+    match /adminCouponCodes/{codeHash} {
+      allow read, write: if false;
+    }
+    match /couponQuotes/{quoteId} {
+      allow read, write: if false;
+    }
+    match /couponRedemptions/{redemptionId} {
+      allow read, write: if false;
+    }
+    match /couponUsageCounters/{counterId} {
+      allow read, write: if false;
+    }
+    match /couponAuditLogs/{logId} {
+      allow read, write: if false;
+    }
+    match /couponBillingEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /webhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+  }
+}

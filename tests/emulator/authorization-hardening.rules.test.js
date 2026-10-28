@@ -35,7 +35,7 @@ for(const role of ['owner','seller'])test(`V202 ${role} handshake is read-only, 
  const c=await setup(),uid=c[role];
  const before=(await c.root.collection('processedOperations').get()).size;
  const protocol=await service.receipt({auth:{uid},data:{businessId:c.bid,workspaceGeneration:0,kind:'sync_protocol'}});
- assert.deepEqual(protocol,{protocolVersion:1,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:0});assert.equal((await c.root.collection('processedOperations').get()).size,before);
+ assert.deepEqual(protocol,{protocolVersion:1,permissionsVersion:2,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:0});assert.equal((await c.root.collection('processedOperations').get()).size,before);
  await assert.rejects(service.receipt({auth:{uid},data:{businessId:'other-company',kind:'sync_protocol'}}));
  const h=harness({businessId:c.bid,spaceId:c.space,uid}),{packet}=h.sell();
  const {operationalCallable}=require('../../functions/src/shared/operational-callable');const call=operationalCallable(r=>service.commit(r),{requireProtocol:true}),request=c.request(packet);

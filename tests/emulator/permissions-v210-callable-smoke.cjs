@@ -1,0 +1,51 @@
+'use strict';
+// Authenticated callable integration, emulator ONLY. No production fallback.
+const assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
+for(const key of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST'])assert.match(process.env[key]||'',/^(127\.0\.0\.1|localhost):\d+$/);
+assert.equal(process.env.GCLOUD_PROJECT,'demo-veconi-permissions-v210');
+const admin=require('../../functions/node_modules/firebase-admin'),{initializeApp,deleteApp}=require('firebase/app');
+const {getAuth,connectAuthEmulator,createUserWithEmailAndPassword}=require('firebase/auth');
+const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
+const sdk=require('firebase/firestore'),{harness,bridge}=require('../helpers/fiado-cancellation-harness.cjs');
+const projectId='demo-veconi-permissions-v210',id=crypto.randomUUID(),bid='qa-v210-'+id,space=bid+'-space',checks=[];
+const server=admin.initializeApp({projectId},'callable-v210'),db=server.firestore(),root=db.doc('businesses/'+bid),apps=[];
+async function client(label){const app=initializeApp({projectId,apiKey:'emulator-only'},label+'-'+id);apps.push(app);const auth=getAuth(app);connectAuthEmulator(auth,'http://'+process.env.FIREBASE_AUTH_EMULATOR_HOST,{disableWarnings:true});const credential=await createUserWithEmailAndPassword(auth,label+'-'+id+'@example.invalid','Ficticio-QA-Only-210!');const fn=getFunctions(app,'southamerica-east1');connectFunctionsEmulator(fn,'127.0.0.1',5001);const store=sdk.getFirestore(app);const[host,port]=process.env.FIRESTORE_EMULATOR_HOST.split(':');sdk.connectFirestoreEmulator(store,host,Number(port));return{uid:credential.user.uid,email:credential.user.email,store,call:async(name,data)=>(await httpsCallable(fn,name)({businessId:bid,workspaceGeneration:0,...data})).data};}
+const packet=(uid,writes)=>({businessId:bid,userId:uid,workspaceGeneration:0,operationId:crypto.randomUUID(),checksum:'original-qa-immutable',attempts:0,status:'pending',payload:{eventKind:'simple',writes}});
+const customer=(clientId,fields,operation='create')=>({entityType:'clients',entityId:clientId,operation,data:{id:clientId,businessId:bid,...fields}});
+async function main(){
+ const owner=await client('owner'),seller=await client('seller');
+ await root.set({id:bid,active:true,ownerId:owner.uid,legacyAccessDisabled:true,workspaceGeneration:0,subscription:{planId:'internal',status:'active'}});
+ await db.doc('users/'+owner.uid).set({uid:owner.uid,businessId:bid,email:owner.email,name:'Owner fictício',role:'owner',active:true});
+ await db.doc('financialSpaces/'+space).set({id:space,businessId:bid,linkedBusinessId:bid,type:'business',ownerUid:owner.uid,active:true,capabilities:{sales:true,products:true,inventory:true,finance:true}});
+ const member=await owner.call('ensureCurrentMembership');assert.equal(member.member.role,'owner');checks.push('owner authenticated membership');
+ const grants={'sales.create':true,'sales.cancel':true,'customers.view':true,'customers.edit':true,'customers.receiveDebt':true,'products.view':true,'inventory.view':true};
+ const invite=await owner.call('createTeamInvite',{name:'Seller fictício',email:seller.email,role:'seller',spaceAccess:'selected',allowedSpaceIds:[space],permissions:grants});
+ const accepted=await seller.call('acceptTeamInvite',{token:new URL(invite.inviteUrl).searchParams.get('teamInvite')});assert.equal(accepted.member.uid,seller.uid);assert.equal(accepted.member.permissionsVersion,1);checks.push('V209 invitation and acceptance');
+ const handshake=await seller.call('getOperationalSyncReceipt',{kind:'sync_protocol'});assert.equal(handshake.protocolVersion,1);assert.equal(handshake.minClientRelease,202);assert.equal(handshake.permissionsVersion,2);checks.push('V209 protocol 1 compatible');
+ const commit=(who,item,clientRelease=209)=>who.call('commitOperationalSync',{item,syncProtocolVersion:1,clientRelease});
+ const h=harness({businessId:bid,spaceId:space,uid:seller.uid});
+ for(const[col,rows]of [['clients',h.data().clientes],['products',h.data().produtos]])for(const row of rows)await root.collection(col).doc(row.id).set(bridge(row));
+ const {packet:salePacket,sale}=h.sell();Object.assign(salePacket,{workspaceGeneration:0,checksum:'v209-original'});await commit(seller,salePacket);const replay=await commit(seller,salePacket);assert.equal(replay.replayed,true);
+ assert.equal((await seller.call('getOperationalSyncReceipt',{saleId:sale.id,operationId:sale.operationId,spaceId:space})).confirmed,true);
+ assert.equal((await root.collection('stockMovements').get()).size,1);assert.equal((await root.collection('balanceEvents').get()).size,1);checks.push('V209 seller Fiado sale receipt retry no duplicates');
+ assert.equal((await sdk.getDoc(sdk.doc(owner.store,root.path+'/sales/'+sale.id))).data().valorFinal,14);checks.push('owner canonical visibility');
+ const legacy=packet(seller.uid,[customer('legacy-new',{nome:'Fictício legado',saldo:0})]);await commit(seller,legacy);checks.push('legacy explicit edit still creates');
+ const mr=root.collection('members').doc(seller.uid),original=(await mr.get()).data();
+ const observed=new Promise((resolve,reject)=>{const timer=setTimeout(()=>{stop();reject(Error('Live membership timeout'));},15000);const stop=sdk.onSnapshot(sdk.doc(seller.store,mr.path),s=>{if(s.data()?.permissionsVersion===2&&!s.metadata.fromCache){clearTimeout(timer);stop();resolve();}},reject);});
+ const v2={'sales.create':true,'customers.view':true,'customers.create':true,'products.view':true,'inventory.view':true};
+ await owner.call('updateTeamMember',{uid:seller.uid,permissionsVersion:2,expectedAccess:original,permissions:v2});await observed;checks.push('owner explicit V2 edit and open seller listener');
+ const fresh=packet(seller.uid,[customer('new-only',{nome:'Fictício create-only',saldo:0,financialVersion:0})]),preserved=JSON.stringify(fresh);await commit(seller,fresh,210);await commit(seller,fresh,210);assert.equal(JSON.stringify(fresh),preserved);
+ await assert.rejects(commit(seller,packet(seller.uid,[customer('new-only',{nome:'Negado'},'update')]),210),e=>e.code==='functions/permission-denied');checks.push('create-only cannot edit existing');
+ await root.collection('payments').doc('private').set({businessId:bid,spaceId:space,valor:1});await assert.rejects(sdk.getDoc(sdk.doc(seller.store,root.path+'/payments/private')),e=>e.code==='permission-denied');checks.push('seller no financial access');
+ const before=await root.collection('clients').get(),receipts=(await root.collection('processedOperations').get()).size;
+ const stale=packet(seller.uid,[customer('revoked',{nome:'Fictício revogado',saldo:0})]),oldPacket=JSON.stringify(stale);
+ await owner.call('updateTeamMember',{uid:seller.uid,permissionsVersion:2,permissions:{...v2,'customers.create':false}});
+ await assert.rejects(commit(seller,stale,210),e=>e.code==='functions/permission-denied');assert.equal(JSON.stringify(stale),oldPacket);assert.equal((await root.collection('clients').get()).size,before.size);assert.equal((await root.collection('processedOperations').get()).size,receipts);checks.push('revocation rejects without receipt or mutation');
+ const held={...stale,status:'quarantined'};await assert.rejects(commit(seller,held,210),e=>e.code==='functions/failed-precondition');checks.push('historical quarantine never replays');
+ const debt=(await root.collection('clients').doc('qa-client').get()).data().saldo;
+ await commit(owner,packet(owner.uid,[customer('qa-client',{ativo:false,active:false},'update')]),210);assert.equal((await root.collection('clients').doc('qa-client').get()).data().saldo,debt);checks.push('archive preserves debt and original history');
+ const foreign={...stale,businessId:'foreign-qa'};await assert.rejects(seller.call('commitOperationalSync',{businessId:'foreign-qa',item:foreign,syncProtocolVersion:1,clientRelease:210}),e=>e.code==='functions/permission-denied');checks.push('foreign company denied');
+ const result={at:new Date().toISOString(),projectId,authenticated:true,functions:['ensureCurrentMembership','createTeamInvite','acceptTeamInvite','updateTeamMember','getOperationalSyncReceipt','commitOperationalSync'],checks,passed:checks.length,failed:0,V209Compatible:true,productionWrites:0};
+ fs.mkdirSync('artifacts/permissions-v210',{recursive:true});fs.writeFileSync('artifacts/permissions-v210/callable-smoke.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+}
+main().catch(error=>{console.error(JSON.stringify({failed:true,code:error.code,message:error.message,productionWrites:0}));process.exitCode=1;}).finally(async()=>{await Promise.all(apps.map(deleteApp));await server.delete();});

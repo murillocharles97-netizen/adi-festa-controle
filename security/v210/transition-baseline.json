@@ -1,0 +1,9 @@
+{
+  "productionReadOnly": true,
+  "baselineCommit": "5d60e5f5fa159001da39b6b50bcd438129f93fb6",
+  "activeRuleset": "projects/adi-festa-controle/rulesets/ff9ffde6-a8af-4584-817b-0b7ed0f9c532",
+  "activeUpdatedAt": "2026-10-24T20:34:33.635874Z",
+  "baselineSHA256": "d9cb9de9dbc2fedddb7d008640d0f6cdc58f0c3e4b75fa8505984b94c1ca572d",
+  "candidateSHA256": "1919a831bb862ae9b70297133b29774bc558a6fb4a9dc05113f462fc3da8e150",
+  "activationOfPendingV202Rules": false
+}

@@ -14,11 +14,11 @@ const original = overrides => ({
 const draft = overrides => ({ role: 'seller', spaceAccess: 'selected', allowedSpaceIds: ['qa-a'],
   permissions: grants('sales.create', 'customers.view', 'products.view', 'inventory.view'), ...overrides });
 
-test('contrato contém exatamente os 20 grants atuais, sem novas permissões fictícias', () => {
-  assert.equal(Model.KEYS.length, 20);
-  assert.equal(new Set(Model.KEYS).size, 20);
+test('V210 mantém 20 grants e separa cadastro e desativação de clientes', () => {
+  assert.equal(Model.KEYS.length, 22);
+  assert.equal(new Set(Model.KEYS).size, 22);
   assert.equal(Object.isFrozen(Model.KEYS), true);
-  assert.deepEqual(Model.KEYS.filter(key => /discount|price|goals|online|personal|customers.create|products.create/.test(key)), []);
+  assert.deepEqual(Model.KEYS.filter(key => /discount|price|goals|online|personal|products.create/.test(key)), []);
 });
 
 test('membro sparse mantém somente grants explícitos sem completar preset do cargo', () => {
@@ -38,9 +38,10 @@ test('ausência de mapa não transforma gerente ou vendedor em preset', () => {
   }
 });
 
-test('array legado usa apenas as chaves presentes, sem promover entradas falsas ou desconhecidas', () => {
+test('array legado não autoriza ações que o servidor V209 não autorizava; snapshot permanece intacto', () => {
   const member = original({ permissions: ['sales.create', 'products.view', false, 'financial.view:false', 'root'] });
-  assert.deepEqual(enabled(Model.explicit(member)), ['products.view', 'sales.create']);
+  assert.deepEqual(enabled(Model.explicit(member)), []);
+  assert.deepEqual(Model.snapshot(member).permissions, member.permissions);
   assert.equal(Model.explicit(member)['financial.view'], false);
   assert.equal(Object.hasOwn(Model.explicit(member), 'root'), false);
 });
@@ -197,7 +198,7 @@ test('serialize envia só acesso e expectedAccess raw, não perfil, status ou id
   const member = original({ permissions: { 'sales.create': true, 'financial.view': false }, allowedSpaceIds: ['qa-b', 'qa-a'] });
   const value = { ...draft(), name: 'Não enviar', email: 'nao-enviar@example.test', uid: 'nao-enviar', status: 'disabled', rolePreset: 'custom' };
   const beforeMember = clone(member), beforeDraft = clone(value), payload = Model.serialize(member, value);
-  assert.deepEqual(Object.keys(payload).sort(), ['allowedSpaceIds', 'expectedAccess', 'permissions', 'role', 'spaceAccess']);
+  assert.deepEqual(Object.keys(payload).sort(), ['allowedSpaceIds', 'expectedAccess', 'permissions', 'permissionsVersion', 'role', 'spaceAccess']);
   assert.deepEqual(payload.expectedAccess, {
     role: 'seller', status: 'active', spaceAccess: 'selected', allowedSpaceIds: ['qa-b', 'qa-a'],
     permissions: { 'sales.create': true, 'financial.view': false },

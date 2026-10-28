@@ -10,3 +10,4 @@ firestore-debug.log
 ui-debug.log
 functions/.env.*
 functions/.secret.local
+artifacts/permissions-v210/

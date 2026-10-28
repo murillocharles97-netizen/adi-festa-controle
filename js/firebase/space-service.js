@@ -371,6 +371,9 @@ async function persistWithOfflineQueue(write, rollback) {
 }
 
 async function createSpace(input = {}) {
+  window.TeamAccess?.assert?.('spaces.manage');
+  if(window.TeamAccess&&!window.TeamAccess.has('spaces.manage'))throw window.VeconiPermissionPolicy.denied('spaces.manage');
+  window.TeamAccess?.assertSession?.(window.TeamAccess.captureSession());
   const context = assertContext();
   if (!MANAGER_ROLES.has(context.role)) throw new Error("Seu perfil não pode gerenciar espaços.");
   const operationalType = VALID_OPERATIONAL_TYPES.has(String(input.operationalType || input.type))
@@ -418,6 +421,9 @@ async function createSpace(input = {}) {
 }
 
 async function updateSpace(spaceId, input = {}) {
+  window.TeamAccess?.assert?.('spaces.manage');
+  if(window.TeamAccess&&!window.TeamAccess.has('spaces.manage'))throw window.VeconiPermissionPolicy.denied('spaces.manage');
+  window.TeamAccess?.assertSession?.(window.TeamAccess.captureSession());
   const context = assertContext(), id = String(spaceId || "").trim(), current = Context.list().find((space) => space.id === id);
   if (!current) throw new Error("Espaço não encontrado.");
   if (current.businessId && current.businessId !== context.businessId)

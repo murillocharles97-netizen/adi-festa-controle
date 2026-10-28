@@ -8,7 +8,7 @@
   let loadingPromise = null, formBusy = false;
   const permissionLabels = {
     "sales.create": "Criar vendas", "sales.cancel": "Cancelar vendas", "sales.viewAll": "Consultar e administrar vendas / pedidos",
-    "customers.view": "Ver clientes", "customers.edit": "Cadastrar e editar clientes", "customers.receiveDebt": "Receber fiado",
+    "customers.view": "Ver clientes", "customers.create": "Cadastrar clientes", "customers.edit": "Editar clientes existentes", "customers.archive": "Desativar / reativar clientes", "customers.receiveDebt": "Receber fiado",
     "customers.adjustBalance": "Ajustar saldo devedor", "products.view": "Ver produtos", "products.edit": "Cadastrar e editar produtos",
     "inventory.view": "Ver estoque e movimentações", "inventory.adjust": "Ajustar estoque", "financial.view": "Consultar e movimentar Financeiro",
     "reports.view": "Ver relatórios, CRM e campanhas", "profit.view": "Ver lucro (pode incluir custos)", "cost.view": "Ver e gerenciar custos (pode incluir lucro)",
@@ -129,7 +129,7 @@
       event.preventDefault(); if(formBusy)return; const fd = new FormData(form), button = $("[data-team-submit]", form), error = $("[data-team-form-error]", form), permissions = {};
       if(formBusinessId!==window.BusinessContext?.get?.().businessId){error.textContent="A empresa ativa mudou. Feche e abra o formulário novamente.";return;}
       window.TeamAccess.PERMISSIONS.forEach((key) => { permissions[key] = fd.has(`permission:${key}`); });
-      const input = { name: String(fd.get("name")||"").trim(), role: roleInput.value, status: form.elements.status?.value || "active", spaceAccess: roleInput.value==='owner'?'all':fd.get("spaceAccess"), allowedSpaceIds: fd.getAll("allowedSpaceIds"), permissions: roleInput.value==='owner'?{...window.TeamAccess.PRESETS.owner}:permissions };
+      const input = { permissionsVersion:2, name: String(fd.get("name")||"").trim(), role: roleInput.value, status: form.elements.status?.value || "active", spaceAccess: roleInput.value==='owner'?'all':fd.get("spaceAccess"), allowedSpaceIds: fd.getAll("allowedSpaceIds"), permissions: roleInput.value==='owner'?{...window.TeamAccess.PRESETS.owner}:permissions };
       if(!input.name){error.textContent="Informe o nome do funcionário.";return;}
       if(input.spaceAccess==='selected'&&!input.allowedSpaceIds.length){error.textContent="Selecione ao menos um espaço autorizado.";return;}
       if(input.spaceAccess==='all')input.allowedSpaceIds=[];
@@ -173,7 +173,7 @@
       permissionsButton.onclick = () => window.TeamPermissionEditor.open(item);
       $(".team-menu", root).prepend(permissionsButton);
     }
-    if(resend)resend.onclick=async()=>{if(formBusy)return;formBusy=true;resend.disabled=true;try{const result=await window.TeamService.createInvite({name:item.name,email:item.email,role:item.role,spaceAccess:item.spaceAccess,allowedSpaceIds:item.allowedSpaceIds||[],permissions:item.permissions||{},replaceInviteId:item.id});inviteReady(result,item.email);await load();}catch(error){$('[data-team-menu-error]',root).textContent=error.message||"Não foi possível reenviar.";resend.disabled=false;}finally{formBusy=false;}};
+    if(resend)resend.onclick=async()=>{if(formBusy)return;formBusy=true;resend.disabled=true;try{const result=await window.TeamService.createInvite({name:item.name,email:item.email,role:item.role,spaceAccess:item.spaceAccess,allowedSpaceIds:item.allowedSpaceIds||[],permissions:item.permissions||{},permissionsVersion:item.permissionsVersion??1,replaceInviteId:item.id});inviteReady(result,item.email);await load();}catch(error){$('[data-team-menu-error]',root).textContent=error.message||"Não foi possível reenviar.";resend.disabled=false;}finally{formBusy=false;}};
     window.lucide?.createIcons();
   }
   function bindActions(root = document) {

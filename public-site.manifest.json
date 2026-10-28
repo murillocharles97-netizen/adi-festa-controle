@@ -212,6 +212,8 @@
     "js/spaces.js",
     "js/storage.js",
     "js/team-access.js",
+    "js/permission-mutations.js",
+    "functions/src/shared/permission-policy.js",
     "js/team-page.js",
     "js/team-permission-editor.js",
     "js/team-permission-model.js",

@@ -21,7 +21,7 @@ window.Fiados = (() => {
   }
 
   function createPayment(clienteId, valor, observacao, options = {}) {
-    if (window.TeamAccess && !window.TeamAccess.has("customers.receiveDebt")) throw Error("Você não tem permissão para receber pagamentos de fiado.");
+    if (window.TeamAccess && !window.TeamAccess.has("customers.receiveDebt")) throw window.VeconiPermissionPolicy?.denied("customers.receiveDebt")||Error("Você não tem permissão para receber pagamentos de fiado.");
     let pagamento;
     const operationId = String(options.operationId || Utils.uuid()),
       paymentMode = options.paymentMode === "total" ? "total" : "partial";

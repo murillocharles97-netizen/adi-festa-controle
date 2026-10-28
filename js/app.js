@@ -493,7 +493,7 @@
       cupons: "Cupons de desconto",
     };
   function formularioCliente(id) {
-    try { window.Clientes?.assertCanEdit?.(); } catch (error) { toast(error.message, true); return; }
+    try { window.Clientes?.assertCanSave?.(id); } catch (error) { toast(error.message, true); return; }
     const c = id ? Clientes.obter(id) : {};
     abrirFormulario(
       id ? "Editar cliente" : "Novo cliente",

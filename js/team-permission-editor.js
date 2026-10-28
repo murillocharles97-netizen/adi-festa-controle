@@ -5,7 +5,7 @@
   const icon = name => `<i data-lucide="${name}" aria-hidden="true"></i>`;
   const labels = {
     "sales.create": "Criar venda", "sales.cancel": "Cancelar venda", "sales.viewAll": "Consultar e administrar vendas / pedidos",
-    "customers.view": "Ver clientes", "customers.edit": "Cadastrar e editar clientes", "customers.receiveDebt": "Registrar recebimentos / fiado",
+    "customers.view": "Ver clientes", "customers.create": "Cadastrar clientes", "customers.edit": "Editar clientes existentes", "customers.archive": "Desativar / reativar clientes", "customers.receiveDebt": "Registrar recebimentos / fiado",
     "customers.adjustBalance": "Ajustar saldo de clientes", "products.view": "Ver produtos", "products.edit": "Cadastrar e editar produtos",
     "inventory.view": "Ver estoque e movimentações", "inventory.adjust": "Ajustar estoque", "financial.view": "Acessar e movimentar Financeiro",
     "reports.view": "Ver relatórios, CRM e campanhas", "cost.view": "Ver e gerenciar custos", "profit.view": "Ver lucro / margem",
@@ -22,7 +22,7 @@
       linked("discount", "Aplicar desconto", p => p["sales.create"], "Vinculado a Criar venda. Ainda não há bloqueio independente para descontos."),
       linked("price", "Alterar preço na venda", p => p["sales.create"], "Incluído em Criar venda. Ainda não é possível permitir vendas e bloquear a alteração de preço separadamente.")
     ] },
-    { id: "customers", name: "Clientes", icon: "users-round", rows: [row("customers.view", "view", "Permite consultar os clientes autorizados e seus saldos para atendimento."), row("customers.edit", "execute", "Permite cadastrar clientes e alterar seus dados. As duas ações não podem ser separadas. Criar venda também pode registrar dados de clientes durante a venda.")] },
+    { id: "customers", name: "Clientes", icon: "users-round", rows: [row("customers.view", "view", "Permite consultar os clientes autorizados e seus saldos para atendimento."), row("customers.create", "execute", "Cria um cadastro novo com saldo zero. Não permite editar clientes existentes, desativar cadastros ou ajustar dívidas."), row("customers.edit", "execute", "Altera dados de clientes existentes, como nome e telefone. Não permite cadastrar, desativar ou alterar saldos."), row("customers.archive", "execute", "Desativa ou reativa clientes sem apagar o cadastro, as dívidas ou as referências de vendas.")] },
     { id: "products", name: "Produtos e estoque", icon: "box", rows: [row("products.view", "view"), row("products.edit", "execute", "Cadastro e edição não têm permissões separadas no modelo atual."), row("inventory.view", "view"), row("inventory.adjust", "execute", "Não afeta a baixa legítima de estoque gerada por uma venda autorizada.")] },
     { id: "goals", name: "Metas e desempenho", icon: "chart-no-axes-combined", rows: [
       linked("goals", "Ver metas", p => p["sales.create"] || p["sales.viewAll"], "Consulta operacional vinculada ao acesso às vendas do espaço.", "view"),
@@ -52,7 +52,7 @@
   let active = null;
   const context = () => window.BusinessContext?.get?.() || {};
   const stamp = () => JSON.stringify([window.FirebaseSession?.user?.uid || context().userProfile?.uid || "", context().businessId,
-    context().role, context().permissions, context().allowedSpaceIds, context().spaceAccess]);
+    context().role, context().permissions, context().allowedSpaceIds, context().spaceAccess, window.TeamAccess?.captureSession?.()]);
   const q = (selector, root = document) => root.querySelector(selector);
   const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
   const roleLabel = role => window.TeamAccess?.ROLE_LABELS?.[role] || role;
@@ -91,6 +91,9 @@
     const currentName = context().business?.name || context().businessName || context().member?.businessName || "Empresa atual";
     const status = member.status === "active" ? "Ativo" : "Inativo";
     const diff = M.difference(M.explicit(member), s.draft.permissions);
+    if (Number(member.permissionsVersion || 1) < 2 && M.explicit(member)['customers.edit'] && !s.message)
+      s.message = 'Compatibilidade: o acesso antigo a editar clientes já incluía cadastrar e desativar. Esses acessos foram preservados nesta revisão. Você pode separá-los antes de salvar. Nenhum funcionário foi alterado automaticamente.';
+    if(Array.isArray(member.permissions)&&!s.message)s.message='Este vínculo usa um formato legado que o servidor não autoriza como mapa de permissões. O original foi preservado. Revise os acessos desejados e confirme antes de salvar no modelo V2.';
     root.innerHTML = `<section class="tp-page" data-permission-editor aria-labelledby="tp-title"><nav class="tp-breadcrumb" aria-label="Localização"><button type="button" data-tp-back>Equipe</button><span>/</span><span>Permissões</span></nav>
       <header class="tp-heading"><div class="tp-title-icon">${icon("key-round")}</div><div><h1 id="tp-title" tabindex="-1">Permissões da equipe</h1><p>Controle o que cada funcionário pode visualizar e executar.</p></div><button type="button" class="tp-button tp-help" data-tp-help aria-label="Como funcionam as permissões?">${icon("circle-help")}<span>Como funciona?</span></button></header>
       ${s.invalid ? '<div class="tp-alert" role="alert">A sessão ou empresa mudou. Este editor foi bloqueado para proteger os acessos. Volte à Equipe e abra novamente.</div>' : ""}
@@ -125,6 +128,7 @@
     else done();
   }
   async function save(s) {
+    if(window.AdiFestaBuild?.permissionsV2EditingPaused){s.message='A edição de permissões está pausada para manutenção. Os acessos atuais foram preservados.';render(s);return;}
     if (!valid(s) || s.invalid || s.busy || !dirty(s)) return;
     let payload;
     try { payload = M.serialize(s.original, s.draft); }

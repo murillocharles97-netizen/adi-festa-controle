@@ -7,6 +7,7 @@ function loadTeamAccess(context) {
   const listeners = new Map();
   const sandbox = {
     window: null,
+    VeconiPermissionPolicy: require("../functions/src/shared/permission-policy"),
     document: { querySelectorAll: () => [], documentElement: { dataset: {} } },
     addEventListener: (name, callback) => listeners.set(name, callback),
     queueMicrotask,

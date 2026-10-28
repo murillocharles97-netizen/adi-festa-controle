@@ -8,18 +8,20 @@
   const fail=(code,message)=>{throw Object.assign(Error(message),{code});};
   // This adapter handles business-tree writes only. External financial/catalog
   // scopes keep their own authorization and must be bound separately.
-  function create({sdk,runtime,legacyGeneration=()=>0,resolveExternalScope}){
+  function create({sdk,runtime,legacyGeneration=()=>0,resolveExternalScope,permissionContext=()=>null}){
     function capture(){
       const guard=runtime();
-      if(guard)return{guard,origin:guard.capture()};
+      if(guard){const permissions=permissionContext();return{guard,origin:guard.capture(),permissions,permissionStamp:permissions?.captureSession?.()};}
       if(legacyGeneration()!==0)fail('workspace-not-ready','Confirme o ambiente antes de gravar.');
       return null;
     }
     function check(context){
       if(context&&context.guard.capture()!==context.origin)fail('workspace-origin-mismatch','A sessão desta operação foi encerrada.');
+      if(context?.permissions&&context.permissionStamp!==context.permissions.captureSession?.())fail('permission-session-retired','As permissões desta operação mudaram. Nenhuma nova gravação foi enviada.');
     }
     function payload(ref,data,context,businessId=null){
       check(context);
+      context?.permissions?.assertSession?.(context.permissionStamp);
       const parts=String(ref.path||'').split('/');
       if(parts[0]!=='businesses'&&!businessId)return data;
       if(!context)return data; // Legacy generation 0; server Rules remain authoritative.
@@ -39,6 +41,7 @@
     }
     function deletion(ref,context){
       check(context);
+      context?.permissions?.assertSession?.(context.permissionStamp);
       if(String(ref.path||'').startsWith('businesses/')&&context?.origin.workspaceGeneration>0)
         fail('workspace-delete-requires-backend','Exclusão definitiva requer validação no servidor.');
     }

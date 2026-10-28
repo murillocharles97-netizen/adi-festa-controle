@@ -6,7 +6,7 @@ http.createServer((req,res)=>{
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405).end();return;}
   let pathname;
   try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400).end();return;}
-  if(!/^\/(?:assets\/|css\/|js\/|tests\/team-permissions\.fixture\.html$)/.test(pathname)){res.writeHead(404).end();return;}
+  if(!/^\/(?:assets\/|css\/|js\/|functions\/src\/shared\/permission-policy\.js$|tests\/team-permissions\.fixture\.html$)/.test(pathname)){res.writeHead(404).end();return;}
   const file=path.resolve(root,'.'+pathname);
   if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404).end();return;}
   const type={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'}[path.extname(file)]||'application/octet-stream';

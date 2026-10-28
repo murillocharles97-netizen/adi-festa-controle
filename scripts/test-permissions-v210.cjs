@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
+const mode=process.argv[2]||'node';
+const nodeFiles=['tests/permissions-v210.test.cjs','tests/permissions-editor-v210.dom.test.cjs','tests/team-permission-model.test.js','tests/team-permission-integration.test.js','tests/team-access-v150.test.js','tests/customer-permission-v205.test.cjs','functions/test/team-access-concurrency.test.js','functions/test/team-access-service.test.js','tests/sync-queue-quarantine.test.js','tests/sync-recovery-resolution.test.js','tests/sync-protocol-transition.test.cjs','tests/read-hydration-v204.test.cjs','tests/product-batch-v209.test.cjs','tests/product-batch-v209.dom.test.cjs','tests/product-action-server-v209.test.cjs','tests/sale-exchanges.test.js','tests/exchange-credit.test.js','tests/exchange-credit-checkout.test.js','tests/fiado-cancellation.test.js','tests/sale-cancellation-dom.test.cjs','tests/history-cancelled-status.test.js','tests/public-site-containment.test.cjs','tests/static-containment-worker.test.cjs'];
+const emulatorFiles=['tests/emulator/permissions-v210.rules.test.cjs','tests/emulator/operational-compatibility.rules.test.js','tests/emulator/sale-exchanges.rules.test.js','tests/emulator/exchange-credit.rules.test.js','tests/emulator/sale-cancellation.rules.test.js','tests/emulator/product-batch-v209.rules.test.cjs'];
+nodeFiles.push('tests/bootstrap-no-commercial-writes.test.js','tests/cache-session-hotfix.test.js','tests/workspace-runtime.test.js','tests/workspace-writer.test.js','tests/operational-dashboard-access.test.js','tests/sync-integrity-permissions.test.js');
+emulatorFiles.push('tests/emulator/online-orders-v2.rules.test.js');
+if(!['node','emulator'].includes(mode))throw Error('Use node ou emulator.');
+if(mode==='emulator'&&!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Emulator local obrigatório. Nunca executar em produção.');
+const files=mode==='node'?nodeFiles:emulatorFiles;
+const result=spawnSync(process.execPath,['--test','--test-reporter=tap',...(mode==='emulator'?['--test-concurrency=1']:[]),...files],{encoding:'utf8',maxBuffer:40e6});
+const out=path.resolve('artifacts/permissions-v210');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,mode+'.tap'),(result.stdout||'')+'\n'+(result.stderr||''));
+const lines=(result.stdout||'').split('\n'),summary={mode,files:files.length,status:result.status,summary:lines.filter(x=>/^# (tests|pass|fail|skipped|duration)/.test(x)),failures:lines.flatMap((line,i)=>line.startsWith('not ok')?lines.slice(i,i+12):[]),error:result.error?.message};
+fs.writeFileSync(path.join(out,mode+'-summary.json'),JSON.stringify(summary,null,2));console.log(JSON.stringify(summary,null,2));process.exitCode=result.status??1;

@@ -19,7 +19,7 @@
   function get(){return normalize(DB.carregar().config.operation)}
   function emit(operation,reason){dispatchEvent(new CustomEvent('operation-settings-changed',{detail:{operation,reason}}))}
   function ensure(){const current=DB.carregar().config.operation;if(current?.migrationVersion>=VERSION)return normalize(current);let saved;DB.alterar(data=>{saved=normalize(data.config.operation||{});data.config.operation=saved});emit(saved,'migration');return saved}
-  function save(patch={}){let saved;DB.alterar(data=>{saved=normalize({...normalize(data.config.operation||{}),...patch,updatedAt:now()});data.config.operation=saved});emit(saved,'user');return saved}
+  function save(patch={}){window.TeamAccess?.assert?.('settings.manage');if(window.TeamAccess&&!window.TeamAccess.has('settings.manage'))throw window.VeconiPermissionPolicy.denied('settings.manage');let saved;DB.alterar(data=>{saved=normalize({...normalize(data.config.operation||{}),...patch,updatedAt:now()});data.config.operation=saved});emit(saved,'user');return saved}
   function applyRemote(raw){const saved=normalize(raw);DB.hydrateOperation(saved);emit(saved,'cloud');return saved}
   function enabled(name){const op=get();if(name==='creditSales')return op.creditMode==='enabled';return op.modules[name]===true}
   function allowsCredit(){return get().creditMode!=='disabled'}

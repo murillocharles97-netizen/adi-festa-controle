@@ -752,7 +752,7 @@ const retryDelay = (attempts, code = "") =>
 const canAttempt = (item, force = false, manualRetry = false) =>
   !queueManualReviewReason(item) &&
   !(item.payload?.writes?.length===1 && item.payload.writes[0].entityType==='clients' &&
-    ['create','update'].includes(item.payload.writes[0].operation) && window.TeamAccess?.has?.('customers.edit')===false) &&
+    ['create','update'].includes(item.payload.writes[0].operation) && window.TeamAccess?.has?.(item.payload.writes[0].operation==='create'?'customers.create':window.VeconiPermissionPolicy?.customerPermission(item.payload.writes[0])||'customers.edit')===false) &&
   !(Array.isArray(item.payload?.writes) && item.payload.writes.some(write => write.entityType === "settings") &&
     !canWriteSharedSettings()) &&
   (manualRetry || item.status !== "error") &&
@@ -1082,8 +1082,8 @@ function assertCustomerForSale(clientId) {
   const creation=readQueue().find(p=>!readRecoveryResolution(p)&&(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
   // Preserve the legitimate ordered offline flow for a NEW authorized draft.
   // Previously denied/held or pre-protocol packets never qualify, even after a grant changes.
-  if(creation&&window.TeamAccess?.has?.('customers.edit')===true&&creation.userId===currentUser.uid&&creation.businessId===activeBusinessId()&&(creation.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&creation.syncProtocolVersion===1&&creation.status==='pending'&&!creation.lastErrorCode&&!queueManualReviewReason(creation))return;
-  if(creation)throw Object.assign(Error(window.TeamAccess?.has?.('customers.edit')===true
+  if(creation&&window.TeamAccess?.has?.('customers.create')===true&&creation.userId===currentUser.uid&&creation.businessId===activeBusinessId()&&(creation.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&creation.syncProtocolVersion===1&&creation.status==='pending'&&!creation.lastErrorCode&&!queueManualReviewReason(creation))return;
+  if(creation)throw Object.assign(Error(window.TeamAccess?.has?.('customers.create')===true
     ? 'O cadastro deste cliente ainda aguarda confirmação na nuvem. Aguarde; o carrinho foi preservado.'
     : 'Este cliente existe apenas no aparelho e seu perfil não pode cadastrá-lo. Peça ao responsável para analisar o registro. Não refaça a venda.'),{code:'customer-dependency-blocked',customerId:id});
   if(readQueue().some(p=>saleQueueRequiresReview(p)&&!readRecoveryResolution(p)&&(p.payload?.writes||[]).some(w=>w.entityType==='sales'&&String(w.data?.clienteId||'')===id)))
@@ -1097,7 +1097,7 @@ async function prepareSaleCustomer(clientId,options={}) {
   const id=String(clientId),scope=captureCloudReadScope(),spaceId=options.spaceId||window.SpaceContext?.salesId?.();
   if(!currentUser||!canPullSource('clients'))throw Error('A consulta deste cliente não está autorizada.');
   const newDraft=readQueue().find(p=>(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
-  if(newDraft&&window.TeamAccess?.has?.('customers.edit')===true){assertCustomerForSale(id);return{source:'authorized-ordered-local-dependency',clientId:id};}
+  if(newDraft&&window.TeamAccess?.has?.('customers.create')===true){assertCustomerForSale(id);return{source:'authorized-ordered-local-dependency',clientId:id};}
   if(navigator.onLine===false){assertCustomerForSale(id);return{source:'confirmed-local-presence'};}
   // Read only. In particular, do NOT flush or retry any old customer or sale operation here.
   const snapshot=await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
@@ -1863,6 +1863,7 @@ function queueWrites(
   options = {},
 ) {
   if (!writes.length) return 0;
+  window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
   if (window.location || window.AdiFestaBuild) assertSyncProtocolBundle();
   if (writes.some(write => write.entityType === "settings") && !canWriteSharedSettings())
     throw Object.assign(Error("Este perfil não pode alterar configurações da empresa. Nenhuma configuração foi enfileirada."),
@@ -2003,6 +2004,7 @@ function createPaymentOperation(before, after, payment) {
     !clientWrite || !Number.isFinite(Number(clientWrite.data?.saldo)) ||
     Number(clientWrite.data.financialVersion) !== Number(payment.expectedFinancialVersion) + 1)
     throw Error("Recebimento e saldo não formam uma operação financeira única. Nenhum pagamento foi salvo.");
+  window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
   const existing = readQueueStrict().filter((item) => String(item.operationId) === String(payment.operationId));
   if (existing.length) {
     const localPayment = (DB.carregar().pagamentos || []).some((entry) =>
@@ -2040,6 +2042,7 @@ function createSaleOperation(before, after, sale) {
     (credit && (!clientWrite || !Number.isFinite(Number(clientWrite.data?.saldo)) ||
       Number(clientWrite.data.financialVersion) !== Number(sale.financialVersionAnterior) + 1)))
     throw Error("Venda e saldo não formam uma operação financeira única. Nenhuma venda foi salva.");
+  window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
   const existing = readQueueStrict().filter((item) => String(item.operationId) === String(sale.operationId));
   if (existing.length) {
     const localSale = (DB.carregar().vendas || []).some((entry) =>
@@ -2159,8 +2162,9 @@ function diffWrites(before, after) {
 }
 function captureChanges(before, after) {
   if (applyingCloud) return 0;
-  const writes = diffWrites(before, after),
-    eventWrite =
+  const writes = diffWrites(before, after);
+  window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
+  const eventWrite =
       writes.find(
         (write) => write.operation === "create" && write.data?.operationId,
       ) || writes.find((write) => write.data?.operationId),
@@ -2212,11 +2216,15 @@ function installOfflineFirstStorage() {
   DB.alterar = function (mutator) {
     window.WorkspaceRuntime?.capture();
     if (!currentUser) return originalAlter(mutator);
+    const permissionScope = window.TeamAccess?.captureSession?.();
     const before = structuredClone(DB.carregar()), next = structuredClone(before);
     mutator(next);
     const after = DB.prepare ? DB.prepare(next) : next;
+    if (!canWriteSharedSettings() && JSON.stringify(sharedSettingsConfig(before.config)) !== JSON.stringify(sharedSettingsConfig(after.config)))
+      throw window.VeconiPermissionPolicy.denied('settings.manage');
     // Validate/stage the queue before publishing the new memory projection.
     // Both sets of records reach the same IDB transaction at the turn boundary.
+    window.TeamAccess?.assertSession?.(permissionScope);
     captureChanges(before, after);
     return DB.salvar(after);
   };
@@ -2312,6 +2320,8 @@ async function testFirestoreConnection() {
 }
 let verifiedProtocolSession='';
 function assertSyncProtocolBundle() {
+  if(Number(window.AdiFestaBuild?.release)>=210&&(!window.PermissionMutations?.assertWrites||window.VeconiPermissionPolicy?.VERSION!==2))
+    throw Object.assign(Error('A atualização das permissões ainda não terminou de carregar. Atualize o aplicativo sem limpar os dados. Nenhuma operação foi gravada.'),{code:'permissions-update-required'});
   if (!Number.isInteger(Number(window.AdiFestaBuild?.release)) || Number(window.AdiFestaBuild.release)<202 || !window.FirebaseCallable)
     throw Object.assign(Error('Atualize a VECONI para continuar com segurança. As filas foram preservadas. Não refaça vendas.'),{code:'sync-update-required'});
 }
@@ -2326,7 +2336,7 @@ async function verifyOperationalProtocol() {
   const protocol=result.data;
   if(protocol?.protocolVersion!==1||protocol.channel!=='commitOperationalSync'||protocol.businessId!==businessId||protocol.workspaceGeneration!==workspaceGeneration||!Number.isInteger(protocol.minClientRelease)||protocol.minClientRelease<202||Number(window.AdiFestaBuild.release)<protocol.minClientRelease)
     throw Object.assign(Error('Atualize a VECONI. O canal de sincronização ainda não foi confirmado; nenhuma operação foi enviada.'),{code:'sync-update-required'});
-  state.operationalProtocol={status:'verified',protocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release),confirmedAt:now()};
+  state.operationalProtocol={status:'verified',protocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release),permissionsVersion:protocol.permissionsVersion||1,confirmedAt:now()};
   verifiedProtocolSession=key;
   return protocol;
 }
@@ -2345,8 +2355,8 @@ async function commitQueueItem(item) {
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
     ...(queueSettingsDiagnostic(item) ? {syncDetail:{...queueSettingsDiagnostic(item),service:"Firestore",request:"queue_preflight"}} : {})});
   const settingsWrite = item.payload?.writes?.find(write => write.entityType === "settings");
-  if(item.payload?.writes?.length===1&&item.payload.writes[0].entityType==='clients'&&window.TeamAccess?.has?.('customers.edit')===false)
-    throw Object.assign(Error('O cadastro exige customers.edit. O original foi preservado; solicite análise ao responsável.'),{code:'customer-edit-permission-required'});
+  if(item.payload?.writes?.length===1&&item.payload.writes[0].entityType==='clients'&&window.TeamAccess?.has?.(item.payload.writes[0].operation==='create'?'customers.create':window.VeconiPermissionPolicy?.customerPermission(item.payload.writes[0])||'customers.edit')===false)
+    throw Object.assign(Error('A ação exige autorização de clientes. O original foi preservado; solicite análise ao responsável.'),{code:'customer-edit-permission-required'});
   if (settingsWrite && !canWriteSharedSettings())
     throw Object.assign(Error("A autorização para alterar configurações não está disponível. Nenhum envio foi permitido."),
       {code:"settings-permission-required",syncDetail:{stage:"settings_permission_preflight",service:"Firestore",
@@ -6414,6 +6424,8 @@ async function readOnlineOrderSale(order,{flush=false}={}){
   applyCloudCollection('sales',[sale],{authoritative:true});return sale;
 }
 window.SyncFirebase = {
+  getPermissionProtocol: () => verifiedProtocolSession===JSON.stringify([syncSessionGeneration,currentUser?.uid,activeBusinessId(),DB.getWorkspaceGeneration?.()??0])&&currentUser?.uid===auth.currentUser?.uid
+    ? structuredClone(state.operationalProtocol||{status:'not_verified'}) : {status:'not_verified'},
   applyOnlineOrderResult: order => {
     if (!order || order.businessId !== activeBusinessId() || order.source !== 'online_store') throw Error('Pedido de outra empresa.');
     applyCloudCollection('catalogOrders', [order], {authoritative:true});

@@ -99,6 +99,10 @@ service cloud.firestore {
             // Self-editable legacy grant maps are not an authorization source.
             || (actor.role == 'cashier' && permission in ['sales.create','customers.view','customers.edit','customers.receiveDebt','products.view','inventory.view'])));
     }
+    // V210: granular members write clients through the authorized gateway only.
+    function browserClientWritesAllowed(businessId) {
+      return signedIn() && (!memberExists(businessId) || teamMember(businessId).get('permissionsVersion',1) < 2);
+    }
     function hasPermission(businessId, permission) {
       return belongsToBusiness(businessId) && permissionGranted(businessId, permission);
     }
@@ -1400,8 +1404,8 @@ service cloud.firestore {
       }
       match /clients/{documentId} {
         allow read: if canReadCollection(businessId, 'clients');
-        allow create: if zeroInitialBalance() && canCreateGenericDocument(businessId, 'clients', documentId);
-        allow update: if unchangedBalance() && canUpdateGenericDocument(businessId, 'clients', documentId);
+        allow create: if browserClientWritesAllowed(businessId) && zeroInitialBalance() && canCreateGenericDocument(businessId, 'clients', documentId);
+        allow update: if browserClientWritesAllowed(businessId) && unchangedBalance() && canUpdateGenericDocument(businessId, 'clients', documentId);
         allow delete: if false;
       }
       match /payments/{documentId} {
