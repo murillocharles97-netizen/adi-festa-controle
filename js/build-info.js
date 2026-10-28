@@ -16,7 +16,7 @@
     shortCommit,
     builtAt,
     release: "210",
-    permissionsV2EditingPaused: false,
+    permissionsV2EditingPaused: true,
   });
 
   if (!window.__adiFestaBuildLogged) {
