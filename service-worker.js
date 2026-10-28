@@ -67,7 +67,7 @@ self.addEventListener('install', event => event.waitUntil(
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '209'});
+  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '210'});
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);

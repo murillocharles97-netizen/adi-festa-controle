@@ -95,9 +95,16 @@ test('cross-origin Firestore/Auth requests and non-GET mutations are not interce
   assert.equal(await h.request('/operation', {method: 'POST'}), undefined);
   assert.deepEqual(h.calls, []);
 });
-test('worker reports V209 without changing commercial code or login state', () => {
+test('worker reports V210 without changing commercial code or login state', () => {
   const h = harness(); let version;
   h.events.message({data: 'GET_VERSION', ports: [{postMessage: value => { version = value; }}]});
-  assert.equal(version.release, '209');
+  assert.equal(version.release, '210');
   h.events.message({data: 'SKIP_WAITING'}); assert.equal(h.skipped, 1);
+});
+
+test('worker GET_VERSION agrees with the shipped frontend release', () => {
+  const h=harness();let version;h.events.message({data:'GET_VERSION',ports:[{postMessage:value=>{version=value;}}]});
+  const frontend=fs.readFileSync(require('node:path').join(__dirname,'../js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
+  assert.equal(version.release,frontend);
+  assert.match(version.cache,/^veconi-v210-permissions-v2(?:-compatible-pause)?$/);
 });

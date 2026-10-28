@@ -19,6 +19,7 @@ function verify(){
  assert.deepEqual(added.sort(),['functions/src/shared/permission-policy.js','js/permission-mutations.js'].sort());assert.ok(before.every(p=>manifest.files.includes(p)));
  const builder=require('./build-public-site.cjs'),files=new Map(manifest.files.map(p=>[p,fs.readFileSync(p)]));for(const[p,b]of files)builder.assertSafePublicFile(p,b);builder.assertReferencesIncluded(files);
  assert.match(read('js/build-info.js'),/release: "210"/);assert.match(read('service-worker.js'),/veconi-v210-permissions-v2/);
+ const events={};require('node:vm').runInNewContext(read('service-worker.js'),{self:{addEventListener:(key,value)=>events[key]=value},URL,Request,Response});let version;events.message({data:'GET_VERSION',ports:[{postMessage:value=>{version=value;}}]});assert.equal(version.release,'210');assert.match(version.cache,/^veconi-v210-permissions-v2(?:-compatible-pause)?$/);
  return{release:210,base:BASE,sanitizedAncestor:CLEAN,changedFiles:names.length,onlyFunctionsToRedeploy:targets,protocol:1,recoveryAndCommercialServicesUnchanged:true,storageRulesUnchanged:true,restrictiveV202Activation:false,transitionRulesSHA256:sha(transition),publicFiles:files.size+1,permissionVersion:2};
 }
 if(require.main===module)console.log(JSON.stringify(verify(),null,2));module.exports={verify,BASE,CLEAN,targets,allowed};
