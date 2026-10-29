@@ -784,20 +784,23 @@ function readRecoveryResolution(item){
     return value.status==='client_confirmed'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create'&&writes[0].entityId===value.clientId&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&value.resolvedAt&&value.resolvedByUid?value:null;
   }
   const sale=item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
+  if(item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
+    (value.channel!=='monetary_recovery'||value.kind!=='monetary_recovery_v1'||value.commercialReceiptConfirmed!==true||value.monetaryPolicy!=='unit4-total-cent-v1'||sale.length!==1||value.totalCents!==Math.round(Number(sale[0].data.valorFinal??sale[0].data.valorTotal)*100)||value.originalTotalCents!==value.totalCents))return null;
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
 }
 async function refreshRecoveryResolutions(isCurrent){
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
   const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
-  const held=readQueue().filter(i=>(saleQueueRequiresReview(i)||clientDependency(i))&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
+  const monetary=i=>i.lastErrorCode==='invalid-argument'&&i.lastErrorMessage==='Total não corresponde aos itens.'&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
+  const held=readQueue().filter(i=>(saleQueueRequiresReview(i)||clientDependency(i)||monetary(i))&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
   for(let offset=0;offset<held.length;offset+=20){
     const batch=held.slice(offset,offset+20),key=queueKey();
     try{
       const checks=await Promise.all(batch.map(async item=>{
         const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(window.SaleRecoveryClient.canonical(item.payload)));
         const payloadHash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
-        return clientDependency(item)?{kind:'client_dependency',operationId:item.operationId,clientId:item.payload.writes[0].entityId,payloadHash}:{operationId:item.operationId,saleId:item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create').entityId,payloadHash};
+        return clientDependency(item)?{kind:'client_dependency',operationId:item.operationId,clientId:item.payload.writes[0].entityId,payloadHash}:{...(monetary(item)?{kind:'monetary_analysis_v1'}:{}),operationId:item.operationId,saleId:item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create').entityId,payloadHash};
       }));
       if(!isCurrent())return;
       const response=await window.FirebaseCallable('listSaleRecoveryReviews',{businessId:activeBusinessId(),workspaceGeneration:window.DB?.getWorkspaceGeneration?.()??0,resolutionChecks:checks});
@@ -811,10 +814,11 @@ async function refreshRecoveryResolutions(isCurrent){
           localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({...r,channel:'client_dependency',payloadChecksum:checksumValue(item.payload),verifiedAt:now()}));continue;
         }
         const sale=item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create');
+        if(monetary(item)&&(!r||r.kind!=='monetary_recovery_v1'||r.commercialReceiptConfirmed!==true||r.monetaryPolicy!=='unit4-total-cent-v1'||r.totalCents!==Math.round(Number(sale.data.valorFinal??sale.data.valorTotal)*100)||r.originalTotalCents!==r.totalCents))continue;
         if(!r||!['already_recreated','recovered','closed_without_effects'].includes(r.status)||r.payloadHash!==check.payloadHash||r.saleId!==check.saleId||r.businessId!==item.businessId||r.actorUid!==item.userId||r.spaceId!==sale.data.spaceId||r.workspaceGeneration!==(item.workspaceGeneration??0)||!r.resolvedAt||!r.resolvedByUid||!/^[a-f0-9]{64}$/.test(r.contentHash||''))continue;
         const live=readQueue().find(q=>q.operationId===item.operationId);
         if(!live||checksumValue(live.payload)!==checksumValue(item.payload))continue;
-        localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({...r,payloadChecksum:checksumValue(item.payload),verifiedAt:now()}));
+        localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({...r,...(monetary(item)?{channel:'monetary_recovery'}:{}),payloadChecksum:checksumValue(item.payload),verifiedAt:now()}));
       }
     }catch{/* Failed verification never authorizes replay or changes the original packet. */}
   }

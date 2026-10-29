@@ -130,7 +130,7 @@ async function prepareRecoveredSale({db,tx,c,space,v,FieldValue}){
   const at=Timestamp.now(),stamp={businessId:c.businessId,spaceId:v.spaceId,workspaceGeneration:generation,updatedAt:at},canonical={ownerId:v.sale.actorUid,updatedByUid:c.uid,schemaVersion:3,version:1,idempotencyKey:v.operationId,action:'create'},saleData={...operational(v.sale),id:v.saleId,operationId:v.operationId,...stamp,...canonical,entityType:'sales',
     itens:v.sale.itens.map(operational),createdAt:v.sale.createdAt||v.originalSaleAt,
     recoveredFromReview:true,recoveryContentHash:v.contentHash,recoveredAt:at,recoveredByUid:c.uid};
-  return{movementIds:plan.movements.map(w=>w.entityId),commit(){
+  return{movementIds:plan.movements.map(w=>w.entityId),stockPreview:stock.map(change=>({productId:change.item.productId,variantId:change.item.variantId||null,before:change.before,after:change.after,version:change.source.version??null})),commit(){
     if(recoveredClient){
       const before=recoveredClient.data,previous=before.ultimaCompra||'',last=String(previous)>v.originalSaleAt?previous:v.originalSaleAt;
       tx.update(recoveredClient.ref,{totalComprado:Math.round((before.totalComprado+v.total)*100)/100,quantidadeVendas:before.quantidadeVendas+1,ultimaCompra:last,updatedAt:at,atualizadoEm:at,version:FieldValue.increment(1)});

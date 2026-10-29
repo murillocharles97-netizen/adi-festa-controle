@@ -233,6 +233,7 @@
     "js/workspace-writer.js",
     "manifest.json",
     "service-worker.js",
-    "js/sale-money.js"
+    "js/sale-money.js",
+    "js/sale-monetary-recovery-ui.js"
   ]
 }

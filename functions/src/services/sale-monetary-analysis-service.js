@@ -23,13 +23,13 @@ function calculate(sale){
  const originalCents=Math.round(local*100);if(!Number.isSafeInteger(originalCents)||!Number.isSafeInteger(serverCents))fail('invalid-argument','Total fora do limite seguro.');
  return{originalTotal:local,originalTotalCents:originalCents,rawItemsTotal,reportedTotalMinusRawItems:local-rawItemsTotal,serverExpectedCents:serverCents,differenceCents:serverCents-originalCents,calculationRule:'sum(round(quantity * round(originalFinalUnitPrice * 100)))',...pick(sale,['subtotalOriginal','descontoTotal','ajusteManual','descontoTipo','appliedCampaignIds','formaPagamento','status','paymentState','paymentIntentId']),customerId:sale.clienteId||sale.clientId||sale.customerId||null,lines};
 }
-function monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,policyFor=defaultPolicy,enabled=true}){
+function monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,policyFor=defaultPolicy,enabled=true,recoveryEnabled=false}){
  const reader={get:r=>r.get()},root=c=>db.doc('businesses/'+c.businessId),receiptRef=(c,t)=>root(c).collection('saleRecoveryReviews').doc(t.saleId).collection('monetaryAnalysis').doc('receipt'),rawRef=(c,t)=>receiptRef(c,t).parent.doc('original'),indexRef=(c,t)=>root(c).collection('saleRecoveryOperations').doc(t.operationId);
  async function targetsFor(reader,c,data){if(!c.owner)return[];if(c.profile.businessId!==c.businessId||c.profile.uid&&c.profile.uid!==c.uid)fail('permission-denied','A sessão não corresponde à empresa desta análise.');const targets=policyFor(c).filter(t=>!data.spaceId||t.spaceId===data.spaceId);for(const t of targets)await space(reader,c,t.spaceId);return targets;}
  function publicReceipt(r){return pick(r,['kind','schemaVersion','businessId','actorUid','saleId','operationId','spaceId','workspaceGeneration','contentHash','payloadHash','status','commercialEffectsApplied','analysis','remoteChecks','retentionPolicy','retentionReviewAt','receivedAt']);}
  function verified(c,t,r,s,i){return r?.kind===KIND&&r.schemaVersion===1&&r.businessId===c.businessId&&r.actorUid===c.uid&&r.saleId===t.saleId&&r.operationId===t.operationId&&r.spaceId===t.spaceId&&r.workspaceGeneration===(c.business.workspaceGeneration??0)&&r.status==='analysis_received'&&r.commercialEffectsApplied===false&&s?.kind===KIND&&s.actorUid===c.uid&&typeof s.originalJson==='string'&&sha(s.originalJson)===r.contentHash&&s.contentHash===r.contentHash&&s.payloadHash===r.payloadHash&&i?.kind===KIND&&i.businessId===c.businessId&&i.actorUid===c.uid&&i.saleId===t.saleId&&i.operationId===t.operationId&&i.spaceId===t.spaceId&&i.workspaceGeneration===r.workspaceGeneration&&i.contentHash===r.contentHash&&i.payloadHash===r.payloadHash&&i.status==='analysis_only'&&i.commercialEffectsApplied===false;}
  async function status(request){const c=await context(reader,request),targets=await targetsFor(reader,c,request.data),items=[];
-  for(const t of targets){const [r,s,i]=await Promise.all([receiptRef(c,t).get(),rawRef(c,t).get(),indexRef(c,t).get()]);if(r.exists||s.exists||i.data()?.kind===KIND){const v=r.data();if(!verified(c,t,v,s.data(),i.data()))fail('failed-precondition','A evidência remota precisa de revisão técnica.');items.push(publicReceipt(v));}}
+  for(const t of targets){const [r,s,i]=await Promise.all([receiptRef(c,t).get(),rawRef(c,t).get(),indexRef(c,t).get()]);if(r.exists||s.exists||i.data()?.kind===KIND){const v=r.data();if(!verified(c,t,v,s.data(),i.data()))fail('failed-precondition','A evidência remota precisa de revisão técnica.');const row=publicReceipt(v),decision=await receiptRef(c,t).parent.doc('decision').get();if(decision.exists)row.recoveryResolution=await recovery.resolution(reader,c,{saleId:t.saleId,operationId:t.operationId,contentHash:v.contentHash,payloadHash:v.payloadHash});items.push(row);}}
   return{kind:KIND,schemaVersion:1,eligible:!!targets.length,intakeEnabled:enabled,targets:targets.map(t=>({...pick(t,['saleId','operationId','spaceId','reportedAmountCents','expectedDiagnosticChecksum','movementIds'])})),items,commercialEffectsApplied:false};
  }
  async function inspectRemote(tx,c,t,sale){
@@ -56,6 +56,19 @@ function monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,p
    return{...publicReceipt(receipt),receivedAt:null,duplicate:false};
   });
  }
- return{submit,status};
+ async function loadVerified(reader,c,data){
+  const targets=await targetsFor(reader,c,data),t=targets.find(t=>t.saleId===data.saleId&&t.operationId===data.operationId);if(!t)fail('permission-denied','Esta sessão não pode decidir sobre estes identificadores.');
+  const [rr,raw,op]=await Promise.all([reader.get(receiptRef(c,t)),reader.get(rawRef(c,t)),reader.get(indexRef(c,t))]),r=rr.data(),s=raw.data();
+  if(!verified(c,t,r,s,op.data())||data.contentHash&&data.contentHash!==r.contentHash||data.payloadHash&&data.payloadHash!==r.payloadHash)fail('failed-precondition','Os recibos e originais precisam de conferência.');
+  const v=validateOriginal(s,c.uid,c.businessId,{monetaryAnalysis:true});if(v.operationId!==t.operationId||v.saleId!==t.saleId||v.spaceId!==t.spaceId||sha(canonical(v.packet.payload))!==r.payloadHash||t.expectedDiagnosticChecksum&&diagnosticChecksum(v.packet.payload)!==t.expectedDiagnosticChecksum)fail('failed-precondition','O original diverge da evidência recebida.');
+  return{...v,contentHash:r.contentHash,payloadHash:r.payloadHash,target:t};
+ }
+ const recovery=require('./sale-monetary-recovery').monetaryRecovery({db,FieldValue,context,space,loadVerified,enabled:recoveryEnabled});
+ return{submit,status,preview:recovery.preview,decide:recovery.decide,resolution:async(reader,c,data)=>{
+  // An unrelated monetary incident must not abort a mixed read-only batch of
+  // older recovery reviews. No evidence or commercial authority is inferred.
+  if(!policyFor(c).some(t=>t.saleId===data.saleId&&t.operationId===data.operationId))return{saleId:data.saleId,operationId:data.operationId,status:'unconfirmed'};
+  return recovery.resolution(reader,c,data);
+ }};
 }
 module.exports={monetaryAnalysisService,calculate,diagnosticChecksum,KIND};

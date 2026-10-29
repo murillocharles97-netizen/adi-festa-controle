@@ -61,7 +61,7 @@ function similarSales(review,sales){
   return sales.filter(s=>s.id!==review.saleId&&s.spaceId===review.spaceId&&s.actorUid!==review.actorUid&&Array.isArray(s.itens)&&signature(s.itens)===expected)
     .slice(0,5).map(s=>({saleId:s.id,at:date(s.data),total:Number(s.valorFinal??s.total??0),paymentMethod:String(s.formaPagamento||''),sameTotal:Math.abs(Number(s.valorFinal??s.total??0)-review.total)<0.005,samePaymentMethod:String(s.formaPagamento||'')===review.paymentMethod,label:'Possível venda semelhante registrada pelo gestor'}));
 }
-function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DECISIONS_ENABLED,monetaryAnalysisPolicy,monetaryAnalysisEnabled=require('./sale-monetary-analysis-policy').INTAKE_ENABLED}){
+function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DECISIONS_ENABLED,monetaryAnalysisPolicy,monetaryRecoveryEnabled=require('./sale-monetary-analysis-policy').RECOVERY_ENABLED,monetaryAnalysisEnabled=require('./sale-monetary-analysis-policy').INTAKE_ENABLED}){
   const ref=(businessId,name,id)=>db.doc(`businesses/${businessId}/${name}/${id}`);
   async function context(reader,request){
     const uid=request.auth?.uid;if(!uid)fail('unauthenticated','Entre na sua conta para enviar os dados.');
@@ -80,7 +80,7 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     if(!snapshot.exists||!belongsToWorkspace(snapshot.data(),c.businessId)||snapshot.data().active===false||(!c.owner&&c.member.spaceAccess!=='all'&&!c.member.allowedSpaceIds?.includes(id)))fail('permission-denied','Espaço não autorizado.');
     return snapshot.data();
   }
-  const monetaryAnalysis=require('./sale-monetary-analysis-service').monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,policyFor:monetaryAnalysisPolicy,enabled:monetaryAnalysisEnabled});
+  const monetaryAnalysis=require('./sale-monetary-analysis-service').monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,policyFor:monetaryAnalysisPolicy,enabled:monetaryAnalysisEnabled,recoveryEnabled:monetaryRecoveryEnabled});
   async function submit(request){
     if(request.data?.intakeKind==='monetary_analysis_v1')return monetaryAnalysis.submit(request);
     if(!request.auth?.uid)fail('unauthenticated','Entre na sua conta para enviar os dados.');
@@ -149,6 +149,7 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     if(!Array.isArray(checks)||checks.length>20)fail('invalid-argument','Limite de consultas excedido.');
     const items=[];
     for(const check of checks){
+      if(check.kind==='monetary_analysis_v1'){validId(check.saleId,'Venda');validId(check.operationId,'Operação');items.push(await monetaryAnalysis.resolution(reader,c,check));continue;}
       if(check.kind==='client_dependency'){
         const operationId=validId(check.operationId,'Operação'),clientId=validId(check.clientId,'Cliente'),index=(await ref(c.businessId,'saleRecoveryOperations',operationId).get()).data();
         if(!index){items.push({operationId,clientId,status:'unconfirmed'});continue;}
@@ -179,7 +180,7 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     return {items};
   }
   async function list(request){
-    if(request.data?.intakeKind==='monetary_analysis_v1')return monetaryAnalysis.status(request);
+    if(request.data?.intakeKind==='monetary_analysis_v1')return request.data.recoveryPreview===true?monetaryAnalysis.preview(request):monetaryAnalysis.status(request);
     const c=await context(reader,request),requestedSpace=request.data.spaceId||null;
     if(request.data.resolutionChecks!==undefined)return resolutions(c,request.data.resolutionChecks);
     if(requestedSpace)await space(reader,c,requestedSpace);
@@ -237,6 +238,7 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     const raw=await r.collection('original').doc('payload').get();return raw.data();
   }
   async function decide(request){
+    if(request.data?.intakeKind==='monetary_analysis_v1')return monetaryAnalysis.decide(request);
     const input=request.data||{},action=input.action;
     const confirmations={link_existing:'VINCULAR',dismiss_match:'NAO_E_A_MESMA',recover_original:'RECUPERAR',close_without_effects:'ENCERRAR_SEM_EFEITOS',approve_client:'APROVAR_CADASTRO'};
     if(!confirmations[action]||input.confirmation!==confirmations[action])fail('invalid-argument','Confirme explicitamente a decisão.');

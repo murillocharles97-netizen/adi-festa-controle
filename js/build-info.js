@@ -15,8 +15,9 @@
     commit,
     shortCommit,
     builtAt,
-    release: "214",
+    release: "215",
     monetaryAnalysisIntakePaused: false,
+    monetaryRecoveryReady: true,
     permissionsV2EditingPaused: false,
   });
 

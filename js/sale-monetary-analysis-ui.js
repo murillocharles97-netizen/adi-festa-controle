@@ -1,5 +1,7 @@
-import './sale-monetary-analysis-client.js?v=214';
-// Evidence-only intake and status. No recovery mutation is available in A.
+import './sale-monetary-analysis-client.js?v=215';
+import './sale-monetary-recovery-ui.js?v=215';
+// Local intake remains evidence-only. A separate, rollout-gated review requires
+// an explicit owner decision; it never uses the commercial queue or Sync retry.
 let epoch=0,lastKey='',state={phase:'idle',message:'',targets:[],items:[]},lastChecked=0,reading=null,dismissed='',running=false;
 const c=()=>window.BusinessContext?.get?.()||{};
 function identity(){const b=c(),id=window.SpaceContext?.homeId?.();return{uid:window.FirebaseSession?.user?.uid||'',businessId:b.businessId||'',role:b.role||'',workspaceGeneration:b.business?.workspaceGeneration??0,spaceId:id&&!['all','all_spaces','todos'].includes(id)?id:null,principal:window.DB?.getPrincipal?.()||'',permissionSignature:b.permissionSignature||'',epoch};}
@@ -25,6 +27,8 @@ function render(){const current=key();if(!eligible()||dismissed===current||!stat
   const result=document.createElement('p');result.dataset.analysisResult='';result.setAttribute('role',state.phase==='error'?'alert':'status');result.setAttribute('aria-live','polite');result.textContent=state.message;box.append(result);
   for(const row of state.items){const line=document.createElement('p');line.textContent=`Venda ${row.saleId.slice(0,8)}: ${{received:'recebimento confirmado',already_received:'já recebida, sem duplicação',not_on_this_device:'dados originais não encontrados neste dispositivo',receipt_unconfirmed:'recebimento ainda não confirmado; pode repetir somente o envio de evidências'}[row.status]||row.status}`;box.append(line);}
   const actions=document.createElement('div');actions.className='sale-monetary-actions';if(!allReceived()){const send=document.createElement('button');send.type='button';send.className='btn btn-primary';send.dataset.analysisSend='';send.textContent=running?'Enviando somente evidências…':state.phase==='error'?'Tentar envio para análise':state.items.some(accepted)?'Enviar dados restantes':'Enviar para análise';send.disabled=running;send.onclick=submit;actions.append(send);}const later=document.createElement('button');later.type='button';later.className='btn btn-light';later.textContent=allReceived()?'Fechar aviso':'Agora não';later.disabled=running;later.onclick=()=>{dismissed=current;render();};actions.append(later);box.append(actions);
+  // Deliberate rollout flag; evidence intake keeps working while recovery is paused.
+  if(window.AdiFestaBuild?.monetaryRecoveryReady===true)for(const receipt of state.receipts||[]){const review=document.createElement('button');review.type='button';review.className='btn btn-light';review.textContent='Revisar venda '+receipt.saleId.slice(0,8);review.onclick=()=>window.SaleMonetaryRecoveryUI.open({document,call,identity,target:receipt,onResolved:()=>{lastChecked=0;void refresh();}});actions.append(review);}
  }
 }
 async function refresh(){const current=key();if(current!==lastKey){controller.invalidate();lastKey=current;lastChecked=0;state={phase:'idle',message:'',targets:[],items:[]};dismissed='';}if(!eligible()){render();return;}render();if(running||reading||Date.now()-lastChecked<60000)return;lastChecked=Date.now();reading=current;
