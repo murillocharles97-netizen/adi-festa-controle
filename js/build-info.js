@@ -16,7 +16,7 @@
     shortCommit,
     builtAt,
     release: "212",
-    monetaryAnalysisIntakePaused: false,
+    monetaryAnalysisIntakePaused: true,
     permissionsV2EditingPaused: false,
   });
 

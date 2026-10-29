@@ -9,5 +9,5 @@ function policyFor(c){
  return targets.map(t=>({saleId:t.saleId,operationId:t.operationId,spaceId:t.spaceId,reportedAmountCents:t.reportedAmountCents,expectedDiagnosticChecksum:t.expectedDiagnosticChecksum,productIds:[...t.productIds],movementIds:[...t.movementIds]}));
 }
 // Compatible rollback pauses intake, never removes originals, receipts or fences.
-const INTAKE_ENABLED=true;
+const INTAKE_ENABLED=false;
 module.exports={policyFor,INTAKE_ENABLED};
