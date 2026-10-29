@@ -17,7 +17,7 @@
     builtAt,
     release: "215",
     monetaryAnalysisIntakePaused: false,
-    monetaryRecoveryReady: true,
+    monetaryRecoveryReady: false,
     permissionsV2EditingPaused: false,
   });
 

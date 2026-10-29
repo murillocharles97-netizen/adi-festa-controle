@@ -11,5 +11,5 @@ function policyFor(c){
 // Compatible rollback pauses intake, never removes originals, receipts or fences.
 const INTAKE_ENABLED=true;
 // Separate commercial rollout. Evidence collection stays independent.
-const RECOVERY_ENABLED=true;
+const RECOVERY_ENABLED=false;
 module.exports={policyFor,INTAKE_ENABLED,RECOVERY_ENABLED};
