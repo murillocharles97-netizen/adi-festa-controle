@@ -37,6 +37,7 @@ function salesSandbox({browser=false}={}){
   }
   sandbox.window=sandbox;
   vm.createContext(sandbox);
+  vm.runInContext(read('js/sale-money.js'),sandbox);
   vm.runInContext(read('js/vendas.js'),sandbox,{filename:'vendas.js'});
   return{sandbox,data};
 }

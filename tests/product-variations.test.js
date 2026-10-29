@@ -12,6 +12,7 @@ function runtime(){
   vm.runInContext(fs.readFileSync('functions/src/shared/product-model.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/produtos.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/product-variations.js','utf8'),context);
+  vm.runInContext(fs.readFileSync('js/sale-money.js','utf8'),context);
   vm.runInContext(fs.readFileSync('js/vendas.js','utf8'),context);
   return{context,data};
 }

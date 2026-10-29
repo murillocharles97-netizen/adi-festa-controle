@@ -150,14 +150,15 @@
   function cartHTML(cart) {
     if (!cart.length)
       return `<div class="desktop-sale-empty desktop-cart-empty">${icon("shopping-bag")}<span><b>Seu carrinho está vazio</b><small>Selecione produtos à esquerda.</small></span></div>`;
+    const allocation=window.SaleMoney?.summarize(cart);
     return cart
-      .map((item) => {
+      .map((item,index) => {
         const key = itemKey(item),
           product = window.Produtos?.obter?.(item.produtoId) || item,
           variant = item.variantId
             ? window.ProductVariations?.get?.(item.variantId)
             : null,
-          total = number(item.quantidade) * number(item.precoFinalUnitario),
+          total = allocation ? allocation.lines[index].totalCents/100 : number(item.quantidade) * number(item.precoFinalUnitario),
           variation =
             item.variationName ||
             item.variacaoNome ||
@@ -168,7 +169,7 @@
         return `<article class="desktop-cart-item editable-cart">
           <div class="desktop-cart-product">${productImage(product, "desktop-cart-product-image", variant)}<div><b>${esc(item.nome)}</b><small>${esc(variation)}</small></div></div>
           <div class="desktop-cart-quantity" aria-label="Quantidade de ${esc(item.nome)}"><button type="button" data-cart-step="-1" data-cart-key="${esc(key)}" aria-label="Diminuir quantidade">−</button><input data-item-qty="${esc(key)}" type="number" min="1" step="1" value="${number(item.quantidade)}" aria-label="Quantidade"><button type="button" data-cart-step="1" data-cart-key="${esc(key)}" aria-label="Aumentar quantidade">+</button></div>
-          <label class="desktop-cart-unit"><span>Valor unitário</span><input data-item-price="${esc(key)}" type="number" inputmode="decimal" min="0" step=".01" value="${number(item.precoFinalUnitario).toFixed(2)}" aria-label="Valor unitário de ${esc(item.nome)}"></label>
+          <label class="desktop-cart-unit"><span>Valor unitário</span><input data-item-price="${esc(key)}" type="number" inputmode="decimal" min="0" step=".0001" value="${Number(number(item.precoFinalUnitario).toFixed(4))}" aria-label="Valor unitário de ${esc(item.nome)}"></label>
           <b class="desktop-cart-total">${money(total)}</b>
           <button type="button" class="desktop-cart-remove" data-remove="${esc(key)}" aria-label="Remover ${esc(item.nome)}">${icon("x")}</button>
         </article>`;

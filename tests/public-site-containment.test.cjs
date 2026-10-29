@@ -101,5 +101,6 @@ for (const resource of ['/js/kyteData.js', '/js/kyteBalances.js', '/js/saldoCorr
 }
 test('anonymous operational resources remain accessible, including lazy modules, receipt CSS, worker and catalog', async () => {
   for (const resource of ['/index.html', '/catalogo.html', '/404.html', '/manifest.json', '/service-worker.js', '/js/firebase/auth.js', '/js/firebase/sync.js', '/js/sale-exchanges.js', '/js/fiados.js', '/css/receipt.css', '/js/product-spreadsheet-worker.js', '/functions/src/shared/online-order.js', '/assets/veconi-icon-192-v133.png']) assert.equal((await fetch(origin + resource)).status, 200, resource);
-  assert.match(await (await fetch(origin + '/js/build-info.js')).text(), /release: "212"/);
+  const shipped=await (await fetch(origin + '/js/build-info.js')).text(),expected=fs.readFileSync(path.join(root,'js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
+  assert.equal(shipped.match(/release:\s*"(\d+)"/)[1],expected);
 });

@@ -11,6 +11,7 @@ const execute=require('../shared/commercial-commit-engine');
 const {validateEngagement}=require('./operational-engagement-validation');
 const {operationalId}=require('../shared/operational-id');
 const Policy=require('../shared/permission-policy');
+const SaleMoney=require('../shared/sale-money');
 const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message);};
 const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteger(Math.round(n*100)))fail('Valor inválido.','invalid-argument');return Math.round(n*100);};
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
@@ -173,15 +174,20 @@ function operationalCommitService(db){
    }
    credit=(original||sale).formaPagamento==='fiado';
    if(!Array.isArray(sale.itens)||!sale.itens.length||sale.itens.length>100)fail('Itens inválidos.','invalid-argument');
+   let monetary=null;
+   if(sale.monetaryPolicy!==undefined){
+    try{monetary=SaleMoney.assertSale(sale);}catch(error){fail(error.message,'invalid-argument');}
+   }
    for(const i of sale.itens){
     const productId=validId(i.produtoId||i.productId,'Produto'),variantId=i.variantId?validId(i.variantId,'Variação'):null,q=i.quantidade??i.quantity;
     if(!numeric(q,true)||q>1000000)fail('Quantidade inválida.','invalid-argument');
-    const unit=i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot,price=cents(unit);if(price<0)fail('Preço negativo.');total+=Math.round(q*price);
+    const unit=i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot,price=cents(unit);if(price<0)fail('Preço negativo.');if(!monetary)total+=Math.round(q*price);
     const p=await old('products',productId);await scopeProduct(c,p,spaceId);
     if(variantId){const v=await old('productVariants',variantId);if(!v||v.parentProductId!==productId||!Model.active(v))fail('Variação inválida.');}
     if(p.productType==='variable'&&!variantId)fail('Variação obrigatória.');
     if(p.itemKind!=='service'&&!p.semControleEstoque&&p.controlaEstoque!==false)add(productId,variantId,(cancels.length?1:-1)*q);
    }
+   if(monetary)total=monetary.totalCents;
    if(total!==cents(sale.valorFinal??sale.valorTotal)||total<0)fail('Total não corresponde aos itens.','invalid-argument');
    if(sale.onlineOrderId){
     const order=await old('catalogOrders',sale.onlineOrderId);

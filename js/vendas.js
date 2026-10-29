@@ -1,4 +1,7 @@
 window.Vendas = (() => {
+  // Compatible emergency rollback pauses only NEW fractional-price intake.
+  // Server validation/receipts and queued operations retain the new policy.
+  const FOUR_DECIMAL_INTAKE_PAUSED = false;
   const listar = () => DB.carregar().vendas;
   const cents = (value) => Math.round(Number(value || 0) * 100);
   const getCurrentCustomerBalance = (customerId, data = DB.carregar()) => {
@@ -122,6 +125,7 @@ window.Vendas = (() => {
       const frozenOnlineItems = d.onlineOrderId ? window.OnlineOrderModel?.saleItems(d.onlineOrderItems || []) : null;
       if (d.onlineOrderId && (!frozenOnlineItems || frozenOnlineItems.length !== itensComCampanha.length))
         throw Error('O pedido online precisa do resumo confirmado no backend.');
+      if (!d.onlineOrderId && !window.SaleMoney) throw Error('Atualize o aplicativo para conferir os valores. O carrinho foi preservado.');
       const itens = itensComCampanha.map((i, itemIndex) => {
         const produto = db.produtos.find((p) => p.id === i.produtoId),
           variacao = i.variantId
@@ -199,19 +203,26 @@ window.Vendas = (() => {
           recurringActivation: i.recurringActivation ? structuredClone(i.recurringActivation) : null,
         };
       });
+      const monetary = d.onlineOrderId ? null : window.SaleMoney.summarize(itens);
+      if (FOUR_DECIMAL_INTAKE_PAUSED && monetary?.lines.some(line=>line.unit4%100!==0))
+        throw Error('Novas vendas com preço fracionado estão temporariamente pausadas. Revise os preços em centavos; seu carrinho foi preservado.');
+      if (monetary) itens.forEach((item,index)=>{
+        item.subtotalFinal=monetary.lines[index].totalCents/100;
+        item.lucro=item.subtotalFinal-item.custoTotal;
+      });
       const subtotalOriginal = itens.reduce(
           (s, i) => s + i.subtotalOriginal,
           0,
         ),
-        valorFinal = itens.reduce((s, i) => s + i.subtotalFinal, 0),
-        descontoTotal = subtotalOriginal - valorFinal,
+        valorFinal = monetary ? monetary.totalCents / 100 : itens.reduce((s, i) => s + i.subtotalFinal, 0),
+        descontoTotal = monetary ? (cents(subtotalOriginal) - monetary.totalCents) / 100 : subtotalOriginal - valorFinal,
         custoTotal = itens.reduce((s, i) => s + i.custoTotal, 0),
         lucro = valorFinal - custoTotal,
         saldoAnterior = customerBalance?.saldo ?? (cliente ? Number(cliente.saldo || 0) : 0),
         financialVersionAnterior = customerBalance?.financialVersion ??
           (cliente ? Math.max(0, Number(cliente.financialVersion || 0)) : 0),
         saldoAtual =
-          d.status === "fiado" ? saldoAnterior - valorFinal : saldoAnterior;
+          d.status === "fiado" ? (cents(saldoAnterior) - cents(valorFinal)) / 100 : saldoAnterior;
       if (cliente && d.status === "fiado" && cliente.legacyBalance === undefined) {
         cliente.legacyBalance = Math.abs(Math.min(0, saldoAnterior));
         cliente.legacyBalanceRemaining = cliente.legacyBalance;
@@ -222,6 +233,7 @@ window.Vendas = (() => {
         operationId,
         idempotencyKey: operationId,
         syncPipelineVersion: 2,
+        ...(monetary ? {monetaryPolicy: window.SaleMoney.POLICY} : {}),
         clienteId: d.clienteId || null,
         clientId: d.clienteId || null,
         customerId: d.clienteId || null,

@@ -624,7 +624,7 @@ window.Checkout = (() => {
         (s, i) => s + i.quantidade * i.precoOriginal,
         0,
       ),
-      final = items.reduce((s, i) => s + i.quantidade * i.precoFinalUnitario, 0),
+      final = items.length ? (window.SaleMoney ? window.SaleMoney.summarize(items).totalCents / 100 : items.reduce((s,i)=>s+i.quantidade*i.precoFinalUnitario,0)) : 0,
       cost = items.reduce((s, i) => s + i.quantidade * i.custoUnitario, 0);
     return {
       original,
@@ -653,7 +653,7 @@ window.Checkout = (() => {
           .map((i) => {
             const key = cartKey(i), product = products().getById(i.produtoId), variant = i.variantId ? window.ProductVariations?.get?.(i.variantId) : null,
               image = window.ProductImages?.markup?.(product, { variant, className: "sale-cart-photo" }) || `<span class="sale-cart-photo placeholder">${initials(i.nome)}</span>`;
-            return `<div class="cart-item editable-cart">${image}<div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".01" value="${i.precoFinalUnitario.toFixed(2)}"></label><button class="icon-btn" data-remove="${escapar(key)}" aria-label="Remover ${escapar(i.nome)}"><i data-lucide="trash-2"></i></button></div>`;
+            return `<div class="cart-item editable-cart">${image}<div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".0001" value="${Number(i.precoFinalUnitario.toFixed(4))}"></label><button class="icon-btn" data-remove="${escapar(key)}" aria-label="Remover ${escapar(i.nome)}"><i data-lucide="trash-2"></i></button></div>`;
           })
           .join("")
         : '<div class="empty">Adicione produtos</div>';
@@ -913,7 +913,7 @@ window.Checkout = (() => {
       }
       if (price) {
         const i = cart.find((x) => cartKey(x) === price.dataset.itemPrice);
-        i.precoFinalUnitario = Math.max(0, Number(price.value) || 0);
+        i.precoFinalUnitario = Number(Math.max(0, Number(price.value) || 0).toFixed(4));
         manual = true;
         selectedCampaignIds.clear();
         discountKind = "item";

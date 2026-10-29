@@ -58,6 +58,7 @@ function saleHarness() {
     context,
     { filename: 'sync-capture.js' },
   );
+  vm.runInContext(fs.readFileSync('js/sale-money.js', 'utf8'), context, { filename: 'sale-money.js' });
   vm.runInContext(fs.readFileSync('js/vendas.js', 'utf8'), context, { filename: 'vendas.js' });
   return { context, data, captures, queue, counts: () => ({ directSave, mutations }) };
 }

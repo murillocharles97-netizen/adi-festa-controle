@@ -44,6 +44,7 @@ function salesRuntime() {
   context.window = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync("js/customer-subscriptions.js", "utf8"), context);
+  vm.runInContext(fs.readFileSync('js/sale-money.js','utf8'),context);
   vm.runInContext(fs.readFileSync("js/vendas.js", "utf8"), context);
   return { context, data, campaignStatus: () => campaignStatus };
 }

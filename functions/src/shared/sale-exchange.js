@@ -3,6 +3,7 @@
 const fail = message => { throw new Error(message); };
 const cents = value => { const n = Number(value); if (!Number.isFinite(n) || n < 0) fail('Valor inválido.'); return Math.round(n * 100); };
 const quantity = n => { if (!Number.isSafeInteger(n) || n < 1 || n > 999) fail('Quantidade inválida.'); return n; };
+const Money=require('./sale-money');
 function planExchange(sale, input, returned = {}, catalog = []) {
   if (!sale || !['pago','paid','concluido','completed'].includes(sale.status) || sale.deletedAt || sale.reversedAt || sale.active === false)
     fail('A V1 aceita somente vendas pagas e ativas. Fiado exige uma política específica.');
@@ -12,15 +13,18 @@ function planExchange(sale, input, returned = {}, catalog = []) {
     fail('A V1 aceita vendas manuais pagas; pagamentos integrados e pedidos online exigem fluxo específico.');
   if (!input.reason || input.reason.trim().length < 3 || input.reason.length > 500) fail('Informe o motivo da troca.');
   if (!Array.isArray(input.returns) || !input.returns.length || input.returns.length > 40 || !Array.isArray(input.replacements) || !input.replacements.length || input.replacements.length > 40) fail('Selecione itens devolvidos e novos.');
-  const lines = sale.itens.map(i => ({ ...i, qty: quantity(i.quantidade), unit: cents(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco) }));
-  const sum = lines.reduce((n,i) => n + i.qty*i.unit,0);
+  const allocation=sale.monetaryPolicy!==undefined?Money.assertSale(sale):null;
+  const lines = sale.itens.map((i,n) => ({ ...i, qty: quantity(i.quantidade), unit: cents(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco), lineCents:allocation?.lines[n].totalCents }));
+  const sum = allocation?allocation.totalCents:lines.reduce((n,i) => n + i.qty*i.unit,0);
   if (sum !== cents(sale.valorFinal ?? sale.valorTotal)) fail('Desconto ou valor histórico não alocado nos itens. Revisão necessária.');
   const seen = new Set();
   const returns = input.returns.map(r => {
     if (!Number.isSafeInteger(r.line) || !lines[r.line] || seen.has(r.line) || typeof r.restock !== 'boolean') fail('Item devolvido inválido ou repetido.');
     seen.add(r.line); const i=lines[r.line], q=quantity(r.quantity), used=returned[r.line]||0;
     if (!Number.isSafeInteger(used) || used<0 || q+used>i.qty) fail('Quantidade excede o restante disponível para troca.');
-    return {line:r.line,productId:i.produtoId,variantId:i.variantId||null,name:i.nome||i.produtoNome||i.produtoId,variantName:i.variantName||'',quantity:q,restock:r.restock,unitCents:i.unit,totalCents:q*i.unit};
+    const cumulative=n=>Number(BigInt(n)*BigInt(i.lineCents)/BigInt(i.qty));
+    const totalCents=allocation?cumulative(used+q)-cumulative(used):q*i.unit;
+    return {line:r.line,productId:i.produtoId,variantId:i.variantId||null,name:i.nome||i.produtoNome||i.produtoId,variantName:i.variantName||'',quantity:q,restock:r.restock,unitCents:i.unit,totalCents};
   });
   seen.clear();
   const replacements=input.replacements.map(r=>{

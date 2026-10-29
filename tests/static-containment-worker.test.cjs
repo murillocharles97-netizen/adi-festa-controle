@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../service-worker.js'), 'utf8');
 const origin = 'https://veconi.invalid';
+const expectedCache=source.match(/const CACHE='([^']+)'/)[1];
+const expectedRelease=fs.readFileSync(require('node:path').join(__dirname,'../js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
 function harness({offline = false} = {}) {
   const events = {}, calls = [], cache = new Map();
   let claims = 0, skipped = 0;
@@ -71,7 +73,7 @@ test('new cache never falls back to any older cache during offline reload', asyn
   h.cache.set('./index.html', new Response('CURRENT_SAFE_INDEX'));
   const response = await h.request('/new-route', {mode: 'navigate'});
   assert.equal(await response.text(), 'CURRENT_SAFE_INDEX');
-  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => /^veconi-v212-monetary-analysis(?:-compatible-pause)?$/.test(call[1])));
+  assert.ok(h.calls.filter(call => call[0] === 'open').every(call => call[1]===expectedCache));
 });
 test('catalog route keeps its current offline fallback', async () => {
   const h = harness({offline: true});
@@ -95,10 +97,10 @@ test('cross-origin Firestore/Auth requests and non-GET mutations are not interce
   assert.equal(await h.request('/operation', {method: 'POST'}), undefined);
   assert.deepEqual(h.calls, []);
 });
-test('worker reports V212 without changing commercial code or login state', () => {
+test('worker reports the prepared release without changing commercial code or login state', () => {
   const h = harness(); let version;
   h.events.message({data: 'GET_VERSION', ports: [{postMessage: value => { version = value; }}]});
-  assert.equal(version.release, '212');
+  assert.equal(version.release, expectedRelease);
   h.events.message({data: 'SKIP_WAITING'}); assert.equal(h.skipped, 1);
 });
 
@@ -106,5 +108,5 @@ test('worker GET_VERSION agrees with the shipped frontend release', () => {
   const h=harness();let version;h.events.message({data:'GET_VERSION',ports:[{postMessage:value=>{version=value;}}]});
   const frontend=fs.readFileSync(require('node:path').join(__dirname,'../js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
   assert.equal(version.release,frontend);
-  assert.match(version.cache,/^veconi-v212-monetary-analysis(?:-compatible-pause)?$/);
+  assert.equal(version.cache,expectedCache);
 });

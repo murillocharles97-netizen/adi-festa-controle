@@ -38,6 +38,9 @@ window.Modais=(()=>{
   const {dinheiro,escapar}=Utils;
   const value=sale=>Number(sale?.valorFinal??sale?.valorTotal??0);
   const unitPrice=item=>Number(item?.precoFinalUnitario??item?.precoUnitario??0);
+  const precise=sale=>sale?.monetaryPolicy==='unit4-total-cent-v1';
+  const unitLabel=(sale,item)=>precise(sale)?unitPrice(item).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:4}):dinheiro(unitPrice(item));
+  const lineValue=(sale,item)=>precise(sale)&&Number.isFinite(item.subtotalFinal)?item.subtotalFinal:Number(item.quantidade||0)*unitPrice(item);
   const debt=balance=>Math.abs(Math.min(0,Number(balance||0)));
   const isMobile=()=>matchMedia('(max-width:767px)').matches;
   const paymentLabels={pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão',cartao_presencial:'Cartão presencial',credito:'Cartão de crédito',debito:'Cartão de débito',entrega:'Pago na entrega',pago:'Pago',fiado:'Fiado'};
@@ -119,8 +122,8 @@ window.Modais=(()=>{
     (sale.itens||[]).forEach((item,index)=>{
       context.fillStyle='#344052';context.font='bold 15px Arial';context.textAlign='left';
       itemLines[index].forEach(line=>{context.fillText(line,25,y);y+=19});
-      context.font='13px Arial';context.fillStyle='#697586';context.fillText(`${item.quantidade} × ${dinheiro(unitPrice(item))}`,25,y);
-      context.textAlign='right';context.fillStyle='#344052';context.fillText(dinheiro(Number(item.quantidade||0)*unitPrice(item)),width-25,y);y+=34;
+      context.font='13px Arial';context.fillStyle='#697586';context.fillText(`${item.quantidade} × ${unitLabel(sale,item)}`,25,y);
+      context.textAlign='right';context.fillStyle='#344052';context.fillText(dinheiro(lineValue(sale,item)),width-25,y);y+=34;
       if(item.productType==='recurring'&&item.subscriptionExpiresAt){context.textAlign='left';context.font='12px Arial';context.fillStyle='#087d64';context.fillText(`${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')} · ${durationLabel(item)}`,25,y);y+=26}
     });
     context.setLineDash([]);context.textAlign='left';context.font='14px Arial';context.fillStyle='#344052';context.fillText(`Subtotal: ${dinheiro(sale.subtotalOriginal??value(sale))}`,25,y);
@@ -150,7 +153,7 @@ window.Modais=(()=>{
     return`<section class="sale-operation-status">${checks.map(([icon,label])=>`<span><i data-lucide="${icon}"></i>${label}</span>`).join('')}${pending?'<p><i data-lucide="cloud-off"></i> Venda salva neste aparelho e aguardando sincronização.</p>':''}</section>`;
   }
   function itemsMarkup(sale){
-    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${dinheiro(unitPrice(item))}</small>${item.productType==='recurring'&&item.subscriptionExpiresAt?`<small class="receipt-renewal-validity"><b>${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}</b> · ${durationLabel(item)}</small>`:''}</span><strong>${dinheiro(Number(item.quantidade||0)*unitPrice(item))}</strong></div>`).join('');
+    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${unitLabel(sale,item)}</small>${item.productType==='recurring'&&item.subscriptionExpiresAt?`<small class="receipt-renewal-validity"><b>${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}</b> · ${durationLabel(item)}</small>`:''}</span><strong>${dinheiro(lineValue(sale,item))}</strong></div>`).join('');
   }
   function receiptMarkup(sale,customer,business){
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';
