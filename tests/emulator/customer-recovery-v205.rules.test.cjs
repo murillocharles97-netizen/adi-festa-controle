@@ -28,7 +28,8 @@ async function concurrentDecision(work){
 }
 test('seller real shape: denied customer + dependent sale, no receipt or stock; owner approval never changes seller grants',async()=>{
  const c=await setup(),svc=operationalCommitService(db),p=c.dependency.packet,grants=await c.root.collection('members').doc(c.seller).get(),original=JSON.stringify(c.original);
- await assert.rejects(svc.commit(c.request({item:p},c.seller)),/Sem permissão para editar/);
+ // V210 humanized this rejection; authorization semantics are unchanged.
+ await assert.rejects(svc.commit(c.request({item:p},c.seller)),{code:'permission-denied'});
  await assert.rejects(svc.commit(c.request({item:c.original.packet},c.seller)),/Cliente não confirmado/);
  assert.equal(await count(c,'sales'),0);assert.equal(await count(c,'stockMovements'),0);assert.equal(await count(c,'processedOperations'),0);
  await c.upload();await assert.rejects(c.decide('approve_client',{},c.seller),{code:'permission-denied'});

@@ -1,0 +1,34 @@
+import './sale-monetary-analysis-client.js?v=212';
+// Read-only local evidence intake. Never calls Sync, retries, recovery decisions,
+// download APIs or any commercial service.
+let epoch=0,lastKey='',state={phase:'idle',message:'',targets:[],items:[]},lastChecked=0,reading=null,dismissed='',running=false;
+const c=()=>window.BusinessContext?.get?.()||{};
+function identity(){const b=c(),id=window.SpaceContext?.homeId?.();return{uid:window.FirebaseSession?.user?.uid||'',businessId:b.businessId||'',role:b.role||'',workspaceGeneration:b.business?.workspaceGeneration??0,spaceId:id&&!['all','all_spaces','todos'].includes(id)?id:null,principal:window.DB?.getPrincipal?.()||'',permissionSignature:b.permissionSignature||'',epoch};}
+const key=()=>JSON.stringify(identity());
+const eligible=()=>!window.AdiFestaBuild?.monetaryAnalysisIntakePaused&&c().role==='owner'&&!c().loading&&!c().error&&c().member?.status==='active'&&window.FirebaseSession?.user?.uid===c().userProfile?.uid&&c().userProfile?.active===true;
+const call=(name,data)=>{if(!window.FirebaseCallable)throw Error('A sessão ainda está sendo preparada.');return window.FirebaseCallable(name,data);};
+const controller=window.SaleMonetaryAnalysisClient.create({identity,call,snapshot:(i,t,current)=>window.SaleMonetaryAnalysisClient.readSources(window,i,t,current),checksum:payload=>window.SyncFirebase.checksumValue(payload)});
+function render(){const current=key();if(!eligible()||dismissed===current||!state.targets.length){document.querySelectorAll('[data-monetary-analysis]').forEach(e=>e.remove());return;}
+ const hosts=[document.querySelector('#cloud-sync-panel .modal-body')];if(['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio'))hosts.push(document.querySelector('main'));
+ for(const host of hosts.filter(Boolean)){let box=host.querySelector(':scope > [data-monetary-analysis]');if(!box){box=document.createElement('section');box.dataset.monetaryAnalysis='';box.className='sale-monetary-analysis';host.prepend(box);}const signature=JSON.stringify([current,state.phase,state.message,state.items]);if(box.dataset.signature===signature)continue;box.dataset.signature=signature;box.replaceChildren();
+  const title=document.createElement('strong');title.textContent=`Encontramos ${state.targets.length} venda(s) que precisam de conferência. Podemos enviar os dados necessários para análise segura?`;box.append(title);
+  const note=document.createElement('p');note.textContent='Esse envio preserva os originais e não reprocessa vendas, não cobra e não altera estoque ou Financeiro.';box.append(note);
+  const result=document.createElement('p');result.dataset.analysisResult='';result.setAttribute('role',state.phase==='error'?'alert':'status');result.setAttribute('aria-live','polite');result.textContent=state.message;box.append(result);
+  for(const row of state.items){const line=document.createElement('p');line.textContent=`Venda ${row.saleId.slice(0,8)}: ${{received:'recebimento confirmado',already_received:'já recebida, sem duplicação',not_on_this_device:'dados originais não encontrados neste dispositivo',receipt_unconfirmed:'recebimento ainda não confirmado; pode repetir somente o envio de evidências'}[row.status]||row.status}`;box.append(line);}
+  const actions=document.createElement('div');actions.className='sale-monetary-actions';const send=document.createElement('button');send.type='button';send.className='btn btn-primary';send.dataset.analysisSend='';send.textContent=running?'Enviando somente evidências…':state.phase==='done'?'Consultar recebimento':state.phase==='error'?'Tentar envio para análise':'Enviar para análise';send.disabled=running;send.onclick=submit;const later=document.createElement('button');later.type='button';later.className='btn btn-light';later.textContent='Agora não';later.disabled=running;later.onclick=()=>{dismissed=current;render();};actions.append(send,later);box.append(actions);
+ }
+}
+async function refresh(){const current=key();if(current!==lastKey){controller.invalidate();lastKey=current;lastChecked=0;state={phase:'idle',message:'',targets:[],items:[]};dismissed='';}if(!eligible()){render();return;}render();if(running||reading||Date.now()-lastChecked<60000)return;lastChecked=Date.now();reading=current;
+ try{const r=await controller.status();if(key()!==current||!eligible())return;state.targets=r.targets;const accepted=r.items.map(r=>({saleId:r.saleId,status:'already_received'}));if(accepted.length===r.targets.length&&accepted.length){state.phase='done';state.items=accepted;state.message='Dados recebidos para análise segura. As vendas continuam preservadas; nenhuma recuperação comercial foi executada.';}render();}catch{if(key()===current&&state.targets.length){state.phase='error';state.message='Não foi possível consultar o recebimento. Os originais continuam preservados.';render();}}finally{if(reading===current)reading=null;}
+}
+async function submit(){if(running||!eligible())return;const current=key();running=true;state.phase='sending';state.message='Enviando apenas os dados necessários. Nenhuma venda será reprocessada.';render();
+ try{const result=await controller.send({confirmed:true});if(key()!==current||!eligible())return;state.items=result.items;state.phase=result.unconfirmed?'error':'done';state.message=result.missing?`${result.received} recebimento(s) confirmado(s). Os demais originais não foram encontrados neste dispositivo. Mantenha os dados preservados; confira o perfil/aparelho em que as vendas foram registradas.`:result.unconfirmed?`${result.received} recebimento(s) confirmado(s). A rede não permitiu confirmar todos. Tente novamente apenas o envio das evidências.`:'Recebimento das duas evidências confirmado. Nenhuma venda foi reenviada; os erros de Sync permanecem até a regularização autorizada.';
+ }catch(error){if(key()!==current)return;state.phase='error';state.message=String(error.message||'Não foi possível enviar as evidências. Os originais continuam preservados.');}
+ finally{running=false;if(key()===current)render();else void refresh();}
+}
+for(const event of ['firebase-auth-ready','business-context-changed','veconi-space-context-changed','firebase-bootstrap-state','hashchange','online'])addEventListener(event,()=>{void refresh();});
+addEventListener('firebase-session-cleared',()=>{epoch++;void refresh();});
+let scheduled=false,closed=false;const observer=new MutationObserver(()=>{if(scheduled||closed)return;scheduled=true;queueMicrotask(()=>{scheduled=false;if(!closed)render();});});observer.observe(document.body,{childList:true,subtree:true});
+addEventListener('pagehide',()=>{closed=true;observer.disconnect();});
+addEventListener('pageshow',()=>{if(closed){closed=false;observer.observe(document.body,{childList:true,subtree:true});void refresh();}});
+void refresh();

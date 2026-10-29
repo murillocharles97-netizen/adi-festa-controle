@@ -15,7 +15,7 @@ const canonical=value=>JSON.stringify((function sort(v){return Array.isArray(v)?
 const originalCore=value=>canonical(Object.fromEntries(Object.entries(value).filter(([key])=>key!=='clientDependencies')));
 const date=value=>{try{const d=typeof value?.toDate==='function'?value.toDate():new Date(value);return Number.isFinite(d.getTime())?d.toISOString():null;}catch{return null;}};
 const cleanError=value=>String(value||'').slice(0,500).replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[removido]').replace(/\b(Bearer\s+\S+|(?:token|password|senha|secret|authorization)\s*[:=]\s*\S+)/gi,'[removido]');
-function validateOriginal(input,uid,businessId){
+function validateOriginal(input,uid,businessId,{monetaryAnalysis=false}={}){
   if(typeof input.originalJson!=='string'||Buffer.byteLength(input.originalJson,'utf8')>MAX_BYTES)fail('invalid-argument','O pacote excede o limite seguro. Nenhum dado local foi alterado.');
   if(digest(input.originalJson)!==input.contentHash)fail('invalid-argument','A conferência do pacote falhou.');
   let original;try{original=JSON.parse(input.originalJson);}catch{fail('invalid-argument','Pacote inválido.');}
@@ -25,7 +25,9 @@ function validateOriginal(input,uid,businessId){
   if(!original||typeof original!=='object'||Object.keys(original).some(k=>!['packet','localSale','localMovements','clientDependencies'].includes(k)))fail('invalid-argument','Conteúdo de recuperação não suportado.');
   const packet=original.packet,writes=packet?.payload?.writes;
   if(!packet||packet.businessId!==businessId||packet.userId!==uid||!Array.isArray(writes)||!writes.length||writes.length>350)fail('permission-denied','Origem do pacote não autorizada.');
-  if(!['permission-denied','sale-recovery-review-required'].includes(packet.lastErrorCode))fail('failed-precondition','Esta operação não está retida para análise.');
+  if(monetaryAnalysis){
+    if(packet.status!=='error'||packet.lastErrorCode!=='invalid-argument'||!/^Total não corresponde aos itens\.$/.test(packet.lastErrorMessage||'')||packet.payloadVersion!==4)fail('failed-precondition','Esta operação não corresponde ao erro monetário original.');
+  }else if(!['permission-denied','sale-recovery-review-required'].includes(packet.lastErrorCode))fail('failed-precondition','Esta operação não está retida para análise.');
   const operationId=validId(packet.operationId,'Operação'),sales=writes.filter(w=>w.entityType==='sales');
   if(sales.length!==1||sales[0].operation!=='create')fail('invalid-argument','É necessário um único registro original de venda.');
   const write=sales[0],sale=write.data||{},saleId=validId(write.entityId,'Venda'),spaceId=validId(sale.spaceId,'Espaço');
@@ -59,7 +61,7 @@ function similarSales(review,sales){
   return sales.filter(s=>s.id!==review.saleId&&s.spaceId===review.spaceId&&s.actorUid!==review.actorUid&&Array.isArray(s.itens)&&signature(s.itens)===expected)
     .slice(0,5).map(s=>({saleId:s.id,at:date(s.data),total:Number(s.valorFinal??s.total??0),paymentMethod:String(s.formaPagamento||''),sameTotal:Math.abs(Number(s.valorFinal??s.total??0)-review.total)<0.005,samePaymentMethod:String(s.formaPagamento||'')===review.paymentMethod,label:'Possível venda semelhante registrada pelo gestor'}));
 }
-function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DECISIONS_ENABLED}){
+function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DECISIONS_ENABLED,monetaryAnalysisPolicy,monetaryAnalysisEnabled=require('./sale-monetary-analysis-policy').INTAKE_ENABLED}){
   const ref=(businessId,name,id)=>db.doc(`businesses/${businessId}/${name}/${id}`);
   async function context(reader,request){
     const uid=request.auth?.uid;if(!uid)fail('unauthenticated','Entre na sua conta para enviar os dados.');
@@ -78,7 +80,9 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     if(!snapshot.exists||!belongsToWorkspace(snapshot.data(),c.businessId)||snapshot.data().active===false||(!c.owner&&c.member.spaceAccess!=='all'&&!c.member.allowedSpaceIds?.includes(id)))fail('permission-denied','Espaço não autorizado.');
     return snapshot.data();
   }
+  const monetaryAnalysis=require('./sale-monetary-analysis-service').monetaryAnalysisService({db,FieldValue,context,space,validateOriginal,policyFor:monetaryAnalysisPolicy,enabled:monetaryAnalysisEnabled});
   async function submit(request){
+    if(request.data?.intakeKind==='monetary_analysis_v1')return monetaryAnalysis.submit(request);
     if(!request.auth?.uid)fail('unauthenticated','Entre na sua conta para enviar os dados.');
     const businessId=validId(request.data?.businessId,'Empresa'),v=validateOriginal(request.data,request.auth.uid,businessId);
     return db.runTransaction(async tx=>{
@@ -175,6 +179,7 @@ function saleRecoveryService(db,{FieldValue,recoveryDecisionsEnabled=RECOVERY_DE
     return {items};
   }
   async function list(request){
+    if(request.data?.intakeKind==='monetary_analysis_v1')return monetaryAnalysis.status(request);
     const c=await context(reader,request),requestedSpace=request.data.spaceId||null;
     if(request.data.resolutionChecks!==undefined)return resolutions(c,request.data.resolutionChecks);
     if(requestedSpace)await space(reader,c,requestedSpace);
