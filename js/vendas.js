@@ -1,7 +1,7 @@
 window.Vendas = (() => {
   // Compatible emergency rollback pauses only NEW fractional-price intake.
   // Server validation/receipts and queued operations retain the new policy.
-  const FOUR_DECIMAL_INTAKE_PAUSED = false;
+  const FOUR_DECIMAL_INTAKE_PAUSED = true;
   const listar = () => DB.carregar().vendas;
   const cents = (value) => Math.round(Number(value || 0) * 100);
   const getCurrentCustomerBalance = (customerId, data = DB.carregar()) => {
