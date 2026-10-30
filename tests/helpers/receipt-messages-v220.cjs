@@ -28,10 +28,11 @@ function harness({role='owner',grants=['customers.view','customers.receiveDebt']
   w.FirebaseCallable=async(name,data)=>{calls++;if(name!=='getOperationalSyncReceipt'||data.kind!=='payment_confirmation')throw Error('Unexpected commercial call');return{data:responder?await responder(data):confirmed?structuredClone(source):{confirmed:false,status:'awaiting_confirmation'}};};
   function load(file){w.eval(fs.readFileSync(file,'utf8'));}
   load('js/phone.js');load('js/receipt-messages.js');load('js/receipt-message-ui.js');
-  const tick=()=>new Promise(resolve=>setImmediate(resolve)),control=s=>{const node=w.document.querySelector(s);if(!node)throw Error('Missing '+s);return node;};
+  const originalTimeout=w.setTimeout.bind(w);w.setTimeout=(fn,ms,...args)=>originalTimeout(fn,w.ReceiptMessages.RETRY_DELAYS.includes(ms)?0:ms,...args);
+  const tick=async()=>{for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setTimeout(resolve,10));},control=s=>{const node=w.document.querySelector(s);if(!node)throw Error('Missing '+s);return node;};
   const click=async s=>{control(s).click();await tick();};
   return{w,rows,source,effects,load,tick,control,click,calls:()=>calls,scope,
-    open:async()=>{w.ReceiptMessageUI.open(rows.pagamentos[0],rows.clientes[0]);await tick();},
+    open:async()=>{w.ReceiptMessageUI.open(rows.pagamentos[0],rows.clientes[0]);await tick();for(let i=0;i<20&&w.document.querySelector('[data-receipt-check]')?.disabled;i++)await new Promise(r=>setTimeout(r,5));},
     responder:fn=>responder=fn,confirmed:value=>confirmed=value,online:value=>online=value,ready:value=>ready=value,
     switchCompany:value=>{businessId=value;w.FirebaseSession.businessId=value;},switchUser:value=>{uid=value;w.FirebaseSession.user.uid=value;},switchSpace:value=>sid=value,
     role:value=>role=value,grants:value=>grants=value,close:()=>dom.window.close(),html:()=>w.document.querySelector('#modal').textContent,

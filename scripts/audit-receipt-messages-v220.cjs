@@ -18,7 +18,7 @@ async function main(){
     async function waitConfirmed(){await page.waitForFunction(()=>document.querySelector('#whatsapp-payment')&&!document.querySelector('#whatsapp-payment').disabled);}
     async function visible(selector){const e=await page.$(selector);await e.scrollIntoView();await page.evaluate(async()=>Promise.all(document.querySelector('#modal').getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))));assert.ok(await e.evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight+1&&el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),selector);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);}
     for(const [width,height]of [[1366,850],[768,1024],[390,844],[320,568],[390,360]]){
-      await visit(width,height);await page.click('#qa-partial');await waitConfirmed();await page.click('#whatsapp-payment');await page.waitForSelector('[data-receipt-send]');await visible('[data-receipt-send]');
+      await visit(width,height);await page.click('#qa-partial');await waitConfirmed();await page.click('[data-receipt-edit]');await page.waitForSelector('[data-receipt-send]');await visible('[data-receipt-send]');
       assert.match(await page.$eval('[data-receipt-preview]',e=>e.textContent),/164,00/);assert.equal(await page.evaluate(()=>qaEffects.writes),0);
       if(width===1366||width===390&&height===844)await page.screenshot({path:path.join(out,'receipt-preview-'+width+'.png')});results.push('preview-'+width+'x'+height);
       await page.click('[data-receipt-close]');
@@ -33,7 +33,7 @@ async function main(){
       if(width===1366||width===390&&height===844)await page.screenshot({path:path.join(out,'template-editor-'+width+'.png')});
       await page.click('[data-receipt-model-save]');await page.waitForFunction(()=>document.querySelector('[data-receipt-feedback]').textContent.includes('Modelo salvo'));assert.equal(await page.evaluate(()=>qaData.pagamentos.length),1);assert.equal(await page.evaluate(()=>qaEffects.writes),1);results.push('editor-'+width+'x'+height);
     }
-    await visit(1366,850);await page.click('#qa-total');await waitConfirmed();await page.click('#whatsapp-payment');await page.waitForSelector('[data-receipt-send]');assert.match(await page.$eval('[data-receipt-preview]',e=>e.textContent),/saldo está quitado/);await page.click('[data-receipt-send]');await page.waitForFunction(()=>qaEffects.opens===1);assert.equal(await page.evaluate(()=>qaEffects.writes),0);results.push('total-confirmed-one-open-no-payment');
+    await visit(1366,850);await page.click('#qa-total');await waitConfirmed();await page.click('[data-receipt-edit]');await page.waitForSelector('[data-receipt-send]');assert.match(await page.$eval('[data-receipt-preview]',e=>e.textContent),/saldo está quitado/);await page.click('[data-receipt-send]');await page.waitForFunction(()=>qaEffects.opens===1);assert.equal(await page.evaluate(()=>qaEffects.writes),0);results.push('total-confirmed-one-open-no-payment');
     assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);const report={at:new Date().toISOString(),passed:results.length,results,errors,externalRequests:blocked.length,realPaymentCreated:false,productionWrites:0,physicalAndroid:false};fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
   }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 }

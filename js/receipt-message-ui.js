@@ -26,105 +26,88 @@
   }
   function open(local,client,{onClose}={}){
     const token=ReceiptMessages.scope(),root=$('#modal'),identity={paymentId:String(local.id||''),operationId:String(local.operationId||local.id||''),clientId:String(client.id||local.clienteId||'')};
-    let receipt=null,dialog=null,busy=false,content='',selected='',pendingPhone='',render=0,closed=false;
+    let receipt=null,dialog=null,busy=false,content='',selected='',draftKind='',pendingPhone='',render=0,closed=false,controller=null;
     const current=()=>{try{ReceiptMessages.assertScope(token);return !closed&&root.contains(dialog);}catch{return false;}};
-    const close=()=>{if(!current())return;closed=true;window.Modais?.fechar?.();onClose?.();};
+    const close=()=>{if(!current()){retired();return;}closed=true;controller?.abort();window.Modais?.fechar?.();onClose?.();};
+    function retired(){if(closed||!root.contains(dialog))return;controller?.abort();closed=true;const neutral=shell(root,'Acesso atualizado','<p>A conta, o espaço ou suas permissões mudaram. Reabra este recebimento pelo Histórico para conferir com segurança.</p>','<button class="btn btn-light" type="button" data-receipt-dismiss>Fechar</button>');const dismiss=()=>{if(root.contains(neutral))Modais.fechar();};$('[data-receipt-close]',root).onclick=dismiss;$('[data-receipt-dismiss]',root).onclick=dismiss;}
     const feedback=(text,error=false)=>{const node=$('[data-receipt-feedback]',root);if(node&&current()){node.textContent=text;node.setAttribute('role',error?'alert':'status');node.classList.toggle('error',error);}};
     function mount(title,body,footer){if(closed)return;ReceiptMessages.assertScope(token);render++;dialog=shell(root,title,body,footer);$('[data-receipt-close]',root).onclick=close;}
-    function paintStatus(note=''){
-      const confirmed=receipt?.confirmed===true;
-      mount(confirmed?'Recebimento confirmado':'Aguardando confirmação',`<div class="receipt-confirmation-state ${confirmed?'is-confirmed':'is-pending'}"><span aria-hidden="true">${confirmed?'✓':'◷'}</span><h3>${confirmed?money(receipt.amount)+' confirmado':'O registro foi preservado'}</h3><p>${confirmed?'O recibo autorizado foi verificado. Você pode preparar a mensagem ao cliente.':'O recebimento ainda não foi confirmado nesta consulta. Não registre outro pagamento.'}</p></div>${confirmed?`<dl class="receipt-confirmed-facts"><dt>Cliente</dt><dd>${esc(receipt.clientName)}</dd><dt>Saldo em aberto</dt><dd>${money(Math.max(0,-receipt.balance))}</dd><dt>Conferido em</dt><dd>${esc(new Date(receipt.checkedAt).toLocaleString('pt-BR'))}</dd></dl>`:''}<p class="muted">${esc(note)}</p>`,
-        `<button class="btn btn-light" type="button" data-receipt-check>Consultar confirmação</button><button class="btn btn-light" type="button" id="download-payment">${confirmed?'Baixar recibo confirmado':'Baixar registro provisório'}</button><button class="btn btn-whatsapp" type="button" id="whatsapp-payment" ${confirmed?'':'disabled'}>WhatsApp</button><button class="btn btn-light" type="button" data-receipt-done>Concluir</button>`);
-      $('[data-receipt-done]',root).onclick=close;
-      $('[data-receipt-check]',root).onclick=()=>check();
-      $('#whatsapp-payment',root).onclick=async()=>{if(await check(true))composer();};
-      $('#download-payment',root).onclick=async()=>{if(!current()||busy)return;if(!receipt)return download(local,null);if(await check(true))download(local,receipt);};
+    function model(){const kind=ReceiptMessages.kind(receipt),models=ReceiptMessages.list(receipt.templates).filter(t=>t.receiptKind===kind),chosen=models.find(t=>t.id===selected)||ReceiptMessages.defaultTemplate(kind,receipt.templates);if(draftKind!==kind){content='';selected='';}draftKind=kind;selected=chosen.id;if(!content)content=chosen.content;return{models,chosen};}
+    function message(){model();return ReceiptMessages.resolve(content,receipt);}
+    function pending(note=''){
+      mount('Aguardando confirmação',`<div class="receipt-pending-notice" role="status"><span aria-hidden="true">◷</span><p>Estamos conferindo o recibo deste recebimento. Não registre outro pagamento.</p></div><p class="muted">${esc(note)}</p>`,
+        '<button class="btn btn-primary" type="button" data-receipt-check>Consultar novamente</button><button class="btn btn-light" type="button" id="whatsapp-payment" disabled>Enviar pelo WhatsApp</button><div class="receipt-secondary-actions"><button class="btn btn-light" type="button" id="download-payment">Baixar provisório</button><button class="btn btn-light" type="button" data-receipt-done>Concluir</button></div>');
+      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-check]',root).onclick=check;$('#download-payment',root).onclick=()=>{if(current()&&!busy)download(local,null);};
     }
-    async function check(quiet=false){
-      if(!current()||busy)return false;busy=true;receipt=null;const stamp=render;
+    function ready(note=''){
+      if(!current()||!receipt)return;let text;try{text=message();}catch(error){pending('O recebimento foi localizado, mas o modelo precisa de revisão pelo gestor.');feedback(error.message,true);return;}
+      const paymentMethod=ReceiptMessages.variables(receipt).forma_pagamento;
+      mount('Pagamento recebido',`<section class="receipt-summary"><span class="receipt-confirmed-check" aria-hidden="true">✓</span><strong class="receipt-amount" data-receipt-amount>${money(receipt.amount)}</strong><h3>${esc(receipt.clientName)}</h3><dl><dt>Forma de pagamento</dt><dd>${esc(paymentMethod==='PIX'?'Pix':paymentMethod)}</dd><dt>Saldo restante</dt><dd data-receipt-balance>${money(Math.max(0,-receipt.balance))}</dd></dl></section><section class="receipt-whatsapp-preview"><small>Mensagem pronta para o cliente</small><p data-receipt-preview>${esc(text)}</p></section><button class="receipt-text-action" type="button" data-receipt-copy>Copiar mensagem</button><p class="muted receipt-read-note">Saldo conferido às ${esc(new Date(receipt.checkedAt).toLocaleTimeString('pt-BR'))}. ${esc(note)}</p>`,
+        '<button class="btn btn-whatsapp receipt-primary-action" type="button" id="whatsapp-payment" data-receipt-send>Enviar pelo WhatsApp</button><div class="receipt-secondary-actions"><button class="btn btn-light" type="button" data-receipt-edit>Editar mensagem</button><button class="btn btn-light" type="button" id="download-payment">Baixar recibo</button></div><button class="receipt-text-action" type="button" data-receipt-done>Concluir</button>');
+      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-edit]',root).onclick=composer;$('[data-receipt-copy]',root).onclick=()=>share('copy');$('#whatsapp-payment',root).onclick=()=>share('phone');$('#download-payment',root).onclick=()=>share('download');
+      if(window.AdiFestaBuild?.receiptSharingPaused===true){$('#whatsapp-payment',root).disabled=true;feedback('O compartilhamento está temporariamente pausado. O pagamento e o recibo foram preservados.');}
+    }
+    async function check(){
+      if(!current()){retired();return false;}if(busy)return false;busy=true;controller?.abort();controller=new AbortController();const stamp=render,signal=controller.signal;
       for(const button of root.querySelectorAll('button:not([data-receipt-close])'))button.disabled=true;
-      feedback('Consultando o recibo e o saldo na nuvem…');
+      feedback('Confirmando recebimento…');
       try{
-        const result=await ReceiptMessages.read(identity);if(!current()||stamp!==render)return false;
-        receipt=result.confirmed?result:null;busy=false;
-        paintStatus(result.status==='requires_review'?'Este registro exige conferência em Sincronização. Não registre outro pagamento.':!receipt?'A consulta não confirmou o recebimento e o saldo. Você pode consultar novamente, sem reenviar operações.':'');
+        const result=await ReceiptMessages.confirm(identity,{signal,isCurrent:()=>current()&&stamp===render,onAttempt:()=>feedback('Confirmando recebimento…')});
+        if(!current()){retired();return false;}if(stamp!==render)return false;receipt=result.confirmed?result:null;busy=false;
+        if(receipt)ready();else pending(({requires_review:'Este registro precisa de conferência. Consulte o Histórico; não registre outro pagamento.',balance_unconfirmed:'O saldo atualizado ainda não foi confirmado. Consulte novamente mais tarde.',identity_unconfirmed:'Os dados do recibo precisam de conferência pelo gestor.'})[result.status]||'A confirmação ainda não chegou. Você pode consultar novamente mais tarde.');
         return !!receipt;
-      }catch(error){if(current()&&stamp===render){busy=false;paintStatus();feedback(error.message||'Não foi possível consultar a confirmação. Tente novamente.',true);}return false;}
+      }catch(error){if(!current()){retired();return false;}if(stamp===render&&error.code!=='receipt-read-cancelled'){busy=false;pending();feedback(error.message||'Não foi possível consultar agora. O registro foi preservado.',true);}return false;}
       finally{busy=false;}
     }
     function composer(){
-      if(!current()||!receipt)return;
-      try{ReceiptMessages.assertSharing();}catch(error){paintStatus(error.message);return;}
-      const kind=ReceiptMessages.kind(receipt),models=ReceiptMessages.list(receipt.templates).filter(t=>t.receiptKind===kind),chosen=models.find(t=>t.id===selected)||ReceiptMessages.defaultTemplate(kind,receipt.templates);
-      selected=chosen.id;if(!content)content=chosen.content;
-      const validPhone=()=>window.PhoneUtils?.isValidBrazilianPhone?.(receipt.phone)===true;
-      mount('Mensagem de recebimento',`<p><strong>${esc(receipt.clientName)}</strong><br><span class="muted">${esc(receipt.phone||'Cliente sem WhatsApp cadastrado')}</span></p><label class="field">Modelo<select data-receipt-template>${models.map(t=>`<option value="${esc(t.id)}" ${t.id===selected?'selected':''}>${esc(t.name)}${t.isDefault?' · padrão':''}</option>`).join('')}</select></label><label class="field">Mensagem desta vez<textarea data-receipt-text rows="8" maxlength="4000">${esc(content)}</textarea><small>Editar aqui não altera o modelo da empresa.</small></label><div class="receipt-variable-buttons">${ReceiptMessages.VARIABLES.map(v=>`<button type="button" data-receipt-variable="${v}">{{${v}}}</button>`).join('')}</div><section class="receipt-whatsapp-preview" aria-label="Prévia da mensagem"><small>Prévia no WhatsApp</small><p data-receipt-preview></p></section>${!validPhone()?`<p>Cliente sem WhatsApp cadastrado. Escolha um contato no compartilhamento do aparelho ou cadastre o telefone.</p><button class="btn btn-light" type="button" data-receipt-phone ${window.TeamAccess?.has?.('customers.edit')===true?'':'disabled'}>Cadastrar telefone</button>`:''}`,
-        `<button class="btn btn-light" type="button" data-receipt-return>Voltar</button>${validPhone()?'<button class="btn btn-whatsapp" type="button" data-receipt-send>Abrir no WhatsApp</button>':'<button class="btn btn-whatsapp" type="button" data-receipt-native>Compartilhar no aparelho</button><button class="btn btn-light" type="button" data-receipt-copy>Copiar mensagem</button>'}`);
-      const textarea=$('[data-receipt-text]',root),preview=()=>{
-        content=textarea.value;try{$('[data-receipt-preview]',root).textContent=ReceiptMessages.resolve(content,receipt);feedback('');return true;}catch(e){$('[data-receipt-preview]',root).textContent='Revise as variáveis antes de compartilhar.';feedback(e.message,true);return false;}
-      };
-      textarea.oninput=preview;
-      $('[data-receipt-template]',root).onchange=e=>{selected=e.target.value;content=models.find(t=>t.id===selected).content;textarea.value=content;preview();};
-      for(const button of root.querySelectorAll('[data-receipt-variable]'))button.onclick=()=>{const start=textarea.selectionStart,end=textarea.selectionEnd;textarea.setRangeText('{{'+button.dataset.receiptVariable+'}}',start,end,'end');textarea.focus();preview();};
-      $('[data-receipt-return]',root).onclick=()=>paintStatus();
-      const fingerprint=r=>JSON.stringify([r.amount,r.balance,r.financialVersion,r.phone,r.clientName,r.businessName,r.paymentMethod,r.paymentDate]);
-      async function share(mode){
-        if(!current()||busy||!preview())return;busy=true;const stamp=render,before=receipt;
-        for(const button of root.querySelectorAll('footer button'))button.disabled=true;feedback('Conferindo o recibo e o saldo antes de compartilhar…');
-        try{
-          ReceiptMessages.assertSharing();
-          const fresh=await ReceiptMessages.read(identity);if(!current()||stamp!==render)return;
-          if(!fresh.confirmed){receipt=null;paintStatus('A confirmação precisa ser consultada novamente antes do compartilhamento.');return;}
-          receipt=fresh;
-          if(pendingPhone&&window.PhoneUtils.normalizeBrazilianPhone(fresh.phone)!==pendingPhone){feedback('O telefone alterado ainda aguarda confirmação. Consulte novamente antes de compartilhar.',true);return;}
-          const localClient=window.Clientes?.obter?.(identity.clientId);
-          if(localClient&&window.PhoneUtils.normalizeBrazilianPhone(localClient.telefone)!==window.PhoneUtils.normalizeBrazilianPhone(fresh.phone)){feedback('O telefone do cadastro local difere do confirmado. Aguarde a atualização do cadastro antes de compartilhar.',true);return;}
-          pendingPhone='';
-          if(fingerprint(before)!==fingerprint(fresh)){
-            if(ReceiptMessages.kind(before)!==ReceiptMessages.kind(fresh)){selected='';content='';}
-            composer();feedback('O saldo ou os dados do cliente mudaram. Revise a nova prévia e confirme novamente.');return;
-          }
-          const message=ReceiptMessages.resolve(content,fresh);
-          if(mode==='copy'){
-            try{await navigator.clipboard.writeText(message);if(current())feedback('Mensagem copiada. Cole na conversa desejada.');}
-            catch{if(current()){const p=$('[data-receipt-preview]',root);const range=document.createRange();range.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(range);feedback('Selecione e copie a mensagem da prévia.');}}
-          }else if(mode==='native'){
-            if(typeof navigator.share==='function'){await navigator.share({title:'Recebimento',text:message});if(current())feedback('Compartilhamento aberto. O envio depende do aplicativo escolhido.');}
-            else if(current())fallbackWeb(message);
-          }else{
-            if(!window.PhoneUtils?.isValidBrazilianPhone?.(fresh.phone))throw Error('O telefone confirmado não é válido. Confira o cadastro.');
-            const url='https://wa.me/'+window.PhoneUtils.normalizeBrazilianPhone(fresh.phone)+'?text='+encodeURIComponent(message),opened=window.open(url,'_blank','noopener,noreferrer');
-            if(current()){feedback('Abertura solicitada ao WhatsApp. A VECONI não confirma o envio da mensagem.');if(!opened)fallbackWeb(message,url);}
-          }
-        }catch(e){if(current()&&stamp===render)feedback(e.name==='AbortError'?'Compartilhamento cancelado. O recebimento não foi alterado.':e.message||'Não foi possível confirmar o compartilhamento. Consulte novamente.',e.name!=='AbortError');}
-        finally{busy=false;if(current()&&stamp===render)for(const button of root.querySelectorAll('footer button'))button.disabled=false;}
-      }
-      function fallbackWeb(message,url='https://web.whatsapp.com/'){
-        feedback('Se o WhatsApp não abriu, use o link abaixo. O envio é confirmado por você no WhatsApp.');
-        const link=document.createElement('a');link.className='btn btn-light';link.textContent=url.includes('wa.me')?'Abrir conversa no WhatsApp':'Abrir WhatsApp Web';link.href=url;link.target='_blank';link.rel='noopener noreferrer';const created=Date.now();
-        link.onclick=e=>{if(!current()||Date.now()-created>15000){e.preventDefault();link.remove();feedback('Consulte novamente antes de abrir a mensagem.');}};
-        $('[data-receipt-feedback]',root).append(document.createElement('br'),link);
-      }
-      $('[data-receipt-send]',root)?.addEventListener('click',()=>share('phone'));
-      $('[data-receipt-native]',root)?.addEventListener('click',()=>share('native'));
-      $('[data-receipt-copy]',root)?.addEventListener('click',()=>share('copy'));
-      $('[data-receipt-phone]',root)?.addEventListener('click',phoneForm);preview();
+      if(!current()){retired();return;}if(!receipt)return;try{ReceiptMessages.assertSharing();}catch(error){ready();feedback(error.message,true);return;}
+      const {models}=model(),validPhone=()=>window.PhoneUtils?.isValidBrazilianPhone?.(receipt.phone)===true;
+      mount('Editar mensagem',`<p><strong>${esc(receipt.clientName)}</strong><br><span class="muted">${esc(receipt.phone||'Cliente sem WhatsApp cadastrado')}</span></p><label class="field">Modelo<select data-receipt-template>${models.map(t=>`<option value="${esc(t.id)}" ${t.id===selected?'selected':''}>${esc(t.name)}${t.isDefault?' · padrão':''}</option>`).join('')}</select></label><label class="field">Mensagem desta vez<textarea data-receipt-text rows="7" maxlength="4000">${esc(content)}</textarea><small>Editar aqui não altera o modelo da empresa.</small></label><div class="receipt-variable-buttons">${ReceiptMessages.VARIABLES.map(v=>`<button type="button" data-receipt-variable="${v}">{{${v}}}</button>`).join('')}</div><section class="receipt-whatsapp-preview"><small>Prévia no WhatsApp</small><p data-receipt-preview></p></section>${!validPhone()?`<p>Cliente sem WhatsApp cadastrado. Escolha o contato no compartilhamento do aparelho.</p><button class="btn btn-light" type="button" data-receipt-phone ${window.TeamAccess?.has?.('customers.edit')===true?'':'disabled'}>Cadastrar telefone</button>`:''}`,
+        '<button class="btn btn-whatsapp receipt-primary-action" type="button" data-receipt-send>Enviar pelo WhatsApp</button><div class="receipt-secondary-actions"><button class="btn btn-light" type="button" data-receipt-copy>Copiar mensagem</button><button class="btn btn-light" type="button" data-receipt-return>Voltar</button></div>');
+      const textarea=$('[data-receipt-text]',root),preview=()=>{content=textarea.value;try{$('[data-receipt-preview]',root).textContent=ReceiptMessages.resolve(content,receipt);feedback('');return true;}catch(error){$('[data-receipt-preview]',root).textContent='Revise as variáveis antes de compartilhar.';feedback(error.message,true);return false;}};
+      textarea.oninput=preview;$('[data-receipt-template]',root).onchange=e=>{selected=e.target.value;content=models.find(t=>t.id===selected).content;textarea.value=content;preview();};
+      for(const button of root.querySelectorAll('[data-receipt-variable]'))button.onclick=()=>{textarea.setRangeText('{{'+button.dataset.receiptVariable+'}}',textarea.selectionStart,textarea.selectionEnd,'end');textarea.focus();preview();};
+      $('[data-receipt-return]',root).onclick=()=>{if(preview())ready();};$('[data-receipt-send]',root).onclick=()=>{if(preview())share('phone');};if(!validPhone())$('[data-receipt-send]',root).setAttribute('data-receipt-native','');$('[data-receipt-copy]',root).onclick=()=>{if(preview())share('copy');};$('[data-receipt-phone]',root)?.addEventListener('click',phoneForm);preview();
     }
+    const fingerprint=r=>JSON.stringify([r.amount,r.balance,r.financialVersion,r.phone,r.clientName,r.businessName,r.paymentMethod,r.paymentDate]);
+    async function share(mode){
+      if(!current()){retired();return;}if(busy||!receipt)return;try{if(mode!=='download')ReceiptMessages.assertSharing();message();}catch(error){feedback(error.message,true);return;}
+      busy=true;controller?.abort();controller=new AbortController();const stamp=render,before=receipt,signal=controller.signal;for(const button of root.querySelectorAll('footer button'))button.disabled=true;feedback('Conferindo os dados do recibo…');
+      try{
+        const fresh=await ReceiptMessages.confirm(identity,{signal,isCurrent:()=>current()&&stamp===render});if(!current()){retired();return;}if(stamp!==render)return;
+        if(!fresh.confirmed){receipt=null;pending('A confirmação precisa ser consultada novamente. Não registre outro pagamento.');return;}
+        receipt=fresh;
+        if(mode==='download'){download(local,fresh);feedback('Recibo confirmado preparado para download.');return;}
+        const localClient=window.Clientes?.obter?.(identity.clientId),normalize=window.PhoneUtils.normalizeBrazilianPhone;
+        if(pendingPhone&&normalize(fresh.phone)!==pendingPhone||localClient&&normalize(localClient.telefone)!==normalize(fresh.phone)){feedback('O telefone alterado ainda aguarda confirmação. Aguarde a atualização do cadastro.',true);return;}pendingPhone='';
+        if(fingerprint(before)!==fingerprint(fresh)){ready('Os dados mudaram. Revise a mensagem e toque novamente para continuar.');return;}
+        const text=message();
+        if(mode==='copy'){
+          try{await navigator.clipboard.writeText(text);if(current())feedback('Mensagem copiada. Cole na conversa desejada.');}
+          catch{if(current())feedback('Não foi possível copiar automaticamente. Selecione a mensagem da prévia para copiar.',true);}
+        }else if(window.PhoneUtils.isValidBrazilianPhone(fresh.phone)){
+          const url='https://wa.me/'+normalize(fresh.phone)+'?text='+encodeURIComponent(text),opened=window.Mensagens?.openWhatsApp?.(url,{mobile:window.matchMedia?.('(max-width:767px)')?.matches===true});
+          if(!window.Mensagens?.openWhatsApp){const popup=window.open(url,'_blank','noopener,noreferrer');if(current()){feedback('Abertura solicitada ao WhatsApp. A VECONI não confirma o envio.');if(!popup)fallbackWeb(url);}}
+          else if(current()){feedback('Abertura solicitada ao WhatsApp. A VECONI não confirma o envio.');if(!opened?.opened)fallbackWeb(url);}
+        }else if(typeof navigator.share==='function'){
+          await navigator.share({title:'Recebimento',text});if(current())feedback('Compartilhamento aberto. Escolha o contato; o envio depende do aplicativo escolhido.');
+        }else if(current()){feedback('Copie a mensagem e escolha a conversa no WhatsApp Web.');fallbackWeb('https://web.whatsapp.com/');}
+      }catch(error){if(!current()){retired();return;}if(stamp===render)feedback(error.name==='AbortError'?'Compartilhamento cancelado. O recebimento não foi alterado.':error.message||'Não foi possível confirmar agora. Tente novamente.',error.name!=='AbortError');}
+      finally{busy=false;if(current()&&stamp===render)for(const button of root.querySelectorAll('footer button'))button.disabled=false;}
+    }
+    function fallbackWeb(url){const node=$('[data-receipt-feedback]',root),link=document.createElement('a'),created=Date.now();link.className='btn btn-light';link.textContent=url.includes('wa.me')?'Abrir conversa no WhatsApp':'Abrir WhatsApp Web';link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.onclick=e=>{if(!current()||Date.now()-created>15000){e.preventDefault();link.remove();feedback('Consulte novamente antes de abrir a mensagem.');}};node.append(document.createElement('br'),link);}
     function phoneForm(){
       if(!current()||window.TeamAccess?.has?.('customers.edit')!==true)return;
-      mount('Cadastrar telefone',`<form data-receipt-phone-form><label class="field">Telefone com DDD<input name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label><p>Somente o telefone será alterado. O recebimento permanece intacto.</p><button class="btn btn-primary" type="submit">Salvar telefone</button></form>`,`<button class="btn btn-light" type="button" data-receipt-return>Voltar</button>`);
-      $('[data-receipt-return]',root).onclick=composer;
+      mount('Cadastrar telefone','<form data-receipt-phone-form><label class="field">Telefone com DDD<input name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label><p>Somente o telefone será alterado. O recebimento permanece intacto.</p><button class="btn btn-primary" type="submit">Salvar telefone</button></form>','<button class="btn btn-light" type="button" data-receipt-return>Voltar</button>');$('[data-receipt-return]',root).onclick=composer;
       $('[data-receipt-phone-form]',root).onsubmit=async e=>{
         e.preventDefault();if(!current()||busy)return;const session=window.TeamAccess.captureSession(),phone=new FormData(e.target).get('phone');
-        try{
-          window.TeamAccess.assert('customers.edit');window.TeamAccess.assertSession(session);
-          if(!window.PhoneUtils.isValidBrazilianPhone(phone))throw Error('Informe um telefone válido com DDD.');
-          busy=true;DB.alterar(data=>{window.TeamAccess.assertSession(session);const normalizedPhone=window.PhoneUtils.normalizeBrazilianPhone(phone),c=data.clientes.find(x=>x.id===identity.clientId);if(!c)throw Error('Cliente não encontrado.');if(data.clientes.some(x=>x.id!==c.id&&window.PhoneUtils.normalizeBrazilianPhone(x.normalizedPhone||x.telefone)===normalizedPhone))throw Error('Este telefone já pertence a outro cliente.');Object.assign(c,{telefone:phone,normalizedPhone,atualizadoEm:new Date().toISOString()});});pendingPhone=window.PhoneUtils.normalizeBrazilianPhone(phone);
-          await DB.flush?.();if(current())feedback('Telefone salvo neste aparelho. Aguarde a confirmação do cadastro e volte à mensagem.');
+        try{window.TeamAccess.assert('customers.edit');window.TeamAccess.assertSession(session);if(!window.PhoneUtils.isValidBrazilianPhone(phone))throw Error('Informe um telefone válido com DDD.');busy=true;
+          DB.alterar(data=>{window.TeamAccess.assertSession(session);const normalizedPhone=window.PhoneUtils.normalizeBrazilianPhone(phone),c=data.clientes.find(x=>x.id===identity.clientId);if(!c)throw Error('Cliente não encontrado.');if(data.clientes.some(x=>x.id!==c.id&&window.PhoneUtils.normalizeBrazilianPhone(x.normalizedPhone||x.telefone)===normalizedPhone))throw Error('Este telefone já pertence a outro cliente.');Object.assign(c,{telefone:phone,normalizedPhone,atualizadoEm:new Date().toISOString()});});pendingPhone=window.PhoneUtils.normalizeBrazilianPhone(phone);
+          await DB.flush?.();if(current())feedback('Telefone salvo neste aparelho. Aguarde a confirmação do cadastro antes de compartilhar.');
         }catch(error){if(current())feedback(error.message,true);}finally{busy=false;}
       };
     }
-    paintStatus();check();return{close};
+    pending();check();return{close};
   }
   function editor(id,{onSaved}={}){
     const root=$('#modal'),token=ReceiptMessages.scope(),original=ReceiptMessages.list().find(t=>t.id===id),base=original||{name:'',receiptKind:'partial',content:ReceiptMessages.DEFAULTS[0].content,isDefault:false};

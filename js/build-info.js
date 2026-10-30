@@ -15,7 +15,7 @@
     commit,
     shortCommit,
     builtAt,
-    release: "220",
+    release: "221",
     receiptCreationPaused: false,
     receiptSharingPaused: false,
     monetaryAnalysisIntakePaused: false,

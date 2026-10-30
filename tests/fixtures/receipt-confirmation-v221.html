@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>V221 — Recebimentos QA</title>
+<link rel="stylesheet" href="../../css/auth-loading.css?v=216">
+<link rel="stylesheet" href="../../css/google-auth.css?v=217">
+<link rel="stylesheet" href="../../css/business-reset.css">
+<link rel="stylesheet" href="../../css/sale-recovery.css?v=207">
+<link rel="stylesheet" href="../../css/sale-monetary-analysis.css?v=215">
+<link rel="stylesheet" href="../../css/sale-exchanges.css?v=194">
+<link rel="stylesheet" href="../../css/exchange-credit-checkout.css?v=194">
+<link rel="stylesheet" href="../../css/performance-dashboard.css?v=161">
+<link rel="stylesheet" href="../../css/style.css?v=203">
+<link rel="stylesheet" href="../../css/design-system/tokens.css?v=94">
+<link rel="stylesheet" href="../../css/finance.css">
+<link rel="stylesheet" href="../../css/mobile.css?v=140">
+<link rel="stylesheet" href="../../css/import.css">
+<link rel="stylesheet" href="../../css/visual.css">
+<link rel="stylesheet" href="../../css/firebase.css?v=203">
+<link rel="stylesheet" href="../../css/firebase-audit.css">
+<link rel="stylesheet" href="../../css/backup.css">
+<link rel="stylesheet" href="../../css/clientes-page.css?v=196">
+<link rel="stylesheet" href="../../css/clientes-mobile.css">
+<link rel="stylesheet" href="../../css/crm.css?v=92">
+<link rel="stylesheet" href="../../css/crm-dashboard.css?v=58">
+<link rel="stylesheet" href="../../css/runtime-access.css?v=58">
+<link rel="stylesheet" href="../../css/desktop-dashboard.css?v=59">
+<link rel="stylesheet" href="../../css/desktop-sales.css?v=140">
+<link rel="stylesheet" href="../../css/desktop-settings.css?v=61">
+<link rel="stylesheet" href="../../css/produtos-mobile.css?v=92">
+<link rel="stylesheet" href="../../css/product-images.css?v=92">
+<link rel="stylesheet" href="../../css/produtos-desktop.css?v=89">
+<link rel="stylesheet" href="../../css/home-mobile.css?v=158">
+<link rel="stylesheet" href="../../css/spaces.css?v=143">
+<link rel="stylesheet" href="../../css/checkout-mobile.css?v=175">
+<link rel="stylesheet" href="../../css/product-variations.css?v=88">
+<link rel="stylesheet" href="../../css/sale-completion.css?v=138">
+<link rel="stylesheet" href="../../css/mobile-fixes.css?v=142">
+<link rel="stylesheet" href="../../css/mobile-navigation.css?v=77">
+<link rel="stylesheet" href="../../css/mensagens-mobile.css?v=154">
+<link rel="stylesheet" href="../../css/visitas.css?v=39">
+<link rel="stylesheet" href="../../css/catalogo-admin.css?v=55">
+<link rel="stylesheet" href="../../css/online-store.css?v=177">
+<link rel="stylesheet" href="../../css/online-orders.css?v=177">
+<link rel="stylesheet" href="../../css/campanhas.css?v=94">
+<link rel="stylesheet" href="../../css/campanhas-mobile.css?v=87">
+<link rel="stylesheet" href="../../css/engagement-operations.css?v=97">
+<link rel="stylesheet" href="../../css/crm-mobile.css?v=96">
+<link rel="stylesheet" href="../../css/crm-segment-builder.css?v=101">
+<link rel="stylesheet" href="../../css/activity-center.css?v=98">
+<link rel="stylesheet" href="../../css/mobile-components.css?v=97">
+<link rel="stylesheet" href="../../css/configuracoes-mobile.css?v=98">
+<link rel="stylesheet" href="../../css/coupons.css?v=98">
+<link rel="stylesheet" href="../../css/barcode.css?v=51">
+<link rel="stylesheet" href="../../css/plans.css?v=166">
+<link rel="stylesheet" href="../../css/financial.css?v=122">
+<link rel="stylesheet" href="../../css/financial-credit-v2.css?v=134">
+<link rel="stylesheet" href="../../css/design-system/desktop.css?v=94">
+<link rel="stylesheet" href="../../css/design-system/veconi-theme.css?v=123">
+<link rel="stylesheet" href="../../css/tutorial.css?v=137">
+<link rel="stylesheet" href="../../css/financial-refinement.css?v=128">
+<link rel="stylesheet" href="../../css/financial-home-v2.css?v=132">
+<link rel="stylesheet" href="../../css/financial-accounts-carousel.css?v=163">
+<link rel="stylesheet" href="../../css/settings-redesign.css?v=137">
+<link rel="stylesheet" href="../../css/terminal-payments.css?v=160">
+<link rel="stylesheet" href="../../css/team.css?v=155">
+<link rel="stylesheet" href="../../css/team-permissions.css">
+<link rel="stylesheet" href="../../css/receipt-messages.css?v=221">
+<link rel="stylesheet" href="../../css/product-selection.css?v=206">
+<link rel="stylesheet" href="../../css/product-spreadsheet.css">
+<style>body{background:#f2f6f7;color:#193840;font-family:system-ui,sans-serif;margin:0}main{max-width:1040px;margin:auto;padding:24px}h1{font-size:25px}.qa-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}#qa-state{font-size:13px;padding:12px;border-radius:10px;background:#fff}#app{padding:0!important}.qa-brand{display:flex;align-items:center;gap:12px}.qa-brand img{width:46px;height:46px}.qa-badge{color:#087b70;font-size:12px;letter-spacing:.08em;font-weight:700}</style></head>
+<body><main><div class="qa-brand"><img src="../../assets/veconi-symbol.svg" alt="VECONI"><div><span class="qa-badge">LABORATÓRIO • DADOS FICTÍCIOS</span><h1>Recebimentos e mensagens</h1></div></div><p>Prévia funcional V221. Sem Firebase, armazenamento comercial ou envio de mensagens reais.</p><div class="qa-toolbar"><button class="btn btn-primary" id="qa-pending">Recebimento pendente</button><button class="btn btn-primary" id="qa-partial">Parcial confirmado</button><button class="btn btn-primary" id="qa-total">Total confirmado</button><button class="btn btn-primary" id="qa-lag">Confirmação após 2 segundos</button><button class="btn btn-light" id="qa-templates">Central de mensagens</button></div><p id="qa-state" role="status"></p><h2 id="title"></h2><p id="date"></p><div id="app"></div></main><div id="modal"></div>
+<script>
+const qaData={config:{nome:'Loja Aurora • QA'},clientes:[{id:'qa-client',nome:'Ana Exemplo',telefone:'11999990000',saldo:-164}],pagamentos:[{id:'qa-payment',operationId:'qa-operation',clienteId:'qa-client',valor:49,status:'pending_sync',data:'2026-10-30T12:00:00Z',saldoNovo:-999}],vendas:[],movimentacoes:[],messageTemplates:[],messageHistory:[],cobrancas:[]};
+let qaConfirmed=false,qaBalance=-164;const qaEffects={writes:0,opens:0,reads:0};
+window.Utils={uuid:()=>crypto.randomUUID(),escapar:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),dinheiro:n=>Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),telefoneWhatsApp:v=>PhoneUtils.normalizeBrazilianPhone(v),toast:()=>{}};
+window.DB={carregar:()=>qaData,getBusinessId:()=> 'qa-receipts',getWorkspaceGeneration:()=>0,alterar:fn=>{fn(qaData);qaEffects.writes++;},flush:async()=>{}};
+window.FirebaseSession={user:{uid:'qa-owner'},businessId:'qa-receipts'};window.BusinessContext={get:()=>({businessId:'qa-receipts',role:'owner',access:{canMutate:true}})};
+window.TeamAccess={has:()=>true,captureSession:()=> 'qa-owner-qa-receipts',assertSession:t=>{if(t!=='qa-owner-qa-receipts')throw Error('QA session');},assert:()=>{},operationalReadScopeKey:()=> 'qa-owner-qa-receipts'};
+window.SpaceContext={homeId:()=> 'qa-space'};window.Clientes={obter:id=>qaData.clientes.find(c=>c.id===id)};window.Modais={fechar:()=>document.getElementById('modal').replaceChildren(),layout:()=>{}};
+window.FirebaseCallable=async(name,input)=>{if(name!=='getOperationalSyncReceipt'||input.kind!=='payment_confirmation')throw Error('Nenhuma chamada comercial é permitida no laboratório.');qaEffects.reads++;await new Promise(r=>setTimeout(r,80));return{data:qaConfirmed?{confirmed:true,status:'confirmed',businessId:'qa-receipts',workspaceGeneration:0,paymentId:'qa-payment',operationId:'qa-operation',clientId:'qa-client',spaceId:'qa-space',amount:49,balance:qaBalance,financialVersion:17,checkedAt:new Date().toISOString(),paymentDate:'2026-10-30T12:00:00Z',paymentMethod:'pix',businessName:'Loja Aurora • QA',clientName:'Ana Exemplo',phone:'11999990000',templates:qaData.config.receiptMessageTemplates||[]}:{confirmed:false,status:'awaiting_confirmation'}};};
+window.open=()=>{qaEffects.opens++;document.getElementById('qa-state').textContent='WhatsApp simulado: nenhuma mensagem enviada.';return {};};
+window.MessageSequence={draft:async()=>null,history:()=>[],friendly:e=>e.message};window.MessageSequenceUI={resume:async()=>{}};window.ClientesMobile={refresh:()=>{document.getElementById('app').textContent='Voltou à lista de clientes QA.';}};
+</script><script src="../../js/phone.js"></script><script src="../../js/mensagens.js"></script><script src="../../js/receipt-messages.js"></script><script src="../../js/receipt-message-ui.js"></script><script src="../../js/mensagens-mobile.js"></script>
+<script>function qaOpen(confirmed,balance){qaConfirmed=confirmed;qaBalance=balance;ReceiptMessageUI.open(qaData.pagamentos[0],qaData.clientes[0]);}document.getElementById('qa-pending').onclick=()=>qaOpen(false,-164);document.getElementById('qa-partial').onclick=()=>qaOpen(true,-164);document.getElementById('qa-total').onclick=()=>qaOpen(true,0);document.getElementById('qa-lag').onclick=()=>{qaOpen(false,0);setTimeout(()=>qaConfirmed=true,2000);};document.getElementById('qa-templates').onclick=()=>MobileMessages.openCenter({type:'receipt'});document.getElementById('qa-state').textContent='Nenhum pagamento será criado. Consultas e efeitos externos são simulados.';</script>
+</body></html>

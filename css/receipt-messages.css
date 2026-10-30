@@ -17,3 +17,21 @@
 .message-center-page .receipt-model-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:20px}.receipt-model-help{max-width:760px;line-height:1.6;color:#52676e}
 @media(max-width:430px){.receipt-message-dialog{width:calc(100vw - 16px)}.receipt-message-dialog .modal-head{padding:16px}.receipt-message-dialog .modal-head h2{font-size:20px}.receipt-message-dialog .modal-foot>.btn{flex:1 1 125px;font-size:13px}.receipt-confirmed-facts{grid-template-columns:1fr}.receipt-confirmed-facts dd{text-align:left;margin-top:-7px}.receipt-message-dialog .modal-body{padding:16px}.receipt-template-card{padding:16px}}
 @media(min-width:768px){.message-center-page{max-width:1100px;margin:0 auto}.message-center-header{display:flex;align-items:center;gap:16px}.message-type-chips{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.message-type-chips button{padding:10px 16px;border:1px solid #d4e1e3;border-radius:24px;background:#fff}.message-type-chips .active{background:#087f72;color:#fff}}
+/* Keep the action hierarchy at every width, including large Android viewports.
+   #modal specificity overrides the generic modal overflow-wrap:anywhere rule. */
+#modal .receipt-message-dialog>footer.modal-foot{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;gap:10px;padding:14px 20px max(14px,env(safe-area-inset-bottom))}
+#modal .receipt-message-dialog footer button{width:100%;min-width:0;min-height:46px;white-space:nowrap;word-break:normal;overflow-wrap:normal;flex:none;font-size:14px}
+#modal .receipt-message-dialog .receipt-primary-action{min-height:52px;font-size:16px}
+#modal .receipt-message-dialog .receipt-secondary-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-width:0}
+#modal .receipt-message-dialog .receipt-secondary-actions button{padding:10px 6px;font-size:13px}
+#modal .receipt-message-dialog .receipt-text-action{border:0;background:transparent;color:#276d64;min-height:44px;cursor:pointer;font:inherit;font-weight:600}
+#modal .receipt-message-dialog .modal-head{padding:16px 20px;gap:10px}
+#modal .receipt-message-dialog .modal-head h2{margin:0;font-size:20px;line-height:1.25}
+#modal .receipt-message-dialog .modal-head button{min-width:44px;min-height:44px;flex:none}
+.receipt-summary{text-align:center;padding:0 6px 4px}.receipt-summary .receipt-confirmed-check{display:grid;place-items:center;width:42px;height:42px;margin:0 auto 8px;border-radius:50%;background:#e1f7ed;color:#087c65;font-size:24px}
+.receipt-summary .receipt-amount{display:block;font-size:clamp(34px,8vw,46px);line-height:1.2;letter-spacing:-.04em;color:#103b36;font-variant-numeric:tabular-nums}
+.receipt-summary h3{font-size:18px;line-height:1.4;margin:10px 0 18px;overflow-wrap:anywhere}.receipt-summary dl{display:grid;grid-template-columns:1fr auto;text-align:left;margin:0;gap:10px;font-size:14px}.receipt-summary dt{color:#61777b}.receipt-summary dd{margin:0;font-weight:700;text-align:right}
+.receipt-pending-notice{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;background:#fff8e9;color:#71531f}.receipt-pending-notice span{font-size:27px;flex:none}.receipt-pending-notice p{margin:0;line-height:1.5}
+.receipt-read-note{font-size:12px;line-height:1.5;margin:0}.receipt-message-dialog .receipt-whatsapp-preview p{font-size:14px;line-height:1.6}
+@media(max-width:767px){#modal .receipt-message-dialog .modal-body{padding:16px;gap:14px}#modal .receipt-message-dialog>footer.modal-foot{padding:12px 16px max(12px,env(safe-area-inset-bottom))}#modal .receipt-message-dialog .modal-head{padding:12px 16px}#modal .receipt-message-dialog .modal-head h2{font-size:18px}}
+@media(max-height:450px){#modal .receipt-message-dialog .modal-head{padding:6px 12px}#modal .receipt-message-dialog>footer.modal-foot{padding:8px 12px max(8px,env(safe-area-inset-bottom));gap:6px}#modal .receipt-message-dialog footer button{min-height:42px}.receipt-summary .receipt-confirmed-check{display:none}}

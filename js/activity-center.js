@@ -201,22 +201,25 @@
         search: `${item.clienteNome || ""} ${item.vendaId || ""}`,
         raw: item,
       };
-    if (type === "pagamento")
+    if (type === "pagamento") {
+      const payment=(db.pagamentos||[]).find(p=>p.id===item.id||p.id===item.paymentId||p.id===item.pagamentoId||item.operationId&&p.operationId===item.operationId)||item;
+      const state=window.ReceiptMessages?.paymentState?.(payment)||{label:'Registrado — confirmação não verificada',tone:'info'};
       return {
         id: `movement:${item.id}`,
         type: "payment",
         date: item.data || item.createdAt,
-        title: `Pagamento recebido de ${item.clienteNome || "cliente"}`,
+        title: `${state.tone==='success'?'Pagamento recebido':'Recebimento registrado'} de ${item.clienteNome || "cliente"}`,
         subtitle: item.observacao || "Saldo atualizado",
         value: item.valor,
-        status: "Concluído",
-        statusTone: "success",
+        status: state.label,
+        statusTone: state.tone,
         resource: "client",
         resourceId: item.clienteId,
         clientId: item.clienteId,
         search: item.clienteNome || "",
         raw: item,
       };
+    }
     if (type === "ajuste_saldo")
       return {
         id: `movement:${item.id}`,
@@ -466,6 +469,7 @@
     if (event.type === "payment")
       item = paymentEvent({
         ...base,
+        ...(db.pagamentos||[]).filter(p=>p.id===base.id).map(p=>({status:p.status,applicationStatus:p.applicationStatus,financialAppliedAt:p.financialAppliedAt}))[0],
         observacao: summary.paymentMethod
           ? `Recebido via ${summary.paymentMethod}`
           : "Saldo atualizado",
@@ -1028,6 +1032,7 @@
   });
   window.addEventListener?.('firebase-session-cleared',closeCloudSubscription);
   window.addEventListener?.("cloud-data-updated", (event) => {
+    if (event.detail?.collection === "payments") { rerender(); return; }
     if (["sales", "userProfile", "businessProfile"].includes(event.detail?.collection)) {
       clearSaleStatuses();
       rerender();

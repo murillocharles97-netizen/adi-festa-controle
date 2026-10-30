@@ -1,0 +1,350 @@
+{
+  "at": "2026-10-30T22:48:29.005Z",
+  "passed": 19,
+  "results": [
+    {
+      "scenario": "confirmed-320x568",
+      "mainWidth": 264,
+      "footerWidth": 296,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 264,
+          "height": 45,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 128,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 128,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 264,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-320",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-360x780",
+      "mainWidth": 304,
+      "footerWidth": 336,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 304,
+          "height": 45,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 148,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 148,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 304,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-360",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-390x844",
+      "mainWidth": 334,
+      "footerWidth": 366,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 334,
+          "height": 45,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 163,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 163,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 334,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-390",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-430x932",
+      "mainWidth": 374,
+      "footerWidth": 406,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 374,
+          "height": 45,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 183,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 183,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 374,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-430",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-412x915",
+      "mainWidth": 356,
+      "footerWidth": 388,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 356,
+          "height": 45,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 174,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 174,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 356,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-412",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-768x1024",
+      "mainWidth": 608,
+      "footerWidth": 648,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 608,
+          "height": 52,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 300,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 300,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 608,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-768",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "confirmed-1366x850",
+      "mainWidth": 608,
+      "footerWidth": 648,
+      "visible": true,
+      "horizontalOverflow": false,
+      "buttons": [
+        {
+          "text": "Enviar pelo WhatsApp",
+          "width": 608,
+          "height": 52,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Editar mensagem",
+          "width": 300,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Baixar recibo",
+          "width": 300,
+          "height": 46,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        },
+        {
+          "text": "Concluir",
+          "width": 608,
+          "height": 44,
+          "whiteSpace": "nowrap",
+          "overflowWrap": "normal",
+          "wordBreak": "normal"
+        }
+      ]
+    },
+    {
+      "scenario": "edit-keyboard-1366",
+      "visible": true,
+      "noOverflow": true
+    },
+    {
+      "scenario": "precommit-two-seconds-recovers-without-click-or-write",
+      "reads": 3
+    },
+    {
+      "scenario": "partial-canonical-preview"
+    },
+    {
+      "scenario": "edit-only-this-message"
+    },
+    {
+      "scenario": "changed-balance-requires-new-explicit-click"
+    },
+    {
+      "scenario": "network-failure-bounded-buttons-restored"
+    }
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "productionWrites": 0,
+  "paymentsCreated": 0,
+  "physicalAndroid": false,
+  "installedPwaPhysical": false
+}

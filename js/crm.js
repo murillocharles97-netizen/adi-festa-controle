@@ -51,7 +51,7 @@
             (item.clienteId || item.clientId || item.customerId) === clientId,
         ),
         last = list.at(-1);
-      return `${key}:${list.length}:${last?.updatedAt || last?.data || last?.createdAt || ""}`;
+      return `${key}:${list.length}:${last?.updatedAt || last?.data || last?.createdAt || ""}${key==='pagamentos'?':'+list.map(p=>[p.id,p.status,p.applicationStatus,p.financialAppliedAt,p.updatedAt].join(':')).join('|'):''}`;
     });
     const client = (data.clientes || []).find((item) => item.id === clientId),
       catalog = ["produtos", "campanhas"].map((key) => {
@@ -196,7 +196,8 @@
             id: `payment:${payment.id}`,
             sourceId: payment.id,
             value: num(payment.valor),
-            description: payment.observacao || "Saldo atualizado",
+            title: window.ReceiptMessages?.paymentState?.(payment).tone==='success'?'Pagamento recebido':'Recebimento registrado',
+            description: `${window.ReceiptMessages?.paymentState?.(payment).label||'Confirmação não verificada'}${payment.observacao?' · '+payment.observacao:''}`,
             date: payment.data || payment.createdAt,
           }),
         );
