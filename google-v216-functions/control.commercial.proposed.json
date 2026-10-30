@@ -1,0 +1,21 @@
+{
+  "status":"LOCAL_PROPOSAL_NOT_APPLIED",
+  "document":"googleRegistrationControl/active",
+  "requiredRuntimeFlag":"V216_GOOGLE_COMMERCIAL=true",
+  "value":{
+    "schemaVersion":2,
+    "enabled":false,
+    "projectId":"adi-festa-controle",
+    "pilotOnly":false,
+    "registrationOnly":true,
+    "rolloutId":"v216-controlled-opening-1",
+    "requireNativeProbe":true,
+    "signupWindowUntil":0,
+    "signupDailyLimit":20,
+    "subjectHourlyLimit":12,
+    "allowedOrigins":["https://adi-festa-controle.firebaseapp.com","https://veconi.app.br"],
+    "modes":{"signup":false,"signin":true}
+  },
+  "activation":"After explicit approval: future signup window, enabled=true and signup=true; preserve all existing bindings and receipts.",
+  "compatibleRollback":"modes.signup=false; keep schema 2, enabled=true, signin=true, compatible broker and Google login UI. Never reenable native Google."
+}

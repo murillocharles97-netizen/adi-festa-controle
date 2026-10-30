@@ -56,7 +56,7 @@ test('binding before the header exists is harmless and creates no session or dat
 test('avatar reuses confirmation: opening or cancelling never signs out or touches a queue',async()=>{
   const cancel=[{},{}],confirmButton={},root={innerHTML:'',querySelectorAll:()=>cancel,querySelector:()=>confirmButton};
   let exits=0;
-  const s={window:{SyncFirebase:{getFirebaseDiagnostic:()=>({pendingOperations:1})}},document:{querySelector:()=>root},bootstrapLogout:()=>{exits++;},Promise};
+  const s={window:{SyncFirebase:{getFirebaseDiagnostic:()=>({pendingOperations:1})}},document:{querySelector:()=>root},bootstrapLogout:()=>{exits++;},googleAuth:{},mountGoogleAccount:()=>{},Promise};
   vm.createContext(s);vm.runInContext(source.slice(source.indexOf('function logoutConfirmation('),source.indexOf('async function bootstrapCore(')),s);
   await s.logout();assert.equal(exits,0);assert.match(root.innerHTML,/continuarão salvas na fila/);
   cancel[0].onclick();assert.equal(root.innerHTML,'');assert.equal(exits,0);

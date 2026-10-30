@@ -9,6 +9,9 @@ import './sync.js?v=205';
 import '../workspace-generation.js';
 import '../workspace-runtime.js';
 import '../business-reset-ui.js';
+import '../auth-loading.js';
+import {googleAuth,isGoogleRegistration} from './google-auth.js';
+import {mountGoogleLogin,mountGoogleSignup} from '../google-registration-ui.js';
 
 window.WorkspaceResetAuth={reauthenticate:async password=>{
   const user=auth.currentUser;if(!user?.email)throw Error('Confirme sua sessão antes de continuar.');
@@ -41,6 +44,7 @@ function screen(html,entry=false){
   document.documentElement.classList.add('auth-pending');
   const status=gate.querySelector('.auth-loading>p');
   if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');}
+  window.VeconiAuthLoading?.render(gate);
   window.lucide?.createIcons();
 }
 function workspaceBlockedScreen(detail={}){
@@ -91,12 +95,13 @@ function login(message='',presetEmail=''){
   const logo=window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup();
   screen(`<section class="auth-card auth-entry-card" aria-labelledby="auth-entry-title"><div class="auth-entry-brand">${logo}</div><header class="auth-entry-heading"><h1 id="auth-entry-title">${invited?'Entrar na equipe':'Bem-vindo'}</h1><p>${invited?`Use o e-mail convidado${preview?.businessName?` para entrar em ${esc(preview.businessName)}`:''}.`:'Acesse sua conta para continuar.'}</p></header><form id="login-form"><label for="login-email">E-mail<span class="auth-input-wrap"><i data-lucide="mail" aria-hidden="true"></i><input id="login-email" name="email" type="email" autocomplete="username" required inputmode="email" autocapitalize="none" spellcheck="false" placeholder="seu@email.com"></span></label><label for="login-password">Senha</label><span class="password-field auth-input-wrap"><i data-lucide="lock-keyhole" aria-hidden="true"></i><input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="Sua senha"><button type="button" id="toggle-password" aria-label="Mostrar senha" aria-pressed="false"><i data-lucide="eye" aria-hidden="true"></i></button></span><button class="auth-link auth-forgot" type="button" id="show-password-recovery">Esqueci minha senha</button><p class="auth-error" id="auth-error" role="alert" aria-live="assertive">${esc(message)}</p><button class="btn btn-primary" id="login-submit" type="submit"><span>Entrar${invited?' e aceitar convite':''}</span><i data-lucide="arrow-right" aria-hidden="true"></i></button><button class="btn btn-light" type="button" id="show-register">${invited?'Criar meu acesso':'Criar minha conta'}</button>${invited?'':'<button class="auth-link auth-plans" type="button" data-show-plans>Ver planos</button>'}</form></section>`,true);
   const loginEmail=document.querySelector('#login-form [name=email]');if(loginEmail)loginEmail.value=presetEmail;
+  mountGoogleLogin(document.querySelector('#login-form'),googleAuth);
   document.querySelector('#toggle-password').onclick=event=>{const input=document.querySelector('#login-password'),visible=input.type==='password';input.type=visible?'text':'password';event.currentTarget.setAttribute('aria-label',visible?'Ocultar senha':'Mostrar senha');event.currentTarget.setAttribute('aria-pressed',String(visible));event.currentTarget.innerHTML=`<i data-lucide="${visible?'eye-off':'eye'}" aria-hidden="true"></i>`;window.lucide?.createIcons()};
   document.querySelector('#show-register').onclick=()=>{if(invited)return inviteRegister();registerState.step=1;register()};
   document.querySelector('[data-show-plans]')?.addEventListener('click',()=>plansScreen(false));
   document.querySelector('#show-password-recovery').onclick=()=>passwordRecovery(loginEmail.value);
   document.querySelector('#login-form').onsubmit=async event=>{
-    event.preventDefault();const node=event.currentTarget,button=node.querySelector('#login-submit');if(button.disabled)return;
+    event.preventDefault();const node=event.currentTarget,button=node.querySelector('#login-submit');if(button.disabled||googleAuth.busy())return;
     const form=new FormData(node),email=String(form.get('email')).trim();setButtonLoading(button,true,'Entrando…');
     try{await signInWithEmailAndPassword(auth,email,form.get('password'))}
     catch(error){if(node.isConnected)login(friendly(error.code),email)}
@@ -120,6 +125,12 @@ function passwordRecovery(presetEmail=''){
   email.focus();
 }
 
+function googleAccountWelcome(user){
+  const uid=user.uid,pilot=googleAuth.restrictedPilot?.()===true;
+  screen(`<section class="auth-card auth-entry-card"><div class="auth-entry-brand">${window.VeconiBrand?.markup?.({mode:'horizontal',tagline:true})||brandMarkup()}</div><header class="auth-entry-heading"><h1>${pilot?'Acesso Google de teste confirmado':'Seu acesso Google está pronto'}</h1><p>${pilot?'Nenhuma empresa foi criada. Esta homologação não libera acesso a dados comerciais.':'Nenhuma empresa foi criada. Você pode cadastrar a sua empresa quando quiser.'}</p></header>${pilot?'<p data-google-pilot>Homologação restrita à identidade de teste autorizada.</p>':'<button class="btn btn-primary" id="google-start-business" type="button">Cadastrar minha empresa</button><p>Para participar de uma equipe existente, use o convite enviado pelo gestor.</p>'}<button class="btn btn-light" id="google-account-logout" type="button">Sair por enquanto</button></section>`,true);
+  document.querySelector('#google-start-business')?.addEventListener('click',()=>{if(auth.currentUser?.uid!==uid)return login('A sessão mudou. Entre novamente para continuar.');resumeOnboarding(user);});
+  document.querySelector('#google-account-logout').onclick=bootstrapLogout;
+}
 async function loadInvitePreview(){
   if(!INVITE_TOKEN)return null;
   if(invitePreviewCache)return invitePreviewCache;
@@ -155,10 +166,11 @@ function register(message=''){
   if(step===2)content=`<h1>Seu negócio</h1><p>Esses dados identificam o ambiente da sua empresa.</p><label>Nome do comércio<input name="businessName" required value="${esc(data.businessName)}"></label><label>Tipo de comércio<select name="businessType">${businessTypes.map(type=>`<option ${data.businessType===type?'selected':''}>${type}</option>`).join('')}</select></label><label>WhatsApp comercial<input name="businessPhone" required inputmode="tel" value="${esc(data.businessPhone||data.phone)}"></label><div class="auth-form-grid"><label>Cidade<input name="city" required value="${esc(data.city)}"></label><label>Estado<input name="state" maxlength="2" required value="${esc(data.state)}"></label></div><label>CPF/CNPJ <small>(opcional)</small><input name="document" value="${esc(data.document)}"></label>`;
   if(step===3)content=`<h1>Revise sua conta</h1><p>Você começará com 7 dias grátis e poderá escolher um plano depois.</p><div class="auth-review"><span><small>Administrador</small><b>${esc(data.name)}</b><em>${esc(data.email)}</em></span><span><small>Empresa</small><b>${esc(data.businessName)}</b><em>${esc(data.businessType)} · ${esc(data.city)}/${esc(data.state)}</em></span><span><small>Plano inicial</small><b>Teste grátis</b><em>7 dias · sem cobrança automática</em></span></div>`;
   screen(`<section class="auth-card auth-register-card">${brandMarkup()}${progress}<form id="register-form">${content}<p class="auth-error">${esc(message)}</p><div class="auth-form-actions">${step>1?'<button class="btn btn-light" type="button" id="register-back">Voltar</button>':'<button class="btn btn-light" type="button" id="back-login">Já tenho conta</button>'}<button class="btn btn-primary" id="register-next">${step===3?'Criar conta':'Continuar'}</button></div></form></section>`);
+  if(step===1)mountGoogleSignup(document.querySelector('#register-form'),googleAuth);
   document.querySelector('#back-login')?.addEventListener('click',()=>login());
   document.querySelector('#register-back')?.addEventListener('click',()=>{registerState.step--;register()});
   document.querySelector('#register-form').onsubmit=async event=>{
-    event.preventDefault();collectRegister(event.currentTarget);
+    event.preventDefault();if(document.querySelector('#register-next').disabled||googleAuth.busy())return;collectRegister(event.currentTarget);
     const d=registerState.data;
     if(step===1&&d.password!==d.confirm)return register('As senhas não são iguais.');
     if(step<3){registerState.step++;return register()}
@@ -485,6 +497,8 @@ async function bootstrapCore(user,token,mode){
   if(!profileSnapshot.exists()){
     setBootstrapState('onboarding_required');
     bootstrapLog('profile loaded',{profileFound:false});
+    const googleRegistered=await isGoogleRegistration(user);assertCurrentRun(token);
+    if(googleRegistered)return googleAccountWelcome(user);
     return unauthorized(user,'Seu cadastro foi iniciado, mas a empresa ainda não foi concluída.',true,'Cadastro incompleto');
   }
   let profile=profileSnapshot.data();

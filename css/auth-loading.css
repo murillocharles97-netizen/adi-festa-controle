@@ -1,0 +1,13 @@
+/* V213: one official horizontal mark, no timers or artificial loading delay. */
+#auth-gate .auth-loading--v213{box-sizing:border-box;justify-items:center;gap:0;width:min(420px,100%);padding:42px 30px 28px;border:1px solid #dce8e9;border-radius:28px;box-shadow:0 24px 64px #0004;text-align:center}
+#auth-gate .auth-loading--v213 .auth-branding{display:flex;justify-content:center;max-width:100%;padding:0;margin:0 0 26px;color:#102a36}
+#auth-gate .auth-loading--v213 .auth-branding::after{display:none}
+#auth-gate .auth-loading--v213 .veconi-logo{display:inline-flex;flex-direction:row;gap:0;align-items:center;white-space:nowrap}
+#auth-gate .auth-loading--v213 .veconi-logo img{width:58px;height:58px;object-fit:contain;flex:none}
+#auth-gate .auth-loading--v213 .veconi-wordmark b{font-size:52px;line-height:1;letter-spacing:-.055em}
+#auth-gate .auth-loading-spinner{display:block;width:26px;height:26px;border:2px solid #dcecea;border-top-color:#008c82;border-radius:50%;animation:auth-loading-v213-spin .9s linear infinite}
+#auth-gate .auth-loading--v213>p{max-width:32ch;margin:19px 0 14px;font-size:16px;line-height:1.55;font-weight:550;color:#425d6d;text-wrap:balance}
+#auth-gate .auth-loading--v213>.btn{margin-top:14px;min-height:44px;color:#3c5968;background:#f4f8f9;border-color:#dce7e9}
+@keyframes auth-loading-v213-spin{to{transform:rotate(360deg)}}
+@media(max-width:360px){#auth-gate .auth-loading--v213{padding:32px 20px 22px;border-radius:22px}#auth-gate .auth-loading--v213 .veconi-logo img{width:50px;height:50px}#auth-gate .auth-loading--v213 .veconi-wordmark b{font-size:45px}}
+@media(prefers-reduced-motion:reduce){#auth-gate .auth-loading-spinner{animation:none;border-right-color:#008c82}}

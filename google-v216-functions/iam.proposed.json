@@ -1,0 +1,19 @@
+{
+  "status":"PROPOSAL_ONLY_NOT_APPLIED",
+  "projectId":"adi-festa-controle",
+  "serviceAccount":"veconi-google-broker@adi-festa-controle.iam.gserviceaccount.com",
+  "runtimePermissions":[
+    "firebaseauth.configs.get",
+    "firebaseauth.users.get",
+    "firebaseauth.users.create",
+    "datastore.databases.get",
+    "datastore.entities.get",
+    "datastore.entities.create",
+    "datastore.entities.update"
+  ],
+  "selfSigningPermissions":["iam.serviceAccounts.signBlob"],
+  "selfSigningResource":"veconi-google-broker@adi-festa-controle.iam.gserviceaccount.com",
+  "forbiddenGrants":["firebaseauth.users.update","firebaseauth.users.delete","firebaseauth.configs.update","roles/editor","roles/owner"],
+  "privateKeysExported":false,
+  "note":"IAM cannot constrain custom-token signing by Firebase UID or Firestore writes by document. Broker code and private bindings enforce these boundaries."
+}

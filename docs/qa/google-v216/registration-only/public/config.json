@@ -1,0 +1,11 @@
+{
+  "enabled":false,
+  "nativeProbeAuthorized":false,
+  "projectId":"adi-festa-controle",
+  "authDomain":"adi-festa-controle.firebaseapp.com",
+  "apiKey":"",
+  "appId":"",
+  "googleClientId":"",
+  "brokerBase":"https://southamerica-east1-adi-festa-controle.cloudfunctions.net",
+  "allowedOrigins":["https://veconi-google-v216-lab.web.app","https://veconi-google-v216-lab.firebaseapp.com"]
+}

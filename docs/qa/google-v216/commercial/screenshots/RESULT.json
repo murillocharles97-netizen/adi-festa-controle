@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-30T15:41:12.508Z",
+  "type": "simulated-browser-with-real-app-HTML-CSS-and-controller",
+  "passed": 11,
+  "results": [
+    "layout-1440x960",
+    "layout-1366x768",
+    "layout-768x1024",
+    "layout-320x568",
+    "layout-360x740",
+    "layout-390x844",
+    "layout-430x932",
+    "layout-390x360",
+    "Google-picker-above-auth-gate",
+    "cancel-no-account",
+    "explicit-new-google-no-automatic-company"
+  ],
+  "externalRequests": 0,
+  "realOAuth": false,
+  "physicalInstalledPWA": false
+}

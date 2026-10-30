@@ -234,6 +234,16 @@
     "manifest.json",
     "service-worker.js",
     "js/sale-money.js",
-    "js/sale-monetary-recovery-ui.js"
+    "js/sale-monetary-recovery-ui.js",
+    "js/auth-loading.js",
+    "js/google-registration-ui.js",
+    "js/firebase/google-auth.js",
+    "js/google-identity-picker.js",
+    "js/google-registration-client.js",
+    "js/google-registration-release.js",
+    "js/google-registration-dialog.js",
+    "css/auth-loading.css",
+    "css/google-auth.css",
+    "assets/google-g.svg"
   ]
 }

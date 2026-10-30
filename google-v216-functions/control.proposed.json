@@ -1,0 +1,15 @@
+{
+  "status":"PROPOSAL_ONLY_NOT_APPLIED",
+  "document":"googleRegistrationControl/active",
+  "value":{
+    "schemaVersion":1,
+    "enabled":false,
+    "projectId":"adi-festa-controle",
+    "pilotOnly":true,
+    "validUntil":0,
+    "pilotEmailHash":"SET_PRIVATELY_FROM_OWNER_APPROVED_SECONDARY_EMAIL",
+    "pilotSubHash":null,
+    "allowedOrigins":["https://veconi-google-v216-lab.web.app","https://veconi-google-v216-lab.firebaseapp.com"],
+    "modes":{"signup":true,"signin":true}
+  }
+}
