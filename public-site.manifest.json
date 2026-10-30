@@ -244,6 +244,9 @@
     "js/google-registration-dialog.js",
     "css/auth-loading.css",
     "css/google-auth.css",
-    "assets/google-g.svg"
+    "assets/google-g.svg",
+    "js/receipt-messages.js",
+    "js/receipt-message-ui.js",
+    "css/receipt-messages.css"
   ]
 }

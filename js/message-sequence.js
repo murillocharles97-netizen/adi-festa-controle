@@ -136,6 +136,7 @@
       confirmedCount: 0, skippedCount: 0, startedAt: stamp(), updatedAt: stamp() };
   }
   async function start(input) {
+    if(input?.type==='receipt')throw Error('Recebimentos exigem confirmação individual e não podem participar de sequências.');
     allowed(); const ctx = context(); await ready();
     return DB.localRecords.transaction('readwrite', (store, done, fail) => {
       const request = store.get(activeKey(ctx));

@@ -12,6 +12,7 @@ const {validateEngagement}=require('./operational-engagement-validation');
 const {operationalId}=require('../shared/operational-id');
 const Policy=require('../shared/permission-policy');
 const SaleMoney=require('../shared/sale-money');
+const {paymentConfirmationRead}=require('./payment-confirmation-read');
 const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message);};
 const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteger(Math.round(n*100)))fail('Valor inválido.','invalid-argument');return Math.round(n*100);};
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
@@ -371,6 +372,7 @@ function operationalCommitService(db){
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
    if(d.kind==='sync_protocol')return{protocolVersion:1,permissionsVersion:2,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
    const sid=validId(d.saleId,'Venda'),op=operationalId(d.operationId,'Operação'),s=(await tx.get(ref(c.bid,'sales',sid))).data();
    const reversal=d.kind==='sale_undo';

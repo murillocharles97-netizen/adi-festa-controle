@@ -1,0 +1,19 @@
+.receipt-message-dialog{width:min(680px,calc(100vw - 24px));color:#16353d}
+.receipt-message-dialog .modal-body{display:grid;gap:16px;min-height:0}
+.receipt-message-dialog .field{display:grid;gap:7px;margin:0}
+.receipt-message-dialog input,.receipt-message-dialog select,.receipt-message-dialog textarea{width:100%;max-width:100%;box-sizing:border-box;border:1px solid #cddce0;border-radius:10px;padding:11px;background:#fff;color:#17343c;font:inherit}
+.receipt-message-dialog textarea{resize:vertical;min-height:140px;line-height:1.55}
+.receipt-message-dialog .modal-foot{flex-wrap:wrap;gap:8px;padding-bottom:max(16px,env(safe-area-inset-bottom));background:#fff}
+.receipt-message-dialog [data-receipt-feedback]{margin:0;min-height:1.4em;line-height:1.5;overflow-wrap:anywhere}
+.receipt-message-dialog .error{color:#a12b24}
+.receipt-confirmation-state{padding:20px;border-radius:14px;background:#fff8e9;text-align:center}
+.receipt-confirmation-state.is-confirmed{background:#eaf8f3}
+.receipt-confirmation-state>span{font-size:30px;color:#008b7c}.receipt-confirmation-state h3{margin:6px 0}.receipt-confirmation-state p{line-height:1.5;margin:8px 0 0}
+.receipt-confirmed-facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0}.receipt-confirmed-facts dd{margin:0;font-weight:600;text-align:right}
+.receipt-whatsapp-preview{background:#eaf3ec;border:1px solid #d1e2d6;border-radius:14px;padding:16px}.receipt-whatsapp-preview small{color:#486359}.receipt-whatsapp-preview p{background:#fff;margin:10px 0 0;padding:15px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.receipt-variable-buttons{display:flex;flex-wrap:wrap;gap:6px}.receipt-variable-buttons button{font:inherit;font-size:12px;background:#f2f7f7;border:1px solid #d3e2e2;padding:7px 9px;border-radius:8px;color:#176259;cursor:pointer}
+.receipt-default-choice{display:flex;gap:10px;align-items:center}.receipt-default-choice input{width:auto;accent-color:#008a7a}
+.receipt-template-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;margin:20px 0}.receipt-template-card{background:#fff;border:1px solid #d9e4e5;border-radius:14px;padding:20px}.receipt-template-card h3{margin:0 0 8px}.receipt-template-card p{white-space:pre-wrap;font-size:14px;line-height:1.6;color:#4e6268}.receipt-template-card small{color:#08786d}
+.message-center-page .receipt-model-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:20px}.receipt-model-help{max-width:760px;line-height:1.6;color:#52676e}
+@media(max-width:430px){.receipt-message-dialog{width:calc(100vw - 16px)}.receipt-message-dialog .modal-head{padding:16px}.receipt-message-dialog .modal-head h2{font-size:20px}.receipt-message-dialog .modal-foot>.btn{flex:1 1 125px;font-size:13px}.receipt-confirmed-facts{grid-template-columns:1fr}.receipt-confirmed-facts dd{text-align:left;margin-top:-7px}.receipt-message-dialog .modal-body{padding:16px}.receipt-template-card{padding:16px}}
+@media(min-width:768px){.message-center-page{max-width:1100px;margin:0 auto}.message-center-header{display:flex;align-items:center;gap:16px}.message-type-chips{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.message-type-chips button{padding:10px 16px;border:1px solid #d4e1e3;border-radius:24px;background:#fff}.message-type-chips .active{background:#087f72;color:#fff}}

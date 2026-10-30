@@ -1,0 +1,22 @@
+{
+  "at": "2026-10-30T21:51:18.433Z",
+  "passed": 11,
+  "results": [
+    "preview-1366x850",
+    "preview-768x1024",
+    "preview-390x844",
+    "preview-320x568",
+    "preview-390x360",
+    "pending-sharing-blocked",
+    "editor-1366x900",
+    "editor-390x844",
+    "editor-320x568",
+    "editor-390x360",
+    "total-confirmed-one-open-no-payment"
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "realPaymentCreated": false,
+  "productionWrites": 0,
+  "physicalAndroid": false
+}

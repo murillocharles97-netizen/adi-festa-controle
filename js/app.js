@@ -772,10 +772,7 @@
       $$("[data-receive]").forEach(
         (b) =>
           (b.onclick = () => {
-            Fiados.openReceive(b.dataset.receive,{onRecorded:payment=>{
-              Modais.fechar();mountRoute(Router.atual());
-              toast(payment.financialAppliedAt?'Recebimento confirmado na nuvem.':'Recebimento salvo neste aparelho. Aguardando confirmação na nuvem.');
-            }});
+            Fiados.openReceive(b.dataset.receive,{onRecorded:(payment,client)=>ReceiptMessageUI.open(payment,client)});
           }),
       );
     if (route === "configuracoes") {
