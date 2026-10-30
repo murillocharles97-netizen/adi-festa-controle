@@ -9,13 +9,14 @@ function mount(form,controller,intent){
  const verify=document.createElement('button');verify.type='button';verify.className='auth-link';verify.textContent='Consultar resultado';verify.hidden=true;
  block.append(button,note,verify);form.prepend(block);
  const status=form.querySelector('#auth-error,.auth-error');
- function show(value){if(!form.isConnected||!status)return;status.textContent=value;status.setAttribute('role','alert');status.tabIndex=-1;status.focus();}
+ function show(value,alert=true){if(!form.isConnected||!status)return;status.textContent=value;status.setAttribute('role',alert?'alert':'status');status.setAttribute('aria-live',alert?'assertive':'polite');status.dataset.googleProgress=String(!alert);if(alert){status.tabIndex=-1;status.focus();}}
  button.onclick=async()=>{
-  if(button.disabled||controller.busy()||form.querySelector('#login-submit')?.disabled)return;
-  const nodes=[...form.querySelectorAll('button')],prior=nodes.map(x=>x.disabled);nodes.forEach(x=>x.disabled=true);button.setAttribute('aria-busy','true');
+  if(button.disabled||controller.busy())return;
+  if(form.dataset.passwordAuthBusy==='true'){show('O login por senha está em andamento. Aguarde para continuar com Google.');return;}
+  const nodes=[...form.querySelectorAll('button')],prior=nodes.map(x=>x.disabled),label=text.textContent;nodes.forEach(x=>x.disabled=true);button.setAttribute('aria-busy','true');text.textContent='Preparando Google…';show('Preparando acesso ao Google. Você poderá cancelar na próxima janela.',false);
   try{if(intent==='signup')await controller.signUp({confirmed:true});else await controller.signIn();}
   catch(error){show(controller.message(error));verify.hidden=!controller.isPending();}
-  finally{if(form.isConnected){nodes.forEach((x,n)=>x.disabled=prior[n]);button.removeAttribute('aria-busy');button.focus();}}
+  finally{if(form.isConnected){nodes.forEach((x,n)=>x.disabled=prior[n]);text.textContent=label;button.removeAttribute('aria-busy');if(status?.dataset.googleProgress==='true')show('',false);button.focus();}}
  };
  verify.onclick=async()=>{if(controller.busy())return;try{const r=await controller.verifyPending();show(r.message);verify.hidden=!controller.isPending();}catch(error){show(controller.message(error));}};
 }

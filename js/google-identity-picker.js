@@ -2,7 +2,15 @@
 let loading=null,active=0;
 async function load(){
  if(window.google?.accounts?.id)return window.google.accounts.id;
- if(!loading)loading=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=()=>window.google?.accounts?.id?resolve(window.google.accounts.id):reject({code:'link/google-unavailable'});script.onerror=()=>{loading=null;reject({code:'link/google-unavailable'});};document.head.append(script);});
+ if(!loading)loading=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');let finished=false;
+  const done=(failure)=>{if(finished)return;finished=true;clearTimeout(timer);script.onload=script.onerror=null;if(failure){loading=null;script.remove();reject(failure);}else resolve(window.google.accounts.id);};
+  const timer=setTimeout(()=>done({code:'google/provider-timeout'}),12000);
+  script.src='https://accounts.google.com/gsi/client';script.async=true;
+  script.onload=()=>done(window.google?.accounts?.id?null:{code:'link/google-unavailable'});
+  script.onerror=()=>done({code:'link/google-unavailable'});
+  document.head.append(script);
+ });
  return loading;
 }
 export async function mountGoogleIdentityPicker(target,{clientId,nonce,onCredential,onError}){

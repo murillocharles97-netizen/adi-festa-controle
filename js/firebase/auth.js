@@ -102,9 +102,10 @@ function login(message='',presetEmail=''){
   document.querySelector('#show-password-recovery').onclick=()=>passwordRecovery(loginEmail.value);
   document.querySelector('#login-form').onsubmit=async event=>{
     event.preventDefault();const node=event.currentTarget,button=node.querySelector('#login-submit');if(button.disabled||googleAuth.busy())return;
-    const form=new FormData(node),email=String(form.get('email')).trim();setButtonLoading(button,true,'Entrando…');
+    const form=new FormData(node),email=String(form.get('email')).trim();node.dataset.passwordAuthBusy='true';setButtonLoading(button,true,'Entrando…');
     try{await signInWithEmailAndPassword(auth,email,form.get('password'))}
     catch(error){if(node.isConnected)login(friendly(error.code),email)}
+    finally{delete node.dataset.passwordAuthBusy;}
   };
 }
 function passwordRecovery(presetEmail=''){

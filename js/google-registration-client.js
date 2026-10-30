@@ -8,6 +8,10 @@
   'google/confirmation-pending':'A resposta não foi confirmada. Consulte o resultado; não repita o envio original.',
   'google/consent-required':'Confirme a criação de uma conta Google nova antes de continuar.',
   'google/signup-paused':'Novos cadastros com Google estão temporariamente pausados. Quem já possui conta Google pode continuar entrando.',
+  'google/network-unavailable':'Não foi possível conectar ao acesso Google. Verifique sua conexão e tente novamente.',
+  'google/request-timeout':'O acesso Google demorou para responder. Tente novamente; nenhum envio será repetido automaticamente.',
+  'google/provider-timeout':'O seletor do Google demorou para carregar. Tente novamente ou continue com e-mail e senha.',
+  'link/google-unavailable':'Não foi possível carregar o seletor do Google. Verifique sua conexão e tente novamente.',
   'original-method-required':'Não foi possível criar uma nova conta Google. Se já possui conta, entre pelo método usado no cadastro.',
  }[e?.code]||'Não foi possível concluir com Google. Se já possui conta, entre pelo método usado no cadastro.');
  function create({auth,sdk,call,picker,confirm,scope=()=>'',enabled=false,allowSignup=true,randomKey=()=>{const bytes=new Uint8Array(32);globalThis.crypto.getRandomValues(bytes);return Array.from(bytes,n=>n.toString(16).padStart(2,'0')).join('');}}){
