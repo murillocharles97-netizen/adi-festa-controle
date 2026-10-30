@@ -43,15 +43,25 @@
     if(c.role!=='owner'&&c.member&&window.VeconiPermissionPolicy)return window.VeconiPermissionPolicy.has(c.member,permission);
     return c.role === "owner" || c.permissions?.includes?.("*") || c.permissions?.includes?.(permission);
   }
-  const assert = permission => { if (!has(permission)) throw window.VeconiPermissionPolicy.denied(permission); };
+  function failure(permission) {
+    const c=current(),error=(code,message)=>Object.assign(Error(message),{code,permission});
+    if(c.loading)return error('permission-access-loading','Verificando seu acesso. Aguarde e confirme novamente; os dados foram preservados.');
+    if(c.error)return error('permission-access-error','Não foi possível validar sua sessão nesta empresa. Reabra o aplicativo sem limpar os dados para restaurar o acesso.');
+    if(c.userProfile?.active===false||c.member?.status&&c.member.status!=='active')return error('permission-access-inactive','Seu vínculo com esta empresa não está ativo. Nenhum novo recebimento foi gravado.');
+    if(c.access?.canMutate===false||c.access?.readOnly===true)return error('permission-access-readonly','A empresa está temporariamente sem liberação para alterações. Confira o status e a assinatura; os dados foram preservados.');
+    return window.VeconiPermissionPolicy.denied(permission);
+  }
+  const assert = permission => { if (!has(permission)) throw failure(permission); };
   const captureSession = () => {
     const c=current();
     return JSON.stringify([c.businessId,c.userProfile?.uid,window.FirebaseSession?.user?.uid,c.role,c.member?.status,c.member?.permissionsVersion,c.member?.permissions,c.permissions,c.spaceAccess,c.allowedSpaceIds,c.access?.canMutate,window.DB?.getWorkspaceGeneration?.()]);
   };
   function assertSession(token) {
-    if(token!==captureSession())throw Object.assign(Error('Seu acesso ou sessão mudou. Os dados desta operação não foram gravados. Confira as permissões e tente novamente.'),{code:'permission-session-retired'});
     const c=current();
-    if(c.loading||c.error||c.access?.canMutate===false||c.userProfile?.active===false||c.member?.status&&c.member.status!=='active')throw window.VeconiPermissionPolicy.denied('active-session');
+    if(c.loading||c.error||c.access?.canMutate===false||c.access?.readOnly===true||c.userProfile?.active===false||c.member?.status&&c.member.status!=='active')throw failure('active-session');
+    if(token!==captureSession())throw Object.assign(Error('Seu acesso ou sessão mudou. Os dados desta operação não foram gravados. Confira a conta e a empresa antes de continuar.'),{code:'permission-session-retired'});
+    const uid=window.FirebaseSession?.user?.uid;
+    if(!uid||c.userProfile?.uid!==uid||c.userProfile?.businessId&&c.userProfile.businessId!==c.businessId||window.FirebaseSession?.businessId&&window.FirebaseSession.businessId!==c.businessId||c.business?.id&&c.business.id!==c.businessId||c.member?.uid&&c.member.uid!==uid||c.role==='owner'&&(c.member?c.member.role!=='owner':c.business?.ownerId!==uid))throw Object.assign(Error('A identidade da sessão não corresponde ao vínculo desta empresa. Reabra o aplicativo sem limpar os dados para restaurar sua sessão.'),{code:'permission-session-invalid'});
   }
   function assertCustomerProtocol() {
     // Legacy editors use an already-supported path; new create-only grants need
@@ -95,8 +105,8 @@
     if(!window.document?.documentElement)return;
     for(const [selector,key] of Object.entries(ACTION_PERMISSIONS))document.querySelectorAll(selector).forEach(node=>{
       const allowed=key.split(' ').every(has);node.setAttribute('aria-disabled',String(!allowed));
-      if(!allowed){node.setAttribute('title',window.VeconiPermissionPolicy.MESSAGE);node.setAttribute('aria-description',window.VeconiPermissionPolicy.MESSAGE);}
-      else if(node.getAttribute('title')===window.VeconiPermissionPolicy.MESSAGE){node.removeAttribute('title');node.removeAttribute('aria-description');}
+      if(!allowed){const error=failure(key);node.setAttribute('title',error.message);node.setAttribute('aria-description',error.message);node.dataset.permissionReason=error.code;}
+      else if(node.dataset.permissionReason||node.getAttribute('title')===window.VeconiPermissionPolicy.MESSAGE){node.removeAttribute('title');node.removeAttribute('aria-description');delete node.dataset.permissionReason;}
     });
   }
   // Reading the operational ledger of an authorized space is not permission
@@ -168,7 +178,7 @@
   }
   window.TeamAccess = Object.freeze({
     PERMISSIONS, PRESETS, ROLE_LABELS, ROUTE_PERMISSIONS, normalizeRole,
-    permissionsFor, has, assert, captureSession, assertSession, assertCustomerProtocol, assertWriteScope, ACTION_PERMISSIONS, protectActions, canRoute, canReadOperationalSales, operationalReadScopeKey, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
+    permissionsFor, has, assert, failure, captureSession, assertSession, assertCustomerProtocol, assertWriteScope, ACTION_PERMISSIONS, protectActions, canRoute, canReadOperationalSales, operationalReadScopeKey, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
   });
   addEventListener("business-context-changed", () => queueMicrotask(syncNavigation));
   addEventListener("firebase-auth-ready", () => queueMicrotask(syncNavigation));
@@ -176,7 +186,7 @@
     const permission=actionPermission(event.target);
     if(permission&&!permission.split(' ').every(has)){
       event.preventDefault();event.stopImmediatePropagation();
-      window.Utils?.toast?.(window.VeconiPermissionPolicy.MESSAGE,true);
+      window.Utils?.toast?.(failure(permission).message,true);
     }
   },true);
   if(typeof MutationObserver==='function')new MutationObserver(()=>protectActions()).observe(document.documentElement,{childList:true,subtree:true});

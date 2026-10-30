@@ -18,4 +18,9 @@
 .payment-confirmation-dialog [data-payment-feedback]{min-height:24px;font-size:14px;line-height:1.5;color:var(--primary-dark,#087c77)}
 .payment-confirmation-dialog [data-payment-feedback].error{color:var(--danger,#b42318)}
 .payment-confirmation-dialog :focus-visible{outline:3px solid #009e99;outline-offset:3px}
+.receipt-payment-dialog [data-receive-restore][hidden]{display:none!important}
+.receipt-payment-dialog .payment-kind{display:flex;flex-wrap:wrap;gap:12px}
+.receipt-payment-dialog .payment-kind label{display:flex;align-items:center;gap:8px;min-height:44px}
+.receipt-payment-dialog .payment-kind input[type=radio]{width:20px;height:20px;min-height:0;margin:0;padding:0;flex:none}
+.receipt-payment-dialog [data-receive-feedback]{color:var(--danger,#b42318);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
 @media(max-width:520px){.payment-confirmation-dialog .modal-head,.payment-confirmation-dialog .modal-body{padding:16px}.payment-confirmation-dialog .payment-success .actions{display:grid;grid-template-columns:1fr}.payment-confirmation-dialog .modal-body{padding-bottom:max(16px,env(safe-area-inset-bottom))}}

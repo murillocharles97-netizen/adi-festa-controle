@@ -96,7 +96,7 @@
 
   async function run(action, clientId) {
     const permission={sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action];
-    if(permission&&window.TeamAccess&&!window.TeamAccess.has(permission))return Utils.toast(window.VeconiPermissionPolicy.MESSAGE,true);
+    if(permission&&window.TeamAccess&&!window.TeamAccess.has(permission))return Utils.toast(window.TeamAccess.failure?.(permission)?.message||window.VeconiPermissionPolicy.MESSAGE,true);
     const page = window.ClientesPage;
     const client = Clientes.obter(clientId);
     if (!client) return Utils.toast("Cliente não encontrado.", true);

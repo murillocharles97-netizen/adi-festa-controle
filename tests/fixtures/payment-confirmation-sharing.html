@@ -53,7 +53,7 @@
     window.Utils={dinheiro:v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),escapar:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),telefoneWhatsApp:v=>PhoneUtils.normalizeBrazilianPhone(v),toast:qaOutput};
     window.DB={getBusinessId:()=> 'qa-receipt-memory',getWorkspaceGeneration:()=>0,carregar:()=>qaData,flush:async()=>{},alterar:fn=>{fn(qaData);qaCalls.phoneWrites++;qaStatus();}};
     window.Clientes={obter:id=>qaData.clientes.find(c=>c.id===id),financialStatus:c=>({saldo:c.saldo,debt:Math.abs(Math.min(0,c.saldo)),status:'debt'})};
-    window.Fiados={spaceField:()=>'',receber:id=>{qaCalls.receiptReads++;qaStatus();return Object.freeze({...qaData.pagamentos.find(p=>p.clienteId===id)});}};
+    window.Fiados={spaceField:()=>'',receber:id=>{qaCalls.receiptReads++;qaStatus();return Object.freeze({...qaData.pagamentos.find(p=>p.clienteId===id)});},openReceive:(id,{onRecorded})=>{const root=document.getElementById('modal');root.innerHTML='<form><button>Conferir recibo existente</button></form>';root.querySelector('form').onsubmit=event=>{event.preventDefault();onRecorded(Fiados.receber(id),Clientes.obter(id));};}};
     window.TeamAccess={has:()=>true,operationalReadScopeKey:()=> 'qa-receipt-memory'};
     window.FirebaseSession={user:{uid:'qa-memory-only'},access:{canMutate:true,readOnly:false}};
     window.Modais={fechar:()=>{document.getElementById('modal').innerHTML='';qaStatus();}};

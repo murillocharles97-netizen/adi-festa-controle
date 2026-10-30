@@ -216,10 +216,16 @@ function operationalCommitService(db){
    // payment method, actor, scope or historical items.
    for(const w of events){
     const s=await old('sales',w.entityId);if(!payment||!s||s.clienteId!==cid||s.formaPagamento!=='fiado'||s.active===false||s.deletedAt)fail('Alocação de recebimento inválida.');
-    await c.space(s.spaceId);
+    if(s.spaceId)await c.space(s.spaceId);
+    // The historical document and client have already been read from this
+    // business. Only an authenticated active owner may settle a legacy sale
+    // with no space; keep its history unchanged rather than inventing a scope.
+    else if(!c.owner||!spaceId)fail('Venda Fiado histórica sem espaço exige recebimento pelo proprietário em um espaço válido.');
     const allowed=['creditOriginalAmount','creditPaidAmount','creditRemainingAmount','creditSettled','creditSettledAt'];
     if(changed(w.data,s,Object.keys(w.data)).some(k=>!envelope.includes(k)&&!allowed.includes(k)))fail('Recebimento não pode editar a venda.');
-    const a=writes.find(a=>a.entityType==='paymentAllocations'&&a.data.saleId===w.entityId);if(!a||a.data.paymentId!==payment.entityId||a.data.clientId!==cid||a.entityId!==payment.entityId+'__'+w.entityId||!numeric(a.data.amount,true)||!same(w.data.creditPaidAmount,Number(s.creditPaidAmount||0)+a.data.amount)||!same(w.data.creditRemainingAmount,Number(s.creditOriginalAmount??s.valorFinal)-Number(w.data.creditPaidAmount))||w.data.creditRemainingAmount<0||Object.hasOwn(w.data,'creditOriginalAmount')&&!same(w.data.creditOriginalAmount,s.creditOriginalAmount??s.valorFinal)||w.data.creditSettled!==(w.data.creditRemainingAmount===0))fail('Delta de alocação inválido.');
+    // Sync supplies a delta: false/zero settlement fields that did not change
+    // can be absent. Validate their resulting canonical value, not undefined.
+    const next={...s,...w.data},a=writes.find(a=>a.entityType==='paymentAllocations'&&a.data.saleId===w.entityId);if(!a||a.data.paymentId!==payment.entityId||a.data.clientId!==cid||a.entityId!==payment.entityId+'__'+w.entityId||!numeric(a.data.amount,true)||!same(next.creditPaidAmount,Number(s.creditPaidAmount||0)+a.data.amount)||!same(next.creditRemainingAmount,Number(s.creditOriginalAmount??s.valorFinal)-Number(next.creditPaidAmount))||next.creditRemainingAmount<0||Object.hasOwn(w.data,'creditOriginalAmount')&&!same(w.data.creditOriginalAmount,s.creditOriginalAmount??s.valorFinal)||next.creditSettled!==(next.creditRemainingAmount===0))fail('Delta de alocação inválido.');
    }
    if(payment){
     const allocated=writes.filter(w=>w.entityType==='paymentAllocations').reduce((n,w)=>n+cents(w.data.amount),0);if(allocated>cents(delta)||writes.some(w=>w.entityType==='paymentAllocations'&&!events.some(s=>s.entityId===w.data.saleId)))fail('Recebimento aloca mais que o valor confirmado.');
