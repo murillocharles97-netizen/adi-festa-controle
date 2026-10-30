@@ -16,7 +16,7 @@
     shortCommit,
     builtAt,
     release: "219",
-    receiptCreationPaused: false,
+    receiptCreationPaused: true,
     monetaryAnalysisIntakePaused: false,
     monetaryRecoveryReady: true,
     permissionsV2EditingPaused: false,
