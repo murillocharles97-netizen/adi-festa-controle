@@ -17,7 +17,7 @@
     builtAt,
     release: "220",
     receiptCreationPaused: false,
-    receiptSharingPaused: false,
+    receiptSharingPaused: true,
     monetaryAnalysisIntakePaused: false,
     monetaryRecoveryReady: true,
     permissionsV2EditingPaused: false,
