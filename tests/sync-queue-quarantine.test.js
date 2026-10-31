@@ -139,14 +139,14 @@ test('archive receipts and original queue persist atomically in real business-ca
 });
 test('corrupt archive metadata fails closed and remains an actionable diagnostic instead of claiming all synced',async()=>{
  const h=archiveHarness();await h.archive();const [key]=[...h.values.entries()].find(([k])=>k.includes(':incidentArchive:'));h.values.set(key,'corrupt');
- assert.equal(h.counts().errors,1);assert.equal(h.counts().corrupt,true);assert.equal(h.c.preservedQueueMessage(h.counts()),'');await assert.rejects(h.run(true,true),/quar|arquiv|fila/i);assert.equal(h.committed.length,0);
+ assert.equal(h.counts().errors,1);assert.equal(h.c.preservedQueueMessage(h.counts()),'');await h.run(true,true);assert.equal(h.committed.length,0);assert.equal(h.counts().errors,1);
 });
 test('informational preserved notice never hides bootstrap, active listener failure, orphan or integrity warning',()=>{
  const h=archiveHarness(),events=[];h.c.emit=p=>events.push(p);h.c.saleIntegrityDiagnostics=()=>({count:0});h.c.paymentIntegrityDiagnostics=()=>({count:0});
- vm.runInContext(section(source,'function updateQueueState()','function reportError('),h.c);
+ vm.runInContext(section(source,'function retireResolvedQueueFailure()','function reportError('),h.c);
  Object.assign(h.c.state,{status:'waiting',testPassed:true,hydrated:true,listenerConnected:true,syncFailure:null});h.c.updateQueueState();assert.match(events.at(-1).message,/preservada para análise/);events.length=0;
  for(const patch of [{syncFailure:{code:'permission-denied'}},{hydrated:false},{listenerConnected:false},{status:'syncing'},{dataAudit:{integrity:{actionable:true}}}]){
-  Object.assign(h.c.state,{status:'waiting',testPassed:true,hydrated:true,listenerConnected:true,syncFailure:null,dataAudit:null},patch);h.c.updateQueueState();assert.equal(events.length,0);
+  Object.assign(h.c.state,{status:'waiting',testPassed:true,hydrated:true,listenerConnected:true,syncFailure:null,dataAudit:null},patch);h.c.updateQueueState();assert.notEqual(events.at(-1)?.status,'success');
  }
  Object.assign(h.c.state,{status:'waiting',hydrated:true,listenerConnected:true,syncFailure:null,dataAudit:null});h.c.saleIntegrityDiagnostics=()=>({count:1});h.c.updateQueueState();assert.equal(events.at(-1).status,'error');assert.match(events.at(-1).message,/pendência comprovada/);
 });

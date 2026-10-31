@@ -1,0 +1,110 @@
+{
+  "at": "2026-10-31T16:31:31.472Z",
+  "passed": 10,
+  "results": [
+    {
+      "scenario": "resolved-390",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-success",
+        "text": "Nenhuma sincronização pendente. 2 ocorrências resolvidas preservadas para auditoria."
+      }
+    },
+    {
+      "scenario": "mixed-390",
+      "counts": {
+        "errors": "1",
+        "pending": "0",
+        "resolved": "1",
+        "icon": "cloud-panel-icon is-error",
+        "text": "Sincronização incompleta: 1 alteração(ões) com erro e 0 pendente(s)."
+      }
+    },
+    {
+      "scenario": "unverified-390",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-waiting",
+        "text": "Nenhuma operação enviável ou erro ativo. 54 registro(s) aguardam comparação de leitura; ausência na nuvem não comprovada."
+      }
+    },
+    {
+      "scenario": "invalid-390",
+      "counts": {
+        "errors": "2",
+        "pending": "0",
+        "resolved": "0",
+        "icon": "cloud-panel-icon is-error",
+        "text": "Sincronização incompleta: 2 alteração(ões) com erro e 0 pendente(s)."
+      }
+    },
+    {
+      "scenario": "archived-390",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-success",
+        "text": "Nenhuma sincronização pendente. 2 ocorrências resolvidas preservadas para auditoria."
+      }
+    },
+    {
+      "scenario": "resolved-1366",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-success",
+        "text": "Nenhuma sincronização pendente. 2 ocorrências resolvidas preservadas para auditoria."
+      }
+    },
+    {
+      "scenario": "mixed-1366",
+      "counts": {
+        "errors": "1",
+        "pending": "0",
+        "resolved": "1",
+        "icon": "cloud-panel-icon is-error",
+        "text": "Sincronização incompleta: 1 alteração(ões) com erro e 0 pendente(s)."
+      }
+    },
+    {
+      "scenario": "unverified-1366",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-waiting",
+        "text": "Nenhuma operação enviável ou erro ativo. 54 registro(s) aguardam comparação de leitura; ausência na nuvem não comprovada."
+      }
+    },
+    {
+      "scenario": "invalid-1366",
+      "counts": {
+        "errors": "2",
+        "pending": "0",
+        "resolved": "0",
+        "icon": "cloud-panel-icon is-error",
+        "text": "Sincronização incompleta: 2 alteração(ões) com erro e 0 pendente(s)."
+      }
+    },
+    {
+      "scenario": "archived-1366",
+      "counts": {
+        "errors": "0",
+        "pending": "0",
+        "resolved": "2",
+        "icon": "cloud-panel-icon is-success",
+        "text": "Nenhuma sincronização pendente. 2 ocorrências resolvidas preservadas para auditoria."
+      }
+    }
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "commercialWrites": 0,
+  "physicalDevice": false
+}

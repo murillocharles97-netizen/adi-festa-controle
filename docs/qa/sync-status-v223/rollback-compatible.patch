@@ -1,0 +1,19 @@
+diff --git a/js/build-info.js b/js/build-info.js
+--- a/js/build-info.js
++++ b/js/build-info.js
+@@ -20,6 +20,6 @@
+     receiptSharingPaused: false,
+     receiptSyncHintsPaused: false,
+-    syncResolvedStatusPaused: false,
++    syncResolvedStatusPaused: true,
+     monetaryAnalysisIntakePaused: false,
+     monetaryRecoveryReady: true,
+     permissionsV2EditingPaused: false,
+diff --git a/service-worker.js b/service-worker.js
+--- a/service-worker.js
++++ b/service-worker.js
+@@ -1,3 +1,3 @@
+-const CACHE='veconi-v223-sync-resolution-status';
++const CACHE='veconi-v223-sync-resolution-status-indicator-paused';
+ // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
+ // Shared entitlement catalog (same source consumed by Cloud Functions).
