@@ -216,6 +216,8 @@
         resource: "client",
         resourceId: item.clienteId,
         clientId: item.clienteId,
+        paymentId: payment.id,
+        operationId: payment.operationId || item.operationId || '',
         search: item.clienteNome || "",
         raw: item,
       };
@@ -516,6 +518,7 @@
       });
     if (!item) return null;
     item.id = event.eventId || event.id;
+    if(event.type==='payment')item.paymentId=base.id;
     item.operationId = event.operationId || "";
     item.date = event.createdAt;
     item.raw = event;
@@ -909,15 +912,19 @@
       .slice(0, 10);
     return `<dl class="activity-detail-fields">${rows.map(([key, value]) => `<div><dt>${esc(key.replaceAll("_", " "))}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl><button class="btn btn-primary mobile-button primary" type="button" data-history-resource="${esc(item.resource || "")}" data-history-resource-id="${esc(item.resourceId || "")}">${icon("arrow-up-right")} Abrir ${esc(TYPE_META[item.type]?.label?.toLowerCase() || "recurso")}</button>`;
   }
+  function paymentDetail(item){
+    return `<p class="activity-detail-total"><span>Valor registrado</span><b>${money(item.value)}</b></p><p>${esc(item.status)}</p><p class="muted">Consulte o recibo para conferir a aplicação e o saldo atual na nuvem. Esta ação não registra outro pagamento.</p><button class="btn btn-primary mobile-button primary" type="button" data-history-payment-receipt ${window.ReceiptMessages?.canUse()?'':'disabled'}>Ver recebimento</button>`;
+  }
   function openDetail(id) {
     const item = events().find((entry) => entry.id === id);
     if (!item) return;
     const meta = TYPE_META[item.type] || TYPE_META.system,
       db = window.DB?.carregar?.() || {},
       root = $("#modal");
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-detail-modal" role="dialog" aria-modal="true"><header class="modal-head"><div class="activity-detail-title tone-${meta.tone}"><span>${icon(meta.icon)}</span><div><small>${esc(meta.label)} · ${at(item.date).toLocaleString("pt-BR")}</small><h3>${esc(item.title)}</h3></div></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body">${item.type === "sale" ? saleDetail(item, db) : genericDetail(item)}</div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-detail-modal" role="dialog" aria-modal="true"><header class="modal-head"><div class="activity-detail-title tone-${meta.tone}"><span>${icon(meta.icon)}</span><div><small>${esc(meta.label)} · ${at(item.date).toLocaleString("pt-BR")}</small><h3>${esc(item.title)}</h3></div></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body">${item.type === "sale" ? saleDetail(item, db) : item.type==='payment'?paymentDetail(item):genericDetail(item)}</div></section></div>`;
     root.querySelector("[data-activity-close]").onclick = () =>
       (root.innerHTML = "");
+    root.querySelector('[data-history-payment-receipt]')?.addEventListener('click',()=>{try{window.ReceiptMessageUI.openExisting(item.paymentId,item.clientId,{operationId:item.operationId,onClose:()=>openDetail(id)});}catch(error){Utils.toast(error.message,true);}});
     const exchangeSaleId=root.querySelector('[data-history-receipt]')?.dataset.historyReceipt;
     const creditSale=db.vendas?.find(s=>s.id===exchangeSaleId&&s.source==='exchange_credit_checkout');
     if(creditSale)root.querySelector('.activity-detail-total')?.insertAdjacentHTML('afterend',`<section class="exchange-credit-card"><b>Pagamento com crédito de troca</b><p>Crédito utilizado: ${money(Number(creditSale.exchangeCreditUsedCents||0)/100)}</p><p>Complemento recebido: ${money(Number(creditSale.cashReceivedCents||0)/100)}</p><small>Crédito separado do Fiado e do novo recebimento.</small></section>`);

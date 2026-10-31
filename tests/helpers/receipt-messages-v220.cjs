@@ -1,6 +1,6 @@
 'use strict';
 const {JSDOM}=require('jsdom'),fs=require('node:fs'),crypto=require('node:crypto');
-function harness({role='owner',grants=['customers.view','customers.receiveDebt'],phone='11999990000',confirmed=false,balance=-164}={}){
+function harness({role='owner',grants=['customers.view','customers.receiveDebt'],phone='11999990000',confirmed=false,balance=-164,fastTimers=true}={}){
   const dom=new JSDOM('<!doctype html><html lang="pt-BR"><body><h1 id="title"></h1><p id="date"></p><div id="app"></div><div id="modal"></div></body></html>',{url:'https://qa.example.invalid',runScripts:'outside-only'}),w=dom.window;
   let businessId='qa-receipts',uid='qa-owner',generation=0,sid='qa-space',ready=true,calls=0,online=true,responder=null;
   const rows={config:{nome:'Empresa fictícia'},clientes:[{id:'qa-client',nome:'Ana Exemplo',telefone:phone,saldo:balance}],pagamentos:[{id:'qa-payment',operationId:'qa-operation',clienteId:'qa-client',valor:50,status:'pending_sync',saldoNovo:-999,data:'2026-10-30T12:00:00Z'}],vendas:[],movimentacoes:[],messageTemplates:[],messageHistory:[]};
@@ -28,7 +28,7 @@ function harness({role='owner',grants=['customers.view','customers.receiveDebt']
   w.FirebaseCallable=async(name,data)=>{calls++;if(name!=='getOperationalSyncReceipt'||data.kind!=='payment_confirmation')throw Error('Unexpected commercial call');return{data:responder?await responder(data):confirmed?structuredClone(source):{confirmed:false,status:'awaiting_confirmation'}};};
   function load(file){w.eval(fs.readFileSync(file,'utf8'));}
   load('js/phone.js');load('js/receipt-messages.js');load('js/receipt-message-ui.js');
-  const originalTimeout=w.setTimeout.bind(w);w.setTimeout=(fn,ms,...args)=>originalTimeout(fn,w.ReceiptMessages.RETRY_DELAYS.includes(ms)?0:ms,...args);
+  const originalTimeout=w.setTimeout.bind(w);if(fastTimers)w.setTimeout=(fn,ms,...args)=>originalTimeout(fn,w.ReceiptMessages.RETRY_DELAYS.includes(ms)?0:ms,...args);
   const tick=async()=>{for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setTimeout(resolve,10));},control=s=>{const node=w.document.querySelector(s);if(!node)throw Error('Missing '+s);return node;};
   const click=async s=>{control(s).click();await tick();};
   return{w,rows,source,effects,load,tick,control,click,calls:()=>calls,scope,

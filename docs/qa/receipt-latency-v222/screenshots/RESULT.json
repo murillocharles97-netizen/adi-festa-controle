@@ -1,0 +1,214 @@
+{
+  "at": "2026-10-31T01:14:32.949Z",
+  "passed": 13,
+  "results": [
+    {
+      "scenario": "three-paired-V221-V222-timings",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-320",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-360",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-390",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-430",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-412",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-768",
+      "passed": true
+    },
+    {
+      "scenario": "approved-layout-preserved-1366",
+      "passed": true
+    },
+    {
+      "scenario": "canonical-History-no-local-copy-download-and-return",
+      "passed": true
+    },
+    {
+      "scenario": "partial-250-canonical-balance-247",
+      "passed": true
+    },
+    {
+      "scenario": "lost-read-response-and-original-Sync-commit",
+      "passed": true
+    },
+    {
+      "scenario": "late-confirmation-after-initial-window-without-second-payment",
+      "passed": true
+    },
+    {
+      "scenario": "slow-network-navigation-not-blocked",
+      "passed": true
+    }
+  ],
+  "timings": [
+    {
+      "version": 221,
+      "commitAfterMs": 250,
+      "start": 1151.5999999940395,
+      "commitAt": 261.59999999403954,
+      "readyAt": 1033,
+      "reads": [
+        {
+          "at": 11.299999982118607,
+          "returnAt": 105.69999998807907
+        },
+        {
+          "at": 909.6999999880791,
+          "returnAt": 991.1999999880791
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 771.4000000059605,
+      "queries": 2,
+      "writes": 0
+    },
+    {
+      "version": 222,
+      "commitAfterMs": 250,
+      "start": 715.1000000238419,
+      "commitAt": 250.69999998807907,
+      "readyAt": 335.39999997615814,
+      "reads": [
+        {
+          "at": 4.199999988079071,
+          "returnAt": 85.5
+        },
+        {
+          "at": 251.09999999403954,
+          "returnAt": 331.39999997615814
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 84.69999998807907,
+      "queries": 2,
+      "writes": 0
+    },
+    {
+      "version": 221,
+      "commitAfterMs": 1500,
+      "start": 650,
+      "commitAt": 1500.7999999821186,
+      "readyAt": 2656.699999988079,
+      "reads": [
+        {
+          "at": 4,
+          "returnAt": 90
+        },
+        {
+          "at": 890.5,
+          "returnAt": 972
+        },
+        {
+          "at": 2572.699999988079,
+          "returnAt": 2653.2999999821186
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 1155.9000000059605,
+      "queries": 3,
+      "writes": 0
+    },
+    {
+      "version": 222,
+      "commitAfterMs": 1500,
+      "start": 619.8000000119209,
+      "commitAt": 1500.5,
+      "readyAt": 1585.0999999940395,
+      "reads": [
+        {
+          "at": 2.300000011920929,
+          "returnAt": 88.80000001192093
+        },
+        {
+          "at": 889.4000000059605,
+          "returnAt": 970.8000000119209
+        },
+        {
+          "at": 1500.699999988079,
+          "returnAt": 1581.5
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 84.59999999403954,
+      "queries": 3,
+      "writes": 0
+    },
+    {
+      "version": 221,
+      "commitAfterMs": 3600,
+      "start": 602.8999999761581,
+      "commitAt": 3600.9000000059605,
+      "readyAt": 5945,
+      "reads": [
+        {
+          "at": 2.5,
+          "returnAt": 87.60000002384186
+        },
+        {
+          "at": 893.4000000059605,
+          "returnAt": 973.6000000238419
+        },
+        {
+          "at": 2574,
+          "returnAt": 2654.7000000178814
+        },
+        {
+          "at": 5855.5,
+          "returnAt": 5941.300000011921
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 2344.0999999940395,
+      "queries": 4,
+      "writes": 0
+    },
+    {
+      "version": 222,
+      "commitAfterMs": 3600,
+      "start": 627.1000000238419,
+      "commitAt": 3601.199999988079,
+      "readyAt": 3684.2999999821186,
+      "reads": [
+        {
+          "at": 2.0999999940395355,
+          "returnAt": 87.69999998807907
+        },
+        {
+          "at": 888.3999999761581,
+          "returnAt": 968.5999999940395
+        },
+        {
+          "at": 2569,
+          "returnAt": 2650.2999999821186
+        },
+        {
+          "at": 3601.699999988079,
+          "returnAt": 3681.7999999821186
+        }
+      ],
+      "commercialWrites": 0,
+      "delayAfterCommit": 83.09999999403954,
+      "queries": 4,
+      "writes": 0
+    }
+  ],
+  "errors": [],
+  "externalRequests": 0,
+  "commercialWrites": 0,
+  "physicalAndroid": false
+}

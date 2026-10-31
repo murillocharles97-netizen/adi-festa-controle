@@ -52,14 +52,34 @@
     variables(receipt);return Object.freeze({...receipt});
   }
   const RETRY_DELAYS=Object.freeze([800,1600,3200]);
-  function wait(ms,signal){return new Promise((resolve,reject)=>{if(signal?.aborted)return reject(code('receipt-read-cancelled','Consulta encerrada.'));const abort=()=>{clearTimeout(timer);reject(code('receipt-read-cancelled','Consulta encerrada.'));},timer=setTimeout(()=>{signal?.removeEventListener('abort',abort);resolve();},ms);signal?.addEventListener('abort',abort,{once:true});});}
+  // Existing Sync events are wake-up hints only. Never release a message using
+  // local status, event.detail, a queue count or a cached balance as proof.
+  function observeConfirmation(identity,onChange,{signal}={}){
+    const token=scope();let stopped=false;
+    function stamp(){
+      const p=(DB.carregar().pagamentos||[]).find(p=>String(p.id)===identity.paymentId&&String(p.operationId||p.id)===identity.operationId&&String(p.clienteId||p.customerId||p.clientId)===identity.clientId);
+      if(!p||p.businessId&&p.businessId!==DB.getBusinessId()||p.workspaceGeneration!==undefined&&p.workspaceGeneration!==(DB.getWorkspaceGeneration?.()??0))return '';
+      if((p.applicationStatus||p.status)!=='applied')return '';
+      return JSON.stringify([p.syncConfirmedAt||'',p.financialAppliedAt||'']);
+    }
+    let previous=stamp();
+    const stop=()=>{if(stopped)return;stopped=true;for(const name of ['firebase-sync-status','cloud-data-updated'])window.removeEventListener(name,changed);signal?.removeEventListener('abort',stop);};
+    function changed(){if(stopped)return;try{assertScope(token);}catch{stop();return;}const next=stamp();if(next&&next!==previous){previous=next;onChange();}}
+    if(signal?.aborted)return stop;
+    for(const name of ['firebase-sync-status','cloud-data-updated'])window.addEventListener(name,changed);
+    signal?.addEventListener('abort',stop,{once:true});return stop;
+  }
+  function wait(ms,signal,setWake){return new Promise((resolve,reject)=>{let settled=false;const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);setWake(()=>{});fn(value);},abort=()=>finish(reject,code('receipt-read-cancelled','Consulta encerrada.')),timer=setTimeout(()=>finish(resolve),ms);setWake(()=>finish(resolve));if(signal?.aborted)return abort();signal?.addEventListener('abort',abort,{once:true});});}
   function boundedRead(identity,signal,ms){return new Promise((resolve,reject)=>{let settled=false;const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);fn(value);},abort=()=>finish(reject,code('receipt-read-cancelled','Consulta encerrada.')),timer=setTimeout(()=>finish(reject,code('receipt-read-timeout','A consulta demorou mais que o esperado. O registro foi preservado; consulte novamente.')),ms);if(signal?.aborted)return abort();signal?.addEventListener('abort',abort,{once:true});read(identity).then(value=>finish(resolve,value),error=>finish(reject,error));});}
   async function confirm(identity,{signal,isCurrent=()=>true,onAttempt=()=>{}}={}){
-    const token=scope(),deadline=Date.now()+10000;let lastError;
+    const token=scope(),deadline=Date.now()+10000;let lastError,revision=0,readRevision=0,wake=()=>{};
+    const stop=window.AdiFestaBuild?.receiptSyncHintsPaused===true?()=>{}:observeConfirmation(identity,()=>{revision++;wake();},{signal});
+    try{
     for(let attempt=0;attempt<=RETRY_DELAYS.length;attempt++){
       assertScope(token);if(signal?.aborted||!isCurrent())throw code('receipt-read-cancelled','Consulta encerrada.');
-      if(attempt)await wait(Math.min(RETRY_DELAYS[attempt-1],Math.max(0,deadline-Date.now())),signal);
+      if(attempt&&revision===readRevision)await wait(Math.min(RETRY_DELAYS[attempt-1],Math.max(0,deadline-Date.now())),signal,fn=>wake=fn);
       assertScope(token);if(signal?.aborted||!isCurrent())throw code('receipt-read-cancelled','Consulta encerrada.');
+      readRevision=revision;
       onAttempt(attempt+1);let result;
       const remaining=deadline-Date.now();if(remaining<=0)throw lastError||code('receipt-read-timeout','A confirmação ainda não chegou. Consulte novamente mais tarde.');
       try{result=await boundedRead(identity,signal,Math.min(3000,remaining));lastError=null;}
@@ -68,6 +88,7 @@
       if(result?.confirmed||result&&result.status!=='awaiting_confirmation')return result;
       if(attempt===RETRY_DELAYS.length){if(lastError)throw lastError;return result;}
     }
+    }finally{stop();}
   }
   function paymentState(payment={}){
     const status=String(payment.applicationStatus||payment.status||'');
@@ -76,5 +97,5 @@
     if(['pending','pending_sync','processing','syncing'].includes(status)||payment.syncStatus==='pending')return{label:'Aguardando confirmação',tone:'warning'};
     return{label:'Registrado — confirmação não verificada',tone:'info'};
   }
-  window.ReceiptMessages=Object.freeze({VARIABLES,DEFAULTS,RETRY_DELAYS,scope,assertScope,canUse,canManage,assertSharing,validateText,list,save,restore,defaultTemplate,kind,variables,resolve,read,confirm,paymentState});
+  window.ReceiptMessages=Object.freeze({VARIABLES,DEFAULTS,RETRY_DELAYS,scope,assertScope,canUse,canManage,assertSharing,validateText,list,save,restore,defaultTemplate,kind,variables,resolve,read,confirm,observeConfirmation,paymentState});
 })();

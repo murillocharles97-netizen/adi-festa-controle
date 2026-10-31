@@ -1,0 +1,20 @@
+diff --git a/js/build-info.js b/js/build-info.js
+--- a/js/build-info.js
++++ b/js/build-info.js
+@@ -18,7 +18,7 @@
+     release: "222",
+     receiptCreationPaused: false,
+     receiptSharingPaused: false,
+-    receiptSyncHintsPaused: false,
++    receiptSyncHintsPaused: true,
+     monetaryAnalysisIntakePaused: false,
+     monetaryRecoveryReady: true,
+     permissionsV2EditingPaused: false,
+diff --git a/service-worker.js b/service-worker.js
+--- a/service-worker.js
++++ b/service-worker.js
+@@ -1,3 +1,3 @@
+-const CACHE='veconi-v222-receipt-read-latency';
++const CACHE='veconi-v222-receipt-read-latency-hints-paused';
+ // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
+ // Shared entitlement catalog (same source consumed by Cloud Functions).

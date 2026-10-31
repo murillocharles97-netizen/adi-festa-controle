@@ -19,17 +19,18 @@
     ctx.fillText(confirmed?receipt.businessName:'REGISTRO PROVISÓRIO',450,65);
     ctx.font='bold 24px Arial';ctx.fillStyle=confirmed?'#087c71':'#9a5700';ctx.fillText(confirmed?'RECEBIMENTO CONFIRMADO':'AGUARDANDO CONFIRMAÇÃO',450,115);
     const rows=confirmed?[['Cliente',receipt.clientName],['Valor recebido',money(receipt.amount)],['Data do pagamento',new Date(receipt.paymentDate).toLocaleString('pt-BR')],['Saldo em aberto confirmado',money(Math.max(0,-receipt.balance))],['Saldo consultado em',new Date(receipt.checkedAt).toLocaleString('pt-BR')],['Forma de pagamento',ReceiptMessages.variables(receipt).forma_pagamento],['Identificador',receipt.paymentId]]:
-      [['Valor informado',money(local.valor)],['Identificador',local.id],['Situação','Registro local; confirmação não comprovada']];
+      [['Valor informado',typeof local.valor==='number'&&Number.isFinite(local.valor)?money(local.valor):'Não disponível neste dispositivo'],['Identificador',local.id],['Situação','Confirmação não comprovada; não comprova quitação']];
     ctx.textAlign='left';ctx.fillStyle='#263c44';ctx.font='21px Arial';rows.forEach(([label,value],i)=>{ctx.fillText(label,45,190+i*73);ctx.font='bold 21px Arial';ctx.fillText(String(value).slice(0,65),45,219+i*73);ctx.font='21px Arial';});
     if(!confirmed){ctx.fillStyle='#9a5700';ctx.font='bold 23px Arial';ctx.fillText('NÃO COMPROVA PAGAMENTO OU QUITAÇÃO.',45,600);ctx.font='19px Arial';ctx.fillText('Aguarde o recibo remoto autorizado antes de comunicar ao cliente.',45,640);}
     const a=document.createElement('a');a.download=`${confirmed?'recibo-confirmado':'registro-provisorio'}-${local.id}.png`;a.href=canvas.toDataURL('image/png');a.click();
   }
   function open(local,client,{onClose}={}){
     const token=ReceiptMessages.scope(),root=$('#modal'),identity={paymentId:String(local.id||''),operationId:String(local.operationId||local.id||''),clientId:String(client.id||local.clienteId||'')};
-    let receipt=null,dialog=null,busy=false,content='',selected='',draftKind='',pendingPhone='',render=0,closed=false,controller=null;
+    let receipt=null,dialog=null,busy=false,content='',selected='',draftKind='',pendingPhone='',render=0,closed=false,controller=null,awaiting=true,lateHintUsed=false,stopHints=()=>{},lifecycle=null;
     const current=()=>{try{ReceiptMessages.assertScope(token);return !closed&&root.contains(dialog);}catch{return false;}};
-    const close=()=>{if(!current()){retired();return;}closed=true;controller?.abort();window.Modais?.fechar?.();onClose?.();};
-    function retired(){if(closed||!root.contains(dialog))return;controller?.abort();closed=true;const neutral=shell(root,'Acesso atualizado','<p>A conta, o espaço ou suas permissões mudaram. Reabra este recebimento pelo Histórico para conferir com segurança.</p>','<button class="btn btn-light" type="button" data-receipt-dismiss>Fechar</button>');const dismiss=()=>{if(root.contains(neutral))Modais.fechar();};$('[data-receipt-close]',root).onclick=dismiss;$('[data-receipt-dismiss]',root).onclick=dismiss;}
+    const stop=()=>{controller?.abort();stopHints();lifecycle?.disconnect();};
+    const close=()=>{if(!current()){retired();return;}closed=true;stop();window.Modais?.fechar?.();onClose?.();};
+    function retired(){if(closed||!root.contains(dialog))return;stop();closed=true;const neutral=shell(root,'Acesso atualizado','<p>A conta, o espaço ou suas permissões mudaram. Reabra este recebimento pelo Histórico para conferir com segurança.</p>','<button class="btn btn-light" type="button" data-receipt-dismiss>Fechar</button>');const dismiss=()=>{if(root.contains(neutral))Modais.fechar();};$('[data-receipt-close]',root).onclick=dismiss;$('[data-receipt-dismiss]',root).onclick=dismiss;}
     const feedback=(text,error=false)=>{const node=$('[data-receipt-feedback]',root);if(node&&current()){node.textContent=text;node.setAttribute('role',error?'alert':'status');node.classList.toggle('error',error);}};
     function mount(title,body,footer){if(closed)return;ReceiptMessages.assertScope(token);render++;dialog=shell(root,title,body,footer);$('[data-receipt-close]',root).onclick=close;}
     function model(){const kind=ReceiptMessages.kind(receipt),models=ReceiptMessages.list(receipt.templates).filter(t=>t.receiptKind===kind),chosen=models.find(t=>t.id===selected)||ReceiptMessages.defaultTemplate(kind,receipt.templates);if(draftKind!==kind){content='';selected='';}draftKind=kind;selected=chosen.id;if(!content)content=chosen.content;return{models,chosen};}
@@ -37,7 +38,7 @@
     function pending(note=''){
       mount('Aguardando confirmação',`<div class="receipt-pending-notice" role="status"><span aria-hidden="true">◷</span><p>Estamos conferindo o recibo deste recebimento. Não registre outro pagamento.</p></div><p class="muted">${esc(note)}</p>`,
         '<button class="btn btn-primary" type="button" data-receipt-check>Consultar novamente</button><button class="btn btn-light" type="button" id="whatsapp-payment" disabled>Enviar pelo WhatsApp</button><div class="receipt-secondary-actions"><button class="btn btn-light" type="button" id="download-payment">Baixar provisório</button><button class="btn btn-light" type="button" data-receipt-done>Concluir</button></div>');
-      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-check]',root).onclick=check;$('#download-payment',root).onclick=()=>{if(current()&&!busy)download(local,null);};
+      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-check]',root).onclick=check;$('#download-payment',root).onclick=()=>{if(current())download(local,null);};
     }
     function ready(note=''){
       if(!current()||!receipt)return;let text;try{text=message();}catch(error){pending('O recebimento foi localizado, mas o modelo precisa de revisão pelo gestor.');feedback(error.message,true);return;}
@@ -49,14 +50,16 @@
     }
     async function check(){
       if(!current()){retired();return false;}if(busy)return false;busy=true;controller?.abort();controller=new AbortController();const stamp=render,signal=controller.signal;
-      for(const button of root.querySelectorAll('button:not([data-receipt-close])'))button.disabled=true;
+      // A canonical read never holds navigation hostage. Closing only aborts
+      // this receipt query; it cannot cancel or resend the original payment.
+      $('[data-receipt-check]',root).disabled=true;
       feedback('Confirmando recebimento…');
       try{
         const result=await ReceiptMessages.confirm(identity,{signal,isCurrent:()=>current()&&stamp===render,onAttempt:()=>feedback('Confirmando recebimento…')});
-        if(!current()){retired();return false;}if(stamp!==render)return false;receipt=result.confirmed?result:null;busy=false;
+        if(!current()){retired();return false;}if(stamp!==render)return false;receipt=result.confirmed?result:null;awaiting=!receipt&&result.status==='awaiting_confirmation';busy=false;
         if(receipt)ready();else pending(({requires_review:'Este registro precisa de conferência. Consulte o Histórico; não registre outro pagamento.',balance_unconfirmed:'O saldo atualizado ainda não foi confirmado. Consulte novamente mais tarde.',identity_unconfirmed:'Os dados do recibo precisam de conferência pelo gestor.'})[result.status]||'A confirmação ainda não chegou. Você pode consultar novamente mais tarde.');
         return !!receipt;
-      }catch(error){if(!current()){retired();return false;}if(stamp===render&&error.code!=='receipt-read-cancelled'){busy=false;pending();feedback(error.message||'Não foi possível consultar agora. O registro foi preservado.',true);}return false;}
+      }catch(error){if(!current()){retired();return false;}if(stamp===render&&error.code!=='receipt-read-cancelled'){awaiting=['receipt-offline','receipt-read-timeout','unavailable','deadline-exceeded','network-request-failed'].includes(String(error.code||'').replace(/^functions\//,''));busy=false;pending();feedback(error.message||'Não foi possível consultar agora. O registro foi preservado.',true);}return false;}
       finally{busy=false;}
     }
     function composer(){
@@ -107,7 +110,12 @@
         }catch(error){if(current())feedback(error.message,true);}finally{busy=false;}
       };
     }
-    pending();check();return{close};
+    pending();
+    // One late, matching Sync transition can resume reads after the initial
+    // bounded window. Repeated/global events cannot create a polling loop.
+    if(window.AdiFestaBuild?.receiptSyncHintsPaused!==true)stopHints=ReceiptMessages.observeConfirmation(identity,()=>{if(current()&&!busy&&!receipt&&awaiting&&!lateHintUsed){lateHintUsed=true;check();}});
+    lifecycle=new MutationObserver(()=>{if(!root.contains(dialog)){closed=true;stop();}});lifecycle.observe(root,{childList:true,subtree:true});
+    check();return{close};
   }
   function editor(id,{onSaved}={}){
     const root=$('#modal'),token=ReceiptMessages.scope(),original=ReceiptMessages.list().find(t=>t.id===id),base=original||{name:'',receiptKind:'partial',content:ReceiptMessages.DEFAULTS[0].content,isDefault:false};
@@ -130,13 +138,16 @@
       finally{busy=false;button.disabled=false;}
     };preview();return{close};
   }
-  function openExisting(paymentId,clientId){
+  function openExisting(paymentId,clientId,{operationId='',onClose}={}){
     if(!ReceiptMessages.canUse())throw Error('Seu acesso não permite consultar recebimentos.');
-    const payment=(DB.carregar().pagamentos||[]).find(p=>p.id===paymentId),id=payment?.clienteId||payment?.customerId;
-    if(!payment||id!==clientId||payment.businessId&&payment.businessId!==DB.getBusinessId())throw Error('Este recebimento não foi encontrado no histórico desta empresa e cliente.');
-    const client=window.Clientes?.obter?.(clientId);if(!client)throw Error('Cliente não encontrado neste dispositivo.');
-    return open(payment,client,{onClose:()=>window.CRMClienteUI?.open?.(clientId)});
+    const payment=(DB.carregar().pagamentos||[]).find(p=>p.id===paymentId),id=payment?.clienteId||payment?.customerId||payment?.clientId;
+    if(!paymentId||!clientId||payment&&(id!==clientId||payment.businessId&&payment.businessId!==DB.getBusinessId()||payment.workspaceGeneration!==undefined&&payment.workspaceGeneration!==(DB.getWorkspaceGeneration?.()??0)||operationId&&payment.operationId&&payment.operationId!==operationId))throw Error('Este recebimento não corresponde à empresa, geração, cliente ou operação deste histórico.');
+    // History already carries the identifiers. Missing local hydration is not
+    // missing canonical evidence: the unchanged authenticated reader checks all
+    // documents and permissions. No cache write or speculative amount/balance.
+    const original=payment?{...payment,operationId:payment.operationId||operationId||paymentId}:{id:paymentId,operationId:operationId||paymentId,clienteId:clientId},client=window.Clientes?.obter?.(clientId)||{id:clientId};
+    return open(original,client,{onClose:onClose||(()=>window.CRMClienteUI?.open?.(clientId))});
   }
-  document.addEventListener('click',event=>{const button=event.target.closest?.('[data-receipt-open]');if(!button)return;event.preventDefault();try{openExisting(button.dataset.receiptOpen,button.dataset.receiptClient);}catch(error){Utils.toast(error.message,true);}});
+  document.addEventListener('click',event=>{const button=event.target.closest?.('[data-receipt-open]');if(!button)return;event.preventDefault();try{openExisting(button.dataset.receiptOpen,button.dataset.receiptClient,{operationId:button.dataset.receiptOperation||''});}catch(error){Utils.toast(error.message,true);}});
   window.ReceiptMessageUI=Object.freeze({open,openExisting,editor,download});
 })();
