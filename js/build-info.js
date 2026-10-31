@@ -19,7 +19,7 @@
     receiptCreationPaused: false,
     receiptSharingPaused: false,
     receiptSyncHintsPaused: false,
-    syncResolvedStatusPaused: false,
+    syncResolvedStatusPaused: true,
     monetaryAnalysisIntakePaused: false,
     monetaryRecoveryReady: true,
     permissionsV2EditingPaused: false,
