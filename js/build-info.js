@@ -18,7 +18,7 @@
     release: "222",
     receiptCreationPaused: false,
     receiptSharingPaused: false,
-    receiptSyncHintsPaused: false,
+    receiptSyncHintsPaused: true,
     monetaryAnalysisIntakePaused: false,
     monetaryRecoveryReady: true,
     permissionsV2EditingPaused: false,
