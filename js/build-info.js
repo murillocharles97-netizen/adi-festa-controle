@@ -16,14 +16,14 @@
     shortCommit,
     builtAt,
     release: "224",
-    performanceViewsPaused: false,
+    performanceViewsPaused: true,
     receiptCreationPaused: false,
     receiptSharingPaused: false,
     receiptSyncHintsPaused: false,
     syncResolvedStatusPaused: false,
     monetaryAnalysisIntakePaused: false,
     monetaryRecoveryReady: true,
-    permissionsV2EditingPaused: false,
+    permissionsV2EditingPaused: true,
   });
 
   if (!window.__adiFestaBuildLogged) {
