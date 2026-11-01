@@ -19,6 +19,7 @@
     return{c,spaces,range};
   }
   function model(){
+    if(!has('performance.history'))throw Error('O histórico de faturamento não está autorizado neste perfil.');
     const {c,spaces,range}=setup(),data=window.DB?.carregar?.()||{};
     return{...M.build({sales:state.rows??data.vendas??[],exchanges:window.ExchangeEconomics?.forData?.(data,{spaceId:state.spaceId})||[],exchangeAdjustmentsReady:!window.ExchangeEconomics||window.ExchangeEconomics.state?.().ready===true,workspaceGeneration:c.business?.workspaceGeneration??0,range,spaceId:state.spaceId,allowedSpaceIds:c.spaceAccess==='all'?null:c.allowedSpaceIds||[],businessId:c.businessId,canCost:has('cost.view'),canProfit:has('profit.view'),spaces}),range,spacesAvailable:spaces,data};
   }
@@ -42,7 +43,7 @@
   function ranking(rows,total,type){return rows.length?`<ol class="analytics-ranking">${rows.slice(0,5).map((row,i)=>`<li><div class="analytics-rank-label"><span>${type==='products'?`<em>${i+1}</em>`:''}<b>${esc(row.name)}</b></span><strong>${money(row.revenue)}</strong></div><div class="analytics-rank-meta"><small>${type==='products'?`${num(row.quantity)} un.`:type==='payments'&&row.form==='Cartão'?'Cartão • '+esc(row.origin||'manual'):'Participação no faturamento'}</small><span>${num(total?row.revenue/total*100:0)}%</span></div><div class="analytics-bar"><i style="width:${Math.max(0,Math.min(100,total?row.revenue/total*100:0))}%"></i></div></li>`).join('')}</ol>`:'<p class="analytics-muted">Nenhuma venda neste período.</p>';}
   function panel(title,subtitle,content,name){return`<section class="analytics-card"><header><div><h3>${title}</h3><p>${subtitle}</p></div>${icon(name)}</header>${content}</section>`;}
   function render(){
-    if(!has('reports.view'))return window.TeamAccess?.deniedMarkup?.()||'';
+    if(!has('reports.view')||!has('performance.history'))return window.TeamAccess?.deniedMarkup?.()||'';
     let v;try{v=model();}catch(e){return`<section class="analytics-page"><p role="alert">${esc(e.message)}</p><button class="btn btn-light" data-analytics-default>Voltar para 30 dias</button></section>`;}
     state.last=v;const c=v.current,profitAvailable=has('profit.view')&&!c.missingCost,profitReview=c.exchangeProjectionPending?'Custos e lucro em revisão — ajustes de troca não confirmados':c.exchangeCount?'Custos e lucro das trocas em revisão':'Há vendas sem snapshot de custo completo',periods=[['today','Hoje'],['7d','7 dias'],['30d','30 dias'],['90d','90 dias'],['month','Este mês'],['previous','Mês passado'],['year','Este ano'],['custom','Personalizado']];
     const debtAllowed=has('financial.view')&&has('customers.view')&&context().spaceAccess==='all',clients=(v.data.clientes||[]).filter(x=>x.active!==false&&x.ativo!==false&&!x.deleted&&!x.deletedAt&&(!x.businessId||x.businessId===context().businessId)&&Number(x.saldo)<0),debt=clients.reduce((s,x)=>s+Math.abs(Number(x.saldo)),0);
@@ -53,7 +54,7 @@
   }
   function repaint(){if(!document.querySelector('.analytics-page'))return;document.querySelector('#app').innerHTML=render();bind(false);window.lucide?.createIcons();}
   async function load(restart=false){
-    if(state.busy||!has('reports.view'))return;
+    if(state.busy||!has('reports.view')||!has('performance.history'))return;
     if(!navigator.onLine){state.error='Você está offline. Esta é uma prévia local, possivelmente incompleta.';repaint();return;}
     const {c,range}=setup();if(restart){reset();state.key=JSON.stringify([state.identity,range.from,range.to,state.spaceId]);}
     const request=++state.request,id=identity();state.busy=true;state.error='';repaint();

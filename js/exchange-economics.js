@@ -34,7 +34,7 @@
     const excludedHistory=[...history.spaces].filter(id=>excluded.has(id)).sort();
     let mode='query';
     if(c.loading===true||snapshot?.loaded===false||!profileMatches||c.error||c.business?.active===false||c.userProfile?.active===false||c.member&&c.member.status!=='active'||access.canAccessApp===false||access.features?.basicSales===undefined)mode='waiting';
-    else if(!canRead||access.features.basicSales!==true)mode='unavailable';
+    else if(!canRead||access.features.basicSales!==true||root.TeamAccess?.canViewHistoricalPerformance?.()===false)mode='unavailable';
     else if(ambiguous||excluded.size&&history.unverified)mode='waiting';
     else if(excludedHistory.length)mode='historical';
     else if(!spaces.length)mode=all.length||snapshot?.loaded===true?'not_applicable':'waiting';

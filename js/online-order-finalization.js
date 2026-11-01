@@ -13,6 +13,7 @@
         if(order.clientId&&deps.confirmCustomer)await deps.confirmCustomer(order.clientId,order);
         if(order.saleStatus==='fiado')await deps.confirmBalance(order.clientId);
         if(order.finalizationActorUid!==deps.actorUid())throw Error('O operador ativo mudou. Retome com o operador original.');
+        if(deps.prepareSale)await deps.prepareSale();
         deps.registerSale({id:order.saleId,operationId:order.finalizationOperationId,onlineOrderId:order.id,onlineOrderItems:order.items,businessId:order.businessId,spaceId:order.spaceId,financialSpaceId:order.spaceId,clienteId:order.clientId,status:order.saleStatus,formaPagamento:order.paymentMethod,observacao:`Loja Online · ${order.publicOrderNumber}${order.note?` — ${order.note}`:''}`,itens:order.items.map(i=>({produtoId:i.productId,variantId:i.variantId,nome:i.name,productNameSnapshot:i.productNameSnapshot,variantNameSnapshot:i.variantNameSnapshot,attributesSnapshot:i.attributesSnapshot,quantidade:i.quantity,precoOriginal:i.unitPrice,precoFinalUnitario:i.unitPrice}))});
         sale=await deps.readSale(order,{flush:true});
         if(!sale)throw Error('Venda aguardando confirmação na nuvem. Use Retomar conclusão; não crie outra venda.');

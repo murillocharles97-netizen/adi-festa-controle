@@ -216,10 +216,10 @@ window.ExchangeCreditCheckout = (() => {
       let preserved = JSON.parse(localStorage.getItem(key) || 'null');
       if (!preserved) { preserved = { saleId: sale.id, operationId: crypto.randomUUID(), createdAt: new Date().toISOString() }; localStorage.setItem(key, JSON.stringify(preserved)); }
       if (preserved.saleId !== sale.id || !preserved.operationId) throw Error('Identificador de cancelamento inconsistente.');
-      const response = await call('cancelExchangeCreditSale', scope, { saleId: sale.id, operationId: preserved.operationId }, sessionSignature);
+      const response = await call('cancelExchangeCreditSale', scope, { saleId: sale.id, operationId: preserved.operationId, operationalGrantId: window.OperationalReadPolicy?.grantFor?.(sale.id,'cancel') }, sessionSignature);
       if (response.saleId !== sale.id || response.operationId !== preserved.operationId || response.status !== 'cancelado') throw Error('O comprovante de cancelamento precisa ser conferido.');
       localStorage.setItem(key, JSON.stringify({ ...preserved, status: 'resolved', resolvedAt: new Date().toISOString() }));
-      window.dispatchEvent(new CustomEvent('exchange-credit-sale-cancelled', { detail: { ...scope, saleId: sale.id, operationId: preserved.operationId } }));
+      window.dispatchEvent(new CustomEvent('exchange-credit-sale-cancelled', { detail: { ...scope, saleId: sale.id, operationId: preserved.operationId, operationalGrantId: window.OperationalReadPolicy?.grantFor?.(sale.id,'cancel') } }));
       return response;
     });
   }

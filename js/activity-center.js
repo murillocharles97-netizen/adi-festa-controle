@@ -615,8 +615,13 @@
       );
     return local;
   }
+  addEventListener('business-context-changed',()=>{
+    if(window.PerformanceAccess?.restricted() && document.querySelector('.activity-detail-modal [data-history-receipt]')) {
+      const modal=document.querySelector('#modal');if(modal)modal.innerHTML='';
+    }
+  });
   function events(cloudOverride = cloudEvents) {
-    const db = window.DB?.carregar?.() || {},
+    const db = (window.DB?.readForView?.()||window.DB?.carregar?.()) || {},
       canonical = (cloudOverride || [])
         .map((item) => canonicalEvent(db, item))
         .filter(Boolean),
@@ -628,6 +633,7 @@
       seenIds = new Set(),
       seenOperations = new Set();
     return merged
+      .filter(item => item.type!=='sale' || (window.PerformanceAccess ? window.PerformanceAccess.recordAllowed({...item.raw,data:item.date}) : !window.TeamAccess?.requiresDailyDashboard?.()))
       .filter((item) => canViewAll || operational&&item.type==='sale' || String(item.actorUid || item.raw?.actorUid || "") === actorUid)
       .filter((item) => {
         const c=window.BusinessContext?.get?.()||{},raw=item.raw||{},spaceId=raw.spaceId||raw.financialSpaceId||'',selected=window.SpaceContext?.homeId?.();
@@ -728,7 +734,7 @@
     const list = filtered(),
       shown = list.slice(0, state.page * PAGE_SIZE),
       count = activeFilterCount();
-    return `<section class="activity-page" data-activity-root><header class="activity-heading"><h1>Histórico</h1><p>Acompanhe vendas, ajustes e ações do sistema.</p></header><div class="activity-search-row"><label>${icon("search")}<input id="activity-search" value="${esc(state.query)}" placeholder="Buscar ação, cliente, produto..." autocomplete="off">${state.query ? `<button type="button" data-history-clear aria-label="Limpar busca">${icon("x")}</button>` : ""}</label><button type="button" data-history-filters>${icon("sliders-horizontal")}<span>Filtrar</span>${count ? `<b>${count}</b>` : ""}</button></div><div class="activity-chips">${[
+    return `<section class="activity-page" data-activity-root><header class="activity-heading"><h1>Histórico</h1>${window.OperationalReadPolicy?.restricted?.()?'<button class="btn btn-light" type="button" data-operational-case-open>Atendimento de venda</button>':''}<p>Acompanhe vendas, ajustes e ações do sistema.</p></header><div class="activity-search-row"><label>${icon("search")}<input id="activity-search" value="${esc(state.query)}" placeholder="Buscar ação, cliente, produto..." autocomplete="off">${state.query ? `<button type="button" data-history-clear aria-label="Limpar busca">${icon("x")}</button>` : ""}</label><button type="button" data-history-filters>${icon("sliders-horizontal")}<span>Filtrar</span>${count ? `<b>${count}</b>` : ""}</button></div><div class="activity-chips">${[
       ["todos", "Todos"],
       ["sale", "Vendas"],
       ["payment", "Pagamentos"],
@@ -898,7 +904,7 @@
       canCancel = statusConfirmed && window.TeamAccess?.has?.('sales.cancel') === true,
       items = sale.itens || [];
     return `<section class="activity-sale-summary"><div><span>Cliente</span><b>${esc(sale.clienteNome || "Venda avulsa")}</b></div><div><span>Pagamento</span><b>${esc(sale.formaPagamento || sale.status || "Não informado")}</b></div><div><span>Data</span><b>${at(sale.data).toLocaleString("pt-BR")}</b></div></section><ul class="activity-sale-items">${items.map((entry) => `<li><span>${Number(entry.quantidade || 0)}× ${esc(entry.nome || entry.produtoNome || "Produto")}${entry.variantName ? ` <small>${esc(entry.variantName)}</small>` : ""}</span><b>${money(Number(entry.precoFinalUnitario ?? entry.precoUnitario ?? 0) * Number(entry.quantidade || 0))}</b></li>`).join("")}</ul>${sale.descontoTotal ? `<p class="activity-detail-line"><span>Desconto</span><b>− ${money(sale.descontoTotal)}</b></p>` : ""}<p class="activity-detail-total"><span>Total</span><b>${money(sale.valorFinal ?? sale.valorTotal)}</b></p>${sale.observacao ? `<p class="activity-detail-note"><b>Observação</b><br>${esc(sale.observacao)}</p>` : ""}
-      <div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("ban")} Cancelar venda</button></div>
+      ${window.BusinessContext?.get?.().role==='owner'?`<button class="btn btn-light" type="button" data-authorize-sale-task="${esc(sale.id)}">Autorizar atendimento pontual</button>`:''}<div class="activity-detail-actions"><button class="btn btn-primary mobile-button primary" type="button" data-history-receipt="${esc(sale.id)}">${icon("receipt-text")} Ver ou reenviar recibo</button><button class="btn btn-light mobile-button danger" type="button" data-history-cancel-sale="${esc(sale.id)}" ${canCancel ? "" : "disabled"}>${icon("ban")} Cancelar venda</button></div>
       <small class="activity-cancel-note">${!statusConfirmed ? "Cancelamento indisponível até confirmar o estado desta venda. Feche e abra o detalhe após reconectar para consultar novamente." : !window.TeamAccess?.has?.('sales.cancel') ? "Seu perfil não tem permissão para cancelar vendas." : "Cancelar venda não tem limite de 5 minutos: exige conexão, motivo e conferência das dependências. Reembolso não é automático."}</small>
       <button class="btn btn-light mobile-button" type="button" data-history-undo-sale="${esc(sale.id)}" ${canUndo ? "" : "disabled"}>${icon("undo-2")} Desfazer (atalho de 5 minutos)</button><small class="activity-cancel-note">O atalho rápido continua restrito à venda mais recente. Para vendas antigas, use Cancelar venda.</small>`;
   }
@@ -915,16 +921,17 @@
   function paymentDetail(item){
     return `<p class="activity-detail-total"><span>Valor registrado</span><b>${money(item.value)}</b></p><p>${esc(item.status)}</p><p class="muted">Consulte o recibo para conferir a aplicação e o saldo atual na nuvem. Esta ação não registra outro pagamento.</p><button class="btn btn-primary mobile-button primary" type="button" data-history-payment-receipt ${window.ReceiptMessages?.canUse()?'':'disabled'}>Ver recebimento</button>`;
   }
-  function openDetail(id) {
-    const item = events().find((entry) => entry.id === id);
+  function openDetail(id, provided = null) {
+    const item = provided || events().find((entry) => entry.id === id);
     if (!item) return;
     const meta = TYPE_META[item.type] || TYPE_META.system,
-      db = window.DB?.carregar?.() || {},
+      db = (window.DB?.readForView?.()||window.DB?.carregar?.()) || {},
       root = $("#modal");
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-detail-modal" role="dialog" aria-modal="true"><header class="modal-head"><div class="activity-detail-title tone-${meta.tone}"><span>${icon(meta.icon)}</span><div><small>${esc(meta.label)} · ${at(item.date).toLocaleString("pt-BR")}</small><h3>${esc(item.title)}</h3></div></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><div class="modal-body">${item.type === "sale" ? saleDetail(item, db) : item.type==='payment'?paymentDetail(item):genericDetail(item)}</div></section></div>`;
     root.querySelector("[data-activity-close]").onclick = () =>
       (root.innerHTML = "");
     root.querySelector('[data-history-payment-receipt]')?.addEventListener('click',()=>{try{window.ReceiptMessageUI.openExisting(item.paymentId,item.clientId,{operationId:item.operationId,onClose:()=>openDetail(id)});}catch(error){Utils.toast(error.message,true);}});
+    root.querySelector('[data-authorize-sale-task]')?.addEventListener('click',()=>window.OperationalReadPolicy.authorize(db.vendas.find(s=>s.id===root.querySelector('[data-authorize-sale-task]').dataset.authorizeSaleTask)).catch(e=>Utils.toast(e.message,true)));
     const exchangeSaleId=root.querySelector('[data-history-receipt]')?.dataset.historyReceipt;
     const creditSale=db.vendas?.find(s=>s.id===exchangeSaleId&&s.source==='exchange_credit_checkout');
     if(creditSale)root.querySelector('.activity-detail-total')?.insertAdjacentHTML('afterend',`<section class="exchange-credit-card"><b>Pagamento com crédito de troca</b><p>Crédito utilizado: ${money(Number(creditSale.exchangeCreditUsedCents||0)/100)}</p><p>Complemento recebido: ${money(Number(creditSale.cashReceivedCents||0)/100)}</p><small>Crédito separado do Fiado e do novo recebimento.</small></section>`);
@@ -1054,5 +1061,12 @@
       clearSaleStatuses();
       rerender();
     });
-  window.ActivityCenter = { render, bind, events, state };
+  function openOperationalSale(sale) {
+    if(!sale||!window.OperationalReadPolicy?.grantFor?.(sale.id,'consult'))return;
+    currentSaleStatuses().records.set(String(sale.id),{state:'confirmed',status:sale.status,record:sale});
+    openDetail('operational:'+sale.id,saleEvent(sale));
+    const root=$('#modal');root.dataset.operationalSale=sale.id;
+    const check=()=>{if(root.dataset.operationalSale!==sale.id||!root.querySelector('.activity-detail-modal'))return;if(!window.OperationalReadPolicy?.grantFor?.(sale.id,'consult')){root.innerHTML='';delete root.dataset.operationalSale;window.Utils?.toast?.('A autorização de atendimento expirou. Solicite nova autorização ao proprietário.');return;}setTimeout(check,1000);};setTimeout(check,1000);
+  }
+  window.ActivityCenter = { render, bind, events, state, openOperationalSale };
 })();

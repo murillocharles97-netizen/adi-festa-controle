@@ -17,6 +17,7 @@
   const renewalCache={value:null,updatedAt:0,promise:null};
   const RENEWAL_CACHE_MS=120000;
   function model(){
+    if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())){const s=window.PerformanceAccess?.state?.() || {ready:false};return{restricted:true,ready:s.ready,daily:s.ready?s.value:null};}
     const source=DB.carregar(),db=window.SpaceContext?.contextualData?.(source,'home')||source,selectionId=db.spaceSelectionId||window.SpaceContext?.ALL_SPACES||'all_spaces',isAllSpaces=selectionId===(window.SpaceContext?.ALL_SPACES||'all_spaces'),now=new Date(),todayKey=dayKey(now),yesterday=new Date(now);yesterday.setDate(yesterday.getDate()-1);
     const sales=(db.vendas||[]).filter(isValidSale),today=sales.filter(sale=>dayKey(sale.data||sale.createdAt)===todayKey),yesterdaySales=sales.filter(sale=>dayKey(sale.data||sale.createdAt)===dayKey(yesterday));
     const adjustment=key=>window.ExchangeEconomics?.total?.(db,{key,dayKey})||0,exchangeAdjustment=adjustment(todayKey),exchangeCount=(window.ExchangeEconomics?.forData?.(db)||[]).filter(row=>dayKey(row.createdAt)===todayKey).length;
@@ -60,6 +61,7 @@
     return list.sort((a,b)=>a.priority-b.priority);
   }
   function render(){
+    if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.()))return window.PerformanceAccess?.render?.() || '<section role="status">Não foi possível carregar os indicadores. Reabra o aplicativo sem limpar os dados.</section>';
     const data=model(),attentionList=attentionItems(data);
     const main=`<div class="home-main-metrics"><article class="sold">${icon('circle-dollar-sign')}<span><small>Vendido hoje</small><strong>${money(data.sold)}</strong>${comparison(data.sold,data.soldYesterday)}</span></article>${window.TeamAccess?.has?.('profit.view')?`<article class="profit">${icon('trending-up')}<span><small>Lucro hoje</small><strong>${data.profit===null?'Em revisão':money(data.profit)}</strong><em>${data.profit===null?esc(data.profitReview):data.margin.toFixed(0)+'% de margem'}</em></span></article>`:''}</div>`;
     const secondary=`<div class="home-secondary-scroller">${[['shopping-cart',data.today.length,'vendas'],['shopping-bag',data.items,'itens'],['users',data.customers,'clientes']].map(([symbol,value,label])=>`<article><button type="button" data-home-target="day-summary" aria-label="Ver resumo do dia: ${value} ${label}">${icon(symbol)}<strong>${value}</strong><span>${label}</span>${icon('chevron-right')}</button></article>`).join('')}</div>`;
@@ -84,6 +86,7 @@
     if(target.startsWith('products-')){const filter=target==='products-low'?'baixo':target==='products-out'?'esgotado':model().out.length?'esgotado':'baixo';window.ProdutosMobile?.applyFilter(filter,'menorEstoque');return Router.ir('produtos')}
   }
   function summaryModal(weekly=false){
+    if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.()))return;
     const data=model(),root=$('#modal'),trigger=document.activeElement,label=window.SpaceContext?.selectionLabel?.('home')||'Espaço selecionado';
     root.innerHTML=`<div class="modal-bg"><section class="modal-box home-summary-modal" role="dialog" aria-modal="true" aria-labelledby="home-summary-title"><header class="modal-head"><div><h3 id="home-summary-title">${weekly?'Últimos 7 dias':'Resumo de hoje'}</h3><small>${esc(label)}</small></div><button class="icon-btn" type="button" data-home-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body">${weekly?chart(data):`<dl class="home-summary-values"><dt>Vendido hoje</dt><dd>${money(data.sold)}</dd><dt>Vendas</dt><dd>${data.today.length}</dd><dt>Itens vendidos</dt><dd>${data.items}</dd><dt>Clientes identificados</dt><dd>${data.customers}</dd><dt>Ticket médio</dt><dd>${data.today.length?money(data.sold/data.today.length):'Sem vendas hoje'}</dd></dl><p>Resumo das vendas válidas de hoje no espaço selecionado. Vendas canceladas não entram nestes indicadores.</p>`}</div><footer class="modal-foot"><button class="btn btn-primary" type="button" data-home-close>Fechar</button></footer></section></div>`;
     const close=()=>{root.innerHTML='';if(trigger?.isConnected)trigger.focus({preventScroll:true});};root.querySelectorAll('[data-home-close]').forEach(button=>button.onclick=close);
@@ -99,6 +102,7 @@
     return renewalCache.promise;
   }
   function bind(){
+    if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())){window.PerformanceAccess?.bind?.();return;}
     const page=$('.mobile-home-dashboard');if(!page||page.dataset.bound)return;page.dataset.bound='true';
     void window.ExchangeEconomics?.refresh?.();
     page.querySelectorAll('[data-home-go]').forEach(button=>button.onclick=()=>Router.ir(button.dataset.homeGo));

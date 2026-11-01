@@ -247,6 +247,10 @@
     "assets/google-g.svg",
     "js/receipt-messages.js",
     "js/receipt-message-ui.js",
-    "css/receipt-messages.css"
+    "css/receipt-messages.css",
+    "js/performance-access.js",
+    "css/performance-access.css",
+    "functions/src/shared/operational-privacy-policy.js",
+    "js/operational-read-policy.js"
   ]
 }

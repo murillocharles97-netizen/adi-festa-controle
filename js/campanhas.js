@@ -294,7 +294,7 @@
   }
 
   function applySaleInDb(db, sale) {
-    const result = Engine.applySale(db, sale);
+    const apply=data=>Engine.applySale(data,sale),result=window.OperationalReadPolicy?.restricted?.()?window.OperationalReadPolicy.benefitOperation(db,sale.clienteId||sale.clientId,apply):apply(db);
     sale.campaignEvents = result.events.map((event) => event.id);
     sale.campaignSnapshot = result.snapshots;
     sale.campaignReceiptSummary = Engine.receiptSummary(result.snapshots);

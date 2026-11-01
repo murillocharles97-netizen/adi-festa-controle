@@ -113,6 +113,10 @@
     };
   }
   function aggregate(sourceDb, period = state.period) {
+    if ((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())) {
+      const value=window.PerformanceAccess?.state?.() || {ready:false};
+      return {restricted:true,ready:value.ready,daily:value.ready?value.value:null};
+    }
     const contextualDb =
         window.SpaceContext?.contextualData?.(sourceDb || {}, "home") ||
         sourceDb ||
@@ -546,6 +550,7 @@
     return `<section class="desktop-space-goal ${reached ? "is-reached" : ""}"><span class="desktop-space-goal-icon">${icon(reached ? "circle-check-big" : "target")}</span><div class="desktop-space-goal-copy"><b>${esc(label)}</b><small>${esc(description)}</small></div><div class="desktop-space-goal-values"><span><strong>${money(view.todayRevenue)}</strong> de ${money(view.goal)}</span><div role="progressbar" aria-label="Progresso da meta diária" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><i style="--space-goal-progress:${progress}%"></i></div></div><em>${view.goalPercent.toFixed(0)}%</em><button type="button" data-home-goal>Editar ${icon("chevron-right")}</button></section>`;
   }
   function render() {
+    if ((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())) return window.PerformanceAccess?.render?.() || '<section role="status">Não foi possível carregar os indicadores. Reabra o aplicativo sem limpar os dados.</section>';
     window.AppBootDiagnostics?.count?.("dashboardRenderCount");
     const renderStartedAt = window.performance?.now?.() ?? Date.now(),
       view = aggregate(DB.carregar()),
@@ -566,6 +571,7 @@
     return `<section class="desktop-dashboard" data-desktop-dashboard>${contextBar}${legacyNotice(view)}${goalCard(view)}<section class="desktop-kpis">${kpi("Vendas hoje", money(view.todayRevenue), `${view.today.length} venda(s)`, "shopping-cart", null)}${canViewFinancial?kpi("Recebido hoje", money(view.receivedToday), "pagamentos recebidos", "circle-dollar-sign", null):''}${kpi("Clientes ativos", view.clients.length, "cadastrados", "users", null)}${kpi("Produtos cadastrados", view.products.length, "itens ativos", "package", null)}${canViewProfit?kpi("Lucro estimado", view.todayProfit===null?"Em revisão":money(view.todayProfit), view.todayProfit===null?(view.exchangeProjectionPending?"Ajustes de troca não confirmados":"Custos das trocas em revisão"):"hoje", "trending-up", null):''}${canViewFinancial?kpi(receivableTitle, money(receivableValue), view.creditEnabled ? "saldo de clientes" : "histórico da base", view.creditEnabled ? "hand-coins" : "chart-line", null, view.creditEnabled ? "danger" : "default"):''}</section><section class="desktop-performance-grid"><article class="desktop-panel desktop-sales-performance">${panelHeader("Desempenho de vendas")}<label>Período<select id="desktop-dashboard-period"><option value="today">Hoje</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="month">Mês atual</option></select></label><div class="desktop-performance-value"><strong>${money(view.revenue)}</strong>${trend(view.revenueGrowth)}</div><div class="desktop-chart-layout">${chart(view.daily)}<aside><span><small>Média diária</small><b>${money(view.averageDaily)}</b></span><span><small>Melhor dia</small><b>${view.best.date ? view.best.date.toLocaleDateString("pt-BR") : "—"}</b><em>${money(view.best.value)}</em></span><span><small>Ticket médio</small><b>${money(view.ticket)}</b></span><span><small>Crescimento</small><b>${view.revenueGrowth.toFixed(1).replace(".", ",")}%</b></span></aside></div></article>${canViewFinancial?`<section class="desktop-panel desktop-finance">${panelHeader("Painel financeiro")}<div><span><small>Recebido no período</small><b class="positive">${money((view.db.pagamentos || []).filter((payment) => within(payment.data || payment.createdAt, view.selected.start, view.selected.end)).reduce((sum, payment) => sum + number(payment.valor), 0))}</b></span><span><small>A receber</small><b class="negative">${money(view.openBalance)}</b></span><span><small>Despesas</small><b>${money(0)} <em>placeholder</em></b></span><span class="forecast"><small>Saldo previsto</small><b>${money(view.revenue - view.openBalance)}</b></span></div></section>`:''}${topProducts(view)}</section>${quickActions()}<section class="desktop-command-grid">${recentSales(view)}${alerts(view)}${canViewReports?crmSummary(view):''}</section>${canViewReports?campaignSummary(view):''}</section>`;
   }
   function bind() {
+    if ((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())) { window.PerformanceAccess?.bind?.(); return; }
     const root = document.querySelector("[data-desktop-dashboard]");
     if (!root) return;
     void window.ExchangeEconomics?.refresh?.();
@@ -588,6 +594,12 @@
     window.SpaceContext?.bind?.(root);
     window.lucide?.createIcons();
   }
+  window.addEventListener?.('business-context-changed',()=>{
+    state.period='7d';
+    if(!(window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.()) && !window.MobileHome?.isMobile?.() && document.querySelector('[data-daily-performance], [data-desktop-dashboard]')) {
+      const app=document.querySelector('#app'); if(app){app.innerHTML=render();bind();}
+    }
+  });
   window.DesktopDashboard = { render, bind, aggregate, state };
   window.addEventListener?.('sale-exchange-metrics-updated',()=>{
     if(!document.querySelector('[data-desktop-dashboard]'))return;

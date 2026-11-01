@@ -30,7 +30,7 @@ window.SaleExchanges = (() => {
   const itemList = (items = [], returns = false) => `<ul class="exchange-items">${items.map(i => `<li><div><b>${esc(i.quantity)}× ${esc(i.name)}</b>${i.variantName ? `<small>${esc(i.variantName)}</small>` : ''}${returns ? `<small class="${i.restock ? 'exchange-restock' : 'exchange-damaged'}">${i.restock ? 'Volta ao estoque disponível' : 'Avaria / não volta ao estoque'}</small>` : ''}</div><strong>${money(i.totalCents ?? i.unitCents * i.quantity)}</strong></li>`).join('')}</ul>`;
   async function open(sale) {
     if (!sale || !allowed()) return;
-    const origin = identity(), modal = document.querySelector('#modal'), token = crypto.randomUUID(), db = DB.carregar();
+    const origin = identity(), modal = document.querySelector('#modal'), token = crypto.randomUUID(), db = (DB.readForView?.()||DB.carregar());
     if (!origin.uid || !origin.businessId || !modal) return;
     disposeStorage?.();
     const key = scopeKey(origin, sale.id), catalog = catalogFor(db, sale, origin);
@@ -41,7 +41,7 @@ window.SaleExchanges = (() => {
       if (!current()) throw Error('A sessão mudou. Reabra a venda na conta de origem.');
       if (!navigator.onLine) throw Error('Conecte-se para consultar ou confirmar a troca.');
       if(name==='confirmSaleExchange')assertCausalQueue();
-      const r = await window.FirebaseCallable(name, { ...data, businessId: origin.businessId, workspaceGeneration: origin.generation, saleId: sale.id });
+      const r = await window.FirebaseCallable(name, { ...data, businessId: origin.businessId, workspaceGeneration: origin.generation, saleId: sale.id, operationalGrantId: window.OperationalReadPolicy?.grantFor?.(sale.id,'exchange') });
       if (!current()) throw Error('A sessão mudou. Consulte a troca na conta de origem.');
       return r.data ?? r;
     };

@@ -1,7 +1,7 @@
 window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
   const financialStatus=client=>{const saldo=Math.round((Number(client?.saldo)||0)*100)/100;return{saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)}};
-  const listar=()=>DB.carregar().clientes;
+  const listar=()=>(DB.readForView?.()||DB.carregar()).clientes;
   const obter=id=>listar().find(c=>c.id===id);
   const allowed=key=>window.TeamAccess?window.TeamAccess.has(key)===true:!window.FirebaseSession?.user;
   const assertPermission=key=>{if(!allowed(key))throw Object.assign(Error(window.VeconiPermissionPolicy?.MESSAGE||'Você não tem permissão para realizar esta ação. Solicite ao gestor que habilite esta função em Equipe → Permissões.'),{code:'customer-edit-permission-required',permission:key});};
@@ -13,7 +13,7 @@ window.Clientes=(()=>{
     const atual=db.clientes.find(c=>c.id===d.id),agora=new Date().toISOString(),telefone=d.telefone||'',normalizedPhone=normalizePhone(telefone),duplicado=db.clientes.find(c=>c.id!==d.id&&normalizedPhone&&normalizePhone(c.normalizedPhone||c.telefone)===normalizedPhone);
     if(duplicado)throw Error(`Este WhatsApp já pertence a ${duplicado.nome}.`);
     const consent=d.marketingConsent===true||d.marketingConsent==='true',previousConsent=atual?.marketingConsent===true;const campos={nome:d.nome.trim(),apelido:d.apelido||'',telefone,normalizedPhone,telefone2:d.telefone2||'',email:d.email||'',endereco:d.endereco||'',cidade:d.cidade||atual?.cidade||'',estado:d.estado||atual?.estado||'',complemento:d.complemento||'',documento:d.documento||'',observacoes:d.observacoes||'',marketingConsent:consent,marketingConsentAt:consent?(atual?.marketingConsentAt||agora):null,marketingConsentSource:consent?(d.marketingConsentSource||atual?.marketingConsentSource||'manual'):null,marketingConsentRevokedAt:previousConsent&&!consent?agora:(atual?.marketingConsentRevokedAt||null),origemCadastro:d.origemCadastro||atual?.origemCadastro||'app',portalRefToken:d.portalRefToken||atual?.portalRefToken||Utils.uuid(),ativo:d.ativo!==false,atualizadoEm:agora};
-    if(atual){delete campos.ativo;Object.assign(atual,campos);salvo=atual}else{salvo={id:Utils.uuid(),...campos,totalComprado:0,quantidadeVendas:0,saldo:0,financialVersion:0,ultimaCompra:null,etiquetas:[],promessaPagamento:null,criadoEm:agora};db.clientes.push(salvo)}
+    if(atual){if(!atual.portalRefToken&&!d.portalRefToken)delete campos.portalRefToken;delete campos.ativo;Object.assign(atual,campos);salvo=atual}else{salvo={id:Utils.uuid(),...campos,totalComprado:0,quantidadeVendas:0,saldo:0,financialVersion:0,ultimaCompra:null,etiquetas:[],promessaPagamento:null,criadoEm:agora};db.clientes.push(salvo)}
   });return salvo};
   const setActive=(id,enabled)=>{assertPermission('customers.archive');if(typeof enabled!=='boolean')throw Error('Estado de cliente inválido.');return DB.alterar(db=>{assertPermission('customers.archive');const cliente=db.clientes.find(c=>c.id===id);if(!cliente)throw Error('Cliente não encontrado.');Object.assign(cliente,{ativo:enabled,active:enabled,atualizadoEm:new Date().toISOString()});if(enabled&&cliente.deletedAt)cliente.deletedAt=null})};
   const excluir=id=>setActive(id,false);

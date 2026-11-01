@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "./workspace-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=204";
+import { createFirestoreRepository } from "./firestore-repository.js?v=224";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -106,6 +106,7 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
 function canPullSource(name) {
+  if(window.OperationalReadPolicy?.handles?.(name)&&!window.OperationalReadPolicy.allowedRead(name))return false;
   const has = window.TeamAccess?.has;
   if (typeof has !== "function") return true;
   if (["products", "productVariants"].includes(name)) return has("products.view");
@@ -1129,7 +1130,8 @@ async function prepareSaleCustomer(clientId,options={}) {
   if(newDraft&&window.TeamAccess?.has?.('customers.create')===true){assertCustomerForSale(id);return{source:'authorized-ordered-local-dependency',clientId:id};}
   if(navigator.onLine===false){assertCustomerForSale(id);return{source:'confirmed-local-presence'};}
   // Read only. In particular, do NOT flush or retry any old customer or sale operation here.
-  const snapshot=await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
+  if(window.OperationalReadPolicy?.restricted?.())await prepareOperationalCustomer(id,'checkout');
+  const snapshot=window.OperationalReadPolicy?.handles?.('clients')?await readOperationalDocument('clients',id):await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
   assertCloudReadScope(scope);
   if(spaceId&&window.SpaceContext?.salesId&&window.SpaceContext.salesId()!==spaceId)throw Error('O espaço mudou. Revise o cliente na conta atual.');
   if(!snapshot.exists()||snapshot.metadata?.fromCache||snapshot.metadata?.hasPendingWrites)
@@ -2426,7 +2428,7 @@ async function commitQueueItem(item) {
     let result;
     try { result = await window.FirebaseCallable('commitOperationalSync', {
       businessId: activeBusinessId(),
-      syncProtocolVersion:1,clientRelease:202,
+      syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release)||202,
       item: {...item, operationId:stableLegacyOperationId(item),
         workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0},
     }); } catch(error) {
@@ -3231,7 +3233,7 @@ async function verifySaleQueueCommit(item) {
   const saleId = String(saleWrite.entityId),
     operationId = String(saleWrite.data?.operationId || item.operationId || ""),
     businessId = activeBusinessId(),
-    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "sales", saleId)),
+    snapshot = await readOperationalDocument('sales',saleId,{operationId}),
     remote = snapshot.exists() ? snapshot.data() : null;
   if (!remote || String(remote.operationId || "") !== operationId)
     throw Object.assign(new Error("A venda não foi confirmada na nuvem. A fila foi preservada para revisão."),
@@ -3792,7 +3794,7 @@ async function prepareCustomerForSale(customerId) {
   if (unconfirmed.length > 10)
     throw Error("Há muitas vendas recentes sem confirmação neste aparelho. Exporte o diagnóstico antes de outra venda fiado.");
   for (const localSale of unconfirmed) {
-    const remote = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(localSale.id)));
+    const remote = await readOperationalDocument('sales',String(localSale.id),{presence:true});
     const confirmed = remote.exists() ? cleanCloudItem({ id: remote.id, ...remote.data() }) : null;
     if (!confirmed?.financialAppliedAt ||
       String(confirmed.operationId || "") !== String(localSale.operationId || ""))
@@ -3811,7 +3813,7 @@ async function prepareCustomerForSale(customerId) {
   if (pending.length)
     throw Error("A operação anterior deste cliente ainda está sincronizando. Aguarde a confirmação ou use o modo offline antes de outra venda fiado.");
   // Leitura pontual do servidor: nunca varre a coleção de clientes no checkout.
-  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", id));
+  const snapshot = await readOperationalDocument('clients',id);
   if (!snapshot.exists()) throw Error("Cliente não encontrado na empresa atual da nuvem.");
   applyCloudCollection("clients", [{ id, ...snapshot.data() }], { authoritative: true });
   return { source: "server", financialVersion: financialVersionOf(snapshot.data()) };
@@ -3821,13 +3823,13 @@ async function confirmCreditSale(sale) {
   if (!currentUser || readOnlyMode)
     throw Error("A sincronização financeira não está pronta para confirmar a venda.");
   await processSyncQueue({ force: true });
-  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", String(sale.id)));
+  const snapshot = await readOperationalDocument('sales',String(sale.id),{operationId:sale.operationId});
   const confirmed = snapshot.exists() ? cleanCloudItem({ id: snapshot.id, ...snapshot.data() }) : null;
   if (!confirmed?.financialAppliedAt ||
     String(confirmed.operationId || "") !== String(sale.operationId || ""))
     throw Error("Venda preservada neste aparelho, mas ainda sem confirmação financeira na nuvem. Não repita com outra operação; revise a sincronização.");
   applyCloudCollection("sales", [confirmed], { authoritative: true });
-  const clientSnapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "clients", String(sale.clienteId)));
+  const clientSnapshot = await readOperationalDocument('clients',String(sale.clienteId));
   if (clientSnapshot.exists())
     applyCloudCollection("clients", [{ id: sale.clienteId, ...clientSnapshot.data() }], { authoritative: true });
   return { ...sale, ...confirmed, status: "fiado", formaPagamento: "fiado" };
@@ -3850,8 +3852,8 @@ async function confirmSaleUndo(sale) {
     assertSession();
     if(ack.data?.confirmed!==true)throw Error('Cancelamento preservado; confirmação financeira pendente. Não repita.');
     const [remote,client]=await Promise.all([
-      getDocFromServer(doc(db,'businesses',businessId,'sales',saleId)),
-      getDocFromServer(doc(db,'businesses',businessId,'clients',customerId)),
+      readOperationalDocument('sales',saleId,{presence:true}),
+      readOperationalDocument('clients',customerId),
     ]);
     assertSession();
     if(remote.exists())applyCloudCollection('sales',[{id:saleId,...remote.data()}],{authoritative:true});
@@ -4060,6 +4062,23 @@ function applyCloudCollectionBatch(entries) {
   return total;
 }
 // Downloads have their own identity and retry lifecycle, never a queue owner.
+async function readOperationalDocument(name,id,options={}) {
+  if(window.OperationalReadPolicy?.handles?.(name)){
+    const record=await window.OperationalReadPolicy.get(name,id,options);
+    return {id:String(id),exists:()=>!!record,data:()=>record,metadata:{fromCache:false,hasPendingWrites:false}};
+  }
+  return getDocFromServer(doc(db,'businesses',activeBusinessId(),name,String(id)));
+}
+async function prepareOperationalCustomer(clientId,purpose='checkout') {
+  if(!window.OperationalReadPolicy?.restricted?.())return null;
+  if(navigator.onLine===false){if(purpose==='payment'&&!window.OperationalReadPolicy.paymentPrepared(clientId))throw Error('Conecte-se para conferir as obrigações deste cliente antes de receber. O formulário e a fila foram preservados.');return null;}
+  const scope=captureCloudReadScope(),data=await window.OperationalReadPolicy.customerContext(clientId,purpose);assertCloudReadScope(scope);
+  const progress=(data.campaignProgress||[]).map(p=>{const copy={...p};delete copy.ledgerBaseline;delete copy.operationalProjection;return copy;});
+  const entries=[['clients',[data.client]],['sales',data.sales],['campaignProgress',progress],['campaignEvents',data.campaignEvents],['customerSubscriptions',data.customerSubscriptions]].filter(([,rows])=>rows?.length).map(([name,documents])=>({name,documents,options:{authoritative:true}}));
+  if(entries.length)applyCloudCollectionBatch(entries);
+  rememberCanonicalClients([data.client],{source:'server',fromCache:false,hasPendingWrites:false,readAt:now()});
+  return data;
+}
 function captureCloudReadScope() {
   const context=window.BusinessContext?.get?.()||{};
   let businessId='';try{businessId=activeBusinessId();}catch{/* signed-out scope is still fenceable */}
@@ -4241,6 +4260,7 @@ function startCloudSubscriptions() {
     if(!Object.keys(remote).length&&revision)
       for(const name of signal.changedCollections||DEFAULT_PULL_NAMES)enqueue(name,revision);
     if(!signalCollections.size)return;
+    if(window.OperationalReadPolicy?.restricted?.())window.dispatchEvent(new CustomEvent('operational-remote-invalidation',{detail:{collections:[...signalCollections]}}));
     try{persist();publishState('waiting');schedule();}catch(error){fail(error);}
   },error=>{
     if(!isCurrent())return;
@@ -4338,6 +4358,7 @@ async function refreshBusinessContext() {
   const context = window.BusinessContext?.set?.({
     business,
     userProfile: session.profile,
+    member: session.member,
   });
   session.business = context?.business || business;
   session.subscription = context?.subscription || business.subscription;
@@ -4369,6 +4390,7 @@ async function refreshUserContext() {
   window.BusinessContext?.set?.({
     business: session.business,
     userProfile: profile,
+    member: session.member,
   });
   dispatchEvent(
     new CustomEvent("cloud-data-updated", {
@@ -4679,7 +4701,7 @@ async function readCanonicalClient(clientId, options = {}) {
   }
   let snapshot;
   try {
-    snapshot = await getDocFromServer(doc(db, "businesses", businessId, "clients", id));
+    snapshot = await readOperationalDocument('clients',id);
     assertCloudReadScope(readScopeToken);
   } catch (error) {
     error.stage ||= "client-document-read";
@@ -4876,6 +4898,10 @@ async function queryClientsPage(options = {}) {
 }
 async function queryCustomerSubscriptions(options = {}) {
   await validateUser();
+  if(window.OperationalReadPolicy?.restricted?.()){
+    if(!options.clientId)throw Error('Selecione o cliente para consultar sua vigência atual. Indicadores de renovações anteriores exigem histórico autorizado.');
+    return (await prepareOperationalCustomer(String(options.clientId),'checkout'))?.customerSubscriptions||[];
+  }
   const clientId = String(options.clientId || "").trim(),
     productId = String(options.productId || "").trim(),
     status = String(options.status || "").trim(),
@@ -5191,7 +5217,7 @@ async function performDeviceComparison(options = {}) {
   const protectedNames={products:'productFinancials',productVariants:'variantFinancials',sales:'saleFinancials'},projections={};
   for(const [publicName,name] of Object.entries(protectedNames)){
     assertAuditSession();
-    if(!allowed(name)){skippedCollections.push({name,reason:'permission_scope'});continue;}
+    if(!allowed(name)||window.OperationalReadPolicy?.handles?.(name)){skippedCollections.push({name,reason:'operational_projection_scope'});continue;}
     const prefetched=prefetchedEntries.find(entry=>entry.name===name);
     const remoteItems=prefetched?prefetched.documents:await syncStep('orphan_comparison',()=>repositories[name].listAllPaged(200),{service:'Firestore',collection:name,businessId,request:'listAllPaged'});
     assertAuditSession();
@@ -5202,7 +5228,7 @@ async function performDeviceComparison(options = {}) {
   }
   for (const name of AUDIT_NAMES) {
     assertAuditSession();
-    if(!allowed(name)){skippedCollections.push({name,reason:'permission_scope'});continue;}
+    if(!allowed(name)||window.OperationalReadPolicy?.handles?.(name)){skippedCollections.push({name,reason:'operational_projection_scope'});continue;}
     const localItems = sourceItems(data, name),
       remoteItems = prefetchedEntries.some(entry => entry.name === name)
         ? prefetchedEntries.find(entry => entry.name === name).documents
@@ -6384,6 +6410,7 @@ function pendingActivityEvents() {
 }
 
 function subscribeRecentActivityEvents(callback, onError, max = 100) {
+  if(window.OperationalReadPolicy?.handles?.('activityEvents')&&!window.OperationalReadPolicy.allowedRead('activityEvents')){callback([],{source:'server',projection:true,notRequested:true},{hasMore:false,cursor:null});return()=>{};}
   const generation=syncSessionGeneration,uid=currentUser?.uid,subscription=++activitySubscriptionGeneration;
   let stopped=false;
   const current=()=>!stopped&&generation===syncSessionGeneration&&uid===currentUser?.uid&&subscription===activitySubscriptionGeneration;
@@ -6459,7 +6486,7 @@ async function readIntegratedSale(intent, { flush = false } = {}) {
   if (!currentUser || !navigator.onLine || intent.businessId !== activeBusinessId())
     throw Error("Conecte-se à empresa do pagamento para concluir a venda.");
   if (flush) await processSyncQueue({ force: true });
-  const snapshot = await getDocFromServer(doc(db, "businesses", activeBusinessId(), "sales", intent.saleId));
+  const snapshot = await readOperationalDocument('sales',intent.saleId,{operationId:intent.finalizationOperationId});
   if (intent.businessId !== activeBusinessId()) throw Error("A empresa ativa mudou. Retome o pagamento na empresa original.");
   if (!snapshot.exists()) return null;
   const sale = cleanCloudItem({ id: snapshot.id, ...snapshot.data() });
@@ -6471,7 +6498,7 @@ async function readIntegratedSale(intent, { flush = false } = {}) {
 async function readOnlineOrderSale(order,{flush=false}={}){
   if(!currentUser||!navigator.onLine||order.businessId!==activeBusinessId())throw Error('Conecte-se à empresa do pedido para concluir a venda.');
   if(flush)await processSyncQueue({force:true});
-  const snapshot=await getDocFromServer(doc(db,'businesses',activeBusinessId(),'sales',order.saleId));
+  const snapshot=await readOperationalDocument('sales',order.saleId,{operationId:order.finalizationOperationId});
   if(order.businessId!==activeBusinessId())throw Error('A empresa ativa mudou. Retome o pedido na empresa original.');
   if(!snapshot.exists())return null;
   const sale=cleanCloudItem({id:snapshot.id,...snapshot.data()});
@@ -6502,6 +6529,7 @@ window.SyncFirebase = {
   },
   readIntegratedSale,
   readOnlineOrderSale,
+  pendingBenefitEventIds:()=>readQueue().filter(item=>['pending','processing','preparing'].includes(classifyQueueOperation(item).category)).flatMap(item=>(item.payload?.writes||[]).filter(w=>w.entityType==='campaignEvents'&&w.operation==='create').map(w=>w.entityId)),
   setUser,
   setAuthReady: (value) => emit({ authReady: Boolean(value) }),
   stop: ({reason = "runtime_stop"} = {}) => setUser(null, null, null, {reason}),
@@ -6538,6 +6566,7 @@ window.SyncFirebase = {
   createSaleOperation,
   createPaymentOperation,
   assertSaleTracked,
+  prepareOperationalCustomer,
   prepareSaleCustomer,
   assertCustomerForSale,
   assertPaymentTracked,

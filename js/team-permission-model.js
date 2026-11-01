@@ -1,39 +1,36 @@
 /* Permission editor: explicit grants only; this module never changes session access. */
 (function (root, factory) {
-  const model = factory();
+  const model = factory(typeof module === 'object' && module.exports ? require('../functions/src/shared/permission-policy') : root.VeconiPermissionPolicy);
   if (typeof module === "object" && module.exports) module.exports = model;
   else root.TeamPermissionModel = model;
-})(typeof window !== "undefined" ? window : globalThis, function () {
+})(typeof window !== "undefined" ? window : globalThis, function (Policy) {
   "use strict";
   const KEYS = Object.freeze([
     "sales.create", "sales.cancel", "sales.viewAll", "customers.view", "customers.create", "customers.edit", "customers.archive",
     "customers.receiveDebt", "customers.adjustBalance", "products.view", "products.edit",
     "inventory.view", "inventory.adjust", "financial.view", "reports.view", "profit.view",
-    "cost.view", "team.view", "team.manage", "settings.manage", "billing.manage", "spaces.manage"
+    "performance.daily", "performance.history", "cost.view", "team.view", "team.manage", "settings.manage", "billing.manage", "spaces.manage"
   ]);
   const DEPENDENCIES = Object.freeze({
-    "sales.cancel": ["sales.create"], "customers.edit": ["customers.view"],
+    "performance.history": ["performance.daily"], "sales.cancel": ["sales.create"], "customers.edit": ["customers.view"],
     "customers.create": ["customers.view"], "customers.archive": ["customers.view"],
     "customers.receiveDebt": ["customers.view"], "customers.adjustBalance": ["customers.view"],
     "products.edit": ["products.view"], "inventory.view": ["products.view"],
     "inventory.adjust": ["products.view", "inventory.view"], "team.manage": ["team.view"]
   });
   function explicit(member = {}) {
-    const source = !Array.isArray(member.permissions) && member.permissions || {};
-    return Object.fromEntries(KEYS.map(key => [key, member.role === "owner" ||
-      (['customers.create','customers.archive'].includes(key) && Number(member.permissionsVersion || 1) < 2 &&
-       !(Array.isArray(source) ? source.includes(key) : Object.hasOwn(source, key))
-        ? (Array.isArray(source) ? source.includes('customers.edit') : source['customers.edit'] === true)
-        : (Array.isArray(source) ? source.includes(key) : source[key] === true))]));
+    const policy = Policy || globalThis.VeconiPermissionPolicy;
+    if (!policy) throw Error("A política de permissões ainda não foi carregada.");
+    return policy.effective(member);
   }
   function snapshot(member) {
     return JSON.parse(JSON.stringify(Object.fromEntries(["role", "status", "spaceAccess", "allowedSpaceIds", "permissions", "permissionsVersion"]
       .filter(key => Object.prototype.hasOwnProperty.call(member, key)).map(key => [key, member[key]]))));
   }
   function preset(name) {
-    const enabled = name === "manager" ? ["sales.create", "sales.cancel", "sales.viewAll", "customers.view",
+    const enabled = name === "manager" ? ["sales.create", "sales.cancel", "sales.viewAll", "performance.daily", "performance.history", "customers.view",
       "customers.create", "customers.edit", "products.view", "products.edit", "inventory.view", "inventory.adjust", "reports.view"] :
-      ["sales.create", "customers.view", "products.view", "inventory.view"];
+      ["sales.create", "performance.daily", "customers.view", "products.view", "inventory.view"];
     return Object.fromEntries(KEYS.map(key => [key, enabled.includes(key)]));
   }
   function issues(values) {
@@ -76,7 +73,7 @@
     const ids = [...new Set(draft.allowedSpaceIds || [])].sort();
     if (draft.spaceAccess !== "all" && (draft.spaceAccess !== "selected" || !ids.length)) throw new Error("Selecione ao menos um espaço.");
     return { role: draft.role, spaceAccess: draft.spaceAccess, allowedSpaceIds: draft.spaceAccess === "all" ? [] : ids,
-      permissionsVersion: 2, permissions: Object.fromEntries(KEYS.map(key => [key, draft.permissions[key] === true])), expectedAccess: snapshot(original) };
+      permissionsVersion: 3, permissions: Object.fromEntries(KEYS.map(key => [key, draft.permissions[key] === true])), expectedAccess: snapshot(original) };
   }
   return Object.freeze({ KEYS, DEPENDENCIES, explicit, snapshot, preset, issues, change, difference, spaceOptions, serialize });
 });

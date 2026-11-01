@@ -1021,6 +1021,12 @@ window.Checkout = (() => {
         } catch (error) { return validationError(error.message || 'O cliente ainda não foi confirmado. O carrinho foi preservado.'); }
         finally{finishing=false;}
       }
+      if(window.OperationalReadPolicy?.restricted?.()){
+        finishing=true;setSubmissionState('processing','Conferindo disponibilidade da venda…');
+        try{await window.OperationalReadPolicy.prepareSale();if(businessId!==DB.getBusinessId()||spaceId!==selectedSalesSpaceId())return validationError('O espaço mudou. Revise o carrinho antes de confirmar.');}
+        catch(error){return validationError(error.message||'Não foi possível conferir a venda. O carrinho foi preservado.');}
+        finally{finishing=false;}
+      }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },

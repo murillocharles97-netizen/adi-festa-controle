@@ -14,15 +14,15 @@ const original = overrides => ({
 const draft = overrides => ({ role: 'seller', spaceAccess: 'selected', allowedSpaceIds: ['qa-a'],
   permissions: grants('sales.create', 'customers.view', 'products.view', 'inventory.view'), ...overrides });
 
-test('V210 mantém 20 grants e separa cadastro e desativação de clientes', () => {
-  assert.equal(Model.KEYS.length, 22);
-  assert.equal(new Set(Model.KEYS).size, 22);
+test('V224 mantém os 22 grants anteriores e separa os dois acessos de desempenho', () => {
+  assert.equal(Model.KEYS.length, 24);
+  assert.equal(new Set(Model.KEYS).size, 24);
   assert.equal(Object.isFrozen(Model.KEYS), true);
   assert.deepEqual(Model.KEYS.filter(key => /discount|price|goals|online|personal|products.create/.test(key)), []);
 });
 
 test('membro sparse mantém somente grants explícitos sem completar preset do cargo', () => {
-  const member = original({ role: 'manager', permissions: { 'sales.create': true, 'products.edit': false } });
+  const member = original({ role: 'manager', permissionsVersion:3, permissions: { 'sales.create': true, 'products.edit': false } });
   const before = clone(member), values = Model.explicit(member);
   assert.deepEqual(enabled(values), ['sales.create']);
   assert.equal(values['products.edit'], false);

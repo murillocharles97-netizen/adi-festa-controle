@@ -1,0 +1,7 @@
+'use strict';
+const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),fixture='/tests/team-permissions-v224.fixture.html';
+function start(port=0){const server=http.createServer((req,res)=>{let name;try{name=decodeURIComponent(new URL(req.url,'http://127.0.0.1').pathname);}catch{res.writeHead(400).end();return;}if(name==='/')name=fixture;
+ const allowed=name===fixture||name==='/tests/fixtures/performance-v224.js'||/^\/(js|css|assets)\/[a-zA-Z0-9_./-]+\.(js|css|svg|png|ico)$/.test(name)||['/functions/src/shared/permission-policy.js','/functions/src/shared/operational-privacy-policy.js'].includes(name);
+ const file=path.resolve(root,'.'+name);if(req.method!=='GET'||!allowed||!file.startsWith(root+path.sep)||name.includes('..')||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404).end();return;}res.writeHead(200,{'Content-Type':name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.svg')?'image/svg+xml':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).end(fs.readFileSync(file));});return new Promise(resolve=>server.listen(port,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+fixture})));}
+module.exports={start};if(require.main===module)start(Number(process.argv[2]||8224)).then(x=>console.log(x.url));

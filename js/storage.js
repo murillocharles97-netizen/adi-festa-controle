@@ -140,5 +140,6 @@ window.DB=(()=>{
   // Demo datasets belong in isolated test fixtures, never in a production API.
   const restaurar=()=>{throw Error('Carga de demonstração desativada. Use somente backup verificado.');};
   // IndexedDB commits use optimistic revision checks to reject stale-tab writes.
-  return{prepare:normalizarParaMemoria,hydrateConfig,hydrateOperation,getRecentClientIds,rememberRecentClient,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,retireBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,getWorkspaceGeneration:()=>activeGeneration,VERSAO};
+  const readForView=()=>{const member=window.BusinessContext?.get?.()?.member;if(member?.role!=='owner'&&member?.permissionsVersion>=3&&!window.VeconiPermissionPolicy?.has?.(member,'performance.history')&&!window.OperationalReadPolicy)throw Error('O leitor autorizado ainda não carregou. Atualize sem limpar os dados.');return window.OperationalReadPolicy?.view?.(carregar())||carregar();};
+  return{readForView,prepare:normalizarParaMemoria,hydrateConfig,hydrateOperation,getRecentClientIds,rememberRecentClient,compactMessageSequences,carregar,salvar,alterar,limpar,restaurar,criarBackup:criarBackupCompleto,validarBackup,restaurarBackup,useBusiness,releaseBusiness,retireBusiness,getBusinessId:()=>activeBusinessId,getPrincipal:()=>activePrincipal,getWorkspaceGeneration:()=>activeGeneration,VERSAO};
 })();

@@ -152,6 +152,10 @@ export function getBusinessDocumentRef(collectionName, id) {
 }
 
 export function createFirestoreRepository(collectionName) {
+  const raw=createRawFirestoreRepository(collectionName);
+  return window.OperationalReadPolicy?.wrapRepository?.(collectionName,raw)||raw;
+}
+function createRawFirestoreRepository(collectionName) {
   let lastReadMetadata = null;
   const collectionRef = () => getBusinessCollectionRef(collectionName);
   const documentRef = (id) => getBusinessDocumentRef(collectionName, id);

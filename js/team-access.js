@@ -5,19 +5,19 @@
     "sales.create", "sales.cancel", "sales.viewAll",
     "customers.view", "customers.create", "customers.edit", "customers.archive", "customers.receiveDebt", "customers.adjustBalance",
     "products.view", "products.edit", "inventory.view", "inventory.adjust",
-    "financial.view", "reports.view", "profit.view", "cost.view",
+    "financial.view", "reports.view", "profit.view", "cost.view", "performance.daily", "performance.history",
     "team.view", "team.manage", "settings.manage", "billing.manage", "spaces.manage",
   ]);
   const PRESETS = Object.freeze({
     owner: Object.freeze(Object.fromEntries(PERMISSIONS.map((key) => [key, true]))),
     manager: Object.freeze({
-      "sales.create": true, "sales.cancel": true, "sales.viewAll": true,
+      "sales.create": true, "sales.cancel": true, "sales.viewAll": true, "performance.daily": true, "performance.history": true,
       "customers.view": true, "customers.edit": true, "customers.receiveDebt": true,
       "customers.adjustBalance": true, "products.view": true, "products.edit": true,
       "inventory.view": true, "inventory.adjust": true, "reports.view": true, "team.view": true,
     }),
     seller: Object.freeze({
-      "sales.create": true, "customers.view": true, "products.view": true, "inventory.view": true,
+      "sales.create": true, "customers.view": true, "products.view": true, "inventory.view": true, "performance.daily": true, "performance.history": false,
     }),
     stock: Object.freeze({ "products.view": true, "inventory.view": true, "inventory.adjust": true }),
   });
@@ -38,6 +38,7 @@
     if (permission === "platform.admin") return current().role === "platform_admin";
     const c = current();
     if (c.loading || c.error || c.userProfile?.active === false || c.member?.status && c.member.status !== 'active') return false;
+    if (c.role!=='owner' && permission.startsWith('performance.') && window.AdiFestaBuild?.performanceViewsPaused) return false;
     // Keep persisted legacy permission arrays/signatures unchanged. Split
     // aliases are derived only at authorization time, not in the cache key.
     if(c.role!=='owner'&&c.member&&window.VeconiPermissionPolicy)return window.VeconiPermissionPolicy.has(c.member,permission);
@@ -85,7 +86,10 @@
       if(assigning&&(parent.spaceAccessMode==='all_spaces'||!ids.length||ids.some(id=>!allowed.includes(id))))throw window.VeconiPermissionPolicy.denied('spaces.manage');
     }
   }
-  const canRoute = (route) => !ROUTE_PERMISSIONS[route] || has(ROUTE_PERMISSIONS[route]);
+  const canRoute = (route) => {
+    if (['relatorios','crm','campanhas'].includes(route) && !has('performance.history')) return false;
+    return !ROUTE_PERMISSIONS[route] || has(ROUTE_PERMISSIONS[route]);
+  };
   const ACTION_PERMISSIONS = Object.freeze({
     '#new-client,#empty-new-client,#quick-new-client,[data-primary-action="new-client"]':'customers.create',
     '[data-edit-client],[data-mobile-edit],[data-client-action="edit"],[data-client-action="contact"],[data-client-action="promise"],[data-client-action="charge"]':'customers.edit',
@@ -113,9 +117,17 @@
   // to manage other sales, financial projections, costs or staff. viewAll is
   // retained for administrative screens; the store dashboard is not personal.
   const canReadOperationalSales = () => has('sales.create') || has('sales.viewAll');
+  const canViewDailyPerformance = () => has('performance.daily');
+  const canViewHistoricalPerformance = () => has('performance.history');
+  // Protect the new restriction even if the optional reporting renderer failed
+  // to load. Legacy sessions retain their old views until an explicit V3 save.
+  const requiresDailyDashboard = () => {
+    const c=current(),p=c.member?.permissions;
+    return c.role!=='owner' && (Number(c.member?.permissionsVersion||1)>=3 || p && !Array.isArray(p) && ['performance.daily','performance.history'].some(key=>Object.hasOwn(p,key))) && !has('performance.history');
+  };
   const operationalReadScopeKey = () => {
     const c=current();
-    return JSON.stringify(['store-sales-v2',c.businessId||'',c.userProfile?.uid||window.FirebaseSession?.user?.uid||'',c.role||'',c.permissionSignature||[...(c.permissions||[])].sort().join('|'),c.spaceAccess||'selected',[...(c.allowedSpaceIds||[])].sort()]);
+    return JSON.stringify(['store-sales-v2',c.businessId||'',c.userProfile?.uid||window.FirebaseSession?.user?.uid||'',c.role||'',c.permissionSignature||[...(c.permissions||[])].sort().join('|'),c.spaceAccess||'selected',[...(c.allowedSpaceIds||[])].sort(),c.member?.permissionsVersion,c.member?.permissions]);
   };
   function deniedMarkup() {
     return `<section class="access-denied" role="alert"><i data-lucide="shield-x"></i><h2>Você não tem acesso a esta área.</h2><p>Peça ao proprietário para revisar seu cargo e suas permissões.</p><button class="btn btn-primary" type="button" data-go="inicio">Voltar ao início</button></section>`;
@@ -178,7 +190,7 @@
   }
   window.TeamAccess = Object.freeze({
     PERMISSIONS, PRESETS, ROLE_LABELS, ROUTE_PERMISSIONS, normalizeRole,
-    permissionsFor, has, assert, failure, captureSession, assertSession, assertCustomerProtocol, assertWriteScope, ACTION_PERMISSIONS, protectActions, canRoute, canReadOperationalSales, operationalReadScopeKey, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
+    permissionsFor, has, assert, failure, captureSession, assertSession, assertCustomerProtocol, assertWriteScope, ACTION_PERMISSIONS, protectActions, canRoute, canReadOperationalSales, canViewDailyPerformance, canViewHistoricalPerformance, requiresDailyDashboard, operationalReadScopeKey, deniedMarkup, syncNavigation, sanitizePrivateCache, actor,
   });
   addEventListener("business-context-changed", () => queueMicrotask(syncNavigation));
   addEventListener("firebase-auth-ready", () => queueMicrotask(syncNavigation));

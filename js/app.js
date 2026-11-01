@@ -124,7 +124,7 @@
   }
   window.requestSafeSaleUndo = requestSafeSaleUndo;
   function resumoFechamento() {
-    const base = DB.carregar(),
+    const base = (DB.readForView?.()||DB.carregar()),
       d = window.SpaceContext?.contextualData?.(base, "home") || base,
       vendas = d.vendas.filter((v) => Utils.hoje(v.data) && window.PerformanceModel?.validSale?.(v)!==false),
       pagamentos = d.pagamentos.filter((p) => Utils.hoje(p.data)),
@@ -165,7 +165,7 @@
     };
   }
   function resumoEstoque() {
-    const base = DB.carregar(),
+    const base = (DB.readForView?.()||DB.carregar()),
       d = window.SpaceContext?.contextualData?.(base, "home") || base,
       produtos = d.produtos.filter((p) => p.ativo !== false),
       esgotados = produtos.filter(
@@ -196,7 +196,8 @@
     return `<section class="panel stock-alerts"><div class="panel-head"><h3>Alertas de estoque</h3><button class="btn btn-light btn-sm" data-go="produtos">${icon("package")} Ver produtos</button></div><div class="stock-alert-grid"><div class="stock-alert danger"><b>${e.esgotados.length}</b><span>Produtos esgotados</span></div><div class="stock-alert warning"><b>${e.baixos.length}</b><span>Abaixo do mínimo</span></div><div><h4>Mais vendidos hoje</h4>${e.maisVendidos.length ? e.maisVendidos.map((p) => `<p>${escapar(p.nome)} <b>${p.quantidade} un.</b></p>`).join("") : '<p class="muted">Nenhuma venda hoje</p>'}</div><div><h4>Sugestão de reposição</h4>${e.reposicao.length ? e.reposicao.map((p) => `<p>${escapar(p.nome)} <b>${Number(p.estoqueAtual || 0)} un.</b></p>`).join("") : '<p class="muted">Estoque tranquilo por enquanto</p>'}</div></div></section>`;
   }
   function inicio() {
-    const base = DB.carregar(),
+    if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.()))return window.PerformanceAccess?.render?.() || '<section role="status">Não foi possível carregar os indicadores. Reabra o aplicativo sem limpar os dados.</section>';
+    const base = (DB.readForView?.()||DB.carregar()),
       d = window.SpaceContext?.contextualData?.(base, "home") || base,
       hoje = d.vendas.filter((v) => Utils.hoje(v.data) && window.PerformanceModel?.validSale?.(v)!==false),
       exchangeRows=(window.ExchangeEconomics?.forData?.(d)||[]).filter(row=>Utils.hoje(row.createdAt)),
@@ -385,6 +386,7 @@
     );
   }
   function historicoTabela(lista, titulo = "Histórico") {
+    if(window.PerformanceAccess)lista=window.PerformanceAccess.filter(lista);
     return `<section class="panel"><div class="panel-head"><h3>${titulo}</h3></div>${lista.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Status</th><th>Valor</th></tr></thead><tbody>${lista.map((v) => `<tr><td>${dataHora(v.data)}</td><td>${escapar(v.clienteNome || "Venda avulsa")}</td><td><span class="badge ${v.status === "pago" ? "badge-paid" : "badge-debt"}">${v.status}</span></td><td><b>${dinheiro(v.valorTotal)}</b></td></tr>`).join("")}</tbody></table></div>` : vazio("Nenhuma venda registrada")}</section>`;
   }
   function historico() {
@@ -434,7 +436,7 @@
         window.BusinessContext?.get?.().business?.subscription?.planId ||
         subscription.planId ||
         "trial",
-      data = DB.carregar(),
+      data = (DB.readForView?.()||DB.carregar()),
       limits = access.limits || business.limits || {};
     return (
       cabecalho(
@@ -693,7 +695,7 @@
           const c = Clientes.obter(b.dataset.clientWhatsapp),
             businessName = String(
               window.BusinessContext?.get?.().business?.name ||
-                window.DB?.carregar?.().config?.nome ||
+                (window.DB?.readForView?.()||window.DB?.carregar?.()).config?.nome ||
                 "seu estabelecimento",
             ).trim(),
             businessReference =
@@ -1017,6 +1019,7 @@
     redesenhar();
   }
   function baixarBackup(prefixo = "backup") {
+    if(window.TeamAccess && (!window.TeamAccess.has('settings.manage') || !window.TeamAccess.has('performance.history'))){toast('Seu acesso não permite exportar o histórico comercial desta empresa.',true);return;}
     const backup = DB.criarBackup(),
       slug = (backup.businessName || backup.businessId || "empresa")
         .normalize("NFD")
@@ -1045,7 +1048,7 @@
     window.lucide?.createIcons();
   }
   function mostrarPreviaBackup(prepared) {
-    const p = BackupManager.preview(prepared, DB.carregar());
+    const p = BackupManager.preview(prepared, (DB.readForView?.()||DB.carregar()));
     $("#modal").innerHTML =
       `<div class="modal-bg"><section class="modal-box modal-wide"><header class="modal-head"><h3>Prévia do backup</h3><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><div class="import-stats"><div><small>Clientes</small><b>${p.clientes}</b></div><div><small>Produtos</small><b>${p.produtos}</b></div><div><small>Vendas</small><b>${p.vendas}</b></div><div><small>Pagamentos</small><b>${p.pagamentos}</b></div><div><small>Campanhas</small><b>${p.campanhas}</b></div><div><small>Mov. estoque</small><b>${p.movimentosEstoque}</b></div><div><small>Total do fiado</small><b>${dinheiro(p.totals.fiado)}</b></div></div><p>Data: <b>${prepared.exportedAt ? dataHora(prepared.exportedAt) : "Backup antigo"}</b> · Schema ${prepared.schemaVersion} · Negócio ${escapar(prepared.businessId)}</p><p>${p.validos} registro(s) válido(s) · ${p.duplicates} duplicado(s) no arquivo que serão mesclados · ${p.novos} novo(s) · ${p.atualizados} existente(s) serão atualizados.</p><label class="backup-mode"><input type="radio" name="backup-mode" value="merge" checked> <b>Mesclar com os dados atuais</b><small>Atualiza IDs existentes e adiciona apenas registros novos.</small></label><label class="backup-mode"><input type="radio" name="backup-mode" value="replace"> <b>Substituir os dados deste negócio</b><small>Substitui aparelho e nuvem. Um backup de segurança será criado.</small></label><div id="replace-confirm" hidden><div class="backup-warning"><b>Atenção:</b> digite SUBSTITUIR para confirmar a substituição completa.</div><input class="search" id="replace-word" autocomplete="off" placeholder="SUBSTITUIR"></div></div><footer class="modal-foot"><button class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary confirm">Mesclar backup</button></footer></section></div>`;
     $$("#modal .close,#modal .cancel").forEach(
@@ -1182,7 +1185,7 @@
     }
   }
   const mensagemCobranca = (c) =>
-    `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${DB.carregar().config.nome || "nossa loja"} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
+    `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${(DB.readForView?.()||DB.carregar()).config.nome || "nossa loja"} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
   function syncResponsiveNavigation() {
     const mobile = !window.TeamAccess?.canRoute?.("relatorios"),
       link = $('[data-route="relatorios"]');

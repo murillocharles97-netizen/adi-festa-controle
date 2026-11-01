@@ -14,7 +14,8 @@ async function load(){
   loadedFor=scope.key;
   const cached=readCache(scope);if(cached&&current(scope)){window.OperationMode.applyRemote(cached);dispatchEvent(new CustomEvent('operation-settings-loaded',{detail:{businessId,operation:window.OperationMode.get(),source:'cache'}}));return}
   try{
-    const snap=await getDoc(doc(db,'businesses',businessId,'settings','operation'));
+    const projected=window.OperationalReadPolicy?.handles?.('settings')?await window.OperationalReadPolicy.get('settings','operation'):undefined;
+    const snap=projected!==undefined?{exists:()=>!!projected,data:()=>projected}:await getDoc(doc(db,'businesses',businessId,'settings','operation'));
     if(!current(scope))return;
     if(snap.exists()){
       window.OperationMode.applyRemote(snap.data());

@@ -412,6 +412,7 @@ window.Vendas = (() => {
       Object.assign(db, nextData);
     });
     window.SyncFirebase?.assertSaleTracked?.(criada);
+    window.OperationalReadPolicy?.consumeSaleCapacity?.();
     return criada;
   };
   const ultima = () => {

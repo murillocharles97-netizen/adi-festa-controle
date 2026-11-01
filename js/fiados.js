@@ -22,6 +22,7 @@ window.Fiados = (() => {
 
   function createPayment(clienteId, valor, observacao, options = {}) {
     assertCanReceive();
+    if(window.OperationalReadPolicy?.restricted?.()&&!window.OperationalReadPolicy.paymentPrepared(clienteId))throw Error('Conecte-se para conferir as obrigações autorizadas antes de confirmar o recebimento. Nenhum pagamento foi gravado.');
     let pagamento;
     const operationId = String(options.operationId || Utils.uuid()),
       paymentMode = options.paymentMode === "total" ? "total" : "partial";
@@ -127,16 +128,16 @@ window.Fiados = (() => {
       const allocatable = Number((received - pagamento.legacyAmount).toFixed(2));
 
       if (allocatable > 0 && window.CampaignEngineV2) {
-        const allocations = CampaignEngineV2.allocatePayment(db, clienteId, allocatable, pagamento.id, at, {
-          businessId: pagamento.businessId,
-        });
+        const allocate=data=>CampaignEngineV2.allocatePayment(data, clienteId, allocatable, pagamento.id, at, {businessId: pagamento.businessId});
+        const allocations=window.OperationalReadPolicy?.restricted?.()?window.OperationalReadPolicy.debtOperation(db,clienteId,allocate):allocate(db);
         pagamento.allocations = allocations.map((allocation) => ({
           saleId: allocation.saleId,
           amount: allocation.amount,
           settledSale: allocation.settledSale,
         }));
         pagamento.allocatedAmount = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
-        pagamento.campaignConfirmations = CampaignEngineV2.confirmSettledSales(db, pagamento, allocations).map((event) => ({
+        const confirm=data=>CampaignEngineV2.confirmSettledSales(data,pagamento,allocations);
+        pagamento.campaignConfirmations = (window.OperationalReadPolicy?.restricted?.()?window.OperationalReadPolicy.benefitOperation(db,clienteId,confirm):confirm(db)).map((event) => ({
           eventId: event.id,
           campaignId: event.campaignId,
           saleId: event.saleId,
@@ -190,7 +191,8 @@ window.Fiados = (() => {
     }};
   }
 
-  function openReceive(clientId,{onRecorded}={}) {
+  async function openReceive(clientId,{onRecorded}={}) {
+    if(window.OperationalReadPolicy?.restricted?.()){try{await window.SyncFirebase.prepareOperationalCustomer(clientId,'payment');}catch(error){Utils.toast(error.message,true);return;}}
     let attempt;try{attempt=receiptAttempt(clientId);}catch(error){Utils.toast(error.message,true);return;}
     const client=(DB.carregar().clientes||[]).find(c=>c.id===clientId);if(!client)return Utils.toast('Cliente não encontrado.',true);
     const due=Math.abs(Math.min(0,Number(client.saldo||0)));if(!due)return Utils.toast('Este cliente não possui dívida em aberto.',true);

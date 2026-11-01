@@ -9,7 +9,7 @@ function setup(width=390,member={}){
  for(const file of ['js/team-permission-model.js','js/team-access.js','js/team-permission-editor.js'])w.eval(fs.readFileSync(file,'utf8'));
  w.TeamService={updateMember:async(uid,input)=>{calls.push({uid,input});return new Promise((a,b)=>{resolve=a;reject=b;});}};
  const original={uid:'qa-seller',name:'Pessoa fictícia QA',email:'pessoa@example.invalid',role:'seller',status:'active',spaceAccess:'selected',allowedSpaceIds:['qa-a'],permissions:{'customers.view':true},permissionsVersion:2,...member};
- w.TeamPermissionEditor.open(original);const q=s=>w.document.querySelector(s),click=s=>q(s).click();
+ w.TeamPermissionEditor.open(original,{onClose:()=>{}});const q=s=>w.document.querySelector(s),click=s=>q(s).click();
  return{w,q,click,calls,original,finish:()=>resolve({member:calls.at(-1).input}),fail:()=>reject(Error('QA sem rede')),change:()=>{context={...context,businessId:'other'};w.dispatchEvent(new w.Event('business-context-changed'));},close:async()=>{await new Promise(setImmediate);w.close();}};
 }
 for(const width of [320,360,390,430,768,1440])test('real DOM '+width+'px: independent customer toggles, descriptions and protected save',async()=>{
@@ -17,7 +17,7 @@ for(const width of [320,360,390,430,768,1440])test('real DOM '+width+'px: indepe
  assert.match(h.w.document.body.textContent,/Não permite editar clientes existentes/);assert.equal(h.q('[data-tp-save]').disabled,true);
  const create=h.q('[data-tp-key="customers.create"]');create.checked=true;create.dispatchEvent(new h.w.Event('change'));assert.equal(h.q('[data-tp-preset="custom"]').getAttribute('aria-pressed'),'true');
  h.click('[data-tp-save]');assert.match(h.q('#modal').textContent,/Cadastrar clientes/);assert.equal(h.calls.length,0);h.click('[data-tp-dialog-confirm]');h.click('[data-tp-save]');assert.equal(h.calls.length,1);
- assert.equal(h.calls[0].input.permissions['customers.edit'],false);assert.equal(h.calls[0].input.permissionsVersion,2);assert.deepEqual(Array.from(h.calls[0].input.allowedSpaceIds),['qa-a']);
+ assert.equal(h.calls[0].input.permissions['customers.edit'],false);assert.equal(h.calls[0].input.permissionsVersion,3);assert.deepEqual(Array.from(h.calls[0].input.allowedSpaceIds),['qa-a']);
  h.finish();await new Promise(setImmediate);assert.match(h.w.document.body.textContent,/Permissões salvas/);assert.equal(h.q('[data-tp-save]').disabled,true);await h.close();
 });
 test('legacy preview preserves 3 already-authorized duties; opening/cancel never migrates a member',async()=>{

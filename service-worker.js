@@ -1,4 +1,4 @@
-const CACHE='veconi-v223-sync-resolution-status';
+const CACHE='veconi-v224-performance-privacy';
 // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
 // Shared entitlement catalog (same source consumed by Cloud Functions).
 const ARQUIVOS=['./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./functions/src/shared/online-order.js','./css/online-orders.css','./','./index.html','./catalogo.html','./404.html','./manifest.json','./css/style.css','./css/finance.css','./css/mobile.css','./css/import.css','./css/visual.css','./css/firebase.css','./css/firebase-audit.css','./css/backup.css','./css/clientes-page.css','./css/clientes-mobile.css','./css/produtos-mobile.css','./css/product-images.css','./css/produtos-desktop.css','./css/home-mobile.css','./css/checkout-mobile.css','./css/mobile-fixes.css','./css/mensagens-mobile.css','./css/visitas.css','./css/campanhas.css','./css/catalogo.css','./assets/veconi-icon-v133.svg','./assets/veconi-icon-192-v133.png','./assets/veconi-icon-512-v133.png','./assets/lucide.min.js','./js/utils.js','./js/storage.js','./js/backup.js','./js/financial-concurrency.js','./js/clientes.js','./js/produtos.js','./js/product-images.js','./js/campanhas.js','./js/campanhas-ui.js','./js/vendas.js','./js/fiados.js','./js/cobrancas.js','./js/mensagens.js','./js/visitas.js','./js/router.js','./js/csvImport.js','./js/recibos.js','./js/repositories.js','./js/checkout.js','./js/checkout-mobile.js','./js/clientes-page.js','./js/mensagens-mobile.js','./js/clientes-mobile.js','./js/produtos-mobile.js','./js/home-mobile.js','./js/visual-ui.js','./js/app.js','./js/catalog-portal.js','./js/catalogo-publico.js','./js/firebase/firebase-config.js','./js/firebase/business-context.js','./js/firebase/firestore-utils.js','./js/firebase/firestore-repository.js','./js/firebase/usage-monitor.js','./js/firebase/sync.js','./js/firebase/auth.js','./js/firebase/firebase-ui.js','./js/firebase/catalog-bridge.js','./js/firebase/product-image-storage.js'];
@@ -40,6 +40,7 @@ ARQUIVOS.push('./css/crm-segment-builder.css','./js/crm-segment-engine-v2.js','.
 ARQUIVOS.push('./css/financial.css','./css/financial-credit-v2.css','./css/financial-refinement.css','./css/financial-home-v2.css','./js/financial-engine.js','./js/financial-ui.js','./js/firebase/financial-space-service.js');
 ARQUIVOS.push('./css/spaces.css','./js/spaces.js','./js/firebase/space-service.js');
 ARQUIVOS.push('./css/team.css','./js/team-access.js','./js/team-page.js','./js/firebase/team-service.js');
+ARQUIVOS.push('./js/performance-access.js','./css/performance-access.css');
 ARQUIVOS.push('./css/team-permissions.css','./js/team-permission-model.js','./js/team-permission-editor.js');
 ARQUIVOS.push('./css/design-system/veconi-theme.css','./js/veconi-brand.js','./assets/veconi-symbol.svg','./assets/veconi-maskable-192-v133.png','./assets/veconi-maskable-512-v133.png','./assets/veconi-apple-touch-icon-180-v133.png','./assets/veconi-favicon-16-v133.png','./assets/veconi-favicon-32-v133.png','./assets/veconi-favicon-48-v133.png','./assets/veconi-favicon-v133.ico');
 ARQUIVOS.push('./functions/src/shared/product-model.js','./functions/src/shared/product-spreadsheet.js');
@@ -69,7 +70,7 @@ self.addEventListener('install', event => event.waitUntil(
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '223'});
+  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '224'});
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -106,3 +107,5 @@ ARQUIVOS.push("./js/sale-money.js");
 ARQUIVOS.push("./js/sale-monetary-recovery-ui.js");
 
 ARQUIVOS.push("./js/auth-loading.js","./js/google-registration-ui.js","./js/firebase/google-auth.js","./js/google-identity-picker.js","./js/google-registration-client.js","./js/google-registration-release.js","./js/google-registration-dialog.js","./css/auth-loading.css","./css/google-auth.css","./assets/google-g.svg");
+
+ARQUIVOS.push('./functions/src/shared/operational-privacy-policy.js','./js/operational-read-policy.js');
