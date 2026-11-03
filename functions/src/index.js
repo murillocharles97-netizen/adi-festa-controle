@@ -260,7 +260,11 @@ async function acquireCheckoutAttempt({businessId,operationId,requestHash,contex
   return{...result,ref};
 }
 async function finishCheckoutAttempt(ref,patch){await ref.set({...patch,status:'pending_payment',leaseUntil:FieldValue.delete(),providerRedirectedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true})}
-async function failCheckoutAttempt(ref,error){if(!ref)return;await ref.set({status:'failed',errorCode:String(error?.code||'unknown').slice(0,80),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()},{merge:true}).catch(()=>{})}
+async function failCheckoutAttempt(ref,error){
+  if(!ref)return;
+  const diagnostic=providerErrorDiagnostics(error),definitive=error?.code==='mercado-pago-error'&&error.status===400&&error.endpoint==='/v1/orders'&&diagnostic.providerCauses.some(c=>c.code==='unsupported_properties');
+  await ref.set({status:'failed',errorCode:String(error?.code||'unknown').slice(0,80),creationOutcome:definitive?'rejected_before_creation':'unknown',providerCreateHttpStatus:diagnostic.httpStatus,leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()},{merge:true}).catch(()=>{});
+}
 async function supersedePendingCardCheckout({businessId,context,subscriptionId,newOperationId}){
   const intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${subscriptionId}`),indexRef=db.doc(`subscriptionIndex/${subscriptionId}`),intentSnapshot=await intentRef.get(),intent=intentSnapshot.data()||{};
   if(!intentSnapshot.exists||intent.businessId!==businessId)throw new HttpsError('failed-precondition','A tentativa anterior não pôde ser validada com segurança.');
@@ -278,6 +282,8 @@ async function supersedePendingCardCheckout({businessId,context,subscriptionId,n
 function callableError(error){
   if(error instanceof HttpsError)return error;
   if(String(error?.code||'').startsWith('legacy-'))return new HttpsError('failed-precondition',error.message,{billingCode:error.code});
+  if(String(error?.code||'').startsWith('migration-recovery-'))return new HttpsError('failed-precondition',error.message,{billingCode:error.code});
+  if(error?.code==='permission-denied')return new HttpsError('permission-denied',error.message);
   if(error instanceof CouponError){const code=error.code==='permission_denied'?'permission-denied':error.code==='duplicate_code'?'already-exists':'failed-precondition';return new HttpsError(code,error.message,{couponCode:error.publicCode})}
   logger.error('[Subscriptions]',{code:error?.code||'unknown',status:error?.status||null,message:String(error?.message||error).slice(0,240)});
   if(error?.code==='invalid-plan')return new HttpsError('invalid-argument','Plano inválido.');
@@ -290,7 +296,7 @@ function callableError(error){
     if(providerIndicatesPayerEmailMismatch(diagnostic))return new HttpsError('failed-precondition','O e-mail usado no Mercado Pago é diferente do e-mail informado para cobrança.',{billingCode:'billing_payer_email_mismatch',action:'change_billing_payer_email'});
     if(/pix/.test(text)&&/(?:not available|not enabled|not configured|chave|indispon)/.test(text))return new HttpsError('failed-precondition','O recebimento por Pix ainda não está disponível na conta Mercado Pago vinculada.',{billingCode:'pix_not_available'});
     if(error?.code!=='mercado-pago-error'||diagnostic.httpStatus>=500||[408,425,429].includes(diagnostic.httpStatus))return new HttpsError('unavailable','O Mercado Pago está temporariamente indisponível. Tente novamente em instantes.',{billingCode:'provider_unavailable'});
-    return new HttpsError('failed-precondition','O Mercado Pago recusou a criação deste Pix. Tente novamente ou confira os dados da conta.',{billingCode:'provider_rejected'});
+    return new HttpsError('failed-precondition','O Mercado Pago recusou esta tentativa de pagamento. Confira os dados antes de tentar novamente.',{billingCode:'provider_rejected'});
   }
   return new HttpsError('internal','Não foi possível concluir a operação de assinatura.');
 }
@@ -330,11 +336,12 @@ exports.validateCoupon=onCall(FUNCTION_OPTIONS,async request=>{
 
 exports.getBillingCheckoutConfig=onCall(FUNCTION_OPTIONS,async request=>{
   try{
-    const businessId=requestedBusinessId(request);await permissions().authenticatedContext(request,businessId);
-    if(request.data?.catalogOnly===true)return{catalogVersion:2};
+    const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId);
+    const migrationReservation=await require('./services/legacy-checkout-recovery-service').legacyCheckoutRecoveryService(db,null).summary({businessId,uid:context.uid});
+    if(request.data?.catalogOnly===true)return{catalogVersion:2,migrationReservation};
     const publicKey=String(MP_PUBLIC_KEY.value()||'').trim();
     if(!/^(?:APP_USR|TEST)-[A-Za-z0-9_-]{16,}$/.test(publicKey))throw new HttpsError('failed-precondition','O checkout mensal com cartão ainda não está configurado.');
-    return{catalogVersion:2,publicKey,environment:MP_ENV.value(),deviceIdRequired:true,threeDsMode:'on_fraud_risk'};
+    return{catalogVersion:2,publicKey,environment:MP_ENV.value(),deviceIdRequired:true,threeDsMode:'on_fraud_risk',migrationReservation};
   }catch(error){throw callableError(error)}
 });
 
@@ -347,6 +354,13 @@ exports.duplicateAdminCoupon=onCall(FUNCTION_OPTIONS,async request=>{try{const c
 exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
   let attemptRef=null,redemption=null,checkoutPersisted=false,billingLog={paymentMethodType:null,businessId:null,operationIdHash:null};
   try{
+    if(request.data?.action){
+      if(request.data.action!=='recover_failed_migration')throw new HttpsError('invalid-argument','Ação de contratação inválida.');
+      const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId);
+      // Separate, explicit action. Returns before any quote, reservation or POST.
+      return await require('./services/legacy-checkout-recovery-service').legacyCheckoutRecoveryService(db,mp()).recover({businessId,uid:context.uid,operationId:request.data.operationId,confirmed:request.data.confirmed});
+    }
+    if(process.env.BILLING_NEW_CHECKOUTS_ENABLED==='false')throw new HttpsError('unavailable','Novas contratações estão temporariamente pausadas. Seu acesso atual e a consulta de pagamentos foram preservados.');
     if(request.data?.catalogVersion!==2)throw new HttpsError('failed-precondition','Atualize a tela de planos antes de iniciar uma nova cobrança.',{code:'billing_catalog_mismatch'});
     const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),paymentMethod=requirePaymentMethod(request.data?.paymentMethodType),context=await permissions().authenticatedContext(request,businessId);billingLog={...billingLog,paymentMethodType:paymentMethod.id,businessId};
     const migrating=assertLegacyCheckoutReady(context.business.subscription||{},new Date(),{explicitMigration:request.data?.legacyMigration===true});
@@ -355,12 +369,14 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     if(!context.email)throw new HttpsError('failed-precondition','A conta precisa possuir um e-mail válido.');
     if(context.business.subscription?.planId==='internal')throw new HttpsError('failed-precondition','A conta interna não utiliza cobrança.');
     const quoteId=String(request.data?.quoteId||''),couponCode=String(request.data?.couponCode||'').trim().toUpperCase(),previousAttemptId=String(request.data?.previousCheckoutAttemptId||'').trim(),usesPayerEmail=['card','card_monthly'].includes(paymentMethod.id),billingPayerEmail=usesPayerEmail?normalizeBillingPayerEmail(request.data?.billingPayerEmail):null,deviceSessionId=normalizeDeviceSessionId(request.data?.deviceSessionId),manualCard=paymentMethod.id==='card_monthly'?normalizeManualCardPayment(request.data?.cardPayment||{}):null,pendingProviderId=!migrating&&context.business.subscription?.pendingPaymentMethodType==='card'&&context.business.subscription?.pendingPlanId?context.business.subscription?.mercadoPago?.subscriptionId:null;
+    if(paymentMethod.id==='card_monthly'&&!deviceSessionId)throw new HttpsError('failed-precondition','A verificação segura do dispositivo é necessária para pagar com cartão. Tente novamente ou escolha Pix.');
     if(paymentMethod.id==='card'&&pendingProviderId&&context.business.subscription?.pendingPlanId===plan.id){
       const intent=await db.doc(`businesses/${businessId}/subscriptionIntents/${pendingProviderId}`).get(),intentData=intent.data()||{},sameCheckout=String(intentData.status||'pending')!=='superseded'&&String(intentData.billingCycle||'monthly')===billingCycle&&Number(intentData.officialPrice)===officialBilling.amount&&String(intentData.quoteId||'')===quoteId&&String(intentData.paymentMethodType||'card')===paymentMethod.id&&String(intentData.billingPayerEmail||'')===billingPayerEmail,checkoutUrl=sameCheckout?intentData.checkoutUrl:null;
       if(checkoutUrl){const provider=await mp().getSubscription(String(pendingProviderId)),providerStatus=String(provider?.status||'').toLowerCase();if(providerStatus==='pending')return{checkoutUrl,paymentMethodType:paymentMethod.id,reused:true};if(providerStatus==='authorized'){await reconcileCardBillingAttempt({subscriptionId:String(pendingProviderId),source:'checkout_retry_guard',expectedBusinessId:businessId});throw new HttpsError('failed-precondition','Este pagamento já foi confirmado. Atualize a tela de planos.')}}
     }
     const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({catalogVersion:2,legacyMigration:migrating,businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id,billingPayerEmail}));billingLog.operationIdHash=sha(opId).slice(0,12);
-    const migration=migrating?await legacyPlanTransitionService(db,mp()).reserve({businessId,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,actorUid:context.uid}):null;
+    const sourceBillingCheck=migrating?await legacyPlanTransitionService(db,mp()).verifySourceForCheckout({businessId,actorUid:context.uid}):null;
+    const migration=migrating?await legacyPlanTransitionService(db,mp()).reserve({businessId,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,actorUid:context.uid,sourceBillingCheck}):null;
     logger.info('[BILLING_ATTEMPT_CREATED]',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,attemptId:opId,operationIdHash:sha(opId).slice(0,12)});
     logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
     const attempt=await acquireCheckoutAttempt({businessId,operationId:opId,requestHash,context,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,quoteId,billingPayerEmail});
@@ -443,7 +459,7 @@ exports.getPixCheckoutStatus=onCall(FUNCTION_OPTIONS,async request=>{
     if(reconcileProvider&&data.providerOrderId&&data.status==='payment_pending'){
       const lastCheck=data.lastManualProviderCheckAt?.toMillis?.()||0;if(lastCheck&&Date.now()-lastCheck<60000)throw new HttpsError('resource-exhausted','A conferência manual pode ser feita uma vez por minuto.');
       await ref.set({lastManualProviderCheckAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
-      const order=await mp().getOrder(data.providerOrderId),result=await pixBilling().applyOrder(order,{source:'manual_reconciliation'});await finishLegacyMigration(result);data=result.attempt;
+      const order=await mp().getOrder(data.providerOrderId),result=await pixBilling().applyOrder(order,{source:'owner_reconciliation',authorization:{uid:context.uid,businessId}});await finishLegacyMigration(result);data=result.attempt;
     }
     return{pix:publicAttempt(data),source:reconcileProvider?'mercado_pago':'firestore'};
   }catch(error){throw callableError(error)}
@@ -459,7 +475,7 @@ exports.getCardCheckoutStatus=onCall(FUNCTION_OPTIONS,async request=>{
     if(reconcileProvider&&data.providerOrderId&&['payment_pending','payment_challenge'].includes(data.status)){
       const lastCheck=data.lastManualProviderCheckAt?.toMillis?.()||0;if(lastCheck&&Date.now()-lastCheck<5000)throw new HttpsError('resource-exhausted','Aguarde alguns segundos antes de conferir novamente.');
       await ref.set({lastManualProviderCheckAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
-      const order=await mp().getOrder(data.providerOrderId),result=await pixBilling().applyOrder(order,{source:'manual_card_reconciliation'});await finishLegacyMigration(result);data=result.attempt;
+      const order=await mp().getOrder(data.providerOrderId),result=await pixBilling().applyOrder(order,{source:'owner_reconciliation',authorization:{uid:context.uid,businessId}});await finishLegacyMigration(result);data=result.attempt;
     }
     return{card:publicAttempt(data),source:reconcileProvider?'mercado_pago':'firestore'};
   }catch(error){throw callableError(error)}
@@ -482,7 +498,7 @@ exports.syncSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     const subscription=context.business.subscription||{},pixOrderId=subscription.mercadoPago?.pendingOrderId,checkoutReturn=request.data?.checkoutReturn===true;
     const lastSync=new Date(context.business.subscription?.mercadoPago?.lastManualSyncAt||0).getTime(),minimumInterval=checkoutReturn?30000:15*60*1000;if(lastSync&&Date.now()-lastSync<minimumInterval)throw new HttpsError('resource-exhausted',checkoutReturn?'A cobrança acabou de ser conferida. Aguarde alguns segundos.':'A reconciliação manual pode ser feita a cada 15 minutos.');
     if(pixOrderId&&['pix_monthly','card_monthly'].includes(subscription.pendingPaymentMethodType)){
-      const order=await mp().getOrder(pixOrderId),result=await pixBilling().applyOrder(order,{source:'manual_reconciliation'}),now=iso();await finishLegacyMigration(result);await context.businessRef.update({'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});
+      const order=await mp().getOrder(pixOrderId),result=await pixBilling().applyOrder(order,{source:'owner_reconciliation',authorization:{uid:context.uid,businessId}}),now=iso();await finishLegacyMigration(result);await context.businessRef.update({'subscription.mercadoPago.lastManualSyncAt':now,updatedAt:FieldValue.serverTimestamp()});
       logger.info('[Subscriptions] manual order reconciliation',{businessId,paymentMethodType:subscription.pendingPaymentMethodType,status:result.status});return{subscription:sanitize(result.subscription),...(subscription.pendingPaymentMethodType==='card_monthly'?{card:result.attempt}:{pix:result.attempt}),source:'mercado_pago'};
     }
     const subscriptionId=subscription.legacyMigration?.status==='awaiting_payment'&&subscription.pendingPaymentMethodType==='card'?subscription.legacyMigration.replacementId:subscription.mercadoPago?.subscriptionId;if(!subscriptionId)throw new HttpsError('failed-precondition','Cobrança do Mercado Pago não encontrada.');

@@ -3,7 +3,7 @@
 const {FieldValue}=require('firebase-admin/firestore');
 const {getPlan}=require('./plan-service');
 const {counterId}=require('./coupon-firestore-service');
-const {readMigration,activateMigration}=require('./legacy-plan-transition-service');
+const {readMigration,activateMigration,prepareOwnerReconciliation}=require('./legacy-plan-transition-service');
 
 const TERMINAL_STATUSES=new Set(['canceled','cancelled','expired','failed','refunded','charged_back']);
 
@@ -99,7 +99,7 @@ function pixBillingService(db){
     if(!orderId||!index.businessId)throw Object.assign(Error('Índice Pix incompleto para o Payment.'),{code:'billing-order-index-invalid'});
     return{orderId,index};
   }
-  async function applyOrder(order,{source='webhook',eventId=null}={}){
+  async function applyOrder(order,{source='webhook',eventId=null,authorization=null}={}){
     const orderId=String(order?.id||'');if(!orderId)throw Object.assign(Error('Order sem identificador.'),{code:'billing-order-id-missing'});
     const indexRef=db.doc(`billingOrderIndex/${orderId}`),indexSnapshot=await indexRef.get(),index=indexSnapshot.data()||{};
     if(!indexSnapshot.exists||!index.businessId)throw Object.assign(Error('Order sem empresa vinculada.'),{code:'billing-order-index-not-found'});
@@ -110,13 +110,20 @@ function pixBillingService(db){
       const business=businessSnapshot.data()||{},attempt=attemptSnapshot.data()||{};
       if(attempt.businessId!==index.businessId||attempt.providerOrderId!==orderId)throw Object.assign(Error('Tentativa Pix diverge do índice seguro.'),{code:'billing-attempt-mismatch'});
       const migration=await readMigration(db,transaction,index,business.subscription||{},orderId);
-      if(details.status==='approved'&&migration&&!migration.activated&&(source!=='webhook'||!eventId))return{businessId:index.businessId,status:'payment_pending',subscription:business.subscription||{},attempt:publicAttempt(attempt),awaitingWebhook:true};
+      if(details.status==='approved'&&migration?.blocked){
+        const review={status:'payment_review_required',reviewReason:'closed_or_superseded_migration_approved',providerStatus:details.providerStatus,providerPaymentId:details.paymentId,updatedAt:now};
+        transaction.set(attemptRef,review,{merge:true});transaction.set(indexRef,review,{merge:true});
+        return{businessId:index.businessId,status:'payment_review_required',subscription:business.subscription||{},attempt:publicAttempt({...attempt,...review}),requiresReview:true};
+      }
+      const providerApprovedAt=order.last_updated_date||order.date_last_updated||order.created_date||order.date_created;
+      const ownerProof=details.status==='approved'&&migration&&!migration.activated&&source==='owner_reconciliation'?await prepareOwnerReconciliation(db,transaction,{authorization,business,index,orderId,paymentId:details.paymentId,amount:details.amount,approvedAt:providerApprovedAt}):null;
+      if(details.status==='approved'&&migration&&!migration.activated&&!ownerProof&&(source!=='webhook'||!eventId))return{businessId:index.businessId,status:'payment_pending',subscription:business.subscription||{},attempt:publicAttempt(attempt),awaitingWebhook:true};
       const terminal=!['pending','challenge','approved'].includes(details.status),attemptPatch={providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId||attempt.providerPaymentId||null,challengeUrl:details.challengeUrl||FieldValue.delete(),transactionSecurityStatus:details.transactionSecurityStatus||null,lastProviderSource:source,lastProviderEventId:eventId||null,lastProviderCheckAt:now,updatedAt:FieldValue.serverTimestamp()};
       if(['pending','challenge'].includes(details.status)){attemptPatch.status=details.status==='challenge'?'payment_challenge':'payment_pending';transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:attemptPatch.status,providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId||null,updatedAt:now},{merge:true});return{businessId:index.businessId,status:attemptPatch.status,subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch})}}
       attemptPatch.qrCode=FieldValue.delete();attemptPatch.qrCodeBase64=FieldValue.delete();attemptPatch.ticketUrl=FieldValue.delete();
       const redemptionRef=index.couponRedemptionId?db.doc(`couponRedemptions/${index.couponRedemptionId}`):null,redemptionSnapshot=redemptionRef?await transaction.get(redemptionRef):null,redemption=redemptionSnapshot?.data()||null;
       if(terminal){
-        if(migration&&!migration.activated)transaction.update(migration.ref,{status:'attempt_closed',closedAt:now,nextAttemptAt:null});
+        if(migration&&!migration.activated&&!migration.blocked)transaction.update(migration.ref,{status:'attempt_closed',closedAt:now,nextAttemptAt:null});
         attemptPatch.status=details.status;attemptPatch.terminalAt=now;transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:details.status,providerStatus:details.providerStatus,statusDetail:details.statusDetail,updatedAt:now},{merge:true});
         if(redemption&&['reserved','pending_payment'].includes(redemption.status))changeCouponReservation(transaction,redemptionRef,redemption,'release');
         const subscription=business.subscription||{};if(subscription.pendingCheckoutAttemptId===index.operationId)transaction.update(businessRef,{'subscription.pendingPlanId':FieldValue.delete(),'subscription.pendingBillingCycle':FieldValue.delete(),'subscription.pendingPaymentMethodType':FieldValue.delete(),'subscription.pendingCheckoutAttemptId':FieldValue.delete(),'subscription.pendingDiscount':FieldValue.delete(),'subscription.mercadoPago.pendingOrderId':FieldValue.delete(),'subscription.mercadoPago.pendingPaymentId':FieldValue.delete(),'subscription.mercadoPago.providerStatus':details.providerStatus,'subscription.updatedAt':now,updatedAt:FieldValue.serverTimestamp()});
@@ -141,12 +148,13 @@ function pixBillingService(db){
         transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:'payment_review_required',providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId,reviewReason:'superseded_order_approved',updatedAt:now},{merge:true});
         return{businessId:index.businessId,status:'payment_review_required',subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch}),requiresReview:true};
       }
-      const existing=business.subscription||{},currentEnd=new Date(existing.currentPeriodEnd||existing.expiresAt||0),paidAt=new Date(order.date_last_updated||order.date_created||now),periodStart=!migration&&currentEnd>paidAt?currentEnd:paidAt,periodStartIso=periodStart.toISOString(),periodEnd=addBillingPeriod(periodStartIso,index.billingCycle),plan=getPlan(index.planId);
+      if(migration&&!Number.isFinite(Date.parse(providerApprovedAt||'')))throw Object.assign(Error('A data oficial do pagamento precisa ser confirmada.'),{code:'legacy-payment-proof-required'});
+      const existing=business.subscription||{},currentEnd=new Date(existing.currentPeriodEnd||existing.expiresAt||0),paidAt=new Date(providerApprovedAt||now),periodStart=!migration&&currentEnd>paidAt?currentEnd:paidAt,periodStartIso=periodStart.toISOString(),periodEnd=addBillingPeriod(periodStartIso,index.billingCycle),plan=getPlan(index.planId);
       const subscription={...existing,status:'active',subscriptionStatus:'active',planId:index.planId,billingCycle:index.billingCycle,paymentMethodType,billingStrategy:paymentMethodType==='card_monthly'?'manual_card':'guest_pix_manual',provider:'mercado_pago',pendingPlanId:null,pendingBillingCycle:null,pendingPaymentMethodType:null,pendingCheckoutAttemptId:null,hasPaidSubscription:true,startedAt:existing.startedAt||periodStartIso,currentPeriodStart:periodStartIso,currentPeriodEnd:periodEnd,expiresAt:periodEnd,nextBillingDate:periodEnd,lastPaymentDate:periodStartIso,lastPaymentStatus:'approved',lastPaymentProviderId:details.paymentId,lastPaymentEventId:eventId||`order:${orderId}`,cancelAtPeriodEnd:false,updatedAt:now,mercadoPago:{...(existing.mercadoPago||{}),pendingOrderId:null,pendingPaymentId:null,lastOrderId:orderId,lastPaymentId:details.paymentId,providerStatus:details.providerStatus,lastWebhook:eventId?now:existing.mercadoPago?.lastWebhook||null},latestPayment:{provider:'mercado_pago',paymentMethod:paymentMethodType==='card_monthly'?'card':'pix',orderId,paymentId:details.paymentId,amount:details.amount,currency:'BRL',paidAt:periodStartIso,couponSnapshot:index.discountSnapshot||null}};
       if(index.catalogVersion===2){subscription.catalogVersion=2;subscription.legacyPlan=false;subscription.legacyTransition=null;}
       if(migration&&!redemption&&!index.discountSnapshot){delete subscription.discount;delete subscription.pendingDiscount;}
       if(redemption&&redemption.status!=='active'){changeCouponReservation(transaction,redemptionRef,redemption,'confirm');subscription.discount={...(redemption.discountSnapshot||index.discountSnapshot||{})};delete subscription.pendingDiscount}else if(index.discountSnapshot){subscription.discount={...index.discountSnapshot};delete subscription.pendingDiscount}
-      if(migration){subscription.mercadoPago.subscriptionId=null;subscription.mercadoPago.preapprovalId=null;activateMigration(transaction,migration,subscription,{paymentId:details.paymentId,approvedAt:paidAt.toISOString(),now,source,eventId});}
+      if(migration){subscription.mercadoPago.subscriptionId=null;subscription.mercadoPago.preapprovalId=null;activateMigration(transaction,migration,subscription,{paymentId:details.paymentId,approvedAt:paidAt.toISOString(),now,source,eventId,ownerProof});}
       transaction.update(businessRef,{subscription,limits:plan?.limits||business.limits||{},updatedAt:FieldValue.serverTimestamp()});
       attemptPatch.status='payment_approved';attemptPatch.approvedAt=periodStartIso;transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:'payment_approved',providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId,approvedAt:periodStartIso,updatedAt:now},{merge:true});transaction.create(markerRef,{id:markerRef.id,businessId:index.businessId,operationId:index.operationId,providerOrderId:orderId,providerPaymentId:details.paymentId,amount:details.amount,currency:'BRL',status:'approved',source,eventId:eventId||null,approvedAt:periodStartIso,createdAt:FieldValue.serverTimestamp()});
       return{businessId:index.businessId,status:'payment_approved',subscription,attempt:publicAttempt({...attempt,...attemptPatch})};

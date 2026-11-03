@@ -156,6 +156,11 @@ function firestoreSubscriptionService(db) {
         preservePaidPeriod=active===false&&existingSubscription.hasPaidSubscription===true&&['active','grace_period'].includes(String(existingSubscription.status||''))&&Number.isFinite(paidThrough)&&paidThrough>Date.parse(now),
         preserveTrial=active===false&&['trial','trialing'].includes(String(existingSubscription.status||''))&&Date.parse(existingSubscription.trialEndsAt||'')>Date.parse(now);
       const migration=await readMigration(db,transaction,index,existingSubscription,subscriptionId);
+      if(migration?.blocked){
+        const status=active?'payment_review_required':'attempt_closed';
+        transaction.set(indexRef,{status,reviewReason:active?'closed_or_superseded_migration_approved':null,providerStatus:String(provider.status||''),updatedAt:now},{merge:true});
+        return{businessId:index.businessId,subscription:existingSubscription,ignored:true,requiresReview:active,reason:'closed-or-superseded-migration'};
+      }
       if(active&&migration&&(!validation.active||activation?.reason!=='initial_payment_approved'||!activation?.paymentId))throw Object.assign(Error('Pagamento da migração não confirmado.'),{code:'legacy-payment-proof-required'});
       if(active&&migration&&!migration.activated&&(source!=='webhook'||!eventId))return{businessId:index.businessId,subscription:existingSubscription,awaitingWebhook:true};
       if(active&&!isCurrentProvider&&!migration)throw Object.assign(Error('Uma assinatura antiga foi autorizada enquanto outra tentativa está ativa.'),{code:'provider-subscription-conflict'});

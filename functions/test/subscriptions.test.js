@@ -151,7 +151,7 @@ test('Pix mensal guest usa Orders API e retorna QR sem redirecionamento',async()
   assert.equal(body.total_amount,'39.90');assert.equal(body.transactions.payments[0].amount,'39.90');
   assert.deepEqual(body.transactions.payments[0].payment_method,{id:'pix',type:'bank_transfer'});
   assert.equal(body.external_reference,pixExternalReference('biz_1','op_1234567890123456'));assert.match(body.external_reference,/^billing_[a-f0-9]{56}$/);assert.equal(body.external_reference.length,64);assert.equal(body.payer.email,'buyer@example.com');assert.equal('init_point' in body,false);
-  assert.equal(body.notification_url,'https://southamerica-east1-example.cloudfunctions.net/receiveWebhook?source_news=webhooks');
+  assert.equal('notification_url' in body,false,'Orders usa notificações configuradas na integração, sem notification_url no body');
   assert.equal('expiration_time' in body.transactions.payments[0],false,'Orders API deve aplicar a validade padrão de 24 horas');
 });
 

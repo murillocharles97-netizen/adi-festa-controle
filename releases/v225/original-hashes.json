@@ -1,0 +1,57 @@
+{
+  "release": 225,
+  "frozenPackagePreparedAt": "2026-11-02T21:28:03.212Z",
+  "files": [
+    {
+      "path": "functions/src/index.js",
+      "sha256": "f2f9d23c4086e1b0b0b851989b5a7ade82f04ef947edce01fcfa261a83b206d5",
+      "lfSha256": "6cccbbe8de5137019e78f6bb13607bd7291a1c3ea9eeb5fd3e9bfdf3ed59562e"
+    },
+    {
+      "path": "functions/src/services/mercado-pago-service.js",
+      "sha256": "067488dd4c5afdfcc77762f634e896cdc8e4f2d88c3e745367c0c54c9fc149f0",
+      "lfSha256": "067488dd4c5afdfcc77762f634e896cdc8e4f2d88c3e745367c0c54c9fc149f0"
+    },
+    {
+      "path": "functions/src/services/legacy-plan-transition-service.js",
+      "sha256": "7b9783b1a25012373f29a86ba0fbffc7013a611842c28632bc17337bdabf16bd",
+      "lfSha256": "7b9783b1a25012373f29a86ba0fbffc7013a611842c28632bc17337bdabf16bd"
+    },
+    {
+      "path": "functions/src/services/pix-billing-service.js",
+      "sha256": "e5187d160a83564f86d74941288f24da6977d70df9d8f89a2da98b65a097f927",
+      "lfSha256": "e5187d160a83564f86d74941288f24da6977d70df9d8f89a2da98b65a097f927"
+    },
+    {
+      "path": "functions/src/services/firestore-subscription-service.js",
+      "sha256": "b98164b3d8cfca21041f21d7dc837b9f1f3e9683b9fdbececd66ed7178ddbd6b",
+      "lfSha256": "b98164b3d8cfca21041f21d7dc837b9f1f3e9683b9fdbececd66ed7178ddbd6b"
+    },
+    {
+      "path": "functions/src/services/legacy-checkout-recovery-service.js",
+      "sha256": "a2125292067ffb290a67df96eea1d0127f351b1e21d44980ed0d810308f00455",
+      "lfSha256": "a2125292067ffb290a67df96eea1d0127f351b1e21d44980ed0d810308f00455"
+    },
+    {
+      "path": "js/plans.js",
+      "sha256": "8b050a019d115e63df8a35468e2ee5729cc3bc83a0990d1cb4bf88e10ee8b4f6",
+      "lfSha256": "7c27b2262c439221b98d76771b3bff1671829f24520bf6dc179c32b2a3ef9baa"
+    },
+    {
+      "path": "js/firebase/business-context.js",
+      "sha256": "8589f6dc4658109e1236d6ce02d9bc8f2e10f267668df4970f532a6860ac8358",
+      "lfSha256": "1bcae1295fd7d92de52bc82258067929a0e4cd5952ef7834df53c14eb626a71a"
+    },
+    {
+      "path": "js/build-info.js",
+      "sha256": "741e81b747c4b47ed750e858d614669b30732561f8b48340a13c8927fb93acfd",
+      "lfSha256": "73f9feb96faa88c9731c7c17c81a0bb85a5814c1d2edd7a889271ffd42eb15c7"
+    },
+    {
+      "path": "service-worker.js",
+      "sha256": "34d6fc749385c91adb9b83bd9d65d5806b2d6fe1d3d7b481f028ed31ba45700f",
+      "lfSha256": "2fb67f7e98c93ce7bef7d07a87fdc270481ebd93db008e7f54add8d4da76cf11"
+    }
+  ],
+  "policy": "Original files remain immutable. Canonical index integrates only the original billing delta over V224 and preserves all V224 exports. Its full-file hash therefore differs; the seven handlers below remain exact."
+}

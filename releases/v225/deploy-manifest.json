@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "release": 225,
+  "branch": "codex/v225-billing-hotfix",
+  "base": "730abca9b1c4128042770074e4a07b2a2d132f21",
+  "status": "local-candidate-awaiting-specific-deployment-authorization",
+  "deploymentAuthorized": false,
+  "functions": {
+    "updateInOrder": [
+      "retryLegacyPlanMigrations",
+      "receiveWebhook",
+      "getPixCheckoutStatus",
+      "getCardCheckoutStatus",
+      "syncSubscription",
+      "getBillingCheckoutConfig",
+      "createSubscription"
+    ],
+    "create": [],
+    "onlyExplicitNames": true,
+    "canonicalSource": "functions",
+    "exportCountPreserved": 92,
+    "handlerSha256": {
+      "retryLegacyPlanMigrations": "e5a5bb3078f2c6afc4fef9cd1cb724c0da4b3bab024d6823a32a46103dda95b3",
+      "receiveWebhook": "afee8294c95c2c14535761346baa533d7ac84959645fe775fe6fd2a39bf36038",
+      "getPixCheckoutStatus": "06f29d73466d3de52aeab3d1047a9238f612708b3ac4d0331a693b64395d181f",
+      "getCardCheckoutStatus": "ab9a40161a1e6a4714f7a0592ea4c3d5c28e8afa054bf4f524d38cce5ab7f582",
+      "syncSubscription": "81058747d37913d32aaa5a7ab5ad086f2469a8e4625eb09f0a81793117e83bf5",
+      "getBillingCheckoutConfig": "b7d7e4edcaa3659a27bdb874cb60cddaffcb4cc7a6bd9ee65513437dbd0a4a4e",
+      "createSubscription": "5a806da6a9c856c76a11d716d9e08134293141094353530f1bd949c5b8e5e88b"
+    }
+  },
+  "productionFiles": [
+    "functions/src/index.js",
+    "functions/src/services/mercado-pago-service.js",
+    "functions/src/services/legacy-plan-transition-service.js",
+    "functions/src/services/pix-billing-service.js",
+    "functions/src/services/firestore-subscription-service.js",
+    "functions/src/services/legacy-checkout-recovery-service.js",
+    "js/plans.js",
+    "js/firebase/business-context.js",
+    "js/build-info.js",
+    "service-worker.js"
+  ],
+  "originalHashes": "releases/v225/original-hashes.json",
+  "firestoreRulesChanged": false,
+  "storageRulesChanged": false,
+  "indexesChanged": false,
+  "activateV3": false,
+  "googleChanged": false,
+  "v226Included": false,
+  "v226PreservedCommit": "bcdc215e1f9f33aab459f5c5c62d6dbf6ee56bdb",
+  "rollback": {
+    "newCheckoutsPaused": true,
+    "serverFlag": "BILLING_NEW_CHECKOUTS_ENABLED=false",
+    "frontendFlag": "billingCheckoutPaused=true",
+    "preserveProviderReads": true,
+    "preserveWebhooks": true,
+    "preservePendingPayments": true,
+    "preserveIdentitiesAndData": true,
+    "deleteData": false,
+    "replay": false
+  },
+  "pendingBeforeDeployment": [
+    "Specific publication authorization",
+    "Fresh main/domain/backend revision and original-hash checks",
+    "Orders notification destination/topic verification",
+    "Isolated QA, no live payment/cancellation during deployment"
+  ],
+  "pendingFor3Lindas": [
+    "Fresh absence of approved/pending concurrent charges",
+    "Specific short-lived trusted proof for the original creating reservation if still needed",
+    "Authenticated owner releases that reservation through explicit GET-only verification",
+    "Owner confirms current Pro quote and coupon, then one explicit new contract/payment"
+  ]
+}

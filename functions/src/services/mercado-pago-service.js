@@ -16,10 +16,11 @@ function validNotificationUrl(value){
 }
 
 function normalizeDeviceSessionId(value){
-  const id=String(value||'').trim();
-  if(!id)return null;
-  if(!/^[A-Za-z0-9_-]{8,256}$/.test(id))throw Object.assign(Error('Device ID do checkout inválido.'),{code:'invalid-device-session-id'});
-  return id;
+  if(value==null||value==='')return null;
+  // Opaque official SDK value (Armor includes punctuation). Never generate,
+  // truncate, decode or log it; only enforce a bounded, safe HTTP header.
+  if(typeof value!=='string'||value.length<8||value.length>2048||!/^[\x21-\x7e]+$/.test(value))throw Object.assign(Error('A verificação segura do dispositivo não foi concluída. Tente novamente ou escolha Pix.'),{code:'invalid-device-session-id'});
+  return value;
 }
 
 function safeProviderPayload(text){
@@ -92,17 +93,23 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     },
     createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null}){
       const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=billingExternalReference(businessId,operationId);
-      const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}},webhookUrl=validNotificationUrl(notificationUrl);
-      if(webhookUrl)body.notification_url=webhookUrl;
+      // Orders notifications are configured in the merchant integration.
+      // Unlike /preapproval, /v1/orders does not accept notification_url.
+      const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}};
       return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body});
     },
     createCardOrder({businessId,email,plan,billing,operationId,payment,notificationUrl=null,deviceSessionId=null}){
+      if(!normalizeDeviceSessionId(deviceSessionId))throw Object.assign(Error('A verificação segura do dispositivo é necessária para pagar com cartão. Tente novamente ou escolha Pix.'),{code:'device-session-required'});
       const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=billingExternalReference(businessId,operationId),identification=payment?.payer?.identification,method={id:String(payment.paymentMethodId),type:'credit_card',token:String(payment.token),installments:Number(payment.installments)};
-      const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',capture_mode:'automatic',config:{online:{transaction_security:{validation:'on_fraud_risk',liability_shift:'required'}}},payer:{email},transactions:{payments:[{amount,payment_method:method}]}},webhookUrl=validNotificationUrl(notificationUrl);
+      const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',capture_mode:'automatic',config:{online:{transaction_security:{validation:'on_fraud_risk',liability_shift:'required'}}},payer:{email},transactions:{payments:[{amount,payment_method:method}]}};
       if(payment.issuerId)method.issuer_id=String(payment.issuerId);
       if(identification?.type&&identification?.number)body.payer.identification={type:String(identification.type),number:String(identification.number)};
-      if(webhookUrl)body.notification_url=webhookUrl;
       return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body,deviceSessionId});
+    },
+    searchOrders({externalReference,beginDate,endDate,page=1}){
+      if(!/^billing_[a-f0-9]{56}$/.test(externalReference)||!Number.isFinite(Date.parse(beginDate))||!Number.isFinite(Date.parse(endDate)))throw Object.assign(Error('Consulta de verificação inválida.'),{code:'invalid-order-search'});
+      const query=new URLSearchParams({external_reference:externalReference,begin_date:beginDate,end_date:endDate,type:'online',page:String(page),page_size:'20'});
+      return request('/v1/orders?'+query);
     },
     getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},

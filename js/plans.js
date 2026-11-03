@@ -553,6 +553,26 @@
     $('[data-renew-pix]',root)?.addEventListener('click',()=>{root.innerHTML="";openPaymentMethodModal({planId:subscription.planId,billingCycle:subscription.billingCycle||'monthly',quote:null,initialPaymentMethod:'pix_monthly'})});
     $('[data-manage-change-payer]',root)?.addEventListener('click',()=>changePendingPayerEmail());
     $('[data-cancel-pending-card]',root)?.addEventListener('click',event=>runSubscriptionAction(event.currentTarget,()=>window.SubscriptionService.cancelPendingBillingAttempt(),'Tentativa cancelada com segurança.',root));
+    const panel=root.querySelector('.plan-manage-sheet'),origin=window.TeamAccess?.captureSession?.();
+    void window.SubscriptionService.getBillingCheckoutConfig({catalogOnly:true}).then(config=>{
+      if(!panel?.isConnected||origin!==window.TeamAccess?.captureSession?.())return;
+      const pending=config.migrationReservation;if(!pending?.requiresVerification)return;
+      const note=document.createElement('section');note.className='plan-state-note warning';
+      note.innerHTML='<div><b>Contratação anterior interrompida</b><p>Verifique a tentativa antes de contratar novamente. Esta verificação não cria pagamento nem cancela seu contrato.</p><button type="button" class="btn btn-light mobile-button" data-recover-migration>Verificar tentativa interrompida</button><p data-recovery-result role="status"></p></div>';
+      panel.querySelector('.modal-body')?.prepend(note);
+      const button=note.querySelector('[data-recover-migration]'),status=note.querySelector('[data-recovery-result]');
+      button.onclick=async()=>{
+        if(!window.confirm('Verificar no provedor se a tentativa anterior falhou sem criar cobrança? Nenhum pagamento será iniciado.'))return;
+        button.disabled=true;button.textContent='Verificando…';status.textContent='Consultando a tentativa anterior.';
+        try{
+          if(origin!==window.TeamAccess?.captureSession?.())throw Error('Sua conta ou empresa mudou. Reabra a assinatura.');
+          const result=await window.FirebaseCallable('createSubscription',{companyId:ctx.businessId||window.BusinessContext?.get?.().businessId,catalogVersion:2,action:'recover_failed_migration',operationId:pending.operationId,confirmed:true});
+          if(!panel.isConnected||origin!==window.TeamAccess?.captureSession?.())return;
+          if((result.data??result).status!=='reservation_released')throw Error('A verificação não liberou uma nova tentativa. Preserve os dados e procure o suporte.');
+          status.textContent='Tentativa anterior verificada e preservada. Você pode fechar esta janela, escolher o plano e conferir o novo valor antes de pagar. Nenhuma cobrança foi criada.';button.textContent='Verificação concluída';
+        }catch(error){if(panel.isConnected&&origin===window.TeamAccess?.captureSession?.()){status.textContent=error.message||'Não foi possível verificar agora. Nenhuma nova cobrança foi criada.';status.setAttribute('role','alert');button.disabled=false;button.textContent='Verificar novamente';}}
+      };
+    }).catch(error=>{if(panel?.isConnected&&origin===window.TeamAccess?.captureSession?.()){const note=document.createElement('p');note.setAttribute('role','status');note.textContent='Não foi possível consultar tentativas anteriores. Reabra Gerenciar assinatura para tentar novamente.';panel.querySelector('.modal-body')?.prepend(note);}});
     $('[data-view-pending-pix]',root)?.addEventListener('click',async event=>{event.currentTarget.disabled=true;try{const result=await window.SubscriptionService.checkPixCheckout(pendingPixId),plan=plans().find(item=>item.id===(subscription.pendingPlanId||subscription.planId));if(!plan)throw Error('Plano da cobrança não encontrado.');openPixModal({pix:result.pix,plan,billingCycle:subscription.pendingBillingCycle||'monthly',quote:null})}catch(error){window.Utils?.toast?.(error.message||'Não foi possível abrir o Pix.',true);event.currentTarget.disabled=false}});
     window.lucide?.createIcons();
   }
@@ -763,10 +783,19 @@
     const existing=document.getElementById(id);if(existing)return existing.dataset.loaded==='true'?Promise.resolve(existing):new Promise((resolve,reject)=>{existing.addEventListener('load',()=>resolve(existing),{once:true});existing.addEventListener('error',reject,{once:true})});
     return new Promise((resolve,reject)=>{const script=document.createElement('script');script.id=id;script.src=src;script.async=true;Object.entries(attributes).forEach(([key,value])=>script.setAttribute(key,value));script.onload=()=>{script.dataset.loaded='true';resolve(script)};script.onerror=()=>reject(Error('Não foi possível carregar o checkout seguro do Mercado Pago.'));document.head.appendChild(script)});
   }
-  async function mercadoPagoDeviceId(){
-    if(!window.MP_DEVICE_SESSION_ID)await loadScript('mercado-pago-security','https://www.mercadopago.com/v2/security.js',{view:'checkout'}).catch(()=>null);
-    for(let attempt=0;attempt<10&&!window.MP_DEVICE_SESSION_ID;attempt+=1)await new Promise(resolve=>setTimeout(resolve,80));
-    return String(window.MP_DEVICE_SESSION_ID||'').trim()||null;
+  async function mercadoPagoDeviceId({required=false}={}){
+    let timeout;
+    try{
+      if(!window.MP_DEVICE_SESSION_ID)await Promise.race([
+        loadScript('mercado-pago-security','https://www.mercadopago.com/v2/security.js',{view:'checkout'}),
+        new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('A verificação segura do dispositivo demorou. Tente novamente ou escolha Pix.')),8000)})
+      ]);
+      for(let attempt=0;attempt<30&&!window.MP_DEVICE_SESSION_ID;attempt+=1)await new Promise(resolve=>setTimeout(resolve,100));
+      const id=window.MP_DEVICE_SESSION_ID;
+      if(id==null||id===''){if(required)throw Error('A verificação segura do dispositivo não foi concluída. Tente novamente ou escolha Pix.');return null;}
+      if(typeof id!=='string'||id.length<8||id.length>2048||!/^[\x21-\x7e]+$/.test(id))throw Error('A verificação segura do dispositivo é inválida. Tente novamente ou escolha Pix.');
+      return id;
+    }finally{clearTimeout(timeout);}
   }
   async function mercadoPagoBrick(publicKey){
     if(!window.MercadoPago)await loadScript('mercado-pago-sdk','https://sdk.mercadopago.com/js/v2');
@@ -804,6 +833,7 @@
   }
   function cardStatusView(card,plan,billingCycle,quote){
     const status=String(card?.status||'payment_pending'),approved=status==='payment_approved',challenge=status==='payment_challenge',pending=status==='payment_pending',couponCode=quote?.code||card?.couponSnapshot?.couponCodeSnapshot||'';
+    if(status==='payment_review_required')return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result"><header>${icon('shield-alert')}<h3>Pagamento em conferência</h3><p>Foi identificado pagamento de uma tentativa anterior encerrada. Não inicie outro pagamento. O suporte precisa conferir as cobranças; não acrescentamos dois períodos automaticamente.</p></header><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;
     if(approved)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result success"><header>${icon('circle-check-big')}<h3>Pagamento confirmado</h3><p>Seu plano ${esc(plan.name)} está ativo por ${billingCycle==='yearly'?'um ano':'um mês'}.</p></header><button class="btn btn-primary mobile-button primary" data-card-finish>Começar a usar</button></section></div>`;
     if(challenge)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet" aria-labelledby="card-challenge-title"><header class="modal-head"><div><h3 id="card-challenge-title">Confirme com seu banco</h3><small>Autenticação segura 3DS</small></div><button class="icon-btn mobile-icon-button" data-card-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><p class="plan-card-challenge-help">Conclua a verificação do banco abaixo. Esta etapa não significa que o pagamento já foi aprovado.</p><iframe class="plan-card-challenge-frame" data-card-challenge title="Autenticação do cartão" src="${esc(card.challengeUrl)}" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" referrerpolicy="strict-origin"></iframe><button class="btn btn-light mobile-button" data-check-card>Já concluí · verificar</button></div></section></div>`;
     if(pending)return `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result"><header>${icon('clock-3')}<h3>Pagamento em processamento</h3><p>Estamos aguardando a confirmação oficial do Mercado Pago.</p></header><button class="btn btn-light mobile-button" data-check-card>Verificar agora</button><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;
@@ -824,14 +854,15 @@
     render(card);
   }
   async function openMonthlyCardModal({plan,billingCycle,quote,couponCode,billingPayerEmail,previousCheckoutAttemptId=null}){
-    const root=$('#modal');if(!root)return;await destroyCardBrick();
+    const root=$('#modal'),origin=window.TeamAccess?.captureSession?.();if(!root)return;await destroyCardBrick();if(origin!==window.TeamAccess?.captureSession?.())return;
     const finalPrice=quote?.discountedPrice??(billingCycle==='yearly'?plan.yearlyPrice:plan.monthlyPrice),operationId=newCheckoutOperationId();
     root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet" aria-labelledby="card-monthly-title"><header class="modal-head"><div><h3 id="card-monthly-title">Pagar este período com cartão</h3><small>${esc(plan.name)} · sem cobrança automática</small></div><button class="icon-btn mobile-icon-button" data-card-close aria-label="Fechar">${icon('x')}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Total</span><b>${money(finalPrice)}</b>${quote||couponCode?`<small>Cupom ${esc(quote?.code||couponCode)} será validado novamente no servidor.</small>`:''}</section><p class="plan-card-monthly-explainer">Os dados do cartão são tokenizados pelo Mercado Pago. Se o banco solicitar, a autenticação 3DS aparecerá nesta tela.</p><div class="plan-card-brick-loading" data-card-brick-loading>Carregando checkout seguro…</div><div id="cardPaymentBrick_container"></div><p class="plan-payment-disclaimer">${icon('shield-check')} Este pagamento ativa apenas ${billingCycle==='yearly'?'o período anual':'um mês'} e não cria cobrança recorrente.</p></div></section></div>`;
-    $('[data-card-close]',root)?.addEventListener('click',async()=>{await destroyCardBrick();root.innerHTML=''});window.lucide?.createIcons();
+    const sheet=root.querySelector('.plan-card-monthly-sheet'),isCurrent=()=>sheet?.isConnected&&origin===window.TeamAccess?.captureSession?.();
+    $('[data-card-close]',root)?.addEventListener('click',async()=>{await destroyCardBrick();if(isCurrent())root.innerHTML=''});window.lucide?.createIcons();
     try{
-      const [config,deviceSessionId]=await Promise.all([window.SubscriptionService.getBillingCheckoutConfig(),mercadoPagoDeviceId()]),bricks=await mercadoPagoBrick(config.publicKey),settings={initialization:{amount:Number(finalPrice),payer:{email:billingPayerEmail}},customization:{visual:{style:{theme:'default'}},paymentMethods:{maxInstallments:1}},callbacks:{onReady:()=>{$('[data-card-brick-loading]',root)?.remove()},onError:error=>{console.warn('[BILLING_CARD_BRICK_ERROR]',{type:error?.type||'unknown'});window.Utils?.toast?.('Não foi possível carregar os dados do cartão.',true)},onSubmit:formData=>new Promise(async(resolve,reject)=>{try{const result=await window.SubscriptionService.requestUpgrade(plan.id,{billingCycle,quoteId:quote?.quoteId||null,couponCode:couponCode||quote?.code||null,paymentMethodType:'card_monthly',billingPayerEmail,operationId,previousCheckoutAttemptId,deviceSessionId:deviceSessionId||await mercadoPagoDeviceId(),cardPayment:formData});await destroyCardBrick();openCardStatusModal({card:result.card,plan,billingCycle,quote,billingPayerEmail,couponCode});resolve()}catch(error){console.warn('[BILLING_CARD_MONTHLY_ERROR]',{code:error?.code||'unknown'});window.Utils?.toast?.(error.message||'Não foi possível processar o cartão.',true);reject(error)}})}};
-      cardBrickController=await bricks.create('cardPayment','cardPaymentBrick_container',settings);
-    }catch(error){console.warn('[BILLING_CARD_BRICK_LOAD_ERROR]',{code:error?.code||'unknown'});root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result expired"><header>${icon('circle-alert')}<h3>Checkout indisponível</h3><p>${esc(error.message||'Não foi possível carregar o checkout seguro.')}</p></header><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;$('[data-card-close]',root)?.addEventListener('click',()=>{root.innerHTML=''});window.lucide?.createIcons()}
+      const [config]=await Promise.all([window.SubscriptionService.getBillingCheckoutConfig(),mercadoPagoDeviceId({required:true})]);if(!isCurrent())return;const bricks=await mercadoPagoBrick(config.publicKey);if(!isCurrent())return;const settings={initialization:{amount:Number(finalPrice),payer:{email:billingPayerEmail}},customization:{visual:{style:{theme:'default'}},paymentMethods:{maxInstallments:1}},callbacks:{onReady:()=>{if(isCurrent())$('[data-card-brick-loading]',root)?.remove()},onError:error=>{console.warn('[BILLING_CARD_BRICK_ERROR]',{type:error?.type||'unknown'});if(isCurrent())window.Utils?.toast?.('Não foi possível carregar os dados do cartão.',true)},onSubmit:formData=>new Promise(async(resolve,reject)=>{try{const deviceSessionId=await mercadoPagoDeviceId({required:true});if(!isCurrent())throw Error('Sua conta ou empresa mudou. Nenhuma nova cobrança foi iniciada.');const result=await window.SubscriptionService.requestUpgrade(plan.id,{billingCycle,quoteId:quote?.quoteId||null,couponCode:couponCode||quote?.code||null,paymentMethodType:'card_monthly',billingPayerEmail,operationId,previousCheckoutAttemptId,deviceSessionId,cardPayment:formData});if(!isCurrent()){resolve();return;}await destroyCardBrick();if(!isCurrent()){resolve();return;}openCardStatusModal({card:result.card,plan,billingCycle,quote,billingPayerEmail,couponCode});resolve()}catch(error){console.warn('[BILLING_CARD_MONTHLY_ERROR]',{code:error?.code||'unknown'});if(isCurrent())window.Utils?.toast?.(error.message||'Não foi possível processar o cartão.',true);reject(error)}})}};
+      const controller=await bricks.create('cardPayment','cardPaymentBrick_container',settings);if(!isCurrent()){await controller?.unmount?.();return;}cardBrickController=controller;
+    }catch(error){if(!isCurrent())return;console.warn('[BILLING_CARD_BRICK_LOAD_ERROR]',{code:error?.code||'unknown'});root.innerHTML=`<div class="modal-bg"><section class="modal-box mobile-modal plan-card-monthly-sheet plan-pix-result expired"><header>${icon('circle-alert')}<h3>Checkout indisponível</h3><p>${esc(error.message||'Não foi possível carregar o checkout seguro.')}</p></header><button class="btn btn-light mobile-button" data-card-close>Fechar</button></section></div>`;$('[data-card-close]',root)?.addEventListener('click',()=>{root.innerHTML=''});window.lucide?.createIcons()}
   }
   function openPaymentMethodModal({
     planId,
@@ -1057,6 +1088,8 @@
   function legacyNotice(force=false) {
     const subscription=context().subscription,migration=subscription?.legacyMigration;
     if(migration?.activatedAt&&migration.status==='cancellation_pending')return '<section class="plan-legacy-notice" role="status"><h3>Novo plano ativo</h3><p>Seu acesso ao novo plano já está liberado. O encerramento da recorrência anterior ainda está pendente; não contrate outra assinatura. Estamos tentando concluir esta etapa.</p><button type="button" class="btn btn-primary" data-legacy-plans>Ver assinatura</button></section>';
+    const grant=subscription?.administrativeAccess,end=globalThis.VeconiPlanCatalog?.dateMs?.(grant?.endsAt);
+    if(grant?.financialConfirmation===false&&Number.isFinite(end)&&end>Date.now()&&grant.status!=='superseded_by_paid_migration')return '<section class="plan-legacy-notice" role="status"><h3>Acesso temporário preservado</h3><p>Liberação administrativa até '+esc(new Date(end).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))+'. Esta tolerância não é pagamento. Confira o plano do catálogo atual e o valor final antes de contratar.</p><button type="button" class="plan-manage-button" data-legacy-plans>Ver planos e assinatura</button></section>';
     const state=globalThis.VeconiPlanCatalog?.legacyState?.(subscription);
     if(!state)return '';
     if(!state.legacy||(!force&&!state.showNotice))return '';
