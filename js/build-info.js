@@ -17,7 +17,7 @@
     builtAt,
     release: "226",
     billingCheckoutPaused: false,
-    priorSalesPaused: false,
+    priorSalesPaused: true,
     performanceViewsPaused: false,
     receiptCreationPaused: false,
     receiptSharingPaused: false,
