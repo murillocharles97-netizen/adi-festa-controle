@@ -6,8 +6,8 @@ const {providerErrorDiagnostics}=require('../src/services/mercado-pago-service')
 const source=fs.readFileSync(path.join(__dirname,'../src/index.js'),'utf8');
 const handlerSource=source.slice(source.indexOf('exports.receiveWebhook='),source.indexOf('exports.retryLegacyPlanMigrations='));
 const secret='unit-test-only-secret';
-function request(type='subscription_preapproval',id='123456',overrides={}){
-  const ts=Math.floor(Date.now()/1000),requestId='test-request',v1=crypto.createHmac('sha256',secret).update(webhook.signatureManifest({dataId:id,requestId,timestamp:ts})).digest('hex');
+function request(type='subscription_preapproval',id='123456',overrides={},timestamp=String(Math.floor(Date.now()/1000))){
+  const ts=timestamp,requestId='test-request',v1=crypto.createHmac('sha256',secret).update(`id:${id.toLowerCase()};request-id:${requestId};ts:${ts};`).digest('hex');
   return{method:'POST',body:{type,entity:'preapproval',action:'updated',data:{id}},query:{},headers:{'x-request-id':requestId,'x-signature':`ts=${ts},v1=${v1}`},...overrides};
 }
 function harness({error=null,leaseError=false,reconcileError=null,failErrorPersistence=false}={}){
@@ -35,6 +35,23 @@ for(const type of ['subscription_preapproval','subscription_authorized_payment',
 }
 test('signature failure returns 401 before provider lookup or database access',async()=>{
   const h=harness(),res=await h.send(request(undefined,undefined,{headers:{}}));assert.equal(res.code,401);assert.equal(h.calls.reads.length,0);assert.equal(h.calls.writes.length,0);
+});
+for(const unit of ['seconds','milliseconds'])test(`Orders ${unit}: authenticated fixture reaches GET only; missing resource has no commercial effects`,async()=>{
+  const h=harness({error:missing()}),ts=String(unit==='seconds'?Math.floor(Date.now()/1000):Date.now()),res=await h.send(request('order','ORD_QA_ONLY',{},ts));
+  assert.equal(res.code,200);assert.equal(res.body,'provider-resource-not-found');assert.deepEqual(h.calls.reads,[{method:'getOrder',id:'ORD_QA_ONLY'}]);assert.equal(h.calls.writes.length,0);assert.equal(h.calls.reconciliations.length,0);
+});
+for(const kind of ['expired','future','tampered','duplicate-ts','missing-request-id'])test(`Orders ${kind}: rejected before all provider/database effects`,async()=>{
+  const h=harness(),ts=String(Date.now()+(kind==='expired'?-300001:kind==='future'?60000:-10)),req=request('order','ORD_QA_ONLY',{},ts);
+  if(kind==='tampered')req.headers['x-signature']=req.headers['x-signature'].replace(/v1=.*/,'v1='+'0'.repeat(64));
+  if(kind==='duplicate-ts')req.headers['x-signature']+=`,ts=${ts}`;
+  if(kind==='missing-request-id')delete req.headers['x-request-id'];
+  assert.equal((await h.send(req)).code,401);assert.equal(h.calls.reads.length,0);assert.equal(h.calls.writes.length,0);assert.equal(h.calls.reconciliations.length,0);
+});
+test('changing only timestamp unit cannot bypass duplicate event lease',async()=>{
+  const h=harness(),ts=Date.now()-10;
+  assert.equal((await h.send(request(undefined,undefined,{},String(Math.floor(ts/1000))))).code,200);
+  assert.equal((await h.send(request(undefined,undefined,{},String(ts)))).code,200);
+  assert.equal(h.calls.reconciliations.length,1);assert.equal(h.calls.writes.length,2);
 });
 test('unknown signed event and plan event are acknowledged without reads or writes',async()=>{
   for(const type of ['unknown','subscription_preapproval_plan','constructor','__proto__']){const h=harness(),res=await h.send(request(type));assert.equal(res.code,200);assert.equal(h.calls.reads.length,0);assert.equal(h.calls.writes.length,0)}

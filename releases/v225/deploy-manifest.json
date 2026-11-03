@@ -3,7 +3,7 @@
   "release": 225,
   "branch": "codex/v225-billing-hotfix",
   "base": "730abca9b1c4128042770074e4a07b2a2d132f21",
-  "status": "local-corrected-candidate-awaiting-orders-proof-and-deployment-authorization",
+  "status": "local-webhook-auth-corrected-candidate-awaiting-final-preflight-and-authorization",
   "deploymentAuthorized": false,
   "functions": {
     "updateInOrder": [
@@ -49,7 +49,8 @@
     "js/firebase/business-context.js",
     "js/build-info.js",
     "service-worker.js",
-    "functions/src/services/legacy-source-billing-guard.js"
+    "functions/src/services/legacy-source-billing-guard.js",
+    "functions/src/services/webhook-service.js"
   ],
   "originalHashes": "releases/v225/original-hashes.json",
   "firestoreRulesChanged": false,
@@ -69,11 +70,12 @@
     "preserveIdentitiesAndData": true,
     "deleteData": false,
     "replay": false,
-    "preserveScheduledRetryGuard": true
+    "preserveScheduledRetryGuard": true,
+    "preserveWebhookTimestampAuthentication": true
   },
   "pendingBeforeDeployment": [
     "Specific publication authorization",
-    "Orders notification destination/topic verification",
+    "Production Orders signature proof remains unconfirmed; official signed simulator receipt/verification before activation if required by preflight",
     "Isolated QA, no live payment/cancellation during deployment",
     "Fresh main/domain/backend revision, original/corrective hash checks and old-invoice retry state"
   ],
@@ -84,5 +86,6 @@
     "Owner confirms current Pro quote and coupon, then one explicit new contract/payment"
   ],
   "correctionBase": "41d5095e7f4b716e8d0eb559b953ae1e6883898a",
-  "correctiveHashes": "releases/v225/corrective-hashes.json"
+  "correctiveHashes": "releases/v225/corrective-hashes.json",
+  "webhookAuthHashes": "releases/v225/webhook-auth-hashes.json"
 }

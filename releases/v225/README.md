@@ -1,5 +1,7 @@
 # V225 — hotfix de cobrança
 
+**Atualização corretiva de autenticação Orders:** ver `WEBHOOK-AUTH.md` e `webhook-auth-hashes.json`. A revisão atual parte de `e07e043…`, aceita timestamps estritos de10/13 dígitos e preserva o token original no HMAC. Não há novo handler ou alteração frontend nesta correção. O estado e os resultados desse documento mais recente prevalecem sobre pendências históricas registradas abaixo. Nenhuma publicação está autorizada por este pacote.
+
 Candidato local sobre a V224 sanitizada `730abca9b1c4128042770074e4a07b2a2d132f21`, branch `codex/v225-billing-hotfix`. Sem push, deploy, cobrança, cancelamento ou reparação de produção nesta preparação.
 
 **Revisão corretiva de03/11:** o candidato inicial `41d5095…` foi interrompido no preflight. A versão atual adiciona o guard de faturas/retentativas descrito em `CORRECTION.md`, com hashes separados em `corrective-hashes.json`. A comprovação de Orders no painel permanece independente e pendente. Nenhuma correção foi aplicada em produção.
@@ -10,7 +12,7 @@ Os dez originais do hotfix de02/11 estão preservados no pacote privado congelad
 
 O verificador confirma essa relação, a allowlist e ausência de outros arquivos de produção alterados. As diferenças entre as demais dependências do bundle antigo e a árvore V224 são de módulos não utilizados pelos sete handlers (reset, assets, equipe e projeção financeira); permission-service, subscription-service, catálogo e dependências de cobrança conferem. O backend integrado foi testado novamente.
 
-Arquivos de produção do release completo: sete de backend e quatro de frontend, enumerados no manifesto. O commit corretivo altera somente quatro fontes existentes e acrescenta o guard interno; o frontend não muda nesta correção. Não há nova Function exportada, Rules, índices, Google, permissões V3, código de vendas retroativas ou protocolo Sync neste release.
+Arquivos de produção do release completo: oito de backend e quatro de frontend, enumerados no manifesto. O commit corretivo altera somente quatro fontes existentes e acrescenta o guard interno; o frontend não muda nesta correção. Não há nova Function exportada, Rules, índices, Google, permissões V3, código de vendas retroativas ou protocolo Sync neste release.
 
 A V226 permanece em `codex/previous-sales-v1`, commit `bcdc215e1f9f33aab459f5c5c62d6dbf6ee56bdb`; não foi reescrita ou integrada.
 

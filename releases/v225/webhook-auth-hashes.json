@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "baseCandidate": "e07e043f95e42724c2f4b02f72f763b183b53bf7",
+  "reason": "Strict 10/13-digit webhook timestamp freshness, original signed token, unambiguous headers",
+  "originalManifestUnchanged": "releases/v225/original-hashes.json",
+  "priorCorrectiveHashesUnchanged": "releases/v225/corrective-hashes.json",
+  "changed": [
+    {
+      "path": "functions/src/services/webhook-service.js",
+      "baselineLfSha256": "c436e6042feb7e6e08b284f852de7e87bfcddc06b044edf9f805a2e92b865940",
+      "correctedLfSha256": "8ee2fe7937357814717400e630348dda86206cf871eac89bc0f5175f05d057bf"
+    }
+  ],
+  "maxAgeMs": 300000,
+  "rejectAllFutureTimestamps": true,
+  "handlerBodiesUnchanged": true,
+  "scheduledRetryGuardUnchanged": true,
+  "deployExecuted": false
+}
