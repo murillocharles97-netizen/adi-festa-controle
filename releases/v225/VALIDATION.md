@@ -1,5 +1,7 @@
 # Validação local V225
 
+**Estado atual:** revisão corretiva do guard de concorrência; ver `CORRECTION.md`. Os resultados abaixo de207 testes descrevem o candidato inicial e ficam preservados como histórico. A execução atual soma234 testes unitários/DOM e29+17 cenários Emulator, além dos três roteiros de persistência. O guard novo é incluído no pacote e no rollback; as conclusões antigas não liberam o candidato rejeitado no preflight.
+
 ## Resultado
 
 - **171 testes unitários, DOM, contrato HTTP e contenção pública aprovados.** Incluem cotação/cupom, assinatura, Pix, cartão, Device ID, autorização, interface de recuperação e gates de release.
@@ -24,6 +26,7 @@ Nenhuma validação foi removida ou enfraquecida para obter aprovação.
 node --test tests/billing-v225-release.test.cjs tests/billing-migration-hotfix.test.cjs tests/subscription-plans.test.js tests/subscription-pix.test.js tests/subscription-payer-email.test.js tests/subscription-coupons.test.js tests/plan-catalog-v2.test.js tests/legacy-billing-audit.test.js tests/manual-legacy-reconciliation-v148.test.js functions/test/legacy-plan-transition.test.js functions/test/subscriptions.test.js functions/test/coupons.test.js tests/public-site-containment.test.cjs tests/static-containment-worker.test.cjs
 node --test tests/emulator/billing-migration-hotfix.integration.cjs
 node --test tests/emulator/billing-v225-legacy.integration.cjs
+node --test tests/billing-scheduled-retry-v225.test.cjs
 node functions/test/pix-billing-emulator.js
 node functions/test/card-monthly-emulator.js
 node functions/test/billing-state-machine-emulator.js
@@ -46,4 +49,4 @@ O teste físico Chrome Android/PWA continua pendente. Conferir teclado, carregam
 
 Main/domínio/Service Worker foram consultados nesta rodada e permanecem V224 `730abca`. Os dois rulesets estão ativos. A consulta Firestore de02/11 às22:55:13 de Brasília confirmou acesso temporário vigente até04/11 às12:07:44, plano legado pending e reserva creating sem replacement/ativação vinculados. Não se reconsultou o provedor; o preflight de pagamentos precisa ser renovado antes de qualquer alteração real.
 
-GO técnico para solicitar publicação controlada, condicionado ao preflight do README e à autorização específica. NO-GO para criar cobrança, reparar reserva ou cancelar contrato nesta preparação. O deploy do código sozinho não comprova assinatura regularizada.
+A conclusão atual encontra-se em CORRECTION.md: GO técnico local para a correção, NO-GO para publicação enquanto a configuração Orders não for comprovada e o novo candidato não passar no preflight autorizado. NO-GO para criar cobrança, reparar reserva ou cancelar contrato nesta preparação. O deploy do código sozinho não comprova assinatura regularizada.

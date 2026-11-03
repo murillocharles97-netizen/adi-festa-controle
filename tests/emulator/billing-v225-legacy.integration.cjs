@@ -27,11 +27,11 @@ async function setup(method='card'){
  const now=new Date(),end=new Date(+now+30*86400000).toISOString(),oldEnd=new Date(+now+5*86400000).toISOString();
  const sub={planId:'professional',status:'active',hasPaidSubscription:true,currentPeriodEnd:oldEnd,expiresAt:oldEnd,paymentMethodType:'card',mercadoPago:{subscriptionId:oldId}};
  await db.doc('businesses/'+businessId).set({id:businessId,ownerId:'qa-owner',active:true,subscription:sub});
- await db.doc('subscriptionIndex/'+oldId).set({businessId,planId:'professional',chargedPrice:49.9,catalogVersion:1});
+ await db.doc('subscriptionIndex/'+oldId).set({businessId,planId:'professional',chargedPrice:49.9,catalogVersion:1,expectedExternalReference:'qa-old-reference'});
  await db.doc('webhookEvents/event_'+op).set({businessId,status:'processed',source:'synthetic-emulator-fixture'});
  let calls=0,remoteStatus='authorized',network=false,lost=false;
- const provider={getSubscription:async()=>({id:oldId,status:remoteStatus,auto_recurring:{transaction_amount:49.9}}),cancelSubscription:async()=>{calls++;if(network)throw Object.assign(Error('network'),{code:'network'});remoteStatus='cancelled';if(lost)throw Error('response-lost');}};
- const service=legacyPlanTransitionService(db,provider),store=firestoreSubscriptionService(db);
+ const provider={getSubscription:async()=>({id:oldId,status:remoteStatus,external_reference:'qa-old-reference',next_payment_date:end,auto_recurring:{transaction_amount:49.9,currency_id:'BRL'}}),searchAuthorizedPayments:async()=>({results:[],paging:{offset:0,limit:10,total:0}}),cancelSubscription:async()=>{calls++;if(network)throw Object.assign(Error('network'),{code:'network'});remoteStatus='cancelled';if(lost)throw Error('response-lost');}};
+ const core=legacyPlanTransitionService(db,provider),service={...core,reserve:async request=>core.reserve({...request,sourceBillingCheck:await core.verifySourceForCheckout({businessId:request.businessId,actorUid:request.actorUid})})},store=firestoreSubscriptionService(db);
  const request={businessId,operationId:op,requestHash:'hash',planId:'essential',billingCycle:'monthly',paymentMethodType:method,actorUid:'qa-owner'};
  const get=async()=>(await db.doc('businesses/'+businessId).get()).data().subscription,job=async()=>(await db.doc('legacyPlanTransitions/'+businessId).get()).data();
  async function prepare(){

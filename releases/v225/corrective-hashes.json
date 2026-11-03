@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "baseCandidate": "41d5095e7f4b716e8d0eb559b953ae1e6883898a",
+  "reason": "Block scheduled invoice retries and unverified source billing before new contracts and creation-reservation repair",
+  "originalManifestUnchanged": "releases/v225/original-hashes.json",
+  "changed": [
+    {
+      "path": "functions/src/index.js",
+      "baselineLfSha256": "420bf042c400eebb78257cafe5ffae61998c6c71bb54344a2c0009c99c4bed30",
+      "correctedLfSha256": "17a918653930ea927087023b15c0b58a21ef5887ebacd7af65c13747e0df326e"
+    },
+    {
+      "path": "functions/src/services/legacy-plan-transition-service.js",
+      "baselineLfSha256": "7b9783b1a25012373f29a86ba0fbffc7013a611842c28632bc17337bdabf16bd",
+      "correctedLfSha256": "8f02cbe200508f702c22b36106faf8a1aa70f438c2cfc08eac659e53b6edb1ae"
+    },
+    {
+      "path": "functions/src/services/legacy-checkout-recovery-service.js",
+      "baselineLfSha256": "a2125292067ffb290a67df96eea1d0127f351b1e21d44980ed0d810308f00455",
+      "correctedLfSha256": "b23bc86d3245dab4d91dd4b09835d40eca93fea4d7a79dc1f718891874911197"
+    },
+    {
+      "path": "functions/src/services/mercado-pago-service.js",
+      "baselineLfSha256": "067488dd4c5afdfcc77762f634e896cdc8e4f2d88c3e745367c0c54c9fc149f0",
+      "correctedLfSha256": "f78f38f8e0bfedb09bd203f115d736f3f6d0106011f8830472eaa4a7dfb26c25"
+    }
+  ],
+  "added": [
+    {
+      "path": "functions/src/services/legacy-source-billing-guard.js",
+      "correctedLfSha256": "a9dce2ffa44aeead5c186b2bb2ce124f37156e77a4cb5ee0ee0b72efbb734238"
+    }
+  ],
+  "changedHandlers": [
+    "createSubscription"
+  ],
+  "unchangedHandlers": [
+    "retryLegacyPlanMigrations",
+    "receiveWebhook",
+    "getPixCheckoutStatus",
+    "getCardCheckoutStatus",
+    "syncSubscription",
+    "getBillingCheckoutConfig"
+  ],
+  "reconciliationAndWebhookGatesUnchanged": true,
+  "originalFilesPreserved": 10,
+  "deployExecuted": false
+}

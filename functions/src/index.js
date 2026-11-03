@@ -376,6 +376,12 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     }
     const opId=operationId(request.data?.operationId,businessId,plan.id,context.uid),requestHash=sha(JSON.stringify({catalogVersion:2,legacyMigration:migrating,businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id,billingPayerEmail}));billingLog.operationIdHash=sha(opId).slice(0,12);
     const sourceBillingCheck=migrating?await legacyPlanTransitionService(db,mp()).verifySourceForCheckout({businessId,actorUid:context.uid}):null;
+    const recheckSourceBeforeProviderWrite=async()=>{
+      if(!migrating)return;
+      const fresh=await permissions().authenticatedContext(request,businessId);
+      if(fresh.uid!==context.uid)throw new HttpsError('permission-denied','A identidade da contratação mudou.');
+      await legacyPlanTransitionService(db,mp()).verifySourceForCheckout({businessId,actorUid:context.uid,expectedSubscriptionId:sourceBillingCheck.subscriptionId});
+    };
     const migration=migrating?await legacyPlanTransitionService(db,mp()).reserve({businessId,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,actorUid:context.uid,sourceBillingCheck}):null;
     logger.info('[BILLING_ATTEMPT_CREATED]',{businessId,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,attemptId:opId,operationIdHash:sha(opId).slice(0,12)});
     logger.info('[Billing] payment_method_selected',{businessId,paymentMethodType:paymentMethod.id,operationIdHash:sha(opId).slice(0,12)});
@@ -395,6 +401,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     const effectiveQuoteId=redemption?.quoteId||quoteId||null,billing={...officialBilling,amount:redemption?Number(redemption.discountedPrice):officialBilling.amount},coupon=redemption?{couponId:redemption.couponId,redemptionId:redemption.id,quoteId:effectiveQuoteId}:null,backUrl=new URL('#/planos',APP_URL.value()).href,now=iso();
     if(paymentMethod.id==='card_monthly'){
       logger.info('[BILLING_CARD_MONTHLY_STARTED]',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12),deviceSessionPresent:Boolean(deviceSessionId)});
+      await recheckSourceBeforeProviderWrite();
       const order=await mp().createCardOrder({businessId,email:billingPayerEmail,plan,billing,operationId:opId,payment:manualCard,notificationUrl:MP_WEBHOOK_URL.value(),deviceSessionId}),details=orderDetails(order,'card_monthly'),expectedExternalReference=billingExternalReference(businessId,opId);
       if(!details.orderId)throw new HttpsError('unavailable','O Mercado Pago não devolveu a Order do cartão.');
       if(details.status==='challenge'&&!details.challengeUrl)throw new HttpsError('unavailable','O Mercado Pago solicitou 3DS sem devolver a URL de autenticação.');
@@ -410,6 +417,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     }
     if(paymentMethod.id==='pix_monthly'){
       logger.info('[Billing] pix_order_started',{businessId,planId:plan.id,billingCycle,operationIdHash:sha(opId).slice(0,12)});
+      await recheckSourceBeforeProviderWrite();
       const order=await mp().createPixOrder({businessId,email:context.email,plan,billing,operationId:opId,notificationUrl:MP_WEBHOOK_URL.value()}),details=pixDetails(order),expectedExternalReference=pixExternalReference(businessId,opId);
       if(!details.orderId||!details.qrCode||!details.qrCodeBase64)throw new HttpsError('unavailable','O Mercado Pago não devolveu o QR Code do Pix.');
       const discountSnapshot=redemption?.discountSnapshot||null,attemptData={businessId,requestedBy:context.uid,operationId:opId,requestHash,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',provider:'mercado_pago',providerOrderId:details.orderId,providerPaymentId:details.paymentId,status:'payment_pending',providerStatus:details.providerStatus,statusDetail:details.statusDetail,officialPrice:officialBilling.amount,originalAmount:officialBilling.amount,discountAmount:Number((officialBilling.amount-billing.amount).toFixed(2)),chargedPrice:billing.amount,finalAmount:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,couponSnapshot:discountSnapshot,qrCode:details.qrCode,qrCodeBase64:details.qrCodeBase64,ticketUrl:details.ticketUrl,expiresAt:details.expiresAt,replacesOperationId:replacement?previousAttemptId:null,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete()},index={legacyMigrationOperationId:migration?opId:null,catalogVersion:2,businessId,ownerId:context.uid,operationId:opId,planId:plan.id,billingCycle,paymentMethodType:'pix_monthly',providerOrderId:details.orderId,providerPaymentId:details.paymentId,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot,internalSubscriptionId:opId,replacesOperationId:replacement?previousAttemptId:null,status:'payment_pending',createdAt:now,updatedAt:now},subscription=pendingPixSubscription(context.business.subscription||{},{planId:plan.id,billingCycle,operationId:opId,providerOrderId:details.orderId,providerPaymentId:details.paymentId,providerStatus:details.providerStatus,discount:discountSnapshot},now),batch=db.batch();
@@ -425,6 +433,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       logger.info('[Billing] pix_waiting_payment',{businessId,planId:plan.id,orderId:details.orderId,hasCoupon:Boolean(redemption),couponQuoteRefreshed:redemption?.quoteRefreshed===true,replacesOperationId:replacement?previousAttemptId:null,environment:MP_ENV.value()});
       return{paymentMethodType:'pix_monthly',pix:publicAttempt(attemptData),reused:false};
     }
+    await recheckSourceBeforeProviderWrite();
     const provider=await mp().createSubscription({businessId,userId:context.uid,billingPayerEmail,plan,billing,backUrl,operationId:opId,coupon,paymentMethodType:paymentMethod.id,notificationUrl:MP_WEBHOOK_URL.value(),deviceSessionId});
     if(!provider?.id||!provider?.init_point)throw new HttpsError('unavailable','O checkout não foi criado pelo Mercado Pago.');
     const expectedExternalReference=billingExternalReference(businessId,opId),subscription=pendingSubscription({existing:context.business.subscription||{},plan,provider,now,billingCycle,discount:redemption?.discountSnapshot||null,paymentMethodType:paymentMethod.id,billingPayerEmail}),batch=db.batch(),intentRef=db.doc(`businesses/${businessId}/subscriptionIntents/${provider.id}`),baseIndex={legacyMigrationOperationId:migration?opId:null,catalogVersion:2,businessId,ownerId:context.uid,planId:plan.id,billingCycle,paymentMethodType:paymentMethod.id,billingPayerEmail,officialPrice:officialBilling.amount,chargedPrice:billing.amount,expectedExternalReference,activationPolicy:'initial_payment_required',quoteId:effectiveQuoteId,couponRedemptionId:redemption?.id||null,discountSnapshot:redemption?.discountSnapshot||null,internalSubscriptionId:opId,replacesSubscriptionId:cardReplacement?.subscriptionId||null,reconciliationVersion:2,status:'pending_payment',createdAt:now,updatedAt:now};

@@ -2,35 +2,37 @@
 
 Candidato local sobre a V224 sanitizada `730abca9b1c4128042770074e4a07b2a2d132f21`, branch `codex/v225-billing-hotfix`. Sem push, deploy, cobrança, cancelamento ou reparação de produção nesta preparação.
 
+**Revisão corretiva de03/11:** o candidato inicial `41d5095…` foi interrompido no preflight. A versão atual adiciona o guard de faturas/retentativas descrito em `CORRECTION.md`, com hashes separados em `corrective-hashes.json`. A comprovação de Orders no painel permanece independente e pendente. Nenhuma correção foi aplicada em produção.
+
 ## Escopo e integridade
 
-Os dez originais do hotfix de 02/11 estão preservados no pacote privado congelado. `original-hashes.json` registra SHA256 bruto e normalizado. Nove arquivos do candidato correspondem aos originais após normalização de quebra de linha. O décimo, `functions/src/index.js`, recebe somente o delta original de cobrança sobre o índice V224: preserva seus 92 exports e os sete handlers de cobrança são idênticos aos originais auditados. Nunca substituir o índice canônico inteiro pelo índice antigo do bundle.
+Os dez originais do hotfix de02/11 estão preservados no pacote privado congelado. `original-hashes.json` mantém seus SHA256 brutos e normalizados. Na revisão corretiva, seis arquivos não index continuam iguais por LF; três módulos e o índice possuem o delta documentado separadamente, além de um guard interno novo. Os92 exports da V224 permanecem, seis handlers de cobrança continuam idênticos e somente createSubscription ganha a reconferência antes do POST. Nunca substituir o índice canônico inteiro pelo índice antigo do bundle.
 
 O verificador confirma essa relação, a allowlist e ausência de outros arquivos de produção alterados. As diferenças entre as demais dependências do bundle antigo e a árvore V224 são de módulos não utilizados pelos sete handlers (reset, assets, equipe e projeção financeira); permission-service, subscription-service, catálogo e dependências de cobrança conferem. O backend integrado foi testado novamente.
 
-Arquivos de produção: seis de backend (cinco existentes e um módulo interno novo), `js/plans.js`, `js/firebase/business-context.js`, `js/build-info.js` e `service-worker.js`. O manifesto enumera os dez. Não há nova Function exportada, Rules, índices, Google, permissões V3, código de vendas retroativas ou protocolo Sync neste release.
+Arquivos de produção do release completo: sete de backend e quatro de frontend, enumerados no manifesto. O commit corretivo altera somente quatro fontes existentes e acrescenta o guard interno; o frontend não muda nesta correção. Não há nova Function exportada, Rules, índices, Google, permissões V3, código de vendas retroativas ou protocolo Sync neste release.
 
 A V226 permanece em `codex/previous-sales-v1`, commit `bcdc215e1f9f33aab459f5c5c62d6dbf6ee56bdb`; não foi reescrita ou integrada.
 
 ## Fluxo revisado
 
 1. Owner autenticado escolhe plano, ciclo e forma. Cotação/cupom são validados no servidor. O valor antigo não quita o plano novo e desconto legado não é transferido implicitamente.
-2. Em migração, GET do contrato/cobranças antigas antecede a reserva. Aprovação recente ou processamento bloqueiam nova contratação para análise.
+2. Em migração, GET do contrato e de todas as páginas de faturas antigas antecede a reserva. Estado scheduled/recycling, qualquer next_retry_date remanescente, pagamento pendente/aprovação recente, respostas incompletas ou estado desconhecido bloqueiam contratação e reparação para análise. Há nova conferência imediatamente antes do POST; a reserva exige prova interna vinculada ao contexto e recente.
 3. Reserva e tentativa preservam operationId/hash, tenant e autor. Retry usa os mesmos identificadores e a idempotência do provedor.
 4. Pix/cartão mensal usam Orders sem `notification_url`. Cartão preserva exatamente o Device ID do SDK no header oficial, tokenização e 3DS. Não inventa identificadores nem dados de cartão.
-5. A reserva `creating` só pode ser encerrada pela ação separada `recover_failed_migration`, consentida pelo owner. Exige prova confiável de rejeição antes da criação, GET recente vazio, ausência de efeitos/vínculos e transação com lease. Preserva histórico e auditoria; a ação não cria pagamento.
+5. A reserva `creating` só pode ser encerrada pela ação separada `recover_failed_migration`, consentida pelo owner. Exige prova confiável de rejeição antes da criação, ausência de concorrência na assinatura antiga, GET Orders vazio, ausência de efeitos/vínculos e transação com lease. Reconferir a assinatura antes do lease e antes de encerrá-la. Preserva histórico e auditoria; a ação não cria pagamento. A consulta de uma reparação já concluída não a executa outra vez.
 6. Somente aprovação oficial e validação de identidade, referência, valor, moeda e pagamento ativam o novo período. Webhook assinado ou consulta oficial autenticada do owner gera a prova correspondente. Duplicatas e resposta perdida não criam outro período.
 7. O encerramento do contrato antigo pertence ao fluxo já existente de migração, depois da ativação nova e de prova válida. A confirmação do cancelamento é verificada no provedor. Esta preparação não executa esse fluxo nem autoriza cancelamento antecipado/manual.
 8. Aprovação tardia de tentativa encerrada/superada fica em conferência. Falha de cancelamento mantém o plano pago novo ativo e permite retomada idempotente. A tolerância administrativa não vira pagamento.
 
-Há uma corrida externa residual: o provedor não oferece transação única entre o débito antigo e o pagamento novo. Conferência recente reduz o risco; eventual cobrança antiga tardia exige conciliação individual, sem crédito de período, estorno ou segundo pagamento automáticos.
+Há uma corrida externa residual: o provedor não oferece transação única entre o débito antigo e o pagamento novo. O guard bloqueia riscos conhecidos e incertezas nas leituras, mas não garante que o provedor jamais agende uma cobrança após a última consulta. Eventual alteração posterior exige conciliação individual, sem crédito de período, estorno ou segundo pagamento automáticos. A retentativa já conhecida da3 Lindas continua bloqueando sua regularização até nova prova remota segura; esta correção não cancela essa retentativa.
 
 ## Publicação progressiva — somente após autorização específica
 
 ### Preflight
 
 - Reconfirmar main/domínio/SW na base esperada, sete revisões de billing, dois rulesets GitHub ativos, hashes e credencial temporária autorizada. Interromper se houver alteração inesperada.
-- Reconsultar a assinatura, a tolerância e as cobranças da empresa. Não reutilizar um diagnóstico antigo como prova atual de inexistência de pagamento.
+- Reconsultar a assinatura, a tolerância e as faturas completas da empresa, incluindo status do wrapper e next_retry_date. Não reutilizar um diagnóstico antigo como prova atual de inexistência de pagamento. A fatura scheduled identificada no preflight impede nova contratação/reparação enquanto permanecer arriscada ou inconclusiva.
 - Conferir destino HTTPS, segredo e tópico Orders em Integrações do Mercado Pago. Não remover tópicos antigos necessários a transações pendentes. Nenhuma configuração do provedor foi alterada nesta etapa.
 - Fixar hashes do pacote e rollback integrado. Não usar pacote privado antigo ou deploy genérico.
 
@@ -64,7 +66,7 @@ Conferir handlers/versões e compatibilidade V224, autorização, dados retornad
 
 O packager prepara uma variante de contenção: apenas `createSubscription` bloqueia novos checkouts; `getPixCheckoutStatus`, `getCardCheckoutStatus`, `syncSubscription`, `receiveWebhook` e processamento de pagamentos já aprovados continuam disponíveis. A verificação GET-only de reserva também permanece. Frontend usa `billingCheckoutPaused:true` e novo nome de cache estático, sem apagar caches, armazenamento comercial, filas ou sessões.
 
-Rollback modifica somente três arquivos: guard de criação em `functions/src/index.js`, flag em `js/build-info.js` e nome do cache em `service-worker.js`. Não restaura o código com payload defeituoso, não desativa confirmação de pagamentos e não desfaz assinaturas já pagas. Regras e todos os dados permanecem preservados. Nunca voltar simplesmente à árvore V224 para desfazer este release.
+Rollback modifica somente três arquivos: guard de criação em `functions/src/index.js`, flag em `js/build-info.js` e nome do cache em `service-worker.js`. Preserva integralmente o novo guard de retentativas, inclusive na reparação. Não reutilizar `331cb454…` como rollback da correção, pois ele antecede esse guard. Não restaura o código com payload defeituoso, não desativa confirmação de pagamentos e não desfaz assinaturas já pagas. Regras e todos os dados permanecem preservados. Nunca voltar simplesmente à árvore V224 para desfazer este release.
 
 A referência local de rollback compatível é preparada como commit separado sobre o candidato. Seu hash e tag serão registrados no relatório de fechamento; nada é enviado ao remoto sem autorização.
 

@@ -41,10 +41,16 @@ function legacyCheckoutRecoveryService(db,provider,{now=()=>new Date()}={}){
   async function recover({businessId,uid,operationId,confirmed}){
     if(confirmed!==true||typeof businessId!=='string'||!/^[-A-Za-z0-9_]{1,128}$/.test(businessId)||typeof operationId!=='string'||!/^[-A-Za-z0-9_]{16,100}$/.test(operationId)||!uid)fail('invalid-argument','Confirme a verificação da tentativa interrompida.');
     const r=refs(businessId,uid,operationId),token=crypto.randomUUID();
+    const initial=await read(r);owner(initial,businessId,uid);
+    // An existing immutable result is a lookup, not another repair.
+    if(initial.history.data?.closed===true&&initial.history.data.businessId===businessId&&initial.history.data.operationId===operationId)return{status:'reservation_released',operationId,replayed:true,paymentCreated:false};
+    const original=eligible(initial,businessId,operationId),guard=require('./legacy-source-billing-guard');
+    const sourceCheck=await guard.verifyLegacySourceBilling(db,provider,{businessId,actorUid:uid,expectedSubscriptionId:original.j.subscriptionId,now});
     const acquired=await db.runTransaction(async tx=>{
       const s=await read(r,tx);owner(s,businessId,uid);
       if(s.history.data?.closed===true&&s.history.data.businessId===businessId&&s.history.data.operationId===operationId)return{replayed:true};
       const intent=eligible(s,businessId,operationId);
+      guard.assertSourceBillingCheck({check:sourceCheck,business:s.business.data,businessId,actorUid:uid,expectedSubscriptionId:intent.j.subscriptionId,now:now()});
       if(s.job.data?.recoveryLeaseUntil?.toMillis?.()>+now())fail('migration-recovery-busy','A verificação já está em andamento. Aguarde sem iniciar outra contratação.');
       tx.update(r.job,{status:'checking_creation',recoveryLeaseToken:token,recoveryLeaseUntil:Timestamp.fromMillis(+now()+60000)});
       return{...intent,requestHash:intent.j.requestHash};
@@ -56,15 +62,17 @@ function legacyCheckoutRecoveryService(db,provider,{now=()=>new Date()}={}){
       const rows=search?.data,total=Number(search?.paging?.total);
       if(!Array.isArray(rows)||!Number.isSafeInteger(total)||total!==0||rows.length)fail('migration-recovery-provider-state','O provedor encontrou uma cobrança ou não comprovou uma busca vazia. A reserva foi preservada para conciliação.');
       const queries=[db.collection('billingOrderIndex').where('expectedExternalReference','==',acquired.externalReference),db.collection('billingPaymentEvents').where('operationId','==',operationId)];
+      const finalSourceCheck=await guard.verifyLegacySourceBilling(db,provider,{businessId,actorUid:uid,expectedSubscriptionId:acquired.j.subscriptionId,now});
       const result=await db.runTransaction(async tx=>{
         const [s,...indexes]=await Promise.all([read(r,tx),...queries.map(q=>tx.get(q))]);owner(s,businessId,uid);
         const intent=eligible(s,businessId,operationId);
-        if(intent.j.recoveryLeaseToken!==token||intent.j.requestHash!==acquired.requestHash||indexes.some(x=>!x.empty))fail('migration-recovery-state-changed','A contratação mudou durante a conferência. Nenhuma nova cobrança foi liberada.');
+        guard.assertSourceBillingCheck({check:finalSourceCheck,business:s.business.data,businessId,actorUid:uid,expectedSubscriptionId:intent.j.subscriptionId,now:now()});
+        if(intent.j.recoveryLeaseToken!==token||intent.j.recoveryLeaseUntil?.toMillis?.()<=+now()||intent.j.requestHash!==acquired.requestHash||indexes.some(x=>!x.empty))fail('migration-recovery-state-changed','A contratação mudou durante a conferência. Nenhuma nova cobrança foi liberada.');
         const id=idFor(businessId,operationId),audit=db.doc(`businesses/${businessId}/auditLogs/migration_creation_recovered_${id}`);
         tx.create(r.history,{businessId,operationId,requestHash:intent.j.requestHash,reservation:acquired.j,attemptStatus:intent.a.status,providerSearch:{externalReference:acquired.externalReference,total:0,checkedAt:Timestamp.fromDate(now())},proofType:intent.proofType,recoveredBy:uid,closed:true,createdAt:FieldValue.serverTimestamp()});
         tx.update(r.job,{status:'attempt_closed',creationRecovery:{id,closed:true,reason:'provider_rejected_before_creation',checkedAt:Timestamp.fromDate(now())},recoveryLeaseToken:FieldValue.delete(),recoveryLeaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
         tx.set(r.attempt,{reservationRecoveryId:id,reservationRecoveredAt:FieldValue.serverTimestamp()},{merge:true});
-        tx.create(audit,{type:'legacy_checkout_creation_recovered',businessId,operationId,actorUid:uid,providerOrdersFound:0,proofType:intent.proofType,paymentCreated:false,subscriptionChanged:false,createdAt:FieldValue.serverTimestamp()});
+        tx.create(audit,{type:'legacy_checkout_creation_recovered',businessId,operationId,actorUid:uid,providerOrdersFound:0,sourceBillingCheck:finalSourceCheck,proofType:intent.proofType,paymentCreated:false,subscriptionChanged:false,createdAt:FieldValue.serverTimestamp()});
         return{status:'reservation_released',operationId,replayed:false,paymentCreated:false};
       });
       return result;

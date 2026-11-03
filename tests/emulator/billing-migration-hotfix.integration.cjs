@@ -29,7 +29,10 @@ global.fetch=async(input,options={})=>{
  if(u.pathname.startsWith('/v1/orders/'))return orders.has(u.pathname.split('/').pop())?json(orders.get(u.pathname.split('/').pop())):json({message:'not found'},404);
  if(u.pathname==='/authorized_payments/search'){
   const id=u.searchParams.get('preapproval_id'),entry=contracts.get(id);if(!entry)return json({message:'not found'},404);
-  return json({results:[{id:'qa-old-invoice',preapproval_id:id,debit_date:new Date().toISOString(),payment:{id:'qa-old-rejected-payment',status:entry.paymentStatus||'rejected'}}]});
+  entry.searchCount=(entry.searchCount||0)+1;
+  if(entry.scheduleOnSearch===entry.searchCount){entry.invoiceStatus='scheduled';entry.nextRetryDate=new Date(Date.now()+3600000).toISOString();}
+  const rows=entry.invoices||[{id:'qa-old-invoice',preapproval_id:id,status:entry.invoiceStatus||'processed',retry_attempt:1,...(entry.nextRetryDate!==undefined?{next_retry_date:entry.nextRetryDate}:{}),debit_date:new Date().toISOString(),payment:{id:'qa-old-rejected-payment',status:entry.paymentStatus||'rejected'}}],offset=Number(u.searchParams.get('offset')||0);
+  return json({results:rows.slice(offset,offset+10),...(entry.incompleteInvoices?{}:{paging:{offset,limit:10,total:rows.length}})});
  }
  if(u.pathname.startsWith('/preapproval/')){
   const id=u.pathname.split('/').pop(),entry=contracts.get(id);if(!entry)return json({message:'not found'},404);
@@ -52,7 +55,7 @@ async function seed({stuck=false,proof=false}={}){
  await root.set({id:bid,name:'QA only',active:true,ownerId:owner.uid,workspaceGeneration:0,subscription:sub});
  for(const [person,role]of [[owner,'owner'],[seller,'seller']])await root.collection('members').doc(person.uid).set({uid:person.uid,role,status:'active',spaceAccess:'all',allowedSpaceIds:[],permissions:role==='owner'?{}:{'sales.create':true}});
  const oldReference=billingExternalReference(bid,'qa-old-original');await db.doc('subscriptionIndex/'+oldId).set({businessId:bid,ownerId:owner.uid,catalogVersion:1,planId:'premium',chargedPrice:50.34,officialPrice:79.9,status:'approved',expectedExternalReference:oldReference});
- contracts.set(oldId,{businessId:bid,cancels:0,value:{id:oldId,status:'authorized',external_reference:oldReference,auto_recurring:{transaction_amount:50.34,currency_id:'BRL',frequency:1,frequency_type:'months'}}});
+ contracts.set(oldId,{businessId:bid,cancels:0,value:{id:oldId,status:'authorized',external_reference:oldReference,next_payment_date:new Date(Date.now()+30*86400000).toISOString(),auto_recurring:{transaction_amount:50.34,currency_id:'BRL',frequency:1,frequency_type:'months'}}});
  if(stuck){const createdAt=Timestamp.fromMillis(Date.now()-86400000),requestHash='qa-original-hash';await db.doc('legacyPlanTransitions/'+bid).set({businessId:bid,mode:'approval_first',operationId:op,requestHash,actorUid:owner.uid,subscriptionId:oldId,recurring:true,paidThrough,targetPlanId:'premium',billingCycle:'monthly',paymentMethodType:'pix_monthly',status:'creating',replacementId:null,activatedAt:null,approvedPaymentId:null,createdAt});await root.collection('billingCheckoutAttempts').doc(op).set({businessId:bid,requestedBy:owner.uid,operationId:op,requestHash,planId:'premium',billingCycle:'monthly',paymentMethodType:'pix_monthly',status:'failed',errorCode:'mercado-pago-error',createdAt});if(proof)await db.doc('billingMigrationRepairAuthorizations/'+idFor(bid,op)).set({businessId:bid,operationId:op,requestHash,expectedExternalReference:billingExternalReference(bid,op),providerHttpStatus:400,outcome:'rejected_before_creation',authority:'platform_admin',verifiedAt:Timestamp.now(),expiresAt:Timestamp.fromMillis(Date.now()+3600000)});}
  return{bid,owner,seller,oldId,op,root,graceEnd,paidThrough,sub};
 }
@@ -85,3 +88,37 @@ test('client cannot forge the official reconciliation receipt',async()=>{const c
 test('rollback pauses new checkouts while already-created payment can still be reconciled safely',async()=>{const c=await seed(),x=await create(c),n=providerCalls.filter(x=>x.method==='POST').length;process.env.BILLING_NEW_CHECKOUTS_ENABLED='false';try{await assert.rejects(create(c));assert.equal(providerCalls.filter(x=>x.method==='POST').length,n);await approved(x.orderId);await invoke('getPixCheckoutStatus',c,{operationId:x.operationId,reconcileProvider:true});assert.equal((await c.root.get()).data().subscription.catalogVersion,2);assert.equal(contracts.get(c.oldId).cancels,1);}finally{delete process.env.BILLING_NEW_CHECKOUTS_ENABLED;}});
 test('repeated checkout after a lost reply reuses the same order without a second POST',async()=>{const c=await seed(),x=await create(c),n=providerCalls.filter(x=>x.method==='POST').length,result=await invoke('createSubscription',c,{catalogVersion:2,legacyMigration:true,planId:'premium',billingCycle:'monthly',operationId:x.operationId,paymentMethodType:'pix_monthly'});assert.equal(result.reused,true);assert.equal(result.pix.orderId,x.orderId);assert.equal(providerCalls.filter(x=>x.method==='POST').length,n);});
 test('a late approved or processing old charge blocks a fresh POST without settling the new plan',async()=>{const c=await seed(),n=providerCalls.filter(x=>x.method==='POST').length;for(const status of ['approved','in_process']){contracts.get(c.oldId).paymentStatus=status;await assert.rejects(create(c),e=>e.code==='failed-precondition');assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).exists,false);assert.equal(providerCalls.filter(x=>x.method==='POST').length,n);assert.notEqual((await c.root.get()).data().subscription.catalogVersion,2);}});
+
+for(const scenario of ['scheduled','future_retry','incomplete','unknown_contract','approved','in_process']){
+ test(scenario+' blocks both new checkout and creation repair without provider writes',async()=>{
+  const c=await seed({stuck:true,proof:true}),entry=contracts.get(c.oldId),before=(await c.root.get()).data(),jobBefore=(await db.doc('legacyPlanTransitions/'+c.bid).get()).data(),n=providerCalls.filter(x=>x.method!=='GET').length;
+  if(scenario==='scheduled'){entry.invoiceStatus='scheduled';entry.nextRetryDate=new Date(Date.now()+3600000).toISOString();}
+  if(scenario==='future_retry')entry.nextRetryDate=new Date(Date.now()+3600000).toISOString();
+  if(scenario==='incomplete')entry.incompleteInvoices=true;
+  if(scenario==='unknown_contract')entry.value.status='unknown';
+  if(['approved','in_process'].includes(scenario))entry.paymentStatus=scenario;
+  await assert.rejects(recover(c),e=>e.code==='failed-precondition');
+  await assert.rejects(create(c),e=>e.code==='failed-precondition');
+  assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);
+  assert.deepEqual((await c.root.get()).data(),before);
+  assert.deepEqual((await db.doc('legacyPlanTransitions/'+c.bid).get()).data(),jobBefore);
+  assert.equal((await db.doc('billingMigrationReservationHistory/'+idFor(c.bid,c.op)).get()).exists,false);
+  assert.equal((await db.collection('billingPaymentEvents').where('businessId','==',c.bid).get()).size,0);
+  assert.equal(entry.cancels,0);
+ });
+}
+test('risk appears after reservation but before POST: second check blocks Pix and monthly card',async()=>{
+ for(const method of ['pix_monthly','card_monthly']){const c=await seed(),entry=contracts.get(c.oldId),n=providerCalls.filter(x=>x.method!=='GET').length;entry.scheduleOnSearch=2;await assert.rejects(create(c,method),e=>e.code==='failed-precondition');assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).data().status,'creating');assert.equal((await c.root.get()).data().subscription.currentPeriodEnd,c.paidThrough);assert.equal(entry.cancels,0);}
+});
+test('risk appears during GET-only repair: final check preserves creating and original evidence',async()=>{
+ const c=await seed({stuck:true,proof:true}),entry=contracts.get(c.oldId),attemptRef=c.root.collection('billingCheckoutAttempts').doc(c.op),before=(await attemptRef.get()).data(),n=providerCalls.filter(x=>x.method!=='GET').length;entry.scheduleOnSearch=2;
+ await assert.rejects(recover(c),e=>e.code==='failed-precondition');assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).data().status,'creating');assert.deepEqual((await attemptRef.get()).data(),before);assert.equal((await db.doc('billingMigrationReservationHistory/'+idFor(c.bid,c.op)).get()).exists,false);assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);assert.equal(computeAccess((await c.root.get()).data().subscription).canMutate,true);
+});
+test('a new scheduled invoice does not block official reconciliation of an existing approved order',async()=>{
+ const c=await seed(),x=await create(c),entry=contracts.get(c.oldId);entry.invoiceStatus='scheduled';entry.nextRetryDate=new Date(Date.now()+3600000).toISOString();await approved(x.orderId);
+ await invoke('getPixCheckoutStatus',c,{operationId:x.operationId,reconcileProvider:true});await webhook(x.orderId);
+ assert.equal((await c.root.get()).data().subscription.catalogVersion,2);assert.equal((await db.collection('billingPaymentEvents').where('operationId','==',x.operationId).get()).size,1);assert.equal(entry.cancels,1);
+});
+test('lost repair response stays a read-only receipt lookup even if an old retry later appears',async()=>{
+ const c=await seed({stuck:true,proof:true});await recover(c);const entry=contracts.get(c.oldId),searches=entry.searchCount,n=providerCalls.filter(x=>x.method!=='GET').length;entry.invoiceStatus='scheduled';entry.nextRetryDate=new Date(Date.now()+3600000).toISOString();const r=await recover(c);assert.equal(r.replayed,true);assert.equal(entry.searchCount,searches);assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);assert.equal((await db.collection('billingMigrationReservationHistory').where('operationId','==',c.op).get()).size,1);
+});

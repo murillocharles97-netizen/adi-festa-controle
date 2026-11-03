@@ -60,25 +60,8 @@ function activateMigration(tx,migration,subscription,{paymentId,approvedAt,now,s
   tx.update(ref,{status:'pending',approvedPaymentId:String(paymentId),approvedAt,confirmedWebhookEventId:source==='webhook'?eventId:null,confirmedReconciliationProofId:ownerProof?.id||null,activatedAt:now,overlapStartedAt:now,nextAttemptAt:Timestamp.fromDate(new Date(now)),updatedAt:Timestamp.fromDate(new Date(now))});
 }
 function legacyPlanTransitionService(db,provider,{now=()=>new Date()}={}){
-  async function verifySourceForCheckout({businessId,actorUid}){
-    const business=(await db.doc('businesses/'+businessId).get()).data(),s=business?.subscription||{},id=sourceId(s);
-    if(business?.active!==true||business.ownerId!==actorUid)throw fail('legacy-migration-owner-required');
-    if(!recurring(s))return{recurring:false,checkedAt:now().toISOString()};
-    const index=(await db.doc('subscriptionIndex/'+id).get()).data();
-    if(!id||index?.businessId!==businessId||Number(index.catalogVersion||1)>=2)throw fail('provider-tenant-unverified');
-    const remote=await provider.getSubscription(id);
-    if(String(remote.id)!==id)throw fail('provider-tenant-unverified');
-    require('./firestore-subscription-service').validateProviderSubscription(remote,index,business);
-    const response=await provider.searchAuthorizedPayments(id,{limit:10});
-    if(!Array.isArray(response?.results))throw fail('legacy-source-billing-unverified');
-    if(response.results.some(r=>String(r.preapproval_id||'')!==id||!Number.isFinite(Date.parse(r.debit_date||r.date_created||''))))throw fail('legacy-source-billing-unverified');
-    const rows=response.results.filter(r=>String(r.preapproval_id||'')===id).sort((a,b)=>Date.parse(b.debit_date||b.date_created||0)-Date.parse(a.debit_date||a.date_created||0)),latest=rows[0],status=String(latest?.payment?.status||'').toLowerCase();
-    if(response.results.length&&!latest)throw fail('provider-tenant-unverified');
-    if(latest&&!status)throw fail('legacy-source-billing-unverified');
-    if(['pending','in_process','authorized','in_mediation'].includes(status))throw fail('legacy-source-billing-pending');
-    const paidThrough=Catalog.dateMs(s.currentPeriodEnd||s.expiresAt),paymentAt=Date.parse(latest?.payment?.date_approved||latest?.debit_date||latest?.date_created||'');
-    if(status==='approved'&&(!Number.isFinite(paidThrough)||!Number.isFinite(paymentAt)||paymentAt>=paidThrough))throw fail('legacy-source-late-payment-review');
-    return{recurring:true,subscriptionId:id,providerStatus:remote.status,invoiceId:latest?.id==null?null:String(latest.id),paymentId:latest?.payment?.id==null?null:String(latest.payment.id),paymentStatus:status||null,checkedAt:now().toISOString()};
+  async function verifySourceForCheckout(options){
+    return require('./legacy-source-billing-guard').verifyLegacySourceBilling(db,provider,{...options,now});
   }
   async function enroll(businessId){
     const ref=db.doc('businesses/'+businessId),jobRef=db.doc('legacyPlanTransitions/'+businessId);
@@ -96,13 +79,14 @@ function legacyPlanTransitionService(db,provider,{now=()=>new Date()}={}){
       const [bs,js]=await Promise.all([tx.get(ref),tx.get(jobRef)]),business=bs.data()||{},s=business.subscription||{},previous=js.data();
       if(business.ownerId!==actorUid)throw fail('legacy-migration-owner-required');
       if(!assertLegacyCheckoutReady(s,now(),{explicitMigration:true}))throw fail('legacy-migration-not-eligible');
+      require('./legacy-source-billing-guard').assertSourceBillingCheck({check:sourceBillingCheck,business,businessId,actorUid,now:now()});
       if(previous?.mode==='approval_first'&&previous.operationId===operationId){
         if(previous.requestHash!==requestHash)throw fail('legacy-migration-request-conflict');
         if(previous.creationRecovery?.closed===true)throw fail('legacy-migration-closed-attempt');
         return previous;
       }
       if(previous?.operationId&&!['awaiting_selection','attempt_closed'].includes(previous.status))throw fail('legacy-migration-in-progress');
-      const id=sourceId(s),isRecurring=recurring(s),index=isRecurring&&id?(await tx.get(db.doc('subscriptionIndex/'+id))).data():null;
+      const id=sourceId(s),isRecurring=sourceBillingCheck.recurring,index=isRecurring&&id?(await tx.get(db.doc('subscriptionIndex/'+id))).data():null;
       if(isRecurring&&(!id||index?.businessId!==businessId||Number(index.catalogVersion||1)>=2))throw fail('provider-tenant-unverified');
       const historyRef=previous?.operationId&&previous.status==='attempt_closed'?db.doc('billingMigrationReservationHistory/'+idFor(businessId,previous.operationId)):null,history=historyRef?await tx.get(historyRef):null;
       if(historyRef&&!history.exists)tx.create(historyRef,{businessId,operationId:previous.operationId,requestHash:previous.requestHash,reservation:previous,closed:true,reason:'owner_replaced_closed_attempt',createdAt:FieldValue.serverTimestamp()});
