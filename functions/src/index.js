@@ -360,7 +360,7 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       // Separate, explicit action. Returns before any quote, reservation or POST.
       return await require('./services/legacy-checkout-recovery-service').legacyCheckoutRecoveryService(db,mp()).recover({businessId,uid:context.uid,operationId:request.data.operationId,confirmed:request.data.confirmed});
     }
-    if(process.env.BILLING_NEW_CHECKOUTS_ENABLED==='false')throw new HttpsError('unavailable','Novas contratações estão temporariamente pausadas. Seu acesso atual e a consulta de pagamentos foram preservados.');
+    if(true)throw new HttpsError('unavailable','Novas contratações estão temporariamente pausadas. Seu acesso atual e a consulta de pagamentos foram preservados.');
     if(request.data?.catalogVersion!==2)throw new HttpsError('failed-precondition','Atualize a tela de planos antes de iniciar uma nova cobrança.',{code:'billing_catalog_mismatch'});
     const businessId=requestedBusinessId(request),plan=requirePlan(request.data?.planId),billingCycle=String(request.data?.billingCycle||'monthly'),officialBilling=planBilling(plan,billingCycle),paymentMethod=requirePaymentMethod(request.data?.paymentMethodType),context=await permissions().authenticatedContext(request,businessId);billingLog={...billingLog,paymentMethodType:paymentMethod.id,businessId};
     const migrating=assertLegacyCheckoutReady(context.business.subscription||{},new Date(),{explicitMigration:request.data?.legacyMigration===true});

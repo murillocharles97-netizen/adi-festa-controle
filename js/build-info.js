@@ -16,7 +16,7 @@
     shortCommit,
     builtAt,
     release: "225",
-    billingCheckoutPaused: false,
+    billingCheckoutPaused: true,
     performanceViewsPaused: false,
     receiptCreationPaused: false,
     receiptSharingPaused: false,
