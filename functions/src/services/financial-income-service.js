@@ -184,7 +184,7 @@ function financialIncomeService(db){
         if(!automation.enabled)return{skipped:'automation-disabled'};
         if(!((saleSource||exchangeSource)?automation.sales:automation.customerPayments))return{skipped:'income-kind-disabled'};
         if(saleSource&&onlineOrderId(source)&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
-        if(!afterActivation(automation,input.occurredAt))return{skipped:'before-activation'};
+        if(!afterActivation(automation,source.recordingMode==='prior_sale'?source.registeredAt:input.occurredAt))return{skipped:'before-activation'};
       }
       let original=null,amountCents=input.amountCents;
       if(reversal){
@@ -211,7 +211,7 @@ function financialIncomeService(db){
           delta=(value.direction==='in'?1:-1)*Number(value.amountCents||0);
         transaction.update(accountRef,{currentBalanceCents:currentBalanceCents+delta,balanceUpdatedAt:value.occurredAt,lastBalanceOperationId:value.operationId,schemaVersion:Math.max(3,Number(account.schemaVersion||0)),updatedAt:FieldValue.serverTimestamp()});
       }
-      transaction.create(ref,value);
+      transaction.create(ref,{...value,...(source.recordingMode==='prior_sale'?{recordedAt:FieldValue.serverTimestamp(),priorSale:true}:{} )});
       if(!routeSnapshot.exists)transaction.create(route,{businessId,sourceSpaceId:space.id,financialSpaceId:space.id,sourceType:kind,sourceId:input.sourceId,entryId:originalId,financialRoutingVersion:2,workspaceGeneration:source.workspaceGeneration??0,createdAt:FieldValue.serverTimestamp()});
       if(reversal){
         const reversedAmountCents=Number(original.reversedAmountCents||0)+amountCents;
@@ -265,7 +265,7 @@ function financialIncomeService(db){
     if(!automation.enabled)return{skipped:'automation-disabled'};
     if(!automation.sales)return{skipped:'sales-disabled'};
     if(orderId&&!automation.onlineOrders)return{skipped:'online-orders-disabled'};
-    if(!afterActivation(automation,occurredAt))return{skipped:'before-activation'};
+    if(!afterActivation(automation,sale.recordingMode==='prior_sale'?sale.registeredAt:occurredAt))return{skipped:'before-activation'};
     if(!amountCents)return{skipped:'zero-value'};
     if(CREDIT_SALE_STATUSES.has(status))return{skipped:'credit-sale-not-realized'};
     if(!PAID_SALE_STATUSES.has(status))return{skipped:'sale-not-paid'};

@@ -42,7 +42,8 @@
       row.insertAdjacentHTML('afterbegin','<span class="mobile-cart-swipe duplicate">Duplicar</span><span class="mobile-cart-swipe remove">Remover</span>');
       bindCartSwipe(row);
     });
-    const total=$('.total-row b',summary)?.textContent||money(0),finish=$('#finish-sale',summary),finishState=finish?.dataset.saleState||'normal';if(finish&&finishState==='normal'&&!$('strong',finish))finish.innerHTML=`${icon('check')} Concluir venda <strong>${total}</strong>`;else if(finish&&finishState==='normal'&&$('strong',finish)?.textContent!==total)$('strong',finish).textContent=total;
+    const paymentHint=$('.mobile-payment-note small',summary);if(paymentHint)paymentHint.textContent=window.PriorSales?.active?.()?(payment==='fiado'?'Débito no saldo atual, sujeito à conferência de recebimentos.':'Pagamento externo já recebido. Nenhuma cobrança será iniciada.'):(payment==='fiado'?'O valor será somado à conta do cliente.':'Valor será recebido agora.');
+    const total=$('.total-row b',summary)?.textContent||money(0),finish=$('#finish-sale',summary),finishState=finish?.dataset.saleState||'normal';if(finish&&finishState==='normal'&&window.PriorSales?.active?.())finish.innerHTML=`${icon('calendar-clock')} ${window.PriorSales.locked()?'Consultar registro anterior':'Revisar venda anterior'} <strong>${total}</strong>`;else if(finish&&finishState==='normal'&&!$('strong',finish))finish.innerHTML=`${icon('check')} Concluir venda <strong>${total}</strong>`;else if(finish&&finishState==='normal'&&$('strong',finish)?.textContent!==total)$('strong',finish).textContent=total;
     const bag=$('#open-sale-summary'),items=$$('.editable-cart',summary).reduce((sum,row)=>sum+Number($('[data-item-qty]',row)?.value||0),0),client=$('#sale-client',summary),clientName=client?.value?client.options[client.selectedIndex]?.text:'Venda avulsa';
     const meta=`${clientName} · ${payment==='fiado'?'Fiado':payment[0].toUpperCase()+payment.slice(1)}`;
     if(bag){

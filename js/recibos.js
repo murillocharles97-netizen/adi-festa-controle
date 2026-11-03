@@ -64,6 +64,7 @@ window.Modais=(()=>{
   }
   function terminalPaymentMarkup(sale){
     if(sale?.source==='exchange_credit_checkout')return`<div class="sale-terminal-payment-meta"><span>Crédito utilizado: ${dinheiro(Number(sale.exchangeCreditUsedCents||0)/100)}</span><small>Complemento recebido: ${dinheiro(Number(sale.cashReceivedCents||0)/100)}</small><small>Crédito separado do Fiado.</small></div>`;
+    if(sale?.recordingMode==='prior_sale')return `<div class="sale-terminal-payment-meta"><span>Venda anterior · realizada em ${escapar(new Date(sale.data).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</span><small>Registrada em ${escapar(new Date(sale.registeredAt||sale.createdAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</small>${sale.paidAt?`<small>Pagamento externo recebido em ${escapar(new Date(sale.paidAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</small>`:''}</div>`;
     const payment=sale?.paymentMetadata;
     if(!payment||payment.channel!=='card_present')return'';
     const provider=({cielo:'Cielo',mercado_pago:'Mercado Pago',pagbank:'PagBank',mock:'SIMULADOR VECONI',simulator:'Simulador VECONI'})[payment.provider]||payment.provider||'Maquininha',method=payment.method==='debit'?'Débito':'Crédito',installments=payment.method==='credit'?` · ${Number(payment.installments||1)}x`:'';

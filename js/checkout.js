@@ -136,7 +136,7 @@ window.Checkout = (() => {
         recentProducts,
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -639,7 +639,7 @@ window.Checkout = (() => {
     const host = document.querySelector("#cart");
     if (!host) return;
     const clientId = document.querySelector("#sale-client")?.value || null;
-    const displayItems = !manual && clientId
+    const displayItems = !window.PriorSales?.active?.() && !manual && clientId
       ? (window.Campanhas?.aplicarBeneficios?.(cart, clientId, {
           selectedCampaignIds: [...selectedCampaignIds],
           status: document.querySelector("#sale-status")?.value || "pago",
@@ -664,7 +664,7 @@ window.Checkout = (() => {
     refresh();
     saveDraft();
     window.lucide?.createIcons();
-    void window.ExchangeCreditCheckout?.mount?.({
+    if(!window.PriorSales?.active?.())void window.ExchangeCreditCheckout?.mount?.({
       clientId, spaceId: selectedSalesSpaceId(), totalCents: Math.round(t.final * 100),
       onChange: () => { invalidateAttempt(); saveDraft(); },
       onRecovered: completeRecoveredCreditSale,
@@ -685,6 +685,7 @@ window.Checkout = (() => {
   }
 
   function drawCampaignBenefits() {
+    if(window.PriorSales?.active?.()){const node=document.querySelector('#campaign-benefits');if(node)node.innerHTML='';return;}
     const totalsHost = document.querySelector("#sale-totals");
     if (!totalsHost) return;
     let host = document.querySelector("#campaign-benefits");
@@ -724,6 +725,8 @@ window.Checkout = (() => {
     );
   };
   function addSaleItem(item, options = {}) {
+    if(window.PriorSales?.locked?.()){toast('Consulte o registro preservado antes de alterar o carrinho.',true);return false;}
+    if(window.PriorSales?.active?.()&&item.productType==='recurring'){toast('Renovações não estão disponíveis no modo venda anterior.',true);return false;}
     const product = products().getById(item?.produtoId || item?.productId);
     if (!product || !productAvailableHere(product)) {
       toast("Este item não está disponível no espaço de venda atual.", true);
@@ -816,6 +819,7 @@ window.Checkout = (() => {
     render();
   }
   function standalone() {
+    window.PriorSales?.mount?.(()=>{selectedCampaignIds.clear();manual=window.PriorSales.active();discountKind=manual?'historical_manual':null;window.ExchangeCreditCheckout?.reset?.();drawCart();});
     window.SpaceContext?.bind?.(document);
     const search = document.querySelector("#product-search");
     if (!search) return;
@@ -979,6 +983,18 @@ window.Checkout = (() => {
         return;
       }
       if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
+      if(window.PriorSales?.active?.()){
+        if(!cart.length&&!window.PriorSales.locked())return toast('Adicione ao menos um produto.',true);
+        const priorScope=window.TeamAccess?.captureSession?.();finishing=true;setSubmissionState('processing','Preparando a revisão online…');
+        try{await window.PriorSales.submit({itens:structuredClone(cart),clienteId:document.querySelector('#sale-client')?.value||null,formaPagamento:document.querySelector('#sale-payment-method')?.value||'pix',observacao:document.querySelector('#sale-note')?.value||''},async sale=>{
+          cart=[];selectedCampaignIds.clear();manual=true;discountKind='historical_manual';activeAttempt=null;clearDraft();draftDetails={clientId:'',paymentMethod:'pix',note:'',discountValue:'0',discountPercent:'0'};
+          closeCartSurface({immediate:true});Recibos.mostrar(sale,sale.clienteId?clients().getById(sale.clienteId):null);window.PriorSales.afterConfirmed();
+          void window.SyncFirebase?.pullCloudCollections?.({force:true,names:['sales','products','productVariants','clients','stockMovements','balanceEvents']}).catch(()=>{});
+        });}
+        catch(error){if(priorScope===window.TeamAccess?.captureSession?.()){setSubmissionState('error',error.message);toast(error.message,true);}}
+        finally{if(priorScope===window.TeamAccess?.captureSession?.()){finishing=false;setSubmissionState('normal');window.PriorSales.mount();}}
+        return;
+      }
       const validationError = (message) => {
         setSubmissionState("error", message);
         toast(message, true);
@@ -1196,7 +1212,7 @@ window.Checkout = (() => {
   }
 
   function openCartSurface() {
-    void window.TerminalPayments?.refreshAvailability?.(selectedSalesSpaceId());
+    if(!window.PriorSales?.active?.())void window.TerminalPayments?.refreshAvailability?.(selectedSalesSpaceId());
     traceSale("[CART] checkout opened", { items: cartCount(), spaceId: selectedSalesSpaceId() });
     if (window.DesktopSales?.isDesktop?.())
       return window.DesktopSales.openCart?.();

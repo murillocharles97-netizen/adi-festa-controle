@@ -16,7 +16,7 @@ const INVALID_SALE_STATUSES=new Set(['cancelado','cancelada','cancelled','cancel
 const first=(data,...keys)=>keys.map(key=>data?.[key]).find(value=>value!==undefined&&value!==null&&value!=='');
 const text=(value,max=240)=>String(value??'').trim().slice(0,max);
 const numberOrNull=value=>Number.isFinite(Number(value))?Number(value):null;
-const dateValue=(data,type)=>first(data,...(type==='order'?['updatedAt','createdAt','data']:['createdAt','data','criadoEm','updatedAt']));
+const dateValue=(data,type)=>type==='sale'&&data.recordingMode==='prior_sale'?data.data:first(data,...(type==='order'?['updatedAt','createdAt','data']:['createdAt','data','criadoEm','updatedAt']));
 const actor=(data)=>({
   actorUid:text(first(data,'actorUid','createdByUid','userId','ownerId'),128)||null,
   actorNameSnapshot:text(first(data,'actorNameSnapshot','actorName','createdByName','userName'),120)||null,
@@ -93,6 +93,7 @@ function buildActivityEvent({businessId,sourceCollection,sourceDocumentId,data,s
     entityId:text(sourceDocumentId,500),operationId,
     ...actor(data),spaceId:text(first(data,'spaceId','financialSpaceId'),160)||null,
     createdAt:timestamp(dateValue(data,spec.type),Timestamp),
+    ...(spec.type==='sale'&&data.recordingMode==='prior_sale'?{registeredAt:timestamp(data.registeredAt||data.createdAt,Timestamp),commercialOccurredAt:timestamp(data.data,Timestamp)}:{}),
     sourceUpdatedAt:timestamp(first(data,'updatedAt',dateValue(data,spec.type)),Timestamp),
     status:sourceDeleted?'source_deleted':sourceStatus(data,spec.type),sourceDeleted:Boolean(sourceDeleted),
     sourceCollection,sourceDocumentId:text(sourceDocumentId,500),

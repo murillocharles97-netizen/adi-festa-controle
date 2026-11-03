@@ -45,6 +45,9 @@ const db=getFirestore(),REGION='southamerica-east1';
 const saleRecoveries=require('./services/sale-recovery-service').saleRecoveryService(db,{FieldValue});
 const RECOVERY_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:3};
 const operationalCommits=require('./services/operational-commit-service').operationalCommitService(db);
+const priorSales=require('./services/prior-sale-service').priorSaleService(db,{enabled:process.env.PRIOR_SALES_ENABLED!=='false'});
+exports.previewPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.preview(request));
+exports.confirmPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.confirm(request));
 const {operationalCallable}=require('./shared/operational-callable');
 exports.commitOperationalSync=onCall(RECOVERY_OPTIONS,operationalCallable(request=>operationalCommits.commit(request),{requireProtocol:true}));
 exports.getOperationalSyncReceipt=onCall(RECOVERY_OPTIONS,request=>operationalCommits.receipt(request));
@@ -150,7 +153,7 @@ const effectiveSale=snapshot=>{
   if(!snapshot?.exists)return null;
   const sale=snapshot.data()||{},clientId=String(sale.clienteId||sale.clientId||sale.customerId||''),status=String(sale.status||sale.saleStatus||sale.tipo||'').trim().toLowerCase(),rawDate=sale.data||sale.createdAt||sale.criadoEm,date=typeof rawDate?.toDate==='function'?rawDate.toDate().toISOString():String(rawDate||'');
   if(sale.deletedAt||sale.active===false||sale.ativo===false||INVALID_CRM_SALE_STATUSES.has(status)||!clientId||!date)return null;
-  return{clientId,value:Number(sale.valorFinal??sale.valorTotal??sale.total??sale.amount??0),items:(sale.itens||sale.items||[]).reduce((sum,item)=>sum+Number(item.quantidade??item.quantity??0),0),date};
+  return{clientId,value:Number(sale.valorFinal??sale.valorTotal??sale.total??sale.amount??0),items:(sale.itens||sale.items||[]).reduce((sum,item)=>sum+Number(item.quantidade??item.quantity??0),0),date,...(sale.recordingMode==='prior_sale'?{month:require('./shared/prior-sale-policy').day(date).slice(0,7)}:{})};
 };
 async function enforcePublicRateLimit(request,catalogToken,action,limit){const ip=String(request.rawRequest?.ip||request.rawRequest?.headers?.['x-forwarded-for']||'unknown').split(',')[0].trim(),bucket=Math.floor(Date.now()/(15*60*1000)),ref=db.doc(`publicRateLimits/${sha(`${action}:${catalogToken}:${ip}:${bucket}`)}`);await db.runTransaction(async transaction=>{const snapshot=await transaction.get(ref),count=Number(snapshot.data()?.count||0);if(count>=limit)throw new HttpsError('resource-exhausted','Muitas tentativas. Aguarde alguns minutos.');transaction.set(ref,{action,catalogHash:sha(catalogToken).slice(0,16),count:count+1,expiresAt:Timestamp.fromMillis(Date.now()+30*60*1000),updatedAt:FieldValue.serverTimestamp()},{merge:true})})}
 async function publicCatalog(request){const catalogToken=String(request.data?.catalogToken||'').trim();if(!validCatalogToken(catalogToken))throw new HttpsError('invalid-argument','Catálogo inválido.');const ref=db.doc(`publicCatalogs/${catalogToken}`),snapshot=await ref.get();if(!snapshot.exists)throw new HttpsError('not-found','Catálogo não encontrado.');const catalog=snapshot.data()||{};if(catalog.legacyStoreRetired||catalog.schemaVersion<6||catalog.catalogType!=='space_store'||!catalog.spaceId)throw new HttpsError('failed-precondition','A loja antiga foi desativada. Use o novo link da loja por espaço.');if(catalog.active!==true||catalog.catalogVisible===false)throw new HttpsError('failed-precondition','Catálogo indisponível.');return{catalogToken,ref,catalog}}
@@ -618,14 +621,15 @@ exports.initializeBusinessTrial=onDocumentCreated({document:'businesses/{busines
 exports.aggregateCustomerSaleMetrics=onDocumentWritten({document:'businesses/{businessId}/sales/{saleId}',region:REGION,memory:'256MiB',timeoutSeconds:20,maxInstances:20},async event=>{
   const before=effectiveSale(event.data?.before),after=effectiveSale(event.data?.after),businessId=event.params.businessId,eventId=event.id;
   if(!before&&!after)return;
-  const targets=new Map();for(const [sale,sign] of [[before,-1],[after,1]])if(sale){const month=sale.date.slice(0,7),key=`${sale.clientId}:${month}`,row=targets.get(key)||{clientId:sale.clientId,month,spent:0,purchases:0,items:0,lastPurchaseAt:null};row.spent+=sign*sale.value;row.purchases+=sign;row.items+=sign*sale.items;if(sign>0)row.lastPurchaseAt=sale.date;targets.set(key,row)}
+  const targets=new Map();for(const [sale,sign] of [[before,-1],[after,1]])if(sale){const month=sale.month||sale.date.slice(0,7),key=`${sale.clientId}:${month}`,row=targets.get(key)||{clientId:sale.clientId,month,spent:0,purchases:0,items:0,lastPurchaseAt:null};row.spent+=sign*sale.value;row.purchases+=sign;row.items+=sign*sale.items;if(sign>0)row.lastPurchaseAt=sale.date;targets.set(key,row)}
   const source=event.data?.after?.exists?event.data.after.data():event.data?.before?.data?.();
   await projectInWorkspace(db,businessId,source,async transaction=>{
     const marker=db.doc(`businesses/${businessId}/metricEvents/${eventId}`),seen=await transaction.get(marker);if(seen.exists)return;
+    const metricDates=await require('./services/prior-sale-metric-dates').priorSaleMetricDates(transaction,db,businessId,targets,source);
     for(const row of targets.values()){
       const metric=db.doc(`businesses/${businessId}/customerMetrics/${row.clientId}`),monthly=db.doc(`businesses/${businessId}/customerMonthlyMetrics/${row.clientId}__${row.month}`),metricData={id:row.clientId,businessId,totalSpent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),updatedAt:FieldValue.serverTimestamp(),schemaVersion:2},monthlyData={id:`${row.clientId}__${row.month}`,businessId,clientId:row.clientId,month:row.month,spent:FieldValue.increment(row.spent),purchaseCount:FieldValue.increment(row.purchases),itemsCount:FieldValue.increment(row.items),updatedAt:FieldValue.serverTimestamp(),schemaVersion:2};
       if(row.lastPurchaseAt){metricData.lastPurchaseAt=row.lastPurchaseAt;metricData.lastPurchaseAtNeedsRebuild=false;monthlyData.lastPurchaseAt=row.lastPurchaseAt;monthlyData.lastPurchaseAtNeedsRebuild=false}else if(row.purchases<0){metricData.lastPurchaseAtNeedsRebuild=true;monthlyData.lastPurchaseAtNeedsRebuild=true}
-      transaction.set(metric,{...metricData,workspaceGeneration:source?.workspaceGeneration??0},{merge:true});transaction.set(monthly,{...monthlyData,workspaceGeneration:source?.workspaceGeneration??0},{merge:true});
+      const previous=metricDates.get(`${row.clientId}:${row.month}`),keep=require('./services/prior-sale-metric-dates').keepNewestPurchase;transaction.set(metric,{...(previous?keep(metricData,previous.global):metricData),workspaceGeneration:source?.workspaceGeneration??0},{merge:true});transaction.set(monthly,{...(previous?keep(monthlyData,previous.monthly):monthlyData),workspaceGeneration:source?.workspaceGeneration??0},{merge:true});
     }
     transaction.create(marker,{businessId,eventId,type:'sale_metrics_v2',workspaceGeneration:source?.workspaceGeneration??0,createdAt:FieldValue.serverTimestamp()});
   });

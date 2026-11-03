@@ -57,13 +57,14 @@ function operationalCommitService(db){
   };
   return c;
  }
- async function commit(request){
+ async function commit(request,{priorSale=null}={}){
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
   if(Buffer.byteLength(JSON.stringify(item))>750*1024)fail('Operação excede o limite seguro.','invalid-argument');
   operationalId(item.operationId,'Operação');
   if(['quarantined','manual_review','archived','resolved'].includes(item.status)||item.quarantined||item.quarantine||item.resolution)fail('Operação preservada para revisão; replay bloqueado.','failed-precondition');
   const writes=item.payload?.writes;
   if(!Array.isArray(writes)||!writes.length||writes.length>350)fail('Envelope de operação inválido.','invalid-argument');
+  if(writes.some(w=>w.entityType==='sales'&&w.operation==='create'&&(w.data?.recordingMode==='prior_sale'||w.data?.priorSale))&&!priorSale)fail('Venda anterior exige revisão online e confirmação do proprietário.');
   const keys=new Set();
   for(const w of writes){
    operationalId(w.entityId,'Documento');
@@ -79,6 +80,7 @@ function operationalCommitService(db){
    item.payload=JSON.parse(originalPayload);
    const attemptWrites=item.payload.writes;
    const c=await context(tx,request,item),root=db.doc(`businesses/${c.bid}`),op=ref(c.bid,'processedOperations',item.operationId),hash=requestHash;
+   if(priorSale)await priorSale.authorize(tx,c,item);
    for(const w of attemptWrites)if(w.operation==='create'&&w.data.actorUid&&w.data.actorUid!==c.uid)fail('Autoria de um evento novo deve corresponder à sessão autenticada.');
    const [prior,archive,review]=await Promise.all([tx.get(op),tx.get(ref(c.bid,'syncIncidentArchives',item.operationId)),tx.get(ref(c.bid,'saleRecoveryOperations',item.operationId))]);
    if(archive.exists||review.exists||prior.data()?.status==='archived_without_effects')fail('Operação arquivada/em revisão; replay bloqueado.','failed-precondition');
@@ -103,6 +105,7 @@ function operationalCommitService(db){
    }};
    const outcome=await execute({db,item,transaction:buffer,currentUser:{uid:c.uid},FieldValue,has:c.has,actor:{actorUid:c.uid,actorRoleSnapshot:c.role,actorNameSnapshot:c.member?.name||c.user.name||null}});
    await validate(tx,c,item,attemptWrites,plan,get,writes);
+   if(priorSale)await priorSale.finalize(tx,c,item,plan,get);
    if(!plan.size)return{operationId:item.operationId,outcome,replayed:false};
    const marker=plan.get(op.path);
    if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1});
@@ -200,6 +203,7 @@ function operationalCommitService(db){
    if(cid){const client=await old('clients',cid);if(!client)fail('Cliente não confirmado.');expectedClient.set(cid,{balance:(credit?(cancels.length?1:-1)*total:0)/100,amount:(cancels.length?-1:1)*total/100,count:cancels.length?-1:1});}
    else if(credit)fail('Fiado exige cliente.');
    if(cancels.length){
+    await require('./operational-sale-access').assertOperationalSaleAccess(tx,db,c,{...original,id:primary.entityId},{purpose:'cancel',grantId:item.payload.operationalGrantId,operationId:item.operationId});
     const moves=await tx.get(ref(c.bid,'stockMovements','__none__').parent.where('vendaId','==',primary.entityId).limit(351)),originalDeltas=new Map();
     for(const s of moves.docs){const m=s.data();if(m.tipo!=='saida_venda'||m.operationId!==original.operationId)fail('Venda já possui devolução/movimento divergente.');const k=m.produtoId+':'+(m.variantId||'');originalDeltas.set(k,(originalDeltas.get(k)||0)-m.quantidade);}
     if(canonical([...originalDeltas].sort())!==canonical([...deltas].sort()))fail('Baixas originais não comprovadas.');
@@ -371,7 +375,7 @@ function operationalCommitService(db){
   return db.runTransaction(async tx=>{
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
-   if(d.kind==='sync_protocol')return{protocolVersion:1,permissionsVersion:2,minClientRelease:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
    const sid=validId(d.saleId,'Venda'),op=operationalId(d.operationId,'Operação'),s=(await tx.get(ref(c.bid,'sales',sid))).data();

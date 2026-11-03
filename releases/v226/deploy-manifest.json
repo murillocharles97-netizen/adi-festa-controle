@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "release": 226,
+  "status": "local-integrated-on-published-v225-awaiting-controlled-release",
+  "branch": "codex/v226-on-v225",
+  "preparedFrontendBase": "730abca9b1c4128042770074e4a07b2a2d132f21",
+  "productionReady": false,
+  "deploymentAuthorized": false,
+  "requiredIntegrationBase": "e83635c0fee645ffeaf1a4dea9c6480cc153a2f9",
+  "integrationSourceCommit": "bcdc215e1f9f33aab459f5c5c62d6dbf6ee56bdb",
+  "integrationCompletedLocally": true,
+  "functions": {
+    "update": [
+      "commitOperationalSync",
+      "aggregateCustomerSaleMetrics",
+      "projectSaleActivity",
+      "reconcileBusinessActivityEvents",
+      "projectSaleFinancialIncome"
+    ],
+    "create": [
+      "previewPriorSale",
+      "confirmPriorSale"
+    ],
+    "deployOnlyExplicitNames": true,
+    "sourceStrategy": "Rebase reviewed V226 changes over V225; never overwrite the canonical index with an older billing bundle. Keep the V225 deployment source and hash manifest immutable."
+  },
+  "firestore": {
+    "candidate": "firestore.prior-sales.rules",
+    "baseline": "tests/fixtures/prior-sale-published.rules",
+    "baselineNormalizedSha256": "94e6c1f36657a5dd605419202d3bc6e913f8a317cdf53986dcbb25f514da5eac",
+    "scope": "Reserve new prior_sale metadata and prior-sale records for authorized server operations only.",
+    "activateV3Permissions": false
+  },
+  "storageRulesChanged": false,
+  "indexesChanged": false,
+  "billingChangesIncluded": false,
+  "syncQueueProtocolChanged": false,
+  "onlineOnly": true,
+  "ownerOnly": true,
+  "timezone": "America/Sao_Paulo",
+  "maxPreviousCalendarDays": 7,
+  "maxLines": 60,
+  "publicManifest": "public-site.manifest.json",
+  "newPublicFiles": [
+    "functions/src/shared/prior-sale-policy.js",
+    "js/prior-sales.js",
+    "css/prior-sales.css"
+  ],
+  "rollback": {
+    "pauseServerIntakeWith": "PRIOR_SALES_ENABLED=false",
+    "pauseFrontendWith": "priorSalesPaused=true",
+    "preserveConfirmStatusReads": true,
+    "preserveV225Billing": true,
+    "preserveRulesFence": true,
+    "deleteData": false,
+    "replayQueues": false
+  }
+}
