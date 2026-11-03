@@ -18,7 +18,7 @@ const {legacyPlanTransitionService,assertLegacyCheckoutReady}=require('./service
 const {requirePlan,getPlan,planBilling}=require('./services/plan-service');
 const {pendingSubscription,sanitize,computeAccess}=require('./services/subscription-service');
 const {firestoreSubscriptionService}=require('./services/firestore-subscription-service');
-const {verifyWebhookSignature,eventId,eventData,readWebhookResource}=require('./services/webhook-service');
+const {validateWebhookSignature,eventId,eventData,webhookReplayReason,readWebhookResource}=require('./services/webhook-service');
 const {CouponError}=require('./services/coupon-service');
 const {couponFirestoreService}=require('./services/coupon-firestore-service');
 const {onboardingService}=require('./services/onboarding-service');
@@ -522,7 +522,8 @@ exports.syncSubscription=onCall(FUNCTION_OPTIONS,async request=>{
 exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:30,maxInstances:30,secrets:[MP_TOKEN,MP_TEST_TOKEN,MP_WEBHOOK_SECRET]},async(req,res)=>{
   if(req.method!=='POST'){res.status(405).send('method-not-allowed');return}
   const event=eventData(req);
-  if(!verifyWebhookSignature({secret:MP_WEBHOOK_SECRET.value(),xSignature:event.xSignature,xRequestId:event.requestId,dataId:event.dataId})){logger.warn('[Webhook] invalid signature',{type:event.type,hasDataId:Boolean(event.dataId)});res.status(401).send('invalid-signature');return}
+  const authentication=validateWebhookSignature({secret:MP_WEBHOOK_SECRET.value(),xSignature:event.xSignature,xRequestId:event.requestId,dataId:event.dataId,identifierIssue:event.identifierIssue,headerIssue:event.headerIssue});
+  if(!authentication.valid){const type=['order','orders','payment','subscription_preapproval','subscription_authorized_payment','subscription_preapproval_plan'].includes(event.type)?event.type:'unknown';logger.warn('[Webhook] invalid signature',{type,stage:'signature-authentication',httpStatus:401,signatureValid:false,...authentication});res.status(401).send('invalid-signature');return}
   logger.info('[BILLING_WEBHOOK_RECEIVED]',{eventType:event.type,action:event.action,providerResourceId:event.dataId||null,signatureValid:true,bodyType:String(req.body?.type||'').slice(0,80),queryType:String(req.query?.type||'').slice(0,80),entity:String(req.body?.entity||'').slice(0,80)});
   const id=eventId(event),eventRef=db.doc(`webhookEvents/${id}`);
   let acquired=false,stage='provider-resource-lookup';
@@ -530,14 +531,15 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
   const lookup=await readWebhookResource(event,mp());
   if(lookup.reason){logger.info('[BILLING_WEBHOOK_SKIPPED]',{eventId:id,eventType:event.type,providerResourceId:event.dataId,signatureValid:true,stage,reason:lookup.reason,httpStatus:lookup.httpStatus,providerHttpStatus:lookup.providerHttpStatus||null,endpoint:lookup.endpoint||null});res.status(lookup.httpStatus).send(lookup.reason);return}
   stage='event-lease';
-  acquired=await db.runTransaction(async transaction=>{
+  const lease=await db.runTransaction(async transaction=>{
     const existing=await transaction.get(eventRef),data=existing.data()||{};
-    if(data.status==='processed'||data.status==='ignored')return false;
-    if(data.status==='processing'&&data.leaseUntil?.toMillis?.()>Date.now())return false;
+    const replayReason=webhookReplayReason(data);
+    if(replayReason)return{acquired:false,replayReason};
     transaction.set(eventRef,{id,type:event.type,action:event.action,dataId:event.dataId,status:'processing',receivedAt:data.receivedAt||FieldValue.serverTimestamp(),leaseUntil:Timestamp.fromMillis(Date.now()+60000),updatedAt:FieldValue.serverTimestamp()},{merge:true});
-    return true;
+    return{acquired:true,replayReason:null};
   });
-  if(!acquired){res.status(200).send('already-processing-or-processed');return}
+  acquired=lease.acquired;
+  if(!acquired){logger.info('[BILLING_WEBHOOK_REPLAY_BLOCKED]',{eventId:id,reason:lease.replayReason,stage:'event-lease',signatureValid:true,httpStatus:200});res.status(200).send('already-processing-or-processed');return}
     stage='business-reconciliation';
     const applyManualOrder=async(order,{providerPaymentId=null}={})=>{
       const method=order?.transactions?.payments?.[0]?.payment_method||{},paymentMethodType=String(method.id||'').toLowerCase()==='pix'?'pix_monthly':'card_monthly',details=orderDetails(order,paymentMethodType);

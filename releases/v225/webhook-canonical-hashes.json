@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "baseCandidate": "1054294955c81f9b80fba2039ca0f22d944eb44e",
+  "reason": "Preserve canonical resource ID case, safe authentication/replay diagnostics and resource identity consistency",
+  "immutableReferences": [
+    "releases/v225/original-hashes.json",
+    "releases/v225/corrective-hashes.json",
+    "releases/v225/webhook-auth-hashes.json"
+  ],
+  "changed": [
+    {
+      "path": "functions/src/index.js",
+      "baselineLfSha256": "17a918653930ea927087023b15c0b58a21ef5887ebacd7af65c13747e0df326e",
+      "correctedLfSha256": "f02745ffbb3c8ed4932634a0847092a150a2ea11779d9452eeaaa3a792dce812"
+    },
+    {
+      "path": "functions/src/services/webhook-service.js",
+      "baselineLfSha256": "8ee2fe7937357814717400e630348dda86206cf871eac89bc0f5175f05d057bf",
+      "correctedLfSha256": "81a44dd1e5aae119a778a0f4c8f33048c9c2163cc5dce75a2888788c895bcd02"
+    }
+  ],
+  "providerLookupAndEventIdentityUnchanged": true,
+  "otherSixPublishedHandlersUnchanged": true,
+  "deployExecuted": false
+}

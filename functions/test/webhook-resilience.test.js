@@ -7,11 +7,11 @@ const source=fs.readFileSync(path.join(__dirname,'../src/index.js'),'utf8');
 const handlerSource=source.slice(source.indexOf('exports.receiveWebhook='),source.indexOf('exports.retryLegacyPlanMigrations='));
 const secret='unit-test-only-secret';
 function request(type='subscription_preapproval',id='123456',overrides={},timestamp=String(Math.floor(Date.now()/1000))){
-  const ts=timestamp,requestId='test-request',v1=crypto.createHmac('sha256',secret).update(`id:${id.toLowerCase()};request-id:${requestId};ts:${ts};`).digest('hex');
+  const ts=timestamp,requestId='test-request',v1=crypto.createHmac('sha256',secret).update(`id:${id};request-id:${requestId};ts:${ts};`).digest('hex');
   return{method:'POST',body:{type,entity:'preapproval',action:'updated',data:{id}},query:{},headers:{'x-request-id':requestId,'x-signature':`ts=${ts},v1=${v1}`},...overrides};
 }
-function harness({error=null,leaseError=false,reconcileError=null,failErrorPersistence=false}={}){
-  const calls={reads:[],writes:[],reconciliations:[],logs:[]};let record={};
+function harness({error=null,leaseError=false,reconcileError=null,failErrorPersistence=false,initialRecord=null}={}){
+  const calls={reads:[],writes:[],reconciliations:[],logs:[]};let record=initialRecord||{};
   const ref={update:async patch=>{calls.writes.push(patch);Object.assign(record,patch)},set:async patch=>{if(failErrorPersistence)throw Error('database unavailable');calls.writes.push(patch);Object.assign(record,patch)}};
   const db={doc:()=>ref,runTransaction:async callback=>{if(leaseError)throw Error('lease database unavailable');return callback({get:async()=>({data:()=>record}),set:(_,patch)=>{calls.writes.push(patch);Object.assign(record,patch)}})}};
   const provider=Object.fromEntries(['getSubscription','getAuthorizedPayment','getPayment','getOrder'].map(method=>[method,async id=>{calls.reads.push({method,id});if(error)throw error;return{id,preapproval_id:'sub-test',status:'authorized'}}]));
@@ -35,6 +35,22 @@ for(const type of ['subscription_preapproval','subscription_authorized_payment',
 }
 test('signature failure returns 401 before provider lookup or database access',async()=>{
   const h=harness(),res=await h.send(request(undefined,undefined,{headers:{}}));assert.equal(res.code,401);assert.equal(h.calls.reads.length,0);assert.equal(h.calls.writes.length,0);
+});
+test('safe signature diagnosis distinguishes mismatch and inconsistent identifiers before any effects',async()=>{
+  const h=harness(),req=request('order','ORD_AbC');req.query={'data.id':'ORD_AbC'};req.body.data.id='ord_abc';
+  assert.equal((await h.send(req)).code,401);assert.equal(h.calls.logs[0].reason,'identifier_mismatch');assert.equal(h.calls.reads.length,0);assert.equal(h.calls.writes.length,0);
+  const h2=harness(),req2=request('order','ORD_AbC');req2.headers['x-signature']=req2.headers['x-signature'].replace(/v1=.*/,'v1='+'0'.repeat(64));
+  assert.equal((await h2.send(req2)).code,401);assert.equal(h2.calls.logs[0].reason,'hmac_mismatch');
+});
+test('rejected authentication logs do not echo attacker-controlled values or raw authentication material',async()=>{
+  const h=harness(),req=request('private-person@example.invalid','private-resource@example.invalid');req.body.customer={phone:'private-phone-sentinel'};req.headers['x-request-id']='Bearer private-token-sentinel';req.headers['x-signature']='private-signature-sentinel';
+  assert.equal((await h.send(req)).code,401);const log=h.calls.logs[0];assert.equal(log.type,'unknown');assert.equal(log.reason,'malformed_signature');
+  const all=JSON.stringify(h.calls.logs);for(const value of [secret,'private-person','private-resource','private-phone','private-token','private-signature'])assert.ok(!all.includes(value));
+});
+for(const [state,reason]of [['processed','replay_processed'],['ignored','replay_ignored'],['processing','replay_in_flight']])test(`structured ${state} replay acknowledgement has zero writes and keeps history`,async()=>{
+  const record={status:state,lastErrorCode:'original-history',leaseUntil:{toMillis:()=>Date.now()+60000}},h=harness({initialRecord:record}),req=request();
+  const response=await h.send(req);assert.equal(response.code,200);assert.equal(response.body,'already-processing-or-processed');assert.equal(h.calls.writes.length,0);assert.equal(h.calls.reconciliations.length,0);assert.equal(record.status,state);assert.equal(record.lastErrorCode,'original-history');
+  const log=h.calls.logs.find(x=>x.message==='[BILLING_WEBHOOK_REPLAY_BLOCKED]');assert.equal(log.reason,reason);assert.equal(log.signatureValid,true);assert.ok(/^[a-f0-9]{64}$/.test(log.eventId));assert.ok(!JSON.stringify(log).includes(req.headers['x-signature']));
 });
 for(const unit of ['seconds','milliseconds'])test(`Orders ${unit}: authenticated fixture reaches GET only; missing resource has no commercial effects`,async()=>{
   const h=harness({error:missing()}),ts=String(unit==='seconds'?Math.floor(Date.now()/1000):Date.now()),res=await h.send(request('order','ORD_QA_ONLY',{},ts));

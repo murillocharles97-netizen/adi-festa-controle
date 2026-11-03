@@ -4,8 +4,8 @@ const test=require('node:test'),assert=require('node:assert/strict'),crypto=requ
 const {verifyWebhookSignature:verify,signatureManifest,timestampMillis,eventData}=require('../src/services/webhook-service');
 const now=1793712000123,secret='synthetic-webhook-secret-only',dataId='ORD01M28P44G5FG8RJPM579EH56FV',xRequestId='2066ca19-c6f1-498a-be75-1923005edd06';
 // Deliberately independent of production signatureManifest: pin field order,
-// separators, lowercase alphanumeric resource ID and the ORIGINAL ts text.
-const manifest=ts=>`id:ord01m28p44g5fg8rjpm579eh56fv;request-id:${xRequestId};ts:${ts};`;
+// separators, original alphanumeric resource ID and the ORIGINAL ts text.
+const manifest=ts=>`id:ORD01M28P44G5FG8RJPM579EH56FV;request-id:${xRequestId};ts:${ts};`;
 const signed=(ts,overrides={})=>({secret,dataId,xRequestId,now,xSignature:`ts=${ts},v1=${crypto.createHmac('sha256',secret).update(manifest(ts)).digest('hex')}`,...overrides});
 
 for(const ts of ['1793712000','1793712000123'])test(`valid independent HMAC with ${ts.length}-digit ts preserves original signed token`,()=>{

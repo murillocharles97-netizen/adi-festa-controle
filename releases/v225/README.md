@@ -1,5 +1,7 @@
 # V225 — hotfix de cobrança
 
+**Estado atual — patch local isolado sobre o backend já publicado:** ver `WEBHOOK-CANONICAL.md` e `webhook-canonical-hashes.json`. O backend do commit `1054294…` foi publicado seletivamente; o simulador oficial retornou 401. Esta revisão preserva a capitalização original de `data.id` e adiciona diagnóstico seguro exclusivamente em `receiveWebhook`. Não foi publicada, não altera o frontend e não declara o incidente resolvido. O escopo de uma próxima autorização é somente `webhookPatch.updateInOrder`, não a republicação das sete Functions. As seções anteriores abaixo permanecem como histórico das camadas preparatórias.
+
 **Atualização corretiva de autenticação Orders:** ver `WEBHOOK-AUTH.md` e `webhook-auth-hashes.json`. A revisão atual parte de `e07e043…`, aceita timestamps estritos de10/13 dígitos e preserva o token original no HMAC. Não há novo handler ou alteração frontend nesta correção. O estado e os resultados desse documento mais recente prevalecem sobre pendências históricas registradas abaixo. Nenhuma publicação está autorizada por este pacote.
 
 Candidato local sobre a V224 sanitizada `730abca9b1c4128042770074e4a07b2a2d132f21`, branch `codex/v225-billing-hotfix`. Sem push, deploy, cobrança, cancelamento ou reparação de produção nesta preparação.
