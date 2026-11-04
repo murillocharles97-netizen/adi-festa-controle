@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "base": "c06402d494b1e529ea7d8498f6406499873bfacf",
+  "branch": "codex/v226-prior-review-ui",
+  "publicationScope": "frontend-pwa-only",
+  "runtimeFiles": ["css/prior-sales.css", "js/prior-sales.js"],
+  "supportFiles": [
+    "tests/fixtures/prior-review-ui.js",
+    "tests/helpers/prior-review-ui.cjs",
+    "tests/prior-review-ui.fixture.html",
+    "tests/prior-review-ui.test.cjs",
+    "docs/qa/V226-PRIOR-REVIEW-UI.md",
+    "releases/v226/prior-review-ui-manifest.json"
+  ],
+  "functions": [],
+  "rules": [],
+  "indexes": [],
+  "commercialContractChanged": false,
+  "billingChanged": false,
+  "storageMigration": false,
+  "deploymentAuthorized": false,
+  "technicalGo": true,
+  "physicalAndroidConfirmationPending": true,
+  "rollback": {
+    "frontend": "c06402d494b1e529ea7d8498f6406499873bfacf",
+    "preserveBackendV226": true,
+    "preserveBillingV225": true,
+    "deleteOrReplayData": false
+  }
+}
