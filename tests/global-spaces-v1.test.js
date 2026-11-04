@@ -96,7 +96,7 @@ test("Vender lista apenas espaços ativos com sales=true e nunca aceita IDs agre
   assert.equal(window.SpaceContext.requireSalesSpace(), "iptv");
 });
 
-test("Home Todos agrega e as visões Adi Festa/IPTV isolam vendas, clientes e produtos", () => {
+test("Home Todos agrega e as visões isolam vendas/produtos e respeitam os vínculos explícitos de clientes", () => {
   const { window, db } = loadSpaces();
   window.SpaceContext.setSpaces(fixtures());
   Object.assign(db, {
@@ -107,7 +107,7 @@ test("Home Todos agrega e as visões Adi Festa/IPTV isolam vendas, clientes e pr
       { id: "legacy-unassigned", clienteId: "c-old", valorFinal: 10 },
       { id: "unknown-space", spaceId: "foreign-or-removed", valorFinal: 100 },
     ],
-    clientes: [{ id: "c-adi" }, { id: "c-iptv" }, { id: "c-old" }],
+    clientes: [{ id: "c-adi" }, { id: "c-iptv" }, { id: "c-old" }, { id: "c-foreign", businessId: "another-business" }, { id: "c-bound", businessId: "business-a", spaceId: "iptv" }],
     produtos: [
       { id: "coca", spaceAccessMode: "single_space", allowedSpaceIds: ["adi"], defaultSpaceId: "adi" },
       { id: "plano", itemKind: "service", spaceAccessMode: "single_space", allowedSpaceIds: ["iptv"], defaultSpaceId: "iptv" },
@@ -121,11 +121,14 @@ test("Home Todos agrega e as visões Adi Festa/IPTV isolam vendas, clientes e pr
   const adi = window.SpaceContext.contextualData(db);
   assert.deepEqual(Array.from(adi.vendas, (sale) => sale.id), ["adi-new", "adi-legacy-ref"]);
   assert.deepEqual(Array.from(adi.produtos, (product) => product.id), ["coca", "shared-legacy"]);
-  assert.deepEqual(Array.from(adi.clientes, (client) => client.id), ["c-adi"]);
+  // The V224/V225 contract keeps the business directory shared. A purchase
+  // alone never changes the customer's space binding or company ownership.
+  assert.deepEqual(Array.from(adi.clientes, (client) => client.id), ["c-adi", "c-iptv", "c-old"]);
   window.SpaceContext.selectHome("iptv");
   const iptv = window.SpaceContext.contextualData(db);
   assert.deepEqual(Array.from(iptv.vendas, (sale) => sale.id), ["iptv-new"]);
   assert.deepEqual(Array.from(iptv.produtos, (product) => product.id), ["plano", "shared-legacy"]);
+  assert.deepEqual(Array.from(iptv.clientes, (client) => client.id), ["c-adi", "c-iptv", "c-old", "c-bound"]);
 });
 
 test("produtos legados permanecem all_spaces e os três modos são canônicos", () => {
@@ -203,9 +206,9 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /validProductSpaceScope/);
   assert.match(financial, /business_\$\{businessId\}/);
-  assert.match(index, /spaces\.js\?v=171/);
+  assert.match(index, /spaces\.js\?v=\d+/);
   assert.match(index, /firebase\/space-service\.js\?v=151/);
-  assert.match(worker, /veconi-v173-session-team-hotfix/);
+  assert.match(worker, /const CACHE='veconi-v226-ui-regression-hotfix-v1'/);
 });
 
 test('stock movement origin requires an eligible business space; no global or ambiguous fallback',()=>{

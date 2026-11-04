@@ -312,6 +312,19 @@
     return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="map-pin"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i><span>Gerenciar</span></button>' : ""}</section>`;
   }
 
+  // A space read may finish while a modal prevents the route from remounting.
+  // Refresh only the selectors: never reset the checkout, modal or its drafts.
+  function refreshBars() {
+    const bars = window.document?.querySelectorAll?.('[data-space-context]');
+    if (!bars?.length) return;
+    bars.forEach(bar => {
+      const kind = bar.dataset.spaceContext;
+      if (kind === 'home' || kind === 'sales') bar.outerHTML = renderBar(kind);
+    });
+    bind(document);
+    window.lucide?.createIcons?.();
+  }
+
   function openPicker(kind = "home") {
     ensureContext();
     if (kind !== "home") return;
@@ -564,6 +577,7 @@
     stockMovementFields,
     selectionLabel,
     renderBar,
+    refreshBars,
     contextualData,
     goalFor,
     saveGoal,
@@ -581,6 +595,8 @@
   };
   window.SpaceEngine = SpaceEngine;
   window.SpaceContext = SpaceContext;
+  ['veconi-spaces-ready', 'veconi-space-context-local-ready', 'veconi-space-context-changed']
+    .forEach(event => addEventListener(event, refreshBars));
   addEventListener("business-context-changed", () => {
     ensureContext();
     dispatchEvent(new CustomEvent("veconi-space-context-local-ready", { detail: snapshot() }));

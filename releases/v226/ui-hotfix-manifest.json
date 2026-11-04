@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "release": "226-ui-regression-v1",
+  "branch": "codex/v226-ui-regression-hotfix",
+  "base": "5957fb9b1e78481f940f58766e17257cc1b0336f",
+  "billingBase": "e83635c0fee645ffeaf1a4dea9c6480cc153a2f9",
+  "deploymentAuthorized": false,
+  "productionReady": false,
+  "publicationScope": "frontend-pwa-only",
+  "runtimeFiles": [
+    "css/prior-sales.css",
+    "js/build-info.js",
+    "js/checkout.js",
+    "js/desktop-sales.js",
+    "js/prior-sales.js",
+    "js/spaces.js",
+    "service-worker.js"
+  ],
+  "supportFiles": [
+    "tests/fixtures/v226-ui-regression.js",
+    "tests/v226-ui-regression.fixture.html",
+    "tests/v226-ui-regression.test.cjs",
+    "tests/prior-sales-v225-integration.test.cjs",
+    "tests/global-spaces-v1.test.js",
+    "releases/v226/ui-hotfix-manifest.json",
+    "docs/qa/V226-UI-REGRESSION.md"
+  ],
+  "functions": [],
+  "rules": [],
+  "indexes": [],
+  "storageMigration": false,
+  "permissionMigration": false,
+  "dataMutation": false,
+  "rollback": {
+    "frontendBase": "5957fb9b1e78481f940f58766e17257cc1b0336f",
+    "compatiblePauseReference": "1f7e1675fa2d0551e3dcbf3ee8183fdb7e4dd2f5",
+    "remoteTag": "rollback/v226-compatible-v225-integrated",
+    "requiresSpecificAuthorization": true,
+    "keepBackendV226": true,
+    "keepBillingV225": true,
+    "deleteOrReplayData": false
+  },
+  "blockers": [
+    "Real-browser visible/clickable mobile QA and comparative screenshots are pending: user chose to continue without browser control.",
+    "The missing owner profit on the original Android device has not been reproduced or causally identified."
+  ]
+}

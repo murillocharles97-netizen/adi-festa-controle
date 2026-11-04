@@ -16,6 +16,7 @@
     shortCommit,
     builtAt,
     release: "226",
+    hotfix: "ui-regression-v1",
     billingCheckoutPaused: false,
     priorSalesPaused: false,
     performanceViewsPaused: false,

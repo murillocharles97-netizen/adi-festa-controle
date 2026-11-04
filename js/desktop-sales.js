@@ -200,7 +200,8 @@
         0,
       );
     return `<section class="desktop-sales" data-desktop-sales>
-      <header class="desktop-sales-title"><h2>Nova venda</h2><p>Adicione produtos ao carrinho para iniciar uma venda.</p>${window.PriorSales?.actionMarkup?.()||''}</header>
+      <header class="desktop-sales-title"><h2>Nova venda</h2><p>Adicione produtos ao carrinho para iniciar uma venda.</p></header>
+      <div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div>
       <div class="desktop-sales-toolbar">
         <label class="desktop-sales-search">${icon("search")}<input id="product-search" placeholder="Buscar produto, código de barras ou categoria..." autocomplete="off"><button type="button" id="clear-product-search" aria-label="Limpar busca">${icon("x")}</button></label>
         <button class="desktop-barcode-button" type="button" data-scan-sale aria-label="Ler código de barras" title="Ler código de barras">${icon("scan-barcode")}</button>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>VECONI · Regressões V226 · QA local</title>
+  <link rel="stylesheet" href="../css/style.css"><link rel="stylesheet" href="../css/visual.css">
+  <link rel="stylesheet" href="../css/mobile.css"><link rel="stylesheet" href="../css/spaces.css">
+  <link rel="stylesheet" href="../css/home-mobile.css"><link rel="stylesheet" href="../css/checkout-mobile.css">
+  <link rel="stylesheet" href="../css/desktop-sales.css"><link rel="stylesheet" href="../css/performance-access.css">
+  <link rel="stylesheet" href="../css/prior-sales.css">
+  <style>
+    body{margin:0;background:#f5f7fb;font-family:system-ui,sans-serif;color:#17233b}
+    .qa-header{background:#063d43;color:white;padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .qa-header img{width:32px}.qa-header small{margin-left:auto}.qa-controls{display:flex;gap:8px;flex-wrap:wrap;padding:10px}
+    .qa-controls button{min-height:44px;border:1px solid #cbdcd7;background:white;border-radius:12px;padding:8px 12px}
+    #app{max-width:1440px;margin:auto;padding:14px}#modal:empty{display:none}
+    #qa-status{padding:0 12px 10px;font-size:12px;color:#526579}
+  </style>
+</head>
+<body>
+  <header class="qa-header"><img src="../assets/veconi-icon-v133.svg" alt=""><b>VECONI · QA local</b><small id="qa-version"></small></header>
+  <nav class="qa-controls" aria-label="Cenários fictícios">
+    <button data-qa-route="inicio">Início</button><button data-qa-route="vender">Vender</button>
+    <button id="qa-hydration">Simular carregamento tardio dos espaços</button>
+  </nav>
+  <p id="qa-status" role="status">Somente dados sintéticos. Nenhuma conexão com Firebase ou produção.</p>
+  <main id="app"></main><div id="modal"></div>
+  <script src="./fixtures/v226-ui-regression.js"></script>
+  <script>
+    (async()=>{
+      const version=location.pathname.split('/')[1];
+      document.querySelector('#qa-version').textContent=version==='candidate'?'Correção local':version==='v225'?'Base V225':'V226 publicada';
+      for(const file of V226UIQA.sourceScripts){
+        if(version==='v225'&&/prior-sale/.test(file))continue;
+        await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='../'+file;script.onload=resolve;script.onerror=()=>reject(Error('Falha no recurso local: '+file));document.body.append(script);});
+      }
+      SpaceContext.setSpaces(V226UIQA.spaces);SpaceContext.selectSales('qa-a');V226UIQA.render('inicio');
+      document.querySelectorAll('[data-qa-route]').forEach(button=>button.onclick=()=>V226UIQA.render(button.dataset.qaRoute));
+      document.querySelector('#qa-hydration').onclick=()=>{
+        SpaceContext.setSpaces([V226UIQA.spaces[0]],{loaded:false});V226UIQA.render('vender');
+        document.querySelector('#modal').innerHTML='<div class="modal-bg"><section class="modal-box"><div class="modal-body"><h3>Carregamento de espaços fictício</h3><p>O segundo espaço será recebido sem fechar este modal.</p><button class="btn btn-primary" data-qa-close>Voltar ao caixa</button></div></section></div>';
+        document.querySelector('[data-qa-close]').onclick=()=>{document.querySelector('#modal').replaceChildren();};
+        setTimeout(()=>SpaceContext.setSpaces(V226UIQA.spaces),500);
+      };
+    })().catch(error=>{document.querySelector('#qa-status').textContent=error.message;});
+  </script>
+</body></html>
