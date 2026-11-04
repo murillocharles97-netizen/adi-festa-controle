@@ -1,15 +1,6 @@
 'use strict';
-const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),cp=require('node:child_process'),{JSDOM}=require('jsdom');
-const BASE='e83635c0fee645ffeaf1a4dea9c6480cc153a2f9',PUBLISHED='5957fb9b1e78481f940f58766e17257cc1b0336f';
-const read=(file,ref)=>ref?cp.execFileSync('git',['show',ref+':'+file],{encoding:'utf8'}):fs.readFileSync(file,'utf8');
-function runtime({ref,width=390}={}){
-  const dom=new JSDOM('<main id="app"></main><div id="modal"></div>',{url:'http://127.0.0.1/qa',runScripts:'outside-only'}),w=dom.window;
-  let closed=false;w.structuredClone=structuredClone;w.matchMedia=q=>({matches:/max-width/.test(q)?width<=767:/min-width/.test(q)?width>=768:false,addEventListener(){}});w.scrollTo=()=>{};w.confirm=()=>true;w.CSS={escape:x=>x};w.queueMicrotask=fn=>queueMicrotask(()=>{if(!closed)fn();});
-  w.eval(read('tests/fixtures/v226-ui-regression.js'));
-  for(const file of w.V226UIQA.sourceScripts){if(ref===BASE&&/prior-sale/.test(file))continue;w.eval(read(file,ref));}
-  w.SpaceContext.setSpaces(w.V226UIQA.spaces);w.SpaceContext.selectSales('qa-a');
-  return{w,q:s=>w.document.querySelector(s),render:r=>w.V226UIQA.render(r),flush:()=>new Promise(setImmediate),close(){closed=true;w.PerformanceAccess?.invalidate();w.close();}};
-}
+const {test}=require('node:test'),assert=require('node:assert/strict'),cp=require('node:child_process');
+const {BASE,PUBLISHED,read,runtime}=require('./helpers/v226-ui-regression.cjs');
 const mobileCSS=read('css/checkout-mobile.css');
 function hiddenByMobileRule(element){
   assert.match(mobileCSS,/\.mobile-sale-page\s+\.pos-head\s*\{\s*display:none\s*\}/);
@@ -53,7 +44,7 @@ test('V225→V226 did not edit the Home, profit, spaces, membership/session or p
   for(const file of ['js/home-mobile.js','js/desktop-dashboard.js','js/spaces.js','js/team-access.js','js/performance-access.js','js/app.js','js/firebase/business-context.js','js/firebase/space-service.js','css/spaces.css','css/home-mobile.css'])assert.equal(read(file,BASE),read(file,PUBLISHED),file);
 });
 test('UI hotfix leaves every backend, Rules, billing hash manifest, Auth and Sync source byte-identical',()=>{
-  const files=['functions','firestore.prior-sales.rules','firestore.rules','storage.rules','firestore.indexes.json','js/plans.js','js/firebase','js/team-access.js','js/performance-access.js','releases/v225'];
+  const files=['functions','firestore.prior-sales.rules','firestore.rules','storage.rules','firestore.indexes.json','js/plans.js','js/firebase','js/team-access.js','releases/v225'];
   const changes=cp.execFileSync('git',['diff',PUBLISHED,'--',...files],{encoding:'utf8'});assert.equal(changes,'');
 });
 test('UI patch has an exact frontend/support allowlist and never authorizes publication or a data migration',()=>{

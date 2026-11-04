@@ -13,6 +13,7 @@
     "js/checkout.js",
     "js/desktop-sales.js",
     "js/prior-sales.js",
+    "js/performance-access.js",
     "js/spaces.js",
     "service-worker.js"
   ],
@@ -20,10 +21,13 @@
     "tests/fixtures/v226-ui-regression.js",
     "tests/v226-ui-regression.fixture.html",
     "tests/v226-ui-regression.test.cjs",
+    "tests/v226-profit-visibility.test.cjs",
+    "tests/helpers/v226-ui-regression.cjs",
     "tests/prior-sales-v225-integration.test.cjs",
     "tests/global-spaces-v1.test.js",
     "releases/v226/ui-hotfix-manifest.json",
-    "docs/qa/V226-UI-REGRESSION.md"
+    "docs/qa/V226-UI-REGRESSION.md",
+    "docs/qa/V226-PROFIT-INVESTIGATION.md"
   ],
   "functions": [],
   "rules": [],

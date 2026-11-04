@@ -22,6 +22,9 @@
   <nav class="qa-controls" aria-label="Cenários fictícios">
     <button data-qa-route="inicio">Início</button><button data-qa-route="vender">Vender</button>
     <button id="qa-hydration">Simular carregamento tardio dos espaços</button>
+    <button data-qa-session="loading">Sessão em validação</button>
+    <button data-qa-session="error">Falha de sessão</button>
+    <button data-qa-session="ready">Restaurar proprietário QA</button>
   </nav>
   <p id="qa-status" role="status">Somente dados sintéticos. Nenhuma conexão com Firebase ou produção.</p>
   <main id="app"></main><div id="modal"></div>
@@ -36,6 +39,9 @@
       }
       SpaceContext.setSpaces(V226UIQA.spaces);SpaceContext.selectSales('qa-a');V226UIQA.render('inicio');
       document.querySelectorAll('[data-qa-route]').forEach(button=>button.onclick=()=>V226UIQA.render(button.dataset.qaRoute));
+      document.querySelectorAll('[data-qa-session]').forEach(button=>button.onclick=()=>{
+        const state=button.dataset.qaSession;V226UIQA.change({loading:state==='loading',error:state==='error'?'Falha sintética de sessão':null});V226UIQA.render('inicio');
+      });
       document.querySelector('#qa-hydration').onclick=()=>{
         SpaceContext.setSpaces([V226UIQA.spaces[0]],{loaded:false});V226UIQA.render('vender');
         document.querySelector('#modal').innerHTML='<div class="modal-bg"><section class="modal-box"><div class="modal-body"><h3>Carregamento de espaços fictício</h3><p>O segundo espaço será recebido sem fechar este modal.</p><button class="btn btn-primary" data-qa-close>Voltar ao caixa</button></div></section></div>';

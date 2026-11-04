@@ -12,7 +12,7 @@ Branch isolada: `codex/v226-ui-regression-hotfix`.
 | Venda anterior ausente no Android | O botão foi inserido em `.pos-head`; `checkout-mobile.css` oculta esse cabeçalho em até 767 px. O enhancer real adiciona `.mobile-sale-page`. Reprodução positiva no código publicado, mesmo com owner válido. | Entrada independente, fora do cabeçalho oculto, abaixo do espaço e antes da busca. Área de toque mínima de 44 px e largura total no mobile. |
 | Entrada ausente após carregar a sessão | `actionMarkup()` devolve vazio enquanto a identidade owner está sendo validada. O `mount()` original só vincula botões já existentes. O botão não reaparece ao concluir a autenticação. | Slot reconciliado após eventos de sessão/contexto, conservando a mesma validação de owner e sem executar venda. |
 | Espaço permanece como texto de espaço único | Reprodução QA: a lista inicial tem um espaço; outros chegam com modal aberto. `app.js` adia o remount nesse estado, mas não atualiza o seletor nem agenda esse remount para depois. Esse defeito também existe na base anterior; a condição do aparelho real ainda não foi confirmada. | Atualização apenas das barras de espaço ao receber a lista ou mudar o contexto. Mantém carrinho, observações e modal; usa os mesmos filtros de autorização. |
-| Lucro do dia desaparecido | Não reproduzido com owner canônico pronto. Home, Dashboard, cálculos de lucro, permissões e CSS de Home são idênticos em V225 e V226. A mesma fixture calcula R$48,00 no consolidado e R$18,00 no segundo espaço nas três versões. Carregamento temporário pode ocultar os indicadores; o teste de retorno ao owner restaura o lucro. Isso não comprova a causa no Android. | Nenhum cálculo ou permissão alterado. O desaparecimento persistente permanece pendente de observação do contexto no aparelho. |
+| Lucro do dia desaparecido | Não reproduzido com owner canônico pronto. Home, Dashboard, cálculos de lucro, permissões e CSS de Home são idênticos em V225 e V226. A mesma fixture calcula R$48,00 no consolidado e R$18,00 no segundo espaço nas três versões. Carregamento temporário pode ocultar os indicadores; o teste de retorno ao owner restaura o lucro. Isso não comprova a causa no Android. | Nenhum cálculo ou permissão alterado. O follow-up corrigiu o feedback enganoso durante loading/error em performance-access.js; o desaparecimento persistente no aparelho continua sem causa comprovada. Consulte V226-PROFIT-INVESTIGATION.md. |
 | Mudança geral da Home | Nenhuma remoção identificada no diff V225→V226. Meta, vendido hoje, lucro autorizado, resumo do dia, prioridades e resumo de sete dias permanecem no renderer. A função de gráfico já era aberta pelo resumo de sete dias, não exibida diretamente na Home. | Sem redesenho da Home nem inclusão de números artificiais. |
 
 Leituras de produção, sem gravação:
@@ -27,14 +27,14 @@ Leituras de produção, sem gravação:
 
 No frontend, a V226 acrescentou `prior-sales.js`, `prior-sales.css`, a policy compartilhada de datas, as entradas no checkout mobile/desktop, a integração dos callables, os recibos com datas comerciais e os metadados/PWA. Não editou `home-mobile.js`, `desktop-dashboard.js`, `spaces.js`, `team-access.js`, `performance-access.js`, `app.js`, `business-context.js`, `space-service.js` ou o CSS de Home/espaços.
 
-O hotfix atual modifica sete arquivos públicos: `checkout.js`, `desktop-sales.js`, `prior-sales.js`, `spaces.js`, `prior-sales.css`, `build-info.js` e `service-worker.js`. O manifesto exato está em `releases/v226/ui-hotfix-manifest.json`.
+O hotfix atual modifica oito arquivos públicos: `checkout.js`, `desktop-sales.js`, `prior-sales.js`, `spaces.js`, `performance-access.js`, `prior-sales.css`, `build-info.js` e `service-worker.js`. O manifesto exato está em `releases/v226/ui-hotfix-manifest.json`.
 
 Não altera o contrato de vendas, Functions, Rules, índices, Auth/Google, assinatura, cobrança V225, leitores, protocolo de Sync, filas ou mapas de permissão. A mudança do Service Worker é só o nome do cache estático; mantém a ativação e o fallback anteriores, sem apagar caches, IndexedDB, localStorage ou filas.
 
 ## Testes e limites da evidência
 
-- **189 testes focados aprovados, zero falhas**, em vinte arquivos de teste.
-- **21 novos cenários**: regressão do botão oculto; sessão tardia; larguras parametrizadas 320/360/390/430; entrada desktop; datas/motivo/pagamento externo; hidratação tardia dos espaços; preservação do carrinho e motivo; revogação; troca de empresa; lucro por espaço; restauração após loading; restrição de funcionários; escopo exato do hotfix; preservação de backend/Rules/Sync e cache sem limpeza.
+- **209 testes focados aprovados, zero falhas**, em 21 arquivos de teste após o follow-up de lucro e sessão.
+- **41 novos cenários** (21 do hotfix inicial e 20 do follow-up de lucro/sessão): regressão do botão oculto; sessão tardia; larguras parametrizadas 320/360/390/430; entrada desktop; datas/motivo/pagamento externo; hidratação tardia dos espaços; preservação do carrinho e motivo; revogação; troca de empresa; lucro por espaço; restauração após loading; restrição de funcionários; escopo exato do hotfix; preservação de backend/Rules/Sync e cache sem limpeza.
 - Os testes existentes de prévia, confirmação individual, resposta perdida e consulta idempotente continuam aprovados. Nenhuma operação comercial foi enviada a produção.
 - Lint e build validados. Pacote público gerado por allowlist, sem fixtures, diagnósticos, documentos internos ou implementação privada do backend.
 - Dois testes antigos falhavam também no commit publicado (evidência preservada em diretório de suporte): um inferia vínculo de cliente pela compra, incompatível com o diretório compartilhado vigente; outro exigia versões estáticas V171/V173. Foram atualizados para o contrato vigente, incluindo negativas para empresa estrangeira e cliente explicitamente vinculado a outro espaço. Nenhuma política comercial foi alterada para fazer o teste passar.
@@ -65,7 +65,7 @@ O servidor foi preparado para uma futura sessão autorizada de navegador. HTTP 2
 ## Publicação e rollback propostos
 
 1. **Não publicar agora.** Falta homologação visual real do candidato e esclarecer o lucro no contexto original.
-2. Depois da validação e autorização específica, reconfirmar `main`/domínio na base V226, as revisões de backend/Rules, manifesto e integridade dos sete arquivos públicos.
+2. Depois da validação e autorização específica, reconfirmar `main`/domínio na base V226, as revisões de backend/Rules, manifesto e integridade dos oito arquivos públicos.
 3. Publicar somente frontend/PWA, pelo fluxo de Pages sanitizado, mantendo os dois rulesets GitHub ativos. Não há deploy de Firebase neste hotfix.
 4. Conferir workflow, commit de build, namespace novo do Service Worker e hashes dos recursos; smoke de leitura, sem criar venda/recebimento.
 5. Homologar Home/Vender no Android antes de iniciar vendas anteriores reais. Uma venda anterior permanece owner-only, online, sujeita às validações do backend já publicado e à confirmação individual.
@@ -74,3 +74,5 @@ Rollback de frontend: a base `5957fb9b1e78481f940f58766e17257cc1b0336f` é compa
 
 **GO:** correções locais reproduzidas e regressões técnicas.
 **NO-GO:** declarar todo o incidente resolvido, homologação física concluída ou iniciar publicação/lançamentos reais nesta etapa.
+
+Follow-up detalhado: [V226-PROFIT-INVESTIGATION.md](V226-PROFIT-INVESTIGATION.md). O único acréscimo de runtime nesta continuação está no feedback de loading/error de performance-access.js, sem mudança da política de autorização ou dos leitores.
