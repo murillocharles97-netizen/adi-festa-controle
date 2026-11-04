@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "name": "billing-continuity-3l",
+  "branch": "codex/billing-continuity-on-v226",
+  "base": "f1fa1fa574538a5129755ae3baf899ec1c4bcb93",
+  "integratedFrom": "0c37c1161677a57cbdb74a3c2e35125c6f7ebc0c",
+  "billingBase": "e83635c0fee645ffeaf1a4dea9c6480cc153a2f9",
+  "deploymentAuthorized": false,
+  "productionReady": false,
+  "functions": {
+    "updateInOrder": ["getBillingCheckoutConfig", "createSubscription"],
+    "create": [],
+    "onlyExplicitNames": true,
+    "entrypointBodyChanged": ["getBillingCheckoutConfig"],
+    "dependencyOnlyUpdate": ["createSubscription"]
+  },
+  "runtimeFiles": [
+    "functions/src/index.js",
+    "functions/src/services/legacy-source-billing-guard.js",
+    "functions/src/services/legacy-cancellation-evidence.js",
+    "functions/src/services/billing-migration-status-service.js",
+    "js/plans.js"
+  ],
+  "supportFiles": [
+    "scripts/plan-subscription-extension.cjs",
+    "scripts/plan-billing-reservation-proof.cjs",
+    "scripts/verify-billing-continuity-release.cjs",
+    "tests/billing-continuity.test.cjs",
+    "tests/billing-continuity-ui.test.cjs",
+    "tests/emulator/billing-continuity.integration.cjs",
+    "tests/emulator/billing-migration-hotfix.integration.cjs",
+    "releases/billing-continuity/deploy-manifest.json",
+    "docs/billing-continuity-3l.md",
+    "docs/billing-continuity-v226-integration.md"
+  ],
+  "rules": [],
+  "indexes": [],
+  "subscriptionExtensionExecuted": false,
+  "reservationRepairExecuted": false,
+  "commercialWrites": false,
+  "v3Activation": false,
+  "googleChanged": false,
+  "frontendVisualHotfixIncluded": false,
+  "visualHotfixPreservedCommit": "c06402d494b1e529ea7d8498f6406499873bfacf",
+  "publishedVisualHotfixesPreserved": ["c06402d494b1e529ea7d8498f6406499873bfacf", "f1fa1fa574538a5129755ae3baf899ec1c4bcb93"],
+  "privateEvidenceCollections": ["billingLegacyCancellationProofs", "billingMigrationRepairAuthorizations"],
+  "rollback": {
+    "source": "f1fa1fa574538a5129755ae3baf899ec1c4bcb93",
+    "localReference": "rollback/billing-continuity-compatible-v226",
+    "requiresSpecificAuthorization": true,
+    "keepWebhooksAndReconciliation": true,
+    "keepScheduledRetryGuard": true,
+    "deleteData": false,
+    "replay": false
+  },
+  "remainingGates": [
+    "Mercado Pago confirmation before attesting retained retry metadata as non-executable",
+    "Specific administrative proof and reservation repair authorizations",
+    "Migration notice Android/PWA QA before activation; preserve published V226 metadata and storage strategy",
+    "Selective production preflight and explicit deploy authorization",
+    "Owner confirmation of the official Pro quote/payment method before a charge"
+  ]
+}

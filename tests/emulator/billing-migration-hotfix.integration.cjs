@@ -134,3 +134,15 @@ test('lost repair response stays a read-only receipt lookup even if an old retry
 });
 
 test('inconsistent signed query/body IDs are diagnosed before provider lookup or persistence',async()=>{const n=providerCalls.length,before=(await db.collection('webhookEvents').get()).size;assert.equal(await webhook('ORD_QA_CASE',undefined,{bodyDataId:'ord_qa_case',expectedStatus:401}),'invalid-signature');assert.equal(providerCalls.length,n);assert.equal((await db.collection('webhookEvents').get()).size,before);});
+
+test('authenticated owner explicitly reads migration eligibility; V225 default config remains compatible and creates no payment',async()=>{
+ const c=await seed(),n=providerCalls.filter(x=>x.method!=='GET').length,before=(await c.root.get()).data();
+ const legacy=await invoke('getBillingCheckoutConfig',c,{catalogOnly:true});assert.equal(legacy.catalogVersion,2);assert.equal(legacy.migrationEligibility,undefined);
+ const result=await invoke('getBillingCheckoutConfig',c,{catalogOnly:true,checkMigrationEligibility:true});assert.equal(result.migrationEligibility.status,'ready_for_quote');assert.equal(result.migrationEligibility.paymentCreated,false);assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);assert.deepEqual((await c.root.get()).data(),before);
+ await assert.rejects(invoke('getBillingCheckoutConfig',c,{catalogOnly:true,checkMigrationEligibility:true},c.seller),e=>e.code==='permission-denied');
+});
+
+test('authenticated consultation of a stuck reservation does not repair it or create an authorization proof',async()=>{
+ const c=await seed({stuck:true}),ref=db.doc('legacyPlanTransitions/'+c.bid),before=(await ref.get()).data(),n=providerCalls.filter(x=>x.method!=='GET').length,result=await invoke('getBillingCheckoutConfig',c,{catalogOnly:true,checkMigrationEligibility:true});
+ assert.equal(result.migrationEligibility.status,'reservation_review_required');assert.equal(result.migrationEligibility.canStartNewCheckout,false);assert.deepEqual((await ref.get()).data(),before);assert.equal((await db.doc('billingMigrationRepairAuthorizations/'+idFor(c.bid,c.op)).get()).exists,false);assert.equal(providerCalls.filter(x=>x.method!=='GET').length,n);
+});

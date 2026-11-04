@@ -341,7 +341,8 @@ exports.getBillingCheckoutConfig=onCall(FUNCTION_OPTIONS,async request=>{
   try{
     const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId);
     const migrationReservation=await require('./services/legacy-checkout-recovery-service').legacyCheckoutRecoveryService(db,null).summary({businessId,uid:context.uid});
-    if(request.data?.catalogOnly===true)return{catalogVersion:2,migrationReservation};
+    const migrationEligibility=request.data?.checkMigrationEligibility===true?await require('./services/billing-migration-status-service').billingMigrationStatus(db,mp(),{businessId,uid:context.uid}):undefined;
+    if(request.data?.catalogOnly===true)return{catalogVersion:2,migrationReservation,...(migrationEligibility?{migrationEligibility}:{})};
     const publicKey=String(MP_PUBLIC_KEY.value()||'').trim();
     if(!/^(?:APP_USR|TEST)-[A-Za-z0-9_-]{16,}$/.test(publicKey))throw new HttpsError('failed-precondition','O checkout mensal com cartão ainda não está configurado.');
     return{catalogVersion:2,publicKey,environment:MP_ENV.value(),deviceIdRequired:true,threeDsMode:'on_fraud_risk',migrationReservation};

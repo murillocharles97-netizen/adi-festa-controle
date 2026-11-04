@@ -1086,10 +1086,12 @@
     return window.PlanLimitService?.canUseFeature?.(feature)?.ok !== false;
   }
   function legacyNotice(force=false) {
-    const subscription=context().subscription,migration=subscription?.legacyMigration;
+    const current=context(),stateContext=current.state,uid=current.session.user?.uid,member=stateContext.member;
+    if(!uid||stateContext.loading||stateContext.error||stateContext.role!=='owner'||current.business.ownerId!==uid||stateContext.userProfile?.uid!==uid||stateContext.userProfile?.active!==true||stateContext.userProfile?.businessId!==stateContext.businessId||member&&(member.role!=='owner'||member.status!=='active'))return '';
+    const subscription=current.subscription,migration=subscription?.legacyMigration;
     if(migration?.activatedAt&&migration.status==='cancellation_pending')return '<section class="plan-legacy-notice" role="status"><h3>Novo plano ativo</h3><p>Seu acesso ao novo plano já está liberado. O encerramento da recorrência anterior ainda está pendente; não contrate outra assinatura. Estamos tentando concluir esta etapa.</p><button type="button" class="btn btn-primary" data-legacy-plans>Ver assinatura</button></section>';
     const grant=subscription?.administrativeAccess,end=globalThis.VeconiPlanCatalog?.dateMs?.(grant?.endsAt);
-    if(grant?.financialConfirmation===false&&Number.isFinite(end)&&end>Date.now()&&grant.status!=='superseded_by_paid_migration')return '<section class="plan-legacy-notice" role="status"><h3>Acesso temporário preservado</h3><p>Liberação administrativa até '+esc(new Date(end).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))+'. Esta tolerância não é pagamento. Confira o plano do catálogo atual e o valor final antes de contratar.</p><button type="button" class="plan-manage-button" data-legacy-plans>Ver planos e assinatura</button></section>';
+    if(grant?.financialConfirmation===false&&Number.isFinite(end)&&end>Date.now()&&grant.status!=='superseded_by_paid_migration')return '<section class="plan-legacy-notice" role="status"><h3>Regularize seu plano com o acesso preservado</h3><p>Liberação administrativa até '+esc(new Date(end).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))+'. A assinatura continua pendente; esta tolerância não é pagamento. Tentativas pendentes ou recusadas não encerram essa liberação antes do prazo.</p><p>Confira a situação da contratação anterior. Depois, escolha o Pro, revise a cotação oficial e confirme Pix ou cartão no checkout. Nenhuma cobrança será criada por este aviso.</p><button type="button" class="plan-manage-button" data-legacy-plans>Ver planos e assinatura</button><button type="button" class="plan-manage-button" data-check-migration>Consultar migração</button><p data-migration-status role="status"></p></section>';
     const state=globalThis.VeconiPlanCatalog?.legacyState?.(subscription);
     if(!state)return '';
     if(!state.legacy||(!force&&!state.showNotice))return '';
@@ -1103,7 +1105,8 @@
   let legacyNoticeTimer=null;
   function syncLegacyNotice(){
     clearTimeout(legacyNoticeTimer);
-    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(context().subscription);
+    const current=context(),scope=()=>JSON.stringify([window.TeamAccess?.captureSession?.(),window.FirebaseSession?.user?.uid,window.BusinessContext?.get?.().businessId]);
+    const legacy=globalThis.VeconiPlanCatalog?.legacyState?.(current.subscription);
     if(legacy?.legacy&&legacy.paidThrough&&!legacy.expired){
       const end=Date.parse(legacy.paidThrough),boundary=legacy.showNotice?end:end-7*86400000;
       legacyNoticeTimer=setTimeout(()=>{const state=window.BusinessContext?.get?.();if(state?.business&&state?.userProfile)window.BusinessContext.set({business:state.business,userProfile:state.userProfile,member:state.member});syncLegacyNotice();},Math.max(1000,Math.min(86400000,boundary-Date.now()+50)));
@@ -1113,6 +1116,19 @@
     const app=document.getElementById('app');if(!markup||!app)return;
     const notice=document.createElement('div');notice.id='legacy-plan-notice';notice.innerHTML=markup;
     notice.querySelector('[data-legacy-plans]').onclick=()=>{if(window.Router?.ir)window.Router.ir('planos');else location.hash='#/planos';};
+    const check=notice.querySelector('[data-check-migration]');
+    if(check)check.onclick=async()=>{
+      if(check.disabled)return;const origin=scope(),status=notice.querySelector('[data-migration-status]');check.disabled=true;notice.querySelector('[data-migration-offer]')?.remove();status.textContent='Consultando a contratação anterior. Nenhuma cobrança será criada.';
+      try{
+        const response=await window.FirebaseCallable('getBillingCheckoutConfig',{companyId:current.state.businessId,catalogOnly:true,checkMigrationEligibility:true});
+        if(!notice.isConnected||origin!==scope())return;const result=(response.data??response).migrationEligibility;
+        if(!result)throw Error('A consulta ainda não está disponível nesta versão do servidor. Nenhuma cobrança foi criada.');
+        status.textContent=result.status==='blocked'?result.message:result.status==='reservation_review_required'?'A tentativa interrompida precisa de verificação autorizada em Planos → Gerenciar assinatura. Nenhuma cobrança foi criada.':result.status==='payment_pending'?'Existe uma contratação aguardando confirmação. Consulte o pagamento existente; não inicie outro.':result.status==='ready_for_quote'?'Conferência concluída. Abra Planos, escolha o Pro e revise o valor final antes de confirmar uma contratação.':'A situação da assinatura foi atualizada. Confira Planos e assinatura.';
+        const oldOffer=notice.querySelector('[data-migration-offer]');oldOffer?.remove();const offer=result.offer;
+        if(offer?.catalogVersion===2&&offer.planId==='premium'&&offer.billingCycle==='monthly'&&offer.currency==='BRL'&&Number.isFinite(offer.amount)&&offer.amount>0&&offer.requiresCheckoutConfirmation===true&&Number.isFinite(Date.parse(offer.quotedAt))&&Date.parse(offer.quotedAt)<=Date.now()+60000&&Date.parse(offer.expiresAt)>Date.now()&&Date.parse(offer.expiresAt)<=Date.parse(offer.quotedAt)+300000){const line=document.createElement('p');line.dataset.migrationOffer='';line.textContent='Pro: '+money(offer.amount)+'/mês, consultado no servidor. Sem desconto aplicado. Confira a cotação final e eventuais cupons no checkout antes de confirmar.';status.after(line);setTimeout(()=>line.remove(),Date.parse(offer.expiresAt)-Date.now());}
+      }catch(error){if(notice.isConnected&&origin===scope())status.textContent=error.message||'Não foi possível consultar agora. Nenhuma cobrança foi criada.';}
+      finally{if(notice.isConnected&&origin===scope())check.disabled=false;}
+    };
     app.prepend(notice);
   }
   function syncNavigation() {
