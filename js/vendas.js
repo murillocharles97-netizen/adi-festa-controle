@@ -70,6 +70,8 @@ window.Vendas = (() => {
         (v) => v.operationId === operationId,
       );
     if (existente) {
+      if(d.installmentTerms){const t=d.installmentTerms,p=existente.installmentPlan;if(!p||p.count!==Number(t.count)||p.downPaymentCents!==window.InstallmentPlan.cents(t.downPayment||0)||p.firstDueDate!==t.firstDueDate||p.downPaymentMethod!==(t.downPaymentMethod||"pix"))throw Error("Esta operação já possui outro parcelamento. Consulte a venda existente.");}
+
       if (
         explicitSpaceId &&
         existente.spaceId &&
@@ -91,6 +93,11 @@ window.Vendas = (() => {
       if (window.SyncFirebase?.assertCustomerForSale) window.SyncFirebase.assertCustomerForSale(d.clienteId);
       else if (window.FirebaseSession?.user && Number(window.AdiFestaBuild?.release) >= 205)
         throw Error('Atualize o aplicativo para confirmar o cliente. Nenhuma venda foi registrada.');
+    }
+    if(d.installmentTerms){
+      if(window.OperationalReadPolicy?.restricted?.())throw Error('Crediário indisponível neste contexto restritivo. Nenhuma venda foi registrada.');
+      if(window.AdiFestaBuild?.installmentCreationPaused)throw Error('Novos crediários estão pausados. As parcelas existentes foram preservadas.');
+      if(!d.clienteId||d.status!=='fiado'||d.formaPagamento!=='fiado'||d.onlineOrderId)throw Error('Crediário exige cliente identificado e venda Fiado no caixa.');
     }
     const customerBalance = d.status === "fiado"
       ? getCurrentCustomerBalance(d.clienteId, currentData) : null;
@@ -285,6 +292,10 @@ window.Vendas = (() => {
             }
           : {}),
       };
+      if(d.installmentTerms){
+        criada.installmentPlan=window.InstallmentPlan.create({...d.installmentTerms,total:valorFinal,saleDate:window.InstallmentPlan.today(new Date(data))});
+        window.InstallmentPlan.assertSale(criada);
+      }
       db.vendas.push(criada);
       itens.forEach((i) => {
         const p = db.produtos.find((x) => x.id === i.produtoId);

@@ -694,8 +694,9 @@
     let remaining = Math.max(0, n(amount));
     const sales = (db.vendas || []).filter((sale) =>
       String(sale.clienteId || sale.clientId) === String(clientId) &&
-      sale.status === "fiado" &&
-      sale.desfeita !== true &&
+        (sale.status === "fiado" || sale.formaPagamento === "fiado") &&
+        sale.desfeita !== true && !sale.deletedAt && sale.active !== false &&
+        (!options.saleId || sale.id === options.saleId) &&
       (!options.businessId || !sale.businessId || String(sale.businessId) === String(options.businessId)),
     ).sort((a, b) => new Date(a.data || a.createdAt) - new Date(b.data || b.createdAt));
     const allocations = [];

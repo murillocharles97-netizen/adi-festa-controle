@@ -68,6 +68,7 @@ function runtime() {
     "js/clientes.js",
     "js/produtos.js",
     "js/product-variations.js",
+    "js/sale-money.js",
     "js/vendas.js",
     "js/fiados.js",
   ])

@@ -136,7 +136,7 @@ window.Checkout = (() => {
         recentProducts,
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option></select></div><select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(card).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option>${window.AdiFestaBuild?.installmentCreationPaused||window.OperationalReadPolicy?.restricted?.()?'':'<option value="crediario">Crediário / Parcelado</option>'}</select></div>${window.InstallmentCredit?.fields()||''}<select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -528,6 +528,7 @@ window.Checkout = (() => {
     draftDetails = {
       clientId: document.querySelector("#sale-client")?.value || draftDetails.clientId || "",
       paymentMethod: document.querySelector("#sale-payment-method")?.value || draftDetails.paymentMethod || "pix",
+      installmentTerms: window.InstallmentCredit?.read(),
       note: document.querySelector("#sale-note")?.value ?? draftDetails.note ?? "",
       discountValue: document.querySelector("#discount-value")?.value ?? draftDetails.discountValue ?? "0",
       discountPercent: document.querySelector("#discount-percent")?.value ?? draftDetails.discountPercent ?? "0",
@@ -588,7 +589,8 @@ window.Checkout = (() => {
       discountValue = document.querySelector("#discount-value"), discountPercent = document.querySelector("#discount-percent");
     if (client && [...client.options].some((option) => option.value === draftDetails.clientId)) client.value = draftDetails.clientId;
     if (payment) payment.value = draftDetails.paymentMethod || "pix";
-    if (status) status.value = payment?.value === "fiado" ? "fiado" : "pago";
+    if (status) status.value = ["fiado","crediario"].includes(payment?.value) ? "fiado" : "pago";
+    window.InstallmentCredit?.restore(draftDetails.installmentTerms);
     if (note) note.value = draftDetails.note || "";
     if (discountValue) discountValue.value = draftDetails.discountValue || "0";
     if (discountPercent) discountPercent.value = draftDetails.discountPercent || "0";
@@ -892,8 +894,9 @@ window.Checkout = (() => {
     document.querySelector("#sale-status").onchange = drawCart;
     document.querySelector("#sale-payment-method")?.addEventListener("change", event => {
       window.CheckoutPaymentMethod = event.target.value;
-      document.querySelector("#sale-status").value = event.target.value === "fiado" ? "fiado" : "pago";
+      document.querySelector("#sale-status").value = ["fiado","crediario"].includes(event.target.value) ? "fiado" : "pago";
       invalidateAttempt();
+      window.InstallmentCredit?.update();
       if (activeConflict && event.target.value !== "fiado") { activeConflict = null; setSubmissionState("normal"); }
       drawCart();
     });
@@ -986,6 +989,7 @@ window.Checkout = (() => {
       if(window.PriorSales?.active?.()){
         if(!cart.length&&!window.PriorSales.locked())return toast('Adicione ao menos um produto.',true);
         const priorScope=window.TeamAccess?.captureSession?.();finishing=true;setSubmissionState('processing','Preparando a revisão online…');
+        if(document.querySelector('#sale-payment-method')?.value==='crediario')return validationError('Crediário está disponível apenas para novas vendas nesta versão.');
         try{await window.PriorSales.submit({itens:structuredClone(cart),clienteId:document.querySelector('#sale-client')?.value||null,formaPagamento:document.querySelector('#sale-payment-method')?.value||'pix',observacao:document.querySelector('#sale-note')?.value||''},async sale=>{
           cart=[];selectedCampaignIds.clear();manual=true;discountKind='historical_manual';activeAttempt=null;clearDraft();draftDetails={clientId:'',paymentMethod:'pix',note:'',discountValue:'0',discountPercent:'0'};
           closeCartSurface({immediate:true});Recibos.mostrar(sale,sale.clienteId?clients().getById(sale.clienteId):null);window.PriorSales.afterConfirmed();
@@ -1017,7 +1021,7 @@ window.Checkout = (() => {
       const businessId = String(DB.getBusinessId?.() || window.FirebaseSession?.businessId || "").trim(),
         clienteId = document.querySelector("#sale-client").value || null,
         paymentMethod = document.querySelector("#sale-payment-method")?.value || window.CheckoutPaymentMethod || "pix",
-        status = paymentMethod === "fiado" ? "fiado" : document.querySelector("#sale-status").value;
+        status = ["fiado","crediario"].includes(paymentMethod) ? "fiado" : document.querySelector("#sale-status").value;
       if (!businessId) return validationError("Não foi possível identificar a empresa desta venda. Entre novamente e tente de novo.");
       if (status === "fiado" && !clienteId)
         return validationError("Selecione um cliente para vender fiado.");
@@ -1044,10 +1048,11 @@ window.Checkout = (() => {
         finally{finishing=false;}
       }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
-      const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
+      const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
+          if(activeAttempt?.operationId&&activeAttempt.operationId!==attempt.operationId&&(DB.carregar().vendas||[]).some(s=>s.operationId===activeAttempt.operationId))return validationError("A tentativa anterior já gerou uma venda. Consulte sua confirmação antes de alterar ou repetir o carrinho.");
           activeAttempt = attempt;
           saveDraft();
           finishing = true;
@@ -1060,7 +1065,8 @@ window.Checkout = (() => {
             clienteId,
             status,
             operationId: attempt.operationId,
-            formaPagamento: paymentMethod,
+            formaPagamento: paymentMethod === "crediario" ? "fiado" : paymentMethod,
+            ...(paymentMethod === "crediario" ? {installmentTerms:window.InstallmentCredit.read()} : {}),
             observacao: document.querySelector("#sale-note").value,
             itens: cart,
             ajusteManual: manual,

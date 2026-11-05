@@ -254,6 +254,8 @@
     "js/workspace-runtime.js",
     "js/workspace-writer.js",
     "manifest.json",
-    "service-worker.js"
+    "service-worker.js",
+    "functions/src/shared/installment-plan.js",
+    "js/installment-credit.js"
   ]
 }

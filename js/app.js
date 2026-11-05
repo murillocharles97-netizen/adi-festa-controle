@@ -375,14 +375,14 @@
   }
   function fiadoCard(c) {
     const tel = Utils.somenteNumeros(c.telefone);
-    return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(Math.abs(c.saldo))}</b></div><div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon("banknote-arrow-down")} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon("copy")} Copiar</button></div></article>`;
+    return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(Math.abs(c.saldo))}</b></div>${window.InstallmentCredit?.button(c.id)||''}<div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon("banknote-arrow-down")} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon("copy")} Copiar</button></div></article>`;
   }
   function fiados() {
     const lista = Fiados.listar().sort((a, b) => a.saldo - b.saldo),
       total = lista.reduce((s, c) => s + Math.abs(c.saldo), 0);
     return (
       cabecalho("Fiados e pendências", "Do maior débito para o menor.") +
-      `<section class="metrics" style="margin-bottom:18px">${metric("Total em aberto", dinheiro(total), `${lista.length} cliente(s)`, "hand-coins")}</section><div class="toolbar"><input class="search" id="fiado-search" placeholder="Buscar cliente..."></div><section class="entity-grid" id="fiados-list">${lista.map(fiadoCard).join("") || vazio("Nenhuma pendência. Tudo em dia!")}</section>`
+      `<section class="metrics" style="margin-bottom:18px">${metric("Total em aberto", dinheiro(total), `${lista.length} cliente(s)`, "hand-coins")}</section><div class="toolbar"><input class="search" id="fiado-search" placeholder="Buscar cliente...">${window.InstallmentCredit?.available()?'<button class="btn btn-light" data-installment-client="">Todos os crediários / quitados</button>':''}</div><section class="entity-grid" id="fiados-list">${lista.map(fiadoCard).join("") || vazio("Nenhuma pendência. Tudo em dia!")}</section>`
     );
   }
   function historicoTabela(lista, titulo = "Histórico") {

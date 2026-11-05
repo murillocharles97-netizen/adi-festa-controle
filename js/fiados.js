@@ -30,6 +30,7 @@ window.Fiados = (() => {
     if (existing) {
       if (options.spaceId && String(existing.spaceId || "") !== String(options.spaceId))
         throw Error("Este recebimento já pertence a outro espaço.");
+      if(options.saleId && (existing.installmentSaleId!==options.saleId||Number(existing.requestedAmount)!==Number(valor)||existing.paymentMethod!==options.paymentMethod||String(existing.clienteId)!==String(clienteId)))throw Error('Identificador já utilizado para outro recebimento.');
       window.SyncFirebase?.assertPaymentTracked?.(existing);
       return existing;
     }
@@ -40,6 +41,11 @@ window.Fiados = (() => {
     ((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
+      const target=options.saleId?(db.vendas||[]).find(s=>s.id===options.saleId):null;
+      if(options.saleId&&(!target?.installmentPlan||target.clienteId!==clienteId||target.deletedAt||target.active===false||target.desfeita||target.spaceId!==spaceId||target.businessId!==DB.getBusinessId()||!['pix','cash'].includes(options.paymentMethod)))throw Error('Venda parcelada, cliente, espaço ou meio de recebimento inválido.');
+      if(target&&Math.abs(Number(valor)*100-Math.round(Number(valor)*100))>0.00001)throw Error('Informe o recebimento em centavos.');
+      if(target&&(db.pagamentos||[]).some(p=>p.installmentSaleId===target.id&&!p.financialAppliedAt&&!['cancelled','superseded'].includes(p.status)))throw Error('Há um recebimento desta venda aguardando confirmação. Consulte o registro existente antes de receber novamente.');
+      if(target&&(!Number.isFinite(Number(valor))||Number(valor)<=0||Math.round(Number(valor)*100)>Math.round(Number(target.creditRemainingAmount)*100)))throw Error('Valor excede o saldo desta venda.');
       const debt = Math.abs(Math.min(0, Number(client.saldo || 0)));
       const requested = Number(valor);
       const received = options.allowCredit
@@ -87,6 +93,7 @@ window.Fiados = (() => {
         effectiveAmount: received,
         paymentMode,
         paymentMethod: String(options.paymentMethod || "other"),
+        ...(target?{installmentSaleId:target.id}:{}),
         saldoAnterior: previousBalance,
         saldoNovo: client.saldo,
         expectedBalance: expected.expectedBalance,
@@ -123,12 +130,12 @@ window.Fiados = (() => {
         client.legacyBalanceRemaining = client.legacyBalance;
         client.campaignFinanceVersion = 2;
       }
-      pagamento.legacyAmount = Math.min(received, Math.max(0, Number(client.legacyBalanceRemaining || 0)));
+      pagamento.legacyAmount = target ? 0 : Math.min(received, Math.max(0, Number(client.legacyBalanceRemaining || 0)));
       client.legacyBalanceRemaining = Number(Math.max(0, Number(client.legacyBalanceRemaining || 0) - pagamento.legacyAmount).toFixed(2));
       const allocatable = Number((received - pagamento.legacyAmount).toFixed(2));
 
       if (allocatable > 0 && window.CampaignEngineV2) {
-        const allocate=data=>CampaignEngineV2.allocatePayment(data, clienteId, allocatable, pagamento.id, at, {businessId: pagamento.businessId});
+        const allocate=data=>CampaignEngineV2.allocatePayment(data, clienteId, allocatable, pagamento.id, at, {businessId: pagamento.businessId, saleId:target?.id});
         const allocations=window.OperationalReadPolicy?.restricted?.()?window.OperationalReadPolicy.debtOperation(db,clienteId,allocate):allocate(db);
         pagamento.allocations = allocations.map((allocation) => ({
           saleId: allocation.saleId,
@@ -146,6 +153,7 @@ window.Fiados = (() => {
         }));
       }
 
+      if(target&&Math.round(pagamento.allocatedAmount*100)!==Math.round(received*100))throw Error('O recebimento não foi alocado integralmente à venda.');
       db.pagamentos.push(pagamento);
       db.movimentacoes.push({ ...pagamento });
     })(nextData);
@@ -178,7 +186,7 @@ window.Fiados = (() => {
       if(flight)return flight;
       flight=(async()=>{
         assertCanReceive();window.TeamAccess?.assertSession?.(session);
-        const key=JSON.stringify([Number(value),String(note||''),options.paymentMode,options.paymentMethod,options.spaceId]);
+        const key=JSON.stringify([Number(value),String(note||''),options.paymentMode,options.paymentMethod,options.spaceId,options.saleId]);
         if(payment&&key!==inputKey)throw Object.assign(Error('Este recebimento já foi preparado com os dados anteriores. Confira a sincronização antes de registrar outro valor.'),{code:'payment-already-prepared'});
         if(!payment){payment=receber(clientId,value,note,{...options,operationId});inputKey=key;}
         else window.SyncFirebase?.assertPaymentTracked?.(payment);
@@ -191,21 +199,24 @@ window.Fiados = (() => {
     }};
   }
 
-  async function openReceive(clientId,{onRecorded}={}) {
+  async function openReceive(clientId,{onRecorded,saleId}={}) {
     if(window.OperationalReadPolicy?.restricted?.()){try{await window.SyncFirebase.prepareOperationalCustomer(clientId,'payment');}catch(error){Utils.toast(error.message,true);return;}}
     let attempt;try{attempt=receiptAttempt(clientId);}catch(error){Utils.toast(error.message,true);return;}
     const client=(DB.carregar().clientes||[]).find(c=>c.id===clientId);if(!client)return Utils.toast('Cliente não encontrado.',true);
-    const due=Math.abs(Math.min(0,Number(client.saldo||0)));if(!due)return Utils.toast('Este cliente não possui dívida em aberto.',true);
+    const target=saleId?(DB.carregar().vendas||[]).find(s=>s.id===saleId&&s.clienteId===clientId):null;
+    if(saleId&&!target?.installmentPlan)return Utils.toast('Venda parcelada não disponível. Atualize os dados.',true);
+    const due=target?Number(target.creditRemainingAmount):Math.abs(Math.min(0,Number(client.saldo||0)));if(!due)return Utils.toast('Este cliente não possui dívida em aberto.',true);
     const root=document.querySelector('#modal');if(!root)return;
     root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="receive-payment-title"><header class="modal-head"><h2 id="receive-payment-title">Receber pagamento</h2><button type="button" class="icon-btn" data-receive-close aria-label="Fechar">×</button></header><form><div class="modal-body viewport-scroll"><p><b>${esc(client.nome)}</b> · Saldo atual: ${money(due)}</p><div class="payment-kind"><label><input type="radio" name="kind" value="total" checked> Pagamento total</label><label><input type="radio" name="kind" value="partial"> Parcial</label></div><label class="field">Valor recebido<input name="valor" type="number" inputmode="decimal" min="0.01" max="${due}" step="0.01" value="${due.toFixed(2)}" required></label>${spaceField()}<label class="field">Forma de pagamento<select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></label><label class="field">Observação<textarea name="observacao"></textarea></label><p>Saldo após receber: <b data-receive-after>${money(0)}</b></p><p data-receive-feedback role="alert" aria-live="assertive" tabindex="-1"></p><button type="button" class="btn btn-light" data-receive-restore hidden>Reabrir para restaurar acesso</button></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-receive-close>Cancelar</button><button type="submit" class="btn btn-primary" data-receive-confirm>Confirmar recebimento</button></footer></form></section></div>`;
     const form=root.querySelector('form'),button=form.querySelector('[data-receive-confirm]'),feedback=form.querySelector('[data-receive-feedback]'),restore=form.querySelector('[data-receive-restore]'),value=form.elements.valor,dialog=root.querySelector('[role=dialog]');let busy=false;dialog.classList.add('receipt-payment-dialog');
+    if(target){[...form.elements.paymentMethod.options].forEach(o=>{if(!['pix','cash'].includes(o.value))o.remove();});const space=form.querySelector('[name=paymentSpaceId]');if(space){space.value=target.spaceId;space.disabled=true;}}
     window.Modais?.layout?.(dialog);const close=()=>{if(!busy&&root.contains(form))window.Modais?.fechar?.();};root.querySelectorAll('[data-receive-close]').forEach(b=>b.onclick=close);
     restore.onclick=()=>{if(!busy&&root.contains(form))location.reload();};
     const update=()=>form.querySelector('[data-receive-after]').textContent=money(Math.max(0,due-Number(value.value||0)));value.oninput=()=>{form.querySelector('[name=kind][value="'+(Math.round(Number(value.value)*100)===Math.round(due*100)?'total':'partial')+'"]').checked=true;update();};form.querySelectorAll('[name=kind]').forEach(r=>r.onchange=()=>{if(r.checked&&r.value==='total')value.value=due.toFixed(2);update();});
     dialog.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}else if(e.key==='Tab'){const list=[...dialog.querySelectorAll('button:not(:disabled),input,select,textarea')].filter(x=>!x.hidden),first=list[0],last=list.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
     form.onsubmit=async event=>{
       event.preventDefault();if(busy)return;busy=true;button.disabled=true;button.textContent='Confirmando registro…';feedback.textContent='';restore.hidden=true;
-      try{const data=new FormData(form),amount=Number(data.get('valor')),payment=await attempt.confirm(amount,String(data.get('observacao')||''),{paymentMode:Math.round(amount*100)===Math.round(due*100)?'total':'partial',paymentMethod:String(data.get('paymentMethod')||'other'),spaceId:String(data.get('paymentSpaceId')||'')});
+      try{const data=new FormData(form),amount=Number(data.get('valor')),payment=await attempt.confirm(amount,String(data.get('observacao')||''),{saleId, paymentMode:target?'partial':Math.round(amount*100)===Math.round(due*100)?'total':'partial',paymentMethod:String(data.get('paymentMethod')||'other'),spaceId:target?.spaceId||String(data.get('paymentSpaceId')||'')});
         if(!form.isConnected||!root.contains(form))return;
         if(onRecorded)onRecorded(payment,client);else{window.Modais?.fechar?.();Utils.toast(payment.financialAppliedAt?'Recebimento confirmado na nuvem.':'Recebimento salvo neste aparelho. Aguardando confirmação na nuvem.');}
       }catch(error){if(form.isConnected&&root.contains(form)){feedback.textContent=error.message;feedback.focus();restore.hidden=!['permission-session-invalid','permission-session-retired','permission-access-error'].includes(error.code);}}
