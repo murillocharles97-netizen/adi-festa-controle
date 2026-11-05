@@ -12,7 +12,7 @@
   const isValidSale=sale=>sale&&sale.ativo!==false&&sale.active!==false&&sale.desfeita!==true&&!sale.deletedAt&&!INVALID_SALE_STATUSES.has(normalizedStatus(sale.status||sale.saleStatus||sale.tipo));
   const saleValue=sale=>Number(sale.valorFinal??sale.valorTotal??0);
   const saleCost=sale=>Number.isFinite(Number(sale.custoTotal))?Number(sale.custoTotal):(sale.itens||[]).reduce((sum,item)=>sum+Number(item.custoTotal??Number(item.custoUnitario||0)*Number(item.quantidade||0)),0);
-  const saleDebt=sale=>normalizedStatus(sale?.status)!=='fiado'||sale?.creditSettled===true?0:Math.max(0,Number(sale.creditRemainingAmount??sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal??0));
+  const saleDebt=sale=>sale?.installmentPlan?window.InstallmentPlan.rows(sale).filter(r=>r.dueDate<=window.InstallmentPlan.today()).reduce((n,r)=>n+r.remainingCents,0)/100:normalizedStatus(sale?.status)!=='fiado'||sale?.creditSettled===true?0:Math.max(0,Number(sale.creditRemainingAmount??sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal??0));
   const percentage=(today,yesterday)=>yesterday>0?(today-yesterday)/yesterday*100:null;
   const renewalCache={value:null,updatedAt:0,promise:null};
   const RENEWAL_CACHE_MS=120000;
@@ -28,7 +28,7 @@
     const items=today.reduce((sum,sale)=>sum+(sale.itens||[]).reduce((subtotal,item)=>subtotal+Number(item.quantidade??item.quantity??0),0),0);
     const customers=new Set(today.map(sale=>sale.clienteId||sale.clientId).filter(Boolean)).size;
     const scopedClients=(db.clientes||[]).filter(client=>client.ativo!==false&&client.active!==false&&!client.deletedAt),newCustomers=scopedClients.filter(client=>dayKey(client.criadoEm||client.createdAt)===todayKey).length;
-    const scopedDebtByClient=isAllSpaces?null:sales.reduce((map,sale)=>{const id=sale.clienteId||sale.clientId,amount=saleDebt(sale);if(id&&amount)map.set(String(id),(map.get(String(id))||0)+amount);return map},new Map()),debtors=scopedClients.filter(client=>isAllSpaces?Number(client.saldo)<0:(scopedDebtByClient?.get(String(client.id))||0)>0),debt=isAllSpaces?debtors.reduce((sum,client)=>sum+Math.abs(Number(client.saldo)),0):[...(scopedDebtByClient?.values()||[])].reduce((sum,value)=>sum+value,0);
+    const scopedDebtByClient=isAllSpaces?null:sales.reduce((map,sale)=>{const id=sale.clienteId||sale.clientId,amount=saleDebt(sale);if(id&&amount)map.set(String(id),(map.get(String(id))||0)+amount);return map},new Map()),debtors=scopedClients.filter(client=>isAllSpaces?(window.Clientes?.financialStatus?.(client).saldo??Number(client.saldo))<0:(scopedDebtByClient?.get(String(client.id))||0)>0),debt=isAllSpaces?debtors.reduce((sum,client)=>sum+(window.Clientes?.financialStatus?.(client).debt??Math.abs(Number(client.saldo))),0):[...(scopedDebtByClient?.values()||[])].reduce((sum,value)=>sum+value,0);
     const products=(db.produtos||[]).filter(product=>product.ativo!==false),out=products.filter(product=>getProductStockStatus(product)==='esgotado'),low=products.filter(product=>getProductStockStatus(product)==='baixo');
     const localRenewals=window.CustomerSubscriptions?.metrics?.(now.toISOString())||{dueToday:0,due7:0,forecastValue:0},renewals=isAllSpaces?(renewalCache.value||localRenewals):{dueToday:0,due7:0,forecastValue:0};
     const pendingOrders=(db.catalogOrders||[]).filter(order=>window.OnlineOrderModel?.isV2(order)&&!order.deletedAt&&['recebido','pendente','novo'].includes(String(order.orderStatus||order.status||'').toLowerCase()));

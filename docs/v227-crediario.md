@@ -1,65 +1,79 @@
-# V227 — crediário próprio, candidato local
+# V227 — Parcelado integrado ao Fiado por vencimento
 
-## Base e isolamento
+## Estado e base
 
-Auditoria iniciada em 05/11/2026. `main` remoto confirmado em `f812c583e8336b142799d0735334f5d2ea330889`, sobre `f1fa1fa574538a5129755ae3baf899ec1c4bcb93`. Branch local `codex/v227-crediario`, checkout `C:/Users/Murillo/Documents/VECONI-V227-Crediario`. O checkout antigo da área de trabalho contém alterações de outras frentes e não foi utilizado. O checkout de continuidade da assinatura permanece intacto. O gerenciador de worktrees recusou o repositório fora das pastas deste chat; foi criado worktree Git nativo a partir da base correta.
+Ajuste local sobre `34d0f28e89cdc1ea0365032785d2480130ecf5d0`, branch `codex/v227-crediario`. A implementação anterior e seu rollback continuam preservados no Git. A base publicada permanece referência `f812c583e8336b142799d0735334f5d2ea330889`. Sem push, deploy, dados comerciais, Mercado Pago, assinatura ou alterações de Rules/índices/V3.
 
-Não houve push, deploy, consulta de documentos comerciais, cobrança, alteração de assinatura, tolerância, permissões ou limpeza. A consulta remota foi somente da referência Git. QA exclusivamente sintético; Emulator em projeto `demo-veconi-owner-v219`, Auth/Firestore em loopback. Navegador descartável bloqueia rede externa.
+## Arquitetura final
 
-## Auditoria da arquitetura
+Há **uma conta e um ledger**, os existentes. `clients.saldo` conserva o saldo contábil do total contratado ainda não recebido, com sinal negativo para dívida. Isso preserva IDs, débitos originais, conciliação, cancelamentos, registros antigos e confirmação de recebimentos. Esse campo bruto não é mais usado como valor exigível nas telas adaptadas de Fiado/clientes/dashboard/cobrança. Backup bruto continua preservando o saldo contábil total; não deve ser interpretado como dívida vencida.
 
-| Domínio | Módulos existentes e integração |
-| --- | --- |
-| Caixa | `js/checkout.js` prepara carrinho, cliente, espaço, tentativa persistida e confirmação; `js/vendas.js` calcula com `SaleMoney`, cria venda, débito e movimentos de estoque em uma operação write-ahead. |
-| Fiado | `js/fiados.js`, `js/campaign-engine-v2.js`: saldo canônico em `clients.saldo`; venda com `creditOriginalAmount`, `creditPaidAmount`, `creditRemainingAmount`; recebimentos em `payments`, alocações em `paymentAllocations`. |
-| Clientes | `js/clientes.js`, repositórios e contexto validam cliente/empresa; `prepareSaleCustomer` e `prepareCustomerForSale` preservados. |
-| Sincronização | `js/firebase/sync.js`, `commercial-commit-engine.js`, `operational-commit-service.js`: fila write-ahead, versão financeira, transação, hash de payload, `processedOperations`, `balanceEvents` determinísticos. Nenhum segundo pipeline. |
-| Estoque | `Vendas.registrar`, movimentos `saida_venda`, commit operacional e proteção de reservas existentes. Uma baixa na confirmação da venda; recebimentos não contêm movimentos de estoque. |
-| Recibos | `js/recibos.js` mantém recibo de venda e acrescenta calendário em HTML, texto e imagem. `receipt-message-ui.js`, `receipt-messages.js` e leitor canônico de confirmação continuam responsáveis pelo comprovante de recebimento. |
-| Financeiro | `financial-income-service.js` reconhece Fiado como venda não recebida; pagamento aplicado gera `credit_payment_{paymentId}` na data efetiva. Automação/configuração financeira já existente continua sendo respeitada. Não se habilita automação nem se faz backfill. |
-| Dashboard/histórico | Venda mantém `data`, `valorFinal` e `formaPagamento:'fiado'`: faturamento na data comercial, dívida no mesmo saldo, caixa somente pelos recebimentos. Histórico mantém IDs/autoria e recibos; novo painel permite consultar parcelas inclusive quitadas. Não foram criados novos totais que somem parcelas ao Fiado. |
-| Exportação | Backup existente preserva o objeto adicional da venda e recebimentos. CSV próprio contém parcelas, vencimentos, valores e saldos da visão carregada, com escape de células. Não é um extrato global de dados não hidratados. |
+O saldo **exigível** é uma projeção determinística, calculada no servidor pelo contrato imutável `sales.installmentPlan`, pelas alocações de pagamentos já existentes e pelo dia em `America/Sao_Paulo`:
 
-Autorizações preservadas: `sales.create` para vender; `customers.receiveDebt` para receber/consultar o painel; empresa, geração, cliente, espaço, autoria e entitlement no commit existente. Recebimento não concede edição da venda: somente os campos financeiros já permitidos. Rules, índices e política V3 não mudam. Os contextos restritivos cuja projeção não inclui parcelas ficam sem a nova modalidade/painel, sem ampliar a projeção ou as permissões.
+- Exigível agora: Fiado tradicional em aberto + entrada vencida + parcelas com vencimento menor ou igual ao dia corrente, descontando alocações.
+- Futuras: parcelas não pagas com vencimento posterior.
+- Total ainda devido: exigível + futuras. Crédito positivo existente é apresentado separadamente.
 
-## Modelo e invariantes
+Não se cria outro débito ao vencer uma parcela. Cada número de parcela existe uma única vez no plano validado e contribui uma vez para a fórmula. Portanto não há cron, materialização diária, corrida de lançamentos, dependência de abrir o aplicativo ou tarefa que precise recuperar dias perdidos. Uma consulta servidor no primeiro segundo do novo dia já calcula o novo exigível, mesmo sem sessões de aplicativo. Leituras não escrevem dados.
 
-`sales.installmentPlan` é um contrato imutável versão 1: moeda BRL, total/entrada em centavos, quantidade, primeiro vencimento, data comercial e parcelas numeradas. Quantidade entre 1 e 60; parcelas de ao menos um centavo; entrada menor que o total, inclusive zero. Dias 29–31 são limitados ao último dia de cada mês sem perder a âncora original nos meses seguintes. Resíduo de centavos é distribuído nas primeiras parcelas. Sem juros e multas.
+`getOperationalSyncReceipt(kind:'fiado_account')` expõe essa apuração dentro da transação/autorização existente. `commitOperationalSync` refaz a apuração sobre dados canônicos antes de aceitar o pagamento; não confia no saldo ou relógio do navegador. O leitor verifica que o `creditPaidAmount` dos contratos parcelados coincide com os registros imutáveis de `paymentAllocations`. Divergência interrompe, sem reparar ou apagar nada.
 
-**Uma dívida:** venda continua `formaPagamento:'fiado'` e debita o total uma vez. Calendário não é um segundo ledger. Situação das parcelas deriva de `creditPaidAmount`, alocando primeiro à entrada e depois em ordem de vencimento. Exibe aberta, parcial, quitada ou vencida; uma parcial também informa atraso. Cancelamentos existentes mantêm a venda e o calendário legíveis como cancelados.
+O módulo puro `functions/src/shared/fiado-account.js` compartilha as fórmulas com a prévia local. A consulta remota é obrigatória antes de preparar um novo recebimento parcelado. Uma prévia local não é prova financeira; comprovantes continuam dependendo do leitor canônico.
 
-**Entrada em duas etapas explícitas:** a entrada combinada NÃO significa dinheiro recebido. Confirma-se a venda, depois registra-se o Pix externo/dinheiro efetivamente recebido pelo mesmo fluxo de recebimentos. A interface e o recibo informam isso. Até esse registro, o saldo inclui a entrada. Nenhuma captura Pix, cartão, boleto, Mercado Pago ou chamada SaaS é iniciada.
+## Recebimento agregado
 
-`payments.installmentSaleId` identifica recebimento direcionado. O evento existente reduz o saldo do cliente e aloca exatamente àquela venda, sem consumir dívida histórica ou outras vendas. Permite valor parcial ou quitação antecipada, limitado ao restante. O recebimento geral do Fiado continua alocando cronologicamente, inclusive às vendas parceladas. O calendário acompanha ambos sem gravar parcelas mutáveis.
+O botão existente do Fiado recebe o valor do cliente, sem seleção de venda ou parcela. Pix e dinheiro são registros externos; não há iniciação de cobrança. O fluxo write-ahead, `payments`, `paymentAllocations`, `balanceEvents`, `processedOperations`, versão financeira, transação e hash original permanecem.
 
-O backend confere envelope, valor pedido/efetivo, método Pix/dinheiro, alocação integral, venda/cliente/espaço e plano; edição do calendário por recebimento é rejeitada. Repetição do ID reapresenta recibo, payload divergente é recusado e concorrência usa a versão financeira existente. Recebimento direcionado local pendente impede novo recebimento direcionado até confirmação. Troca de sessão é conferida nas ações e exportação. A fila original é preservada em falha; não se reprocessa histórico.
+Alocação determinística: dívida legada sem origem datada primeiro; depois vencimento, data comercial, ID da venda e número da parcela. Fiado tradicional participa pela data comercial; parcelas futuras não são consumidas pelo recebimento comum. Cada alocação registra valor, venda, parcela, vencimento e indicação de antecipação, dentro do evento já existente. A confirmação de campanhas continua no motor existente.
 
-## Resultado local e limites
+Antecipar exige marcar a opção explícita no mesmo formulário. O valor quita primeiro o exigível mais antigo e somente então as futuras mais antigas; não há desconto, juros ou multa. A antecipação reduz o total e as parcelas futuras sem transformá-las em exigível.
 
-- Caixa com modalidade Crediário / Parcelado, cliente obrigatório, configuração persistida no rascunho e incluída no fingerprint.
-- Fiado com painel de parcelas/quitados, recebimento parcial/integral/antecipado e histórico com acesso ao comprovante canônico.
-- Recibo de venda HTML/texto/imagem com calendário; CSV próprio; nenhum preço financeiro local relacionado ao SaaS.
-- Backend incremental: somente serviço de commit operacional e modelo puro adicional. Sem novas coleções, endpoints ou índices.
-- Entrada é recebida em etapa explícita; não há pagamento retroativo editável nesta versão. Data do recebimento é o momento do registro — receber externamente hoje é a operação suportada.
-- Antecipação amortiza em ordem de vencimento, sem desconto; não há escolha arbitrária de uma parcela futura nem renegociação de contrato.
-- Não há juros, multas, geração de cobranças, lembretes automáticos ou estorno parcial novo. Cancelamento com recebimentos permanece sujeito à conciliação existente.
-- QA não substitui homologação física Android/PWA, teste multiaparelho do negócio ou aprovação comercial. V3 restritiva excluída deste candidato.
-- Publicação futura exige revisar implantação do commit operacional antes do frontend: o backend V226 não suporta recebimento direcionado que pula dívida histórica. Não publicar apenas o frontend.
+O total recebido reduz o ledger contábil uma vez. O novo exigível é reapurado; nunca se soma o contrato novamente. Duplo clique usa a mesma tentativa; mesmo ID/payload reapresenta o recibo; payload diferente é rejeitado. Concorrência com IDs diferentes e versão financeira antiga não aplica um segundo efeito. Uma tentativa já preparada pode atravessar a virada do mês e ser aplicada com a alocação original, desde que não tenha havido outro movimento financeiro; a data de apuração não pode ser futura. Em conflito, a operação original fica preservada para revisão.
 
-## Testes e evidências
+## Exemplo obrigatório comprovado
 
-Evidências locais em `C:/Users/Murillo/.codex/visualizations/2026/11/05/`: `v227-unit.log`, `v227-regression.log`, `v227-emulator.log`, `v227-build.log`, `v227-browser/browser-results.json` e quatro screenshots.
+| Momento | Exigível | Futuras | Total ainda devido |
+| --- | ---: | ---: | ---: |
+| Antes do primeiro vencimento, com R$50 tradicionais | R$50 | R$2.800 | R$2.850 |
+| Primeira parcela de R$280 vence | R$330 | R$2.520 | R$2.850 |
+| Recebimento parcial de R$100 | R$230 | R$2.520 | R$2.750 |
+| Segunda parcela vence | R$510 | R$2.240 | R$2.750 |
 
-Resultado: 166 testes de domínio/DOM/caixa/contenção + 120 regressões de recibos/migração/hotfixes aprovados, zero falhas/skips na seleção final. Emulator: 23 cenários aprovados; browser: duas larguras aprovadas. Pacote público: 256 arquivos.
+Nesse cenário, os R$100 pagam os R$50 tradicionais mais antigos e R$50 da primeira parcela. Consultar novamente não cria evento de vencimento nem altera saldo ou versão financeira.
 
-Cobertura: valores fracionados, entrada zero, ano bissexto/fim de mês, plano inválido/adulterado, cliente/método errado, pagamento parcial/antecipado, dívida histórica preservada, tentativa repetida, perda de resposta, concorrência com IDs iguais/diferentes, permissão/espaço, uma baixa de estoque e um débito. Browser em 390/1366 px registra R$140 sintéticos numa venda de R$2.800, resultando em R$2.660 e um único recebimento.
+## Integração e interface
 
-A fixture antiga `financial-domain.test.js` foi atualizada para carregar o `SaleMoney` já exigido pela base. O gate histórico “release diff is limited” do hotfix V226 não se aplica a uma release posterior; os testes comportamentais do hotfix foram executados, e a preservação dos arquivos sensíveis é verificada separadamente pelo gate V227. A falha inicial de teste de valor adulterado motivou validação do envelope original antes da normalização; reteste no Emulator aprovado.
+- Caixa: opção **Parcelado**, cliente obrigatório, entrada zero/opcional, calendário mensal consistente em centavos e meses curtos. Contrato inteiro registrado na data comercial e estoque baixado uma vez.
+- Fiado: lista, total e ordenação usam exigível; futuras não aparecem como dívida vencida. Acesso à lista completa de contratos/quitados permanece.
+- Cliente/CRM: exigível, futuras, total devido e próximos vencimentos; consulta canônica ao abrir o resumo quando possível. Filtros, cartões, dashboard e mensagens de cobrança passam a usar o exigível nas integrações adaptadas.
+- Recibo da venda: valor total contratado e calendário; indicação explícita quando o total inclui futuras. Comprovante do recebimento: saldo exigível atual, futuras e total; existência de futuras impede a classificação de conta totalmente quitada.
+- Financeiro: venda Fiado não cria entrada de caixa; o recebimento aplicado gera a entrada existente por ID/data efetiva uma vez, respeitando automação já configurada. Não se ativa automação nem se faz backfill.
+- Histórico/CSV: contratos, pagamentos e alocações permanecem; CSV de parcelas continua separado do backup contábil. Nenhuma receita extra surge no vencimento.
+
+## Autorização e escopo técnico
+
+Nenhuma permissão nova, expansão de V3, Rule ou índice. `sales.create`, `customers.receiveDebt`, `customers.view`, empresa, geração, vínculo ativo, entitlement e espaços existentes continuam valendo. Contextos V3 restritivos continuam fora da nova modalidade, sem modificar sua política/projeção. Apuração de conta com venda fora dos espaços autorizados é bloqueada, sem expor ou modificar a dívida alheia.
+
+Backend incremental: serviço de commit operacional, leitor de comprovante e novo serviço de apuração; dois módulos puros de parcelas/conta. Nenhuma coleção nova e nenhum endpoint novo: são extensões dos dois handlers operacionais existentes. O frontend V226 e a migração SaaS não foram publicados ou modificados remotamente. `functions/src/index.js`, `js/plans.js`, motor transacional gerado, módulos SaaS, permissões e Rules permanecem intactos.
+
+Uma publicação futura deve revisar/pacotar as dependências dos handlers operacionais antes de disponibilizar o frontend. Não é uma publicação estática independente.
+
+## Testes e limites
+
+Emulator isolado Auth/Firestore, projeto demo e loopback: exemplo 330→230→510, antecipação, mudança de mês, repetição de leitura sem escrita, concorrência, resposta perdida, reconexão, adulteração, empresa/espaço/permissões/V3, comprovação das alocações, venda/estoque únicos, recibos, projeção de caixa e vendas retroativas V226. O teste de financeiro verifica que a venda mantém R$2.800 na data comercial e somente o recebimento cria caixa, mesmo com entrega duplicada.
+
+Tests de unidade/DOM cobrem calendário, centavos, saldo agregado, contratos inválidos, UI, filtros, recibos e regressões de caixa, Fiado, migração SaaS e hotfixes visuais. O gate histórico de escopo exclusivo do hotfix V226 é substituído pelo gate V227, mantendo os testes comportamentais. Os mocks incompletos do dashboard motivaram chamadas opcionais ao helper de saldo, preservando o fallback tradicional.
+
+Limites explícitos: 350 vendas e 2.000 alocações para apurar uma conta parcelada nesta versão; acima disso interrompe para uma implementação paginada. Fiado sem parcelamento não ganha esse bloqueio de quantidade. Novo recebimento parcelado requer conexão para obter a apuração; os já preparados continuam na fila para reconexão. Divergências preexistentes entre total contábil e alocações exigem conciliação autorizada, sem reparação automática. Não há renegociação, edição de calendário, juros, multa ou desconto automático. Homologação física Android/PWA e multiaparelho real continua pendente. Integrações externas que leiam `clients.saldo` devem tratá-lo como total contábil, usando a apuração para exigível.
 
 ## Rollback compatível
 
-Não retornar cegamente ao frontend V226 depois de registrar crediários. A referência local `codex/rollback-v227-compatible` deriva do candidato e pausa somente novos planos: `installmentCreationPaused:true` no frontend e `INSTALLMENT_CREATION_ENABLED=false` no commit operacional. Mantém leitura, calendário, recebimentos, hashes/IDs, filas, parcelas existentes, conciliação e validação de saldo. Não restaura dados, exclui registros, altera índices nem reexecuta pagamentos.
+A referência nova `codex/rollback-v227-due-account` deriva deste candidato e pausa apenas novos contratos no frontend (`installmentCreationPaused:true`) e no backend (`INSTALLMENT_CREATION_ENABLED=false`). Conserva apuração por vencimento, futuro/total, recebimento agregado, alocações, recibos, IDs, filas e validações. Isso evita voltar à semântica inicial que tratava todas as futuras como exigíveis.
 
-O bloqueio no backend é necessário para abas antigas; desligar somente a opção visual não bloqueia essas abas. Vendas novas ainda pendentes durante a contenção ficam preservadas para avaliação, nunca descartadas. Recebimentos já registrados continuam confirmáveis/idempotentes. Rollback depende de avaliação e autorização específica; nenhum foi publicado.
+Não usar o rollback antigo `4015cd6…` para este novo modelo. Ele permanece como referência histórica do primeiro candidato. A contenção atual precisa ser homologada com o mesmo exemplo e com recebimentos existentes; nunca restaura dados ou reprocessa movimentos. Aba antiga é contida pelo backend. Operações pendentes ficam preservadas para avaliação.
 
-**GO para homologação local/sintética do candidato e avaliação visual controlada. NO-GO para produção**, até aprovação específica, revisão de implantação e homologação Android/PWA. A assinatura/migração continua fora do escopo.
+**GO para homologação local controlada**, condicionado aos resultados finais registrados na entrega. **NO-GO para produção** sem nova autorização, preflight e homologação de implantação. Nenhum push/deploy executado.
+
+## Evidência final do candidato
+
+251 testes locais/DOM/regressões e 57 cenários Emulator aprovados, sem falhas ou skips. QA sintético em 390 e 1366 px aprovou exigível 330, recebimento 100, saldo 230 e opção explícita de antecipação. Pacote público: 257 recursos com manifesto SHA-256 externo; gate preservou 15 arquivos protegidos. Uma execução com suítes simultâneas apresentou transação fechada no Emulator; a execução final serializa os arquivos de suíte, mantendo os testes explícitos de concorrência dentro deles, e passou integralmente. A evidência dessa ocorrência foi conservada.

@@ -32,7 +32,7 @@ const same=(a,b)=>Math.abs(Number(a)-Number(b))<0.000001;
 // The caller supplies an intent/old offline envelope, NEVER an Admin write plan.
 // The existing transaction arithmetic is buffered; these independent guards
 // validate every actual read/write before ANY Admin write is flushed.
-function operationalCommitService(db){
+function operationalCommitService(db,{now=()=>new Date()}={}){
  const ref=(bid,col,id)=>db.doc(`businesses/${bid}/${col}/${id}`);
  async function context(tx,request,item,{readOnly=false}={}){
   const uid=request.auth?.uid;if(!uid)fail('Entre na sua conta.','unauthenticated');
@@ -97,6 +97,18 @@ function operationalCommitService(db){
     if(!p.requestHash){const primary=writes.find(w=>['sales','payments','stockMovements','balanceAdjustments'].includes(w.entityType)&&w.operation==='create');const event=primary&&(await tx.get(ref(c.bid,primary.entityType,primary.entityId))).data();if(!event||event.operationId!==item.operationId)fail('Recibo legado exige revisão; nenhum efeito foi reaplicado.','failed-precondition');}
     return{replayed:true,operationId:item.operationId,outcome:null};
    }
+   const incomingPayment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+   if(incomingPayment){
+    const p=incomingPayment.data,account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(p.clienteId||p.clientId,'Cliente'),now:now(),checkPermission:false});
+    if(account){
+     if(!p.fiadoSchedule||p.installmentSaleId||p.paymentMode!=='partial'||!['pix','cash'].includes(p.paymentMethod)||!same(p.valor,p.requestedAmount)||!same(p.valor,p.effectiveAmount)||(!/^\d{4}-\d{2}-\d{2}$/.test(p.fiadoSchedule.asOf)||p.fiadoSchedule.asOf>account.asOf)||Number(p.expectedFinancialVersion)!==account.financialVersion)fail('Atualize o saldo exigível e preserve o recebimento original para revisão.','failed-precondition');
+     let rows;try{require('../shared/installment-plan').date(p.fiadoSchedule.asOf);const originalDay={...account,asOf:p.fiadoSchedule.asOf,dueCents:account.entries.filter(e=>e.dueDate<=p.fiadoSchedule.asOf).reduce((n,e)=>n+e.remainingCents,0)};rows=require('../shared/fiado-account').allocate(originalDay,cents(p.valor),{advance:p.fiadoSchedule.advance===true});}catch(e){fail(e.message,'failed-precondition');}
+     if(canonical(rows)!==canonical(p.fiadoSchedule.rows))fail('Ordem/alocação de vencimentos divergente.');
+     const expected=new Map();for(const row of rows)if(row.saleId)expected.set(row.saleId,(expected.get(row.saleId)||0)+row.amountCents);
+     const allocations=attemptWrites.filter(w=>w.entityType==='paymentAllocations');
+     if(allocations.length!==expected.size||allocations.some(a=>expected.get(a.data.saleId)!==cents(a.data.amount)||canonical(a.data.scheduleRows)!==canonical(rows.filter(r=>r.saleId===a.data.saleId)))||!same(p.legacyAmount,rows.filter(r=>!r.saleId).reduce((n,r)=>n+r.amountCents,0)/100))fail('Alocação contábil não corresponde ao exigível.');
+    }else if(p.fiadoSchedule)fail('Conta parcelada não encontrada.');
+   }
    const before=new Map(),get=async reference=>{
     if(!reference.path.startsWith(`businesses/${c.bid}/`))fail('Leitura fora da empresa.');
     if(!before.has(reference.path))before.set(reference.path,await tx.get(reference));
@@ -110,6 +122,7 @@ function operationalCommitService(db){
    }};
    const outcome=await execute({db,item,transaction:buffer,currentUser:{uid:c.uid},FieldValue,has:c.has,actor:{actorUid:c.uid,actorRoleSnapshot:c.role,actorNameSnapshot:c.member?.name||c.user.name||null}});
    await validate(tx,c,item,attemptWrites,plan,get,writes);
+   const newPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);if(newPlan){const entry=plan.get(ref(c.bid,'clients',newPlan.data.clienteId).path);if(entry)entry.data.hasInstallmentFiado=true;}
    if(priorSale)await priorSale.finalize(tx,c,item,plan,get);
    if(!plan.size)return{operationId:item.operationId,outcome,replayed:false};
    const marker=plan.get(op.path);
@@ -385,7 +398,8 @@ function operationalCommitService(db){
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
    if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
-   if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref});
+   if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now()})};
+   if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
    const sid=validId(d.saleId,'Venda'),op=operationalId(d.operationId,'Operação'),s=(await tx.get(ref(c.bid,'sales',sid))).data();
    const reversal=d.kind==='sale_undo';

@@ -256,6 +256,7 @@
     "manifest.json",
     "service-worker.js",
     "functions/src/shared/installment-plan.js",
-    "js/installment-credit.js"
+    "js/installment-credit.js",
+    "functions/src/shared/fiado-account.js"
   ]
 }

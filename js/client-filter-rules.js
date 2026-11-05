@@ -9,7 +9,7 @@
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, " ");
   const digits = (value) => String(value || "").replace(/\D/g, "");
-  const balance = (client) => Number(client?.saldo || 0);
+  const balance = (client) => (globalThis.Clientes?.financialStatus?.(client)?.saldo ?? Number(client?.saldo || 0));
 
   function matchesSearch(client, query) {
     const text = normalize(query);

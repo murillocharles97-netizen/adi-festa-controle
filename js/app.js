@@ -207,7 +207,7 @@
       )+exchangeRows.reduce((sum,row)=>sum+row.differenceCents,0)/100,
       lucroHoje = exchangeRows.length||Boolean(window.ExchangeEconomics)&&window.ExchangeEconomics.state?.().ready!==true?null:hoje.reduce((s, v) => s + Number(v.lucro || 0), 0),
       fiado = d.clientes.reduce(
-        (s, c) => s + Math.abs(Math.min(0, c.saldo)),
+        (s, c) => s + (window.Clientes?.financialStatus?.(c).debt??Math.abs(Math.min(0,c.saldo))),
         0,
       ),
       recebido = d.pagamentos
@@ -235,7 +235,7 @@
   function clientes() {
     if (window.ClientesPage) return ClientesPage.render();
     const lista = Clientes.listar(),
-      debito = lista.reduce((s, c) => s + Math.abs(Math.min(0, c.saldo)), 0),
+      debito = lista.reduce((s, c) => s + (window.Clientes?.financialStatus?.(c).debt??Math.abs(Math.min(0,c.saldo))), 0),
       credito = lista.reduce((s, c) => s + Math.max(0, c.saldo), 0);
     return (
       cabecalho(
@@ -375,11 +375,11 @@
   }
   function fiadoCard(c) {
     const tel = Utils.somenteNumeros(c.telefone);
-    return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(Math.abs(c.saldo))}</b></div>${window.InstallmentCredit?.button(c.id)||''}<div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon("banknote-arrow-down")} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon("copy")} Copiar</button></div></article>`;
+    return `<article class="entity-card fiado-card" data-name="${escapar(c.nome.toLowerCase())}"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge balance-badge debit">Débito</span></div><div class="balance debit"><span>Saldo em aberto</span><b class="debit">${dinheiro(window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo))}</b></div>${window.InstallmentCredit?.button(c.id)||''}<div class="fiado-tools"><button class="btn btn-primary btn-sm" data-receive="${c.id}">${icon("banknote-arrow-down")} Receber</button><button class="btn btn-whatsapp btn-sm" data-charge-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} WhatsApp</button><button class="btn btn-light btn-sm" data-copy-charge="${c.id}">${icon("copy")} Copiar</button></div></article>`;
   }
   function fiados() {
-    const lista = Fiados.listar().sort((a, b) => a.saldo - b.saldo),
-      total = lista.reduce((s, c) => s + Math.abs(c.saldo), 0);
+    const lista = Fiados.listar().sort((a, b) => Clientes.financialStatus(a).saldo - Clientes.financialStatus(b).saldo),
+      total = lista.reduce((s, c) => s + (window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo)), 0);
     return (
       cabecalho("Fiados e pendências", "Do maior débito para o menor.") +
       `<section class="metrics" style="margin-bottom:18px">${metric("Total em aberto", dinheiro(total), `${lista.length} cliente(s)`, "hand-coins")}</section><div class="toolbar"><input class="search" id="fiado-search" placeholder="Buscar cliente...">${window.InstallmentCredit?.available()?'<button class="btn btn-light" data-installment-client="">Todos os crediários / quitados</button>':''}</div><section class="entity-grid" id="fiados-list">${lista.map(fiadoCard).join("") || vazio("Nenhuma pendência. Tudo em dia!")}</section>`
@@ -399,7 +399,7 @@
     const tel = Utils.somenteNumeros(c.telefone),
       ultima = Cobrancas.ultimaCliente(c.id),
       status = Cobrancas.statusCliente(c);
-    return `<article class="entity-card charge-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge ${status === "enviado hoje" ? "badge-paid" : "badge-debt"}">${status}</span></div><div class="entity-stats"><div class="entity-stat"><small>Valor em aberto</small><strong>${dinheiro(Math.abs(c.saldo))}</strong></div><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString("pt-BR") : "—"}</strong></div><div class="entity-stat"><small>Última cobrança</small><strong>${ultima ? dataHora(ultima.data) : "Nunca"}</strong></div></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-batch-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} Enviar cobrança</button><button class="btn btn-light btn-sm" data-copy-batch="${c.id}">${icon("copy")} Copiar mensagem</button><button class="btn btn-light btn-sm" data-ignore-charge="${c.id}">${icon("ban")} Ignorar hoje</button></div></article>`;
+    return `<article class="entity-card charge-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge ${status === "enviado hoje" ? "badge-paid" : "badge-debt"}">${status}</span></div><div class="entity-stats"><div class="entity-stat"><small>Valor em aberto</small><strong>${dinheiro(window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo))}</strong></div><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString("pt-BR") : "—"}</strong></div><div class="entity-stat"><small>Última cobrança</small><strong>${ultima ? dataHora(ultima.data) : "Nunca"}</strong></div></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-batch-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} Enviar cobrança</button><button class="btn btn-light btn-sm" data-copy-batch="${c.id}">${icon("copy")} Copiar mensagem</button><button class="btn btn-light btn-sm" data-ignore-charge="${c.id}">${icon("ban")} Ignorar hoje</button></div></article>`;
   }
   function cobrancas() {
     const filtro =
@@ -704,7 +704,7 @@
                 : `em ${businessName}`,
             texto =
               c.saldo < 0
-                ? `sua conta atual ${businessReference} está em ${dinheiro(Math.abs(c.saldo))}`
+                ? `sua conta atual ${businessReference} está em ${dinheiro(window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo))}`
                 : c.saldo > 0
                   ? `você possui um crédito de ${dinheiro(c.saldo)} ${businessReference}`
                   : `sua conta ${businessReference} está zerada`,
@@ -860,7 +860,7 @@
         fiado = $("#sale-status").value === "fiado";
       $("#debt-preview").innerHTML =
         fiado && c
-          ? `<div class="debt-preview"><div><span>Saldo anterior</span><b>${dinheiro(Math.abs(Math.min(0, c.saldo)))}</b></div><div><span>Valor desta venda</span><b>${dinheiro(t.valorFinal)}</b></div><div><span>Novo total em aberto</span><b>${dinheiro(Math.abs(Math.min(0, c.saldo - t.valorFinal)))}</b></div></div>`
+          ? `<div class="debt-preview"><div><span>Saldo anterior</span><b>${dinheiro((window.Clientes?.financialStatus?.(c).debt??Math.abs(Math.min(0,c.saldo))))}</b></div><div><span>Valor desta venda</span><b>${dinheiro(t.valorFinal)}</b></div><div><span>Novo total em aberto</span><b>${dinheiro(Math.abs(Math.min(0, c.saldo - t.valorFinal)))}</b></div></div>`
           : "";
       $$("[data-item-qty]").forEach(
         (x) =>
@@ -1185,7 +1185,7 @@
     }
   }
   const mensagemCobranca = (c) =>
-    `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${(DB.readForView?.()||DB.carregar()).config.nome || "nossa loja"} está em ${dinheiro(Math.abs(c.saldo))}. Obrigado!`;
+    `Olá, ${c.nome}. Passando para avisar que sua conta atual na ${(DB.readForView?.()||DB.carregar()).config.nome || "nossa loja"} está em ${dinheiro(window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo))}. Obrigado!`;
   function syncResponsiveNavigation() {
     const mobile = !window.TeamAccess?.canRoute?.("relatorios"),
       link = $('[data-route="relatorios"]');

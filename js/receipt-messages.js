@@ -36,13 +36,13 @@
   }
   function restore(id){const original=DEFAULTS.find(t=>t.id===id);if(!original)throw code('receipt-template-invalid','Este modelo não possui um original de fábrica.');return save({...original,isDefault:list().find(t=>t.id===id)?.isDefault===true});}
   function defaultTemplate(kind,source){const templates=list(source).filter(t=>t.receiptKind===kind);return templates.find(t=>t.isDefault)||templates[0];}
-  function kind(receipt){return Number(receipt.balance)<0?'partial':'total';}
+  function kind(receipt){return Number(receipt.balance)<0||Number(receipt.futureAmount)>0?'partial':'total';}
   function variables(receipt){
     if(receipt?.confirmed!==true||!Number.isFinite(receipt.balance)||!Number.isFinite(receipt.amount)||!receipt.businessName||!receipt.clientName)throw code('receipt-unconfirmed','O recebimento e o saldo precisam de confirmação remota.');
     const date=new Date(receipt.paymentDate);if(Number.isNaN(date.getTime()))throw code('receipt-date-unconfirmed','A data do recebimento ainda não foi confirmada.');
     return{nome:receipt.clientName,primeiro_nome:receipt.clientName.trim().split(/\s+/)[0],valor_pago:money(receipt.amount),saldo_atual:money(Math.max(0,-receipt.balance)),nome_negocio:receipt.businessName,data_pagamento:date.toLocaleDateString('pt-BR'),forma_pagamento:({pix:'PIX',cash:'Dinheiro',credit_card:'Cartão de crédito',debit_card:'Cartão de débito',transfer:'Transferência',other:'Não informada'})[receipt.paymentMethod]||'Não informada'};
   }
-  function resolve(content,receipt){const text=validateText(content),values=variables(receipt);return text.replace(/{{\s*([^{}]+?)\s*}}/g,(_,key)=>values[key.trim()]);}
+  function resolve(content,receipt){const text=validateText(content),values=variables(receipt);return text.replace(/{{\s*([^{}]+?)\s*}}/g,(_,key)=>values[key.trim()])+(receipt.balanceMeaning==='due_now'?'\n\nSaldo exigível agora: '+money(Math.max(0,-receipt.balance))+'. Parcelas futuras: '+money(receipt.futureAmount)+'. Total ainda devido: '+money(receipt.totalOutstanding)+'.':'');}
   async function read({paymentId,operationId,clientId}){
     const token=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;assertScope(token);
     if(!navigator.onLine||typeof window.FirebaseCallable!=='function')throw code('receipt-offline','Não foi possível consultar a confirmação. Conecte-se e consulte novamente; nenhum pagamento será reenviado.');

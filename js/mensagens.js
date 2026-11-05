@@ -42,6 +42,7 @@ window.Mensagens=(()=>{
       const result=await window.SyncFirebase.readCanonicalClient(id,options),client=result?.client;
       if(!client||!Number.isFinite(Number(client.saldo)))throw Object.assign(Error('Resposta canônica sem saldo válido.'),{code:'canonical-balance-missing',stage:'canonical-response'});
       console.info('[CHARGE] confirmed balance',Number(client.saldo));
+      if(window.InstallmentCredit?.has(id)){const account=await window.InstallmentCredit.refresh(id);return {...client,saldo:-account.dueCents/100};}
       return client;
     }catch(error){const code=String(error?.code||'unknown').replace(/^firestore\//,'');console.error('[CHARGE ERROR]',{code,message:String(error?.message||'Falha desconhecida.'),stage:error?.stage||'canonical-client-read',businessId,customerId:id});const visible=Error(canonicalBalanceErrorMessage(error));visible.code=code;visible.stage=error?.stage||'canonical-client-read';throw visible}
   }

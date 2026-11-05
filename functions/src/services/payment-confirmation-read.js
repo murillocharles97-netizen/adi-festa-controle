@@ -9,7 +9,7 @@ const money=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isSaf
 
 // Called inside the existing authenticated transaction. This module only reads;
 // it never repairs a receipt, publishes a signal or executes a commercial intent.
-async function paymentConfirmationRead({tx,c,d,ref}){
+async function paymentConfirmationRead({tx,c,d,ref,now=new Date()}){
   if(!c.has('customers.receiveDebt')||!c.has('customers.view'))deny('Seu acesso não permite consultar este recebimento.');
   const paymentId=validId(d.paymentId,'Recebimento'),operationId=operationalId(d.operationId,'Operação'),clientId=validId(d.clientId,'Cliente');
   const p=(await tx.get(ref(c.bid,'payments',paymentId))).data();
@@ -31,9 +31,10 @@ async function paymentConfirmationRead({tx,c,d,ref}){
     return{confirmed:false,status:'balance_unconfirmed'};
   const businessName=String(settings.nome||c.business.name||c.business.nome||'').trim();
   if(!businessName||!String(client.nome||'').trim())return{confirmed:false,status:'identity_unconfirmed'};
+  const account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId,now});
   return{confirmed:true,status:'confirmed',businessId:c.bid,workspaceGeneration:generation,paymentId,operationId,clientId,spaceId:p.spaceId,
     amount:p.valor,paymentDate:iso(p.data||p.createdAt||p.financialAppliedAt),paymentMethod:p.paymentMethod||'other',
-    appliedAt:iso(p.financialAppliedAt),balance:client.saldo,financialVersion:client.financialVersion,checkedAt:new Date().toISOString(),
+    appliedAt:iso(p.financialAppliedAt),balance:account?-account.dueCents/100:client.saldo,...(account?{futureAmount:account.futureCents/100,totalOutstanding:account.totalCents/100,balanceMeaning:'due_now'}:{}),financialVersion:client.financialVersion,checkedAt:new Date().toISOString(),
     businessName,clientName:String(client.nome),phone:String(client.telefone||''),
     // Only this category is exposed; no settings, financial lists or other clients.
     templates:Array.isArray(settings.receiptMessageTemplates)?settings.receiptMessageTemplates.filter(t=>t&&t.type==='receipt'&&t.active!==false).map(t=>({id:t.id,name:t.name,type:'receipt',receiptKind:t.receiptKind,content:t.content,isDefault:t.isDefault===true})):[],

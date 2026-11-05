@@ -476,7 +476,7 @@
               Math.max(max, num(item.valorFinal ?? item.valorTotal)),
             0,
           ),
-          openBalance: Math.abs(Math.min(0, num(client.saldo))),
+          openBalance: (window.Clientes?.financialStatus?.(client)?.debt ?? Math.abs(Math.min(0,num(client.saldo)))),
           lastCharge,
           lastContact,
           topProduct:

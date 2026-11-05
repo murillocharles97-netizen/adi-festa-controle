@@ -5,11 +5,11 @@ window.Cobrancas=(()=>{
   const ultimaCliente=clienteId=>historicoCliente(clienteId)[0]||null;
   const statusCliente=c=>{const u=ultimaCliente(c.id);return u&&hoje(u.data)?(u.status==='ignorado'?'ignorado':'enviado hoje'):'pendente'};
   const listar=(filtro='naoHoje')=>{
-    let clientes=DB.carregar().clientes.filter(c=>Number(c.saldo)<0).sort((a,b)=>Number(a.saldo)-Number(b.saldo));
+    let clientes=DB.carregar().clientes.filter(c=>(window.Clientes?.financialStatus?.(c).saldo??Number(c.saldo))<0).sort((a,b)=>(window.Clientes?.financialStatus?.(a).saldo??Number(a.saldo))-(window.Clientes?.financialStatus?.(b).saldo??Number(b.saldo)));
     if(filtro==='nunca')clientes=clientes.filter(c=>!ultimaCliente(c.id));
     if(filtro==='naoHoje')clientes=clientes.filter(c=>!hoje(ultimaCliente(c.id)?.data));
-    if(filtro==='acima10')clientes=clientes.filter(c=>Math.abs(Number(c.saldo))>10);
-    if(filtro==='acima50')clientes=clientes.filter(c=>Math.abs(Number(c.saldo))>50);
+    if(filtro==='acima10')clientes=clientes.filter(c=>Math.abs((window.Clientes?.financialStatus?.(c).saldo??Number(c.saldo)))>10);
+    if(filtro==='acima50')clientes=clientes.filter(c=>Math.abs((window.Clientes?.financialStatus?.(c).saldo??Number(c.saldo)))>50);
     if(filtro==='semTelefone')clientes=clientes.filter(c=>Utils.somenteNumeros(c.telefone).length<10);
     return clientes;
   };

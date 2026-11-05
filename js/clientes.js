@@ -1,6 +1,6 @@
 window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
-  const financialStatus=client=>{const saldo=Math.round((Number(client?.saldo)||0)*100)/100;return{saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)}};
+  const financialStatus=client=>{const account=window.InstallmentCredit?.account(client?.id),saldo=account?(account.creditCents-account.dueCents)/100:Math.round((Number(client?.saldo)||0)*100)/100;return{saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)}};
   const listar=()=>(DB.readForView?.()||DB.carregar()).clientes;
   const obter=id=>listar().find(c=>c.id===id);
   const allowed=key=>window.TeamAccess?window.TeamAccess.has(key)===true:!window.FirebaseSession?.user;
