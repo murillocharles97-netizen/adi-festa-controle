@@ -77,3 +77,7 @@ Não usar o rollback antigo `4015cd6…` para este novo modelo. Ele permanece co
 ## Evidência final do candidato
 
 251 testes locais/DOM/regressões e 57 cenários Emulator aprovados, sem falhas ou skips. QA sintético em 390 e 1366 px aprovou exigível 330, recebimento 100, saldo 230 e opção explícita de antecipação. Pacote público: 257 recursos com manifesto SHA-256 externo; gate preservou 15 arquivos protegidos. Uma execução com suítes simultâneas apresentou transação fechada no Emulator; a execução final serializa os arquivos de suíte, mantendo os testes explícitos de concorrência dentro deles, e passou integralmente. A evidência dessa ocorrência foi conservada.
+
+## Atualização de 06/11/2026
+
+As afirmações anteriores de ausência de patch de Rules e a referência antiga de rollback foram substituídas pela correção mínima do calendário e pela nova contenção descritas em [v227-preflight-fixes.md](v227-preflight-fixes.md). Consultar esse documento e o manifesto seletivo antes de novo preflight.

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "release": 227,
+  "candidateParent": "2da941ca0def0b31acbcff0b3d8c94e9ec7a9ddc",
+  "productionBase": "f812c583e8336b142799d0735334f5d2ea330889",
+  "publicationAuthorized": false,
+  "scope": "Commercial date and immutable installment calendar preflight blockers only",
+  "configuration": "firebase.v227.json",
+  "functions": {
+    "updateInOrder": [
+      "getOperationalSyncReceipt",
+      "commitOperationalSync"
+    ],
+    "create": [],
+    "region": "southamerica-east1",
+    "onlyExplicitNames": true,
+    "runtimeFiles": [
+      "functions/src/services/operational-commit-service.js",
+      "functions/src/services/payment-confirmation-read.js",
+      "functions/src/services/fiado-account-service.js",
+      "functions/src/shared/fiado-account.js",
+      "functions/src/shared/installment-plan.js"
+    ]
+  },
+  "firestore": {
+    "candidate": "firestore.v227.rules",
+    "baseline": "firestore.prior-sales.rules",
+    "baselineNormalizedSha256": "7366f251aea2fbcb4412d114e864649c3c3caf500b9c44031b4ed78bf2a56141",
+    "candidateNormalizedSha256": "b947c26a89dc0a59b2aa24b5deec14c33fbb98cef66c5e833a56c708d7a533bc",
+    "changes": "Deny direct creates containing installmentPlan and direct updates with installmentPlan in old or new sales document; deletes already denied",
+    "deployBeforeNewContracts": true,
+    "activateV3": false
+  },
+  "storageChanged": false,
+  "indexesChanged": false,
+  "billingChanged": false,
+  "dataMigration": false,
+  "frontend": {
+    "manifest": "public-site.manifest.json",
+    "cache": "veconi-v227-due-account-candidate-v3-fixes"
+  },
+  "rollback": {
+    "newReferenceRequired": true,
+    "pauseCreationOnly": true,
+    "preserveRulesFence": true,
+    "preserveReceiptsAndProjection": true,
+    "automatic": false,
+    "deleteData": false,
+    "replay": false
+  },
+  "sequence": [
+    "Authorize corrected candidate and exact resources after new preflight",
+    "Verify published baseline, ACTIVE revisions and ruleset immediately",
+    "Publish only reviewed Firestore calendar fence with explicit config",
+    "Publish getOperationalSyncReceipt only, verify revision and read compatibility",
+    "Publish commitOperationalSync only, verify revision",
+    "Authorize and publish allowlisted frontend separately; verify workflow/domain/SW/hashes"
+  ],
+  "stopOn": [
+    "baseline or hash mismatch",
+    "permissions/isolation regression",
+    "direct calendar write allowed",
+    "date or balance mismatch",
+    "duplicate stock/debt/receipt",
+    "failed idempotency or incompatible queued operation"
+  ]
+}

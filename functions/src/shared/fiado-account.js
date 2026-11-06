@@ -2,13 +2,26 @@
  'use strict';
  const active=s=>!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt&&['fiado','applied'].includes(s.status||'fiado');
  const canonicalDate=v=>v?.toDate?.().toISOString()||String(v||'');
+ // V226 stores an explicit civil date; old records store the commercial instant in data.
+ // createdAt is technical registration time and must never replace the sale date.
+ function commercialDay(sale){
+  const explicit=sale.priorSale?.commercialDate||sale.commercialDate;
+  if(explicit)return Plan.date(explicit);
+  const value=canonicalDate(sale.occurredAt||sale.data);
+  if(!value)return '0001-01-01'; // undated historical debt remains immediately due
+  if(/^\d{4}-\d{2}-\d{2}$/.test(value))return Plan.date(value);
+  // Historical zone-less strings represent local business wall time, not host time.
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value))return Plan.date(value.slice(0,10));
+  const instant=new Date(value);if(!Number.isFinite(+instant))throw Error('Data comercial inválida; conciliação necessária.');
+  return Plan.today(instant); // canonical business timezone: America/Sao_Paulo, as in V226
+ }
  function project(client,sales,day=Plan.today()){
   Plan.date(day);const entries=[],eligible=sales.filter(s=>(s.clienteId||s.clientId)===client.id&&s.formaPagamento==='fiado'&&active(s));
   for(const s of eligible){
    const paid=Plan.cents(s.creditPaidAmount||0),original=Plan.cents(s.creditOriginalAmount??s.valorFinal??s.valorTotal);
    if(paid>original)throw Error('Recebimentos excedem o valor contratado. Conciliação necessária.');
    if(s.installmentPlan){for(const row of Plan.rows(s,day))if(row.remainingCents)entries.push({saleId:s.id,number:row.number,dueDate:row.dueDate,createdAt:canonicalDate(s.data),remainingCents:row.remainingCents,spaceId:s.spaceId||null});}
-   else if(original>paid)entries.push({saleId:s.id,number:null,dueDate:canonicalDate(s.data).slice(0,10)||'0001-01-01',createdAt:canonicalDate(s.data),remainingCents:original-paid,spaceId:s.spaceId||null});
+   else if(original>paid)entries.push({saleId:s.id,number:null,dueDate:commercialDay(s),createdAt:canonicalDate(s.data),remainingCents:original-paid,spaceId:s.spaceId||null});
   }
   const bookCents=Math.round(-Number(client.saldo||0)*100),tracked=entries.reduce((n,e)=>n+e.remainingCents,0);
   if(tracked>Math.max(0,bookCents))throw Error('Saldo e alocações divergem. Conciliação necessária; nenhum recebimento foi registrado.');
@@ -34,5 +47,5 @@
    const allocation={id:paymentId+'__'+id,operationId:paymentId,schemaVersion:2,engineVersion:2,paymentId,saleId:id,clientId,businessId:sale.businessId||null,amount,settledSale:sale.creditSettled,createdAt:at,scheduleRows};db.alocacoesPagamento.push(allocation);allocations.push(allocation);
   }return allocations;
  }
- return Object.freeze({project,allocate,applyAllocations});
+ return Object.freeze({commercialDay,project,allocate,applyAllocations});
 });
