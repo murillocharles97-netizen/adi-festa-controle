@@ -6,6 +6,38 @@ window.InstallmentCredit = (() => {
   const available=()=>window.TeamAccess?.has?.('customers.receiveDebt')===true&&!window.OperationalReadPolicy?.restricted?.();
   const has=id=>{const plans=(DB.carregar().vendas||[]).filter(s=>s.clienteId===id&&s.installmentPlan);return plans.length?plans.some(s=>!s.deletedAt&&s.active!==false&&!s.desfeita):(DB.carregar().clientes||[]).some(c=>c.id===id&&c.hasInstallmentFiado);};
   function account(id){if(!has(id))return null;const client=(DB.carregar().clientes||[]).find(c=>c.id===id);return window.FiadoAccount.project(client,DB.carregar().vendas||[]);}
+  function salePreview(client, total, terms = read(), day = InstallmentPlan.today()) {
+    const history = DB.carregar().vendas || [];
+    if (client.hasInstallmentFiado && !history.some(s =>
+      s.clienteId === client.id && s.installmentPlan && !s.deletedAt && s.active !== false && !s.desfeita))
+      throw Error('Sincronize o calendário completo para conferir o exigível.');
+    if (Number(client.saldo) > 0) throw Error('Cliente com crédito. Confira a apuração antes de projetar o saldo.');
+    const current = window.FiadoAccount.project(client, history, day);
+    const plan = InstallmentPlan.create({...terms, total, saleDate: day});
+    const rows = InstallmentPlan.rows({installmentPlan: plan, creditPaidAmount: 0}, day);
+    const dueCents = rows.filter(r => r.dueDate <= day).reduce((sum,r) => sum + r.remainingCents,0);
+    const futureCents = rows.filter(r => r.dueDate > day).reduce((sum,r) => sum + r.remainingCents,0);
+    return {current, newDueCents: dueCents, newFutureCents: futureCents,
+      dueCents: current.dueCents + dueCents, futureCents: current.futureCents + futureCents,
+      totalCents: current.totalCents + plan.totalCents};
+  }
+  function checkoutPreview(client, total) {
+    try {
+      const p = salePreview(client,total);
+      return `<section class="pos-fiado-preview" data-installment-debt-preview>
+        <p>Fiado exigível atual: <b data-current-due>${money(p.current.dueCents)}</b></p>
+        <p>Parcelas futuras atuais: <b>${money(p.current.futureCents)}</b></p>
+        <p>Esta venda — exigível hoje: <b>${money(p.newDueCents)}</b></p>
+        <p>Esta venda — parcelas futuras: <b data-new-future>${money(p.newFutureCents)}</b></p>
+        <p>Exigível após confirmar: <b data-after-due>${money(p.dueCents)}</b></p>
+        <p>Parcelas futuras após confirmar: <b data-after-future>${money(p.futureCents)}</b></p>
+        <p>Total comprometido após confirmar: <b data-after-total>${money(p.totalCents)}</b></p>
+        <small>Prévia local por vencimento. Confirme a sincronização do cliente. Entrada combinada não significa recebimento.</small>
+      </section>`;
+    } catch (error) {
+      return `<p data-installment-preview-unavailable role="status">Prévia indisponível: ${esc(error.message)}</p>`;
+    }
+  }
   async function refresh(id){const ticket=window.TeamAccess?.captureSession?.(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o exigível; recebimentos já preparados permanecem na fila.');const result=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id});window.TeamAccess?.assertSession?.(ticket);const v=result.data??result;if(v.businessId!==businessId||v.workspaceGeneration!==workspaceGeneration||v.account?.clientId!==id)throw Error('Resposta de outra conta ou empresa.');return v.account;}
   function customerSummary(id,confirmed){const a=confirmed||account(id);if(!a)return '';return `<section class="receipt-debt" data-fiado-account><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>${confirmed?'Apurado no servidor em '+esc(a.asOf):'Prévia local por vencimento. O servidor confere antes de receber.'}</small>${button(id)}</section>`;}
   function mountCustomer(id){const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll');if(host&&has(id)){host.insertAdjacentHTML('afterbegin',customerSummary(id));const section=host.querySelector('[data-fiado-account]');refresh(id).then(a=>{if(section.isConnected)section.outerHTML=customerSummary(id,a);}).catch(()=>{});}}
@@ -25,6 +57,13 @@ window.InstallmentCredit = (() => {
     window.Modais?.layout?.(root.querySelector('[role=dialog]'));
   }
   document.addEventListener('click',e=>{const b=e.target.closest?.('[data-installment-client]');if(b)open(b.dataset.installmentClient||undefined);});
-  document.addEventListener('input',e=>{if(e.target.closest?.('#installment-fields')||e.target.id==='manual-total')update();});
-  return {has,account,refresh,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv};
+  const updatePreview = e => {
+    if(e.target.closest?.('#installment-fields') || e.target.id === 'manual-total') {
+      update();
+      window.dispatchEvent(new Event('installment-preview-changed'));
+    }
+  };
+  document.addEventListener('input',updatePreview);
+  document.addEventListener('change',updatePreview);
+  return {has,account,refresh,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,checkoutPreview};
 })();

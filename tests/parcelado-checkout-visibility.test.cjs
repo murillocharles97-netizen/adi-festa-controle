@@ -38,7 +38,13 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       page.on('request',request=>new URL(request.url()).hostname==='127.0.0.1'?request.continue():request.abort());
       await page.goto('http://127.0.0.1:'+server.address().port+'/tests/parcelado-fixture.html?visual=vender');
       await page.waitForFunction(()=>document.body.dataset.visualReady==='vender');
-      await page.evaluate(()=>{ SyncFirebase.prepareSaleCustomer=async()=>({confirmed:true}); });
+      await page.evaluate(()=>{
+        SyncFirebase.prepareSaleCustomer=async()=>({confirmed:true});
+        DB.alterar(data=>{
+          Object.assign(data.clientes[0],{saldo:-247,legacyBalance:247,legacyBalanceRemaining:247});
+          data.produtos.find(p=>p.id==='p1').preco=20;
+        });
+      });
       await page.click('[data-add="p1"]');
       await page.waitForFunction(()=>Checkout.cartCount()===1);
       if (await page.$eval('#pos-summary',el=>el.hidden)) await page.click('#open-sale-summary');
@@ -65,9 +71,23 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       assert.equal(await page.evaluate(()=>DB.carregar().vendas.length),before.sales);
       assert.match(await page.$eval('body',el=>el.textContent),/Selecione um cliente/);
       await page.select('#sale-client','c1');
+      assert.match(await page.$eval('[data-current-due]',el=>el.textContent),/247,00/);
+      assert.match(await page.$eval('[data-new-future]',el=>el.textContent),/20,00/);
+      assert.match(await page.$eval('[data-after-due]',el=>el.textContent),/247,00/);
+      assert.match(await page.$eval('[data-after-total]',el=>el.textContent),/267,00/);
+      assert.equal(await page.$eval('#selected-client-card',el=>el.textContent.includes('267,00 em aberto')),false);
+      if (width<768) await page.click('[data-payment="fiado"]');
+      else await page.select('#sale-payment-method','fiado');
+      assert.match(await page.$eval('#selected-client-card',el=>el.textContent),/267,00 em aberto/);
+      if (width<768) await page.click('[data-payment="crediario"]');
+      else await page.select('#sale-payment-method','crediario');
       await page.$eval('#installment-count',el=>{el.value='10';el.dispatchEvent(new Event('input',{bubbles:true}));});
       await page.$eval('#installment-first',el=>{el.value=InstallmentPlan.month(InstallmentPlan.today(),1);el.dispatchEvent(new Event('change',{bubbles:true}));});
       await page.waitForFunction(()=>document.querySelector('[data-installment-preview]').textContent.includes('10 parcelas'));
+      await page.$eval('#installment-down',el=>{el.value='5';el.dispatchEvent(new Event('input',{bubbles:true}));});
+      assert.match(await page.$eval('[data-after-due]',el=>el.textContent),/252,00/);
+      assert.match(await page.$eval('[data-after-future]',el=>el.textContent),/15,00/);
+      await page.$eval('#installment-down',el=>{el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}));});
       await page.$eval('#installment-fields',el=>el.scrollIntoView({block:'center'}));
       assert.equal(await page.$eval('#installment-count',el=>el.getBoundingClientRect().width>0),true);
       if(output) await page.screenshot({path:path.join(output,'parcelado-'+width+'.png'),fullPage:true});
@@ -78,7 +98,7 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       const sale=after.sales.at(-1);
       assert.equal(sale.clienteId,'c1');assert.equal(sale.formaPagamento,'fiado');
       assert.equal(sale.installmentPlan.installments.length,10);
-      assert.equal(sale.installmentPlan.installments.reduce((n,row)=>n+row.amountCents,0),1200);
+      assert.equal(sale.installmentPlan.installments.reduce((n,row)=>n+row.amountCents,0),2000);
       assert.equal(after.sales.length,before.sales+1);
       assert.equal(after.payments,before.payments);
       assert.equal(after.stock,before.stock-1);

@@ -199,9 +199,13 @@ window.Checkout = (() => {
     }
     const total = Number(document.querySelector("#manual-total")?.value || 0),
       fiado = document.querySelector("#sale-status")?.value === "fiado",
+      parcelado = document.querySelector("#sale-payment-method")?.value === "crediario",
       deve = Math.abs(Math.min(0, Number(c.saldo || 0)));
+    const preview = parcelado
+      ? window.InstallmentCredit?.checkoutPreview?.(c,total) || '<p>Atualize o aplicativo para conferir as parcelas.</p>'
+      : `<p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">Após esta venda: <b>${dinheiro(deve + total)} em aberto</b></p>` : ""}`;
     label.textContent = c.nome;
-    box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b><p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">Após esta venda: <b>${dinheiro(deve + total)} em aberto</b></p>` : ""}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
+    box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b>${preview}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
     window.lucide?.createIcons();
   }
   function filter() {
@@ -1359,6 +1363,7 @@ window.Checkout = (() => {
     return window.AppPageRuntime?.mount?.("vender") || false;
   }
   addEventListener("firebase-session-cleared", resetSession);
+  addEventListener("installment-preview-changed", selectedClient);
   addEventListener("terminal-payment-retry-ready", () => {
     finishing = false;
     setSubmissionState("error", "A cobrança não foi concluída. Revise os dados e tente novamente.");
