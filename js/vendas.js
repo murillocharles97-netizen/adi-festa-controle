@@ -98,6 +98,17 @@ window.Vendas = (() => {
       if(window.OperationalReadPolicy?.restricted?.())throw Error('Crediário indisponível neste contexto restritivo. Nenhuma venda foi registrada.');
       if(window.AdiFestaBuild?.installmentCreationPaused)throw Error('Novos crediários estão pausados. As parcelas existentes foram preservadas.');
       if(!d.clienteId||d.status!=='fiado'||d.formaPagamento!=='fiado'||d.onlineOrderId)throw Error('Crediário exige cliente identificado e venda Fiado no caixa.');
+      const client=currentData.clientes.find(c=>c.id===d.clienteId),history=currentData.vendas||[];
+      try{
+        if(!client||!window.FiadoAccount?.project)throw Error('Atualize o aplicativo e confirme o cliente.');
+        if(Number(client.saldo)>0)throw Error('Cliente com crédito exige apuração específica.');
+        if(client.hasInstallmentFiado&&!history.some(s=>s.clienteId===client.id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita))throw Error('Sincronize o calendário completo.');
+        // Mirror the existing first-sale initialization before any write. The
+        // current backend requires that snapshot; do not silently repair it.
+        const initialized=client.legacyBalance===undefined?{...client,legacyBalanceRemaining:Math.abs(Math.min(0,Number(client.saldo||0)))}:client;
+        window.FiadoAccount.project(client,history);
+        window.FiadoAccount.project(initialized,history);
+      }catch(error){throw Object.assign(Error('Histórico incompatível com a apuração do servidor. Nenhuma venda parcelada foi registrada. '+error.message),{code:'installment-history-incompatible'});}
     }
     const customerBalance = d.status === "fiado"
       ? getCurrentCustomerBalance(d.clienteId, currentData) : null;

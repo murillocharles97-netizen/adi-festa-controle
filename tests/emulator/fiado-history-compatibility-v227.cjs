@@ -1,0 +1,22 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto'),path=require('node:path');
+assert.equal(process.env.GCLOUD_PROJECT,'demo-veconi-owner-v219');for(const key of ['FIREBASE_AUTH_EMULATOR_HOST','FIRESTORE_EMULATOR_HOST'])assert.match(process.env[key]||'',/^127\.0\.0\.1:\d+$/);
+const dep=require('node:module').createRequire(path.resolve('functions/package.json')),{initializeApp,deleteApp}=dep('firebase-admin/app'),{getFirestore}=dep('firebase-admin/firestore'),{operationalCommitService}=require('../../functions/src/services/operational-commit-service'),Plan=require('../../functions/src/shared/installment-plan'),{fixture}=require('../helpers/fiado-history-proof.cjs'),{prove}=require('../../scripts/lib/fiado-history-proof.cjs');
+test('unchanged backend rejects the historical account after a first plan even with a fully confirmed 247 ledger',async()=>{
+ const app=initializeApp({projectId:'demo-veconi-owner-v219'},'history-'+crypto.randomUUID());try{
+  const db=getFirestore(app),bid='qa-'+crypto.randomUUID(),uid='qa-owner',space='qa-space-'+crypto.randomUUID(),root=db.doc('businesses/'+bid),input=fixture();input.businessId=bid;input.client.businessId=bid;
+  await root.set({id:bid,ownerId:uid,active:true,workspaceGeneration:0,subscription:{planId:'internal',status:'active'}});await db.doc('users/'+uid).set({uid,businessId:bid,active:true,role:'owner'});await root.collection('members').doc(uid).set({uid,role:'owner',status:'active',permissionsVersion:2,permissions:{},spaceAccess:'all'});await db.doc('financialSpaces/'+space).set({id:space,businessId:bid,linkedBusinessId:bid,active:true,type:'business',ownerUid:uid,capabilities:{sales:true}});
+  for(const [col,rows]of Object.entries(input.collections))for(const row of rows){row.businessId=bid;if(col==='sales')row.spaceId=space;await root.collection(col).doc(row.id).set(row);}
+  assert.equal(prove(input,'2026-11-07').financialProof,true);await root.collection('clients').doc(input.client.id).set(input.client);
+  const request={auth:{uid,token:{uid}},data:{kind:'fiado_account',businessId:bid,workspaceGeneration:0,clientId:input.client.id}},service=operationalCommitService(db,{now:()=>new Date('2026-11-07T12:00:00Z')});
+  assert.equal((await service.receipt(request)).account,null);
+  // Emulator-only representation, including the canonical evidence of the new sale.
+  const at='2026-11-07T12:00:00Z',newSale={id:'new-plan',operationId:'new-plan-op',businessId:bid,workspaceGeneration:0,spaceId:space,clienteId:input.client.id,formaPagamento:'fiado',status:'applied',applicationStatus:'applied',valorFinal:20,creditOriginalAmount:20,creditPaidAmount:0,creditRemainingAmount:20,saldoAnterior:-247,saldoAtual:-267,data:at,financialAppliedAt:at,installmentPlan:Plan.create({total:20,downPayment:0,count:10,firstDueDate:'2026-12-07',saleDate:'2026-11-07'})};
+  const newEvent={id:'credit_sale:new-plan',businessId:bid,workspaceGeneration:0,customerId:input.client.id,status:'applied',type:'credit_sale',sourceCollection:'sales',sourceDocumentId:'new-plan',operationId:newSale.operationId,appliedAt:at,balanceDelta:-20},newMarker={id:newSale.operationId,businessId:bid,workspaceGeneration:0,status:'processed',eventKind:'sale'};
+  for(const [col,row]of [['sales',newSale],['balanceEvents',newEvent],['processedOperations',newMarker]]){await root.collection(col).doc(row.id).set(row);input.collections[col].push(row);}
+  Object.assign(input.client,{saldo:-267,hasInstallmentFiado:true});await root.collection('clients').doc(input.client.id).update({saldo:-267,hasInstallmentFiado:true});const before=(await root.collection('clients').doc(input.client.id).get()).updateTime.toMillis();
+  const confirmed=prove(input,'2026-11-07');assert(confirmed.financialProof);assert.equal(confirmed.account.dueCents,24700);assert.equal(confirmed.account.futureCents,2000);assert.equal(confirmed.account.totalCents,26700);assert.equal(confirmed.backendCompatible,false);
+  await assert.rejects(service.receipt(request),e=>e.code==='failed-precondition'&&/Histórico incompleto/.test(e.message));
+  assert.equal((await root.collection('clients').doc(input.client.id).get()).data().legacyBalanceRemaining,22);assert.equal((await root.collection('clients').doc(input.client.id).get()).updateTime.toMillis(),before);assert.equal((await root.collection('payments').get()).size,5);assert.equal((await root.collection('stockMovements').get()).size,0);
+ }finally{await deleteApp(app);}
+});
