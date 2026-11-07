@@ -33,7 +33,7 @@
  function allocate(account,amountCents,{advance=false}={}){
   if(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>(advance?account.totalCents:account.dueCents))throw Error('Valor excede o saldo exigível. Para antecipar, confirme explicitamente o pagamento de parcelas futuras.');
   let remaining=amountCents;const rows=[];
-  for(const e of account.entries){if(!remaining)break;if(!advance&&e.dueDate>account.asOf)continue;const cents=Math.min(e.remainingCents,remaining);rows.push({saleId:e.saleId,number:e.number,dueDate:e.dueDate,amountCents:cents,anticipated:e.dueDate>account.asOf});remaining-=cents;}
+  for(const e of account.entries){if(!remaining)break;if(!advance&&e.dueDate>account.asOf)continue;const cents=Math.min(e.remainingCents,remaining);rows.push({saleId:e.saleId,number:e.number,dueDate:e.dueDate,amountCents:cents,anticipated:e.dueDate>account.asOf,...(e.historyEventId?{historyEventId:e.historyEventId}:{})});remaining-=cents;}
   if(remaining)throw Error('Alocação incompleta.');return rows;
  }
  function applyAllocations(db,clientId,rows,paymentId,at){

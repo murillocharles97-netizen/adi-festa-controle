@@ -31,7 +31,7 @@ async function paymentConfirmationRead({tx,c,d,ref,now=new Date()}){
     return{confirmed:false,status:'balance_unconfirmed'};
   const businessName=String(settings.nome||c.business.name||c.business.nome||'').trim();
   if(!businessName||!String(client.nome||'').trim())return{confirmed:false,status:'identity_unconfirmed'};
-  const account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId,now});
+  const account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId,now,historyProofVersion:d.fiadoHistoryVersion===1?1:0});
   return{confirmed:true,status:'confirmed',businessId:c.bid,workspaceGeneration:generation,paymentId,operationId,clientId,spaceId:p.spaceId,
     amount:p.valor,paymentDate:iso(p.data||p.createdAt||p.financialAppliedAt),paymentMethod:p.paymentMethod||'other',
     appliedAt:iso(p.financialAppliedAt),balance:account?-account.dueCents/100:client.saldo,...(account?{futureAmount:account.futureCents/100,totalOutstanding:account.totalCents/100,balanceMeaning:'due_now'}:{}),financialVersion:client.financialVersion,checkedAt:new Date().toISOString(),
