@@ -237,8 +237,9 @@
           <button type="button" class="desktop-continue-sale" id="desktop-continue-sale"><span>Continuar venda <b id="desktop-cta-total">• ${money(total)}</b></span>${icon("chevron-right")}</button>
           <section class="desktop-checkout-fields" id="desktop-checkout-fields" hidden>
             <button class="desktop-back-to-cart" id="desktop-back-to-cart" type="button">${icon("arrow-left")} Voltar ao carrinho</button>
-            <div class="field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option></select></div>
+            <div class="field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option><option value="crediario">Parcelado</option></select></div>
             <select id="sale-status" hidden aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select>
+            ${window.InstallmentCredit?.fields?.() || ""}
             <div id="debt-preview"></div>
             <div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Observação opcional"></textarea></div>
             <button class="btn btn-primary" id="finish-sale" type="button">${icon("check")} Concluir venda <span id="desktop-finish-total">• ${money(total)}</span></button>

@@ -23,7 +23,7 @@
   function paymentChips(summary){
     if($('.mobile-payment-chips',summary))return;
     const select=$('#sale-payment-method',summary),field=select?.closest('.field');
-    field?.insertAdjacentHTML('beforebegin',`<section class="mobile-payment"><h4>Forma de pagamento</h4><div class="mobile-payment-chips"><button class="active" data-payment="pix">${icon('diamond')} Pix</button><button data-payment="dinheiro">${icon('banknote')} Dinheiro</button><button data-payment="cartao">${icon('credit-card')} Cartão</button><button data-payment="cartao_presencial" hidden disabled>${icon('contactless')} Maquininha integrada</button><button data-payment="fiado">${icon('receipt-text')} Fiado</button></div><div class="mobile-payment-note">${icon('circle-check')}<span><b>Pagamento à vista</b><small>Valor será recebido agora.</small></span></div></section>`);
+    field?.insertAdjacentHTML('beforebegin',`<section class="mobile-payment"><h4>Forma de pagamento</h4><div class="mobile-payment-chips"><button class="active" data-payment="pix">${icon('diamond')} Pix</button><button data-payment="dinheiro">${icon('banknote')} Dinheiro</button><button data-payment="cartao">${icon('credit-card')} Cartão</button><button data-payment="cartao_presencial" hidden disabled>${icon('contactless')} Maquininha integrada</button><button data-payment="fiado">${icon('receipt-text')} Fiado</button>${select?.querySelector('option[value="crediario"]')?'<button data-payment="crediario">'+icon('calendar-days')+' Parcelado</button>':''}</div><div class="mobile-payment-note">${icon('circle-check')}<span><b>Pagamento à vista</b><small>Valor será recebido agora.</small></span></div></section>`);
     field?.classList.add('mobile-hidden-payment-select');
   }
   function summaryTools(summary){
@@ -42,7 +42,7 @@
       row.insertAdjacentHTML('afterbegin','<span class="mobile-cart-swipe duplicate">Duplicar</span><span class="mobile-cart-swipe remove">Remover</span>');
       bindCartSwipe(row);
     });
-    const paymentHint=$('.mobile-payment-note small',summary);if(paymentHint)paymentHint.textContent=window.PriorSales?.active?.()?(payment==='fiado'?'Débito no saldo atual, sujeito à conferência de recebimentos.':'Pagamento externo já recebido. Nenhuma cobrança será iniciada.'):(payment==='fiado'?'O valor será somado à conta do cliente.':'Valor será recebido agora.');
+    const paymentHint=$('.mobile-payment-note small',summary);if(paymentHint)paymentHint.textContent=window.PriorSales?.active?.()?(payment==='fiado'?'Débito no saldo atual, sujeito à conferência de recebimentos.':'Pagamento externo já recebido. Nenhuma cobrança será iniciada.'):(payment==='crediario'?'Parcelas entram no Fiado conforme o vencimento. Registre os recebimentos separadamente.':payment==='fiado'?'O valor será somado à conta do cliente.':'Valor será recebido agora.');
     const total=$('.total-row b',summary)?.textContent||money(0),finish=$('#finish-sale',summary),finishState=finish?.dataset.saleState||'normal';if(finish&&finishState==='normal'&&window.PriorSales?.active?.())finish.innerHTML=`${icon('calendar-clock')} ${window.PriorSales.locked()?'Consultar registro anterior':'Revisar venda anterior'} <strong>${total}</strong>`;else if(finish&&finishState==='normal'&&!$('strong',finish))finish.innerHTML=`${icon('check')} Concluir venda <strong>${total}</strong>`;else if(finish&&finishState==='normal'&&$('strong',finish)?.textContent!==total)$('strong',finish).textContent=total;
     const bag=$('#open-sale-summary'),items=$$('.editable-cart',summary).reduce((sum,row)=>sum+Number($('[data-item-qty]',row)?.value||0),0),client=$('#sale-client',summary),clientName=client?.value?client.options[client.selectedIndex]?.text:'Venda avulsa';
     const meta=`${clientName} · ${payment==='fiado'?'Fiado':payment[0].toUpperCase()+payment.slice(1)}`;
@@ -57,7 +57,28 @@
   }
   function openSummary(){const summary=$('#pos-summary'),overlay=$('[data-sale-cart-overlay]')||$('.pos-summary-overlay'),trigger=$('#open-sale-summary');if(!summary)return false;summary.hidden=false;if(overlay)overlay.hidden=false;summary.classList.add('mobile-open');summary.setAttribute('aria-hidden','false');trigger?.setAttribute('aria-expanded','true');document.body.classList.add('sale-sheet-open');overlay?.classList.add('open');enhanceCart(summary);setTimeout(()=>$('#close-sale-summary',summary)?.focus(),0);return true}
   function closeSummary({immediate=false}={}){const summary=$('#pos-summary'),overlay=$('[data-sale-cart-overlay]')||$('.pos-summary-overlay'),trigger=$('#open-sale-summary');summary?.classList.remove('mobile-open','expanded','discount-open','note-open');summary?.setAttribute('aria-hidden','true');trigger?.setAttribute('aria-expanded','false');document.body.classList.remove('sale-sheet-open');overlay?.classList.remove('open');const finish=()=>{if(summary&&!summary.classList.contains('mobile-open'))summary.hidden=true;if(overlay&&!overlay.classList.contains('open'))overlay.hidden=true};if(immediate)finish();else setTimeout(finish,180);trigger?.focus({preventScroll:true});return Boolean(summary)}
-  function updatePayment(method){payment=method;window.CheckoutPaymentMethod=method;const summary=$('#pos-summary'),status=$('#sale-status',summary),select=$('#sale-payment-method',summary);if(select)select.value=method;if(status){status.value=method==='fiado'?'fiado':'pago';status.dispatchEvent(new Event('change',{bubbles:true}))}$$('[data-payment]',summary).forEach(button=>button.classList.toggle('active',button.dataset.payment===method));const note=$('.mobile-payment-note',summary);if(note)note.innerHTML=method==='fiado'?`${icon('hand-coins')}<span><b>Venda fiado</b><small>O valor será somado à conta do cliente.</small></span>`:method==='cartao_presencial'?`${icon('contactless')}<span><b>Cartão na maquininha</b><small>A venda só finaliza após a aprovação.</small></span>`:`${icon('circle-check')}<span><b>${method==='pix'?'Pagamento via Pix':method==='dinheiro'?'Pagamento em dinheiro':'Pagamento no cartão'}</b><small>Valor será recebido agora.</small></span>`;enhanceCart(summary);window.lucide?.createIcons()}
+  function updatePayment(method) {
+    payment = method;
+    window.CheckoutPaymentMethod = method;
+    const summary = $('#pos-summary'), status = $('#sale-status', summary),
+      select = $('#sale-payment-method', summary);
+    if (select) select.value = method;
+    if (status) status.value = ['fiado', 'crediario'].includes(method) ? 'fiado' : 'pago';
+    // Use the same change handler as the native checkout, including installment fields.
+    select?.dispatchEvent(new Event('change', {bubbles:true}));
+    $$('[data-payment]', summary).forEach(button =>
+      button.classList.toggle('active', button.dataset.payment === method));
+    const note = $('.mobile-payment-note', summary);
+    if (note) note.innerHTML = method === 'crediario'
+      ? `${icon('calendar-days')}<span><b>Venda parcelada</b><small>Cliente obrigatório. Confira as parcelas e os vencimentos.</small></span>`
+      : method === 'fiado'
+        ? `${icon('hand-coins')}<span><b>Venda fiado</b><small>O valor será somado à conta do cliente.</small></span>`
+        : method === 'cartao_presencial'
+          ? `${icon('contactless')}<span><b>Cartão na maquininha</b><small>A venda só finaliza após a aprovação.</small></span>`
+          : `${icon('circle-check')}<span><b>${method === 'pix' ? 'Pagamento via Pix' : method === 'dinheiro' ? 'Pagamento em dinheiro' : 'Pagamento no cartão'}</b><small>Valor será recebido agora.</small></span>`;
+    enhanceCart(summary);
+    window.lucide?.createIcons();
+  }
   function menu(item){
     const root=$('#modal'),controlsStock=window.productControlsStock?.(item)??(item.itemKind!=='service'&&!item.semControleEstoque&&item.controlaEstoque!==false);root.innerHTML=`<div class="modal-bg mobile-product-menu-bg"><section class="mobile-product-menu"><span class="sheet-handle"></span><header>${window.ProductImages?.markup?.(item,{className:'sale-menu-photo'})||`<span>${esc(item.nome.slice(0,2).toUpperCase())}</span>`}<div><h3>${esc(item.nome)}</h3><p>${money(item.preco)}${item.itemKind==='service'?' · Serviço':''}</p></div><button class="close">${icon('x')}</button></header><button data-menu-add-five>${icon('plus')} Adicionar 5 à sacola</button><button data-menu-favorite>${icon('star')} ${item.favorito?'Remover dos favoritos':'Favoritar item'}</button><button data-menu-edit>${icon('pencil')} Editar item</button>${controlsStock?`<button data-menu-stock>${icon('package-plus')} Entrada de estoque</button><button data-menu-history>${icon('history')} Histórico de estoque</button>`:''}</section></div>`;
     const close=()=>root.innerHTML='';$('.close',root).onclick=close;$('[data-menu-add-five]',root).onclick=()=>{close();const card=$(`.pos-product[data-add="${CSS.escape(item.id)}"]`);for(let n=0;n<5;n++)card?.click()};$('[data-menu-favorite]',root).onclick=()=>{close();$(`[data-fav="${CSS.escape(item.id)}"]`)?.click()};$('[data-menu-edit]',root).onclick=()=>{close();window.ProdutosMobile?.productForm(item.id)};$('[data-menu-stock]',root)?.addEventListener('click',()=>{close();window.ProdutosMobile?.stockEntry(item.id)});$('[data-menu-history]',root)?.addEventListener('click',()=>{close();window.ProdutosMobile?.history(item.id)});window.lucide?.createIcons()
