@@ -150,3 +150,25 @@ test('informational preserved notice never hides bootstrap, active listener fail
  }
  Object.assign(h.c.state,{status:'waiting',hydrated:true,listenerConnected:true,syncFailure:null,dataAudit:null});h.c.saleIntegrityDiagnostics=()=>({count:1});h.c.updateQueueState();assert.equal(events.at(-1).status,'error');assert.match(events.at(-1).message,/pendência comprovada/);
 });
+
+test('denied receipt is immutable through automatic and manual sync while independent sales proceed',async()=>{
+ const denied={...legitimate(),queueId:'receipt-q',operationId:'old-receipt',status:'error',lastErrorCode:'permission-denied',lastErrorMessage:'Parcela histórica do recebimento divergente.',attempts:2,checksum:'preserved',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old-receipt',operation:'create',data:{clienteId:'client-old',valor:100,legacyAmount:0}}]}};
+ for(const manual of [false,true]){const next={...legitimate(),payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-independent'}}))}},h=harness([denied,next]),before=JSON.stringify(denied);h.migrate();const result=await h.run(manual,manual);assert.equal(result.sent,1);assert.deepEqual(h.committed,['legitimate']);assert.equal(h.queue().length,1);assert.equal(JSON.stringify(h.queue()[0]),before);assert.equal([...h.values.keys()].some(k=>k.includes(':manualReview:')||k.includes(':incidentArchive:')),false);}
+});
+test('same-client operation waits but other-client operation synchronizes',async()=>{
+ const old={...legitimate(),queueId:'old-q',operationId:'old',status:'error',lastErrorCode:'permission-denied',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old',operation:'create',data:{clientId:'client-a',valor:10}}]}};
+ const dependent={...legitimate(),queueId:'dependent-q',operationId:'dependent',payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-a'}}))}},independent=legitimate(),h=harness([old,dependent,independent]),before=JSON.stringify([old,dependent]);
+ await h.run(true,true);assert.deepEqual(h.committed,['legitimate']);assert.equal(JSON.stringify(h.queue()),before);
+});
+
+test('unrelated new receipt proceeds while denied receipt remains intact',async()=>{
+ const denied={...legitimate(),queueId:'old-q',operationId:'old',status:'error',lastErrorCode:'permission-denied',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old',operation:'create',data:{clientId:'a',valor:100}}]}};
+ const next={...legitimate(),queueId:'new-payment-q',operationId:'new-payment',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'new-payment',operation:'create',data:{clientId:'b',valor:50,businessId:'qa',spaceId:'space',actorUid:'seller'}}]}},h=harness([denied,next]),before=JSON.stringify(denied);
+ h.c.CLOUD_NAMES.push('payments');await h.run(true,true);assert.deepEqual(h.committed,['new-payment']);assert.equal(JSON.stringify(h.queue()[0]),before);
+});
+
+test('client review guard blocks dependent local mutations and allows unrelated client',()=>{
+ const old={...legitimate(),queueId:'old-q',operationId:'old',status:'error',lastErrorCode:'permission-denied',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old',operation:'create',data:{clientId:'client-a',valor:10}}]}},h=harness([old]),before=h.raw();
+ assert.throws(()=>h.c.assertCustomerPaymentReview('client-a'),e=>e.code==='payment-review-required');
+ assert.doesNotThrow(()=>h.c.assertCustomerPaymentReview('client-b'));assert.equal(h.raw(),before);
+});

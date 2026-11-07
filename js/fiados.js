@@ -35,6 +35,7 @@ window.Fiados = (() => {
       window.SyncFirebase?.assertPaymentTracked?.(existing);
       return existing;
     }
+    window.SyncFirebase?.assertCustomerPaymentReview?.(clienteId);
     const spaceId = window.SpaceContext?.requireSalesSpace?.(options.spaceId || "") || null;
     if (!spaceId && typeof document !== "undefined") throw Error("Selecione o espaço deste recebimento.");
     const before = DB.carregar(),

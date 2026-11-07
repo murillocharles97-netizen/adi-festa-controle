@@ -784,6 +784,30 @@ const canAttempt = (item, force = false, manualRetry = false) =>
   (force || !item.lastAttemptAt ||
     Date.now() - new Date(item.lastAttemptAt).getTime() >=
       retryDelay(item.attempts || 0, item.lastErrorCode));
+function paymentQueueRequiresReview(item) {
+  return item.lastErrorCode === "permission-denied" &&
+    (item.payload?.writes || []).some(write =>
+      write.entityType === "payments" && write.operation === "create");
+}
+function paymentQueueDependsOnReview(item, queue) {
+  const clients = packet => new Set((packet.payload?.writes || []).flatMap(write =>
+    [write.entityType === "clients" ? write.entityId : null,
+      write.data?.clienteId, write.data?.clientId].filter(Boolean)));
+  const currentClients = clients(item);
+  return queue.some(original => original.businessId === item.businessId &&
+    original.userId === item.userId &&
+    (original.workspaceGeneration ?? 0) === (item.workspaceGeneration ?? 0) &&
+    paymentQueueRequiresReview(original) &&
+    [...clients(original)].some(id => currentClients.has(id)));
+}
+function assertCustomerPaymentReview(clientId) {
+  const candidate = {businessId:activeBusinessId(),userId:currentUser?.uid,
+    workspaceGeneration:DB.getWorkspaceGeneration?.() ?? 0,
+    payload:{writes:[{entityType:"clients",entityId:String(clientId)}]}};
+  if (paymentQueueDependsOnReview(candidate, readQueue()))
+    throw Object.assign(Error("Este cliente possui recebimento rejeitado preservado para revisão. Consulte a operação original antes de registrar outra movimentação para ele."),
+      {code:"payment-review-required"});
+}
 function saleQueueRequiresReview(item) {
   // Previously denied sales may have been re-entered by another operator.
   // A permission fix must not silently replay their commercial effects. This
@@ -1105,6 +1129,7 @@ function rememberCustomerPresence(client) {
   customerPresenceCache.set(key,value);try{localStorage.setItem(key,JSON.stringify(value));}catch{/* Presence may remain in this session; no business write is lost. */}
 }
 function assertCustomerForSale(clientId) {
+  if (clientId) assertCustomerPaymentReview(clientId);
   const id=String(clientId||''),client=(DB.carregar().clientes||[]).find(c=>String(c.id)===id);
   if (!id) return;
   if (!currentUser || !client || client.deletedAt || client.active===false || client.ativo===false || client.businessId&&client.businessId!==activeBusinessId())
@@ -1843,7 +1868,7 @@ function migrateScopedQueueCompatibility() {
     blocked = 0;
   const next = queue.map((item) => {
     if (preserveQueueQuarantine(item)) return item;
-    if (saleQueueRequiresReview(item)) return item;
+    if (saleQueueRequiresReview(item) || paymentQueueRequiresReview(item)) return item;
     // Permission resolution is not permission to enrich/rewrite a config packet.
     if (Array.isArray(item.payload?.writes) && item.payload.writes.some(write => write.entityType === "settings") &&
         !canWriteSharedSettings()) return item;
@@ -3458,6 +3483,12 @@ async function processSyncQueue(options = {}) {
       changedCollections = new Set();
     for (const queued of [...queue]) {
       assertSession();
+      // Keep the rejected financial packet byte-for-byte intact, even on manual Sync.
+      // Independent clients can proceed; dependent financial projections must wait.
+      if (paymentQueueRequiresReview(queued) || paymentQueueDependsOnReview(queued, readQueue())) {
+        reviewHeld++;
+        continue;
+      }
       const classification=classifyQueueOperation(queued);
       if (classification.replayBlocked) {
         if(['quarantined','manual_review'].includes(classification.category))preserveQueueQuarantine(queued);
@@ -6569,6 +6600,7 @@ window.SyncFirebase = {
   prepareOperationalCustomer,
   prepareSaleCustomer,
   assertCustomerForSale,
+  assertCustomerPaymentReview,
   assertPaymentTracked,
   isSalePending,
   prepareCustomerForSale,
