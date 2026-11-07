@@ -114,6 +114,7 @@
     "js/activity-center.js",
     "js/app-intro-tutorial.js",
     "js/app.js",
+    "js/pwa-update.js",
     "js/auth-loading.js",
     "js/backup.js",
     "js/barcode.js",

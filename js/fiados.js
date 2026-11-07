@@ -42,6 +42,7 @@ window.Fiados = (() => {
     ((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
+      if(client.hasInstallmentFiado && !(db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan)) throw Error('Sincronize o calendário completo deste cliente antes de receber. Preserve qualquer recebimento pendente.');
       const scheduled=(db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan&&!s.deletedAt&&s.active!==false);
       if(scheduled&&options.saleId)throw Error('Utilize o recebimento agregado do Fiado, sem escolher parcelas.');
       const account=scheduled?window.FiadoAccount.project(client,db.vendas,options.fiadoAccount?.asOf):null;

@@ -1436,11 +1436,7 @@
     navigator.serviceWorker
       .register("./service-worker.js")
       .then((registration) => {
-        const offerUpdate = (worker) => {
-          if (!worker) return;
-          if (confirm("Nova versão disponível. Deseja atualizar agora?"))
-            worker.postMessage("SKIP_WAITING");
-        };
+        const offerUpdate = worker => window.PwaUpdate.offer(worker);
         if (registration.waiting) offerUpdate(registration.waiting);
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;
@@ -1456,7 +1452,7 @@
         navigator.serviceWorker.addEventListener("controllerchange", () => {
           if (!refreshing) {
             refreshing = true;
-            location.reload();
+            window.PwaUpdate.reload();
           }
         });
       })
