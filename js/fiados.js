@@ -133,7 +133,9 @@ window.Fiados = (() => {
       if (client.legacyBalanceRemaining === undefined) {
         const trackedDebt = (db.vendas || []).filter((sale) =>
           String(sale.clienteId || sale.clientId) === String(clienteId) &&
-          sale.status === "fiado" &&
+          sale.formaPagamento === "fiado" &&
+          ["fiado", "applied"].includes(sale.status || "fiado") &&
+          sale.active !== false && !sale.deletedAt && !sale.cancelledAt &&
           sale.desfeita !== true,
         ).reduce((sum, sale) => sum + Math.max(0, Number(
           sale.creditRemainingAmount ?? sale.creditOriginalAmount ?? sale.valorFinal ?? sale.valorTotal ?? 0,
