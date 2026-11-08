@@ -1305,7 +1305,7 @@ async function prepareSaleCustomer(clientId,options={}) {
         snapshot=await (paidCheckout?withDeadline(pending,5000):pending);
       }catch(error){
         checkScope();
-        if(!paidCheckout||!isConnectionError(error))throw error;
+        if (!paidCheckout || error?.code !== 'unavailable') throw error;
         transport='direct';
         snapshot=await withDeadline(readCheckoutCustomerDirect(reference,checkScope),7000);
       }

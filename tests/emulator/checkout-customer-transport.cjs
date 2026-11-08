@@ -20,7 +20,7 @@ const cut = (from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 const checkout = cut('function paymentQueueRequiresReview(', 'function saleQueueRequiresReview(')
   + cut('// Presence evidence', 'function rememberCanonicalClients(');
 
-test('authenticated checkout confirms through Lite when full Firestore is offline, with Rules and debt guards intact', async () => {
+test('authenticated checkout confirms through Lite when full Firestore is offline, with Rules and debt guards intact', async t => {
   const name = randomUUID();
   const app = initializeApp({ projectId, apiKey: 'demo-only' }, name);
   const adminApp = admin('firebase-admin/app').initializeApp({ projectId }, name);
@@ -88,10 +88,35 @@ test('authenticated checkout confirms through Lite when full Firestore is offlin
     for (const method of ['fiado', 'crediario']) await assert.rejects(prepare(method, true), { code: 'payment-review-required' });
     assert.equal(sdkAttempts, 3);
 
+    const readFromServer = sandbox.getDocFromServer;
+    const beforeFailures = directAttempts;
+    for (const code of ['deadline-exceeded', 'network-request-failed', 'operational-read-offline']) {
+      await t.test(code + ' leaves checkout pending without a Lite read', async () => {
+        sandbox.getDocFromServer = async () => { throw Object.assign(Error('Falha de teste'), { code }); };
+        await assert.rejects(prepare('pix'), {
+          code: 'checkout-customer-unavailable',
+          message: /Tentar novamente.*carrinho foi preservado/,
+        });
+        assert.equal(directAttempts, beforeFailures);
+        assert.equal(JSON.stringify(queue), before);
+      });
+    }
+    await t.test('the five-second timeout and a late unavailable do not start Lite', async () => {
+      let rejectLate;
+      sandbox.getDocFromServer = () => new Promise((_, reject) => { rejectLate = reject; });
+      await assert.rejects(prepare('cartao'), { code: 'checkout-customer-unavailable' });
+      rejectLate(Object.assign(Error('Falha tardia'), { code: 'unavailable' }));
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(directAttempts, beforeFailures);
+      assert.equal(JSON.stringify(queue), before);
+    });
+    sandbox.getDocFromServer = readFromServer;
+
     // Even with a previous presence marker, both channels unavailable must block.
     failDirect = true;
     await assert.rejects(prepare('pix'), { code: 'checkout-customer-unavailable' });
-    assert.equal(diagnostics[0][1].path, 'businesses/{empresa}/clients/{cliente}');
+    assert.equal(directAttempts, beforeFailures + 1);
+    assert.equal(diagnostics.at(-1)[1].path, 'businesses/{empresa}/clients/{cliente}');
     assert.equal(JSON.stringify(queue), before);
     assert.equal((await root.collection('sales').get()).size, 0);
     assert.equal((await root.collection('stockMovements').get()).size, 0);
