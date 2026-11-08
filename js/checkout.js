@@ -1036,12 +1036,19 @@ window.Checkout = (() => {
       if(clienteId&&Number(window.AdiFestaBuild?.release)>=205&&!window.SyncFirebase?.prepareSaleCustomer)
         return validationError('Atualize o aplicativo para conferir o cliente antes de iniciar a venda ou cobrança. O carrinho foi preservado.');
       if (clienteId && window.SyncFirebase?.prepareSaleCustomer) {
-        const customerCheckOrigin=JSON.stringify([DB.getPrincipal?.(),businessId,DB.getWorkspaceGeneration?.(),spaceId,clienteId,cart]);
+        const customerCheckOrigin = () => JSON.stringify([
+          DB.getPrincipal?.(), DB.getBusinessId?.() || window.FirebaseSession?.businessId,
+          DB.getWorkspaceGeneration?.(), selectedSalesSpaceId(),
+          document.querySelector('#sale-client')?.value || null,
+          document.querySelector('#sale-payment-method')?.value || window.CheckoutPaymentMethod || 'pix',
+          document.querySelector('#sale-status')?.value, cart,
+        ]);
+        const origin = customerCheckOrigin();
         finishing=true;setSubmissionState('processing','Conferindo o cliente na nuvem…');
         try {
-          await window.SyncFirebase.prepareSaleCustomer(clienteId, {spaceId,affectsDebt:status==="fiado"});
-          if (customerCheckOrigin!==JSON.stringify([DB.getPrincipal?.(),DB.getBusinessId?.(),DB.getWorkspaceGeneration?.(),selectedSalesSpaceId(),document.querySelector('#sale-client')?.value||null,cart]))
-            return validationError('O cliente ou espaço mudou. Revise o carrinho antes de confirmar.');
+          await window.SyncFirebase.prepareSaleCustomer(clienteId, {spaceId,paymentMethod,affectsDebt:status==="fiado"});
+          if (origin!==customerCheckOrigin())
+            return validationError('O carrinho mudou durante a conferência. Revise a venda antes de confirmar.');
         } catch (error) { return validationError(error.message || 'O cliente ainda não foi confirmado. O carrinho foi preservado.'); }
         finally{finishing=false;}
       }

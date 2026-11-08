@@ -60,6 +60,41 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
         if (width<768) await page.click('[data-payment="'+method+'"]');
         else await page.select('#sale-payment-method',method);
       };
+      const beforeOutage = await page.evaluate(() => {
+        DB.alterar(data => { data.clientes[0].saldo = 0; });
+        window.customerChecks = [];
+        SyncFirebase.prepareSaleCustomer = async (_id, options) => {
+          window.customerChecks.push(options.paymentMethod);
+          throw Object.assign(Error('Não foi possível confirmar o cliente na nuvem. O carrinho foi preservado.'),
+            {code:'checkout-customer-unavailable'});
+        };
+        return JSON.stringify([DB.carregar().vendas, DB.carregar().pagamentos, Produtos.obter('p1').estoqueAtual]);
+      });
+      await page.select('#sale-client','c1');
+      for (const [index, method] of ['pix','dinheiro','cartao'].entries()) {
+        await choose(method);
+        assert.equal(await page.evaluate(() => window.customerChecks.length), index);
+        await page.$eval('#finish-sale', button => button.click());
+        try {
+          await page.waitForFunction(n => window.customerChecks.length === n, {timeout:3000}, index + 1);
+        } catch (error) {
+          throw Error('Checkout ' + width + '/' + method + ': ' + await page.evaluate(() => JSON.stringify({
+            customer: document.querySelector('#sale-client')?.value,
+            method: document.querySelector('#sale-payment-method')?.value,
+            state: document.querySelector('#finish-sale')?.dataset.saleState,
+            feedback: document.querySelector('#sale-submit-feedback')?.textContent,
+            checks: window.customerChecks,
+          })), {cause:error});
+        }
+        assert.match(await page.$eval('#sale-submit-feedback', el => el.textContent), /confirmar o cliente na nuvem/);
+        assert.equal(await page.evaluate(() => Checkout.cartCount()), 1);
+        assert.equal(await page.evaluate(() => JSON.stringify([DB.carregar().vendas, DB.carregar().pagamentos, Produtos.obter('p1').estoqueAtual])), beforeOutage);
+      }
+      await page.evaluate(() => {
+        SyncFirebase.prepareSaleCustomer = async () => ({source:'server'});
+        DB.alterar(data => { data.clientes[0].saldo = -247; });
+      });
+      await page.select('#sale-client','');
       for (const method of ['pix','dinheiro','cartao','fiado','crediario']) {
         await choose(method);
         assert.equal(await page.$eval('#sale-payment-method',el=>el.value),method);
@@ -67,9 +102,9 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       }
       assert.equal(await page.$eval('#installment-fields',el=>el.hidden),false);
       const before = await page.evaluate(()=>({sales:DB.carregar().vendas.length,payments:DB.carregar().pagamentos.length,stock:Produtos.obter('p1').estoqueAtual}));
-      await page.click('#finish-sale');
+      await page.$eval('#finish-sale', button => button.click());
       assert.equal(await page.evaluate(()=>DB.carregar().vendas.length),before.sales);
-      assert.match(await page.$eval('body',el=>el.textContent),/Selecione um cliente/);
+      assert.match(await page.$eval('#sale-submit-feedback',el=>el.textContent),/Selecione um cliente/);
       await page.select('#sale-client','c1');
       assert.match(await page.$eval('[data-current-due]',el=>el.textContent),/247,00/);
       assert.match(await page.$eval('[data-new-future]',el=>el.textContent),/20,00/);

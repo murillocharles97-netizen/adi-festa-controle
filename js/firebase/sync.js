@@ -1223,6 +1223,14 @@ const rememberSnapshotMetadata = (name, metadata) => {
 };
 const canonicalClientSnapshotKey = (businessId, clientId) =>
   `${currentUser?.uid || "anonymous"}:${businessId}:${String(clientId || "")}`;
+async function readCheckoutCustomerDirect(reference, checkScope) {
+  // Same Firebase app, user and Rules. Lite makes a server-only request without
+  // relying on the full SDK's snapshot listener or local cache.
+  const lite = await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-lite.js');
+  checkScope();
+  return lite.getDoc(lite.doc(lite.getFirestore(reference.firestore.app), reference.path));
+}
+
 // Presence evidence is session/tenant/generation scoped metadata, never a commercial patch.
 const customerPresenceCache=new Map();
 const customerPresenceKey = id => `customerPresence:v205:${encodeURIComponent(currentUser?.uid||'')}:${encodeURIComponent(activeBusinessId())}:${DB.getWorkspaceGeneration?.()??0}:${encodeURIComponent(id)}`;
@@ -1253,15 +1261,63 @@ function assertCustomerForSale(clientId,options={}) {
 async function prepareSaleCustomer(clientId,options={}) {
   if(!clientId)return {source:'guest'};
   const id=String(clientId),scope=captureCloudReadScope(),spaceId=options.spaceId||window.SpaceContext?.salesId?.();
-  if(!currentUser||!canPullSource('clients'))throw Error('A consulta deste cliente não está autorizada.');
+  const checkScope = () => {
+    assertCloudReadScope(scope);
+    if(spaceId&&window.SpaceContext?.salesId&&window.SpaceContext.salesId()!==spaceId)
+      throw Error('O espaço mudou. Revise o cliente na conta atual.');
+  };
+  if(!currentUser||auth.currentUser?.uid!==currentUser.uid||!canPullSource('clients'))
+    throw Error('A consulta deste cliente não está autorizada. Confira a sessão. O carrinho foi preservado.');
+  if(options.affectsDebt!==false)assertCustomerPaymentReview(id);
+  const paidCheckout = options.affectsDebt===false && ['pix','dinheiro','cartao'].includes(options.paymentMethod);
+  const isConnectionError = error => ['unavailable','deadline-exceeded','network-request-failed','operational-read-offline']
+    .includes(String(error?.code||'').replace(/^(?:firestore|functions|auth)\//,''));
+  const connectionError = () => Object.assign(
+    Error('Não foi possível confirmar o cliente na nuvem. Verifique a conexão e toque em Tentar novamente. O carrinho foi preservado.'),
+    {code:'checkout-customer-unavailable',stage:'checkout_customer_presence',path:'businesses/{empresa}/clients/{cliente}'});
+  const withDeadline = async (promise, ms) => {
+    let timer;
+    try {
+      return await Promise.race([promise,new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(Object.assign(Error('Tempo limite na leitura.'),{code:'deadline-exceeded'})),ms);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
   const newDraft=readQueue().find(p=>(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
   if(newDraft&&window.TeamAccess?.has?.('customers.create')===true){assertCustomerForSale(id,options);return{source:'authorized-ordered-local-dependency',clientId:id};}
-  if(navigator.onLine===false){assertCustomerForSale(id,options);return{source:'confirmed-local-presence'};}
+  if(navigator.onLine===false){
+    if(paidCheckout)throw connectionError();
+    assertCustomerForSale(id,options);return{source:'confirmed-local-presence'};
+  }
   // Read only. In particular, do NOT flush or retry any old customer or sale operation here.
-  if(window.OperationalReadPolicy?.restricted?.())await prepareOperationalCustomer(id,'checkout');
-  const snapshot=window.OperationalReadPolicy?.handles?.('clients')?await readOperationalDocument('clients',id):await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
-  assertCloudReadScope(scope);
-  if(spaceId&&window.SpaceContext?.salesId&&window.SpaceContext.salesId()!==spaceId)throw Error('O espaço mudou. Revise o cliente na conta atual.');
+  let snapshot;
+  let transport='snapshot';
+  try {
+    if(window.OperationalReadPolicy?.restricted?.())await prepareOperationalCustomer(id,'checkout');
+    checkScope();
+    if(window.OperationalReadPolicy?.handles?.('clients')||window.OperationalReadPolicy?.restricted?.()){
+      transport='operational';
+      snapshot=await readOperationalDocument('clients',id);
+    }else{
+      const reference=doc(db,'businesses',activeBusinessId(),'clients',id);
+      try {
+        const pending=getDocFromServer(reference);
+        snapshot=await (paidCheckout?withDeadline(pending,5000):pending);
+      }catch(error){
+        checkScope();
+        if(!paidCheckout||!isConnectionError(error))throw error;
+        transport='direct';
+        snapshot=await withDeadline(readCheckoutCustomerDirect(reference,checkScope),7000);
+      }
+    }
+  }catch(error){
+    checkScope();
+    if(!isConnectionError(error)&&!(transport==='direct'&&error instanceof TypeError))throw error;
+    const failure=connectionError();
+    console.warn('[Checkout] Consulta do cliente indisponível.',{stage:failure.stage,path:failure.path,transport});
+    throw failure;
+  }
+  checkScope();
   if(!snapshot.exists()||snapshot.metadata?.fromCache||snapshot.metadata?.hasPendingWrites)
     throw Object.assign(Error('Cliente não confirmado na nuvem. Peça ao responsável para analisar o cadastro; nenhuma venda foi registrada.'),{code:'customer-unconfirmed',customerId:id});
   const remote=snapshot.data();

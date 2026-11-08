@@ -242,6 +242,7 @@
             ${window.InstallmentCredit?.fields?.() || ""}
             <div id="debt-preview"></div>
             <div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Observação opcional"></textarea></div>
+            <div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div>
             <button class="btn btn-primary" id="finish-sale" type="button">${icon("check")} Concluir venda <span id="desktop-finish-total">• ${money(total)}</span></button>
           </section>
         </aside>
