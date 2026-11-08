@@ -86,6 +86,7 @@ test('preflight prevents even a modified fixture or partial queued write from re
  // This fixture is not quarantined; quarantine behavior has its own suite.
  c.queueQuarantineReason=()=>'';
  c.saleQueueRequiresReview=()=>false;
+ c.readQueue=()=>[];c.paymentQueueRequiresReview=()=>false;c.paymentQueueDependsOnReview=()=>false;
  const result=c.preflight({businessId:'adi-festa',userId:'owner',operationId:'operation',payload:{writes:[{entityType:'clients',entityId:'c1',operation:'update',data:{saldo:-360}}]}});
  assert.equal(result.ok,false);assert.equal(result.code,'legacy-fixture-upload-blocked');
 });

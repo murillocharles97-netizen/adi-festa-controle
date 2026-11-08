@@ -1039,7 +1039,7 @@ window.Checkout = (() => {
         const customerCheckOrigin=JSON.stringify([DB.getPrincipal?.(),businessId,DB.getWorkspaceGeneration?.(),spaceId,clienteId,cart]);
         finishing=true;setSubmissionState('processing','Conferindo o cliente na nuvem…');
         try {
-          await window.SyncFirebase.prepareSaleCustomer(clienteId, {spaceId});
+          await window.SyncFirebase.prepareSaleCustomer(clienteId, {spaceId,affectsDebt:status==="fiado"});
           if (customerCheckOrigin!==JSON.stringify([DB.getPrincipal?.(),DB.getBusinessId?.(),DB.getWorkspaceGeneration?.(),selectedSalesSpaceId(),document.querySelector('#sale-client')?.value||null,cart]))
             return validationError('O cliente ou espaço mudou. Revise o carrinho antes de confirmar.');
         } catch (error) { return validationError(error.message || 'O cliente ainda não foi confirmado. O carrinho foi preservado.'); }

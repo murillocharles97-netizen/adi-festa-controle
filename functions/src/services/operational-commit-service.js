@@ -60,8 +60,15 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   };
   return c;
  }
- async function commit(request,{priorSale=null}={}){
-  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
+ async function commit(request,{priorSale=null,paymentRecovery=null}={}){
+  if(!paymentRecovery&&['payment_recovery_review','payment_recovery_apply'].includes(request.data?.kind)){
+   const d=request.data,original=d.item;
+   if(!original?.payload||Number(d.clientRelease)<227||d.originalPayloadHash!==digest(original?.payload)||!['permission-denied','failed-precondition','invalid-argument','already-exists'].includes(String(original?.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')))fail('Original rejeitado completo e versão compatível são obrigatórios.','failed-precondition');
+   if(d.kind==='payment_recovery_apply'&&(d.confirmed!==true||!/^[a-f0-9]{64}$/.test(d.reviewHash||'')))fail('Confirme explicitamente a revisão atual antes de recuperar.','failed-precondition');
+   require('./payment-recovery-policy').shape(original);
+   return commit(request,{paymentRecovery:{dryRun:d.kind==='payment_recovery_review',originalHash:d.originalPayloadHash,expectedReviewHash:d.reviewHash||null}});
+  }
+  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
   if(Buffer.byteLength(JSON.stringify(item))>750*1024)fail('Operação excede o limite seguro.','invalid-argument');
   operationalId(item.operationId,'Operação');
@@ -100,11 +107,12 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(!p.requestHash){const primary=writes.find(w=>['sales','payments','stockMovements','balanceAdjustments'].includes(w.entityType)&&w.operation==='create');const event=primary&&(await tx.get(ref(c.bid,primary.entityType,primary.entityId))).data();if(!event||event.operationId!==item.operationId)fail('Recibo legado exige revisão; nenhum efeito foi reaplicado.','failed-precondition');}
     return{replayed:true,operationId:item.operationId,outcome:null};
    }
+   if(paymentRecovery&&(!c.has('customers.receiveDebt')||!c.has('customers.view')))fail('Sem autorização para revisar este recebimento.');
    const priorFailure=String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'');
    const protectedFinancialIntent=attemptWrites.some(w=>w.operation==='create'&&(w.entityType==='payments'||w.entityType==='sales'&&w.data.installmentPlan));
-   if(protectedFinancialIntent&&['permission-denied','failed-precondition','invalid-argument','already-exists'].includes(priorFailure))fail('Operação com rejeição permanente exige revisão explícita; o envelope original foi preservado.','failed-precondition');
+   if(!paymentRecovery&&protectedFinancialIntent&&['permission-denied','failed-precondition','invalid-argument','already-exists'].includes(priorFailure))fail('Operação com rejeição permanente exige revisão explícita; o envelope original foi preservado.','failed-precondition');
    const incomingPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);
-   const capability=item.payload.fiadoHistoryVersion===1&&Number(request.data?.clientRelease)>=227;
+   const capability=!!paymentRecovery||item.payload.fiadoHistoryVersion===1&&Number(request.data?.clientRelease)>=227;
    let historyAccount=null;
    if(incomingPlan){historyAccount=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(incomingPlan.data.clienteId,'Cliente'),now:now(),checkPermission:false,includeTraditional:true,historyProofVersion:capability?1:0});}
    if(incomingPlan&&historyAccount?.creditCents>0)fail('Cliente com crédito exige apuração específica antes do parcelamento.','failed-precondition');
@@ -120,8 +128,14 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     }}
    }
    const incomingPayment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+   let recoveryFacts=null,recoveryHash=null,recoveryAudit=null;
    if(incomingPayment){
-    const p=incomingPayment.data,account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(p.clienteId||p.clientId,'Cliente'),now:now(),checkPermission:false,includeTraditional:capability&&p.fiadoSchedule?.version===2,historyProofVersion:capability?1:0});
+    const p=incomingPayment.data,account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(p.clienteId||p.clientId,'Cliente'),now:now(),checkPermission:false,includeTraditional:!!paymentRecovery||capability&&p.fiadoSchedule?.version===2,historyProofVersion:capability?1:0});
+    if(paymentRecovery){
+     const client=(await tx.get(ref(c.bid,'clients',p.clienteId||p.clientId))).data();recoveryFacts=require('./payment-recovery-policy').prepare({item,client,account,day:require('../shared/installment-plan').today(now())});
+     recoveryHash=digest({originalHash:hash,facts:recoveryFacts,effectivePayloadHash:digest(item.payload)});if(!paymentRecovery.dryRun&&recoveryHash!==paymentRecovery.expectedReviewHash)fail('A revisão mudou. Consulte novamente; nenhum recebimento foi reaplicado.','failed-precondition');
+     recoveryAudit=ref(c.bid,'auditLogs','payment_recovery_'+item.operationId);if((await tx.get(recoveryAudit)).exists)fail('Existe evidência de recuperação sem recibo canônico completo; revisão individual obrigatória.','failed-precondition');
+    }
     historyAccount=account;
     if(account?.version===2&&!HISTORY_ACTIVATION_ENABLED){const client=(await tx.get(ref(c.bid,'clients',p.clienteId||p.clientId))).data();if(client.fiadoHistoryVersion!==1)fail('Novas ativações do histórico estão pausadas.','failed-precondition');}
     if(account){
@@ -151,9 +165,15 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    const newPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);if(newPlan){const entry=plan.get(ref(c.bid,'clients',newPlan.data.clienteId).path);if(entry){entry.data.hasInstallmentFiado=true;if(historyAccount?.version===2)entry.data.fiadoHistoryVersion=1;}}
    if(incomingPayment&&historyAccount?.version===2){const entry=plan.get(ref(c.bid,'clients',incomingPayment.data.clienteId||incomingPayment.data.clientId).path);if(entry)entry.data.fiadoHistoryVersion=1;}
    if(priorSale)await priorSale.finalize(tx,c,item,plan,get);
+   if(paymentRecovery?.dryRun)return{status:'ready_for_explicit_confirmation',reviewHash:recoveryHash,originalPayloadHash:hash,operationId:item.operationId,...recoveryFacts,writesApplied:0};
    if(!plan.size)return{operationId:item.operationId,outcome,replayed:false};
    const marker=plan.get(op.path);
    if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1});
+   if(paymentRecovery){
+    if(!marker)fail('Marcador canônico ausente.','failed-precondition');
+    marker.data.paymentRecovery={version:1,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),auditId:recoveryAudit.id};
+    tx.create(recoveryAudit,{type:'original_payment_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),reviewHash:recoveryHash,...recoveryFacts,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
+   }
    for(const p of plan.values())tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
    const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'))];
    if(names.length){
@@ -447,9 +467,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   return db.runTransaction(async tx=>{
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
-   if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
+   if(d.kind==='payment_recovery_status')return require('./payment-recovery-policy').status({tx,c,d:{...d,operationId:operationalId(d.operationId,'Operação'),paymentId:operationalId(d.paymentId,'Recebimento'),clientId:validId(d.clientId,'Cliente')},ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
    const sid=validId(d.saleId,'Venda'),op=operationalId(d.operationId,'Operação'),s=(await tx.get(ref(c.bid,'sales',sid))).data();
    const reversal=d.kind==='sale_undo';

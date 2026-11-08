@@ -541,8 +541,8 @@ const readQueue = () => {
     return [];
   }
 };
-const readQueueStrict = () => {
-  const raw = localStorage.getItem(queueKey());
+const readQueueStrict = ({readOnly=false}={}) => {
+  const raw = readOnly&&typeof localStorage.peekItem==='function'?localStorage.peekItem(queueKey()):localStorage.getItem(queueKey());
   if (!raw) return [];
   let parsed;
   try { parsed = JSON.parse(raw); } catch { /* keep the original data untouched */ }
@@ -553,7 +553,7 @@ const readQueueStrict = () => {
 const saveQueue = (queue) => {
   const previous = readQueueStrict();
   for (const item of previous) {
-    if (!queueQuarantineReason(item)) continue;
+    if (!queueQuarantineReason(item) && !paymentQueueRequiresReview(item) && !readPaymentRecoveryReceipt(item)) continue;
     const next = queue.find(entry => entry.queueId === item.queueId &&
       entry.operationId === item.operationId);
     if (!next || JSON.stringify(next) !== JSON.stringify(item))
@@ -568,7 +568,7 @@ function classifyQueueOperation(item) {
     activeError:false,sendable:false,canRetry:false,replayBlocked:true,reviewRequired:false,
     reviewState:null,reviewReason:null,resolution:null,archive:null,...extra});
   try {
-    const resolution=readRecoveryResolution(item),archive=readQueueArchive(item);
+    const resolution=readPaymentRecoveryReceipt(item)||readRecoveryResolution(item),archive=readQueueArchive(item);
     if(resolution&&archive&&resolution.status!=='closed_without_effects')
       return result('error',{activeError:true,reviewRequired:true,reviewState:'verification_failed',reviewReason:'conflicting_resolution_evidence'});
     if(resolution)return result('resolved',{reviewState:'resolved',resolution});
@@ -746,6 +746,8 @@ const queueDiagnostics = () =>
     diagnostic: queueSettingsDiagnostic(item),
     originalErrorPath: item.lastErrorPath || null,
     ...classification,
+    paymentReview: paymentQueueRequiresReview(item),
+    paymentDependency: classification.reviewReason==='payment_financial_dependency',
     canArchive: classification.category==='quarantined'&&!['settings_permission_required','sync_protocol_upgrade_review','customer_permission_required'].includes(classification.reviewReason),
     payloadChecksum: checksumValue(item.payload || {}),
     payloadVersion: Number(item.payloadVersion || 1),
@@ -785,12 +787,19 @@ const canAttempt = (item, force = false, manualRetry = false) =>
     Date.now() - new Date(item.lastAttemptAt).getTime() >=
       retryDelay(item.attempts || 0, item.lastErrorCode));
 function paymentQueueRequiresReview(item) {
-  return item.lastErrorCode === "permission-denied" &&
+  return Array.isArray(item.payload?.writes) && !readPaymentRecoveryReceipt(item) && ["permission-denied","failed-precondition","invalid-argument","already-exists"].includes(String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')) &&
     (item.payload?.writes || []).some(write =>
       write.entityType === "payments" && write.operation === "create");
 }
 function paymentQueueDependsOnReview(item, queue) {
-  const clients = packet => new Set((packet.payload?.writes || []).flatMap(write =>
+  // A customer reference or sales counters alone do not depend on debt.
+  const financial = (Array.isArray(item.payload?.writes)?item.payload.writes:[]).some(w =>
+    ['payments','balanceAdjustments','paymentAllocations'].includes(w.entityType) ||
+    w.entityType==='sales' && (w.data?.status==='fiado'||w.data?.formaPagamento==='fiado'||w.data?.installmentPlan) ||
+    w.entityType==='clients' && ['saldo','financialVersion','legacyBalance','legacyBalanceRemaining','hasInstallmentFiado','fiadoHistoryVersion'].some(k =>
+      Object.hasOwn(w.data||{},k) && (!w.before || JSON.stringify(w.data[k])!==JSON.stringify(w.before[k]))));
+  if(!financial)return false;
+  const clients = packet => new Set((Array.isArray(packet.payload?.writes)?packet.payload.writes:[]).flatMap(write =>
     [write.entityType === "clients" ? write.entityId : null,
       write.data?.clienteId, write.data?.clientId].filter(Boolean)));
   const currentClients = clients(item);
@@ -803,7 +812,7 @@ function paymentQueueDependsOnReview(item, queue) {
 function assertCustomerPaymentReview(clientId) {
   const candidate = {businessId:activeBusinessId(),userId:currentUser?.uid,
     workspaceGeneration:DB.getWorkspaceGeneration?.() ?? 0,
-    payload:{writes:[{entityType:"clients",entityId:String(clientId)}]}};
+    payload:{writes:[{entityType:"clients",entityId:String(clientId),data:{saldo:0}}]}};
   if (paymentQueueDependsOnReview(candidate, readQueue()))
     throw Object.assign(Error("Este cliente possui recebimento rejeitado preservado para revisão. Consulte a operação original antes de registrar outra movimentação para ele."),
       {code:"payment-review-required"});
@@ -980,7 +989,9 @@ function queueQuarantineReason(item) {
   return "";
 }
 function queueManualReviewReason(item) {
-  return queueQuarantineReason(item) || (saleQueueRequiresReview(item) ? "sale_recovery_review_required" : "");
+  return queueQuarantineReason(item) || (paymentQueueRequiresReview(item) ? 'payment_recovery_review_required' :
+    paymentQueueDependsOnReview(item,readQueue()) ? 'payment_financial_dependency' :
+    saleQueueRequiresReview(item) ? "sale_recovery_review_required" : "");
 }
 function preserveQueueQuarantine(item) {
   if(readRecoveryResolution(item))return false;
@@ -1042,6 +1053,8 @@ async function archiveQuarantinedOperation(operationId) {
   incidentArchiveTasks.set(operationId,task);return task;
 }
 const queuePreflight = (item) => {
+  if(paymentQueueRequiresReview(item)||paymentQueueDependsOnReview(item,readQueue()))
+    return {ok:false,code:'payment-review-required',message:'Recebimento ou dependência financeira preservados. Utilize a conferência explícita do original.'};
   if (queueQuarantineReason(item))
     return {ok:false,code:"queue-quarantined",message:"Operação em quarentena. O registro original foi preservado para revisão, sem envio."};
   const businessId = activeBusinessId(),
@@ -1087,6 +1100,96 @@ const queuePreflight = (item) => {
     };
   return { ok: true };
 };
+// Recovery is a separate explicit channel. These functions never rewrite the
+// original queue packet, retry it automatically, or manufacture a replacement.
+function paymentReceiptKey(item){return `${queueKey()}:paymentReceipt:${encodeURIComponent(item.operationId)}`;}
+function readPaymentRecoveryReceipt(item){
+  if(!Array.isArray(item.payload?.writes))return null;
+  let r;try{const key=paymentReceiptKey(item);r=JSON.parse((typeof localStorage.peekItem==='function'?localStorage.peekItem(key):localStorage.getItem(key))||'null');}catch{return null;}
+  const p=(item.payload?.writes||[]).find(w=>w.entityType==='payments'&&w.operation==='create');
+  return r?.confirmed===true&&r.status==='confirmed'&&r.operationId===item.operationId&&r.businessId===item.businessId&&r.actorUid===item.userId&&r.workspaceGeneration===(item.workspaceGeneration??0)&&r.paymentId===p?.entityId&&r.clientId===(p?.data.clienteId||p?.data.clientId)&&r.amount===p?.data.valor&&r.paymentDate===p?.data.data&&r.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(r.originalPayloadHash||'')&&r.resolvedAt?r:null;
+}
+function paymentCanonical(v){const sort=x=>Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;return JSON.stringify(sort(v));}
+async function paymentHash(v){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(paymentCanonical(v)))),b=>b.toString(16).padStart(2,'0')).join('');}
+function paymentReviewOrigin(operationId){
+  const uid=currentUser?.uid,bid=activeBusinessId(),generation=DB.getWorkspaceGeneration?.()??0,key=queueKey(),session=syncSessionGeneration;
+  const items=readQueueStrict({readOnly:true}).filter(p=>p.operationId===operationId),item=items[0];
+  if(items.length!==1||!item||item.userId!==uid||uid!==auth.currentUser?.uid||item.businessId!==bid||(item.workspaceGeneration??0)!==generation||!paymentQueueRequiresReview(item))throw Error('Entre na conta de origem e selecione um recebimento rejeitado preservado.');
+  const json=JSON.stringify(item),assertCurrent=()=>{
+    if(session!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||key!==queueKey()||bid!==activeBusinessId()||generation!==(DB.getWorkspaceGeneration?.()??0)||JSON.stringify(readQueueStrict({readOnly:true}).find(p=>p.operationId===operationId))!==json)throw Error('A sessão ou o original mudou. Nenhuma nova tentativa será feita.');
+  };
+  return {item:JSON.parse(json),assertCurrent,bid,generation,key};
+}
+async function persistedPaymentOriginal(origin){
+  const matches=[],add=value=>{if(typeof value==='string'){try{value=JSON.parse(value);}catch{return;}}for(const p of Array.isArray(value)?value:[value])if(p?.operationId===origin.item.operationId&&p.businessId===origin.bid&&p.userId===origin.item.userId&&(p.workspaceGeneration??0)===origin.generation)matches.push(p);};
+  // Exact namespace and queue field only; no cache clearing, flush or lazy import.
+  if(window.indexedDB){
+    const database=await new Promise((resolve,reject)=>{let stopped=false;const q=window.indexedDB.open('veconi-local-records');q.onupgradeneeded=()=>{q.transaction.abort();};q.onerror=()=>reject(Error('Banco local indisponível; original preservado.'));q.onblocked=()=>{stopped=true;reject(Error('Banco local ocupado.'));};q.onsuccess=()=>{if(stopped)q.result.close();else resolve(q.result);};});
+    try{await new Promise((resolve,reject)=>{const tx=database.transaction('records','readonly'),q=tx.objectStore('records').openCursor();q.onsuccess=()=>{const c=q.result;if(!c)return;const r=c.value;if(r.area==='sync'&&r.field===origin.key)add(r.value);c.continue();};q.onerror=()=>reject(q.error);tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Leitura local interrompida.'));});}finally{database.close();}
+  }
+  add(window.localStorage?.getItem(origin.key));origin.assertCurrent();
+  if(!matches.length)throw Error('Original ainda não confirmado no armazenamento persistente. Não recarregue nem refaça o recebimento.');
+  const original=await paymentHash(origin.item.payload);
+  for(const p of matches)if(await paymentHash(p.payload)!==original)throw Error('Existem cópias financeiras divergentes. Preserve todas e solicite análise.');
+  return {originalPayloadHash:original,storedCopies:matches.length};
+}
+function paymentFinancialProjection(value){
+  const fields=new Set(('version asOf advance rows dueDate amountCents remainingCents id operationId businessId spaceId workspaceGeneration clienteId clientId paymentId saleId entityId entityType operation valor requestedAmount effectiveAmount legacyAmount allocatedAmount saldo saldoAnterior saldoNovo expectedBalance expectedFinancialVersion financialVersion financialVersionAfter legacyBalance legacyBalanceRemaining campaignFinanceVersion paymentMode paymentMethod status data createdAt updatedAt financialAppliedAt creditOriginalAmount creditPaidAmount creditRemainingAmount creditSettled creditSettledAt amount allocations scheduleRows fiadoSchedule installmentSaleId hasInstallmentFiado fiadoHistoryVersion historyEventId').split(' '));
+  const project=v=>Array.isArray(v)?v.map(project):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).filter(([k])=>fields.has(k)).map(([k,x])=>[k,project(x)])):v;
+  return project(value);
+}
+function assertPaymentExportHasNoSecrets(value){
+  const scan=v=>{if(!v||typeof v!=='object')return;for(const [k,x]of Object.entries(v)){if(/password|senha|authorization|cookie|credential|private.?key|access.?token|refresh.?token|id.?token|api.?key|secret/i.test(k)||typeof x==='string'&&(/Bearer\s+\S+|-----BEGIN .*PRIVATE KEY|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\./.test(x)))throw Error('O pacote contém um possível segredo. Exportação bloqueada para análise local.');scan(x);}};scan(value);
+}
+async function exportPreservedPayment(operationId,{includeOriginal=false}={}){
+  const origin=paymentReviewOrigin(operationId),stored=await persistedPaymentOriginal(origin),p=origin.item;
+  const result={kind:'preserved_payment_readonly_v1',businessId:origin.bid,operationId,readOnly:true,...stored,
+    status:p.status,errorCode:p.lastErrorCode,payloadVersion:p.payloadVersion,
+    writes:(p.payload?.writes||[]).map(w=>({entityType:w.entityType,entityId:w.entityId,operation:w.operation,data:paymentFinancialProjection(w.data),before:paymentFinancialProjection(w.before)}))};
+  if(includeOriginal){assertPaymentExportHasNoSecrets(p);result.privateOriginal=p;result.sha256StoredPacket=await paymentHash(p);}
+  assertPaymentExportHasNoSecrets(result);origin.assertCurrent();downloadJsonFile(result,`veconi-recebimento-${operationId}${includeOriginal?'-privado':''}.json`);return result;
+}
+async function paymentRecoveryCapabilities(origin){
+  if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')throw Error('Conecte-se para conferir o original. Nenhum reenvio foi realizado.');
+  const request={kind:'sync_protocol',businessId:origin.bid,workspaceGeneration:origin.generation};
+  const replies=await Promise.all(['getOperationalSyncReceipt','commitOperationalSync'].map(name=>window.FirebaseCallable(name,request)));origin.assertCurrent();
+  const [r,w]=replies.map(x=>x.data??x);
+  if(r.paymentRecoveryReadVersion!==1||w.paymentRecoveryVersion!==1||[r,w].some(x=>x.businessId!==origin.bid||x.workspaceGeneration!==origin.generation))throw Error('Recuperação explícita ainda não disponível no servidor. Exporte o original e aguarde atualização autorizada.');
+}
+async function readPaymentRecoveryStatus(origin,hash){
+  const p=origin.item.payload.writes.find(w=>w.entityType==='payments'&&w.operation==='create');
+  const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'payment_recovery_status',businessId:origin.bid,workspaceGeneration:origin.generation,operationId:origin.item.operationId,paymentId:p.entityId,clientId:p.data.clienteId||p.data.clientId,originalPayloadHash:hash});origin.assertCurrent();return reply.data??reply;
+}
+async function rememberPaymentRecovery(origin,receipt,hash){
+  const p=origin.item.payload.writes.find(w=>w.entityType==='payments'&&w.operation==='create');
+  if(receipt.confirmed!==true||receipt.operationId!==origin.item.operationId||receipt.businessId!==origin.bid||receipt.actorUid!==origin.item.userId||receipt.workspaceGeneration!==origin.generation||receipt.originalPayloadHash!==hash||receipt.paymentId!==p.entityId||receipt.clientId!==(p.data.clienteId||p.data.clientId)||receipt.amount!==p.data.valor||receipt.paymentDate!==p.data.data)throw Error('Confirmação independente divergente. Original preservado; não repita.');
+  origin.assertCurrent();localStorage.setItem(paymentReceiptKey(origin.item),JSON.stringify({...receipt,payloadChecksum:checksumValue(origin.item.payload),resolvedAt:now(),resolvedByUid:currentUser.uid}));markLocalPaymentConfirmed(origin.item);await DB.flush?.();updateQueueState();
+  let refreshPending=false;
+  try{await pullCloudCollections({force:true,full:true,names:['clients','payments','sales','paymentAllocations']});}catch{refreshPending=true;}
+  return {...receipt,status:'confirmed',originalPreserved:true,refreshPending};
+}
+async function reviewPreservedPayment(operationId){
+  const origin=paymentReviewOrigin(operationId),stored=await persistedPaymentOriginal(origin);await paymentRecoveryCapabilities(origin);
+  const status=await readPaymentRecoveryStatus(origin,stored.originalPayloadHash);
+  if(status.confirmed)return rememberPaymentRecovery(origin,status,stored.originalPayloadHash);
+  if(status.status!=='not_confirmed')throw Error('Há evidência remota incompleta. Revisão individual necessária; não reenviar.');
+  const reply=await window.FirebaseCallable('commitOperationalSync',{kind:'payment_recovery_review',businessId:origin.bid,workspaceGeneration:origin.generation,syncProtocolVersion:1,clientRelease:227,item:origin.item,originalPayloadHash:stored.originalPayloadHash});origin.assertCurrent();
+  const result=reply.data??reply;if(result.status!=='ready_for_explicit_confirmation'||result.originalPayloadHash!==stored.originalPayloadHash||result.operationId!==operationId||result.writesApplied!==0||!/^[a-f0-9]{64}$/.test(result.reviewHash||''))throw Error('Revisão inconclusiva. Original preservado.');
+  return result;
+}
+const paymentRecoveryInFlight=new Set();
+async function recoverPreservedPayment(operationId,review,{confirmed=false}={}){
+  if(!confirmed||review?.status!=='ready_for_explicit_confirmation'||review.operationId!==operationId||paymentRecoveryInFlight.has(operationId))throw Error('Confirmação explícita atual obrigatória.');
+  paymentRecoveryInFlight.add(operationId);
+  try{
+    const origin=paymentReviewOrigin(operationId),stored=await persistedPaymentOriginal(origin);if(stored.originalPayloadHash!==review.originalPayloadHash)throw Error('O original difere da revisão.');await paymentRecoveryCapabilities(origin);
+    const before=await readPaymentRecoveryStatus(origin,stored.originalPayloadHash);if(before.confirmed)return rememberPaymentRecovery(origin,before,stored.originalPayloadHash);if(before.status!=='not_confirmed')throw Error('Evidência remota incompleta. Nenhuma tentativa realizada.');
+    let applyError;try{await window.FirebaseCallable('commitOperationalSync',{kind:'payment_recovery_apply',businessId:origin.bid,workspaceGeneration:origin.generation,syncProtocolVersion:1,clientRelease:227,item:origin.item,originalPayloadHash:stored.originalPayloadHash,reviewHash:review.reviewHash,confirmed:true});}catch(e){applyError=e;}
+    // A lost reply is resolved by independent reading, never a second apply.
+    const after=await readPaymentRecoveryStatus(origin,stored.originalPayloadHash);if(after.confirmed)return rememberPaymentRecovery(origin,after,stored.originalPayloadHash);
+    throw Error(applyError?.message||'Sem confirmação remota. Original preservado. Confira novamente antes de decidir nova ação.');
+  }finally{paymentRecoveryInFlight.delete(operationId);}
+}
 const readPullState = () => {
   try {
     return JSON.parse(localStorage.getItem(pullStateKey())) || {};
@@ -1128,8 +1231,8 @@ function rememberCustomerPresence(client) {
   const key=customerPresenceKey(client.id),value={uid:currentUser?.uid,businessId:activeBusinessId(),workspaceGeneration:DB.getWorkspaceGeneration?.()??0,clientId:String(client.id),readAt:now(),source:'server'};
   customerPresenceCache.set(key,value);try{localStorage.setItem(key,JSON.stringify(value));}catch{/* Presence may remain in this session; no business write is lost. */}
 }
-function assertCustomerForSale(clientId) {
-  if (clientId) assertCustomerPaymentReview(clientId);
+function assertCustomerForSale(clientId,options={}) {
+  if (clientId && options.affectsDebt!==false) assertCustomerPaymentReview(clientId);
   const id=String(clientId||''),client=(DB.carregar().clientes||[]).find(c=>String(c.id)===id);
   if (!id) return;
   if (!currentUser || !client || client.deletedAt || client.active===false || client.ativo===false || client.businessId&&client.businessId!==activeBusinessId())
@@ -1152,8 +1255,8 @@ async function prepareSaleCustomer(clientId,options={}) {
   const id=String(clientId),scope=captureCloudReadScope(),spaceId=options.spaceId||window.SpaceContext?.salesId?.();
   if(!currentUser||!canPullSource('clients'))throw Error('A consulta deste cliente não está autorizada.');
   const newDraft=readQueue().find(p=>(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
-  if(newDraft&&window.TeamAccess?.has?.('customers.create')===true){assertCustomerForSale(id);return{source:'authorized-ordered-local-dependency',clientId:id};}
-  if(navigator.onLine===false){assertCustomerForSale(id);return{source:'confirmed-local-presence'};}
+  if(newDraft&&window.TeamAccess?.has?.('customers.create')===true){assertCustomerForSale(id,options);return{source:'authorized-ordered-local-dependency',clientId:id};}
+  if(navigator.onLine===false){assertCustomerForSale(id,options);return{source:'confirmed-local-presence'};}
   // Read only. In particular, do NOT flush or retry any old customer or sale operation here.
   if(window.OperationalReadPolicy?.restricted?.())await prepareOperationalCustomer(id,'checkout');
   const snapshot=window.OperationalReadPolicy?.handles?.('clients')?await readOperationalDocument('clients',id):await getDocFromServer(doc(db,'businesses',activeBusinessId(),'clients',id));
@@ -1164,7 +1267,7 @@ async function prepareSaleCustomer(clientId,options={}) {
   const remote=snapshot.data();
   if(remote.businessId&&remote.businessId!==activeBusinessId()||remote.workspaceGeneration!==undefined&&remote.workspaceGeneration!==(DB.getWorkspaceGeneration?.()??0)||remote.deletedAt||remote.active===false||remote.ativo===false)
     throw Object.assign(Error('Cliente indisponível nesta empresa. Nenhuma venda foi registrada.'),{code:'customer-unconfirmed'});
-  rememberCustomerPresence({...remote,id});assertCustomerForSale(id);return{source:'server',clientId:id};
+  rememberCustomerPresence({...remote,id});assertCustomerForSale(id,options);return{source:'server',clientId:id};
 }
 function rememberCanonicalClients(documents, metadata = {}) {
   if (metadata.fromCache || metadata.hasPendingWrites || metadata.source !== "server") return;
@@ -3693,7 +3796,7 @@ async function processSyncQueue(options = {}) {
 function pendingIds(name) {
   const ids = new Set();
   for (const item of readQueue())
-    if (!(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
+    if (!readPaymentRecoveryReceipt(item) && !(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required"))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
@@ -5391,6 +5494,8 @@ function queueOperationDiagnostic(item) {
     lastErrorRequest: item.lastErrorRequest || null,
     transactionPaths: item.lastErrorPaths || [],
     ...classification,
+    paymentReview: paymentQueueRequiresReview(item),
+    paymentDependency: classification.reviewReason==='payment_financial_dependency',
     // Older queues did not persist the first failure. Never label creation or
     // the last attempt as the first failure, nor change the queue to export it.
     firstFailureAt: item.firstFailureAt || item.firstFailedAt || null,
@@ -6582,6 +6687,9 @@ window.SyncFirebase = {
   runFirebaseDiagnostic,
   getFirebaseDiagnostic: diagnostic,
   getQueueDiagnostics: queueDiagnostics,
+  exportPreservedPayment,
+  reviewPreservedPayment,
+  recoverPreservedPayment,
   refreshQueueStatus,
   archiveQuarantinedOperation,
   getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,

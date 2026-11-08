@@ -273,6 +273,14 @@
     return serial(() => openCache(key, candidates, empty, ticket));
   }
   const keyValue = {
+    // Diagnostics/export must not trigger the lazy legacy import below.
+    peekItem(key) {
+      if(session?.retired)throw failure('workspace-generation-mismatch','O ambiente da empresa mudou.');
+      if(session?.suspended)throw retiredError();
+      if(session?.values.has(key))return session.values.get(key);
+      if(session?.workspaceGeneration>0&&ownedKey(key)&&key!=='adiFestaDeviceId')return null;
+      return localStorage.getItem(key);
+    },
     getItem(key) {
       if(session?.retired)throw failure('workspace-generation-mismatch','O ambiente da empresa mudou.');
       if(session?.suspended)throw retiredError();

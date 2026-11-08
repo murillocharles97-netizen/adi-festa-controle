@@ -155,9 +155,9 @@ test('denied receipt is immutable through automatic and manual sync while indepe
  const denied={...legitimate(),queueId:'receipt-q',operationId:'old-receipt',status:'error',lastErrorCode:'permission-denied',lastErrorMessage:'Parcela histórica do recebimento divergente.',attempts:2,checksum:'preserved',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old-receipt',operation:'create',data:{clienteId:'client-old',valor:100,legacyAmount:0}}]}};
  for(const manual of [false,true]){const next={...legitimate(),payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-independent'}}))}},h=harness([denied,next]),before=JSON.stringify(denied);h.migrate();const result=await h.run(manual,manual);assert.equal(result.sent,1);assert.deepEqual(h.committed,['legitimate']);assert.equal(h.queue().length,1);assert.equal(JSON.stringify(h.queue()[0]),before);assert.equal([...h.values.keys()].some(k=>k.includes(':manualReview:')||k.includes(':incidentArchive:')),false);}
 });
-test('same-client operation waits but other-client operation synchronizes',async()=>{
+test('same-client Fiado operation waits but other-client operation synchronizes',async()=>{
  const old={...legitimate(),queueId:'old-q',operationId:'old',status:'error',lastErrorCode:'permission-denied',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old',operation:'create',data:{clientId:'client-a',valor:10}}]}};
- const dependent={...legitimate(),queueId:'dependent-q',operationId:'dependent',payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-a'}}))}},independent=legitimate(),h=harness([old,dependent,independent]),before=JSON.stringify([old,dependent]);
+ const dependent={...legitimate(),queueId:'dependent-q',operationId:'dependent',payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-a',status:'fiado',formaPagamento:'fiado'}}))}},independent=legitimate(),h=harness([old,dependent,independent]),before=JSON.stringify([old,dependent]);
  await h.run(true,true);assert.deepEqual(h.committed,['legitimate']);assert.equal(JSON.stringify(h.queue()),before);
 });
 
@@ -165,6 +165,58 @@ test('unrelated new receipt proceeds while denied receipt remains intact',async(
  const denied={...legitimate(),queueId:'old-q',operationId:'old',status:'error',lastErrorCode:'permission-denied',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'old',operation:'create',data:{clientId:'a',valor:100}}]}};
  const next={...legitimate(),queueId:'new-payment-q',operationId:'new-payment',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'new-payment',operation:'create',data:{clientId:'b',valor:50,businessId:'qa',spaceId:'space',actorUid:'seller'}}]}},h=harness([denied,next]),before=JSON.stringify(denied);
  h.c.CLOUD_NAMES.push('payments');await h.run(true,true);assert.deepEqual(h.committed,['new-payment']);assert.equal(JSON.stringify(h.queue()[0]),before);
+});
+
+function oldReceipt(){return {...legitimate(),operationId:'original-payment',queueId:'payment-q',status:'error',lastErrorCode:'functions/permission-denied',lastErrorMessage:'Parcela histórica do recebimento divergente.',payload:{eventKind:'payment',writes:[{entityType:'payments',entityId:'original-payment',operation:'create',data:{clienteId:'client-a',valor:100,data:'2026-11-01T20:00:00.000Z',paymentMethod:'pix',nomeCliente:'Private name',observacao:'Private note',legacyAmount:29}}]}};}
+test('permanent receipt codes classify as manual review; same-client paid sales and metadata are independent',async()=>{
+ for(const code of ['permission-denied','functions/permission-denied','firestore/failed-precondition','invalid-argument','already-exists']){
+  const old={...oldReceipt(),lastErrorCode:code},paid={...legitimate(),payload:{eventKind:'sale',writes:legitimate().payload.writes.map(w=>({...w,data:{...w.data,clienteId:'client-a',status:'pago',formaPagamento:'cash'}}))}},h=harness([old,paid]),original=JSON.stringify(old);
+  assert.equal(h.counts().errors,0);assert.equal(h.counts().manualReview,1);assert.equal(h.attempt(old,true,true),false);await h.run(true,true);assert.deepEqual(h.committed,['legitimate']);assert.equal(JSON.stringify(h.queue()[0]),original);
+  assert.equal(h.c.paymentQueueDependsOnReview({businessId:'qa',userId:'seller',payload:{writes:[{entityType:'clients',entityId:'client-a',before:{saldo:-100},data:{nome:'edited',saldo:-100}}]}},h.queue()),false);
+  assert.throws(()=>h.save([]),{code:'queue-quarantined-immutable'});
+ }
+});
+function paymentClient({capability=true,lostReply=false,network=false}={}){
+ const packet=oldReceipt(),h=harness([packet]),calls=[],downloads=[];let confirmed=false;
+ Object.assign(h.c,{TextEncoder,Uint8Array,downloadJsonFile:(value,name)=>downloads.push({value,name})});
+ h.c.FirebaseCallable=async(name,data)=>{
+  calls.push({name,data});if(network)throw Error('offline');
+  if(data.kind==='sync_protocol')return{data:{businessId:'qa',workspaceGeneration:0,...(capability?{paymentRecoveryVersion:1,paymentRecoveryReadVersion:1}:{})}};
+  if(data.kind==='payment_recovery_status')return{data:confirmed?{confirmed:true,status:'confirmed',businessId:'qa',workspaceGeneration:0,actorUid:'seller',operationId:packet.operationId,paymentId:packet.operationId,clientId:'client-a',originalPayloadHash:data.originalPayloadHash,amount:100,paymentDate:packet.payload.writes[0].data.data,paymentMethod:'pix',auditId:'audit-original'}:{confirmed:false,status:'not_confirmed'}};
+  if(data.kind==='payment_recovery_review')return{data:{status:'ready_for_explicit_confirmation',operationId:packet.operationId,originalPayloadHash:data.originalPayloadHash,reviewHash:'a'.repeat(64),amount:100,writesApplied:0}};
+  if(data.kind==='payment_recovery_apply'){confirmed=true;if(lostReply)throw Error('lost response');return{data:{replayed:false}};}throw Error('unexpected RPC');
+ };
+ return {...h,packet,calls,downloads};
+}
+test('mobile export is local, excludes PII by default, and preserves exact private original with hashes',async()=>{
+ const h=paymentClient(),raw=h.raw();const financial=await h.c.exportPreservedPayment(h.packet.operationId);assert.equal(financial.readOnly,true);assert.equal(JSON.stringify(financial).includes('Private'),false);assert.equal(h.calls.length,0);assert.match(financial.originalPayloadHash,/^[a-f0-9]{64}$/);
+ const full=await h.c.exportPreservedPayment(h.packet.operationId,{includeOriginal:true});assert.equal(JSON.stringify(full.privateOriginal),raw.slice(1,-1));assert.equal(h.raw(),raw);assert.equal(h.downloads.length,2);
+ const secret=structuredClone(h.packet);secret.payload.writes[0].data.accessToken='do-not-export';h.setQueue([secret]);await assert.rejects(h.c.exportPreservedPayment(secret.operationId,{includeOriginal:true}),/segredo/);assert.equal(h.downloads.length,2);
+});
+test('old backend capability cannot accidentally replay preview; network failure keeps queue untouched',async()=>{
+ for(const options of [{capability:false},{network:true}]){const h=paymentClient(options),raw=h.raw();await assert.rejects(h.c.reviewPreservedPayment(h.packet.operationId));assert.equal(h.calls.some(c=>['payment_recovery_review','payment_recovery_apply'].includes(c.data.kind)),false);assert.equal(h.raw(),raw);assert.equal(h.counts().manualReview,1);}
+});
+test('lost reply after explicit apply is resolved by independent status; original queue survives reload and sync',async()=>{
+ const h=paymentClient({lostReply:true}),raw=h.raw(),review=await h.c.reviewPreservedPayment(h.packet.operationId);assert.equal(h.calls.some(c=>c.data.kind==='payment_recovery_apply'),false);assert.equal(h.raw(),raw);
+ await assert.rejects(h.c.recoverPreservedPayment(h.packet.operationId,review),/Confirmação/);
+ const result=await h.c.recoverPreservedPayment(h.packet.operationId,review,{confirmed:true});assert.equal(result.confirmed,true);assert.equal(h.raw(),raw);assert.equal(h.calls.filter(c=>c.data.kind==='payment_recovery_apply').length,1);assert.equal(h.counts().resolved,1);assert.equal(h.counts().errors,0);
+ h.migrate();await h.run(true,true);assert.equal(h.raw(),raw);assert.deepEqual(h.committed,[]);assert.equal(h.c.readPaymentRecoveryReceipt(JSON.parse(raw)[0]).confirmed,true);
+});
+test('read-only IndexedDB export rejects conflicting persisted payloads and never opens a write transaction',async()=>{
+ const h=paymentClient(),raw=h.raw(),bad=structuredClone(h.packet);bad.payload.writes[0].data.valor=101;let closed=0;const modes=[];
+ h.c.indexedDB={open:()=>{const q={};queueMicrotask(()=>{q.result={close:()=>closed++,transaction:(store,mode)=>{assert.equal(store,'records');modes.push(mode);const tx={objectStore:()=>({openCursor:()=>{const cursor={};queueMicrotask(()=>{cursor.result={value:{area:'sync',field:h.c.queueKey(),value:bad},continue:()=>queueMicrotask(()=>{cursor.result=null;cursor.onsuccess();tx.oncomplete();})};cursor.onsuccess();});return cursor;}})};return tx;}};q.onsuccess();});return q;}};
+ await assert.rejects(h.c.exportPreservedPayment(h.packet.operationId),/divergentes/);assert.deepEqual(modes,['readonly']);assert.equal(closed,1);assert.equal(h.raw(),raw);assert.equal(h.downloads.length,0);
+});
+
+test('checkout guard allows a confirmed same-customer paid sale but keeps Fiado and Parcelado held',()=>{
+ const h=harness([oldReceipt()]);h.c.DB.carregar=()=>({clientes:[{id:'client-a',ativo:true,saldo:-100}]});
+ vm.runInContext(section(source,'const canonicalClientSnapshotKey =','function rememberCanonicalClients('),h.c);h.c.rememberCustomerPresence({id:'client-a',ativo:true});
+ assert.doesNotThrow(()=>h.c.assertCustomerForSale('client-a',{affectsDebt:false}));assert.throws(()=>h.c.assertCustomerForSale('client-a',{affectsDebt:true}),e=>e.code==='payment-review-required');assert.throws(()=>h.c.assertCustomerForSale('client-a'),e=>e.code==='payment-review-required');
+});
+
+test('read-only cache peek does not lazily import, schedule or modify queue/session data',()=>{
+ const cache=fs.readFileSync('js/business-cache.js','utf8'),raw='[{"operationId":"preserved"}]',values=new Map(),c={session:{values,workspaceGeneration:0},localStorage:{getItem:()=>raw},ownedKey:()=>true,failure:(code,message)=>Object.assign(Error(message),{code}),retiredError:()=>Error('retired'),schedule:()=>{c.scheduled++;},scheduled:0};
+ vm.createContext(c);vm.runInContext(cache.slice(cache.indexOf('  const keyValue = {'),cache.indexOf('  async function diagnostic()'))+'this.api=keyValue;',c);assert.equal(c.api.peekItem('adiFesta:qa:syncQueue'),raw);assert.equal(values.size,0);assert.equal(c.scheduled,0);c.api.getItem('adiFesta:qa:syncQueue');assert.equal(values.size,1);assert.equal(c.scheduled,1);
 });
 
 test('client review guard blocks dependent local mutations and allows unrelated client',()=>{

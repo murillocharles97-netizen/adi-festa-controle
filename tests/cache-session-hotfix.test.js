@@ -68,7 +68,7 @@ function queueRuntime(){
  // Current V202+ runner checks the browser session and the read-only recovery
  // acknowledgements before sending. This old harness omitted both globals.
  s.window=s;s.refreshRecoveryResolutions=async()=>{};
- vm.createContext(s);vm.runInContext(source.slice(source.indexOf('async function processSyncQueue('),source.indexOf('function pendingIds(')),s);
+ s.classifyQueueOperation=()=>({replayBlocked:false});s.paymentQueueRequiresReview=()=>false;s.paymentQueueDependsOnReview=()=>false;vm.createContext(s);vm.runInContext(source.slice(source.indexOf('async function processSyncQueue('),source.indexOf('function pendingIds(')),s);
  return{s,queues,entered:enteredPromise,finish:()=>complete({})};
 }
 test('Sync response after account switch cannot acknowledge, remove or change any queue in the new identity',async()=>{

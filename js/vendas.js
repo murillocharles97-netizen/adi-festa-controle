@@ -90,7 +90,7 @@ window.Vendas = (() => {
       (!window.SyncFirebase?.isReady?.() || DB.__firebaseSyncWrapped !== true))
       throw Error("A sincronização ainda não está pronta. Aguarde e tente a venda novamente.");
     if (d.clienteId) {
-      if (window.SyncFirebase?.assertCustomerForSale) window.SyncFirebase.assertCustomerForSale(d.clienteId);
+      if (window.SyncFirebase?.assertCustomerForSale) window.SyncFirebase.assertCustomerForSale(d.clienteId,{affectsDebt:d.status==="fiado"||d.formaPagamento==="fiado"||!!d.installmentTerms});
       else if (window.FirebaseSession?.user && Number(window.AdiFestaBuild?.release) >= 205)
         throw Error('Atualize o aplicativo para confirmar o cliente. Nenhuma venda foi registrada.');
     }
