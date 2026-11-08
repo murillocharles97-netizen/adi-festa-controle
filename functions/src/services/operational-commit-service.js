@@ -480,7 +480,14 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    return{confirmed:!!marker&&!!e&&(reversal?s.active===false&&s.financialReversalEventId:s.financialAppliedAt)!=null&&e.operationId===op&&e.customerId===(s.clienteId||s.customerId)&&e.sourceDocumentId===sid&&cents(e.balanceDelta)===(reversal?1:-1)*cents(s.valorFinal??s.valorTotal)};
   });
  }
+ async function recognizePreservedPayment(request) {
+  const d=request.data||{};
+  return db.runTransaction(async tx=>{
+   const c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
+   return require('./preserved-payment-recognition').recognizePreservedPayment({tx,c,d,ref});
+  },{readOnly:true});
+ }
  // Internal authorization shared by typed maintenance commands, not a callable.
- return{commit,receipt,authorize:context};
+ return{commit,receipt,recognizePreservedPayment,authorize:context};
 }
 module.exports={operationalCommitService};

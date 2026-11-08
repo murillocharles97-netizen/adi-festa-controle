@@ -1103,20 +1103,24 @@ const queuePreflight = (item) => {
 // Recovery is a separate explicit channel. These functions never rewrite the
 // original queue packet, retry it automatically, or manufacture a replacement.
 function paymentReceiptKey(item){return `${queueKey()}:paymentReceipt:${encodeURIComponent(item.operationId)}`;}
+const paymentReceiptPersisting=new Set();
 function readPaymentRecoveryReceipt(item){
   if(!Array.isArray(item.payload?.writes))return null;
-  let r;try{const key=paymentReceiptKey(item);r=JSON.parse((typeof localStorage.peekItem==='function'?localStorage.peekItem(key):localStorage.getItem(key))||'null');}catch{return null;}
+  let r;try{const key=paymentReceiptKey(item);if(paymentReceiptPersisting.has(key))return null;r=JSON.parse((typeof localStorage.peekItem==='function'?localStorage.peekItem(key):localStorage.getItem(key))||'null');}catch{return null;}
   const p=(item.payload?.writes||[]).find(w=>w.entityType==='payments'&&w.operation==='create');
   return r?.confirmed===true&&r.status==='confirmed'&&r.operationId===item.operationId&&r.businessId===item.businessId&&r.actorUid===item.userId&&r.workspaceGeneration===(item.workspaceGeneration??0)&&r.paymentId===p?.entityId&&r.clientId===(p?.data.clienteId||p?.data.clientId)&&r.amount===p?.data.valor&&r.paymentDate===p?.data.data&&r.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(r.originalPayloadHash||'')&&r.resolvedAt?r:null;
 }
 function paymentCanonical(v){const sort=x=>Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;return JSON.stringify(sort(v));}
 async function paymentHash(v){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(paymentCanonical(v)))),b=>b.toString(16).padStart(2,'0')).join('');}
-function paymentReviewOrigin(operationId){
+function paymentReviewOrigin(operationId,{allowResolved=false}={}){
   const uid=currentUser?.uid,bid=activeBusinessId(),generation=DB.getWorkspaceGeneration?.()??0,key=queueKey(),session=syncSessionGeneration;
-  const items=readQueueStrict({readOnly:true}).filter(p=>p.operationId===operationId),item=items[0];
-  if(items.length!==1||!item||item.userId!==uid||uid!==auth.currentUser?.uid||item.businessId!==bid||(item.workspaceGeneration??0)!==generation||!paymentQueueRequiresReview(item))throw Error('Entre na conta de origem e selecione um recebimento rejeitado preservado.');
+  const matches=()=>readQueueStrict({readOnly:true}).filter(p=>p.operationId===operationId);
+  const items=matches(),item=items[0],scope=captureCloudReadScope();
+  if(items.length!==1||!item||item.userId!==uid||uid!==auth.currentUser?.uid||item.businessId!==bid||(item.workspaceGeneration??0)!==generation||(!paymentQueueRequiresReview(item)&&!(allowResolved&&readPaymentRecoveryReceipt(item))))throw Error('Entre na conta de origem e selecione um recebimento rejeitado preservado.');
   const json=JSON.stringify(item),assertCurrent=()=>{
-    if(session!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||key!==queueKey()||bid!==activeBusinessId()||generation!==(DB.getWorkspaceGeneration?.()??0)||JSON.stringify(readQueueStrict({readOnly:true}).find(p=>p.operationId===operationId))!==json)throw Error('A sessão ou o original mudou. Nenhuma nova tentativa será feita.');
+    assertCloudReadScope(scope);
+    const current=matches();
+    if(session!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||key!==queueKey()||bid!==activeBusinessId()||generation!==(DB.getWorkspaceGeneration?.()??0)||current.length!==1||JSON.stringify(current[0])!==json)throw Error('A sessão ou o original mudou. Nenhuma nova tentativa será feita.');
   };
   return {item:JSON.parse(json),assertCurrent,bid,generation,key};
 }
@@ -1142,12 +1146,69 @@ function assertPaymentExportHasNoSecrets(value){
   const scan=v=>{if(!v||typeof v!=='object')return;for(const [k,x]of Object.entries(v)){if(/password|senha|authorization|cookie|credential|private.?key|access.?token|refresh.?token|id.?token|api.?key|secret/i.test(k)||typeof x==='string'&&(/Bearer\s+\S+|-----BEGIN .*PRIVATE KEY|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\./.test(x)))throw Error('O pacote contém um possível segredo. Exportação bloqueada para análise local.');scan(x);}};scan(value);
 }
 async function exportPreservedPayment(operationId,{includeOriginal=false}={}){
-  const origin=paymentReviewOrigin(operationId),stored=await persistedPaymentOriginal(origin),p=origin.item;
+  const origin=paymentReviewOrigin(operationId,{allowResolved:true}),stored=await persistedPaymentOriginal(origin),p=origin.item;
   const result={kind:'preserved_payment_readonly_v1',businessId:origin.bid,operationId,readOnly:true,...stored,
     status:p.status,errorCode:p.lastErrorCode,payloadVersion:p.payloadVersion,
     writes:(p.payload?.writes||[]).map(w=>({entityType:w.entityType,entityId:w.entityId,operation:w.operation,data:paymentFinancialProjection(w.data),before:paymentFinancialProjection(w.before)}))};
   if(includeOriginal){assertPaymentExportHasNoSecrets(p);result.privateOriginal=p;result.sha256StoredPacket=await paymentHash(p);}
   assertPaymentExportHasNoSecrets(result);origin.assertCurrent();downloadJsonFile(result,`veconi-recebimento-${operationId}${includeOriginal?'-privado':''}.json`);return result;
+}
+async function recognizePreservedPayment(operationId){
+  if(paymentRecoveryInFlight.has(operationId))throw Error('A conferência já está em andamento.');
+  paymentRecoveryInFlight.add(operationId);
+  try{
+    const origin=paymentReviewOrigin(operationId,{allowResolved:true});
+    const {originalPayloadHash}=await persistedPaymentOriginal(origin);
+    const existing=readPaymentRecoveryReceipt(origin.item);
+    if(existing?.recognitionVersion===1&&existing.originalPayloadHash===originalPayloadHash)
+      return {...existing,originalPreserved:true};
+    if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')
+      throw Error('Conecte-se para conferir o recibo. A revisão manual permanece ativa.');
+    const p=origin.item.payload.writes.find(w=>w.entityType==='payments'&&w.operation==='create');
+    const clientId=p.data.clienteId||p.data.clientId;
+    const request={businessId:origin.bid,workspaceGeneration:origin.generation,operationId,clientId,originalPayloadHash};
+    const reply=await window.FirebaseCallable('getPreservedPaymentRecognition',request);
+    origin.assertCurrent();
+    const receipt=reply.data??reply;
+    if(receipt.confirmed!==true||receipt.status!=='confirmed'||receipt.recognitionVersion!==1||
+       receipt.operationId!==operationId||receipt.paymentId!==p.entityId||receipt.clientId!==clientId||
+       receipt.businessId!==origin.bid||receipt.workspaceGeneration!==origin.generation||receipt.actorUid!==origin.item.userId||
+       receipt.originalPayloadHash!==originalPayloadHash||receipt.amount!==p.data.valor||receipt.paymentDate!==p.data.data||
+       receipt.paymentMethod!==p.data.paymentMethod||receipt.spaceId!==p.data.spaceId||
+       receipt.before?.saldo!==p.data.saldoAnterior||receipt.before?.financialVersion!==p.data.expectedFinancialVersion||
+       receipt.after?.saldo!==p.data.saldoNovo||receipt.after?.financialVersion!==p.data.financialVersionAfter||
+       receipt.auditId!=='payment_reconciliation_'+operationId||!Number.isSafeInteger(receipt.allocationCount)||receipt.allocationCount<1||
+       !/^[a-f0-9]{64}$/.test(receipt.reviewHash||''))
+      throw Error('O servidor não comprovou a reconciliação do original. A revisão manual permanece ativa.');
+    const snapshot=await readOperationalDocument('clients',clientId);
+    origin.assertCurrent();
+    const client=snapshot.exists()&&snapshot.data();
+    if(!client||snapshot.metadata?.fromCache||snapshot.metadata?.hasPendingWrites||client.id&&client.id!==clientId||
+       client.businessId!==origin.bid||(client.workspaceGeneration??0)!==origin.generation||client.deletedAt||client.active===false||
+       client.saldo!==receipt.after.saldo||client.financialVersion!==receipt.after.financialVersion||
+       pendingIds('clients',operationId).has(clientId)||readQueueArchive(origin.item)||!originalAlter)
+      throw Error('O saldo remoto ou a fila mudou. A revisão manual permanece ativa.');
+    applyCloudCollection('clients',[{...client,id:clientId}],{authoritative:true,notify:false,confirmedPaymentOperation:operationId});
+    await DB.flush?.();
+    origin.assertCurrent();
+    const saved=(DB.carregar().clientes||[]).find(row=>row.id===clientId);
+    if(saved?.saldo!==client.saldo||saved.financialVersion!==client.financialVersion||pendingIds('clients',operationId).has(clientId)||readQueueArchive(origin.item))
+      throw Error('O saldo atualizado ainda não foi persistido. A revisão manual permanece ativa.');
+    const key=paymentReceiptKey(origin.item);
+    const resolution={...receipt,payloadChecksum:checksumValue(origin.item.payload),resolvedAt:now(),resolvedByUid:origin.item.userId};
+    paymentReceiptPersisting.add(key);
+    try{
+      localStorage.setItem(key,JSON.stringify(resolution));
+      await DB.flush?.();
+    }catch(error){
+      if(key===paymentReceiptKey(origin.item))localStorage.removeItem(key);
+      throw error;
+    }finally{paymentReceiptPersisting.delete(key);}
+    origin.assertCurrent();
+    updateQueueState();
+    notifyCloudCollectionChange('clients',1);
+    return {...resolution,originalPreserved:true};
+  }finally{paymentRecoveryInFlight.delete(operationId);}
 }
 async function paymentRecoveryCapabilities(origin){
   if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')throw Error('Conecte-se para conferir o original. Nenhum reenvio foi realizado.');
@@ -3849,10 +3910,10 @@ async function processSyncQueue(options = {}) {
     if(processingPromise===task)processingPromise = null;
   }
 }
-function pendingIds(name) {
+function pendingIds(name, confirmedPaymentOperation = null) {
   const ids = new Set();
   for (const item of readQueue())
-    if (!readPaymentRecoveryReceipt(item) && !(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
+    if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) && !(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required"))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
@@ -3954,7 +4015,7 @@ async function prepareCustomerForSale(customerId) {
     queuedSaleIds = new Set(queue.flatMap((item) => (item.payload?.writes || [])
       .filter((write) => write.entityType === "sales")
       .map((write) => String(write.entityId)))),
-    customerQueue = queue.filter((item) => (item.payload?.writes || []).some(
+    customerQueue = queue.filter((item) => !readPaymentRecoveryReceipt(item) && (item.payload?.writes || []).some(
       (write) => write.entityType === "clients" && String(write.entityId) === id,
     )),
     knownOrphans = readKnownOrphanIds(),
@@ -3995,7 +4056,7 @@ async function prepareCustomerForSale(customerId) {
   // Primeiro confirme operações deste aparelho. Enquanto houver pendências,
   // a projeção local já inclui os deltas e não pode ser substituída pela nuvem.
   if (pendingIds("clients").has(id)) await processSyncQueue({ force: true });
-  const pending = readQueue().filter((item) => (item.payload?.writes || []).some(
+  const pending = readQueue().filter((item) => !readPaymentRecoveryReceipt(item) && (item.payload?.writes || []).some(
     (write) => write.entityType === "clients" && String(write.entityId) === id,
   ));
   if (pending.some((item) => item.status === "error"))
@@ -4151,7 +4212,7 @@ function reconcileLocalAndCloud(
   return [...byId.values()];
 }
 function mergeCloudCollectionIntoData(data, name, documents, options = {}) {
-  const pending = pendingIds(name),
+  const pending = pendingIds(name, name==='clients'?options.confirmedPaymentOperation:null),
     source = SOURCES[name];
   let changed = 0;
   if (name === "settings") {
@@ -6745,6 +6806,7 @@ window.SyncFirebase = {
   getQueueDiagnostics: queueDiagnostics,
   exportPreservedPayment,
   reviewPreservedPayment,
+  recognizePreservedPayment,
   recoverPreservedPayment,
   refreshQueueStatus,
   archiveQuarantinedOperation,

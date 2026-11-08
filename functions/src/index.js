@@ -51,6 +51,7 @@ exports.confirmPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.confirm(req
 const {operationalCallable}=require('./shared/operational-callable');
 exports.commitOperationalSync=onCall(RECOVERY_OPTIONS,operationalCallable(request=>operationalCommits.commit(request),{requireProtocol:true}));
 exports.getOperationalSyncReceipt=onCall(RECOVERY_OPTIONS,request=>operationalCommits.receipt(request));
+exports.getPreservedPaymentRecognition=onCall(RECOVERY_OPTIONS,request=>operationalCommits.recognizePreservedPayment(request));
 const financialMaintenance=require('./services/financial-maintenance-service').financialMaintenanceService(db);
 exports.commitFinancialMaintenance=onCall(RECOVERY_OPTIONS,request=>financialMaintenance.commit(request));
 const saleCancellations=require('./services/sale-cancellation-service').saleCancellationService(db,{allowNewCancellations:true,projectFinancial:(businessId,saleId,sale)=>financialIncomeService(db).projectSale(businessId,saleId,sale)});

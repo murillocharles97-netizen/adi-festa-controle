@@ -11,7 +11,7 @@
     'refundTerminalPayment','claimTerminalPaymentFinalization','acknowledgeTerminalPaymentSale',
     'getActiveTerminalPayment','createTeamInvite','updateTeamMember','migrateSensitiveTeamData',
     'reconcileBusinessActivityEvents','reconcileBusinessFinancialIncome','deleteUnusedFinancialAccount','deleteUnusedCreditCard','deleteWorkspaceAsset',
-    'commitOperationalSync','getOperationalSyncReceipt','commitFinancialMaintenance','previewPriorSale','confirmPriorSale']);
+    'commitOperationalSync','getOperationalSyncReceipt','getPreservedPaymentRecognition','commitFinancialMaintenance','previewPriorSale','confirmPriorSale']);
   function payload(name,data,runtime){
     if(!operational.has(name)||!runtime)return data;
     const origin=runtime.capture();

@@ -20,6 +20,8 @@ test('V202 new protocol legitimate pending operation still synchronizes normally
 function harness(initial,implementation=source){
  const values=new Map(),committed=[];let actor='seller',generation=1;
  const c={console,Date,Map,Set,Math,Number,String,Boolean,Array,Object,JSON,Error,Promise,structuredClone,encodeURIComponent,crypto:crypto.webcrypto,now:()=> '2026-10-19T12:00:00Z',activeBusinessId:()=> 'qa',queueKey:()=>`adiFesta:qa:${actor}:permissions:syncQueue`,localStorage:{getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,String(v))},checksumValue:hash,updateQueueState(){},stableLegacyOperationId:x=>x.operationId,deviceId:()=> 'device',PAYLOAD_VERSION:4,QUEUE_ENTITY_ALIASES:{},IDEMPOTENT_EVENT_NAMES:new Set(['sales']),sanitizeForFirestore:x=>structuredClone(x),CLOUD_NAMES:['products','productVariants','sales'],SOURCES:{sales:{key:'vendas'}},state:{userProfile:{businessId:'qa'}},currentUser:{uid:'seller'},auth:{currentUser:{uid:'seller'}},syncSessionGeneration:generation,DB:{flush:async()=>{},getWorkspaceGeneration:()=>0},processingPromise:null,readOnlyMode:false,cloudPaused:false,navigator:{onLine:true},validateUser:async()=>{},emit(){},queueErrorBreakdown:()=>({}),commitQueueItem:async q=>{committed.push(q.operationId);return{}},verifySaleQueueCommit:async()=>{},markLocalSaleConfirmed(){},markLocalPaymentConfirmed(){},saleQueueRequiresReview:()=>false};c.window=c;
+ c.captureCloudReadScope=()=>actor;c.assertCloudReadScope=scope=>assert.equal(scope,actor);
+ c.localStorage.removeItem=k=>values.delete(k);
  vm.createContext(c);
  vm.runInContext(section(implementation,'const queueSubtype =','const roundedMoney'),c);
  vm.runInContext(section(implementation,'const readQueue =','const knownOrphanKey'),c);
@@ -188,6 +190,61 @@ function paymentClient({capability=true,lostReply=false,network=false}={}){
  };
  return {...h,packet,calls,downloads};
 }
+function recognitionClient(){
+ const packet=oldReceipt(),id='client-a';
+ Object.assign(packet.payload.writes[0].data,{spaceId:'space',saldoAnterior:-100,saldoNovo:0,expectedFinancialVersion:3,financialVersionAfter:4});
+ packet.payload.writes.push({entityType:'clients',entityId:id,operation:'update',data:{saldo:0,financialVersion:4}});
+ const h=harness([packet]),calls=[],local={clientes:[{id,businessId:'qa',saldo:-100,financialVersion:3}]};
+ let canonical={id,businessId:'qa',saldo:0,financialVersion:4},override={},rpcError,readError;
+ Object.assign(h.c,{TextEncoder,Uint8Array,originalAlter:mutate=>mutate(local),applyingCloud:false,
+  cleanCloudItem:row=>row,dispatchEvent(){},CustomEvent:class{},knownOrphanIds:()=>new Set(),financialVersionOf:row=>row.financialVersion,
+  readKnownOrphanIds:()=>new Set(),readOperationalDocument:async()=>{
+   if(readError)throw readError;
+   return {exists:()=>!!canonical,data:()=>canonical,metadata:{fromCache:false,hasPendingWrites:false}};
+  }});
+ h.c.DB.carregar=()=>local;h.c.DB.__firebaseSyncWrapped=true;h.c.SOURCES.clients={key:'clientes'};
+ h.c.FirebaseCallable=async(name,data)=>{
+  calls.push(name);assert.equal(name,'getPreservedPaymentRecognition');assert.equal(data.clientId,id);
+  assert.equal(Object.hasOwn(data,'item'),false);
+  if(rpcError)throw rpcError;
+  return {data:{...data,confirmed:true,status:'confirmed',recognitionVersion:1,actorUid:'seller',paymentId:packet.operationId,
+   paymentDate:packet.payload.writes[0].data.data,paymentMethod:'pix',spaceId:'space',amount:100,
+   before:{saldo:-100,financialVersion:3},after:{saldo:0,financialVersion:4},allocationCount:3,
+   auditId:'payment_reconciliation_'+packet.operationId,reviewHash:'b'.repeat(64),...override}};
+ };
+ for(const [from,to] of [['function pendingIds(','function markLocalCreditSaleConfirmed('],
+  ['function reconcileLocalAndCloud(','async function readOperationalDocument('],
+  ['function captureCloudReadScope(','function salesReadScope('],
+  ['async function prepareCustomerForSale(','async function confirmCreditSale(']])vm.runInContext(section(source,from,to),h.c);
+ return {...h,packet,calls,local,verify:()=>h.c.recognizePreservedPayment(packet.operationId),
+  override:value=>{override=value;},canonical:value=>{canonical=value;},
+  fail:(rpc,read)=>{rpcError=rpc;readError=read;}};
+}
+test('recognition checks the remote receipt and fresh customer before unlocking later Fiado, with original bytes intact',async()=>{
+ const h=recognitionClient(),raw=h.raw(),guard=()=>h.c.assertCustomerPaymentReview('client-a');
+ assert.throws(guard,{code:'payment-review-required'});
+ await assert.rejects(h.c.prepareCustomerForSale('client-a'),/erro de sincronização/);
+ let flushed=0;
+ h.c.DB.flush=async()=>{if(++flushed===1){assert.equal(h.local.clientes[0].financialVersion,4);assert.throws(guard,{code:'payment-review-required'});}};
+ assert.equal((await h.verify()).confirmed,true);assert.equal(h.raw(),raw);
+ assert.doesNotThrow(guard);assert.equal((await h.c.prepareCustomerForSale('client-a')).financialVersion,4);
+ assert.equal((await h.verify()).confirmed,true);assert.deepEqual(h.calls,['getPreservedPaymentRecognition']);
+ assert.equal(h.counts().resolved,1);await h.run(true,true);assert.deepEqual(h.committed,[]);assert.equal(h.raw(),raw);
+});
+test('recognition remains in manual review on incomplete proof, divergence, unavailable server or conflicting customer state',async()=>{
+ const h=recognitionClient(),raw=h.raw();
+ for(const bad of [{confirmed:false,status:'not_confirmed'},{originalPayloadHash:'c'.repeat(64)},
+  {clientId:'other'},{businessId:'other'},{spaceId:'other'},{status:'incomplete_evidence'},
+  {after:{saldo:0,financialVersion:5}}]){
+  h.override(bad);await assert.rejects(h.verify(),/não comprovou/);assert.equal(h.counts().manualReview,1);
+ }
+ h.override({});h.fail(new Error('offline'));await assert.rejects(h.verify(),/offline/);
+ h.fail(null,new Error('sem saldo remoto'));await assert.rejects(h.verify(),/sem saldo remoto/);
+ h.fail();h.canonical({id:'client-a',businessId:'qa',saldo:0,financialVersion:5});
+ await assert.rejects(h.verify(),/mudou/);assert.equal(h.raw(),raw);assert.equal(h.local.clientes[0].saldo,-100);
+ h.canonical({id:'client-a',businessId:'qa',saldo:0,financialVersion:4});
+ assert.equal((await h.verify()).confirmed,true);assert.equal(h.raw(),raw);
+});
 test('mobile export is local, excludes PII by default, and preserves exact private original with hashes',async()=>{
  const h=paymentClient(),raw=h.raw();const financial=await h.c.exportPreservedPayment(h.packet.operationId);assert.equal(financial.readOnly,true);assert.equal(JSON.stringify(financial).includes('Private'),false);assert.equal(h.calls.length,0);assert.match(financial.originalPayloadHash,/^[a-f0-9]{64}$/);
  const full=await h.c.exportPreservedPayment(h.packet.operationId,{includeOriginal:true});assert.equal(JSON.stringify(full.privateOriginal),raw.slice(1,-1));assert.equal(h.raw(),raw);assert.equal(h.downloads.length,2);
