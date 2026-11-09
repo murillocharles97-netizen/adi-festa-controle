@@ -190,6 +190,18 @@ function paymentClient({capability=true,lostReply=false,network=false}={}){
  };
  return {...h,packet,calls,downloads};
 }
+test('new financial envelopes announce history proof without upgrading or replaying the preserved original',async()=>{
+ const old=oldReceipt(),h=harness([old]),original=JSON.stringify(old);
+ Object.assign(h.c,{MAX_WRITES:350,WorkspaceRuntime:{capture:()=>({workspaceGeneration:0})},
+   matchMedia:()=>({matches:false}),scheduleImmediate(){}});
+ vm.runInContext(section(source,'function queueWrites(','function migrateOwnerBusinessQueue('),h.c);
+ for(const event of ['sale','sale_undo','payment','balance_adjustment','simple'])
+  h.c.queueWrites(legitimate().payload.writes,'new-'+event,event,{schedule:false});
+ const [preserved,...created]=h.queue();
+ assert.equal(JSON.stringify(preserved),original);
+ assert.deepEqual(created.map(p=>p.payload.fiadoHistoryVersion),[1,1,1,1,undefined]);
+ assert.equal(h.attempt(preserved,true,true),false);
+});
 function recognitionClient(){
  const packet=oldReceipt(),id='client-a';
  Object.assign(packet.payload.writes[0].data,{spaceId:'space',saldoAnterior:-100,saldoNovo:0,expectedFinancialVersion:3,financialVersionAfter:4});

@@ -23,7 +23,7 @@ test('existing inconsistent legacy stays preserved; no automatic reconciliation 
   for(const file of ['functions/src/shared/installment-plan.js','functions/src/shared/fiado-account.js','js/installment-credit.js'])h.w.eval(fs.readFileSync(file,'utf8'));
   h.rows().pagamentos=[{id:'qa-rejected-original',operationId:'qa-rejected-original',clienteId:client.id,status:'pending_sync',valor:10}];
   const before=JSON.stringify(h.rows());
-  assert.throws(()=>h.w.InstallmentCredit.salePreview(client,20,{count:10,downPayment:0,firstDueDate:'2026-12-07'},'2026-11-07'),/Histórico incompleto/);
+  assert.throws(()=>h.w.InstallmentCredit.salePreview(client,20,{count:10,downPayment:0,firstDueDate:'2026-12-07'},null),/saldo e o calendário/);
   assert.equal(JSON.stringify(h.rows()),before);assert.equal(h.commits(),0);
  }finally{h.close();}
 });
@@ -33,7 +33,8 @@ test('recorded chronology explains 247; a hypothetical approved projection repai
   assert.equal(debtDeltas.reduce((sum,x)=>sum+Math.round(x*100),0),24700);
   Object.assign(client,{saldo:-247,legacyBalance:800,legacyBalanceRemaining:243.5});
   for(const file of ['functions/src/shared/installment-plan.js','functions/src/shared/fiado-account.js','js/installment-credit.js'])h.w.eval(fs.readFileSync(file,'utf8'));
-  const before=JSON.stringify(h.rows()),p=h.w.InstallmentCredit.salePreview(client,20,{count:10,downPayment:0,firstDueDate:'2026-12-07'},'2026-11-07');
+  const before=JSON.stringify(h.rows()),account=h.w.FiadoAccount.project(client,h.rows().vendas,'2026-11-07');
+  const p=h.w.InstallmentCredit.salePreview(client,20,{count:10,downPayment:0,firstDueDate:'2026-12-07'},account);
   assert.equal(p.current.dueCents,24700);assert.equal(p.futureCents,2000);assert.equal(p.totalCents,26700);
   assert.equal(JSON.stringify(h.rows()),before);assert.equal(h.commits(),0);
  }finally{h.close();}

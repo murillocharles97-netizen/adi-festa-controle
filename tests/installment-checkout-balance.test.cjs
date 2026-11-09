@@ -10,7 +10,7 @@ function fixture() {
   const client = h.rows().clientes[0];
   Object.assign(client,{saldo:-247,legacyBalance:247,legacyBalanceRemaining:247});
   h.rows().vendas=[];
-  return {h,client,preview:(options=terms,day='2026-11-07')=>h.w.InstallmentCredit.salePreview(client,20,options,day)};
+  return {h,client,preview:(options=terms,day='2026-11-07')=>h.w.InstallmentCredit.salePreview(client,20,options,h.w.FiadoAccount.project(client,h.rows().vendas,day))};
 }
 test('247 exigible + 20 future = 247 exigible, 20 future, 267 total without any mutation',()=>{
   const {h,client,preview}=fixture();try {
@@ -36,8 +36,8 @@ test('previous debt, overdue, future and partial payments use the existing canon
 });
 test('incomplete calendar or inconsistent legacy evidence never silently becomes an exigible estimate',()=>{
   const {h,client,preview}=fixture();try {
-    client.hasInstallmentFiado=true;assert.throws(()=>preview(),/calendário completo/);
-    delete client.hasInstallmentFiado;client.legacyBalanceRemaining=10;
+    client.fiadoHistoryVersion=1;assert.throws(()=>preview(),/saldo e o calendário/);
+    delete client.fiadoHistoryVersion;client.legacyBalanceRemaining=10;
     assert.throws(()=>preview(),/Histórico incompleto/);
   }finally{h.close();}
 });

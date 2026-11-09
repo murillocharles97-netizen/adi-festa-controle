@@ -92,7 +92,20 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       }
       await page.evaluate(() => {
         SyncFirebase.prepareSaleCustomer = async () => ({source:'server'});
-        DB.alterar(data => { data.clientes[0].saldo = -247; });
+        const context=BusinessContext.get(),uid=FirebaseSession.user.uid;
+        BusinessContext.get=()=>({...context,userProfile:{uid,businessId:context.businessId,active:true},
+          business:{id:context.businessId,ownerId:uid},access:{canMutate:true}});
+        DB.alterar(data => Object.assign(data.clientes[0],{saldo:-247,legacyBalanceRemaining:22}));
+        window.historyReads=[];
+        window.FirebaseCallable=async(name,payload)=>{
+          if(name!=='getOperationalSyncReceipt'||payload.fiadoHistoryVersion!==1)throw Error('Contrato histórico ausente');
+          window.historyReads.push(payload.clientId);
+          if(!window.historyAvailable)throw Error('Histórico incompleto');
+          const c=DB.carregar().clientes.find(c=>c.id===payload.clientId);
+          const account=FiadoAccount.project({...c,legacyBalanceRemaining:247},[]);
+          return {data:{businessId:payload.businessId,workspaceGeneration:payload.workspaceGeneration,
+            account:{...account,version:2,historyProofVersion:1}}};
+        };
       });
       await page.select('#sale-client','');
       for (const method of ['pix','dinheiro','cartao','fiado','crediario']) {
@@ -106,6 +119,13 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       assert.equal(await page.evaluate(()=>DB.carregar().vendas.length),before.sales);
       assert.match(await page.$eval('#sale-submit-feedback',el=>el.textContent),/Selecione um cliente/);
       await page.select('#sale-client','c1');
+      await page.waitForSelector('[data-installment-preview-unavailable]');
+      await page.$eval('#finish-sale', button => button.click());
+      await page.waitForFunction(()=>document.querySelector('#sale-submit-feedback').textContent.includes('Histórico incompleto'));
+      assert.deepEqual(await page.evaluate(()=>({sales:DB.carregar().vendas.length,payments:DB.carregar().pagamentos.length,stock:Produtos.obter('p1').estoqueAtual})),before);
+      await page.evaluate(()=>{window.historyAvailable=true;dispatchEvent(new Event('online'));});
+      try{await page.waitForSelector('[data-current-due]',{timeout:5000});}
+      catch(error){throw Error(await page.evaluate(()=>JSON.stringify({card:document.querySelector('#selected-client-card')?.textContent,checks:window.historyReads,available:window.historyAvailable,errors:window.__desktopAuditErrors})),{cause:error});}
       assert.match(await page.$eval('[data-current-due]',el=>el.textContent),/247,00/);
       assert.match(await page.$eval('[data-new-future]',el=>el.textContent),/20,00/);
       assert.match(await page.$eval('[data-after-due]',el=>el.textContent),/247,00/);
@@ -120,6 +140,7 @@ test('real checkout, desktop renderer and mobile enhancement expose and submit P
       await page.$eval('#installment-first',el=>{el.value=InstallmentPlan.month(InstallmentPlan.today(),1);el.dispatchEvent(new Event('change',{bubbles:true}));});
       await page.waitForFunction(()=>document.querySelector('[data-installment-preview]').textContent.includes('10 parcelas'));
       await page.$eval('#installment-down',el=>{el.value='5';el.dispatchEvent(new Event('input',{bubbles:true}));});
+      await page.waitForFunction(()=>document.querySelector('[data-after-due]')?.textContent.includes('252,00'));
       assert.match(await page.$eval('[data-after-due]',el=>el.textContent),/252,00/);
       assert.match(await page.$eval('[data-after-future]',el=>el.textContent),/15,00/);
       await page.$eval('#installment-down',el=>{el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}));});

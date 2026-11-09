@@ -15,15 +15,15 @@ async function setup(input=fixture(),{role='owner',historicalSpace=false,allowed
  const auth={uid,token:{uid}},read=(cap=true)=>service.receipt({auth,data:{kind:'fiado_account',businessId,workspaceGeneration:0,clientId:'qa-client',...(cap?{fiadoHistoryVersion:1}:{})}});
  async function reload(){for(const [col,key]of [['clients','clientes'],['sales','vendas'],['payments','pagamentos'],['paymentAllocations','alocacoesPagamento'],['products','produtos']]){data[key]=(await root.collection(col).get()).docs.map(d=>({...un(d.data()),id:d.id}));if(col==='sales')data[key].sort((a,b)=>String(a.data||'').localeCompare(String(b.data||'')));}}
  async function plan({cap=true}={}){
-  const a=cap?(await read()).account:null;h.c.FiadoAccount={...h.c.FiadoAccount,project:()=>a||{}};const before=structuredClone(data),operationId=crypto.randomUUID();
-  const sale=h.c.Vendas.registrar({id:crypto.randomUUID(),operationId,businessId,spaceId,clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',itens:[{produtoId:'qa-product',quantidade:1,precoOriginal:20,precoFinalUnitario:20}],installmentTerms:{downPayment:0,count:10,firstDueDate:Plan.month(Plan.today(),1)}});
+  h.c.FirebaseCallable=async(name,payload)=>{assert.equal(name,'getOperationalSyncReceipt');assert.equal(payload.fiadoHistoryVersion,1);return {data:await service.receipt({auth,data:payload})};};
+  const a=await h.c.InstallmentCredit.refresh('qa-client'),before=structuredClone(data),operationId=crypto.randomUUID();
+  const sale=h.c.Vendas.registrar({id:crypto.randomUUID(),operationId,businessId,spaceId,clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',itens:[{produtoId:'qa-product',quantidade:1,precoOriginal:20,precoFinalUnitario:20}],installmentAccount:a,installmentTerms:{downPayment:0,count:10,firstDueDate:Plan.month(Plan.today(),1)}});
   data=h.data();const item={operationId,businessId,userId:uid,workspaceGeneration:0,payloadVersion:4,status:'pending',payload:{eventKind:'sale',...(cap?{fiadoHistoryVersion:1}:{}),writes:JSON.parse(JSON.stringify(h.c.diffWrites(before,data)))}};
   return{sale,item,request:{auth,data:{businessId,item,clientRelease:cap?227:226,syncProtocolVersion:1}}};
  }
  async function payment(amount,{advance=false,operationId=crypto.randomUUID()}={}){
   const a=(await read()).account,receipt=require('../helpers/owner-receipt-v219.cjs').harness({businessId,spaceId,uid,role,grants:{'customers.view':true,'customers.receiveDebt':true}}),rows=receipt.rows();Object.assign(rows,{clientes:structuredClone(data.clientes),vendas:structuredClone(data.vendas),pagamentos:structuredClone(data.pagamentos),alocacoesPagamento:structuredClone(data.alocacoesPagamento)});
-  for(const file of ['functions/src/shared/installment-plan.js','functions/src/shared/fiado-account.js'])receipt.w.eval(fs.readFileSync(file,'utf8'));receipt.w.FiadoAccount={...receipt.w.FiadoAccount,project:()=>a};
-  const capture=receipt.w.SyncFirebase.createPaymentOperation;receipt.w.SyncFirebase.createPaymentOperation=(before,after,p)=>{p.fiadoSchedule.version=a.version;for(const key of ['legacyBalance','legacyBalanceRemaining','campaignFinanceVersion']){if(a.version===2){const previous=before.clientes[0];if(previous[key]===undefined)delete after.clientes[0][key];else after.clientes[0][key]=previous[key];}}capture(before,after,p);};
+  for(const file of ['functions/src/shared/installment-plan.js','functions/src/shared/fiado-account.js'])receipt.w.eval(fs.readFileSync(file,'utf8'));
   try{const p=receipt.w.Fiados.receber('qa-client',amount,'QA externo',{fiadoAccount:a,allowAdvance:advance,paymentMethod:'pix',operationId,spaceId}),item={operationId:p.operationId,businessId,userId:uid,workspaceGeneration:0,payloadVersion:4,status:'pending',payload:{eventKind:'payment',...(a.version===2?{fiadoHistoryVersion:1}:{}),writes:receipt.writes()}};return{auth,data:{businessId,item,clientRelease:227,syncProtocolVersion:1}};}finally{receipt.close();}
  }
  function cancel(id){const {packet}=h.undo(id);data=h.data();packet.workspaceGeneration=0;packet.payload.fiadoHistoryVersion=1;return{auth,data:{businessId,item:packet,clientRelease:227,syncProtocolVersion:1}};}
@@ -46,6 +46,32 @@ test('contract 247 history: first plan, partial/advance, immutable legacy, recei
  const confirmed=await service.receipt({auth:c.auth,data:{businessId:c.businessId,workspaceGeneration:0,kind:'payment_confirmation',clientId:'qa-client',paymentId:p.data.item.operationId,operationId:p.data.item.operationId,fiadoHistoryVersion:1}});assert(confirmed.confirmed);assert.equal(confirmed.totalOutstanding,17);
 });
 test('both selective endpoints advertise read/write capabilities without persistent effects',async()=>{const c=await setup(),ref=c.root.collection('clients').doc('qa-client'),before=(await ref.get()).updateTime.toMillis(),read=await service.receipt({auth:c.auth,data:{businessId:c.businessId,kind:'sync_protocol'}}),write=await service.commit({auth:c.auth,data:{businessId:c.businessId,kind:'sync_protocol'}});assert.equal(read.fiadoHistoryReadVersion,1);assert.equal(write.fiadoHistoryWriteVersion,1);assert.equal((await ref.get()).updateTime.toMillis(),before);assert.equal((await c.root.collection('processedOperations').get()).size,12);});
+
+test('frontend approves empty and consistent accounts and leaves incomplete proof without stock or sale',async()=>{
+ for(const scenario of ['empty','consistent','incomplete']){
+  const input=fixture();
+  if(scenario==='empty'){
+   Object.assign(input.client,{saldo:0,financialVersion:0});
+   for(const key of ['legacyBalance','legacyBalanceRemaining','campaignFinanceVersion'])delete input.client[key];
+   for(const key of Object.keys(input.collections))input.collections[key]=[];
+  }else if(scenario==='consistent')input.client.legacyBalanceRemaining=243.5;
+  else input.collections.balanceEvents=[];
+  const c=await setup(input);
+  if(scenario==='incomplete'){
+   await assert.rejects(c.plan(),error=>error.details?.reason==='fiado-history-review-required');
+   assert.equal((await c.root.collection('stockMovements').get()).size,0);
+   assert.equal(c.data.vendas.length,input.collections.sales.length);
+   continue;
+  }
+  const prior=(await c.read()).account,q=await c.plan();
+  assert.equal(prior.version,1);
+  await service.commit(q.request);assert.equal((await service.commit(q.request)).replayed,true);
+  const after=(await c.read()).account;
+  assert.equal(after.dueCents,prior.dueCents);assert.equal(after.futureCents,2000);
+  assert.equal(after.totalCents,prior.totalCents+2000);
+  assert.equal((await c.root.collection('stockMovements').get()).size,1);
+ }
+});
 
 const originalHash=v=>crypto.createHash('sha256').update(JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v))).digest('hex');
 async function rejectedV226(c){
@@ -98,7 +124,7 @@ test('history permissions and company isolation never widen employee access',asy
 test('37 proved replica accounts become readable; 14 insufficient accounts stay rejected; all 11 first-plan risks keep one stock/debt', {skip:!snapshot||!classification},async()=>{
  clock=new Date();let proved=0,rejected=0,first=0,consistent=0;
  for(const row of classification.rows.filter(r=>!r.strictEligible)){
-  const c=await setup(fromSnapshot(row.clientId));if(row.financialProof){const a=(await c.read()).account;assert.equal(a.totalCents,Math.max(0,Math.round(-c.data.clientes[0].saldo*100)));assert.equal(a.version,2);const legacy=c.data.clientes[0].legacyBalanceRemaining,q=await c.plan();await service.commit(q.request);await c.reload();const after=(await c.read()).account;assert.equal(after.totalCents,a.totalCents+2000);assert.equal(after.futureCents,2000);assert.equal(after.dueCents,a.dueCents);assert.equal(c.data.clientes[0].legacyBalanceRemaining,legacy);proved++;}else{await assert.rejects(c.read());const q=await c.plan({cap:false});q.request.data.clientRelease=227;q.item.payload.fiadoHistoryVersion=1;await assert.rejects(service.commit(q.request));assert.equal((await c.root.collection('stockMovements').get()).size,0);rejected++;}
+  const c=await setup(fromSnapshot(row.clientId));if(row.financialProof){const a=(await c.read()).account;assert.equal(a.totalCents,Math.max(0,Math.round(-c.data.clientes[0].saldo*100)));assert.equal(a.version,2);const legacy=c.data.clientes[0].legacyBalanceRemaining,q=await c.plan();await service.commit(q.request);await c.reload();const after=(await c.read()).account;assert.equal(after.totalCents,a.totalCents+2000);assert.equal(after.futureCents,2000);assert.equal(after.dueCents,a.dueCents);assert.equal(c.data.clientes[0].legacyBalanceRemaining,legacy);proved++;}else{await assert.rejects(c.read());await assert.rejects(c.plan());assert.equal((await c.root.collection('stockMovements').get()).size,0);rejected++;}
  }
  for(const row of classification.rows.filter(r=>r.strictEligible&&!r.firstPlanCompatible)){
   const c=await setup(fromSnapshot(row.clientId)),before=c.data.clientes[0].saldo,initial=(await c.read()).account.entries.filter(e=>!e.saleId).reduce((n,e)=>n+e.remainingCents,0)/100,q=await c.plan();await service.commit(q.request);await c.reload();const a=(await c.read()).account;assert.equal(a.version,1);assert.equal(a.totalCents,Math.round((-before+20)*100));assert.equal(a.futureCents,2000);assert.equal(c.data.clientes[0].legacyBalance,initial);assert.equal(c.data.clientes[0].legacyBalanceRemaining,initial);await service.commit(q.request);assert.equal((await c.root.collection('stockMovements').get()).size,1);first++;

@@ -1,5 +1,6 @@
 window.Fiados = (() => {
-  const listar = () => DB.carregar().clientes.filter((client) => client.ativo && (window.InstallmentCredit?.account(client.id)?.dueCents ?? Math.max(0,-Number(client.saldo)*100)) > 0);
+  const listar = () => DB.carregar().clientes.filter(client => client.ativo &&
+    (window.InstallmentCredit?.account(client.id)?.dueCents ?? Math.max(0,-Number(client.saldo)*100)) > 0);
 
   const money = (value) => Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -43,11 +44,11 @@ window.Fiados = (() => {
     ((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
-      if(client.hasInstallmentFiado && !(db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan)) throw Error('Sincronize o calendário completo deste cliente antes de receber. Preserve qualquer recebimento pendente.');
-      const scheduled=(db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan&&!s.deletedAt&&s.active!==false);
+      const scheduled=client.fiadoHistoryVersion===1||client.hasInstallmentFiado||
+        (db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt);
       if(scheduled&&options.saleId)throw Error('Utilize o recebimento agregado do Fiado, sem escolher parcelas.');
-      const account=scheduled?window.FiadoAccount.project(client,db.vendas,options.fiadoAccount?.asOf):null;
-      if(account&&(!options.fiadoAccount||account.financialVersion!==options.fiadoAccount.financialVersion||account.totalCents!==options.fiadoAccount.totalCents||account.dueCents!==options.fiadoAccount.dueCents))throw Error('Atualize o saldo exigível no servidor antes de receber.');
+      const account=scheduled?window.InstallmentCredit.assertAccount(client,options.fiadoAccount):null;
+      if(account&&account.asOf!==window.InstallmentPlan.today())throw Error('O dia comercial mudou. Confira o saldo exigível novamente.');
       if(account&&!['pix','cash'].includes(options.paymentMethod))throw Error('Utilize Pix externo ou dinheiro.');
       if(account&&(db.pagamentos||[]).some(p=>p.clienteId===clienteId&&!p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)))throw Error('Existe recebimento pendente neste cliente. Consulte a operação original antes de registrar outra.');
       const target=options.saleId?(db.vendas||[]).find(s=>s.id===options.saleId):null;
@@ -103,7 +104,7 @@ window.Fiados = (() => {
         requestedAmount: requested,
         effectiveAmount: received,
         paymentMode:account?'partial':paymentMode,
-        ...(account?{fiadoSchedule:{version:1,asOf:account.asOf,advance:options.allowAdvance===true,rows:scheduleRows}}:{}),
+        ...(account?{fiadoSchedule:{version:account.version,asOf:account.asOf,advance:options.allowAdvance===true,rows:scheduleRows}}:{}),
         paymentMethod: String(options.paymentMethod || "other"),
         ...(target?{installmentSaleId:target.id}:{}),
         saldoAnterior: previousBalance,
@@ -130,7 +131,7 @@ window.Fiados = (() => {
         allocatedAmount: 0,
       };
 
-      if (client.legacyBalanceRemaining === undefined) {
+      if (account?.version!==2&&client.legacyBalanceRemaining === undefined) {
         const trackedDebt = (db.vendas || []).filter((sale) =>
           String(sale.clienteId || sale.clientId) === String(clienteId) &&
           sale.formaPagamento === "fiado" &&
@@ -145,7 +146,8 @@ window.Fiados = (() => {
         client.campaignFinanceVersion = 2;
       }
       pagamento.legacyAmount = account ? scheduleRows.filter(r=>!r.saleId).reduce((n,r)=>n+r.amountCents,0)/100 : target ? 0 : Math.min(received, Math.max(0, Number(client.legacyBalanceRemaining || 0)));
-      client.legacyBalanceRemaining = Number(Math.max(0, Number(client.legacyBalanceRemaining || 0) - pagamento.legacyAmount).toFixed(2));
+      if(account?.version!==2)
+        client.legacyBalanceRemaining = Number(Math.max(0, Number(client.legacyBalanceRemaining || 0) - pagamento.legacyAmount).toFixed(2));
       const allocatable = Number((received - pagamento.legacyAmount).toFixed(2));
 
       if (allocatable > 0 && window.CampaignEngineV2) {
@@ -166,6 +168,8 @@ window.Fiados = (() => {
           progressConfirmed: Number(event.delta?.progress || 0),
         }));
       }
+      if(account&&window.InstallmentPlan.cents(pagamento.allocatedAmount)!==window.InstallmentPlan.cents(allocatable))
+        throw Error('As vendas a quitar precisam estar sincronizadas. Nenhum recebimento foi registrado.');
 
       if(target&&Math.round(pagamento.allocatedAmount*100)!==Math.round(received*100))throw Error('O recebimento não foi alocado integralmente à venda.');
       db.pagamentos.push(pagamento);
@@ -228,7 +232,7 @@ window.Fiados = (() => {
     if(target){[...form.elements.paymentMethod.options].forEach(o=>{if(!['pix','cash'].includes(o.value))o.remove();});const space=form.querySelector('[name=paymentSpaceId]');if(space){space.value=target.spaceId;space.disabled=true;}}
     window.Modais?.layout?.(dialog);const close=()=>{if(!busy&&root.contains(form))window.Modais?.fechar?.();};root.querySelectorAll('[data-receive-close]').forEach(b=>b.onclick=close);
     restore.onclick=()=>{if(!busy&&root.contains(form))location.reload();};
-    const update=()=>form.querySelector('[data-receive-after]').textContent=money(Math.max(0,due-Number(value.value||0)));value.oninput=()=>{form.querySelector('[name=kind][value="'+(Math.round(Number(value.value)*100)===Math.round(Number(value.max)*100)?'total':'partial')+'"]').checked=true;update();};form.querySelectorAll('[name=kind]').forEach(r=>r.onchange=()=>{if(r.checked&&r.value==='total')value.value=Number(value.max).toFixed(2);update();});
+    const update=()=>form.querySelector('[data-receive-after]').textContent=money(Math.max(0,Number(value.max)-Number(value.value||0)));value.oninput=()=>{form.querySelector('[name=kind][value="'+(Math.round(Number(value.value)*100)===Math.round(Number(value.max)*100)?'total':'partial')+'"]').checked=true;update();};form.querySelectorAll('[name=kind]').forEach(r=>r.onchange=()=>{if(r.checked&&r.value==='total')value.value=Number(value.max).toFixed(2);update();});
     dialog.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}else if(e.key==='Tab'){const list=[...dialog.querySelectorAll('button:not(:disabled),input,select,textarea')].filter(x=>!x.hidden),first=list[0],last=list.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
     form.onsubmit=async event=>{
       event.preventDefault();if(busy)return;busy=true;button.disabled=true;button.textContent='Confirmando registro…';feedback.textContent='';restore.hidden=true;

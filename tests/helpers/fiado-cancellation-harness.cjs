@@ -10,6 +10,9 @@ function harness({businessId='qa-fiado',spaceId='qa-space',uid='owner',sdk=null,
  c.DB={getBusinessId:()=>businessId,getWorkspaceGeneration:()=>0,carregar:()=>data,alterar:fn=>{const next=structuredClone(data);fn(next);data=next;return data;},flush:async()=>{}};
  c.Produtos={obter:id=>data.produtos.find(p=>p.id===id)};c.window=c;vm.createContext(c);
  for(const file of ['functions/src/shared/installment-plan.js','functions/src/shared/fiado-account.js','js/sale-money.js','js/product-variations.js','js/vendas.js'])vm.runInContext(fs.readFileSync(file,'utf8'),c,{filename:file});
+ c.document={addEventListener(){}};
+ vm.runInContext(fs.readFileSync('js/installment-credit.js','utf8'),c);
+ delete c.document;
  vm.runInContext(section('const roundedMoney =','const readSignalVersions'),c);
  vm.runInContext(section('function changedFields(','function captureChanges('),c);
  vm.runInContext(section('async function confirmSaleUndo(','function cleanCloudItem('),c);

@@ -202,10 +202,11 @@ window.Checkout = (() => {
       parcelado = document.querySelector("#sale-payment-method")?.value === "crediario",
       deve = Math.abs(Math.min(0, Number(c.saldo || 0)));
     const preview = parcelado
-      ? window.InstallmentCredit?.checkoutPreview?.(c,total) || '<p>Atualize o aplicativo para conferir as parcelas.</p>'
+      ? '<div data-installment-checkout-preview aria-live="polite">Consultando o saldo no servidor…</div>'
       : `<p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">Após esta venda: <b>${dinheiro(deve + total)} em aberto</b></p>` : ""}`;
     label.textContent = c.nome;
     box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b>${preview}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
+    if(parcelado)window.InstallmentCredit.mountCheckoutPreview(box.querySelector('[data-installment-checkout-preview]'),c,total);
     window.lucide?.createIcons();
   }
   function filter() {
@@ -1114,6 +1115,17 @@ window.Checkout = (() => {
             } else {
             if (status === "fiado")
               await window.SyncFirebase?.prepareCustomerForSale?.(clienteId);
+            if(saleDraft.installmentTerms){
+              const session=window.TeamAccess?.captureSession?.();
+              const items=JSON.stringify(cart);
+              saleDraft.installmentAccount=await window.InstallmentCredit.refresh(clienteId);
+              window.TeamAccess?.assertSession?.(session);
+              if(DB.getBusinessId()!==businessId||selectedSalesSpaceId()!==spaceId||
+                 document.querySelector('#sale-client')?.value!==clienteId||document.querySelector('#sale-payment-method')?.value!==paymentMethod||
+                 JSON.stringify(cart)!==items||
+                 JSON.stringify(saleDraft.installmentTerms)!==JSON.stringify(window.InstallmentCredit.read()))
+                throw Error('A venda mudou durante a conferência. Revise o carrinho.');
+            }
             traceSale("[SALE] local write started", { operationId: attempt.operationId });
             sale = Repositories.saleRepository().create(saleDraft);
             await DB.flush?.();
@@ -1371,6 +1383,7 @@ window.Checkout = (() => {
   }
   addEventListener("firebase-session-cleared", resetSession);
   addEventListener("installment-preview-changed", selectedClient);
+  addEventListener("online", selectedClient);
   addEventListener("terminal-payment-retry-ready", () => {
     finishing = false;
     setSubmissionState("error", "A cobrança não foi concluída. Revise os dados e tente novamente.");

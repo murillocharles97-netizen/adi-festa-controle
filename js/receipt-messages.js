@@ -46,7 +46,7 @@
   async function read({paymentId,operationId,clientId}){
     const token=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;assertScope(token);
     if(!navigator.onLine||typeof window.FirebaseCallable!=='function')throw code('receipt-offline','Não foi possível consultar a confirmação. Conecte-se e consulte novamente; nenhum pagamento será reenviado.');
-    const response=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'payment_confirmation',businessId,workspaceGeneration,paymentId,operationId,clientId});assertScope(token);
+    const response=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'payment_confirmation',businessId,workspaceGeneration,paymentId,operationId,clientId,fiadoHistoryVersion:1});assertScope(token);
     const receipt=response?.data;if(receipt?.confirmed!==true)return{confirmed:false,status:receipt?.status||'awaiting_confirmation'};
     if(receipt.businessId!==businessId||receipt.workspaceGeneration!==workspaceGeneration||receipt.paymentId!==paymentId||receipt.operationId!==operationId||receipt.clientId!==clientId)throw code('receipt-origin-mismatch','A confirmação não corresponde a este recebimento.');
     variables(receipt);return Object.freeze({...receipt});

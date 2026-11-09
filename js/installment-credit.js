@@ -4,15 +4,39 @@ window.InstallmentCredit = (() => {
   const money=v=>(v/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
   const labels={open:'Aberta',partial:'Parcial',paid:'Quitada',overdue:'Vencida',cancelled:'Cancelada'};
   const available=()=>window.TeamAccess?.has?.('customers.receiveDebt')===true&&!window.OperationalReadPolicy?.restricted?.();
-  const has=id=>{const plans=(DB.carregar().vendas||[]).filter(s=>s.clienteId===id&&s.installmentPlan);return plans.length?plans.some(s=>!s.deletedAt&&s.active!==false&&!s.desfeita):(DB.carregar().clientes||[]).some(c=>c.id===id&&c.hasInstallmentFiado);};
-  function account(id){if(!has(id))return null;const client=(DB.carregar().clientes||[]).find(c=>c.id===id);return window.FiadoAccount.project(client,DB.carregar().vendas||[]);}
-  function salePreview(client, total, terms = read(), day = InstallmentPlan.today()) {
-    const history = DB.carregar().vendas || [];
-    if (client.hasInstallmentFiado && !history.some(s =>
-      s.clienteId === client.id && s.installmentPlan && !s.deletedAt && s.active !== false && !s.desfeita))
-      throw Error('Sincronize o calendário completo para conferir o exigível.');
-    if (Number(client.saldo) > 0) throw Error('Cliente com crédito. Confira a apuração antes de projetar o saldo.');
-    const current = window.FiadoAccount.project(client, history, day);
+  const has=(id,data=DB.carregar())=>!!id&&((data.clientes||[]).some(c=>c.id===id&&(c.hasInstallmentFiado||c.fiadoHistoryVersion===1))||
+    (data.vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt));
+  const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.()]);
+  const clientFor=id=>(DB.carregar().clientes||[]).find(c=>c.id===id);
+  const summaries=new Map();
+  let summaryScope, previewRequest;
+  function assertAccount(client,a){
+    const balance=Number(client?.saldo??0);
+    if(!client||!a||a.clientId!==client.id||![1,2].includes(a.version)||
+      a.version===2&&a.historyProofVersion!==1||client.fiadoHistoryVersion===1&&a.version!==2||
+      a.financialVersion!==Number(client.financialVersion??0)||
+      ![a.dueCents,a.futureCents,a.totalCents,a.creditCents].every(v=>Number.isSafeInteger(v)&&v>=0)||
+      a.totalCents!==a.dueCents+a.futureCents||a.creditCents-a.totalCents!==Math.sign(balance)*InstallmentPlan.cents(Math.abs(balance))||
+      !Array.isArray(a.entries)||!InstallmentPlan.date(a.asOf))
+      throw Object.assign(Error('Confira o saldo e o calendário do cliente no servidor. A operação foi preservada.'),{code:'installment-history-incompatible'});
+    return a;
+  }
+  function summariesForScope(){
+    const current=scope();if(summaryScope!==current){summaries.clear();summaryScope=current;}return summaries;
+  }
+  function account(id){
+    if(!has(id))return null;
+    const client=clientFor(id);
+    const cached=summariesForScope().get(id);
+    try{if(cached?.asOf===InstallmentPlan.today())return assertAccount(client,cached);}catch{/* cache desatualizado */}
+    if(!client||client.fiadoHistoryVersion===1||client.legacyBalanceRemaining===undefined||
+      !(DB.carregar().vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt))return null;
+    try{return window.FiadoAccount.project(client,DB.carregar().vendas||[]);}catch{return null;}
+  }
+  function salePreview(client, total, terms, current) {
+    assertAccount(client,current);
+    if (current.creditCents) throw Error('Cliente com crédito. Confira a apuração antes de projetar o saldo.');
+    const day=current.asOf;
     const plan = InstallmentPlan.create({...terms, total, saleDate: day});
     const rows = InstallmentPlan.rows({installmentPlan: plan, creditPaidAmount: 0}, day);
     const dueCents = rows.filter(r => r.dueDate <= day).reduce((sum,r) => sum + r.remainingCents,0);
@@ -21,10 +45,20 @@ window.InstallmentCredit = (() => {
       dueCents: current.dueCents + dueCents, futureCents: current.futureCents + futureCents,
       totalCents: current.totalCents + plan.totalCents};
   }
-  function checkoutPreview(client, total) {
-    try {
-      const p = salePreview(client,total);
-      return `<section class="pos-fiado-preview" data-installment-debt-preview>
+  function mountCheckoutPreview(host,client,total){
+    if(!host)return;
+    const origin=scope(),key=JSON.stringify([origin,client.id,client.financialVersion,client.saldo,InstallmentPlan.today()]);
+    const terms=read();
+    host.textContent='Consultando o saldo no servidor…';
+    if(navigator.onLine===false||previewRequest?.key!==key||Date.now()-previewRequest.at>15000){
+      const entry={key,at:Date.now(),promise:refresh(client.id)};
+      previewRequest=entry;
+      entry.promise.catch(()=>{if(previewRequest===entry)previewRequest=null;});
+    }
+    previewRequest.promise.then(current=>{
+      if(!host.isConnected||scope()!==origin)return;
+      const p=salePreview(clientFor(client.id),total,terms,current);
+      host.innerHTML=`<section class="pos-fiado-preview" data-installment-debt-preview>
         <p>Fiado exigível atual: <b data-current-due>${money(p.current.dueCents)}</b></p>
         <p>Parcelas futuras atuais: <b>${money(p.current.futureCents)}</b></p>
         <p>Esta venda — exigível hoje: <b>${money(p.newDueCents)}</b></p>
@@ -32,15 +66,27 @@ window.InstallmentCredit = (() => {
         <p>Exigível após confirmar: <b data-after-due>${money(p.dueCents)}</b></p>
         <p>Parcelas futuras após confirmar: <b data-after-future>${money(p.futureCents)}</b></p>
         <p>Total comprometido após confirmar: <b data-after-total>${money(p.totalCents)}</b></p>
-        <small>Prévia local por vencimento. Confirme a sincronização do cliente. Entrada combinada não significa recebimento.</small>
+        <small>Saldo apurado no servidor. A entrada combinada permanece a receber.</small>
       </section>`;
-    } catch (error) {
-      return `<p data-installment-preview-unavailable role="status">Prévia indisponível: ${esc(error.message)}</p>`;
-    }
+    }).catch(error=>{
+      if(host.isConnected)host.innerHTML=`<p data-installment-preview-unavailable role="status">Prévia indisponível: ${esc(error.message)}</p>`;
+    });
   }
-  async function refresh(id){const ticket=window.TeamAccess?.captureSession?.(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o exigível; recebimentos já preparados permanecem na fila.');const result=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id});window.TeamAccess?.assertSession?.(ticket);const v=result.data??result;if(v.businessId!==businessId||v.workspaceGeneration!==workspaceGeneration||v.account?.clientId!==id)throw Error('Resposta de outra conta ou empresa.');return v.account;}
+  async function refresh(id){
+    const ticket=window.TeamAccess?.captureSession?.(),origin=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
+    if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o saldo no servidor. A operação foi preservada.');
+    const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id,fiadoHistoryVersion:1});
+    window.TeamAccess?.assertSession?.(ticket);
+    const result=reply.data??reply;
+    if(scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
+      throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
+    const confirmed=assertAccount(clientFor(id),result.account);
+    if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
+    if(has(id))summariesForScope().set(id,confirmed);
+    return confirmed;
+  }
   function customerSummary(id,confirmed){const a=confirmed||account(id);if(!a)return '';return `<section class="receipt-debt" data-fiado-account><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>${confirmed?'Apurado no servidor em '+esc(a.asOf):'Prévia local por vencimento. O servidor confere antes de receber.'}</small>${button(id)}</section>`;}
-  function mountCustomer(id){const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll');if(host&&has(id)){host.insertAdjacentHTML('afterbegin',customerSummary(id));const section=host.querySelector('[data-fiado-account]');refresh(id).then(a=>{if(section.isConnected)section.outerHTML=customerSummary(id,a);}).catch(()=>{});}}
+  function mountCustomer(id){const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll');if(host&&has(id)){host.insertAdjacentHTML('afterbegin',customerSummary(id)||'<p data-fiado-account role="status">Consultando exigível e parcelas futuras…</p>');const section=host.querySelector('[data-fiado-account]');refresh(id).then(a=>{if(section.isConnected)section.outerHTML=customerSummary(id,a);}).catch(()=>{if(section.isConnected&&!account(id))section.textContent='Exigível indisponível. Atualize o cliente e confira as parcelas no servidor.';});}}
   function fields(){return `<fieldset id="installment-fields" hidden><legend>Crediário / Parcelado</legend><p>Sem juros ou multa. Registre a entrada e os pagamentos somente após receber Pix ou dinheiro.</p><label class="field">Entrada combinada (R$)<input id="installment-down" type="number" min="0" step="0.01" value="0"></label><label class="field">Forma da entrada<select id="installment-method"><option value="pix">Pix externo</option><option value="cash">Dinheiro</option></select></label><label class="field">Parcelas mensais<input id="installment-count" type="number" min="1" max="60" step="1" value="10"></label><label class="field">Primeiro vencimento<input id="installment-first" type="date" value="${InstallmentPlan.month(InstallmentPlan.today(),1)}"></label><p data-installment-preview role="status"></p></fieldset>`;}
   function read(){return{downPayment:Number(document.querySelector('#installment-down')?.value||0),downPaymentMethod:document.querySelector('#installment-method')?.value||'pix',count:Number(document.querySelector('#installment-count')?.value||10),firstDueDate:document.querySelector('#installment-first')?.value||''};}
   function restore(terms){if(terms)for(const [key,id] of [['downPayment','down'],['downPaymentMethod','method'],['count','count'],['firstDueDate','first']]){const el=document.querySelector('#installment-'+id);if(el)el.value=terms[key];}update();}
@@ -54,6 +100,7 @@ window.InstallmentCredit = (() => {
     root.querySelector('[data-installment-close]').onclick=()=>Modais.fechar();
     root.querySelectorAll('[data-installment-receive]').forEach(b=>b.onclick=()=>{assertSession();const s=list.find(s=>s.id===b.dataset.installmentReceive);Fiados.openReceive(s.clienteId,{onRecorded:(p,c)=>window.ReceiptMessageUI.open(p,c)});});
     root.querySelector('[data-installment-export]').onclick=()=>{assertSession();const url=URL.createObjectURL(new Blob(['\uFEFF'+csv(clientId)],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='crediario-parcelas.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+    if(clientId&&!root.querySelector('[data-fiado-account]'))mountCustomer(clientId);
     window.Modais?.layout?.(root.querySelector('[role=dialog]'));
   }
   document.addEventListener('click',e=>{const b=e.target.closest?.('[data-installment-client]');if(b)open(b.dataset.installmentClient||undefined);});
@@ -65,5 +112,5 @@ window.InstallmentCredit = (() => {
   };
   document.addEventListener('input',updatePreview);
   document.addEventListener('change',updatePreview);
-  return {has,account,refresh,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,checkoutPreview};
+  return {has,account,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
 })();
