@@ -157,3 +157,33 @@ test('V228 cold display reads proved 247 + first 280, separates 2520, and refres
   assert.equal((await c.root.collection('stockMovements').get()).size,1);assert.equal(h.commits(),0);
  }finally{h.close();}
 });
+
+test('V229.1 original owner flow commits partial and full exigible without moving the original sale or stock',async()=>{
+ clock=new Date();const c=await setup(),q=await c.plan({total:2800,firstDueDate:Plan.today()});
+ await service.commit(q.request);await c.reload();
+ const iptv='qa-iptv-'+crypto.randomUUID();await db.doc('financialSpaces/'+iptv).set({id:iptv,businessId:c.businessId,linkedBusinessId:c.businessId,active:true,type:'business',ownerUid:c.uid,capabilities:{sales:true}});
+ const originalSale=(await c.root.collection('sales').doc(q.sale.id).get()).data();
+ const readCents=async()=>{const a=(await c.read()).account;return [a.dueCents,a.futureCents];};
+ assert.deepEqual(await readCents(),[52700,252000]);
+ for(const [amount,remaining] of [[100,42700],[427,0]]){
+  const h=require('../helpers/owner-receipt-v219.cjs').harness({businessId:c.businessId,spaceId:c.spaceId,uid:c.uid});
+  try{
+   const {w}=h;Object.assign(h.rows(),{clientes:structuredClone(c.data.clientes),vendas:structuredClone(c.data.vendas),pagamentos:structuredClone(c.data.pagamentos),alocacoesPagamento:structuredClone(c.data.alocacoesPagamento)});
+   w.Router={atual:()=> 'clientes'};for(const file of ['js/spaces.js','js/clientes.js'])w.eval(fs.readFileSync(file,'utf8'));
+   w.SpaceContext.setSpaces([c.spaceId,iptv].map(id=>({id,name:id,businessId:c.businessId,type:'business'})));w.SpaceContext.selectActive(iptv);
+   w.FirebaseCallable=async(name,data)=>{assert.equal(name,'getOperationalSyncReceipt');return {data:await service.receipt({auth:c.auth,data})};};
+   const options={spaceId:c.spaceId,paymentMethod:'pix',paymentMode:'partial'},attempt=w.Fiados.receiptAttempt('qa-client',{originalScope:w.SpaceContext.viewScope()});
+   const p=await attempt.confirm(amount,'QA externo',options);
+   assert.equal((await attempt.confirm(amount,'QA externo',options)).operationId,p.operationId);assert.equal(h.commits(),1);
+   const item={operationId:p.operationId,businessId:c.businessId,userId:c.uid,workspaceGeneration:0,payloadVersion:4,status:'pending',payload:{eventKind:'payment',fiadoHistoryVersion:1,writes:h.writes()}};
+   const request={auth:c.auth,data:{businessId:c.businessId,item,clientRelease:229,syncProtocolVersion:1}};
+   await service.commit(request);assert.equal((await service.commit(request)).replayed,true);
+   const stored=(await c.root.collection('payments').doc(p.id).get()).data();assert.equal(stored.spaceId,c.spaceId);assert.equal(stored.valor,amount);
+   assert.deepEqual(await readCents(),[remaining,252000]);assert.equal(w.SpaceContext.activeId(),iptv);await c.reload();
+  }finally{h.close();}
+ }
+ const sale=(await c.root.collection('sales').doc(q.sale.id).get()).data();
+ assert.equal(sale.spaceId,originalSale.spaceId);assert.deepEqual(sale.installmentPlan,originalSale.installmentPlan);
+ assert.equal((await c.root.collection('stockMovements').get()).size,1);
+ assert.equal(c.data.produtos[0].estoqueAtual,2);assert.equal(c.data.pagamentos.length,7);
+});

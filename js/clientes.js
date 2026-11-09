@@ -38,6 +38,10 @@ window.Clientes=(()=>{
     const saldo = account ? (account.creditCents - account.dueCents) / 100 : Math.round((Number(client?.saldo) || 0) * 100) / 100;
     return {saldo, futureCents:account?.futureCents || 0, status:saldo<0?'debt':saldo>0?'credit':'zero', debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
   }
+  function originalAccountAction() {
+    return window.Fiados?.canOpenOriginal?.()
+      ? '<button type="button" class="btn btn-light" data-open-original-fiado>Consultar conta original do Fiado</button>' : '';
+  }
   function unassignedMarkup() {
     const rows = viewData().unassignedCustomers || [];
     if (!rows.length) return scopedScreen() && !(viewData().clientes || []).length
@@ -65,5 +69,5 @@ window.Clientes=(()=>{
     else db.clientes.push({...registro,id:registro.id||Utils.uuid(),portalRefToken:registro.portalRefToken||Utils.uuid(),normalizedPhone,saldo:Number(registro.saldo||0),atualizadoEm:registro.atualizadoEm||agora});
   }))};
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('customers.adjustBalance'))throw Error('Você não tem permissão para ajustar saldos.');let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0),financialVersionAnterior=Math.max(0,Number(cliente.financialVersion||0));cliente.saldo=Number(saldoNovo);cliente.financialVersion=financialVersionAnterior+1;cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,expectedFinancialVersion:financialVersionAnterior,financialVersionAfter:cliente.financialVersion,motivo:motivo||'',data:cliente.atualizadoEm,...(window.TeamAccess?.actor?.()||{})};db.movimentacoes.push(movimento)});return movimento};
-  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

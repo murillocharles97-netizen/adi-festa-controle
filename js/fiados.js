@@ -198,8 +198,60 @@ window.Fiados = (() => {
     access?.assertSession?.(access.captureSession());
   }
 
-  function receiptAttempt(clientId, {spaceScope} = {}) {
+  function canOpenOriginal() {
+    const c = window.BusinessContext?.get?.(), uid = window.FirebaseSession?.user?.uid;
+    return Boolean(uid && c?.role === 'owner' && c.business?.ownerId === uid &&
+      c.businessId === DB.getBusinessId() && window.Clientes?.scopedScreen?.() &&
+      window.TeamAccess?.has?.('customers.view') && window.TeamAccess.has('customers.receiveDebt') &&
+      !window.OperationalReadPolicy?.restricted?.());
+  }
+
+  function assertOriginal(clientId, origin) {
+    const client = (DB.carregar().clientes || []).find(row => row.id === clientId);
+    if (!canOpenOriginal() || origin !== window.SpaceContext?.viewScope?.() || !client ||
+      (client.businessId && client.businessId !== DB.getBusinessId()) ||
+      (client.workspaceGeneration ?? 0) !== (DB.getWorkspaceGeneration?.() ?? 0) ||
+      client.deletedAt || client.active === false || client.ativo === false)
+      throw Error('A conta original exige o proprietário ativo da empresa. Abra a consulta novamente.');
+    return client;
+  }
+
+  function originalOrigins(clientId, account) {
+    const rows = account?.entries || (DB.carregar().vendas || []).filter(sale => sale.clienteId === clientId &&
+      sale.formaPagamento === 'fiado' && !sale.deletedAt && !sale.desfeita && !sale.cancelledAt &&
+      sale.active !== false && sale.creditSettled !== true && window.SpaceEngine.isValidSale(sale) &&
+      Number(sale.creditRemainingAmount ?? sale.valorFinal) > 0);
+    const ids = rows.map(row => window.SpaceContext.recordSpace(row));
+    return { known: [...new Set(ids.filter(Boolean))], unassigned: ids.some(id => !id) };
+  }
+
+  const mixedOriginalMessage = 'Há dívida aberta comprovada em mais de um espaço. A consulta está disponível, mas este fluxo não distribui um pagamento entre negócios.';
+
+  function openOriginalDirectory() {
+    if (!canOpenOriginal()) return;
+    const root = document.querySelector('#modal'), scope = window.SpaceContext.viewScope();
+    if (!root) return;
+    const rows = window.Clientes.listar().filter(client => client.ativo !== false && client.active !== false && !client.deletedAt &&
+      (!client.businessId || client.businessId === DB.getBusinessId()) && Number(client.saldo) < 0)
+      .sort((a,b) => String(a.nome).localeCompare(String(b.nome),'pt-BR'));
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box" role="dialog" aria-modal="true" aria-labelledby="fiado-original-title"><header class="modal-head"><h2 id="fiado-original-title">Consultar conta original do Fiado</h2></header><form><div class="modal-body"><p>Consulte um cliente da empresa, inclusive quando a origem de parte da dívida ainda não estiver registrada.</p><label class="field">Cliente<select name="clientId" required><option value="">Selecione o cliente</option>${rows.map(client => `<option value="${esc(client.id)}">${esc(client.nome)}</option>`).join('')}</select></label></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-close-original>Cancelar</button><button type="submit" class="btn btn-primary" ${rows.length?'':'disabled'}>Consultar</button></footer></form></section></div>`;
+    const form = root.querySelector('form');
+    root.querySelector('[data-close-original]').onclick = () => window.Modais?.fechar?.();
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const button = form.querySelector('[type="submit"]');
+      if (button.disabled) return;
+      const id = String(form.elements.clientId.value || '');
+      if (!rows.some(client => client.id === id)) return;
+      button.disabled = true;
+      try { await openReceive(id,{originalScope:scope, sourceForm:form, onRecorded:(p,c)=>window.ReceiptMessageUI?.open?.(p,c)}); }
+      finally { if (form.isConnected) button.disabled = false; }
+    };
+  }
+
+  function receiptAttempt(clientId, {spaceScope, originalScope} = {}) {
     assertCanReceive();const session=window.TeamAccess?.captureSession?.(),operationId=Utils.uuid();let flight=null,payment=null,inputKey='';
+    const basis = originalScope ? paymentContext(assertOriginal(clientId, originalScope)) : null;
     return {operationId,confirm(value,note,options={}){
       if(flight)return flight;
       flight=(async()=>{
@@ -208,7 +260,17 @@ window.Fiados = (() => {
         if(payment&&key!==inputKey)throw Object.assign(Error('Este recebimento já foi preparado com os dados anteriores. Confira a sincronização antes de registrar outro valor.'),{code:'payment-already-prepared'});
         if(!payment){
           const scheduled=window.InstallmentCredit?.has(clientId);
-          if(spaceScope){
+          if(originalScope){
+            assertOriginal(clientId, originalScope);
+            if (!options.spaceId || options.saleId) throw Error('Selecione explicitamente o caixa do recebimento original.');
+            window.SpaceContext.requireSalesSpace(options.spaceId);
+            const proof = await originalProof(clientId, scheduled);
+            const current = paymentContext(assertOriginal(clientId, originalScope));
+            if (current.expectedFinancialVersion !== basis.expectedFinancialVersion || current.expectedBalance !== basis.expectedBalance)
+              throw Error('O saldo mudou desde a consulta. Reabra a conta antes de confirmar.');
+            if (originalOrigins(clientId, proof).known.length > 1) throw Error(mixedOriginalMessage);
+            if (scheduled) options={...options,fiadoAccount:proof};
+          }else if(spaceScope){
             const proof=await window.Clientes.confirmSpaceAccount(clientId,spaceScope);
             const active=window.SpaceContext.requireSalesSpace();
             if(options.spaceId!==active)throw Error('O recebimento precisa pertencer ao espaço ativo.');
@@ -227,22 +289,45 @@ window.Fiados = (() => {
     }};
   }
 
-  async function openReceive(clientId,{onRecorded,saleId,scoped=false}={}) {
+  async function originalProof(clientId, scheduled) {
+    if (scheduled) return window.InstallmentCredit.refresh(clientId);
+    // Traditional Fiado already validates the balance and allocations at commit.
+    // An incomplete legacy proof must not replace that V228 flow with a new contract.
+    if (navigator.onLine === false || !window.FirebaseCallable) return null;
+    try { return await window.InstallmentCredit.refresh(clientId); }
+    catch (error) {
+      const code = String(error.code || '').replace(/^functions\//,'');
+      if (['unauthenticated','permission-denied','permission-session-retired','permission-session-invalid'].includes(code)) throw error;
+      return null;
+    }
+  }
+
+  async function openReceive(clientId,{onRecorded,saleId,scoped=false,originalScope,sourceForm}={}) {
     const spaceScope=scoped?window.SpaceContext.viewScope():null;
     if(window.OperationalReadPolicy?.restricted?.()){try{await window.SyncFirebase.prepareOperationalCustomer(clientId,'payment');}catch(error){Utils.toast(error.message,true);return;}}
-    let attempt;try{attempt=receiptAttempt(clientId,{spaceScope});}catch(error){Utils.toast(error.message,true);return;}
+    let attempt;try{if(originalScope)assertOriginal(clientId,originalScope);attempt=receiptAttempt(clientId,{spaceScope,originalScope});}catch(error){Utils.toast(error.message,true);return;}
     const client=(DB.carregar().clientes||[]).find(c=>c.id===clientId);if(!client)return Utils.toast('Cliente não encontrado.',true);
     const target=saleId?(DB.carregar().vendas||[]).find(s=>s.id===saleId&&s.clienteId===clientId):null;
     if(saleId&&!target?.installmentPlan)return Utils.toast('Venda parcelada não disponível. Atualize os dados.',true);
-    let account=null, selectedSpace='';
-    if(spaceScope || window.InstallmentCredit?.has(clientId)){try{
+    let account=null, original=null, selectedSpace='';
+    if(originalScope){
+      try {
+        const scheduled = window.InstallmentCredit?.has(clientId);
+        const proof = await originalProof(clientId, scheduled);
+        assertOriginal(clientId,originalScope);
+        if (sourceForm && !sourceForm.isConnected) return;
+        original = originalOrigins(clientId,proof);
+        if (scheduled) account=proof;
+      }catch(error){return Utils.toast(error.message,true);}
+    }else if(spaceScope || window.InstallmentCredit?.has(clientId)){try{
       if(spaceScope){selectedSpace=window.SpaceContext.requireSalesSpace();if(target&&target.spaceId!==selectedSpace)throw Error('A parcela não pertence ao espaço ativo.');}
       account=spaceScope?await window.Clientes.confirmSpaceAccount(clientId,spaceScope):await window.InstallmentCredit.refresh(clientId);
     }catch(e){return Utils.toast(e.message,true);}}
     const due=account?account.dueCents/100:target?Number(target.creditRemainingAmount):Math.abs(Math.min(0,Number(client.saldo||0)));if(!due&&!account?.futureCents)return Utils.toast('Este cliente não possui dívida em aberto.',true);
     const root=document.querySelector('#modal');if(!root)return;
-    const hasFuture=Boolean(account?.futureCents);
-    root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="receive-payment-title"><header class="modal-head"><h2 id="receive-payment-title">Receber pagamento</h2><button type="button" class="icon-btn" data-receive-close aria-label="Fechar">×</button></header><form><div class="modal-body viewport-scroll"><p><b>${esc(client.nome)}</b> · Saldo atual: ${money(due)}</p><div class="payment-kind"><label><input type="radio" name="kind" value="total" checked> <span data-receive-total-label>${hasFuture?'Quitar valor exigível':'Pagamento total'}</span></label><label><input type="radio" name="kind" value="partial"> Parcial</label></div><label class="field">Valor recebido<input name="valor" type="number" inputmode="decimal" min="0.01" max="${due}" step="0.01" value="${due.toFixed(2)}" required></label>${account?`<p>Exigível agora: ${money(account.dueCents/100)} · Futuras: ${money(account.futureCents/100)} · Total ainda devido: ${money(account.totalCents/100)}</p><label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="advance" style="width:18px;height:18px;min-height:18px;flex:none"> Antecipar parcelas futuras (sem desconto)</label>`:''}${selectedSpace?`<input type="hidden" name="paymentSpaceId" value="${esc(selectedSpace)}"><p>Espaço do recebimento: ${esc(window.SpaceContext.selectionLabel())}</p>`:spaceField()}<label class="field">Forma de pagamento<select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></label><label class="field">Observação<textarea name="observacao"></textarea></label>${hasFuture?'<p>Valor a receber: <b data-receive-amount></b></p>':''}<p>${hasFuture?'Exigível após receber':'Saldo após receber'}: <b data-receive-after>${money(0)}</b></p>${hasFuture?'<p>Parcelas futuras após receber: <b data-receive-future></b></p>':''}<p data-receive-feedback role="alert" aria-live="assertive" tabindex="-1"></p><button type="button" class="btn btn-light" data-receive-restore hidden>Reabrir para restaurar acesso</button></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-receive-close>Cancelar</button><button type="submit" class="btn btn-primary" data-receive-confirm>Confirmar recebimento</button></footer></form></section></div>`;
+    const hasFuture=Boolean(account?.futureCents), mixed=original?.known.length>1;
+    const originalNote = original ? `<p>Conta da empresa, sem filtro pelo espaço ativo. A seleção abaixo informa em qual caixa o valor entrou. As origens registradas da dívida permanecem iguais.</p>${original.unassigned?'<p>Parte da dívida tem origem de espaço a conferir.</p>':''}${original.known.length?`<p>Origens registradas: ${original.known.map(id=>esc(window.SpaceContext.homeSpaces().find(space=>space.id===id)?.name || 'Espaço indisponível')).join(', ')}.</p>`:''}${mixed?`<p role="status">${esc(mixedOriginalMessage)}</p>`:''}` : '';
+    root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="receive-payment-title"><header class="modal-head"><h2 id="receive-payment-title">${original?"Conta original do Fiado":"Receber pagamento"}</h2><button type="button" class="icon-btn" data-receive-close aria-label="Fechar">×</button></header><form><div class="modal-body viewport-scroll">${originalNote}<p><b>${esc(client.nome)}</b> · Saldo atual: ${money(due)}</p><div class="payment-kind"><label><input type="radio" name="kind" value="total" checked> <span data-receive-total-label>${hasFuture?'Quitar valor exigível':'Pagamento total'}</span></label><label><input type="radio" name="kind" value="partial"> Parcial</label></div><label class="field">Valor recebido<input name="valor" type="number" inputmode="decimal" min="0.01" max="${due}" step="0.01" value="${due.toFixed(2)}" required></label>${account?`<p>Exigível agora: ${money(account.dueCents/100)} · Futuras: ${money(account.futureCents/100)} · Total ainda devido: ${money(account.totalCents/100)}</p><label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="advance" style="width:18px;height:18px;min-height:18px;flex:none"> Antecipar parcelas futuras (sem desconto)</label>`:''}${selectedSpace?`<input type="hidden" name="paymentSpaceId" value="${esc(selectedSpace)}"><p>Espaço do recebimento: ${esc(window.SpaceContext.selectionLabel())}</p>`:spaceField({explicit:!!original})}<label class="field">Forma de pagamento<select name="paymentMethod"><option value="pix">PIX</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="debit_card">Cartão de débito</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></label><label class="field">Observação<textarea name="observacao"></textarea></label>${hasFuture?'<p>Valor a receber: <b data-receive-amount></b></p>':''}<p>${hasFuture?'Exigível após receber':'Saldo após receber'}: <b data-receive-after>${money(0)}</b></p>${hasFuture?'<p>Parcelas futuras após receber: <b data-receive-future></b></p>':''}<p data-receive-feedback role="alert" aria-live="assertive" tabindex="-1"></p><button type="button" class="btn btn-light" data-receive-restore hidden>Reabrir para restaurar acesso</button></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-receive-close>Cancelar</button><button type="submit" class="btn btn-primary" data-receive-confirm ${mixed?"disabled":""}>Confirmar recebimento</button></footer></form></section></div>`;
     const form=root.querySelector('form'),button=form.querySelector('[data-receive-confirm]'),feedback=form.querySelector('[data-receive-feedback]'),restore=form.querySelector('[data-receive-restore]'),value=form.elements.valor,dialog=root.querySelector('[role=dialog]');let busy=false;dialog.classList.add('receipt-payment-dialog');
     if(account){[...form.elements.paymentMethod.options].forEach(o=>{if(!["pix","cash"].includes(o.value))o.remove();});form.elements.advance.onchange=()=>{value.max=(form.elements.advance.checked?account.totalCents:account.dueCents)/100;if(form.querySelector('[name=kind][value=total]').checked||Number(value.value)>Number(value.max))value.value=Number(value.max).toFixed(2);update();};}
     if(target){[...form.elements.paymentMethod.options].forEach(o=>{if(!['pix','cash'].includes(o.value))o.remove();});const space=form.querySelector('[name=paymentSpaceId]');if(space){space.value=target.spaceId;space.disabled=true;}}
@@ -262,7 +347,7 @@ window.Fiados = (() => {
     update();value.oninput=()=>{form.querySelector('[name=kind][value="'+(Math.round(Number(value.value)*100)===Math.round(Number(value.max)*100)?'total':'partial')+'"]').checked=true;update();};form.querySelectorAll('[name=kind]').forEach(r=>r.onchange=()=>{if(r.checked&&r.value==='total')value.value=Number(value.max).toFixed(2);update();});
     dialog.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}else if(e.key==='Tab'){const list=[...dialog.querySelectorAll('button:not(:disabled),input,select,textarea')].filter(x=>!x.hidden),first=list[0],last=list.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
     form.onsubmit=async event=>{
-      event.preventDefault();if(busy)return;busy=true;button.disabled=true;button.textContent='Confirmando registro…';feedback.textContent='';restore.hidden=true;
+      event.preventDefault();if(busy||mixed)return;busy=true;button.disabled=true;button.textContent='Confirmando registro…';feedback.textContent='';restore.hidden=true;
       try{const data=new FormData(form),amount=Number(data.get('valor')),payment=await attempt.confirm(amount,String(data.get('observacao')||''),{saleId,allowAdvance:data.get('advance')==='on',paymentMode:account?'partial':target?'partial':Math.round(amount*100)===Math.round(due*100)?'total':'partial',paymentMethod:String(data.get('paymentMethod')||'other'),spaceId:target?.spaceId||String(data.get('paymentSpaceId')||'')});
         if(!form.isConnected||!root.contains(form))return;
         if(onRecorded)onRecorded(payment,client);else{window.Modais?.fechar?.();Utils.toast(payment.financialAppliedAt?'Recebimento confirmado na nuvem.':'Recebimento salvo neste aparelho. Aguardando confirmação na nuvem.');}
@@ -272,9 +357,9 @@ window.Fiados = (() => {
     value.focus();return {operationId:attempt.operationId};
   }
 
-  function spaceField() {
-    const spaces=window.SpaceContext?.salesSpaces?.()||[],selected=window.SpaceContext?.salesId?.();
-    return `<div class="field"><label>Espaço do recebimento</label><select name="paymentSpaceId" required>${spaces.map(space=>`<option value="${esc(space.id)}"${space.id===selected?' selected':''}>${esc(space.name)}</option>`).join('')}</select><small>O recebimento pertence a este espaço. A dívida do cliente não muda de espaço.</small></div>`;
+  function spaceField({explicit=false}={}) {
+    const spaces=window.SpaceContext?.salesSpaces?.()||[],selected=explicit?null:window.SpaceContext?.salesId?.();
+    return `<div class="field"><label>Espaço do recebimento</label><select name="paymentSpaceId" required>${explicit?'<option value="" selected>Selecione onde o valor entrou</option>':''}${spaces.map(space=>`<option value="${esc(space.id)}"${space.id===selected?' selected':''}>${esc(space.name)}</option>`).join('')}</select><small>O recebimento pertence a este espaço. A dívida do cliente não muda de espaço.</small></div>`;
   }
 
   function confirmarConflito(conflictId) {
@@ -452,7 +537,7 @@ window.Fiados = (() => {
   );
 
   return {
-    spaceField, assertCanReceive, receiptAttempt, openReceive,
+    spaceField, assertCanReceive, receiptAttempt, openReceive, canOpenOriginal, openOriginalDirectory,
     listar,
     receber,
     confirmarConflito,
