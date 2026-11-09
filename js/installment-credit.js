@@ -8,8 +8,9 @@ window.InstallmentCredit = (() => {
     (data.vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt));
   const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.()]);
   const clientFor=id=>(DB.carregar().clientes||[]).find(c=>c.id===id);
-  const summaries=new Map();
-  let summaryScope, previewRequest;
+  const summaries=new Map(), confirmedAt=new Map(), pending=new Map(), failedAt=new Map();
+  const DISPLAY_TTL=60000, RETRY_DELAY=15000;
+  let summaryScope, previewRequest, proofEpoch=0;
   function assertAccount(client,a){
     const balance=Number(client?.saldo??0);
     if(!client||!a||a.clientId!==client.id||![1,2].includes(a.version)||
@@ -22,7 +23,7 @@ window.InstallmentCredit = (() => {
     return a;
   }
   function summariesForScope(){
-    const current=scope();if(summaryScope!==current){summaries.clear();summaryScope=current;}return summaries;
+    const current=scope();if(summaryScope!==current){summaries.clear();confirmedAt.clear();summaryScope=current;}return summaries;
   }
   function account(id){
     if(!has(id))return null;
@@ -32,6 +33,12 @@ window.InstallmentCredit = (() => {
     if(!client||client.fiadoHistoryVersion===1||client.legacyBalanceRemaining===undefined||
       !(DB.carregar().vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt))return null;
     try{return window.FiadoAccount.project(client,DB.carregar().vendas||[]);}catch{return null;}
+  }
+  function confirmedAccount(id){
+    if(!has(id))return null;
+    const cached=summariesForScope().get(id);
+    if(navigator.onLine===false||Date.now()-(confirmedAt.get(id)||0)>=DISPLAY_TTL)return null;
+    try{return cached?.asOf===InstallmentPlan.today()?assertAccount(clientFor(id),cached):null;}catch{return null;}
   }
   function salePreview(client, total, terms, current) {
     assertAccount(client,current);
@@ -72,21 +79,112 @@ window.InstallmentCredit = (() => {
       if(host.isConnected)host.innerHTML=`<p data-installment-preview-unavailable role="status">Prévia indisponível: ${esc(error.message)}</p>`;
     });
   }
-  async function refresh(id){
+  function refresh(id){
     const ticket=window.TeamAccess?.captureSession?.(),origin=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
-    if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o saldo no servidor. A operação foi preservada.');
-    const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id,fiadoHistoryVersion:1});
-    window.TeamAccess?.assertSession?.(ticket);
-    const result=reply.data??reply;
-    if(scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
-      throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
-    const confirmed=assertAccount(clientFor(id),result.account);
-    if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
-    if(has(id))summariesForScope().set(id,confirmed);
-    return confirmed;
+    const epoch=proofEpoch,client=clientFor(id),key=JSON.stringify([epoch,origin,id,client?.financialVersion,client?.saldo,InstallmentPlan.today()]);
+    if(pending.has(key))return pending.get(key);
+    const request=(async()=>{
+      if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o saldo no servidor. A operação foi preservada.');
+      window.TeamAccess?.assertSession?.(ticket);
+      const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id,fiadoHistoryVersion:1});
+      window.TeamAccess?.assertSession?.(ticket);
+      const result=reply.data??reply;
+      if(proofEpoch!==epoch||scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
+        throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
+      const confirmed=assertAccount(clientFor(id),result.account);
+      if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
+      if(has(id)){summariesForScope().set(id,confirmed);confirmedAt.set(id,Date.now());}
+      window.dispatchEvent?.(new CustomEvent('fiado-account-updated',{detail:{clientId:id}}));
+      return confirmed;
+    })().finally(()=>{if(pending.get(key)===request)pending.delete(key);});
+    pending.set(key,request);
+    return request;
   }
-  function customerSummary(id,confirmed){const a=confirmed||account(id);if(!a)return '';return `<section class="receipt-debt" data-fiado-account><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>${confirmed?'Apurado no servidor em '+esc(a.asOf):'Prévia local por vencimento. O servidor confere antes de receber.'}</small>${button(id)}</section>`;}
-  function mountCustomer(id){const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll');if(host&&has(id)){host.insertAdjacentHTML('afterbegin',customerSummary(id)||'<p data-fiado-account role="status">Consultando exigível e parcelas futuras…</p>');const section=host.querySelector('[data-fiado-account]');refresh(id).then(a=>{if(section.isConnected)section.outerHTML=customerSummary(id,a);}).catch(()=>{if(section.isConnected&&!account(id))section.textContent='Exigível indisponível. Atualize o cliente e confira as parcelas no servidor.';});}}
+  function customerSummary(id,confirmed){const a=confirmed||confirmedAccount(id);if(!a)return '';return `<section class="receipt-debt" data-fiado-account data-fiado-client="${esc(id)}"><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>Apurado no servidor em ${esc(a.asOf)}</small>${button(id)}</section>`;}
+  function mountCustomer(id){
+    const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll,#modal .crm-profile-scroll');
+    if(!host||!has(id))return;
+    host.insertAdjacentHTML('afterbegin',customerSummary(id)||`<p data-fiado-account data-fiado-client="${esc(id)}" role="status">Consultando exigível e parcelas futuras…</p>`);
+    const section=host.querySelector('[data-fiado-account]');
+    refresh(id).catch(()=>{if(section.isConnected&&!confirmedAccount(id))section.textContent='Exigível a conferir. Conecte-se e tente consultar o saldo novamente.';});
+  }
+  function balanceText(id,amountOnly=false){
+    const client=clientFor(id),f=client&&window.Clientes?.financialStatus(client);
+    if(!f||f.status==='unverified')return 'Exigível a conferir';
+    return amountOnly?money(Math.round(f.debt*100)):f.status==='debt'?'Exigível '+money(Math.round(f.debt*100)):f.status==='credit'?'Crédito '+money(Math.round(f.credit*100)):'Sem saldo exigível';
+  }
+  // Update only financial fragments: preserve search, swipe handlers and open forms.
+  let totalsScheduled=false;
+  function updateVisibleTotals(){
+    if(totalsScheduled)return;totalsScheduled=true;
+    queueMicrotask(()=>{
+      totalsScheduled=false;
+      const page=document.querySelector('#app .clients-page');if(!page||!window.ClientesPage?.render)return;
+      const shell=document.createElement('div');shell.innerHTML=window.ClientesPage.render();
+      for(const selector of ['.client-kpis','.mobile-client-kpis']){
+        const old=page.querySelector(selector),next=shell.querySelector(selector);
+        if(old&&next){const values=next.querySelectorAll('strong,em');old.querySelectorAll('strong,em').forEach((value,index)=>{if(values[index]&&value.textContent!==values[index].textContent)value.textContent=values[index].textContent;});}
+      }
+      for(const chip of page.querySelectorAll('[data-client-chip],[data-mobile-filter]')){
+        const attr=chip.hasAttribute('data-client-chip')?'data-client-chip':'data-mobile-filter',value=chip.getAttribute(attr);
+        const next=[...shell.querySelectorAll('['+attr+']')].find(el=>el.getAttribute(attr)===value)?.querySelector('b'),old=chip.querySelector('b');
+        if(old&&next&&old.textContent!==next.textContent)old.textContent=next.textContent;
+      }
+    });
+  }
+  function paint(id){
+    const client=clientFor(id);if(!client)return;
+    updateVisibleTotals();
+    for(const card of document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card]')){
+      if((card.dataset.clientId||card.dataset.mobileCard)!==id)continue;
+      const mobile=!!card.dataset.mobileCard,renderer=mobile?window.ClientesMobile?.renderCard:window.ClientesPage?.renderCard;
+      if(!renderer)continue;
+      const shell=document.createElement('div');shell.innerHTML=renderer(client,0);
+      for(const selector of mobile?['.mobile-client-balance']:['.client-balance','.client-status']){
+        const old=card.querySelector(selector),next=shell.querySelector(selector);if(old&&next&&old.outerHTML!==next.outerHTML)old.replaceWith(next);
+      }
+      const selector=mobile?'[data-mobile-receive]':'[data-receive-client]',old=card.querySelector(selector),next=shell.querySelector(selector);
+      if(old&&next)old.disabled=next.disabled;
+    }
+    for(const label of document.querySelectorAll('[data-fiado-balance]'))if(label.dataset.fiadoBalance===id)label.textContent=balanceText(id,label.dataset.fiadoAmountOnly==='true');
+    for(const section of document.querySelectorAll('[data-fiado-client]'))if(section.dataset.fiadoClient===id){
+      const markup=customerSummary(id),shell=document.createElement('div');
+      if(markup){shell.innerHTML=markup;if(section.outerHTML!==shell.firstElementChild.outerHTML)section.replaceWith(shell.firstElementChild);}
+      else if(section.textContent!=='Exigível a conferir. Conecte-se para consultar o saldo.')section.textContent='Exigível a conferir. Conecte-se para consultar o saldo.';
+    }
+  }
+  function visibleIds(){return [...new Set([...document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]')].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>has(id));}
+  let hydrating=false,scheduled=false,rerun=false;
+  async function hydrateVisible(){
+    if(hydrating){rerun=true;return;}hydrating=true;
+    try{
+      const queue=visibleIds();queue.forEach(paint);
+      await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
+        while(queue.length){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
+          if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
+          try{await refresh(id);failedAt.delete(key);}catch{failedAt.set(key,Date.now());}
+        }
+      }));
+    }finally{hydrating=false;if(rerun){rerun=false;scheduleHydration();}}
+  }
+  function scheduleHydration(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;hydrateVisible();});}
+  function recheck(){proofEpoch++;summariesForScope().clear();confirmedAt.clear();failedAt.clear();visibleIds().forEach(paint);scheduleHydration();}
+  if(typeof window.addEventListener==='function'){
+  window.addEventListener('fiado-account-updated',event=>paint(event.detail.clientId));
+  window.addEventListener('financial-state-updated',recheck);
+  window.addEventListener('cloud-data-updated',event=>{
+    if(['clients','sales','payments','paymentAllocations','balanceEvents'].includes(event.detail?.collection))failedAt.clear();
+    // Balance/version checks retire only stale accounts; an unrelated client update must not cancel a valid read.
+    scheduleHydration();
+  });
+  for(const name of ['online','offline'])window.addEventListener(name,recheck);
+  for(const name of ['veconi-spaces-ready','firebase-sync-status'])window.addEventListener(name,()=>{failedAt.clear();scheduleHydration();});
+  window.AppLifecycle?.onResume?.(recheck);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')recheck();});
+  function observeList(){const app=document.querySelector('#app');if(app)new MutationObserver(scheduleHydration).observe(app,{childList:true,subtree:true});scheduleHydration();}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeList,{once:true});else observeList();
+  setInterval(()=>{if(document.visibilityState!=='hidden'&&visibleIds().length)scheduleHydration();},30000);
+  }
   function fields(){return `<fieldset id="installment-fields" hidden><legend>Crediário / Parcelado</legend><p>Sem juros ou multa. Registre a entrada e os pagamentos somente após receber Pix ou dinheiro.</p><label class="field">Entrada combinada (R$)<input id="installment-down" type="number" min="0" step="0.01" value="0"></label><label class="field">Forma da entrada<select id="installment-method"><option value="pix">Pix externo</option><option value="cash">Dinheiro</option></select></label><label class="field">Parcelas mensais<input id="installment-count" type="number" min="1" max="60" step="1" value="10"></label><label class="field">Primeiro vencimento<input id="installment-first" type="date" value="${InstallmentPlan.month(InstallmentPlan.today(),1)}"></label><p data-installment-preview role="status"></p></fieldset>`;}
   function read(){return{downPayment:Number(document.querySelector('#installment-down')?.value||0),downPaymentMethod:document.querySelector('#installment-method')?.value||'pix',count:Number(document.querySelector('#installment-count')?.value||10),firstDueDate:document.querySelector('#installment-first')?.value||''};}
   function restore(terms){if(terms)for(const [key,id] of [['downPayment','down'],['downPaymentMethod','method'],['count','count'],['firstDueDate','first']]){const el=document.querySelector('#installment-'+id);if(el)el.value=terms[key];}update();}
@@ -112,5 +210,5 @@ window.InstallmentCredit = (() => {
   };
   document.addEventListener('input',updatePreview);
   document.addEventListener('change',updatePreview);
-  return {has,account,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
+  return {has,account,confirmedAccount,hydrateVisible,balanceText,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
 })();

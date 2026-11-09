@@ -1,11 +1,11 @@
 window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
   const financialStatus=client=>{
-    const account=window.InstallmentCredit?.account(client?.id);
+    const account=(window.InstallmentCredit?.confirmedAccount||window.InstallmentCredit?.account)?.(client?.id);
     if(!account&&window.InstallmentCredit?.has?.(client?.id))
       return {saldo:NaN,status:'unverified',debt:0,credit:0};
     const saldo=account?(account.creditCents-account.dueCents)/100:Math.round((Number(client?.saldo)||0)*100)/100;
-    return {saldo,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
+    return {saldo,futureCents:account?.futureCents||0,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
   };
   const listar=()=>(DB.readForView?.()||DB.carregar()).clientes;
   const obter=id=>listar().find(c=>c.id===id);

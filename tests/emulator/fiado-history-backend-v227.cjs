@@ -14,10 +14,10 @@ async function setup(input=fixture(),{role='owner',historicalSpace=false,allowed
  const batch=db.batch();batch.set(root,{id:businessId,name:'QA fictício',ownerId:role==='owner'?uid:'other',active:true,workspaceGeneration:0,subscription:{planId:'internal',status:'active'}});batch.set(db.doc('users/'+uid),{uid,businessId,active:true,role});batch.set(root.collection('members').doc(uid),{uid,role,status:'active',permissionsVersion:2,permissions:allowed?{'customers.view':true,'customers.receiveDebt':true,'sales.create':true}:{},spaceAccess:'selected',allowedSpaceIds:[spaceId]});batch.set(db.doc('financialSpaces/'+spaceId),{id:spaceId,businessId,linkedBusinessId:businessId,active:true,type:'business',ownerUid:uid,capabilities:{sales:true,inventory:true}});batch.set(root.collection('clients').doc('qa-client'),client);for(const product of data.produtos)batch.set(root.collection('products').doc(product.id),product);for(const [col,rows]of Object.entries(collections))for(const row of rows)batch.set(root.collection(col).doc(row.id),row);await batch.commit();
  const auth={uid,token:{uid}},read=(cap=true)=>service.receipt({auth,data:{kind:'fiado_account',businessId,workspaceGeneration:0,clientId:'qa-client',...(cap?{fiadoHistoryVersion:1}:{})}});
  async function reload(){for(const [col,key]of [['clients','clientes'],['sales','vendas'],['payments','pagamentos'],['paymentAllocations','alocacoesPagamento'],['products','produtos']]){data[key]=(await root.collection(col).get()).docs.map(d=>({...un(d.data()),id:d.id}));if(col==='sales')data[key].sort((a,b)=>String(a.data||'').localeCompare(String(b.data||'')));}}
- async function plan({cap=true}={}){
+ async function plan({cap=true,total=20,firstDueDate=Plan.month(Plan.today(),1)}={}){
   h.c.FirebaseCallable=async(name,payload)=>{assert.equal(name,'getOperationalSyncReceipt');assert.equal(payload.fiadoHistoryVersion,1);return {data:await service.receipt({auth,data:payload})};};
   const a=await h.c.InstallmentCredit.refresh('qa-client'),before=structuredClone(data),operationId=crypto.randomUUID();
-  const sale=h.c.Vendas.registrar({id:crypto.randomUUID(),operationId,businessId,spaceId,clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',itens:[{produtoId:'qa-product',quantidade:1,precoOriginal:20,precoFinalUnitario:20}],installmentAccount:a,installmentTerms:{downPayment:0,count:10,firstDueDate:Plan.month(Plan.today(),1)}});
+  const sale=h.c.Vendas.registrar({id:crypto.randomUUID(),operationId,businessId,spaceId,clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',itens:[{produtoId:'qa-product',quantidade:1,precoOriginal:total,precoFinalUnitario:total}],installmentAccount:a,installmentTerms:{downPayment:0,count:10,firstDueDate}});
   data=h.data();const item={operationId,businessId,userId:uid,workspaceGeneration:0,payloadVersion:4,status:'pending',payload:{eventKind:'sale',...(cap?{fiadoHistoryVersion:1}:{}),writes:JSON.parse(JSON.stringify(h.c.diffWrites(before,data)))}};
   return{sale,item,request:{auth,data:{businessId,item,clientRelease:cap?227:226,syncProtocolVersion:1}}};
  }
@@ -131,4 +131,29 @@ test('37 proved replica accounts become readable; 14 insufficient accounts stay 
  }
  for(const row of classification.rows.filter(r=>r.strictEligible)){const c=await setup(fromSnapshot(row.clientId));assert.equal((await c.read()).account.version,1);consistent++;}
  assert.equal(proved,37);assert.equal(rejected,14);assert.equal(first,11);assert.equal(consistent,107);
+});
+
+
+test('V228 cold display reads proved 247 + first 280, separates 2520, and refreshes after partial receipt without extra writes',async()=>{
+ clock=new Date();const c=await setup(),q=await c.plan({total:2800,firstDueDate:Plan.today()});
+ await service.commit(q.request);assert.equal((await service.commit(q.request)).replayed,true);await c.reload();
+ const sale=(await c.root.collection('sales').doc(q.sale.id).get()).data();
+ assert.equal(sale.installmentPlan.installments.length,10);assert(sale.installmentPlan.installments.every(r=>r.amountCents===28000));
+ for(let i=0;i<10;i++)assert.equal(sale.installmentPlan.installments[i].dueDate,Plan.month(Plan.today(),i));
+ const h=require('../helpers/owner-receipt-v219.cjs').harness({businessId:c.businessId,spaceId:c.spaceId,uid:c.uid});
+ try{
+  h.rows().clientes=structuredClone(c.data.clientes);h.rows().vendas=[];
+  h.w.eval(fs.readFileSync('js/clientes.js','utf8'));
+  h.w.FirebaseCallable=async(name,data)=>({data:await service.receipt({auth:c.auth,data})});
+  assert.equal(h.w.Clientes.financialStatus(h.rows().clientes[0]).status,'unverified');
+  const before=(await c.root.collection('clients').doc('qa-client').get()).updateTime.toMillis();
+  const a=await h.w.InstallmentCredit.refresh('qa-client');assert.equal(a.dueCents,52700);assert.equal(a.futureCents,252000);assert.equal(a.totalCents,304700);
+  assert.equal(h.w.Clientes.financialStatus(h.rows().clientes[0]).debt,527);
+  assert.equal((await c.root.collection('clients').doc('qa-client').get()).updateTime.toMillis(),before);
+  const payment=await c.payment(100);await service.commit(payment);assert.equal((await service.commit(payment)).replayed,true);await c.reload();
+  h.rows().clientes=structuredClone(c.data.clientes);const after=await h.w.InstallmentCredit.refresh('qa-client');
+  assert.equal(after.dueCents,42700);assert.equal(after.futureCents,252000);assert.equal(after.totalCents,294700);
+  assert.equal(h.w.Clientes.financialStatus(h.rows().clientes[0]).debt,427);
+  assert.equal((await c.root.collection('stockMovements').get()).size,1);assert.equal(h.commits(),0);
+ }finally{h.close();}
 });
