@@ -72,12 +72,12 @@ test('customer links, historical warnings, products, revenues and renewals use o
     assert.match(f.w.Clientes.unassignedMarkup(),/Cadastro legado/);
     assert.deepEqual(ids(first.vendas.filter(f.s.isValidSale)),['sa']);assert.deepEqual(ids(first.pagamentos),['pa']);
     assert.deepEqual(ids(f.s.productsForView(f.db.produtos)),['only-a','both']);
-    assert.deepEqual(ids(f.w.CustomerSubscriptions.forClient(f.c.id)),['ra']);assert.equal(f.w.CustomerSubscriptions.get('rb'),null);
+    assert.deepEqual(ids(f.w.CustomerSubscriptions.view.forClient(f.c.id)),['ra']);assert.equal(f.w.CustomerSubscriptions.view.get('rb'),null);
     f.s.selectHome('b');const second=f.w.Clientes.viewData();
     assert.deepEqual(ids(second.clientes),[f.c.id,'client-b']);assert.equal(second.clientes[0].totalComprado,220);
     assert.deepEqual(ids(second.pagamentos),['pb']);assert.deepEqual(ids(f.s.productsForView(f.db.produtos)),['only-b','both']);
-    assert.deepEqual(ids(f.w.CustomerSubscriptions.forClient(f.c.id)),['rb']);
-    assert.equal(f.w.CustomerSubscriptions.get('unknown-renewal'),null);assert.equal(f.w.Clientes.listar().length,4);
+    assert.deepEqual(ids(f.w.CustomerSubscriptions.view.forClient(f.c.id)),['rb']);
+    assert.equal(f.w.CustomerSubscriptions.view.get('unknown-renewal'),null);assert(f.w.CustomerSubscriptions.view.hasUnassigned('unassigned'));assert.equal(f.w.Clientes.listar().length,4);
     assert.equal(JSON.stringify(f.db),original);
   }finally{f.close();}
 });
@@ -121,15 +121,57 @@ test('an in-flight financial proof cannot return into A after switching A → B 
   }finally{f.close();}
 });
 
-test('renewal rejects moving an existing subscription into another space before modifying it',()=>{
-  const f=fixture();try{
-    const db=f.db;db.produtos.push({id:'service',productType:'recurring'});const before=JSON.stringify(db.customerSubscriptions);
-    assert.throws(()=>f.w.CustomerSubscriptions.applySaleInData(db,{id:'sale-new',spaceId:'a',clienteId:f.c.id,
-      itens:[{produtoId:'service',recurringActivation:{subscriptionId:'rb'}}]}),/outro espaço/);
-    assert.equal(JSON.stringify(db.customerSubscriptions),before);
-  }finally{f.close();}
+test('renewals link customers to their own space without changing checkout candidates or attributing legacy vigencies',()=>{
+  const f=fixture();let single;try{
+    f.db.clientes.push({id:'iptv-only',saldo:0});
+    const rows=f.db.customerSubscriptions;
+    Object.assign(rows[1],{productId:'service',contractedPrice:29});
+    rows.push({id:'iptv-renewal',clientId:'iptv-only',financialSpaceId:'b',expiresAt:'2027-01-01'},
+      {id:'unassigned-shared',clientId:f.c.id,productId:'service',expiresAt:'2027-01-01'},
+      {id:'foreign-renewal',businessId:'foreign',clientId:f.c.id,spaceId:'a',expiresAt:'2027-01-01'});
+    const subs=f.w.CustomerSubscriptions;
+    assert(!ids(f.w.Clientes.viewData().clientes).includes('iptv-only'));
+    assert.deepEqual(ids(subs.view.forClient(f.c.id)),['ra']);
+    assert(subs.view.hasUnassigned(f.c.id));
+    assert.deepEqual(ids(subs.matchingProduct(f.c.id,'service')),['rb','unassigned-shared']);
+    f.s.selectActive('b');
+    assert(ids(f.w.Clientes.viewData().clientes).includes('iptv-only'));
+    assert.deepEqual(ids(subs.view.forClient('iptv-only')),['iptv-renewal']);
+    assert.deepEqual(ids(subs.view.forClient(f.c.id)),['rb']);
+    assert.equal(subs.get('rb').spaceId,'b');
+
+    f.h.setContext({role:'seller',spaceAccess:'selected',allowedSpaceIds:['a']});
+    assert.equal(f.s.activeId(),'a');
+    assert.equal(subs.view.get('rb'),null);
+    assert.equal(subs.view.hasUnassigned(f.c.id),false);
+    f.w.OperationalReadPolicy={restricted:()=>true};
+    assert.equal(subs.view.get('ra'),null);
+
+    single=fixture({single:true});
+    assert.deepEqual(ids(single.w.CustomerSubscriptions.view.forClient('unassigned')),['unknown-renewal']);
+    assert.equal(single.w.CustomerSubscriptions.view.hasUnassigned('unassigned'),false);
+  }finally{f.close();single?.close();}
 });
 
+test('commercial renewal of linked and unassigned vigencies follows V228 even in a scoped company',()=>{
+  const f=fixture();try{
+    f.db.produtos.push({id:'service',productType:'recurring',durationValue:1,durationUnit:'months'});
+    for(const id of ['rb','unknown-renewal']){
+      const row=f.db.customerSubscriptions.find(item=>item.id===id);
+      const sale={id:'sale-'+id,spaceId:'a',clientId:row.clientId,createdAt:'2026-11-09T12:00:00Z',
+        itens:[{produtoId:'service',precoUnitario:29,recurringActivation:{subscriptionId:id}}]};
+      const subs=f.w.CustomerSubscriptions, preview=subs.preview({subscription:row,at:sale.createdAt,durationValue:1,durationUnit:'months'});
+      const [outcome]=subs.applySaleInData(f.db,sale);
+      assert.equal(outcome.action,'renewal');
+      assert.equal(outcome.subscriptionId,id);
+      assert.equal(sale.itens[0].subscriptionExpiresAt,preview.expiresAt);
+      assert.equal(row.contractedPrice,29);
+      assert.equal(subs.applySaleInData(f.db,sale)[0].idempotent,true);
+      assert.equal(subs.reverseSaleInData(f.db,sale)[0],id);
+      assert.equal(subs.get(id).spaceId,id==='rb'?'b':undefined);
+    }
+  }finally{f.close();}
+});
 
 test('scoped receipt cannot post into a different authorized space or allocate a mixed balance',async()=>{
   const f=fixture();try{
@@ -138,5 +180,61 @@ test('scoped receipt cannot post into a different authorized space or allocate a
     await assert.rejects(attempt.confirm(10,'',{spaceId:'b',paymentMethod:'pix'}),/espaço ativo/);
     a=proof(f,['a','b']);await assert.rejects(attempt.confirm(10,'',{spaceId:'a',paymentMethod:'pix'}),/outro espaço/);
     assert.equal(f.h.commits(),0);assert.equal(f.db.pagamentos.length,2);
+  }finally{f.close();}
+});
+
+test('the renewal overview counts only the active space and preserves legacy metrics in a single space',()=>{
+  const f=fixture();let single;try{
+    for(const [i,row] of f.db.customerSubscriptions.entries()){
+      row.expiresAt='2027-01-01T22:00:00.000Z';row.contractedPrice=(i+1)*10;
+    }
+    const ref='2027-01-01T13:00:00.000Z',view=f.w.CustomerSubscriptions.view;
+    assert.equal(view.metrics(ref).forecastValue,10);
+    f.s.selectActive('b');
+    assert.equal(view.metrics(ref).forecastValue,20);
+    single=fixture({single:true});
+    single.db.customerSubscriptions.find(row=>row.id==='unknown-renewal').contractedPrice=30;
+    assert.equal(single.w.CustomerSubscriptions.view.metrics('2027-01-01').forecastValue,30);
+  }finally{f.close();single?.close();}
+});
+
+test('cold renewal link reads use the authorized active space and discard late A → B → A results',async()=>{
+  const f=fixture();try{
+    const source=fs.readFileSync('js/firebase/sync.js','utf8');
+    const start=source.indexOf('async function queryRenewalsForSpace()');
+    const end=source.indexOf('async function queryAllClientsForAction',start);
+    assert(start>=0&&end>start);
+    const {w,s}=f,calls=[],merged=[];
+    Object.assign(w,{
+      captureCloudReadScope:()=>s.viewScope(),
+      assertCloudReadScope:(scope)=>{if(scope!==s.viewScope())throw Error('retired');},
+      validateUser:async()=>{},
+      canPullSource:()=>true,
+      applyCloudCollection:(name,items)=>merged.push([name,ids(items)]),
+    });
+    let finish,startRead;
+    w.repositories={customerSubscriptions:{listWherePaged:async(field,id)=>{
+      calls.push([field,id]);
+      if(field==='spaceId')return new Promise(resolve=>{finish=resolve;startRead();});
+      return [{id:'alias',financialSpaceId:id},{id:'other-space',spaceId:'b',financialSpaceId:id}];
+    }}};
+    w.eval(source.slice(start,end));
+    let started=new Promise(resolve=>{startRead=resolve;});
+    const stale=w.queryRenewalsForSpace();
+    await started;
+    s.selectActive('b');s.selectActive('a');
+    finish([{id:'old-response',spaceId:'a'}]);
+    await assert.rejects(stale,/retired/);
+    assert.deepEqual(merged,[]);
+    started=new Promise(resolve=>{startRead=resolve;});
+    const current=w.queryRenewalsForSpace();
+    await started;
+    finish([{id:'local-space',spaceId:'a'},{id:'foreign',businessId:'other',spaceId:'a'}]);
+    assert.deepEqual(ids(await current),['local-space','alias']);
+    assert.deepEqual(calls,[['spaceId','a'],['financialSpaceId','a'],['spaceId','a'],['financialSpaceId','a']]);
+    assert.deepEqual(merged,[['customerSubscriptions',['local-space','alias']]]);
+    w.OperationalReadPolicy={restricted:()=>true};
+    assert.deepEqual(ids(await w.queryRenewalsForSpace()),[]);
+    assert.equal(calls.length,4);
   }finally{f.close();}
 });

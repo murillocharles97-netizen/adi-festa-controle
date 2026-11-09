@@ -4331,16 +4331,16 @@ async function prepareOperationalCustomer(clientId,purpose='checkout') {
   rememberCanonicalClients([data.client],{source:'server',fromCache:false,hasPendingWrites:false,readAt:now()});
   return data;
 }
-function captureCloudReadScope() {
+function captureCloudReadScope(includeSpace = true) {
   const context=window.BusinessContext?.get?.()||{};
   let businessId='';try{businessId=activeBusinessId();}catch{/* signed-out scope is still fenceable */}
   return JSON.stringify([syncSessionGeneration,currentUser?.uid||'',auth.currentUser?.uid||'',businessId,
     DB.getWorkspaceGeneration?.()??0,context.role||'',context.permissionSignature||'',
     [...(context.permissions||[])].sort(),context.spaceAccess||'', [...(context.allowedSpaceIds||[])].sort(),
-    window.SpaceContext?.homeId?.()||'',window.SpaceContext?.salesId?.()||'',window.SpaceContext?.viewScope?.()||'']);
+    ...(includeSpace ? [window.SpaceContext?.homeId?.()||'',window.SpaceContext?.salesId?.()||'',window.SpaceContext?.viewScope?.()||''] : [])]);
 }
-function assertCloudReadScope(scope) {
-  if(scope!==captureCloudReadScope())throw Object.assign(Error('A sessão ou o espaço mudou durante a leitura. Nenhuma confirmação foi aplicada.'),{code:'sync-session-retired'});
+function assertCloudReadScope(scope, includeSpace = true) {
+  if(scope!==captureCloudReadScope(includeSpace))throw Object.assign(Error('A sessão ou o espaço mudou durante a leitura. Nenhuma confirmação foi aplicada.'),{code:'sync-session-retired'});
 }
 function salesReadScope() {
   const scope=window.TeamAccess?.operationalReadScopeKey?.();
@@ -5149,9 +5149,10 @@ async function queryClientsPage(options = {}) {
   return { ...result, pendingClientIds: [...pendingIds("clients")] };
 }
 async function queryCustomerSubscriptions(options = {}) {
-  const scope = captureCloudReadScope();
+  const spaceView = options.spaceView === true;
+  const scope = captureCloudReadScope(spaceView);
   await validateUser();
-  assertCloudReadScope(scope);
+  assertCloudReadScope(scope, spaceView);
   if(window.OperationalReadPolicy?.restricted?.()){
     if(!options.clientId)throw Error('Selecione o cliente para consultar sua vigência atual. Indicadores de renovações anteriores exigem histórico autorizado.');
     return (await prepareOperationalCustomer(String(options.clientId),'checkout'))?.customerSubscriptions||[];
@@ -5178,9 +5179,28 @@ async function queryCustomerSubscriptions(options = {}) {
     max,
     includeInactive: true,
   });
+  assertCloudReadScope(scope, spaceView);
+  const context = window.SpaceContext;
+  const items = spaceView && context?.scopesCustomers?.()
+    ? result.items.filter(item => context.showsRenewal(item) || context.showsUnassignedRenewal(item))
+    : result.items;
+  applyCloudCollection("customerSubscriptions", items, { authoritative: false });
+  return items;
+}
+async function queryRenewalsForSpace() {
+  const scope = captureCloudReadScope();
+  await validateUser();
   assertCloudReadScope(scope);
-  applyCloudCollection("customerSubscriptions", result.items, { authoritative: false });
-  return result.items;
+  const context = window.SpaceContext, id = context?.activeId?.();
+  if (!id || !context.scopesCustomers() || !canPullSource("customerSubscriptions") ||
+      window.OperationalReadPolicy?.restricted?.() || window.TeamAccess?.canRoute?.("clientes") === false) return [];
+  const repository = repositories.customerSubscriptions;
+  const groups = await Promise.all(["spaceId", "financialSpaceId"].map(field => repository.listWherePaged(field, id)));
+  assertCloudReadScope(scope);
+  const items = [...new Map(groups.flat().filter(item => !item.deletedAt && context.showsRenewal(item))
+    .map(item => [item.id, item])).values()];
+  applyCloudCollection("customerSubscriptions", items, { authoritative: false });
+  return items;
 }
 async function queryAllClientsForAction(options = {}) {
   const items = [];
@@ -6847,6 +6867,7 @@ window.SyncFirebase = {
   queryAllClientsForAction,
   queryClientsByInactivity,
   queryCustomerSubscriptions,
+  queryRenewalsForSpace,
   loadProductVariants,
   findProductVariantByBarcode,
   pendingActivityEvents,

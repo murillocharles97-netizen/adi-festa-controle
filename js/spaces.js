@@ -376,6 +376,16 @@
     if (!ownRow(row) || row.spaceId && row.financialSpaceId && row.spaceId !== row.financialSpaceId) return '';
     return resolveSaleSpaceId(row);
   }
+  function showsRenewal(row) {
+    const id = activeId();
+    return Boolean(id && ownRow(row) && !window.OperationalReadPolicy?.restricted?.() &&
+      window.TeamAccess?.canRoute?.('clientes') !== false && (!scopesCustomers() || recordSpace(row) === id));
+  }
+  function showsUnassignedRenewal(row) {
+    return Boolean(activeId() && scopesCustomers() && ownRow(row) && !window.OperationalReadPolicy?.restricted?.() &&
+      window.BusinessContext?.get?.().role === 'owner' && window.TeamAccess?.has?.('customers.view') &&
+      !row.spaceId && !row.financialSpaceId);
+  }
   function productsForView(products = []) {
     const space = selectedHome();
     if (!space?.capabilities.products) return [];
@@ -391,7 +401,8 @@
     }
     for (const client of db.clientes || []) add(client.id, client);
     for (const sale of db.vendas || []) if (isValidSale(sale) && !sale.desfeita && !sale.cancelledAt) add(sale.clienteId || sale.clientId, sale);
-    for (const renewal of db.customerSubscriptions || []) if (renewal.active !== false && !renewal.deletedAt) add(renewal.clientId, renewal);
+    if (!window.OperationalReadPolicy?.restricted?.())
+      for (const renewal of db.customerSubscriptions || []) if (renewal.active !== false && !renewal.deletedAt) add(renewal.clientId, renewal);
     return relations;
   }
   function customersForView(db = {}) {
@@ -628,6 +639,8 @@
     activeId,
     viewScope,
     scopesCustomers,
+    showsRenewal,
+    showsUnassignedRenewal,
     customersForView,
     productsForView,
     recordSpace: row => { ensureContext(); return recordSpace(row); },

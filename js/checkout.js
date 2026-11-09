@@ -385,10 +385,7 @@ window.Checkout = (() => {
       picker(() => recurringConfiguration(product, variant, source), { requireClient: true, title: "Selecione o cliente da renovação" });
       return;
     }
-    const origin = window.SpaceContext?.viewScope?.();
-    try { await window.CustomerSubscriptions?.loadForClient?.(clientId); }
-    catch (error) { return toast(error.message, true); }
-    if (origin !== window.SpaceContext?.viewScope?.() || Router.atual() !== 'vender' || document.querySelector('#sale-client')?.value !== clientId) return;
+    await window.CustomerSubscriptions?.loadForClient?.(clientId);
     const existing = window.CustomerSubscriptions?.matchingProduct?.(clientId, product.id) || window.CustomerSubscriptions?.matching?.(clientId, product.id, variant?.id || null) || [], modal = document.querySelector("#modal"), defaultDuration = Number(variant?.durationValue || product.durationValue || 30), defaultUnit = variant?.durationUnit || product.durationUnit || "days";
     const render = () => {
       const selectedId = modal.querySelector?.('[name="subscriptionChoice"]:checked')?.value || existing[0]?.id || "new", selected = existing.find((item) => item.id === selectedId) || null, durationValue = Number(modal.querySelector?.('[name="durationValue"]')?.value || defaultDuration), durationUnit = modal.querySelector?.('[name="durationUnit"]')?.value || defaultUnit, price = Number(modal.querySelector?.('[name="contractedPrice"]')?.value || selected?.contractedPrice || variant?.price || product.preco || 0), label = modal.querySelector?.('[name="renewalLabel"]')?.value || selected?.label || product.renewalLabel || product.nome, payment = modal.querySelector?.('[name="renewalPayment"]')?.value || window.CheckoutPaymentMethod || "pix", dates = CustomerSubscriptions.preview({ subscription: selected, durationValue, durationUnit });
@@ -397,7 +394,6 @@ window.Checkout = (() => {
       modal.querySelectorAll('input[name="subscriptionChoice"]').forEach((input) => input.onchange = render);
       ["durationValue", "durationUnit"].forEach((name) => modal.querySelector(`[name="${name}"]`).onchange = render);
       modal.querySelector("[data-confirm-recurring]").onclick = () => {
-        if (origin !== window.SpaceContext?.viewScope?.()) return toast('O espaço da renovação mudou. Abra a vigência novamente.', true);
         const choiceId = modal.querySelector('input[name="subscriptionChoice"]:checked')?.value || selectedId,
           chosen = existing.find((entry) => entry.id === choiceId) || null,
           finalDurationValue = Math.max(1, Number(modal.querySelector('[name="durationValue"]')?.value || defaultDuration)),

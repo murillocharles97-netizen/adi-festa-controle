@@ -19,14 +19,8 @@ window.CustomerSubscriptions = (() => {
     if (["paused", "cancelled"].includes(subscription?.status)) return subscription.status;
     return new Date(subscription?.expiresAt || 0).getTime() < new Date(reference).getTime() ? "expired" : "active";
   };
-  function inActiveSpace(record) {
-    const context = window.SpaceContext;
-    if (!context?.activeId) return true;
-    const active = context.activeId(), origin = context.recordSpace(record);
-    return Boolean(active && (origin === active || !origin && !record.spaceId && !record.financialSpaceId && !context.scopesCustomers()));
-  }
-  const list = () => (DB.carregar().customerSubscriptions || []).filter(inActiveSpace);
-  const events = () => (DB.carregar().customerSubscriptionEvents || []).filter(inActiveSpace);
+  const list = () => DB.carregar().customerSubscriptions || [];
+  const events = () => DB.carregar().customerSubscriptionEvents || [];
   const get = (id) => list().find((item) => item.id === id) || null;
   const forClient = (clientId, options = {}) => list()
     .filter((item) => item.clientId === clientId && (!options.statuses || options.statuses.includes(effectiveStatus(item))))
@@ -69,8 +63,6 @@ window.CustomerSubscriptions = (() => {
       const subscriptionId = config.subscriptionId || item.subscriptionId || null;
       const existing = subscriptionId ? db.customerSubscriptions.find((entry) => entry.id === subscriptionId) : null;
       if (existing && existing.clientId !== clientId) throw Error("A vigência selecionada pertence a outro cliente.");
-      if (existing?.spaceId && existing.spaceId !== sale.spaceId) throw Error("A vigência pertence a outro espaço.");
-      if (existing && !existing.spaceId && window.SpaceContext?.scopesCustomers?.()) throw Error("Confirme o espaço responsável por esta vigência antes de renovar.");
       if (existing?.lastSaleId === sale.id) {
         updates.push({ subscriptionId: existing.id, action: item.subscriptionAction || "unchanged", expiresAt: existing.expiresAt, idempotent: true });
         return;
@@ -128,7 +120,7 @@ window.CustomerSubscriptions = (() => {
     let saved;
     DB.alterar((db) => {
       const subscription = (db.customerSubscriptions || []).find((item) => item.id === id);
-      if (!subscription || !inActiveSpace(subscription)) throw Error("Renovação não encontrada no espaço ativo.");
+      if (!subscription) throw Error("Renovação não encontrada.");
       const previous = structuredClone(subscription), nextStatus = requested === "active" ? effectiveStatus({ ...subscription, status: "active" }) : requested;
       subscription.status = nextStatus; subscription.updatedAt = now(); saved = subscription;
       event(db, subscription, nextStatus === "active" ? "reactivated" : nextStatus, Utils.uuid(), { sourceType: "manual", previous, next: structuredClone(subscription), note });
@@ -139,27 +131,27 @@ window.CustomerSubscriptions = (() => {
     const status = effectiveStatus(item, from), expiry = new Date(item.expiresAt || 0).getTime();
     return statuses.includes(status) && (!clientId || item.clientId === clientId) && expiry >= new Date(from).getTime() && (!to || expiry <= new Date(to).getTime());
   });
-  const metrics = (reference = now()) => {
+  const metrics = (reference = now(), rows = list()) => {
     const endToday = new Date(reference); endToday.setHours(23, 59, 59, 999);
     const end7 = new Date(endToday); end7.setDate(end7.getDate() + 7);
-    const active = list().filter((item) => effectiveStatus(item, reference) === "active");
+    const active = rows.filter((item) => effectiveStatus(item, reference) === "active");
     const dueToday = active.filter((item) => new Date(item.expiresAt) <= endToday);
     const due7 = active.filter((item) => new Date(item.expiresAt) > endToday && new Date(item.expiresAt) <= end7);
-    const expired = list().filter((item) => effectiveStatus(item, reference) === "expired");
+    const expired = rows.filter((item) => effectiveStatus(item, reference) === "expired");
     return { dueToday: dueToday.length, due7: due7.length, expired: expired.length, forecastValue: [...dueToday, ...due7].reduce((sum, item) => sum + number(item.contractedPrice), 0) };
   };
   async function loadForClient(clientId) {
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ clientId, limit: 50 });
-    return remote ? remote.filter(inActiveSpace) : forClient(clientId);
+    return remote || forClient(clientId);
   }
   async function loadUpcoming({ from = now(), to, status = "active", limit = 50 } = {}) {
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ status, from, to, direction: "asc", limit });
-    return remote ? remote.filter(inActiveSpace) : upcoming({ from, to, statuses: [status] });
+    return remote || upcoming({ from, to, statuses: [status] });
   }
   async function loadByStatus(status, { from, to, limit = 50, direction = "asc" } = {}) {
     if (!STATUS.has(status)) throw Error("Status de renovação inválido.");
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ status, from, to, direction, limit });
-    return remote ? remote.filter(inActiveSpace) : list().filter((item) => effectiveStatus(item) === status);
+    return remote || list().filter((item) => effectiveStatus(item) === status);
   }
   async function loadExpiring(days = 7, reference = now(), limit = 50) {
     const end = new Date(reference); end.setDate(end.getDate() + Math.max(0, number(days))); end.setHours(23, 59, 59, 999);
@@ -173,13 +165,13 @@ window.CustomerSubscriptions = (() => {
       window.SyncFirebase.queryCustomerSubscriptions({ status: "expired", to: reference, direction: "desc", limit }),
     ]);
     return [...new Map([...(staleActive || []), ...(explicitExpired || [])]
-      .filter((item) => inActiveSpace(item) && effectiveStatus(item, reference) === "expired")
+      .filter((item) => effectiveStatus(item, reference) === "expired")
       .map((item) => [item.id, item])).values()];
   }
   async function loadRecentlyRenewed(days = 30, reference = now(), limit = 50) {
     const start = new Date(reference); start.setDate(start.getDate() - Math.max(1, number(days, 30)));
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ lastRenewedFrom: start.toISOString(), direction: "desc", limit });
-    return remote ? remote.filter(inActiveSpace) : list().filter((item) => item.lastRenewedAt && new Date(item.lastRenewedAt) >= start);
+    return remote || list().filter((item) => item.lastRenewedAt && new Date(item.lastRenewedAt) >= start);
   }
   async function loadDashboardMetrics(reference = now()) {
     const [due7, expired] = await Promise.all([loadExpiring(7, reference, 50), loadExpired(reference, 50)]);
@@ -192,7 +184,10 @@ window.CustomerSubscriptions = (() => {
     };
   }
   async function loadHomeMetrics(reference = now()) {
-    const due = await loadExpiring(7, reference, 50), endToday = new Date(reference);
+    return homeMetrics(await loadExpiring(7, reference, 50), reference);
+  }
+  function homeMetrics(due, reference) {
+    const endToday = new Date(reference);
     endToday.setHours(23, 59, 59, 999);
     return {
       dueToday: due.filter((item) => new Date(item.expiresAt) <= endToday).length,
@@ -201,5 +196,44 @@ window.CustomerSubscriptions = (() => {
       clientIds: [...new Set(due.map((item) => item.clientId).filter(Boolean))],
     };
   }
-  return { duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
+  // Presentation only. Checkout and sale application use the V228 methods above.
+  const visible = (item) => window.SpaceContext?.showsRenewal?.(item) ?? true;
+  let spaceRead;
+  function refreshSpace() {
+    const context = window.SpaceContext, sync = window.SyncFirebase;
+    if (!navigator.onLine || !context?.activeId?.() || !context.scopesCustomers() ||
+        !sync?.queryRenewalsForSpace || window.OperationalReadPolicy?.restricted?.()) return;
+    const scope = context.viewScope();
+    if (spaceRead?.scope === scope && (spaceRead.promise || Date.now() - spaceRead.updatedAt < 120000))
+      return spaceRead.promise;
+    const read = spaceRead = { scope, updatedAt: 0, promise: null };
+    read.promise = sync.queryRenewalsForSpace().then(() => { read.updatedAt = Date.now(); })
+      .catch(error => {
+        if (scope === context.viewScope()) console.warn("[Renovações] Não foi possível atualizar este espaço.", { code: error?.code || "offline" });
+      }).finally(() => { read.promise = null; });
+    return read.promise;
+  }
+  const view = {
+    refreshSpace,
+    forClient: (id) => forClient(id).filter(visible),
+    get: (id) => list().find((item) => item.id === id && visible(item)) || null,
+    hasUnassigned: (id) => forClient(id).some((item) => window.SpaceContext?.showsUnassignedRenewal?.(item)),
+    loadForClient: (id) => window.SyncFirebase?.queryCustomerSubscriptions?.({ clientId: id, limit: 50, spaceView: true }),
+    metrics: (reference = now()) => metrics(reference, list().filter(visible)),
+    async loadHomeMetrics(reference = now()) {
+      if (window.SpaceContext?.scopesCustomers?.()) {
+        await refreshSpace();
+        return view.metrics(reference);
+      }
+      const end = new Date(reference);
+      end.setDate(end.getDate() + 7);
+      end.setHours(23, 59, 59, 999);
+      const due = await window.SyncFirebase?.queryCustomerSubscriptions?.({
+        status: "active", from: reference, to: end.toISOString(), direction: "asc",
+        limit: 50, spaceView: true,
+      });
+      return due ? homeMetrics(due, reference) : view.metrics(reference);
+    },
+  };
+  return { view, duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
 })();

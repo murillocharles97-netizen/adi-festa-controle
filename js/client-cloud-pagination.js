@@ -185,6 +185,7 @@
     const context = current();
     if (!context || (!force && context.page.dataset.clientCloudBound === "true")) return;
     context.page.dataset.clientCloudBound = "true";
+    void window.CustomerSubscriptions?.view?.refreshSpace?.();
     queueMicrotask(() => load(context, true, options));
   }
   function schedule() { if (!scheduled) { scheduled = true; queueMicrotask(activate); } }

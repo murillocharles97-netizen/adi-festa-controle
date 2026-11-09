@@ -14,7 +14,8 @@
   const saleCost=sale=>Number.isFinite(Number(sale.custoTotal))?Number(sale.custoTotal):(sale.itens||[]).reduce((sum,item)=>sum+Number(item.custoTotal??Number(item.custoUnitario||0)*Number(item.quantidade||0)),0);
   const saleDebt=sale=>sale?.installmentPlan?window.InstallmentPlan.rows(sale).filter(r=>r.dueDate<=window.InstallmentPlan.today()).reduce((n,r)=>n+r.remainingCents,0)/100:normalizedStatus(sale?.status)!=='fiado'||sale?.creditSettled===true?0:Math.max(0,Number(sale.creditRemainingAmount??sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal??0));
   const percentage=(today,yesterday)=>yesterday>0?(today-yesterday)/yesterday*100:null;
-  const renewalCache={value:null,updatedAt:0,promise:null};
+  let renewalCache={scope:null,value:null,updatedAt:0,promise:null};
+  const renewalScope=()=>window.SpaceContext?.viewScope?.()??null;
   const RENEWAL_CACHE_MS=120000;
   function model(){
     if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())){const s=window.PerformanceAccess?.state?.() || {ready:false};return{restricted:true,ready:s.ready,daily:s.ready?s.value:null};}
@@ -30,7 +31,8 @@
     const scopedClients=(db.clientes||[]).filter(client=>client.ativo!==false&&client.active!==false&&!client.deletedAt),newCustomers=scopedClients.filter(client=>dayKey(client.criadoEm||client.createdAt)===todayKey).length;
     const scopedDebtByClient=isAllSpaces?null:sales.reduce((map,sale)=>{const id=sale.clienteId||sale.clientId,amount=saleDebt(sale);if(id&&amount)map.set(String(id),(map.get(String(id))||0)+amount);return map},new Map()),debtors=scopedClients.filter(client=>isAllSpaces?(window.Clientes?.financialStatus?.(client).saldo??Number(client.saldo))<0:(scopedDebtByClient?.get(String(client.id))||0)>0),debt=isAllSpaces?debtors.reduce((sum,client)=>sum+(window.Clientes?.financialStatus?.(client).debt??Math.abs(Number(client.saldo))),0):[...(scopedDebtByClient?.values()||[])].reduce((sum,value)=>sum+value,0);
     const products=(db.produtos||[]).filter(product=>product.ativo!==false),out=products.filter(product=>getProductStockStatus(product)==='esgotado'),low=products.filter(product=>getProductStockStatus(product)==='baixo');
-    const localRenewals=window.CustomerSubscriptions?.metrics?.(now.toISOString())||{dueToday:0,due7:0,forecastValue:0},renewals=isAllSpaces?(renewalCache.value||localRenewals):{dueToday:0,due7:0,forecastValue:0};
+    const localRenewals=window.CustomerSubscriptions?.view?.metrics?.(now.toISOString())||{dueToday:0,due7:0,forecastValue:0},
+      renewals=renewalCache.scope===renewalScope()&&renewalCache.value||localRenewals;
     const pendingOrders=(db.catalogOrders||[]).filter(order=>window.OnlineOrderModel?.isV2(order)&&!order.deletedAt&&['recebido','pendente','novo'].includes(String(order.orderStatus||order.status||'').toLowerCase()));
     const goal=Number(window.SpaceContext?.goalFor?.(db.config||{},selectionId)??db.config?.dashboard?.dailySalesGoal??db.config?.dailySalesGoal??0),goalPercent=goal>0?sold/goal*100:0;
     const week=[];for(let offset=6;offset>=0;offset--){const date=new Date(now);date.setDate(date.getDate()-offset);const key=dayKey(date);week.push({date,key,label:date.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''),value:sales.filter(sale=>dayKey(sale.data||sale.createdAt)===key).reduce((sum,sale)=>sum+saleValue(sale),0)+adjustment(key),today:offset===0})}
@@ -95,11 +97,22 @@
     root.querySelector('[data-home-close]').focus();window.lucide?.createIcons();
   }
   async function loadRenewalAttention(){
-    if(!mq.matches||Router.atual()!=='inicio'||!window.CustomerSubscriptions?.loadHomeMetrics)return;
-    if(window.SpaceContext?.homeId?.()&&window.SpaceContext.homeId()!==window.SpaceContext.ALL_SPACES)return;
-    if(renewalCache.promise||Date.now()-renewalCache.updatedAt<RENEWAL_CACHE_MS)return renewalCache.promise;
-    renewalCache.promise=window.CustomerSubscriptions.loadHomeMetrics(new Date().toISOString()).then(value=>{renewalCache.value=value;renewalCache.updatedAt=Date.now();if(Router.atual()==='inicio'&&mq.matches)refresh({renewals:false});return value}).catch(error=>{console.warn('[Home] Não foi possível atualizar renovações próximas.',{code:error?.code||'unknown'});return null}).finally(()=>{renewalCache.promise=null});
-    return renewalCache.promise;
+    if(!mq.matches||Router.atual()!=='inicio'||!window.CustomerSubscriptions?.view?.loadHomeMetrics||
+       window.TeamAccess?.canRoute?.('clientes')===false||window.OperationalReadPolicy?.restricted?.())return;
+    const scope=renewalScope();
+    if(renewalCache.scope!==scope)renewalCache={scope,value:null,updatedAt:0,promise:null};
+    const cache=renewalCache;
+    if(cache.promise||Date.now()-cache.updatedAt<RENEWAL_CACHE_MS)return cache.promise;
+    cache.promise=window.CustomerSubscriptions.view.loadHomeMetrics(new Date().toISOString()).then(value=>{
+      if(scope!==renewalScope())return null;
+      cache.value=value;cache.updatedAt=Date.now();
+      if(Router.atual()==='inicio'&&mq.matches)refresh({renewals:false});
+      return value;
+    }).catch(error=>{
+      if(scope===renewalScope())console.warn('[Home] Não foi possível atualizar renovações próximas.',{code:error?.code||'unknown'});
+      return null;
+    }).finally(()=>{cache.promise=null});
+    return cache.promise;
   }
   function bind(){
     if((window.PerformanceAccess?.restricted() || window.TeamAccess?.requiresDailyDashboard?.())){window.PerformanceAccess?.bind?.();return;}

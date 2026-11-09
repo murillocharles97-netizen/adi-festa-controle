@@ -14,7 +14,7 @@ function fixture({mobile=false,fail=false}={}){
  w.Utils={...w.Utils,escapar:s=>String(s??''),dinheiro:n=>Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),somenteNumeros:s=>String(s).replace(/\D/g,''),telefoneWhatsApp:s=>'55'+s};
  w.PhoneUtils={normalizeBrazilianPhone:s=>'55'+s};w.matchMedia=()=>({matches:mobile,addEventListener(){}});
  w.Cobrancas={ultimaCliente:()=>null,historicoCliente:()=>[]};w.Router={atual:()=> 'clientes'};
- w.CustomerSubscriptions={forClient:()=>[],loadForClient:async()=>[],effectiveStatus:()=> 'active'};
+ w.CustomerSubscriptions={view:{forClient:()=>[],hasUnassigned:()=>false,loadForClient:async()=>[]},effectiveStatus:()=> 'active'};
  w.Modais={fechar:()=>{w.document.querySelector('#modal').innerHTML='';}};
  w.DB.readForView=w.DB.carregar;w.SyncFirebase.isReady=()=>true;w.SyncFirebase.readCanonicalClient=async()=>({client:structuredClone(client)});
  for(const file of ['js/clientes.js','js/client-filter-rules.js','js/mensagens.js','js/clientes-page.js','js/clientes-mobile.js'])w.eval(fs.readFileSync(file,'utf8'));
