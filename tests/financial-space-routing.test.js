@@ -25,9 +25,8 @@ test('espaço não autorizado não altera dívida nem cria pagamento; formulári
   assert.equal(data.clientes[0].saldo,-100);assert.equal(data.pagamentos.length,0);
   assert.match(ctx.Fiados.spaceField(),/name="paymentSpaceId" required/);
   assert.match(ctx.Fiados.spaceField(),/VECONI QA/);
-  for(const file of ['js/clientes-page.js','js/app.js']){
-    const source=fs.readFileSync(file,'utf8');assert.match(source,/Fiados\?\.spaceField/);assert.match(source,/f\.get\(['"]paymentSpaceId['"]\)/);
-  }
+  assert.match(fs.readFileSync('js/clientes-page.js','utf8'), /Fiados\.openReceive/);
+  assert.match(fs.readFileSync('js/fiados.js','utf8'), /data\.get\(['"]paymentSpaceId['"]\)/);
 });
 test('histórico não é reprocessado e criação de receita não modifica vendas, pagamentos ou ledger de clientes',()=>{
   const service=fs.readFileSync('functions/src/services/financial-income-service.js','utf8');

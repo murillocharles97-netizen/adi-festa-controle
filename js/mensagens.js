@@ -32,6 +32,7 @@ window.Mensagens=(()=>{
   function activeSpaceId(){const value=window.SpaceContext?.homeId?.()||'';return value&&value!=='all_spaces'?value:null}
   function canonicalBalanceErrorMessage(error){const code=String(error?.code||'').replace(/^firestore\//,'');if(['offline-unconfirmed','unavailable','deadline-exceeded','network-request-failed'].includes(code))return'Não foi possível confirmar o saldo atualizado. Conecte-se à internet para enviar a cobrança.';if(code==='permission-denied')return'Seu acesso não permite confirmar o saldo deste cliente.';if(code==='not-found')return'Cliente não encontrado na nuvem. Atualize a lista de clientes e tente novamente.';if(code==='pending-client-write')return'Este cliente possui alterações aguardando sincronização. Sincronize antes de enviar a cobrança.';if(code==='business-mismatch')return'O cliente não pertence à empresa atual. Atualize a sessão e tente novamente.';if(code==='canonical-balance-missing')return'O saldo canônico deste cliente está indisponível. Atualize o cadastro antes de cobrar.';if(code==='unauthenticated')return'Sua sessão precisa ser renovada antes de enviar a cobrança.';return'Não foi possível confirmar o saldo canônico deste cliente. Tente novamente.'}
   async function refreshCanonicalClient(clientId,options){
+    const spaceScope=window.Clientes?.scopedScreen?.()?window.SpaceContext.viewScope():null;
     const id=String(clientId||''),businessId=DB.getBusinessId?.()||window.BusinessContext?.get?.().businessId||'',local=window.Clientes?.obter?.(id)||DB.carregar().clientes.find(item=>String(item.id)===id);
     console.info('[CHARGE] customerId',id);
     console.info('[CHARGE] local balance',Number(local?.saldo));
@@ -42,9 +43,9 @@ window.Mensagens=(()=>{
       const result=await window.SyncFirebase.readCanonicalClient(id,options),client=result?.client;
       if(!client||!Number.isFinite(Number(client.saldo)))throw Object.assign(Error('Resposta canônica sem saldo válido.'),{code:'canonical-balance-missing',stage:'canonical-response'});
       console.info('[CHARGE] confirmed balance',Number(client.saldo));
-      if(window.InstallmentCredit?.has(id)){const account=await window.InstallmentCredit.refresh(id);return {...client,saldo:-account.dueCents/100};}
+      if(spaceScope||window.InstallmentCredit?.has(id)){const account=spaceScope?await window.Clientes.confirmSpaceAccount(id,spaceScope):await window.InstallmentCredit.refresh(id);return {...client,saldo:-account.dueCents/100};}
       return client;
-    }catch(error){const code=String(error?.code||'unknown').replace(/^firestore\//,'');console.error('[CHARGE ERROR]',{code,message:String(error?.message||'Falha desconhecida.'),stage:error?.stage||'canonical-client-read',businessId,customerId:id});const visible=Error(canonicalBalanceErrorMessage(error));visible.code=code;visible.stage=error?.stage||'canonical-client-read';throw visible}
+    }catch(error){const code=String(error?.code||'unknown').replace(/^firestore\//,'');console.error('[CHARGE ERROR]',{code,message:String(error?.message||'Falha desconhecida.'),stage:error?.stage||'canonical-client-read',businessId,customerId:id});const visible=Error(code==='fiado-space-unverified'?error.message:canonicalBalanceErrorMessage(error));visible.code=code;visible.stage=error?.stage||'canonical-client-read';throw visible}
   }
   function openWhatsApp(url,options={}){
     if(!/^https:\/\/wa\.me\//i.test(String(url||'')))return{opened:false,method:'invalid_url'};

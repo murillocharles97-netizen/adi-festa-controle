@@ -10,10 +10,10 @@ const repository = fs.readFileSync("js/firebase/firestore-repository.js", "utf8"
 const app = fs.readFileSync("js/app.js", "utf8");
 
 test("bottom sheet mobile compartilha todas as ações operacionais", () => {
-  for (const label of ["Ver perfil", "Nova venda", "Registrar contato", "Receber pagamento", "Ajustar saldo", "Registrar cobrança", "Promessa de pagamento", "Histórico", "Editar cliente", "Excluir cliente"])
+  for (const label of ["Ver perfil", "Nova venda", "Registrar contato", "Receber pagamento", "Ajustar saldo", "Registrar cobrança", "Promessa de pagamento", "Histórico", "Editar cliente", "Desativar cliente"])
     assert.match(actions, new RegExp(label));
   assert.match(actions, /CRMClienteUI\?\.contactForm/);
-  assert.match(actions, /Modais\.confirmar\("cliente"/);
+  assert.match(actions, /Clientes\.setActive\(client\.id, enabled\)/);
   assert.match(mobile, /ClientActions\?\.openSheet/);
 });
 

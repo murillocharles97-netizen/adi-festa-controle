@@ -20,9 +20,9 @@
     );
     const search = String(raw.query || "").trim();
     page.dataset.clientPageInstance ||= String(++pageSequence);
-    return { page, pageInstanceId: page.dataset.clientPageInstance, mobile, advanced, mode: search ? "search" : "default", params: { search, filter: (mobile ? raw.filter : raw.quick) || "todos", sort: raw.sort || "nomeAsc", limit: PAGE_SIZE } };
+    return { page, spaceScope: window.SpaceContext?.viewScope?.() || "", pageInstanceId: page.dataset.clientPageInstance, mobile, advanced, mode: search ? "search" : "default", params: { search, filter: (mobile ? raw.filter : raw.quick) || "todos", sort: raw.sort || "nomeAsc", limit: PAGE_SIZE } };
   }
-  const keyOf = (context) => JSON.stringify({ mobile: context.mobile, mode: context.mode, ...context.params });
+  const keyOf = (context) => JSON.stringify({ spaceScope: context.spaceScope, mobile: context.mobile, mode: context.mode, ...context.params });
   function liveContext(key, requestId) {
     const live = current();
     return requestId === activeRequest && live && keyOf(live) === key ? live : null;
@@ -111,6 +111,8 @@
     return state;
   }
   async function load(context, reset = true, options = {}) {
+    // The company-wide query cannot paginate a view joined to local space evidence.
+    if (window.SpaceContext?.scopesCustomers?.()) return;
     if (!navigator.onLine || !window.SyncFirebase?.queryClientsPage) return;
     if (context.advanced || ["nunca", "pagamento", "renovacao"].includes(context.params.filter)) { context.page.dataset.clientCloudMode = "local-filter"; return; }
     const key = keyOf(context);
@@ -189,11 +191,17 @@
   new MutationObserver(schedule).observe(document.querySelector("#app"), { childList: true, subtree: false });
   let dataRefreshTimer = null;
   function dataChanged(detail = {}) {
-    if (detail.collection && detail.collection !== "clients") return;
+    const scoped = window.SpaceContext?.scopesCustomers?.();
+    if (detail.collection && !(scoped ? ['clients','sales','customerSubscriptions'].includes(detail.collection) : detail.collection === 'clients')) return;
     clearTimeout(dataRefreshTimer);
     dataRefreshTimer = setTimeout(() => {
       const context = current();
       if (!context) return;
+      if (scoped) {
+        if (document.querySelector('#modal')?.children.length) return;
+        window.ClientesPage?.refresh?.();
+        return;
+      }
       controllers.delete(keyOf(context));
       delete context.page.dataset.clientCloudBound;
       activate(true, { fresh: true, reason: detail.source || "clients-data-changed" });

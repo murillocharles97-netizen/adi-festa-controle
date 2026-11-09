@@ -4337,7 +4337,7 @@ function captureCloudReadScope() {
   return JSON.stringify([syncSessionGeneration,currentUser?.uid||'',auth.currentUser?.uid||'',businessId,
     DB.getWorkspaceGeneration?.()??0,context.role||'',context.permissionSignature||'',
     [...(context.permissions||[])].sort(),context.spaceAccess||'', [...(context.allowedSpaceIds||[])].sort(),
-    window.SpaceContext?.homeId?.()||'',window.SpaceContext?.salesId?.()||'']);
+    window.SpaceContext?.homeId?.()||'',window.SpaceContext?.salesId?.()||'',window.SpaceContext?.viewScope?.()||'']);
 }
 function assertCloudReadScope(scope) {
   if(scope!==captureCloudReadScope())throw Object.assign(Error('A sessão ou o espaço mudou durante a leitura. Nenhuma confirmação foi aplicada.'),{code:'sync-session-retired'});
@@ -5149,7 +5149,9 @@ async function queryClientsPage(options = {}) {
   return { ...result, pendingClientIds: [...pendingIds("clients")] };
 }
 async function queryCustomerSubscriptions(options = {}) {
+  const scope = captureCloudReadScope();
   await validateUser();
+  assertCloudReadScope(scope);
   if(window.OperationalReadPolicy?.restricted?.()){
     if(!options.clientId)throw Error('Selecione o cliente para consultar sua vigência atual. Indicadores de renovações anteriores exigem histórico autorizado.');
     return (await prepareOperationalCustomer(String(options.clientId),'checkout'))?.customerSubscriptions||[];
@@ -5176,6 +5178,7 @@ async function queryCustomerSubscriptions(options = {}) {
     max,
     includeInactive: true,
   });
+  assertCloudReadScope(scope);
   applyCloudCollection("customerSubscriptions", result.items, { authoritative: false });
   return result.items;
 }

@@ -265,6 +265,10 @@
           : dinheiro(variable ? p.minPrice : p.preco);
     return `<article class="desktop-product-card ${st}" data-product-card="${p.id}"><div class="desktop-product-card-media">${window.ProductImages?.markup(p, { className: "desktop-product-card-photo" }) || `<span class="desktop-product-card-photo product-photo-shell is-fallback"><span class="product-photo-fallback">${escapar(String(p.nome || "?").slice(0, 2).toUpperCase())}</span></span>`}<button class="desktop-product-favorite ${p.favorito ? "active" : ""}" data-product-favorite="${p.id}" aria-label="${p.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(p.favorito)}">${icon("star")}</button></div><div class="desktop-product-card-body"><header class="desktop-product-card-head"><div class="desktop-product-card-title"><h3 title="${escapar(p.nome)}">${escapar(p.nome)}</h3><p>${escapar(p.categoria) || "Sem categoria"}${variable ? ` · ${Number(p.activeVariationCount || 0)} variações` : p.codigo ? ` · ${escapar(p.codigo)}` : ""}</p>${p._variationMatch ? `<small class="variation-search-match">Encontrado em ${escapar(p._variationMatch)}</small>` : ""}</div><span class="desktop-product-status ${st} ${st === "baixo" ? stockTone === "warning" ? "stock-at-minimum" : "stock-below-minimum" : ""}">${rotulo}</span></header><section class="desktop-product-metrics"><div class="desktop-product-metric"><small>Preço</small><strong>${preco}</strong></div><div class="desktop-product-metric ${stockToneClass}"><small>Estoque</small><strong>${controlsStock ? `${estoque} un.` : "—"}</strong></div><div class="desktop-product-metric"><small>Variações</small><strong>${variable ? Number(p.activeVariationCount || 0) : "—"}</strong></div></section><footer class="desktop-product-card-actions">${controlsStock ? `<button class="btn btn-primary btn-sm" data-stock-entry="${p.id}">${icon("plus")} Adicionar entrada</button>` : ""}<button class="btn btn-light btn-sm" data-stock-history="${p.id}">${icon("history")} Histórico</button>${variable ? `<button class="btn btn-light btn-sm" data-edit-product="${p.id}">${icon("tags")} Variações</button>` : ""}<details class="desktop-product-more"><summary aria-label="Mais ações de ${escapar(p.nome)}">${icon("ellipsis-vertical")}</summary><div class="desktop-product-more-menu"><button data-edit-main-product="${p.id}">${icon("pencil")} Editar produto</button>${controlsStock && !variable ? `<button data-stock-adjust="${p.id}">${icon("sliders-horizontal")} Ajustar estoque</button>` : ""}<button class="danger" data-delete-product="${p.id}">${icon("trash-2")} Excluir produto</button></div></details></footer></div></article>`;
   }
+  function productsInActiveSpace() {
+    const products = window.ProductActions?.displayProducts?.(Produtos.listar()) || Produtos.listar();
+    return window.SpaceContext?.productsForView?.(products) || products;
+  }
   function desktopProductRows() {
     const query = desktopProductState.query.trim().toLowerCase(),
       variationMatches = new Map(
@@ -272,7 +276,7 @@
           (match) => [match.product.id, match.match],
         ),
       );
-    return (window.ProductActions?.displayProducts?.(Produtos.listar()) || Produtos.listar())
+    return productsInActiveSpace()
       .filter((product) => product.ativo !== false)
       .filter((product) => {
         if (!query) return true;
@@ -297,7 +301,7 @@
       );
   }
   function desktopProductCounts() {
-    const products = (window.ProductActions?.displayProducts?.(Produtos.listar()) || Produtos.listar()).filter((product) => product.ativo !== false);
+    const products = productsInActiveSpace().filter((product) => product.ativo !== false);
     return {
       todos: products.length,
       disponivel: products.filter((product) => Produtos.status(product) === "disponivel").length,
@@ -335,6 +339,7 @@
         window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.",
         `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button><button class="btn btn-light" data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button>`,
       ) +
+      (window.SpaceContext?.renderBar?.("products") || "") +
       `<section class="desktop-products-page"><div class="desktop-product-toolbar"><input class="search" id="search" value="${escapar(desktopProductState.query)}" placeholder="Buscar produto por nome ou código..."><button class="desktop-product-filter-toggle" data-focus-product-filters aria-label="Ir para filtros">${icon("sliders-horizontal")}</button><button class="btn btn-light" data-scan-stock>${icon("package-plus")} Entrada por código</button></div><div class="desktop-product-filters" id="desktop-product-filters">${desktopProductFilter("Todos", "todos", counts.todos, false)}${desktopProductFilter("Em estoque", "disponivel", counts.disponivel)}${desktopProductFilter("Estoque baixo", "baixo", counts.baixo)}${desktopProductFilter("Esgotados", "esgotado", counts.esgotado)}${desktopProductFilter("Sem controle", "sem-controle", counts["sem-controle"])}</div><section class="desktop-product-grid" id="desktop-product-grid">${desktopProductGrid()}</section></section>`
     );
   }
@@ -1209,6 +1214,8 @@
     root.dataset.route = route;
     document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
     root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]();
+    root.dataset.spaceViewScope = window.SpaceContext?.viewScope?.() || "";
+    window.SpaceContext?.bind?.(root);
     const mobileTitle = matchMedia("(max-width:767px)").matches
       ? { crm: "CRM", catalogo: "Catálogo", pedidos: "Pedidos" }[route]
       : "";
@@ -1396,11 +1403,18 @@
       if (cloudRenderPending && !financialModal.children.length)
         scheduleCloudRender();
     }).observe(financialModal, { childList: true });
-  addEventListener("veconi-spaces-ready", () => {
-    const route = Router.atual();
-    if (!["inicio", "vender"].includes(route) || document.querySelector("#modal")?.children.length) return;
+  function refreshSpaceRoute() {
+    const root = document.querySelector('#app'), route = Router.atual();
+    if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender'].includes(route)) return;
+    const scopeChanged = root.dataset.spaceViewScope !== window.SpaceContext?.viewScope?.();
+    if (!scopeChanged) return;
+    window.ClientCloudPagination?.clear?.();
+    if (route === 'vender') window.Checkout?.retireSpaceDraft?.();
+    if (document.querySelector('#modal')?.children.length) window.Modais?.fechar?.();
     try { mountRoute(route); } catch (error) { showAppMountError(error); }
-  });
+  }
+  for (const event of ['veconi-spaces-ready','veconi-space-context-changed','veconi-space-context-local-ready'])
+    addEventListener(event, refreshSpaceRoute);
   document.addEventListener("focusout", () => {
     if (cloudRenderPending) setTimeout(scheduleCloudRender, 80);
   });

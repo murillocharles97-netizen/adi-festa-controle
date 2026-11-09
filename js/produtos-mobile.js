@@ -55,7 +55,12 @@
       .map((word) => word[0])
       .join("")
       .toUpperCase();
-  const products = () => dataCache || (dataCache = {...DB.carregar(), produtos:window.ProductActions?.displayProducts?.(DB.carregar().produtos) || DB.carregar().produtos});
+  function products() {
+    if (dataCache) return dataCache;
+    const source = DB.carregar(), rows = window.ProductActions?.displayProducts?.(source.produtos) || source.produtos;
+    const view = window.SpaceContext?.contextualData?.(source) || source;
+    return dataCache = {...view, produtos:window.SpaceContext?.productsForView?.(rows) || rows};
+  }
   const status = (product) => getProductStockStatus(product);
   const statusInfo = (product) =>
     ({
@@ -253,7 +258,7 @@
   }
   function menuSheet() {
     if (!state.menuId) return "";
-    const product = Produtos.obter(state.menuId);
+    const product = products().produtos.find(row => row.id === state.menuId);
     if (!product) return "";
     const controlsStock = window.productControlsStock?.(product) ?? (product.itemKind !== "service" && !product.semControleEstoque && product.controlaEstoque !== false),
       summary = product.itemKind === "service" ? "Serviço" : product.productType === "recurring" && !controlsStock ? window.getProductRenewalPeriod?.(product) || "30 dias" : statusInfo(product).label;
@@ -264,7 +269,7 @@
     const c = counts(),
       list = filtered(),
       shown = list.slice(0, state.limit);
-    return `<section class="products-mobile-page"><div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto ou serviço" aria-label="Buscar produto ou serviço por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar itens">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Disponíveis", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
+    return `<section class="products-mobile-page">${window.SpaceContext?.renderBar?.("products")||""}<div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto ou serviço" aria-label="Buscar produto ou serviço por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar itens">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Disponíveis", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
   }
   function refresh(reset = false) {
     dataCache = null;
@@ -893,6 +898,7 @@
     card.addEventListener("pointercancel", end);
   }
   function bind() {
+    window.SpaceContext?.bind?.($("#app"));
     const search = $("#mobile-product-search"),
       sort = $("#mobile-product-sort");
     if (!search) return;

@@ -11,8 +11,11 @@
     spaces: [],
     businessId: "",
     uid: "",
-    homeId: ALL_SPACES,
-    salesId: "",
+    activeId: "",
+    generation: 0,
+    sessionReady: false,
+    viewEpoch: 0,
+    viewIdentity: "",
     adapter: null,
     loaded: false,
     migrationReport: null,
@@ -32,6 +35,11 @@
     return {
       businessId: String(context.businessId || session.businessId || window.DB?.getBusinessId?.() || "").trim(),
       uid: String(session.user?.uid || session.profile?.uid || context.userProfile?.uid || "").trim(),
+      generation: context.business?.workspaceGeneration ?? window.DB?.getWorkspaceGeneration?.() ?? 0,
+      ready: !context.loading && !context.error && context.member?.status !== "inactive" &&
+        (!context.member?.status || context.member.status === "active") && context.userProfile?.active !== false && context.business?.active !== false &&
+        (!context.userProfile?.uid || !session.user?.uid || context.userProfile.uid === session.user.uid) &&
+        (!context.userProfile?.businessId || !context.businessId || context.userProfile.businessId === context.businessId),
       businessName: String(context.business?.name || session.business?.name || window.DB?.carregar?.().config?.nome || "Meu negócio").trim(),
     };
   };
@@ -157,39 +165,53 @@
     try { localStorage.setItem(key, value); } catch {}
   };
   function scopedSpaces(spaces = state.spaces) {
+    if (!state.sessionReady || !state.uid || !state.businessId) return [];
     return spaces.filter((space) => {
       if (!space.id || RESERVED_SPACE_IDS.has(space.id) || space.status !== "active") return false;
-       if (space.businessId === state.businessId) return unrestrictedSpaces() || allowedSpaceIds().has(space.id);
+      if (space.businessId === state.businessId && (!space.linkedBusinessId || space.linkedBusinessId === state.businessId)) {
+        if (space.legacyFinancialType !== "business" && space.ownerUid !== state.uid) return false;
+        return unrestrictedSpaces() || allowedSpaceIds().has(space.id);
+      }
        return unrestrictedSpaces() && !space.businessId && Boolean(state.uid) && space.ownerUid === state.uid && (window.TeamAccess?.has?.("financial.view") ?? true);
     });
   }
   const homeSpaces = () => scopedSpaces().sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.name.localeCompare(right.name, "pt-BR"));
-  const salesSpaces = () => scopedSpaces().filter((space) => space.businessId === state.businessId && space.capabilities.sales === true).sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.name.localeCompare(right.name, "pt-BR"));
-  function reconcileSelections() {
-    const homeIds = new Set(homeSpaces().map((space) => space.id)), sales = salesSpaces(), salesIds = new Set(sales.map((space) => space.id)),
-      rememberedHome = state.homeId || read(contextKey("home"), ALL_SPACES),
-      rememberedSales = state.salesId || read(contextKey("sales"), "");
-    const allowAggregate = unrestrictedSpaces() || homeIds.size > 1;
-    state.homeId = allowAggregate && rememberedHome === ALL_SPACES ? ALL_SPACES : homeIds.has(rememberedHome) ? rememberedHome : allowAggregate ? ALL_SPACES : homeSpaces()[0]?.id || ALL_SPACES;
-    state.salesId = salesIds.has(rememberedSales) ? rememberedSales : sales.find((space) => space.isDefault)?.id || sales[0]?.id || "";
-    write(contextKey("home"), state.homeId);
-    if (state.salesId) write(contextKey("sales"), state.salesId);
+  const operationalSpaces = () => homeSpaces().filter(space => space.businessId === state.businessId &&
+    (space.capabilities.sales || space.capabilities.products));
+  const salesSpaces = () => operationalSpaces().filter(space => space.capabilities.sales);
+  // Keep the existing Vender key as the single persisted operational preference.
+  function reconcileSelection() {
+    const spaces = operationalSpaces();
+    return spaces.find(space => space.id === state.activeId) || spaces[0] || null;
   }
   function ensureContext() {
     const context = currentContext();
-    if (context.businessId === state.businessId && context.uid === state.uid) return;
+    const localBusiness = window.DB?.getBusinessId?.();
+    state.sessionReady = context.ready && (!localBusiness || localBusiness === context.businessId);
+    if (context.businessId === state.businessId && context.uid === state.uid && context.generation === state.generation) return;
     state.businessId = context.businessId;
     state.uid = context.uid;
+    state.generation = context.generation;
     state.spaces = [];
     state.loaded = false;
     state.migrationReport = null;
     try {
-      const cached = JSON.parse(read(spacesKey(), "[]"));
-      if (Array.isArray(cached)) state.spaces = cached.map((space) => normalizeSpace(space, context));
+      const cached = JSON.parse(read(spacesKey(), '[]'));
+      if (Array.isArray(cached)) state.spaces = cached.map(space => normalizeSpace(space, context));
     } catch {}
-    state.homeId = read(contextKey("home"), ALL_SPACES);
-    state.salesId = read(contextKey("sales"), "");
-    reconcileSelections();
+    state.activeId = read(contextKey('sales'), read(contextKey('home'), ''));
+  }
+  function activeId() { ensureContext(); return reconcileSelection()?.id || ''; }
+  function viewScope() {
+    const id = activeId(), context = window.BusinessContext?.get?.() || {};
+    const identity = JSON.stringify([state.uid, state.businessId, state.generation, id, operationalSpaces().map(space => space.id),
+      state.sessionReady, context.role, context.permissionSignature, context.spaceAccess, [...allowedSpaceIds()].sort()]);
+    if (state.viewIdentity !== identity) { state.viewIdentity = identity; state.viewEpoch++; }
+    return JSON.stringify([state.viewEpoch, identity]);
+  }
+  function scopesCustomers() {
+    ensureContext();
+    return Boolean(state.uid && state.businessId && (!activeId() || !unrestrictedSpaces() || operationalSpaces().length > 1));
   }
   function setSpaces(rawSpaces = [], options = {}) {
     ensureContext();
@@ -202,7 +224,10 @@
     state.loaded = options.loaded !== false;
     state.migrationReport = options.migrationReport || state.migrationReport;
     write(spacesKey(), JSON.stringify(state.spaces));
-    reconcileSelections();
+    if (state.loaded && state.sessionReady && activeId()) {
+      state.activeId = activeId();
+      write(contextKey("sales"), state.activeId);
+    }
     dispatchEvent(new CustomEvent("veconi-spaces-ready", { detail: snapshot() }));
     return list();
   }
@@ -212,42 +237,40 @@
     return {
       businessId: state.businessId,
       spaces: list(),
-      homeId: state.homeId,
-      salesId: state.salesId,
+      homeId: activeId(),
+      salesId: selectedSales()?.id || "",
       loaded: state.loaded,
       migrationReport: state.migrationReport ? clone(state.migrationReport) : null,
     };
   }
-  function selectHome(id) {
+  function selectActive(id) {
     ensureContext();
-    const value = String(id || ALL_SPACES), available = new Set(homeSpaces().map((space) => space.id));
-    if (value === ALL_SPACES && !unrestrictedSpaces() && available.size <= 1) throw Error("Este perfil possui somente um espaço autorizado.");
-    if (value !== ALL_SPACES && !available.has(value)) throw Error("Este espaço não está disponível na Home.");
-    state.homeId = value;
-    write(contextKey("home"), value);
-    dispatchEvent(new CustomEvent("veconi-space-context-changed", { detail: { kind: "home", id: value } }));
-    return value;
-  }
-  function selectSales(id) {
-    ensureContext();
-    const value = String(id || ""), space = salesSpaces().find((item) => item.id === value);
-    if (!space || RESERVED_SPACE_IDS.has(value)) throw Error("Escolha um espaço de venda ativo.");
-    state.salesId = value;
-    write(contextKey("sales"), value);
-    dispatchEvent(new CustomEvent("veconi-space-context-changed", { detail: { kind: "sales", id: value, space: clone(space) } }));
+    const space = operationalSpaces().find(item => item.id === String(id || ''));
+    if (!space) throw Error('Escolha um espaço autorizado para operar.');
+    if (space.id === activeId()) return clone(space);
+    const checkout = window.Checkout?.state?.();
+    if (checkout?.finishing || checkout?.activeOperationId || window.Checkout?.cartCount?.() || window.PriorSales?.active?.() || window.ExchangeCreditCheckout?.hasPending?.())
+      throw Error('Conclua ou feche o atendimento no espaço atual antes de trocar. A fila de sincronização foi preservada.');
+    state.activeId = space.id;
+    write(contextKey('sales'), space.id);
+    viewScope();
+    dispatchEvent(new CustomEvent('veconi-space-context-changed', { detail: { kind: 'global', id: space.id, space: clone(space) } }));
     return clone(space);
   }
-  function selectedHome() {
+  const selectHome = id => selectActive(id).id;
+  function selectSales(id) {
     ensureContext();
-    return state.homeId === ALL_SPACES ? null : homeSpaces().find((space) => space.id === state.homeId) || null;
+    if (!salesSpaces().some(space => space.id === id)) throw Error('Escolha um espaço de venda ativo.');
+    return selectActive(id);
   }
+  function selectedHome() { ensureContext(); return reconcileSelection(); }
   function selectedSales() {
-    ensureContext();
-    return salesSpaces().find((space) => space.id === state.salesId) || null;
+    const space = selectedHome();
+    return space?.capabilities.sales ? space : null;
   }
   function requireSalesSpace(requestedId = "") {
     ensureContext();
-    const value = String(requestedId || state.salesId || "").trim();
+    const value = String(requestedId || selectedSales()?.id || "").trim();
     if (!value || RESERVED_SPACE_IDS.has(value)) throw Error("Selecione o espaço desta venda.");
     const space = salesSpaces().find((item) => item.id === value);
     if (!space) throw Error("Este espaço não está ativo para vendas.");
@@ -277,7 +300,7 @@
   function stockMovementOrigin(product, requestedId = '') {
     const eligible = stockMovementSpaces(product), businessId = currentContext().businessId;
     const explicit = String(requestedId || '').trim();
-    const selected = explicit || (state.homeId !== ALL_SPACES ? state.homeId : '');
+    const selected = explicit || activeId();
     const space = selected ? eligible.find(s => s.id === selected) : eligible.length === 1 ? eligible[0] : null;
     if (!space || RESERVED_SPACE_IDS.has(space.id))
       throw Error('Selecione um espaço autorizado para esta movimentação de estoque.');
@@ -293,25 +316,21 @@
     }
     return `<div class="field"><label for="stock-movement-space">Espaço da movimentação *</label><select id="stock-movement-space" name="stockSpaceId" required><option value="">Selecione um espaço</option>${eligible.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select><small>${eligible.length ? 'Escolha onde esta entrada ou saída aconteceu. O vínculo do produto não será alterado.' : 'Nenhum espaço autorizado disponível. Peça ao proprietário para revisar o vínculo deste produto.'}</small></div>`;
   }
-  function selectionLabel(kind = "home") {
-    if (kind === "home" && state.homeId === ALL_SPACES) return "Todos os espaços";
-    return (kind === "sales" ? selectedSales() : selectedHome())?.name || "Espaço";
-  }
-  function renderBar(kind = "home") {
-    ensureContext();
-    const isHome = kind === "home", spaces = isHome ? homeSpaces() : salesSpaces(), selected = isHome ? state.homeId : state.salesId,
-      showManagement = canManage(), label = isHome ? "Espaço" : "Espaço atual";
-    if (isHome && spaces.length === 1 && !unrestrictedSpaces())
-      return `<section class="space-context-bar is-single" data-space-context="home"><span><i data-lucide="map-pin"></i>${label}</span><strong>${esc(spaces[0].name)}</strong></section>`;
-    if (isHome) {
-      const current = selectedHome(), icon = current ? spaceIcon(current) : "layers-3";
-      return `<section class="space-context-bar is-home" data-space-context="home"><button class="space-selector-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Escolher espaço. Selecionado: ${esc(selectionLabel("home"))}"><span class="space-selector-icon"><i data-lucide="${icon}"></i></span><span class="space-selector-copy"><small>${label}</small><strong>${esc(selectionLabel("home"))}</strong></span><i class="space-selector-chevron" data-lucide="chevron-down"></i></button><button class="space-filter-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Filtrar a Home por espaço"><i data-lucide="sliders-horizontal"></i><span>Filtros</span></button></section>`;
+  function selectionLabel() { return selectedHome()?.name || 'Espaço indisponível'; }
+  function renderBar(kind = 'home') {
+    const selected = activeId(), spaces = operationalSpaces();
+    const management = (kind === 'home' || kind === 'sales') && canManage()
+      ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i></button>' : '';
+    if (kind === 'home' && spaces.length > 1) {
+      const current = selectedHome();
+      return `<section class="space-context-bar is-home" data-space-context="home"><button class="space-selector-trigger" type="button" data-space-picker="home" aria-haspopup="dialog" aria-label="Escolher espaço. Selecionado: ${esc(current.name)}"><span class="space-selector-icon"><i data-lucide="${esc(spaceIcon(current))}"></i></span><span class="space-selector-copy"><small>Espaço ativo</small><strong>${esc(current.name)}</strong></span><i class="space-selector-chevron" data-lucide="chevron-down"></i></button>${management}</section>`;
     }
-    if (!isHome && spaces.length === 1)
-      return `<section class="space-context-bar is-single" data-space-context="sales"><span><i data-lucide="map-pin"></i>${label}</span><strong>${esc(spaces[0].name)}</strong>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i></button>' : ""}</section>`;
-    return `<section class="space-context-bar" data-space-context="${kind}"><label><span><i data-lucide="map-pin"></i>${label}</span><select data-space-select="${kind}" ${!spaces.length ? "disabled" : ""}>${spaces.map((space) => `<option value="${esc(space.id)}" ${selected === space.id ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>${showManagement ? '<button type="button" data-space-manage aria-label="Gerenciar espaços"><i data-lucide="settings-2"></i><span>Gerenciar</span></button>' : ""}</section>`;
+    const content = spaces.length > 1
+      ? `<label><span><i data-lucide="map-pin"></i>Espaço ativo</span><select aria-label="Espaço ativo" data-space-select="${kind}">${spaces.map(space => `<option value="${esc(space.id)}" ${selected === space.id ? 'selected' : ''}>${esc(space.name)}</option>`).join('')}</select></label>`
+      : spaces.length === 1 ? `<span><i data-lucide="map-pin"></i>Espaço</span><strong>${esc(spaces[0].name)}</strong>`
+      : '<span role="status">Nenhum espaço operacional disponível.</span>';
+    return `<section class="space-context-bar ${spaces.length <= 1 ? 'is-single' : ''}" data-space-context="${kind}">${content}${management}</section>`;
   }
-
   // A space read may finish while a modal prevents the route from remounting.
   // Refresh only the selectors: never reset the checkout, modal or its drafts.
   function refreshBars() {
@@ -319,7 +338,7 @@
     if (!bars?.length) return;
     bars.forEach(bar => {
       const kind = bar.dataset.spaceContext;
-      if (kind === 'home' || kind === 'sales') bar.outerHTML = renderBar(kind);
+      if (['home', 'sales', 'clients', 'products'].includes(kind)) bar.outerHTML = renderBar(kind);
     });
     bind(document);
     window.lucide?.createIcons?.();
@@ -328,20 +347,19 @@
   function openPicker(kind = "home") {
     ensureContext();
     if (kind !== "home") return;
-    const root = document.querySelector("#modal"), spaces = homeSpaces(), selected = state.homeId,
+    const root = document.querySelector("#modal"), selected = activeId(), spaces = operationalSpaces(),
       row = (id, name, description, icon) => {
         const active = selected === id;
         return `<button class="space-picker-option ${active ? "is-selected" : ""}" type="button" data-space-choice="${esc(id)}" role="radio" aria-checked="${active}"><span class="space-picker-option-icon"><i data-lucide="${icon}"></i></span><span><b>${esc(name)}</b><small>${esc(description)}</small></span><i class="space-picker-check" data-lucide="${active ? "check" : "circle"}"></i></button>`;
       };
-    root.innerHTML = `<div class="modal-bg space-picker-backdrop"><section class="modal-box space-picker-modal" role="dialog" aria-modal="true" aria-labelledby="space-picker-title"><header class="modal-head"><div><h3 id="space-picker-title">Escolher espaço</h3><p>Veja somente os espaços autorizados para esta conta.</p></div><button class="icon-btn" type="button" data-space-picker-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body space-picker-list" role="radiogroup" aria-label="Espaços disponíveis">${unrestrictedSpaces()||spaces.length>1?row(ALL_SPACES, "Todos os espaços", "Visão consolidada dos espaços permitidos", "layers-3"):""}${spaces.map((space) => row(space.id, space.name, typeLabel(space.type), spaceIcon(space))).join("")}</div>${canManage() ? '<footer class="modal-foot"><button class="btn btn-light space-picker-manage" type="button" data-space-picker-manage><i data-lucide="building-2"></i> Gerenciar espaços</button></footer>' : ""}</section></div>`;
+    root.innerHTML = `<div class="modal-bg space-picker-backdrop"><section class="modal-box space-picker-modal" role="dialog" aria-modal="true" aria-labelledby="space-picker-title"><header class="modal-head"><div><h3 id="space-picker-title">Escolher espaço</h3><p>Veja somente os espaços autorizados para esta conta.</p></div><button class="icon-btn" type="button" data-space-picker-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body space-picker-list" role="radiogroup" aria-label="Espaços disponíveis">${spaces.map((space) => row(space.id, space.name, typeLabel(space.type), spaceIcon(space))).join("")}</div>${canManage() ? '<footer class="modal-foot"><button class="btn btn-light space-picker-manage" type="button" data-space-picker-manage><i data-lucide="building-2"></i> Gerenciar espaços</button></footer>' : ""}</section></div>`;
     const close = () => { root.innerHTML = ""; };
     root.querySelectorAll("[data-space-picker-close]").forEach((button) => button.onclick = close);
     root.querySelector(".space-picker-backdrop").onclick = (event) => { if (event.target === event.currentTarget) close(); };
     root.querySelectorAll("[data-space-choice]").forEach((button) => button.onclick = () => {
       try {
         selectHome(button.dataset.spaceChoice);
-        close();
-        window.AppPageRuntime?.mount?.(window.Router?.atual?.() || "inicio");
+        if (root.querySelector(".space-picker-backdrop")) close();
       } catch (error) {
         window.Utils?.toast?.(error.message, true);
       }
@@ -350,36 +368,82 @@
     window.lucide?.createIcons();
     queueMicrotask(() => root.querySelector('.space-picker-option[aria-checked="true"]')?.focus());
   }
-  function contextualData(db, kind = "home") {
-    ensureContext();
-    const selectionId = kind === "sales" ? state.salesId : state.homeId,
-      knownIds = new Set(state.spaces.map((space) => space.id)),
-      allSales = Array.isArray(db?.vendas) ? db.vendas : [],
-      sales = allSales.filter((sale) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || knownIds.has(resolveSaleSpaceId(sale))) : saleBelongsTo(sale, selectionId, knownIds)),
-      products = (Array.isArray(db?.produtos) ? db.produtos : []).filter((product) => selectionId === ALL_SPACES ? (unrestrictedSpaces() || [...knownIds].some((id) => productAllowsSpace(product,id))) : productAllowsSpace(product, selectionId)),
-      // Existing clients are a shared business directory, not the set of
-      // customers who happened to buy from this device/operator. Honor any
-      // explicit space binding without inferring one from a sale or its actor.
-      clients = (Array.isArray(db?.clientes) ? db.clientes : []).filter((client) => {
-        if(client.businessId&&client.businessId!==state.businessId)return false;
-        const explicit=resolveSaleSpaceId(client);
-        if(!explicit)return true;
-        return selectionId===ALL_SPACES?(unrestrictedSpaces()||knownIds.has(explicit)):explicit===selectionId;
-      }),
-      payments = (Array.isArray(db?.pagamentos) ? db.pagamentos : []).filter((payment) => recordBelongsTo(payment, selectionId)),
-      catalogOrders = (Array.isArray(db?.catalogOrders) ? db.catalogOrders : []).filter((order) => recordBelongsTo(order, selectionId)),
-      customerSubscriptions = (Array.isArray(db?.customerSubscriptions) ? db.customerSubscriptions : []).filter((subscription) => recordBelongsTo(subscription, selectionId)),
-      unassignedLegacySales = allSales.filter((sale) => isValidSale(sale) && !resolveSaleSpaceId(sale, knownIds)).length;
-    return { ...db, vendas: sales, produtos: products, clientes: clients, pagamentos: payments, catalogOrders, customerSubscriptions, spaceSelectionId: selectionId, unassignedLegacySales };
+  function ownRow(row) {
+    return (!row.businessId || row.businessId === state.businessId) &&
+      (row.workspaceGeneration == null || row.workspaceGeneration === state.generation);
   }
-  function goalFor(config = {}, selectionId = state.homeId) {
+  function recordSpace(row) {
+    if (!ownRow(row) || row.spaceId && row.financialSpaceId && row.spaceId !== row.financialSpaceId) return '';
+    return resolveSaleSpaceId(row);
+  }
+  function productsForView(products = []) {
+    const space = selectedHome();
+    if (!space?.capabilities.products) return [];
+    return products.filter(product => ownRow(product) && productAllowsSpace(product, space.id));
+  }
+  function customerRelations(db) {
+    const relations = new Map();
+    function add(clientId, row) {
+      const id = recordSpace(row);
+      if (!clientId || !id) return;
+      if (!relations.has(clientId)) relations.set(clientId, new Set());
+      relations.get(clientId).add(id);
+    }
+    for (const client of db.clientes || []) add(client.id, client);
+    for (const sale of db.vendas || []) if (isValidSale(sale) && !sale.desfeita && !sale.cancelledAt) add(sale.clienteId || sale.clientId, sale);
+    for (const renewal of db.customerSubscriptions || []) if (renewal.active !== false && !renewal.deletedAt) add(renewal.clientId, renewal);
+    return relations;
+  }
+  function customersForView(db = {}) {
+    const selected = activeId();
+    if (!selected) return { clients: [], unassigned: [] };
+    const own = (db.clientes || []).filter(ownRow);
+    if (!scopesCustomers()) return { clients: own.filter(client => !recordSpace(client) || recordSpace(client) === selected), unassigned: [] };
+    const relations = customerRelations(db), known = new Set(operationalSpaces().map(space => space.id));
+    const mayReview = window.BusinessContext?.get?.().role === 'owner' && window.TeamAccess?.has?.('customers.view');
+    return {
+      clients: own.filter(client => relations.get(client.id)?.has(selected)),
+      unassigned: mayReview ? own.filter(client => client.ativo !== false && client.active !== false && !client.deletedAt &&
+        ![...(relations.get(client.id) || [])].some(id => known.has(id))) : [],
+    };
+  }
+  const singleLegacyHome = () => unrestrictedSpaces() && operationalSpaces().length === 1 && homeSpaces().length === 1;
+  function contextualData(db = {}, kind = 'home') {
+    const selectionId = kind === 'sales' ? selectedSales()?.id : activeId();
+    const knownIds = new Set(operationalSpaces().map(space => space.id));
+    const allSales = (db?.vendas || []).filter(ownRow);
+    const here = row => Boolean(selectionId) && recordSpace(row) === selectionId;
+    const legacyHere = row => kind === 'home' && Boolean(selectionId) && singleLegacyHome() && !row.spaceId && !row.financialSpaceId;
+    const customers = customersForView(db);
+    const sales = allSales.filter(row => here(row) || legacyHere(row));
+    const metrics = new Map();
+    if (scopesCustomers()) for (const sale of sales) {
+      if (!isValidSale(sale) || sale.desfeita || sale.cancelledAt) continue;
+      const id = sale.clienteId || sale.clientId, current = metrics.get(id) || { totalComprado: 0, quantidadeVendas: 0, ultimaCompra: null };
+      current.totalComprado += Number(sale.valorFinal ?? sale.valorTotal ?? 0) || 0;
+      current.quantidadeVendas++;
+      if (sale.data && (!current.ultimaCompra || sale.data > current.ultimaCompra)) current.ultimaCompra = sale.data;
+      metrics.set(id, current);
+    }
+    return { ...db, vendas: sales, produtos: productsForView(db?.produtos),
+      clientes: scopesCustomers() ? customers.clients.map(client => ({ ...client, totalComprado: 0, quantidadeVendas: 0,
+        ultimaCompra: null, lastChargeAt: null, lastChargeMessageId: null, promessaPagamento: null, ...metrics.get(client.id) })) : customers.clients,
+      unassignedCustomers: customers.unassigned, pagamentos: (db.pagamentos || []).filter(row => ownRow(row) && (here(row) || legacyHere(row))),
+      movimentacoes: (db.movimentacoes || []).filter(here), cobrancas: (db.cobrancas || []).filter(here),
+      messageHistory: (db.messageHistory || []).filter(here), contatosCliente: (db.contatosCliente || []).filter(here),
+      catalogOrders: (db.catalogOrders || []).filter(here), customerSubscriptions: (db.customerSubscriptions || []).filter(here),
+      spaceSelectionId: selectionId || '', unassignedLegacySales: allSales.filter(sale => isValidSale(sale) && !knownIds.has(recordSpace(sale))).length };
+  }
+  function goalFor(config = {}, selectionId = activeId()) {
     const dashboard = config.dashboard || config || {};
     if (selectionId === ALL_SPACES) return Number(dashboard.dailySalesGoal ?? config.dailySalesGoal ?? 0);
-    return Number(dashboard.dailySalesGoalsBySpaceId?.[selectionId] || 0);
+    const goal = dashboard.dailySalesGoalsBySpaceId?.[selectionId];
+    return Number(goal ?? (selectionId && singleLegacyHome() ? dashboard.dailySalesGoal ?? config.dailySalesGoal : 0) ?? 0);
   }
-  function saveGoal(value, selectionId = state.homeId) {
+  function saveGoal(value, selectionId = activeId()) {
     if (!canManage()) throw Error("Seu perfil não pode alterar metas.");
-    const goal = Math.max(0, Number(value) || 0), id = String(selectionId || ALL_SPACES);
+    const goal = Math.max(0, Number(value) || 0), id = String(selectionId || "");
+    if (id !== ALL_SPACES && (!id || id !== activeId())) throw Error("O espaço da meta mudou.");
     window.DB.alterar((db) => {
       const dashboard = { ...(db.config.dashboard || {}) };
       if (id === ALL_SPACES) dashboard.dailySalesGoal = goal;
@@ -397,7 +461,9 @@
       window.Utils?.toast?.("Seu perfil não pode alterar metas.", true);
       return;
     }
-    const root = document.querySelector("#modal"), id = state.homeId, space = selectedHome(), current = goalFor(window.DB.carregar().config, id), title = id === ALL_SPACES ? "Meta geral diária" : `Meta diária · ${space?.name || "Espaço"}`;
+    const id = activeId();
+    if (!id) return window.Utils?.toast?.("Aguarde um espaço autorizado para configurar a meta.", true);
+    const root = document.querySelector("#modal"), space = selectedHome(), current = goalFor(window.DB.carregar().config, id), title = id === ALL_SPACES ? "Meta geral diária" : `Meta diária · ${space?.name || "Espaço"}`;
     root.innerHTML = `<div class="modal-bg"><section class="modal-box home-goal-modal"><header class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" type="button" data-space-close><i data-lucide="x"></i></button></header><form data-space-goal-form><div class="modal-body"><p>${id === ALL_SPACES ? "A meta geral é configurada de forma independente; ela não soma automaticamente as metas dos espaços." : "Esta meta vale somente para o espaço selecionado."}</p><div class="field"><label>Meta diária</label><input name="goal" type="number" inputmode="decimal" min="0" step="0.01" value="${current || ""}" placeholder="Ex.: 300,00" autofocus></div><small>Use zero para remover a meta.</small></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-space-close>Cancelar</button><button class="btn btn-primary">Salvar meta</button></footer></form></section></div>`;
     root.querySelectorAll("[data-space-close]").forEach((button) => button.onclick = () => { root.innerHTML = ""; });
     root.querySelector("form").onsubmit = (event) => {
@@ -511,18 +577,10 @@
       if (select.dataset.bound) return;
       select.dataset.bound = "true";
       select.onchange = () => {
-        const kind = select.dataset.spaceSelect;
-        try {
-          if (kind === "sales") {
-            if (window.Checkout?.cartCount?.() && !confirm("Você possui itens no carrinho deste espaço. Pressione Cancelar para continuar aqui ou OK para limpar o carrinho e trocar.")) {
-              select.value = state.salesId;
-              return;
-            }
-            selectSales(select.value);
-            window.Checkout?.resetSession?.();
-          } else selectHome(select.value);
-          window.AppPageRuntime?.mount?.(window.Router?.atual?.() || (kind === "sales" ? "vender" : "inicio"));
+          try {
+          selectActive(select.value);
         } catch (error) {
+          select.value = activeId();
           window.Utils?.toast?.(error.message, true);
         }
       };
@@ -567,8 +625,15 @@
     salesSpaces,
     selectedHome,
     selectedSales,
-    homeId: () => (ensureContext(), state.homeId),
-    salesId: () => (ensureContext(), state.salesId),
+    activeId,
+    viewScope,
+    scopesCustomers,
+    customersForView,
+    productsForView,
+    recordSpace: row => { ensureContext(); return recordSpace(row); },
+    selectActive,
+    homeId: activeId,
+    salesId: () => selectedSales()?.id || "",
     selectHome,
     selectSales,
     requireSalesSpace,
@@ -602,6 +667,7 @@
     dispatchEvent(new CustomEvent("veconi-space-context-local-ready", { detail: snapshot() }));
   });
   addEventListener("firebase-session-cleared", () => {
-    Object.assign(state, { spaces: [], businessId: "", uid: "", homeId: ALL_SPACES, salesId: "", loaded: false, migrationReport: null });
+    state.viewEpoch++;
+    Object.assign(state, { spaces: [], businessId: "", uid: "", activeId: "", generation: 0, sessionReady: false, loaded: false, migrationReport: null });
   });
 })();

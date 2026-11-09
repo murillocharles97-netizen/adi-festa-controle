@@ -19,8 +19,14 @@ window.CustomerSubscriptions = (() => {
     if (["paused", "cancelled"].includes(subscription?.status)) return subscription.status;
     return new Date(subscription?.expiresAt || 0).getTime() < new Date(reference).getTime() ? "expired" : "active";
   };
-  const list = () => DB.carregar().customerSubscriptions || [];
-  const events = () => DB.carregar().customerSubscriptionEvents || [];
+  function inActiveSpace(record) {
+    const context = window.SpaceContext;
+    if (!context?.activeId) return true;
+    const active = context.activeId(), origin = context.recordSpace(record);
+    return Boolean(active && (origin === active || !origin && !record.spaceId && !record.financialSpaceId && !context.scopesCustomers()));
+  }
+  const list = () => (DB.carregar().customerSubscriptions || []).filter(inActiveSpace);
+  const events = () => (DB.carregar().customerSubscriptionEvents || []).filter(inActiveSpace);
   const get = (id) => list().find((item) => item.id === id) || null;
   const forClient = (clientId, options = {}) => list()
     .filter((item) => item.clientId === clientId && (!options.statuses || options.statuses.includes(effectiveStatus(item))))
@@ -63,6 +69,8 @@ window.CustomerSubscriptions = (() => {
       const subscriptionId = config.subscriptionId || item.subscriptionId || null;
       const existing = subscriptionId ? db.customerSubscriptions.find((entry) => entry.id === subscriptionId) : null;
       if (existing && existing.clientId !== clientId) throw Error("A vigência selecionada pertence a outro cliente.");
+      if (existing?.spaceId && existing.spaceId !== sale.spaceId) throw Error("A vigência pertence a outro espaço.");
+      if (existing && !existing.spaceId && window.SpaceContext?.scopesCustomers?.()) throw Error("Confirme o espaço responsável por esta vigência antes de renovar.");
       if (existing?.lastSaleId === sale.id) {
         updates.push({ subscriptionId: existing.id, action: item.subscriptionAction || "unchanged", expiresAt: existing.expiresAt, idempotent: true });
         return;
@@ -120,7 +128,7 @@ window.CustomerSubscriptions = (() => {
     let saved;
     DB.alterar((db) => {
       const subscription = (db.customerSubscriptions || []).find((item) => item.id === id);
-      if (!subscription) throw Error("Renovação não encontrada.");
+      if (!subscription || !inActiveSpace(subscription)) throw Error("Renovação não encontrada no espaço ativo.");
       const previous = structuredClone(subscription), nextStatus = requested === "active" ? effectiveStatus({ ...subscription, status: "active" }) : requested;
       subscription.status = nextStatus; subscription.updatedAt = now(); saved = subscription;
       event(db, subscription, nextStatus === "active" ? "reactivated" : nextStatus, Utils.uuid(), { sourceType: "manual", previous, next: structuredClone(subscription), note });
@@ -142,16 +150,16 @@ window.CustomerSubscriptions = (() => {
   };
   async function loadForClient(clientId) {
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ clientId, limit: 50 });
-    return remote || forClient(clientId);
+    return remote ? remote.filter(inActiveSpace) : forClient(clientId);
   }
   async function loadUpcoming({ from = now(), to, status = "active", limit = 50 } = {}) {
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ status, from, to, direction: "asc", limit });
-    return remote || upcoming({ from, to, statuses: [status] });
+    return remote ? remote.filter(inActiveSpace) : upcoming({ from, to, statuses: [status] });
   }
   async function loadByStatus(status, { from, to, limit = 50, direction = "asc" } = {}) {
     if (!STATUS.has(status)) throw Error("Status de renovação inválido.");
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ status, from, to, direction, limit });
-    return remote || list().filter((item) => effectiveStatus(item) === status);
+    return remote ? remote.filter(inActiveSpace) : list().filter((item) => effectiveStatus(item) === status);
   }
   async function loadExpiring(days = 7, reference = now(), limit = 50) {
     const end = new Date(reference); end.setDate(end.getDate() + Math.max(0, number(days))); end.setHours(23, 59, 59, 999);
@@ -165,13 +173,13 @@ window.CustomerSubscriptions = (() => {
       window.SyncFirebase.queryCustomerSubscriptions({ status: "expired", to: reference, direction: "desc", limit }),
     ]);
     return [...new Map([...(staleActive || []), ...(explicitExpired || [])]
-      .filter((item) => effectiveStatus(item, reference) === "expired")
+      .filter((item) => inActiveSpace(item) && effectiveStatus(item, reference) === "expired")
       .map((item) => [item.id, item])).values()];
   }
   async function loadRecentlyRenewed(days = 30, reference = now(), limit = 50) {
     const start = new Date(reference); start.setDate(start.getDate() - Math.max(1, number(days, 30)));
     const remote = await window.SyncFirebase?.queryCustomerSubscriptions?.({ lastRenewedFrom: start.toISOString(), direction: "desc", limit });
-    return remote || list().filter((item) => item.lastRenewedAt && new Date(item.lastRenewedAt) >= start);
+    return remote ? remote.filter(inActiveSpace) : list().filter((item) => item.lastRenewedAt && new Date(item.lastRenewedAt) >= start);
   }
   async function loadDashboardMetrics(reference = now()) {
     const [due7, expired] = await Promise.all([loadExpiring(7, reference, 50), loadExpired(reference, 50)]);

@@ -137,7 +137,7 @@ test("Home específica usa apenas dados atribuídos e ignora venda cancelada", (
 
   const desktop = sandbox.DesktopDashboard.aggregate(fixture(), "today");
   assert.deepEqual(Array.from(desktop.sales, (sale) => sale.id), ["sale-a"]);
-  assert.deepEqual(Array.from(desktop.clients, (client) => client.id), ["client-a", "client-b", "client-legacy", "client-cancelled"]);
+  assert.deepEqual(Array.from(desktop.clients, (client) => client.id), ["client-a"]);
   assert.deepEqual(Array.from(desktop.products, (product) => product.id), ["product-all", "product-a"]);
   assert.equal(desktop.todayRevenue, 40);
   assert.equal(desktop.receivedToday, 10);
@@ -147,27 +147,26 @@ test("Home específica usa apenas dados atribuídos e ignora venda cancelada", (
 
   const mobile = sandbox.MobileHome.model();
   assert.deepEqual(Array.from(mobile.sales, (sale) => sale.id), ["sale-a"]);
-  assert.deepEqual(Array.from(mobile.clients, (client) => client.id), ["client-a", "client-b", "client-legacy", "client-cancelled"]);
+  assert.deepEqual(Array.from(mobile.clients, (client) => client.id), ["client-a"]);
   assert.equal(mobile.sold, 40);
   assert.equal(mobile.goal, 100);
   assert.equal(mobile.unassignedLegacySales, 1);
 });
 
-test("Todos os espaços mantém legados e usa meta geral independente", () => {
+test("Home acompanha Vendas, mantém meta geral legada independente e indica vendas sem origem", () => {
   const data = fixture(), { sandbox, reads, resetReads } = runtime(data);
-  sandbox.SpaceContext.selectHome(sandbox.SpaceContext.ALL_SPACES);
-
+  assert.throws(() => sandbox.SpaceContext.selectHome(sandbox.SpaceContext.ALL_SPACES), /autorizado/);
+  sandbox.SpaceContext.selectSales('space-b');
   const view = sandbox.DesktopDashboard.aggregate(data, "today");
-  assert.deepEqual(Array.from(view.sales, (sale) => sale.id), ["sale-a", "sale-b", "sale-legacy"]);
-  assert.equal(view.todayRevenue, 170);
-  assert.equal(view.goal, 1000);
-  assert.equal(view.goalPercent, 17);
+  assert.deepEqual(Array.from(view.sales, sale => sale.id), ["sale-b"]);
+  assert.equal(view.todayRevenue, 60);
+  assert.equal(view.goal, 200);
+  assert.equal(sandbox.SpaceContext.goalFor(data.config, sandbox.SpaceContext.ALL_SPACES), 1000);
   assert.equal(view.unassignedLegacySales, 1);
-
   resetReads();
   const html = sandbox.DesktopDashboard.render();
   assert.equal(reads(), 1);
   assert.match(html, /data-space-context="home"/);
-  assert.match(html, /Meta geral diária/);
+  assert.match(html, /Unidade B/);
   assert.match(html, /1 venda antiga sem espaço/);
 });

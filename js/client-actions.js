@@ -98,7 +98,7 @@
     const permission={sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action];
     if(permission&&window.TeamAccess&&!window.TeamAccess.has(permission))return Utils.toast(window.TeamAccess.failure?.(permission)?.message||window.VeconiPermissionPolicy.MESSAGE,true);
     const page = window.ClientesPage;
-    const client = Clientes.obter(clientId);
+    const client = Clientes.scopedScreen?.() ? Clientes.viewClient(clientId) : Clientes.obter(clientId);
     if (!client) return Utils.toast("Cliente não encontrado.", true);
     close();
     if (action === "profile" || action === "history") return (window.CRMClienteUI?.open || page?.profile)?.(clientId);
@@ -124,7 +124,7 @@
   }
 
   function openSheet(clientId) {
-    const client = Clientes.obter(clientId);
+    const client = Clientes.scopedScreen?.() ? Clientes.viewClient(clientId) : Clientes.obter(clientId);
     if (!client) return Utils.toast("Cliente não encontrado.", true);
     const root = document.querySelector("#modal");
     root.innerHTML = sheet(client);

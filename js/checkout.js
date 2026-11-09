@@ -103,6 +103,7 @@ window.Checkout = (() => {
   };
   const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
   function view() {
+    retireSpaceDraft();
     restoreDraft();
     rebuildSoldIndex();
     const ps = products()
@@ -384,7 +385,10 @@ window.Checkout = (() => {
       picker(() => recurringConfiguration(product, variant, source), { requireClient: true, title: "Selecione o cliente da renovação" });
       return;
     }
-    await window.CustomerSubscriptions?.loadForClient?.(clientId);
+    const origin = window.SpaceContext?.viewScope?.();
+    try { await window.CustomerSubscriptions?.loadForClient?.(clientId); }
+    catch (error) { return toast(error.message, true); }
+    if (origin !== window.SpaceContext?.viewScope?.() || Router.atual() !== 'vender' || document.querySelector('#sale-client')?.value !== clientId) return;
     const existing = window.CustomerSubscriptions?.matchingProduct?.(clientId, product.id) || window.CustomerSubscriptions?.matching?.(clientId, product.id, variant?.id || null) || [], modal = document.querySelector("#modal"), defaultDuration = Number(variant?.durationValue || product.durationValue || 30), defaultUnit = variant?.durationUnit || product.durationUnit || "days";
     const render = () => {
       const selectedId = modal.querySelector?.('[name="subscriptionChoice"]:checked')?.value || existing[0]?.id || "new", selected = existing.find((item) => item.id === selectedId) || null, durationValue = Number(modal.querySelector?.('[name="durationValue"]')?.value || defaultDuration), durationUnit = modal.querySelector?.('[name="durationUnit"]')?.value || defaultUnit, price = Number(modal.querySelector?.('[name="contractedPrice"]')?.value || selected?.contractedPrice || variant?.price || product.preco || 0), label = modal.querySelector?.('[name="renewalLabel"]')?.value || selected?.label || product.renewalLabel || product.nome, payment = modal.querySelector?.('[name="renewalPayment"]')?.value || window.CheckoutPaymentMethod || "pix", dates = CustomerSubscriptions.preview({ subscription: selected, durationValue, durationUnit });
@@ -393,6 +397,7 @@ window.Checkout = (() => {
       modal.querySelectorAll('input[name="subscriptionChoice"]').forEach((input) => input.onchange = render);
       ["durationValue", "durationUnit"].forEach((name) => modal.querySelector(`[name="${name}"]`).onchange = render);
       modal.querySelector("[data-confirm-recurring]").onclick = () => {
+        if (origin !== window.SpaceContext?.viewScope?.()) return toast('O espaço da renovação mudou. Abra a vigência novamente.', true);
         const choiceId = modal.querySelector('input[name="subscriptionChoice"]:checked')?.value || selectedId,
           chosen = existing.find((entry) => entry.id === choiceId) || null,
           finalDurationValue = Math.max(1, Number(modal.querySelector('[name="durationValue"]')?.value || defaultDuration)),
@@ -514,6 +519,7 @@ window.Checkout = (() => {
     activeAttempt = null,
     activeConflict = null,
     restoredDraftKey = "",
+    restoredDraftPrincipal = "",
     draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" },
     pendingClient = null,
     pendingRenewal = null,
@@ -540,13 +546,15 @@ window.Checkout = (() => {
     };
     return draftDetails;
   }
+  const draftPrincipal = () => JSON.stringify([window.FirebaseSession?.user?.uid || "", DB.getWorkspaceGeneration?.() ?? 0]);
   function saveDraft() {
     const key = draftKey();
-    if (!key) return;
+    if (!key || restoredDraftKey && (key !== restoredDraftKey || restoredDraftPrincipal !== draftPrincipal())) return;
     try {
       if (!cart.length) return sessionStorage.removeItem(key);
       sessionStorage.setItem(key, JSON.stringify({
         version: 1,
+        principal: draftPrincipal(),
         businessId: String(DB.getBusinessId?.() || ""),
         spaceId: selectedSalesSpaceId(),
         cart,
@@ -565,14 +573,32 @@ window.Checkout = (() => {
     const key = draftKey(), keys = new Set([key, restoredDraftKey].filter(Boolean));
     for (const candidate of keys) try { sessionStorage.removeItem(candidate); } catch {}
     restoredDraftKey = key;
+    restoredDraftPrincipal = draftPrincipal();
+  }
+  function retireSpaceDraft() {
+    if (!restoredDraftKey || restoredDraftKey === draftKey() && restoredDraftPrincipal === draftPrincipal()) return;
+    // The prior cart was already persisted under its original key. Never move it or the sync queue.
+    cart = [];
+    discountKind = null;
+    manual = false;
+    activeAttempt = null;
+    activeConflict = null;
+    pendingClient = null;
+    pendingRenewal = null;
+    selectedCampaignIds.clear();
+    draftDetails = {clientId:'',paymentMethod:'pix',note:'',discountValue:'0',discountPercent:'0'};
+    restoredDraftKey = '';
+    restoredDraftPrincipal = '';
   }
   function restoreDraft() {
     const key = draftKey();
     if (!key || restoredDraftKey === key || cart.length) return;
     restoredDraftKey = key;
+    restoredDraftPrincipal = draftPrincipal();
     try {
       const saved = JSON.parse(sessionStorage.getItem(key) || "null");
-      if (!saved || saved.spaceId !== selectedSalesSpaceId() || !Array.isArray(saved.cart)) return;
+      if (!saved || saved.spaceId !== selectedSalesSpaceId() || saved.businessId !== DB.getBusinessId?.() ||
+        saved.principal && saved.principal !== restoredDraftPrincipal || !Array.isArray(saved.cart)) return;
       cart = saved.cart.filter((item) => {
         const product = products().getById(item?.produtoId || item?.productId);
         return product && productAvailableHere(product) && Number(item.quantidade) > 0;
@@ -1010,6 +1036,7 @@ window.Checkout = (() => {
         return false;
       };
       if (window.ExchangeCreditCheckout?.hasPending?.()) return validationError("Há uma confirmação com crédito preservada. Use Consultar confirmação no cartão de crédito de troca. Não registre outra venda.");
+      if (restoredDraftKey && (restoredDraftKey !== draftKey() || restoredDraftPrincipal !== draftPrincipal())) return validationError('O espaço do carrinho mudou. Reabra a venda no espaço de origem.');
       if (!cart.length) return validationError("Adicione ao menos um produto.");
       const pendingTerminal = window.TerminalPayments?.getCurrent?.();
       if (pendingTerminal && (window.TerminalPayments.ACTIVE_STATUSES.has(pendingTerminal.status) || pendingTerminal.status === "approved")) {
@@ -1060,9 +1087,12 @@ window.Checkout = (() => {
         finally{finishing=false;}
       }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
+      const spaceScope = window.SpaceContext?.viewScope?.();
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
+          if (spaceScope !== window.SpaceContext?.viewScope?.() || spaceId !== selectedSalesSpaceId())
+            return validationError('O espaço da venda mudou. Revise o carrinho antes de confirmar.');
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           if(activeAttempt?.operationId&&activeAttempt.operationId!==attempt.operationId&&(DB.carregar().vendas||[]).some(s=>s.operationId===activeAttempt.operationId))return validationError("A tentativa anterior já gerou uma venda. Consulte sua confirmação antes de alterar ou repetir o carrinho.");
           activeAttempt = attempt;
@@ -1147,6 +1177,7 @@ window.Checkout = (() => {
             if (error.code !== "customer-credit-orphan") toast(message, true);
             return;
           }
+          if (spaceScope !== window.SpaceContext?.viewScope?.()) { finishing=false; return; }
           activeConflict = null;
           cart = [];
           selectedCampaignIds.clear();
@@ -1403,6 +1434,7 @@ window.Checkout = (() => {
     filterProducts: filter,
     refreshProducts,
     refreshClients,
+    retireSpaceDraft,
     resumeAfterReconciliation,
     finalizeTerminalPayment,
     completeTerminalPayment,

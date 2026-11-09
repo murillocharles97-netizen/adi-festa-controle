@@ -1,14 +1,49 @@
 window.Clientes=(()=>{
   const normalizePhone=value=>PhoneUtils.normalizeBrazilianPhone(value);
-  const financialStatus=client=>{
-    const account=(window.InstallmentCredit?.confirmedAccount||window.InstallmentCredit?.account)?.(client?.id);
-    if(!account&&window.InstallmentCredit?.has?.(client?.id))
-      return {saldo:NaN,status:'unverified',debt:0,credit:0};
-    const saldo=account?(account.creditCents-account.dueCents)/100:Math.round((Number(client?.saldo)||0)*100)/100;
-    return {saldo,futureCents:account?.futureCents||0,status:saldo<0?'debt':saldo>0?'credit':'zero',debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
-  };
-  const listar=()=>(DB.readForView?.()||DB.carregar()).clientes;
-  const obter=id=>listar().find(c=>c.id===id);
+  const baseView = () => DB.readForView?.() || DB.carregar();
+  const listar = () => baseView().clientes;
+  const obter = id => listar().find(c => c.id === id);
+  let lastView;
+  function viewData() {
+    const data = baseView(), context = window.SpaceContext;
+    if (!context?.scopesCustomers?.()) return data;
+    const scope = context.viewScope();
+    if (lastView?.data !== data || lastView.scope !== scope) lastView = { data, scope, result: context.contextualData(data, 'clients') };
+    return lastView.result;
+  }
+  const viewClient = id => (viewData().clientes || []).find(c => c.id === id);
+  const scopedScreen = () => window.Router?.atual?.() === 'clientes' && window.SpaceContext?.scopesCustomers?.();
+  const unknown = reason => ({saldo:NaN,status:'unverified',debt:0,credit:0,reason});
+  const spaceAccountMessage = 'O saldo tem origem em outro espaço ou origem não comprovada. Confira o Fiado da empresa antes de cobrar ou receber.';
+  function accountBelongsTo(account, spaceId) {
+    return Boolean(spaceId && account && account.creditCents === 0 && Array.isArray(account.entries) &&
+      account.entries.every(row => row.spaceId === spaceId && Number.isSafeInteger(row.remainingCents) && row.remainingCents > 0) &&
+      account.entries.reduce((sum, row) => sum + row.remainingCents, 0) === account.totalCents);
+  }
+  async function confirmSpaceAccount(id, scope = window.SpaceContext?.viewScope?.()) {
+    const context = window.SpaceContext, space = context?.activeId?.();
+    if (!space || scope !== context.viewScope() || !viewClient(id)) throw Error('O cliente ou espaço ativo mudou. Abra a conta novamente.');
+    const account = await window.InstallmentCredit.refresh(id);
+    if (scope !== context.viewScope() || !viewClient(id) || !accountBelongsTo(account, space)) throw Object.assign(Error(spaceAccountMessage), {code:'fiado-space-unverified'});
+    return account;
+  }
+  function financialStatus(client, scoped = scopedScreen()) {
+    const account = (window.InstallmentCredit?.confirmedAccount || window.InstallmentCredit?.account)?.(client?.id);
+    if (scoped) {
+      if (window.TeamAccess?.has?.('customers.receiveDebt') === false) return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
+      if (account && !accountBelongsTo(account, window.SpaceContext?.activeId?.())) return unknown(spaceAccountMessage);
+      if (!account && (Number(client?.saldo) !== 0 || window.InstallmentCredit?.has?.(client?.id))) return unknown();
+    }
+    if (!account && window.InstallmentCredit?.has?.(client?.id)) return unknown();
+    const saldo = account ? (account.creditCents - account.dueCents) / 100 : Math.round((Number(client?.saldo) || 0) * 100) / 100;
+    return {saldo, futureCents:account?.futureCents || 0, status:saldo<0?'debt':saldo>0?'credit':'zero', debt:Math.abs(Math.min(0,saldo)),credit:Math.max(0,saldo)};
+  }
+  function unassignedMarkup() {
+    const rows = viewData().unassignedCustomers || [];
+    if (!rows.length) return scopedScreen() && !(viewData().clientes || []).length
+      ? '<p class="muted">Nenhum vínculo de cliente foi confirmado neste espaço com os dados disponíveis. O cadastro da empresa continua acessível na seleção de clientes em Vendas.</p>' : '';
+    return `<details class="card space-unassigned-customers"><summary>${rows.length} cliente(s) sem espaço confirmado</summary><p>Cadastros preservados no diretório da empresa. Uma venda ou renovação com espaço identificado permite encontrá-los aqui.</p><ul>${rows.map(client => `<li>${Utils.escapar(client.nome)}</li>`).join('')}</ul></details>`;
+  }
   const allowed=key=>window.TeamAccess?window.TeamAccess.has(key)===true:!window.FirebaseSession?.user;
   const assertPermission=key=>{if(!allowed(key))throw Object.assign(Error(window.VeconiPermissionPolicy?.MESSAGE||'Você não tem permissão para realizar esta ação. Solicite ao gestor que habilite esta função em Equipe → Permissões.'),{code:'customer-edit-permission-required',permission:key});};
   const canEdit=()=>allowed('customers.edit'),canCreate=()=>allowed('customers.create');
@@ -30,5 +65,5 @@ window.Clientes=(()=>{
     else db.clientes.push({...registro,id:registro.id||Utils.uuid(),portalRefToken:registro.portalRefToken||Utils.uuid(),normalizedPhone,saldo:Number(registro.saldo||0),atualizadoEm:registro.atualizadoEm||agora});
   }))};
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('customers.adjustBalance'))throw Error('Você não tem permissão para ajustar saldos.');let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0),financialVersionAnterior=Math.max(0,Number(cliente.financialVersion||0));cliente.saldo=Number(saldoNovo);cliente.financialVersion=financialVersionAnterior+1;cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,expectedFinancialVersion:financialVersionAnterior,financialVersionAfter:cliente.financialVersion,motivo:motivo||'',data:cliente.atualizadoEm,...(window.TeamAccess?.actor?.()||{})};db.movimentacoes.push(movimento)});return movimento};
-  return{listar,obter,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

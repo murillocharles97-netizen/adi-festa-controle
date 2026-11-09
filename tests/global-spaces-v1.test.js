@@ -96,7 +96,7 @@ test("Vender lista apenas espaços ativos com sales=true e nunca aceita IDs agre
   assert.equal(window.SpaceContext.requireSalesSpace(), "iptv");
 });
 
-test("Home Todos agrega e as visões isolam vendas/produtos e respeitam os vínculos explícitos de clientes", () => {
+test("O espaço ativo isola vendas, produtos e clientes comprovadamente vinculados", () => {
   const { window, db } = loadSpaces();
   window.SpaceContext.setSpaces(fixtures());
   Object.assign(db, {
@@ -114,21 +114,18 @@ test("Home Todos agrega e as visões isolam vendas/produtos e respeitam os vínc
       { id: "shared-legacy" },
     ],
   });
-  const all = window.SpaceContext.contextualData(db);
-  assert.equal(all.vendas.length, 5);
-  assert.equal(all.unassignedLegacySales, 2);
+  assert.throws(() => window.SpaceContext.selectHome("all_spaces"), /autorizado/);
+  assert.equal(window.SpaceContext.contextualData(db).unassignedLegacySales, 2);
   window.SpaceContext.selectHome("adi");
   const adi = window.SpaceContext.contextualData(db);
   assert.deepEqual(Array.from(adi.vendas, (sale) => sale.id), ["adi-new", "adi-legacy-ref"]);
   assert.deepEqual(Array.from(adi.produtos, (product) => product.id), ["coca", "shared-legacy"]);
-  // The V224/V225 contract keeps the business directory shared. A purchase
-  // alone never changes the customer's space binding or company ownership.
-  assert.deepEqual(Array.from(adi.clientes, (client) => client.id), ["c-adi", "c-iptv", "c-old"]);
+  assert.deepEqual(Array.from(adi.clientes, (client) => client.id), ["c-adi"]);
   window.SpaceContext.selectHome("iptv");
   const iptv = window.SpaceContext.contextualData(db);
   assert.deepEqual(Array.from(iptv.vendas, (sale) => sale.id), ["iptv-new"]);
   assert.deepEqual(Array.from(iptv.produtos, (product) => product.id), ["plano", "shared-legacy"]);
-  assert.deepEqual(Array.from(iptv.clientes, (client) => client.id), ["c-adi", "c-iptv", "c-old", "c-bound"]);
+  assert.deepEqual(Array.from(iptv.clientes, (client) => client.id), ["c-iptv", "c-bound"]);
 });
 
 test("produtos legados permanecem all_spaces e os três modos são canônicos", () => {
@@ -189,7 +186,7 @@ test("cache e seleção são isolados por businessId + uid e a promoção é ide
   window.SpaceContext.setSpaces(fixtures());
   assert.equal(window.SpaceContext.list().length, 3);
   harness.setBusiness("business-b");
-  assert.equal(window.SpaceContext.homeId(), "all_spaces");
+  assert.equal(window.SpaceContext.homeId(), "");
   assert.equal(window.SpaceContext.snapshot().loaded, false);
   assert.equal(window.SpaceContext.salesSpaces().length, 0);
   assert.throws(() => window.SpaceContext.requireSalesSpace(), /Selecione/);
@@ -207,15 +204,15 @@ test("contratos estruturais preservam Financeiro, isolamento e exigem spaceId no
   assert.match(rules, /validProductSpaceScope/);
   assert.match(financial, /business_\$\{businessId\}/);
   assert.match(index, /spaces\.js\?v=\d+/);
-  assert.match(index, /firebase\/space-service\.js\?v=151/);
-  assert.match(worker, /const CACHE='veconi-v226-ui-regression-hotfix-v1'/);
+  assert.match(index, /firebase\/space-service\.js\?v=\d+/);
+  assert.match(worker, /const CACHE='veconi-v229-1-global-space-v1'/);
 });
 
 test('stock movement origin requires an eligible business space; no global or ambiguous fallback',()=>{
   const {window}=loadSpaces(),spaces=fixtures();spaces[1].capabilities.inventory=true;
   window.SpaceContext.setSpaces(spaces);
   const p={businessId:'business-a',spaceAccessMode:'all_spaces'};
-  assert.throws(()=>window.SpaceContext.stockMovementOrigin(p),/Selecione/);
+  assert.equal(window.SpaceContext.stockMovementOrigin(p).spaceId,'adi');
   assert.equal(window.SpaceContext.stockMovementOrigin(p,'adi').spaceId,'adi');
   assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'all_spaces'),/Selecione/);
   assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'casa'),/Selecione/);

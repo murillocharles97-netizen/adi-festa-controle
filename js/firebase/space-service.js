@@ -37,7 +37,10 @@ const clone = (value) => structuredClone(value);
 const online = () => typeof navigator === "undefined" || navigator.onLine !== false;
 const emit = (name, detail = {}) => dispatchEvent(new CustomEvent(name, { detail }));
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
-const contextKey = (context = currentContext()) => `${context.uid}:${context.businessId}`;
+const contextKey = (context = currentContext()) => {
+  const access = window.BusinessContext?.get?.() || {};
+  return JSON.stringify([context.uid,context.businessId,context.workspaceGeneration,access.role,access.spaceAccess,[...(access.allowedSpaceIds || [])].sort()]);
+};
 const requiredText = (value, label, max = 80) => {
   const text = String(value || "").trim();
   if (!text) throw new Error(`Informe ${label}.`);
@@ -303,8 +306,9 @@ async function load(options = {}) {
     emit("veconi-space-service-error", report);
     return Context.snapshot();
   }
-  const promoted = await promoteAccessibleSpaces(remote.spaces, context), ensured = await ensureDefaultSpace(promoted.spaces, context),
-    report = {
+  const promoted = await promoteAccessibleSpaces(remote.spaces, context);
+  if (requestId !== state.sequence || contextKey() !== key) return Context.snapshot();
+  const ensured = await ensureDefaultSpace(promoted.spaces, context), report = {
       ...promoted.report,
       defaultSpace: ensured.reason,
       defaultSpaceCreated: ensured.created,

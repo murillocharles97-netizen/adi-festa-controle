@@ -6,7 +6,7 @@ window.InstallmentCredit = (() => {
   const available=()=>window.TeamAccess?.has?.('customers.receiveDebt')===true&&!window.OperationalReadPolicy?.restricted?.();
   const has=(id,data=DB.carregar())=>!!id&&((data.clientes||[]).some(c=>c.id===id&&(c.hasInstallmentFiado||c.fiadoHistoryVersion===1))||
     (data.vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt));
-  const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.()]);
+  const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.(),window.SpaceContext?.viewScope?.()]);
   const clientFor=id=>(DB.carregar().clientes||[]).find(c=>c.id===id);
   const summaries=new Map(), confirmedAt=new Map(), pending=new Map(), failedAt=new Map();
   const DISPLAY_TTL=60000, RETRY_DELAY=15000;
@@ -34,8 +34,9 @@ window.InstallmentCredit = (() => {
       !(DB.carregar().vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt))return null;
     try{return window.FiadoAccount.project(client,DB.carregar().vendas||[]);}catch{return null;}
   }
+  const needsProof = id => has(id) || (window.Clientes?.scopedScreen?.() && window.TeamAccess?.has?.('customers.receiveDebt') && Number(clientFor(id)?.saldo) !== 0);
   function confirmedAccount(id){
-    if(!has(id))return null;
+    if(!needsProof(id))return null;
     const cached=summariesForScope().get(id);
     if(navigator.onLine===false||Date.now()-(confirmedAt.get(id)||0)>=DISPLAY_TTL)return null;
     try{return cached?.asOf===InstallmentPlan.today()?assertAccount(clientFor(id),cached):null;}catch{return null;}
@@ -73,7 +74,7 @@ window.InstallmentCredit = (() => {
         <p>Exigível após confirmar: <b data-after-due>${money(p.dueCents)}</b></p>
         <p>Parcelas futuras após confirmar: <b data-after-future>${money(p.futureCents)}</b></p>
         <p>Total comprometido após confirmar: <b data-after-total>${money(p.totalCents)}</b></p>
-        <small>Saldo apurado no servidor. A entrada combinada permanece a receber.</small>
+        <small>Conta de Fiado da empresa, apurada no servidor. A entrada combinada permanece a receber.</small>
       </section>`;
     }).catch(error=>{
       if(host.isConnected)host.innerHTML=`<p data-installment-preview-unavailable role="status">Prévia indisponível: ${esc(error.message)}</p>`;
@@ -93,17 +94,17 @@ window.InstallmentCredit = (() => {
         throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
       const confirmed=assertAccount(clientFor(id),result.account);
       if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
-      if(has(id)){summariesForScope().set(id,confirmed);confirmedAt.set(id,Date.now());}
+      if(needsProof(id)){summariesForScope().set(id,confirmed);confirmedAt.set(id,Date.now());}
       window.dispatchEvent?.(new CustomEvent('fiado-account-updated',{detail:{clientId:id}}));
       return confirmed;
     })().finally(()=>{if(pending.get(key)===request)pending.delete(key);});
     pending.set(key,request);
     return request;
   }
-  function customerSummary(id,confirmed){const a=confirmed||confirmedAccount(id);if(!a)return '';return `<section class="receipt-debt" data-fiado-account data-fiado-client="${esc(id)}"><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>Apurado no servidor em ${esc(a.asOf)}</small>${button(id)}</section>`;}
+  function customerSummary(id,confirmed){const a=confirmed||confirmedAccount(id);if(!a || window.Clientes?.scopedScreen?.() && !window.Clientes.accountBelongsTo(a,window.SpaceContext.activeId()))return '';return `<section class="receipt-debt" data-fiado-account data-fiado-client="${esc(id)}"><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>Apurado no servidor em ${esc(a.asOf)}</small>${button(id)}</section>`;}
   function mountCustomer(id){
     const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll,#modal .crm-profile-scroll');
-    if(!host||!has(id))return;
+    if(!host||!needsProof(id))return;
     host.insertAdjacentHTML('afterbegin',customerSummary(id)||`<p data-fiado-account data-fiado-client="${esc(id)}" role="status">Consultando exigível e parcelas futuras…</p>`);
     const section=host.querySelector('[data-fiado-account]');
     refresh(id).catch(()=>{if(section.isConnected&&!confirmedAccount(id))section.textContent='Exigível a conferir. Conecte-se e tente consultar o saldo novamente.';});
@@ -150,17 +151,17 @@ window.InstallmentCredit = (() => {
     for(const section of document.querySelectorAll('[data-fiado-client]'))if(section.dataset.fiadoClient===id){
       const markup=customerSummary(id),shell=document.createElement('div');
       if(markup){shell.innerHTML=markup;if(section.outerHTML!==shell.firstElementChild.outerHTML)section.replaceWith(shell.firstElementChild);}
-      else if(section.textContent!=='Exigível a conferir. Conecte-se para consultar o saldo.')section.textContent='Exigível a conferir. Conecte-se para consultar o saldo.';
+      else if(section.textContent!=='Exigível a conferir. Verifique a conexão e a origem do saldo.')section.textContent='Exigível a conferir. Verifique a conexão e a origem do saldo.';
     }
   }
-  function visibleIds(){return [...new Set([...document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]')].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>has(id));}
+  function visibleIds(){return [...new Set([...(window.document?.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]') || [])].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>needsProof(id));}
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
-      const queue=visibleIds();queue.forEach(paint);
+      const origin=scope(), queue=visibleIds();queue.forEach(paint);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
-        while(queue.length){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
+        while(queue.length&&scope()===origin){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
           try{await refresh(id);failedAt.delete(key);}catch{failedAt.set(key,Date.now());}
         }
@@ -191,12 +192,12 @@ window.InstallmentCredit = (() => {
   function update(){const el=document.querySelector('#installment-fields');if(!el)return;el.hidden=document.querySelector('#sale-payment-method')?.value!=='crediario';if(el.hidden)return;const label=el.querySelector('[data-installment-preview]');try{const plan=InstallmentPlan.create({...read(),total:Number(document.querySelector('#manual-total')?.value||0)});label.textContent=`Entrada ${money(plan.downPaymentCents)} + ${plan.count} parcelas. Primeira: ${money(plan.installments[0].amountCents)}. Total: ${money(plan.totalCents)}. A entrada ainda não está recebida.`;}catch(e){label.textContent=e.message;}}
   function summary(sale){if(!sale.installmentPlan)return'';const p=sale.installmentPlan;return `<section class="receipt-debt"><h3>Crediário / Parcelado · sem juros</h3><p>Entrada combinada: ${money(p.downPaymentCents)}. Recebimentos são confirmados separadamente.</p>${InstallmentPlan.rows(sale).map(r=>`<div><span>${r.number?'Parcela '+r.number:'Entrada'} · ${r.dueDate.split('-').reverse().join('/')} · ${labels[r.status]}${r.overdue&&r.status==='partial'?' (vencida)':''}</span><strong>${money(r.amountCents)} · resta ${money(r.remainingCents)}</strong></div>`).join('')}</section>`;}
   function text(sale){if(!sale.installmentPlan)return'';return 'Crediário / Parcelado — sem juros ou multa\n'+InstallmentPlan.rows(sale).map(r=>`${r.number?'Parcela '+r.number:'Entrada'} | ${r.dueDate} | ${money(r.amountCents)} | ${labels[r.status]} | saldo ${money(r.remainingCents)}`).join('\n');}
-  function sales(clientId){return(DB.carregar().vendas||[]).filter(s=>s.installmentPlan&&(!clientId||s.clienteId===clientId));}
+  function sales(clientId){const db=window.Clientes?.scopedScreen?.()?window.Clientes.viewData():DB.carregar();return(db.vendas||[]).filter(s=>s.installmentPlan&&(!clientId||s.clienteId===clientId));}
   function button(clientId){return available()&&sales(clientId).length?`<button type="button" class="btn btn-light" data-installment-client="${esc(clientId)}">Parcelas e recebimentos</button>`:'';}
   function csv(clientId){if(!available())throw Error('Sem acesso às parcelas neste contexto.');const records=[['Venda','Cliente','Parcela','Vencimento','Valor','Recebido','Saldo','Status']];for(const s of sales(clientId))for(const r of InstallmentPlan.rows(s))records.push([s.id,s.clienteNome,r.number||'Entrada',r.dueDate,(r.amountCents/100).toFixed(2),(r.paidCents/100).toFixed(2),(r.remainingCents/100).toFixed(2),labels[r.status]]);return records.map(row=>row.map(v=>'"'+String(v).replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(';')).join('\r\n');}
-  function open(clientId){if(!available())return window.Utils?.toast?.('Crediário indisponível neste contexto de acesso.',true);const ticket=window.TeamAccess?.captureSession?.();const assertSession=()=>window.TeamAccess?.assertSession?.(ticket);const root=document.querySelector('#modal');if(!root)return;const list=sales(clientId);root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="installment-title"><header class="modal-head"><h2 id="installment-title">Crediário: parcelas e recebimentos</h2><button class="btn btn-light" data-installment-close>Fechar</button></header><div class="modal-body viewport-scroll"><p>O Fiado exigível inclui compras tradicionais e parcelas vencidas. Parcelas futuras permanecem separadas. Valores locais aguardando sincronização não são confirmação na nuvem.</p>${list.map(s=>{const history=(DB.carregar().pagamentos||[]).filter(p=>(p.allocations||[]).some(a=>a.saleId===s.id));return `<article>${customerSummary(s.clienteId)}<h3>${esc(s.clienteNome)} · venda ${esc(s.id)}</h3>${summary(s)}${Number(s.creditRemainingAmount)>0&&!s.deletedAt&&s.active!==false&&window.TeamAccess?.has?.('customers.receiveDebt')?`<button class="btn btn-primary" data-installment-receive="${esc(s.id)}">Registrar Pix ou dinheiro recebido</button>`:''}<h4>Histórico de recebimentos</h4>${history.map(p=>`<p>${esc(p.data)} · ${money(InstallmentPlan.cents(p.valor))} · ${esc(p.paymentMethod)} · ${p.financialAppliedAt?'Confirmado':'Aguardando confirmação'} <button class="btn btn-light" data-receipt-open="${esc(p.id)}" data-receipt-client="${esc(s.clienteId)}" data-receipt-operation="${esc(p.operationId)}">Comprovante</button></p>`).join('')||'<p>Nenhum recebimento registrado.</p>'}</article>`;}).join('')||'<p>Nenhuma venda parcelada neste aparelho.</p>'}</div><footer class="modal-foot"><button class="btn btn-light" data-installment-export>Exportar parcelas (CSV)</button></footer></section></div>`;
+  function open(clientId){if(!available())return window.Utils?.toast?.('Crediário indisponível neste contexto de acesso.',true);const ticket=window.TeamAccess?.captureSession?.();const assertSession=()=>window.TeamAccess?.assertSession?.(ticket);const root=document.querySelector('#modal');if(!root)return;const list=sales(clientId);root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="installment-title"><header class="modal-head"><h2 id="installment-title">Crediário: parcelas e recebimentos</h2><button class="btn btn-light" data-installment-close>Fechar</button></header><div class="modal-body viewport-scroll"><p>O Fiado exigível inclui compras tradicionais e parcelas vencidas. Parcelas futuras permanecem separadas. Valores locais aguardando sincronização não são confirmação na nuvem.</p>${list.map(s=>{const history=((window.Clientes?.scopedScreen?.()?window.Clientes.viewData():DB.carregar()).pagamentos||[]).filter(p=>(p.allocations||[]).some(a=>a.saleId===s.id));return `<article>${customerSummary(s.clienteId)}<h3>${esc(s.clienteNome)} · venda ${esc(s.id)}</h3>${summary(s)}${Number(s.creditRemainingAmount)>0&&!s.deletedAt&&s.active!==false&&window.TeamAccess?.has?.('customers.receiveDebt')?`<button class="btn btn-primary" data-installment-receive="${esc(s.id)}">Registrar Pix ou dinheiro recebido</button>`:''}<h4>Histórico de recebimentos</h4>${history.map(p=>`<p>${esc(p.data)} · ${money(InstallmentPlan.cents(p.valor))} · ${esc(p.paymentMethod)} · ${p.financialAppliedAt?'Confirmado':'Aguardando confirmação'} <button class="btn btn-light" data-receipt-open="${esc(p.id)}" data-receipt-client="${esc(s.clienteId)}" data-receipt-operation="${esc(p.operationId)}">Comprovante</button></p>`).join('')||'<p>Nenhum recebimento registrado.</p>'}</article>`;}).join('')||'<p>Nenhuma venda parcelada neste aparelho.</p>'}</div><footer class="modal-foot"><button class="btn btn-light" data-installment-export>Exportar parcelas (CSV)</button></footer></section></div>`;
     root.querySelector('[data-installment-close]').onclick=()=>Modais.fechar();
-    root.querySelectorAll('[data-installment-receive]').forEach(b=>b.onclick=()=>{assertSession();const s=list.find(s=>s.id===b.dataset.installmentReceive);Fiados.openReceive(s.clienteId,{onRecorded:(p,c)=>window.ReceiptMessageUI.open(p,c)});});
+    root.querySelectorAll('[data-installment-receive]').forEach(b=>b.onclick=()=>{assertSession();const s=list.find(s=>s.id===b.dataset.installmentReceive);Fiados.openReceive(s.clienteId,{scoped:window.Clientes?.scopedScreen?.(),onRecorded:(p,c)=>window.ReceiptMessageUI.open(p,c)});});
     root.querySelector('[data-installment-export]').onclick=()=>{assertSession();const url=URL.createObjectURL(new Blob(['\uFEFF'+csv(clientId)],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='crediario-parcelas.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
     if(clientId&&!root.querySelector('[data-fiado-account]'))mountCustomer(clientId);
     window.Modais?.layout?.(root.querySelector('[role=dialog]'));

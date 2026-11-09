@@ -26,7 +26,8 @@
   async function refresh({force=false}={}){
     if(!daily()||!restricted())return state();
     const c=context(),uid=window.FirebaseSession?.user?.uid,key=scope();
-    if(c.loading||c.error||!uid||uid!==c.userProfile?.uid||!c.businessId)return state();
+    const selected=window.SpaceContext?.activeId?.();
+    if(c.loading||c.error||!uid||uid!==c.userProfile?.uid||!c.businessId||selected==='')return state();
     if(pending?.key===key)return pending.promise;
     if(!force&&snapshot?.key===key&&Date.now()-loadedAt<30000)return state();
     if(!force&&failedAt&&Date.now()-failedAt<15000)return state();
@@ -34,7 +35,7 @@
     const epoch=++revision;error='';
     const promise=(async()=>{
       try{
-        const response=await Promise.resolve().then(()=>window.FirebaseCallable('getDailySalesPerformance',{businessId:c.businessId,workspaceGeneration:c.business?.workspaceGeneration??0,spaceId:window.SpaceContext?.homeId?.()||'all_spaces'}));
+        const response=await Promise.resolve().then(()=>window.FirebaseCallable('getDailySalesPerformance',{businessId:c.businessId,workspaceGeneration:c.business?.workspaceGeneration??0,spaceId:selected || window.SpaceContext?.homeId?.() || 'all_spaces'}));
         if(epoch!==revision||key!==scope()||!daily()||!restricted())return state();
         const data=response?.data;
         if(data?.businessId!==c.businessId||data.workspaceGeneration!==(c.business?.workspaceGeneration??0)||data.day!==day()||data.timezone!==zone()||data.scope!=='daily'||data.source!=='canonical'||!Number.isSafeInteger(data.revenueCents)||!Number.isSafeInteger(data.saleCount)||data.saleCount<0||!Number.isSafeInteger(data.goalCents)||data.goalCents<0||!Array.isArray(data.spaceIds)||c.role!=='owner'&&c.spaceAccess!=='all'&&data.spaceIds.some(id=>!c.allowedSpaceIds?.includes(id)))throw Error('A consulta não corresponde ao acesso e ao dia atuais.');
