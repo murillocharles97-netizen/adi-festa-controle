@@ -2,9 +2,10 @@
 
 const assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
+const {readFileSync}=require('node:fs');
 const {test,after}=require('node:test');
 const {initializeTestEnvironment,assertFails,assertSucceeds}=require('@firebase/rules-unit-testing');
-const {doc,getDoc,updateDoc}=require('firebase/firestore');
+const {doc,getDoc,getDocs,collection,query,where,limit,updateDoc}=require('firebase/firestore');
 const {createRequire}=require('node:module');
 const adminRequire=createRequire(require.resolve('../../functions/package.json'));
 const {initializeApp,deleteApp}=adminRequire('firebase-admin/app');
@@ -22,7 +23,7 @@ const db=getFirestore(app);
 const deps={FieldValue,Timestamp};
 const onboarding=onboardingService(db,{...deps,professionalLimits:{users:8,products:50,clients:50,monthlySales:500}});
 const team=teamAccessService(db,{...deps,appUrl:'http://localhost'});
-const rules=initializeTestEnvironment({projectId,firestore:{host,port:Number(port)}});
+const rules=initializeTestEnvironment({projectId,firestore:{host,port:Number(port),rules:readFileSync('firestore.v228.rules','utf8')}});
 after(async()=>{await (await rules).cleanup();await db.terminate();await deleteApp(app);});
 const request=(uid,data={})=>({auth:{uid,token:{email:uid+'@example.invalid'}},data});
 const grants={'sales.create':true,'customers.view':true,'products.view':true,'inventory.view':true,'performance.daily':true,'performance.history':false};
@@ -91,4 +92,54 @@ test('legacy public portal and cross-business requests do not change policy or c
   await assert.rejects(team.createInvite(request(other.uid,{...c.data,confirmReadPolicyTransition:true})),{code:'permission-denied'});
   assert.equal((await c.ref.get()).data().operationalReadPolicyVersion,undefined);
   assert.equal((await c.ref.collection('teamInvites').get()).size,0);
+});
+
+test('all-space sellers list current and future spaces without access to financial history or another business',async()=>{
+  const c=await company(),other=await company(),env=await rules;
+  const base={type:'business',linkedBusinessId:c.bid,businessId:c.bid,active:true,status:'active',ownerUid:c.uid,globalSpaceSchemaVersion:1,capabilities:{sales:true,products:true,inventory:true}};
+  const first='space-'+randomUUID(),second='space-'+randomUUID(),future='space-'+randomUUID();
+  await db.doc('financialSpaces/'+first).set({...base,id:first,name:'Primeiro'});
+  const allInvite=await c.invite();
+  await team.acceptInvite(request(c.seller,{token:new URL(allInvite.inviteUrl).searchParams.get('teamInvite')}));
+  const selectedUid='selected-'+randomUUID();
+  const selectedInvite=await c.invite({email:selectedUid+'@example.invalid',spaceAccess:'selected',allowedSpaceIds:[first]});
+  await team.acceptInvite(request(selectedUid,{token:new URL(selectedInvite.inviteUrl).searchParams.get('teamInvite')}));
+  const all=env.authenticatedContext(c.seller).firestore(),selected=env.authenticatedContext(selectedUid).firestore();
+  const listing=client=>getDocs(query(collection(client,'financialSpaces'),where('linkedBusinessId','==',c.bid),where('type','==','business'),where('active','==',true),limit(150)));
+  assert.equal((await assertSucceeds(listing(all))).size,1);
+  await assertSucceeds(getDoc(doc(selected,'financialSpaces',first)));
+  await db.doc('financialSpaces/'+second).set({...base,id:second,name:'Segundo'});
+  assert.equal((await assertSucceeds(listing(all))).size,2);
+  await assertFails(getDoc(doc(selected,'financialSpaces',second)));
+  await assertFails(listing(selected));
+  await db.doc('financialSpaces/'+future).set({...base,id:future,name:'Futuro'});
+  assert.equal((await assertSucceeds(listing(all))).size,3);
+  await assertFails(getDoc(doc(selected,'financialSpaces',future)));
+  await assertFails(listing(env.unauthenticatedContext().firestore()));
+  const loggedAgain=env.authenticatedContext(c.seller).firestore();
+  assert.equal((await assertSucceeds(listing(loggedAgain))).size,3);
+  const foreign='space-'+randomUUID();
+  await db.doc('financialSpaces/'+foreign).set({...base,id:foreign,businessId:other.bid,linkedBusinessId:other.bid,ownerUid:other.uid});
+  await assertFails(getDoc(doc(all,'financialSpaces',foreign)));
+  await assertFails(getDocs(query(collection(all,'financialSpaces'),where('linkedBusinessId','==',other.bid),where('type','==','business'),where('active','==',true))));
+  await assertFails(getDocs(collection(all,'financialSpaces')));
+  const entry=db.doc('financialSpaces/'+first+'/financialAccounts/old');
+  await entry.set({businessId:c.bid,valor:100});
+  await assertFails(getDoc(doc(all,entry.path)));
+  await assertFails(updateDoc(doc(all,'financialSpaces',first),{name:'Não permitido'}));
+  await c.ref.collection('members').doc(c.seller).update({status:'disabled'});
+  await assertFails(listing(all));
+});
+
+test('V228 Rules only add the business space metadata listing already authorized by direct reads',()=>{
+  const prior=readFileSync('firestore.v227.rules','utf8').replaceAll('\r\n','\n');
+  const candidate=readFileSync('firestore.v228.rules','utf8').replaceAll('\r\n','\n');
+  const addition=`            // All-space members may list business space metadata. A list cannot
+            // prove the wildcard ID checks required by canAccessSpace.
+            || (activeMember(resource.data.linkedBusinessId)
+              && activeBusiness(resource.data.linkedBusinessId)
+              && teamMember(resource.data.linkedBusinessId).get('spaceAccess','selected') == 'all')
+`;
+  assert.ok(candidate.includes(addition));
+  assert.equal(candidate.replace(addition,''),prior);
 });
