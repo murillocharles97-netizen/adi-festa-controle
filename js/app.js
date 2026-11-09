@@ -1433,30 +1433,7 @@
     location.protocol.startsWith("http") &&
     !["localhost", "127.0.0.1"].includes(location.hostname)
   )
-    navigator.serviceWorker
-      .register("./service-worker.js")
-      .then((registration) => {
-        const offerUpdate = worker => window.PwaUpdate.offer(worker);
-        if (registration.waiting) offerUpdate(registration.waiting);
-        registration.addEventListener("updatefound", () => {
-          const worker = registration.installing;
-          worker?.addEventListener("statechange", () => {
-            if (
-              worker.state === "installed" &&
-              navigator.serviceWorker.controller
-            )
-              offerUpdate(worker);
-          });
-        });
-        let refreshing = false;
-        navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (!refreshing) {
-            refreshing = true;
-            window.PwaUpdate.reload();
-          }
-        });
-      })
-      .catch((error) => console.error("[Service worker registration]", error));
+    window.PwaUpdate.register().catch(error => console.error("[Service worker registration]", error));
   let appRouterStarted = false,
     pageRuntime = null,
     financialModulePromise = null,

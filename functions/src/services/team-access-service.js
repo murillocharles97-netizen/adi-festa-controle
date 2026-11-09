@@ -6,6 +6,7 @@ const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable}=require('./workspace-reset-policy');
 const {workspaceWriteFence}=require('./workspace-write-fence');
 const Policy=require('../shared/permission-policy');
+const Privacy=require('../shared/operational-privacy-policy');
 
 const PERMISSIONS=Policy.KEYS;
 const ROLE_PRESETS=Object.freeze({
@@ -138,15 +139,37 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const data=invite.data(),expired=data.expiresAt?.toMillis?.()<=Date.now();
     return{businessName:text(business.data()?.name,120),name:text(data.name,120),email:email(data.email),role:data.role,status:expired?'expired':data.status,expiresAt:data.expiresAt?.toDate?.().toISOString()||null};
   }
+  async function needsInviteReadPolicy(transaction,context,businessId,confirmed){
+    const company=(await transaction.get(context.businessRef)).data();
+    const access=computeAccess(company.subscription||{});
+    if(company.active!==true||!access.canMutate||(!access.unlimited&&!access.features.teamManagement))
+      throw new HttpsError('failed-precondition','Equipe está disponível no plano Pro.');
+    const version=company.operationalReadPolicyVersion??0;
+    if(version===1)return false;
+    if(version!==0||context.uid!==company.ownerId||context.member.role!=='owner'||!confirmed)
+      throw new HttpsError('failed-precondition','O proprietário precisa confirmar a proteção do histórico antes deste convite.');
+    // The policy also closes anonymous legacy portal history. Do not change an
+    // existing public link as a side effect of creating a staff invitation.
+    const catalogs=await transaction.get(db.collection('publicCatalogs').where('businessId','==',businessId).limit(51));
+    if(catalogs.size>50)throw new HttpsError('failed-precondition','A proteção do histórico precisa de uma revisão dos links antigos. Procure o suporte antes de enviar o convite.');
+    const legacy=catalogs.docs.filter(doc=>doc.data().legacyStoreRetired!==true);
+    const bindings=await Promise.all(legacy.map(doc=>transaction.get(db.doc(`catalogStoreBindings/${doc.id}`))));
+    if(bindings.some(binding=>!binding.exists))
+      throw new HttpsError('failed-precondition','Esta empresa ainda usa um portal antigo. Procure o suporte para revisar os links antes de convidar alguém sem acesso ao histórico.');
+    return true;
+  }
   async function createInvite(request){
     const businessId=text(request.data?.businessId,128),context=await actorContext(request,businessId),role=text(request.data?.role,40).toLowerCase(),inviteEmail=email(request.data?.email),name=text(request.data?.name,120),spaceAccess=request.data?.spaceAccess==='all'?'all':'selected';
     if(!VALID_ROLES.has(role)||!/^\S+@\S+\.\S+$/.test(inviteEmail)||!name)throw new HttpsError('invalid-argument','Preencha nome, e-mail válido e cargo.');
     if(role==='owner'&&context.member.role!=='owner')throw new HttpsError('permission-denied','Somente um proprietário pode convidar outro proprietário.');
     const permissionsVersion=request.data?.permissionsVersion??1;
-    if(![1,2].includes(permissionsVersion))throw new HttpsError('invalid-argument','Versão de permissões inválida.');
-    if(permissionsVersion===2&&(!request.data?.permissions||typeof request.data.permissions!=='object'||Array.isArray(request.data.permissions)))throw new HttpsError('invalid-argument','Revise e confirme as permissões explícitas do convite.');
+    if(![1,2,3].includes(permissionsVersion))throw new HttpsError('invalid-argument','Versão de permissões inválida.');
+    if(permissionsVersion>=2&&(!request.data?.permissions||typeof request.data.permissions!=='object'||Array.isArray(request.data.permissions)))throw new HttpsError('invalid-argument','Revise e confirme as permissões explícitas do convite.');
+    if(permissionsVersion===3&&request.data?.permissions?.['performance.history']===true&&request.data?.permissions?.['performance.daily']!==true)throw new HttpsError('invalid-argument','Ative Visualizar vendas e meta do dia antes do histórico.');
     const allowedSpaceIds=await validateSpaces(businessId,spaceAccess,request.data?.allowedSpaceIds),permissions=normalizedPermissions(role,request.data?.permissions,permissionsVersion),raw=crypto.randomBytes(32).toString('base64url'),hash=tokenHash(raw),inviteId=hash.slice(0,28),now=Timestamp.now(),expiresAt=Timestamp.fromMillis(now.toMillis()+7*24*60*60*1000),ref=db.doc(`businesses/${businessId}/teamInvites/${inviteId}`);
-    if(permissionsVersion===2&&['customers.create','customers.edit','customers.archive'].some(key=>permissions[key]&&!permissions['customers.view']))throw new HttpsError('invalid-argument','Ative Ver clientes antes das ações de clientes.');
+    if(permissionsVersion>=2&&['customers.create','customers.edit','customers.archive'].some(key=>permissions[key]&&!permissions['customers.view']))throw new HttpsError('invalid-argument','Ative Ver clientes antes das ações de clientes.');
+    const inviteRestricted=Privacy.restricted({role,permissionsVersion,permissions});
+    if(require('../shared/operational-privacy-policy').incompatibleGrants({role,permissionsVersion,permissions}).length)throw new HttpsError('invalid-argument','O perfil ainda autoriza dados gerenciais em Financeiro, custos, lucro, relatórios ou configurações. Revise esses acessos explicitamente antes de limitar o histórico.');
     if(context.member.role!=='owner'&&PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key)))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
     const replaceInviteId=text(request.data?.replaceInviteId,128);
     if(replaceInviteId&& !/^[a-zA-Z0-9_-]+$/.test(replaceInviteId))throw new HttpsError('invalid-argument','Convite inválido.');
@@ -154,6 +177,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     await refreshActor(transaction,context,businessId);
     assertDelegatedSpaces(context,spaceAccess,allowedSpaceIds);
     if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied',Policy.MESSAGE);
+    const provision=inviteRestricted&&await needsInviteReadPolicy(transaction,context,businessId,request.data?.confirmReadPolicyTransition===true);
     const duplicate=await transaction.get(db.collection(`businesses/${businessId}/members`).where('email','==',inviteEmail).where('status','==','active').limit(1));
     if(!duplicate.empty)throw new HttpsError('already-exists','Este e-mail já pertence à equipe ativa.');
     const [activeMembers,pendingInvites]=await Promise.all([
@@ -168,6 +192,11 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const seats=activeMembers.size+liveInvites.filter(item=>item.id!==replaceInviteId).length;
     if(Number.isFinite(limit)&&limit>=0&&seats>=limit)throw new HttpsError('resource-exhausted',`Seu plano permite até ${limit} membro(s) de equipe.`);
     const batch=transaction;
+    if(provision){
+      batch.update(context.businessRef,{operationalReadPolicyVersion:1});
+      const policyAudit=db.doc(`businesses/${businessId}/auditLogs/operational_read_policy_v1`);
+      batch.create(policyAudit,{id:policyAudit.id,businessId,type:'operational_read_policy_enabled',actorUid:context.uid,createdAt:now,schemaVersion:1});
+    }
     if(replacing)batch.update(replacing.ref,{status:'replaced',replacedBy:inviteId,updatedAt:now});
     batch.set(ref,{id:inviteId,businessId,workspaceGeneration:request.data?.workspaceGeneration??0,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,permissions,permissionsVersion,tokenHash:hash,expiresAt,createdAt:now,createdBy:context.uid,updatedAt:now,schemaVersion:1});
     batch.set(db.doc(`teamInviteTokens/${hash}`),{businessId,inviteId,expiresAt,createdAt:now},{merge:false});
@@ -230,13 +259,19 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
       }else allowedSpaceIds=[];
       assertDelegatedSpaces(context,spaceAccess,allowedSpaceIds);
       const version=request.data?.permissionsVersion??current.permissionsVersion??1;
-      if(![1,2].includes(version)||Number(current.permissionsVersion||1)>version)throw new HttpsError('invalid-argument','Versão de permissões inválida. Atualize o aplicativo.');
+      if(![1,2,3].includes(version)||Number(current.permissionsVersion||1)>version)throw new HttpsError('invalid-argument','Versão de permissões inválida. Atualize o aplicativo.');
       // Old editors cannot silently erase granular grants or re-enable inherited access.
       const incoming=request.data?.permissions,source=incoming===undefined?current.permissions:incoming;
-      if(incoming&&current.permissionsVersion===2&&request.data?.permissionsVersion!==2&&['customers.create','customers.archive'].some(key=>!Object.hasOwn(incoming,key)))throw new HttpsError('failed-precondition','Atualize a VECONI para editar permissões V2. Nenhuma alteração foi salva.');
+      if(incoming&&Number(current.permissionsVersion)>=2&&Number(request.data?.permissionsVersion||1)<2&&['customers.create','customers.archive'].some(key=>!Object.hasOwn(incoming,key)))throw new HttpsError('failed-precondition','Atualize a VECONI para editar permissões V2. Nenhuma alteração foi salva.');
+      if (Number(current.permissionsVersion || 1) >= 3 && incoming && (request.data?.permissionsVersion !== 3 || ['performance.daily','performance.history'].some(key=>!Object.hasOwn(incoming,key))))
+        throw new HttpsError('failed-precondition','Atualize a VECONI para preservar os controles de desempenho. Nenhuma alteração foi salva.');
+      if(version===3&&source?.['performance.history']===true&&source?.['performance.daily']!==true)throw new HttpsError('invalid-argument','Ative Visualizar vendas e meta do dia antes do histórico.');
       const permissions=incoming===undefined&&Array.isArray(source)?source:normalizedPermissions(role,source??{},version);
       for(const key of ['customers.create','customers.edit','customers.archive'])if(permissions[key]&&!permissions['customers.view'])throw new HttpsError('invalid-argument','Ative Ver clientes antes das ações de clientes.');
       if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
+      const nextAccess={role,permissionsVersion:version,permissions};
+      if(require('../shared/operational-privacy-policy').incompatibleGrants(nextAccess).length)throw new HttpsError('invalid-argument','Este perfil ainda autoriza dados gerenciais. Revise Financeiro, custos, lucro, relatórios e configurações explicitamente; nenhum acesso foi alterado.');
+      if(require('../shared/operational-privacy-policy').restricted(nextAccess)&&!require('../shared/operational-privacy-policy').restricted(current)&&(context.business.operationalReadPolicyVersion!==1||request.data?.confirmReadPolicyTransition!==true))throw new HttpsError('failed-precondition','Antes de restringir, ative os leitores e Rules V224 e confirme os aparelhos, preservando as filas.');
       const now=FieldValue.serverTimestamp(),patch={name:text(request.data?.name??current.name,120),role,status,spaceAccess,allowedSpaceIds,permissions,permissionsVersion:version,updatedAt:now,updatedBy:context.uid};
       transaction.set(targetRef,patch,{merge:true});
       transaction.set(db.doc(`users/${targetUid}`),{name:patch.name,role,permissions,permissionsVersion:version,active:status==='active',updatedAt:now},{merge:true});

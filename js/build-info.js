@@ -15,7 +15,7 @@
     commit,
     shortCommit,
     builtAt,
-    release: "227",
+    release: "228",
     installmentCreationPaused: false,
     hotfix: "ui-regression-v1",
     billingCheckoutPaused: false,
