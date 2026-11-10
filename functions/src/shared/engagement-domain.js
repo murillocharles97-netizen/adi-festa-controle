@@ -1597,10 +1597,11 @@ window.CustomerSubscriptions = (() => {
     .filter((item) => item.productId === productId && !["cancelled"].includes(item.status));
   const originSpace = (subscription) => {
     const { spaceId, financialSpaceId } = subscription || {};
-    return spaceId && financialSpaceId && spaceId !== financialSpaceId ? null : spaceId || financialSpaceId || null;
+    return spaceId && (!financialSpaceId || spaceId === financialSpaceId) ? spaceId : null;
   };
   const timestampValue = (value) => value?.toDate ? value.toDate().toISOString() : value || null;
   const renewalSnapshot = (subscription) => ({
+    id: subscription.id,
     expiresAt: timestampValue(subscription.expiresAt),
     lastSaleId: subscription.lastSaleId || null,
     status: subscription.status || null,
@@ -1625,7 +1626,7 @@ window.CustomerSubscriptions = (() => {
     return subscription;
   };
   const preview = ({ subscription, at = now(), durationValue, durationUnit, legacy = false }) => {
-    const normalized = duration(durationValue, durationUnit), expiry = timestampValue(subscription?.expiresAt),
+    const normalized = duration(durationValue, durationUnit), expiry = legacy ? subscription?.expiresAt : timestampValue(subscription?.expiresAt),
       calendar = !legacy && calendarUnits.has(normalized.unit),
       currentExpiry = expiry ? (calendar ? calendarInstant(expiry) : new Date(expiry)) : null,
       reference = calendar ? calendarInstant(at) : new Date(at);
@@ -1664,9 +1665,12 @@ window.CustomerSubscriptions = (() => {
       const product = (db.produtos || []).find((entry) => entry.id === item.produtoId);
       if (product?.productType !== "recurring" && !item.recurringActivation) return;
       const config = item.recurringActivation || {}, normalized = duration(config.durationValue ?? product?.durationValue, config.durationUnit ?? product?.durationUnit);
-      if (config.renewalPolicyVersion != null && config.renewalPolicyVersion !== renewalPolicyVersion)
+      if ((Object.hasOwn(config, "renewalPolicyVersion") || Object.hasOwn(config, "expectedSubscription")) &&
+          config.renewalPolicyVersion !== renewalPolicyVersion)
         throw Error("A política de renovação desta venda não é reconhecida.");
       const versioned = config.renewalPolicyVersion === renewalPolicyVersion;
+      if (versioned && config.subscriptionId && item.subscriptionId && config.subscriptionId !== item.subscriptionId)
+        throw Error("O identificador da vigência diverge da renovação selecionada.");
       const subscriptionId = config.subscriptionId || item.subscriptionId || null;
       const existing = subscriptionId ? db.customerSubscriptions.find((entry) => entry.id === subscriptionId) : null;
       if (existing && existing.clientId !== clientId) throw Error("A vigência selecionada pertence a outro cliente.");
@@ -1678,6 +1682,8 @@ window.CustomerSubscriptions = (() => {
         if (!config.expectedSubscription) throw Error("Confira novamente a vigência selecionada.");
         requireRenewable(existing, { clientId, productId: item.produtoId, businessId: DB.getBusinessId?.(),
           spaceId: sale.spaceId, expected: config.expectedSubscription });
+      } else if (versioned && (existing || config.expectedSubscription != null)) {
+        throw Error("Uma ativação não pode reutilizar uma vigência existente.");
       }
       const previous = existing ? structuredClone(existing) : null;
       const id = existing?.id || subscriptionId || Utils.uuid();

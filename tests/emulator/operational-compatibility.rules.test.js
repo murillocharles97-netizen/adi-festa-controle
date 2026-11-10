@@ -3,7 +3,10 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
 const req=require('node:module').createRequire(require('node:path').resolve('functions/package.json'));
 const {initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore}=req('firebase-admin/firestore');
-const {operationalCommitService}=require('../../functions/src/services/operational-commit-service');
+const operationalSource=process.env.VECONI_TEST_FUNCTION_SOURCE;
+const {operationalCommitService}=operationalSource
+ ?require(require('node:path').resolve(operationalSource,'src/services/operational-commit-service'))
+ :require('../../functions/src/services/operational-commit-service');
 const {financialMaintenanceService}=require('../../functions/src/services/financial-maintenance-service');
 const {harness,bridge}=require('../helpers/fiado-cancellation-harness.cjs');
 if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Loopback Emulator required, never production');
@@ -121,6 +124,35 @@ test('recurring activation, renewal and manual close work with immutable transit
 test('subscription cannot be created/extended without its legitimate sale or status transition',async()=>{
  const c=await setup();domains(c);const before=structuredClone(c.h.data());c.h.data().customerSubscriptions=[{id:'forged',businessId:c.bid,clientId:'qa-client',spaceId:c.space,productId:'qa-product',status:'active',expiresAt:'2099-01-01'}];await assert.rejects(c.commit(c.packet(before)));assert.equal((await c.root.collection('customerSubscriptions').get()).size,0);
 });
+test('legacy offline renewal keeps the original calculation and authorization without a policy marker', async () => {
+ const c = await setup();
+ domains(c);
+ const product = Object.assign(c.h.data().produtos[0], { productType: 'recurring', itemKind: 'service', durationValue: 1, durationUnit: 'months' });
+ await c.set('products', 'qa-product', bridge(product));
+ await c.commit(c.h.sell({ status: 'pago' }).packet);
+ const sub = c.h.data().customerSubscriptions[0];
+ const legacy = { expiresAt: '2096-01-31T15:00:00.000Z', financialSpaceId: c.other };
+ Object.assign(sub, legacy);
+ await c.root.collection('customerSubscriptions').doc(sub.id).update(legacy);
+ const before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
+ c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
+   itens: [{ produtoId: 'qa-product', quantidade: 1, precoFinalUnitario: 14, precoOriginal: 14, recurringActivation: {
+     subscriptionId: sub.id, durationValue: 1, durationUnit: 'months',
+   } }],
+ });
+ const packet = c.packet(before, operationId, 'sale');
+ packet.payloadVersion = 4;
+ await c.commit(packet);
+ await c.commit(packet);
+ const saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, '2096-03-02T15:00:00.000Z');
+ assert.equal(saved.spaceId, c.space);
+ assert.equal(saved.financialSpaceId, c.other);
+ assert.equal(saved.renewalCalendarAnchor, undefined);
+ assert.equal(saved.renewalCount, 1);
+ assert.equal((await c.root.collection('sales').get()).size, 2);
+ assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 2);
+});
 test('versioned renewal persists the selected contract and calendar anchor once', async () => {
  const c = await setup();
  domains(c);
@@ -131,6 +163,9 @@ test('versioned renewal persists the selected contract and calendar anchor once'
  const sub = c.h.data().customerSubscriptions[0];
  sub.expiresAt = '2096-01-31T15:00:00.000Z';
  await c.root.collection('customerSubscriptions').doc(sub.id).update({ expiresAt: sub.expiresAt });
+ const other = { ...sub, id: 'qa-other-contract' };
+ await c.set('customerSubscriptions', other.id, bridge(other));
+ c.h.data().customerSubscriptions.push(other);
  const before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
  const domain = c.h.c.CustomerSubscriptions;
  const sale = c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
@@ -140,6 +175,29 @@ test('versioned renewal persists the selected contract and calendar anchor once'
    } }],
  });
  const renewal = c.packet(before, operationId, 'sale');
+ const saleWrite = packet => packet.payload.writes.find(write => write.entityType === 'sales');
+ const substituted = structuredClone(renewal);
+ saleWrite(substituted).data.itens[0].recurringActivation.subscriptionId = other.id;
+ await assert.rejects(c.commit(substituted), /identificador da vigência/);
+ saleWrite(substituted).data.itens[0].subscriptionId = other.id;
+ await assert.rejects(c.commit(substituted), /identificador da vigência/);
+ const stripped = structuredClone(renewal);
+ delete saleWrite(stripped).data.itens[0].recurringActivation.renewalPolicyVersion;
+ await assert.rejects(c.commit(stripped), /Política de renovação inválida/);
+ delete saleWrite(stripped).data.itens[0].recurringActivation.expectedSubscription;
+ await assert.rejects(c.commit(stripped), /referência de vencimento exige/);
+ const omitted = structuredClone(renewal);
+ omitted.payload.writes = omitted.payload.writes.filter(write => !write.entityType.startsWith('customerSubscription'));
+ await assert.rejects(c.commit(omitted), /gravação da vigência e do evento/);
+ const storedRef = c.root.collection('customerSubscriptions').doc(sub.id);
+ await storedRef.update({ spaceId: c.other });
+ await assert.rejects(c.commit(renewal), /Espaço não autorizado/);
+ await storedRef.update({ spaceId: null, financialSpaceId: c.space });
+ await assert.rejects(c.commit(renewal), /Espaço inválido/);
+ await storedRef.update({ spaceId: c.space, financialSpaceId: c.other });
+ await assert.rejects(c.commit(renewal), /vigência mudou em outra sessão/i);
+ await storedRef.update({ financialSpaceId: null });
+ assert.equal((await c.root.collection('sales').get()).size, 1);
  await c.commit(renewal);
  await c.commit(renewal);
  const saved = await c.read('customerSubscriptions', sub.id);
@@ -147,6 +205,7 @@ test('versioned renewal persists the selected contract and calendar anchor once'
  assert.equal(saved.expiresAt, '2096-02-29T15:00:00.000Z');
  assert.deepEqual(saved.renewalCalendarAnchor, { day: 31, expiresAt: saved.expiresAt });
  assert.equal(saved.renewalCount, 1);
+ assert.equal((await c.read('customerSubscriptions', other.id)).expiresAt, '2096-01-31T15:00:00.000Z');
  assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 2);
  assert.equal((await c.root.collection('sales').get()).size, 2);
  const cancellation = c.h.undo(sale.id);
