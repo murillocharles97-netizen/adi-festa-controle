@@ -5165,6 +5165,15 @@ async function queryCustomerSubscriptions(options = {}) {
       : "",
     max = Math.min(50, Math.max(1, Number(options.limit || 20))),
     filters = [];
+  if (options.subscriptionId) {
+    if (!clientId || !spaceView) throw Error("Informe o cliente e o espaço da renovação.");
+    const snapshot = await readOperationalDocument("customerSubscriptions", options.subscriptionId);
+    assertCloudReadScope(scope, spaceView);
+    const item = snapshot.exists() ? cleanCloudItem({ ...snapshot.data(), id: snapshot.id }) : null;
+    if (!item || item.clientId !== clientId || item.deletedAt || !window.SpaceContext?.showsRenewal?.(item)) return [];
+    applyCloudCollection("customerSubscriptions", [item], { authoritative: false });
+    return [item];
+  }
   if (!clientId && !status && !lastRenewedFrom)
     throw Error("Informe um cliente, status ou período de renovação.");
   if (clientId) filters.push({ field: "clientId", operator: "==", value: clientId });

@@ -121,6 +121,41 @@ test('recurring activation, renewal and manual close work with immutable transit
 test('subscription cannot be created/extended without its legitimate sale or status transition',async()=>{
  const c=await setup();domains(c);const before=structuredClone(c.h.data());c.h.data().customerSubscriptions=[{id:'forged',businessId:c.bid,clientId:'qa-client',spaceId:c.space,productId:'qa-product',status:'active',expiresAt:'2099-01-01'}];await assert.rejects(c.commit(c.packet(before)));assert.equal((await c.root.collection('customerSubscriptions').get()).size,0);
 });
+test('versioned renewal persists the selected contract and calendar anchor once', async () => {
+ const c = await setup();
+ domains(c);
+ const product = Object.assign(c.h.data().produtos[0], { productType: 'recurring', itemKind: 'service', durationValue: 1, durationUnit: 'months' });
+ await c.set('products', 'qa-product', bridge(product));
+ const { packet } = c.h.sell({ status: 'pago' });
+ await c.commit(packet);
+ const sub = c.h.data().customerSubscriptions[0];
+ sub.expiresAt = '2096-01-31T15:00:00.000Z';
+ await c.root.collection('customerSubscriptions').doc(sub.id).update({ expiresAt: sub.expiresAt });
+ const before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
+ const domain = c.h.c.CustomerSubscriptions;
+ const sale = c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
+   itens: [{ produtoId: 'qa-product', quantidade: 1, precoFinalUnitario: 14, precoOriginal: 14, recurringActivation: {
+     subscriptionId: sub.id, durationValue: 1, durationUnit: 'months', renewalPolicyVersion: domain.renewalPolicyVersion,
+     expectedSubscription: domain.renewalSnapshot(sub),
+   } }],
+ });
+ const renewal = c.packet(before, operationId, 'sale');
+ await c.commit(renewal);
+ await c.commit(renewal);
+ const saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.spaceId, c.space);
+ assert.equal(saved.expiresAt, '2096-02-29T15:00:00.000Z');
+ assert.deepEqual(saved.renewalCalendarAnchor, { day: 31, expiresAt: saved.expiresAt });
+ assert.equal(saved.renewalCount, 1);
+ assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 2);
+ assert.equal((await c.root.collection('sales').get()).size, 2);
+ const cancellation = c.h.undo(sale.id);
+ await c.commit(cancellation.packet);
+ const restored = await c.read('customerSubscriptions', sub.id);
+ assert.equal(restored.expiresAt, '2096-01-31T15:00:00.000Z');
+ assert.equal(restored.renewalCalendarAnchor, null);
+ assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 3);
+});
 for(const mode of ['explicit','foreign','ambiguous'])test(`all_spaces initial stock origin captured before upload: ${mode}`,async()=>{
  // A restricted editor may not publish a new product to every space. The
  // positive path uses explicit all-space authorization, not a scope bypass.

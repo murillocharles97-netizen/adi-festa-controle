@@ -1545,10 +1545,38 @@ window.CustomerSubscriptions = (() => {
     value: Math.max(1, Math.round(number(value, 30))),
     unit: UNITS.has(unit) ? unit : "days",
   });
-  const addDuration = (dateValue, value, unit) => {
-    const start = new Date(dateValue || Date.now()), next = new Date(start), normalized = duration(value, unit);
+  const calendarUnits = new Set(["months", "years"]);
+  const renewalPolicyVersion = 1;
+  const calendarFormat = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "numeric", day: "numeric",
+    hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23",
+  });
+  const calendarDate = (instant) => {
+    const parts = Object.fromEntries(calendarFormat.formatToParts(instant).map(({ type, value }) => [type, Number(value)]));
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, instant.getUTCMilliseconds()));
+  };
+  const calendarInstant = (value) => {
+    const instant = new Date(value);
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return instant;
+    // A date without a time denotes the civil date, even when UTC midnight is the previous day in São Paulo.
+    const estimate = new Date(instant.getTime() + 12 * 60 * 60 * 1000);
+    return new Date(estimate.getTime() + instant.getTime() - calendarDate(estimate).getTime());
+  };
+  const addDuration = (dateValue, value, unit, { anchorDay, legacy = false } = {}) => {
+    const normalized = duration(value, unit), calendar = calendarUnits.has(normalized.unit) && !legacy,
+      start = calendar ? calendarInstant(dateValue || Date.now()) : new Date(dateValue || Date.now()), next = new Date(start);
     if (normalized.unit === "days") next.setDate(next.getDate() + normalized.value);
     if (normalized.unit === "weeks") next.setDate(next.getDate() + normalized.value * 7);
+    if (calendar) {
+      const localStart = calendarDate(start), target = new Date(localStart);
+      const months = normalized.value * (normalized.unit === "years" ? 12 : 1);
+      target.setUTCMonth(target.getUTCMonth() + months, 1);
+      const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+      target.setUTCDate(Math.min(anchorDay || localStart.getUTCDate(), lastDay));
+      const candidate = new Date(start.getTime() + target.getTime() - localStart.getTime());
+      const offsetChange = target.getTime() - calendarDate(candidate).getTime();
+      return new Date(candidate.getTime() + offsetChange).toISOString();
+    }
     if (normalized.unit === "months") next.setMonth(next.getMonth() + normalized.value);
     if (normalized.unit === "years") next.setFullYear(next.getFullYear() + normalized.value);
     return next.toISOString();
@@ -1567,10 +1595,48 @@ window.CustomerSubscriptions = (() => {
     .filter((item) => item.productId === productId && String(item.variantId || "") === String(variantId || "") && !["cancelled"].includes(item.status));
   const matchingProduct = (clientId, productId) => forClient(clientId)
     .filter((item) => item.productId === productId && !["cancelled"].includes(item.status));
-  const preview = ({ subscription, at = now(), durationValue, durationUnit }) => {
-    const normalized = duration(durationValue, durationUnit), currentExpiry = subscription?.expiresAt ? new Date(subscription.expiresAt) : null;
-    const base = currentExpiry && currentExpiry.getTime() > new Date(at).getTime() ? currentExpiry.toISOString() : at;
-    return { startsAt: base, expiresAt: addDuration(base, normalized.value, normalized.unit), ...normalized };
+  const originSpace = (subscription) => {
+    const { spaceId, financialSpaceId } = subscription || {};
+    return spaceId && financialSpaceId && spaceId !== financialSpaceId ? null : spaceId || financialSpaceId || null;
+  };
+  const timestampValue = (value) => value?.toDate ? value.toDate().toISOString() : value || null;
+  const renewalSnapshot = (subscription) => ({
+    expiresAt: timestampValue(subscription.expiresAt),
+    lastSaleId: subscription.lastSaleId || null,
+    status: subscription.status || null,
+    variantId: subscription.variantId || null,
+    durationValue: subscription.durationValue ?? null,
+    durationUnit: subscription.durationUnit || null,
+    contractedPrice: subscription.contractedPrice ?? null,
+    label: subscription.label || null,
+    anchorDay: subscription.renewalCalendarAnchor?.day ?? null,
+  });
+  const requireRenewable = (subscription, { clientId, productId, businessId, spaceId, expected } = {}) => {
+    if (!subscription || subscription.active === false || subscription.deletedAt || subscription.status === "cancelled")
+      throw Error("A vigência selecionada não está mais disponível. Volte ao perfil do cliente para conferir.");
+    if (subscription.clientId !== clientId || subscription.productId !== productId ||
+        (subscription.businessId && subscription.businessId !== businessId))
+      throw Error("A vigência selecionada não corresponde ao cliente ou produto desta venda.");
+    const origin = originSpace(subscription);
+    if (!origin) throw Error("O espaço original da vigência não está confirmado. Confira o contrato antes de renovar.");
+    if (origin !== spaceId) throw Error("Renove a vigência no seu espaço original.");
+    if (expected && Object.entries(renewalSnapshot(subscription)).some(([key, value]) => expected[key] !== value))
+      throw Error("A vigência mudou. Volte ao perfil do cliente para conferir a renovação.");
+    return subscription;
+  };
+  const preview = ({ subscription, at = now(), durationValue, durationUnit, legacy = false }) => {
+    const normalized = duration(durationValue, durationUnit), expiry = timestampValue(subscription?.expiresAt),
+      calendar = !legacy && calendarUnits.has(normalized.unit),
+      currentExpiry = expiry ? (calendar ? calendarInstant(expiry) : new Date(expiry)) : null,
+      reference = calendar ? calendarInstant(at) : new Date(at);
+    const continuous = currentExpiry && (legacy ? currentExpiry > reference : currentExpiry >= reference);
+    const base = continuous ? currentExpiry.toISOString() : at;
+    const saved = subscription?.renewalCalendarAnchor;
+    const anchorDay = calendar
+      ? (continuous && timestampValue(saved?.expiresAt) === expiry && Number.isInteger(saved.day) && saved.day >= 1 && saved.day <= 31
+        ? saved.day : calendarDate(calendarInstant(base)).getUTCDate())
+      : null;
+    return { startsAt: base, expiresAt: addDuration(base, normalized.value, normalized.unit, { anchorDay, legacy }), anchorDay, ...normalized };
   };
   const event = (db, subscription, transition, sourceId, details = {}) => {
     db.customerSubscriptionEvents ??= [];
@@ -1598,6 +1664,9 @@ window.CustomerSubscriptions = (() => {
       const product = (db.produtos || []).find((entry) => entry.id === item.produtoId);
       if (product?.productType !== "recurring" && !item.recurringActivation) return;
       const config = item.recurringActivation || {}, normalized = duration(config.durationValue ?? product?.durationValue, config.durationUnit ?? product?.durationUnit);
+      if (config.renewalPolicyVersion != null && config.renewalPolicyVersion !== renewalPolicyVersion)
+        throw Error("A política de renovação desta venda não é reconhecida.");
+      const versioned = config.renewalPolicyVersion === renewalPolicyVersion;
       const subscriptionId = config.subscriptionId || item.subscriptionId || null;
       const existing = subscriptionId ? db.customerSubscriptions.find((entry) => entry.id === subscriptionId) : null;
       if (existing && existing.clientId !== clientId) throw Error("A vigência selecionada pertence a outro cliente.");
@@ -1605,13 +1674,18 @@ window.CustomerSubscriptions = (() => {
         updates.push({ subscriptionId: existing.id, action: item.subscriptionAction || "unchanged", expiresAt: existing.expiresAt, idempotent: true });
         return;
       }
+      if (versioned && config.subscriptionId) {
+        if (!config.expectedSubscription) throw Error("Confira novamente a vigência selecionada.");
+        requireRenewable(existing, { clientId, productId: item.produtoId, businessId: DB.getBusinessId?.(),
+          spaceId: sale.spaceId, expected: config.expectedSubscription });
+      }
       const previous = existing ? structuredClone(existing) : null;
       const id = existing?.id || subscriptionId || Utils.uuid();
-      const dates = preview({ subscription: existing, at: saleDate, durationValue: normalized.value, durationUnit: normalized.unit });
+      const dates = preview({ subscription: existing, at: saleDate, durationValue: normalized.value, durationUnit: normalized.unit, legacy: !versioned });
       const variant = item.variantId ? (db.variacoesProdutos || []).find((entry) => entry.id === item.variantId) : null;
       const next = {
         ...(existing || {}), id, operationId: id, businessId: DB.getBusinessId?.() || null,
-        spaceId: sale.spaceId || existing?.spaceId || null,
+        ...(versioned && existing ? {} : { spaceId: sale.spaceId || existing?.spaceId || null }),
         clientId, productId: item.produtoId, variantId: item.variantId || null,
         label: String(config.label || existing?.label || product?.renewalLabel || product?.nome || "Renovação").trim(),
         status: "active", startedAt: existing?.startedAt || saleDate, expiresAt: dates.expiresAt,
@@ -1623,6 +1697,7 @@ window.CustomerSubscriptions = (() => {
         renewalMessage: config.renewalMessage || existing?.renewalMessage || product?.renewalMessage || "",
         createdAt: existing?.createdAt || saleDate, updatedAt: saleDate, schemaVersion: 14,
       };
+      if (versioned) next.renewalCalendarAnchor = dates.anchorDay ? { day: dates.anchorDay, expiresAt: dates.expiresAt } : null;
       if (existing) Object.assign(existing, next); else db.customerSubscriptions.push(next);
       Object.assign(item, {
         productType: "recurring", subscriptionId: id, subscriptionAction: existing ? "renewal" : "activation",
@@ -1646,7 +1721,12 @@ window.CustomerSubscriptions = (() => {
       const index = (db.customerSubscriptions || []).findIndex((entry) => entry.id === item.subscriptionId), current = index >= 0 ? db.customerSubscriptions[index] : null;
       if (!current || current.lastSaleId !== sale.id) return;
       const previous = item.subscriptionPrevious || null;
-      if (previous) db.customerSubscriptions[index] = previous;
+      if (previous) {
+        // Explicit null clears an anchor when the restored record predates it.
+        db.customerSubscriptions[index] = item.recurringActivation?.renewalPolicyVersion === renewalPolicyVersion
+          ? { ...previous, renewalCalendarAnchor: previous.renewalCalendarAnchor ?? null }
+          : previous;
+      }
       else db.customerSubscriptions.splice(index, 1);
       event(db, current, "sale_reversed", sale.id, { previous: structuredClone(current), next: previous, sourceType: "cancellation" });
       reversed.push(current.id);
@@ -1731,7 +1811,7 @@ window.CustomerSubscriptions = (() => {
       clientIds: [...new Set(due.map((item) => item.clientId).filter(Boolean))],
     };
   }
-  return { duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
+  return { duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, renewalPolicyVersion, originSpace, renewalSnapshot, requireRenewable, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
 })();
 
  return{campaigns:window.CampaignEngineV2,subscriptions:window.CustomerSubscriptions};

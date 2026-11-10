@@ -378,34 +378,98 @@ window.Checkout = (() => {
     };
     window.lucide?.createIcons();
   }
-  const dateLabel = (value) => value ? new Date(value).toLocaleDateString("pt-BR") : "—";
-  async function recurringConfiguration(product, variant = null, source = null) {
+  const dateLabel = (value) => {
+    if (!value) return "—";
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value.split("-").reverse().join("/");
+    return new Date(value).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  };
+  const renewalContext = (clientId, productId) => ({
+    clientId, productId, businessId: DB.getBusinessId?.(), spaceId: selectedSalesSpaceId(),
+  });
+  const renewalScope = () => JSON.stringify([window.SpaceContext?.viewScope?.(), selectedSalesSpaceId()]);
+  let recurringRead;
+  function selectedRenewal(request) {
+    if (request.scope !== renewalScope()) throw Error("O espaço ou a sessão mudou. Volte ao perfil para renovar.");
+    const subscription = CustomerSubscriptions.requireRenewable(CustomerSubscriptions.view.get(request.id),
+      renewalContext(request.clientId, request.productId));
+    if (String(subscription.variantId || "") !== request.variantId)
+      throw Error("A variação da vigência mudou. Volte ao perfil do cliente para conferir.");
+    return subscription;
+  }
+  async function recurringConfiguration(product, variant = null, source = null, request = null) {
     const clientId = document.querySelector("#sale-client")?.value;
-    if (!clientId) {
+    if (!clientId && !request) {
       picker(() => recurringConfiguration(product, variant, source), { requireClient: true, title: "Selecione o cliente da renovação" });
       return;
     }
-    await window.CustomerSubscriptions?.loadForClient?.(clientId);
-    const existing = window.CustomerSubscriptions?.matchingProduct?.(clientId, product.id) || window.CustomerSubscriptions?.matching?.(clientId, product.id, variant?.id || null) || [], modal = document.querySelector("#modal"), defaultDuration = Number(variant?.durationValue || product.durationValue || 30), defaultUnit = variant?.durationUnit || product.durationUnit || "days";
+    const read = recurringRead = {},
+      scope = renewalScope(), context = renewalContext(clientId, product.id),
+      modal = document.querySelector("#modal"), previousModal = modal.firstChild;
+    let existing;
+    try {
+      const remote = request && window.SyncFirebase?.queryCustomerSubscriptions
+        ? await window.SyncFirebase.queryCustomerSubscriptions({ clientId, subscriptionId: request.id, spaceView: true })
+        : await CustomerSubscriptions.loadForClient(clientId);
+      if (recurringRead !== read || modal.firstChild !== previousModal) return;
+      if (Router.atual() !== "vender" || scope !== renewalScope() || document.querySelector("#sale-client")?.value !== clientId)
+        throw Error("O cliente ou o espaço mudou. Abra a renovação novamente.");
+      if (request) {
+        if (clientId !== request.clientId)
+          throw Error("A vigência selecionada não está mais disponível. Volte ao perfil do cliente para conferir.");
+        const remoteRenewal = CustomerSubscriptions.requireRenewable(remote.find(item => item.id === request.id), context);
+        existing = [CustomerSubscriptions.requireRenewable(selectedRenewal(request), {
+          ...context, expected: CustomerSubscriptions.renewalSnapshot(remoteRenewal),
+        })];
+      } else {
+        existing = CustomerSubscriptions.matchingProduct(clientId, product.id).filter(item =>
+          CustomerSubscriptions.originSpace(item) === context.spaceId &&
+          (!item.businessId || item.businessId === context.businessId) && item.active !== false && !item.deletedAt);
+      }
+    } catch (error) {
+      if (recurringRead === read) toast(error.message || "Não foi possível consultar a vigência selecionada.", true);
+      return;
+    }
+    const snapshots = new Map(existing.map(item => [item.id, CustomerSubscriptions.renewalSnapshot(item)])),
+      defaultDuration = Number((request && existing[0].durationValue) || variant?.durationValue || product.durationValue || 30),
+      defaultUnit = (request && existing[0].durationUnit) || variant?.durationUnit || product.durationUnit || "days",
+      spaceName = window.SpaceContext?.selectedSales?.()?.name || context.spaceId;
     const render = () => {
-      const selectedId = modal.querySelector?.('[name="subscriptionChoice"]:checked')?.value || existing[0]?.id || "new", selected = existing.find((item) => item.id === selectedId) || null, durationValue = Number(modal.querySelector?.('[name="durationValue"]')?.value || defaultDuration), durationUnit = modal.querySelector?.('[name="durationUnit"]')?.value || defaultUnit, price = Number(modal.querySelector?.('[name="contractedPrice"]')?.value || selected?.contractedPrice || variant?.price || product.preco || 0), label = modal.querySelector?.('[name="renewalLabel"]')?.value || selected?.label || product.renewalLabel || product.nome, payment = modal.querySelector?.('[name="renewalPayment"]')?.value || window.CheckoutPaymentMethod || "pix", dates = CustomerSubscriptions.preview({ subscription: selected, durationValue, durationUnit });
-      modal.innerHTML = `<div class="modal-bg recurring-sale-bg"><section class="modal-box recurring-sale-sheet" role="dialog" aria-modal="true" aria-labelledby="recurring-sale-title"><header class="modal-head"><div><small>Venda com renovação</small><h3 id="recurring-sale-title">${escapar(product.nome)}${variant ? ` — ${escapar(ProductVariations.displayName(variant))}` : ""}</h3></div><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="modal-body">${existing.length ? `<section class="recurring-existing"><h4>Este cliente já possui esta renovação</h4>${existing.map((item) => { const currentVariant = item.variantId ? ProductVariations.get(item.variantId) : null; return `<label><input type="radio" name="subscriptionChoice" value="${item.id}" ${item.id === selectedId ? "checked" : ""}><span><b>${escapar(item.label)}</b><small>${CustomerSubscriptions.effectiveStatus(item) === "active" ? "Ativa" : "Vencida"}${currentVariant ? ` · ${escapar(ProductVariations.displayName(currentVariant))}` : ""} · até ${dateLabel(item.expiresAt)}</small></span></label>`; }).join("")}<label><input type="radio" name="subscriptionChoice" value="new" ${selectedId === "new" ? "checked" : ""}><span><b>Criar outra</b><small>Nova vigência separada</small></span></label></section>` : ""}<div class="field"><label>Nome para identificação</label><input name="renewalLabel" value="${escapar(label)}" placeholder="Ex.: Casa, Escritório"></div><div class="recurring-form-grid"><div class="field"><label>Período</label><input name="durationValue" type="number" inputmode="numeric" min="1" value="${durationValue}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${durationUnit === "days" ? "selected" : ""}>dias</option><option value="weeks" ${durationUnit === "weeks" ? "selected" : ""}>semanas</option><option value="months" ${durationUnit === "months" ? "selected" : ""}>meses</option><option value="years" ${durationUnit === "years" ? "selected" : ""}>anos</option></select></div><div class="field"><label>Valor</label><input name="contractedPrice" type="number" inputmode="decimal" min="0" step=".01" value="${price.toFixed(2)}"></div><div class="field"><label>Pagamento</label><select name="renewalPayment"><option value="pix" ${payment === "pix" ? "selected" : ""}>Pix / pago</option><option value="dinheiro" ${payment === "dinheiro" ? "selected" : ""}>Dinheiro / pago</option><option value="cartao" ${payment === "cartao" ? "selected" : ""}>Cartão / pago</option><option value="fiado" ${payment === "fiado" ? "selected" : ""}>Fiado</option></select></div></div><section class="recurring-preview"><span><small>${selected ? "Vencimento atual" : "Início"}</small><b>${selected ? dateLabel(selected.expiresAt) : dateLabel(dates.startsAt)}</b></span><i data-lucide="arrow-right"></i><span><small>${selected ? "Renovado até" : "Ativo até"}</small><b>${dateLabel(dates.expiresAt)}</b></span></section></div><footer class="modal-foot"><button class="btn btn-light close">Cancelar</button><button class="btn btn-primary" data-confirm-recurring>${selected ? "Adicionar renovação" : "Adicionar ativação"}</button></footer></section></div>`;
+      const selectedId = request?.id || modal.querySelector?.('[name="subscriptionChoice"]:checked')?.value || existing[0]?.id || "new", selected = existing.find((item) => item.id === selectedId) || null, durationValue = Number(modal.querySelector?.('[name="durationValue"]')?.value || defaultDuration), durationUnit = modal.querySelector?.('[name="durationUnit"]')?.value || defaultUnit, price = Number(modal.querySelector?.('[name="contractedPrice"]')?.value || (selected?.contractedPrice ?? variant?.price ?? product.preco ?? 0)), label = modal.querySelector?.('[name="renewalLabel"]')?.value || selected?.label || product.renewalLabel || product.nome, payment = modal.querySelector?.('[name="renewalPayment"]')?.value || window.CheckoutPaymentMethod || "pix", dates = CustomerSubscriptions.preview({ subscription: selected, durationValue, durationUnit });
+      modal.innerHTML = `<div class="modal-bg recurring-sale-bg"><section class="modal-box recurring-sale-sheet" role="dialog" aria-modal="true" aria-labelledby="recurring-sale-title"><header class="modal-head"><div><small>Venda com renovação</small><h3 id="recurring-sale-title">${escapar(product.nome)}${variant ? ` — ${escapar(ProductVariations.displayName(variant))}` : ""}</h3></div><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="modal-body">${request ? `<section class="recurring-existing"><h4>${escapar(selected.label || product.nome)}</h4><p><b>Cliente</b> ${escapar(clients().getById(clientId)?.nome || "")}</p><p><b>Espaço</b> ${escapar(spaceName)}</p><p><b>Variação</b> ${variant ? escapar(ProductVariations.displayName(variant)) : "Sem variação"}</p></section>` : existing.length ? `<section class="recurring-existing"><h4>Este cliente já possui esta renovação</h4>${existing.map((item) => { const currentVariant = item.variantId ? ProductVariations.get(item.variantId) : null; return `<label><input type="radio" name="subscriptionChoice" value="${item.id}" ${item.id === selectedId ? "checked" : ""}><span><b>${escapar(item.label)}</b><small>${CustomerSubscriptions.effectiveStatus(item) === "active" ? "Ativa" : "Vencida"}${currentVariant ? ` · ${escapar(ProductVariations.displayName(currentVariant))}` : ""} · até ${dateLabel(item.expiresAt)}</small></span></label>`; }).join("")}<label><input type="radio" name="subscriptionChoice" value="new" ${selectedId === "new" ? "checked" : ""}><span><b>Criar outra</b><small>Nova vigência separada</small></span></label></section>` : ""}<div class="field"><label>Nome para identificação</label><input name="renewalLabel" value="${escapar(label)}" placeholder="Ex.: Casa, Escritório"></div><div class="recurring-form-grid"><div class="field"><label>Período</label><input name="durationValue" type="number" inputmode="numeric" min="1" value="${durationValue}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${durationUnit === "days" ? "selected" : ""}>dias</option><option value="weeks" ${durationUnit === "weeks" ? "selected" : ""}>semanas</option><option value="months" ${durationUnit === "months" ? "selected" : ""}>meses</option><option value="years" ${durationUnit === "years" ? "selected" : ""}>anos</option></select></div><div class="field"><label>Valor</label><input name="contractedPrice" type="number" inputmode="decimal" min="0" step=".01" value="${price.toFixed(2)}"></div><div class="field"><label>Pagamento</label><select name="renewalPayment"><option value="pix" ${payment === "pix" ? "selected" : ""}>Pix / pago</option><option value="dinheiro" ${payment === "dinheiro" ? "selected" : ""}>Dinheiro / pago</option><option value="cartao" ${payment === "cartao" ? "selected" : ""}>Cartão / pago</option><option value="fiado" ${payment === "fiado" ? "selected" : ""}>Fiado</option></select></div></div><section class="recurring-preview"><span><small>${selected ? "Vencimento atual" : "Início"}</small><b>${selected ? dateLabel(selected.expiresAt) : dateLabel(dates.startsAt)}</b></span><i data-lucide="arrow-right"></i><span><small>${selected ? "Renovado até" : "Ativo até"}</small><b>${dateLabel(dates.expiresAt)}</b></span></section></div><footer class="modal-foot"><button class="btn btn-light close">Cancelar</button><button class="btn btn-primary" data-confirm-recurring>${selected ? "Adicionar renovação" : "Adicionar ativação"}</button></footer></section></div>`;
       modal.querySelectorAll(".close").forEach((button) => button.onclick = () => modal.innerHTML = "");
       modal.querySelectorAll('input[name="subscriptionChoice"]').forEach((input) => input.onchange = render);
       ["durationValue", "durationUnit"].forEach((name) => modal.querySelector(`[name="${name}"]`).onchange = render);
-      modal.querySelector("[data-confirm-recurring]").onclick = () => {
-        const choiceId = modal.querySelector('input[name="subscriptionChoice"]:checked')?.value || selectedId,
+      const confirmButton = modal.querySelector("[data-confirm-recurring]");
+      confirmButton.onclick = () => {
+        if (!modal.contains(confirmButton) || confirmButton.disabled) return;
+        const choiceId = request?.id || modal.querySelector('input[name="subscriptionChoice"]:checked')?.value || selectedId,
           chosen = existing.find((entry) => entry.id === choiceId) || null,
-          finalDurationValue = Math.max(1, Number(modal.querySelector('[name="durationValue"]')?.value || defaultDuration)),
+          expectedSubscription = snapshots.get(choiceId) || null;
+        try {
+          if (scope !== renewalScope() || document.querySelector("#sale-client")?.value !== clientId)
+            throw Error("O cliente ou o espaço mudou. Abra a renovação novamente.");
+          if (choiceId !== "new") {
+            const current = request ? selectedRenewal(request) : CustomerSubscriptions.get(choiceId);
+            CustomerSubscriptions.requireRenewable(current, { ...context, expected: expectedSubscription });
+          }
+          if (chosen && cart.some(item => item.recurringActivation?.subscriptionId === chosen.id))
+            throw Error("Esta vigência já está na sacola.");
+        } catch (error) {
+          return toast(error.message, true);
+        }
+        const finalDurationValue = Math.max(1, Number(modal.querySelector('[name="durationValue"]')?.value || defaultDuration)),
           finalDurationUnit = modal.querySelector('[name="durationUnit"]')?.value || defaultUnit,
           finalPrice = Math.max(0, Number(modal.querySelector('[name="contractedPrice"]')?.value || 0)),
           finalLabel = String(modal.querySelector('[name="renewalLabel"]')?.value || product.renewalLabel || product.nome).trim(),
           finalPayment = modal.querySelector('[name="renewalPayment"]')?.value || "pix",
           item = ProductVariations.saleItem(product, variant, 1), draftId = Utils.uuid();
-        Object.assign(item, { productType: "recurring", precoOriginal: finalPrice, precoFinalUnitario: finalPrice, precoUnitario: finalPrice, recurringActivation: { draftId, subscriptionId: chosen?.id || null, label: finalLabel, durationValue: finalDurationValue, durationUnit: finalDurationUnit, contractedPrice: finalPrice, renewalMessage: product.renewalMessage || "", reminders: product.renewalReminders || [], clientIdSnapshot: clientId } });
+        Object.assign(item, { productType: "recurring", precoOriginal: finalPrice, precoFinalUnitario: finalPrice, precoUnitario: finalPrice, recurringActivation: { draftId, subscriptionId: chosen?.id || null, label: finalLabel, durationValue: finalDurationValue, durationUnit: finalDurationUnit, contractedPrice: finalPrice, renewalPolicyVersion: CustomerSubscriptions.renewalPolicyVersion, expectedSubscription, renewalMessage: product.renewalMessage || "", reminders: product.renewalReminders || [], clientIdSnapshot: clientId } });
         const status = finalPayment === "fiado" ? "fiado" : "pago", statusSelect = document.querySelector("#sale-status"), paymentSelect = document.querySelector("#sale-payment-method");
         statusSelect.value = status; if (paymentSelect) paymentSelect.value = finalPayment; window.CheckoutPaymentMethod = finalPayment; statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        addSaleItem(item, { source }); modal.innerHTML = ""; toast(chosen ? "Renovação adicionada à sacola" : "Ativação adicionada à sacola");
+        confirmButton.disabled = true;
+        if (!addSaleItem(item, { source })) { confirmButton.disabled = false; return; }
+        modal.innerHTML = "";
+        toast(chosen ? "Renovação adicionada à sacola" : "Ativação adicionada à sacola");
       };
       window.lucide?.createIcons();
     };
@@ -1091,6 +1155,19 @@ window.Checkout = (() => {
             return validationError('O espaço da venda mudou. Revise o carrinho antes de confirmar.');
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           if(activeAttempt?.operationId&&activeAttempt.operationId!==attempt.operationId&&(DB.carregar().vendas||[]).some(s=>s.operationId===activeAttempt.operationId))return validationError("A tentativa anterior já gerou uma venda. Consulte sua confirmação antes de alterar ou repetir o carrinho.");
+          try {
+            for (const item of cart) {
+              const renewal = item.recurringActivation;
+              if (!renewal?.renewalPolicyVersion || !renewal.subscriptionId) continue;
+              const current = CustomerSubscriptions.get(renewal.subscriptionId);
+              if (current?.lastSaleId !== attempt.saleId)
+                CustomerSubscriptions.requireRenewable(current, {
+                  clientId: clienteId, productId: item.produtoId, businessId, spaceId, expected: renewal.expectedSubscription,
+                });
+            }
+          } catch (error) {
+            return validationError(error.message);
+          }
           activeAttempt = attempt;
           saveDraft();
           finishing = true;
@@ -1228,9 +1305,9 @@ window.Checkout = (() => {
       pendingClient = null;
     }
     if (pendingRenewal) {
-      const subscription = CustomerSubscriptions.get(pendingRenewal), product = subscription && products().getById(subscription.productId), variant = subscription?.variantId ? ProductVariations.get(subscription.variantId) : null;
+      const request = pendingRenewal;
       pendingRenewal = null;
-      if (subscription && product) setTimeout(() => recurringConfiguration(product, variant), 0);
+      setTimeout(() => openSelectedRenewal(request), 0);
     }
     window.lucide?.createIcons();
   }
@@ -1380,15 +1457,35 @@ window.Checkout = (() => {
     draftDetails = { ...draftDetails, clientId: draft.clienteId || "", paymentMethod: "cartao_presencial", note: draft.observacao || "" };
     saveDraft();
   }
+  function openSelectedRenewal(request) {
+    try {
+      if (Router.atual() !== "vender" || document.querySelector("#sale-client")?.value !== request.clientId)
+        throw Error("O cliente da renovação não está selecionado. Volte ao perfil para conferir.");
+      const subscription = selectedRenewal(request),
+        product = products().getById(subscription.productId),
+        variant = subscription.variantId ? ProductVariations.get(subscription.variantId) : null;
+      if (product?.productType !== "recurring" || !productAvailableHere(product) ||
+          (subscription.variantId && (!variant || variant.parentProductId !== product.id || variant.active === false || variant.deletedAt)))
+        throw Error("O produto ou a variação desta vigência está indisponível neste espaço.");
+      void recurringConfiguration(product, variant, null, request);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
   function prepareRenewal(subscriptionId) {
     const subscription = CustomerSubscriptions.get(subscriptionId);
-    if (!subscription) return (toast("Renovação não encontrada", true), false);
-    pendingRenewal = subscription.id;
-    prepareClientSale(subscription.clientId, "customer_profile_renewal");
-    if (Router.atual() === "vender" && document.querySelector("#sale-client")) {
-      const product = products().getById(subscription.productId), variant = subscription.variantId ? ProductVariations.get(subscription.variantId) : null;
+    const request = { id: subscriptionId, clientId: subscription?.clientId, productId: subscription?.productId,
+      variantId: String(subscription?.variantId || ""), scope: renewalScope() };
+    try { selectedRenewal(request); }
+    catch (error) { return (toast(error.message, true), false); }
+    pendingRenewal = request;
+    if (!prepareClientSale(request.clientId, "customer_profile_renewal")) {
       pendingRenewal = null;
-      if (product) recurringConfiguration(product, variant);
+      return false;
+    }
+    if (pendingRenewal === request && Router.atual() === "vender" && document.querySelector("#sale-client")) {
+      pendingRenewal = null;
+      openSelectedRenewal(request);
     }
     return true;
   }

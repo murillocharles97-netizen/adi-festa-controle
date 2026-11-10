@@ -161,7 +161,7 @@ test('commercial renewal of linked and unassigned vigencies follows V228 even in
       const row=f.db.customerSubscriptions.find(item=>item.id===id);
       const sale={id:'sale-'+id,spaceId:'a',clientId:row.clientId,createdAt:'2026-11-09T12:00:00Z',
         itens:[{produtoId:'service',precoUnitario:29,recurringActivation:{subscriptionId:id}}]};
-      const subs=f.w.CustomerSubscriptions, preview=subs.preview({subscription:row,at:sale.createdAt,durationValue:1,durationUnit:'months'});
+      const subs=f.w.CustomerSubscriptions, preview=subs.preview({subscription:row,at:sale.createdAt,durationValue:1,durationUnit:'months',legacy:true});
       const [outcome]=subs.applySaleInData(f.db,sale);
       assert.equal(outcome.action,'renewal');
       assert.equal(outcome.subscriptionId,id);
