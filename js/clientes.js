@@ -28,9 +28,10 @@ window.Clientes=(()=>{
     return account;
   }
   function financialStatus(client, scoped = scopedScreen()) {
+    if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
+      return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
     const account = (window.InstallmentCredit?.confirmedAccount || window.InstallmentCredit?.account)?.(client?.id);
     if (scoped) {
-      if (window.TeamAccess?.has?.('customers.receiveDebt') === false) return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
       if (account && !accountBelongsTo(account, window.SpaceContext?.activeId?.())) return unknown(spaceAccountMessage);
       if (!account && (Number(client?.saldo) !== 0 || window.InstallmentCredit?.has?.(client?.id))) return unknown();
     }

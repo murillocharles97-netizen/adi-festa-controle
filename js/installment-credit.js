@@ -4,11 +4,26 @@ window.InstallmentCredit = (() => {
   const money=v=>(v/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
   const labels={open:'Aberta',partial:'Parcial',paid:'Quitada',overdue:'Vencida',cancelled:'Cancelada'};
   const available=()=>window.TeamAccess?.has?.('customers.receiveDebt')===true&&!window.OperationalReadPolicy?.restricted?.();
-  const has=(id,data=DB.carregar())=>!!id&&((data.clientes||[]).some(c=>c.id===id&&(c.hasInstallmentFiado||c.fiadoHistoryVersion===1))||
-    (data.vendas||[]).some(s=>s.clienteId===id&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt));
+  let index;
+  function accountIndex(data) {
+    const clients = data.clientes, sales = data.vendas;
+    if (index && index.clients === clients && index.sales === sales && index.clientCount === clients?.length && index.saleCount === sales?.length) return index;
+    const byId = new Map((clients || []).map(client => [client.id, client]));
+    const withInstallments = new Set();
+    for (const sale of sales || []) {
+      if (sale.installmentPlan && !sale.deletedAt && sale.active !== false && !sale.desfeita && !sale.cancelledAt)
+        withInstallments.add(sale.clienteId);
+    }
+    return index = {clients, sales, clientCount: clients?.length, saleCount: sales?.length, byId, withInstallments};
+  }
+  function has(id, data = DB.carregar()) {
+    if (!id) return false;
+    const {byId, withInstallments} = accountIndex(data), client = byId.get(id);
+    return Boolean(client?.hasInstallmentFiado || client?.fiadoHistoryVersion === 1 || withInstallments.has(id));
+  }
   const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.(),window.SpaceContext?.viewScope?.()]);
-  const clientFor=id=>(DB.carregar().clientes||[]).find(c=>c.id===id);
-  const summaries=new Map(), confirmedAt=new Map(), pending=new Map(), failedAt=new Map();
+  const clientFor=id=>accountIndex(DB.carregar()).byId.get(id);
+  const summaries=new Map(), confirmedAt=new Map(), pending=new Map(), failedAt=new Map(), clientEpochs=new Map();
   const DISPLAY_TTL=60000, RETRY_DELAY=15000;
   let summaryScope, previewRequest, proofEpoch=0;
   function assertAccount(client,a){
@@ -36,7 +51,7 @@ window.InstallmentCredit = (() => {
   }
   const needsProof = id => has(id) || (window.Clientes?.scopedScreen?.() && window.TeamAccess?.has?.('customers.receiveDebt') && Number(clientFor(id)?.saldo) !== 0);
   function confirmedAccount(id){
-    if(!needsProof(id))return null;
+    if(!summaries.has(id)||!needsProof(id))return null;
     const cached=summariesForScope().get(id);
     if(navigator.onLine===false||Date.now()-(confirmedAt.get(id)||0)>=DISPLAY_TTL)return null;
     try{return cached?.asOf===InstallmentPlan.today()?assertAccount(clientFor(id),cached):null;}catch{return null;}
@@ -82,7 +97,7 @@ window.InstallmentCredit = (() => {
   }
   function refresh(id){
     const ticket=window.TeamAccess?.captureSession?.(),origin=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
-    const epoch=proofEpoch,client=clientFor(id),key=JSON.stringify([epoch,origin,id,client?.financialVersion,client?.saldo,InstallmentPlan.today()]);
+    const epoch=proofEpoch, revision=clientEpochs.get(id)||0,client=clientFor(id),key=JSON.stringify([epoch,revision,origin,id,client?.financialVersion,client?.saldo,InstallmentPlan.today()]);
     if(pending.has(key))return pending.get(key);
     const request=(async()=>{
       if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o saldo no servidor. A operação foi preservada.');
@@ -90,7 +105,7 @@ window.InstallmentCredit = (() => {
       const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id,fiadoHistoryVersion:1});
       window.TeamAccess?.assertSession?.(ticket);
       const result=reply.data??reply;
-      if(proofEpoch!==epoch||scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
+      if(proofEpoch!==epoch||(clientEpochs.get(id)||0)!==revision||scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
         throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
       const confirmed=assertAccount(clientFor(id),result.account);
       if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
@@ -117,10 +132,10 @@ window.InstallmentCredit = (() => {
   // Update only financial fragments: preserve search, swipe handlers and open forms.
   let totalsScheduled=false;
   function updateVisibleTotals(){
-    if(totalsScheduled)return;totalsScheduled=true;
+    if(window.Clientes?.scopedScreen?.()||totalsScheduled)return;totalsScheduled=true;
     queueMicrotask(()=>{
       totalsScheduled=false;
-      const page=document.querySelector('#app .clients-page');if(!page||!window.ClientesPage?.render)return;
+      const page=document.querySelector('#app .clients-page');if(!page||!window.ClientesPage?.render||window.Clientes?.scopedScreen?.())return;
       const shell=document.createElement('div');shell.innerHTML=window.ClientesPage.render();
       for(const selector of ['.client-kpis','.mobile-client-kpis']){
         const old=page.querySelector(selector),next=shell.querySelector(selector);
@@ -157,11 +172,13 @@ window.InstallmentCredit = (() => {
   function visibleIds(){return [...new Set([...(window.document?.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]') || [])].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>needsProof(id));}
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
+    const route=window.Router?.atual?.();
+    if((route&&route!=='clientes')||window.Clientes?.scopedScreen?.()||!available())return;
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
       const origin=scope(), queue=visibleIds();queue.forEach(paint);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
-        while(queue.length&&scope()===origin){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
+        while(queue.length&&scope()===origin&&window.Router?.atual?.()===route){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
           try{await refresh(id);failedAt.delete(key);}catch{failedAt.set(key,Date.now());}
         }
@@ -169,22 +186,94 @@ window.InstallmentCredit = (() => {
     }finally{hydrating=false;if(rerun){rerun=false;scheduleHydration();}}
   }
   function scheduleHydration(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;hydrateVisible();});}
-  function recheck(){proofEpoch++;summariesForScope().clear();confirmedAt.clear();failedAt.clear();visibleIds().forEach(paint);scheduleHydration();}
+  function expireDisplayedProofs() {
+    for (const id of summariesForScope().keys()) {
+      if (confirmedAccount(id)) continue;
+      summaries.delete(id);
+      confirmedAt.delete(id);
+      paint(id);
+    }
+  }
+  function recheck(id) {
+    const scoped = window.Clientes?.scopedScreen?.();
+    if (id) {
+      clientEpochs.set(id,(clientEpochs.get(id)||0)+1);
+      summariesForScope().delete(id);
+      confirmedAt.delete(id);
+      paint(id);
+      if(!scoped)scheduleHydration();
+      return;
+    }
+    const displayed = scoped ? [...summariesForScope().keys()] : visibleIds();
+    proofEpoch++;
+    summariesForScope().clear();
+    confirmedAt.clear();
+    failedAt.clear();
+    clientEpochs.clear();
+    displayed.forEach(paint);
+    if(!scoped)scheduleHydration();
+  }
+  function revisit() {
+    if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+    else recheck();
+  }
+  function lookupButton(id, financial) {
+    if (!window.Clientes?.scopedScreen?.() || !available() || financial.status !== 'unverified' || financial.reason) return '';
+    return `<button type="button" class="btn btn-light btn-sm" data-fiado-lookup="${esc(id)}">Consultar saldo</button>`;
+  }
+  async function lookup(button) {
+    const id=button.dataset.fiadoLookup,origin=scope();
+    if (!available() || !window.Clientes?.scopedScreen?.() || !window.Clientes.viewClient(id)) return;
+    button.disabled=true;
+    button.textContent='Consultando…';
+    try {
+      if (!confirmedAccount(id)) await refresh(id);
+    } catch (error) {
+      if (button.isConnected && scope()===origin)
+        window.Utils?.toast?.(error.message || 'Não foi possível consultar o saldo. Tente novamente.',true);
+    } finally {
+      if (button.isConnected) {
+        button.disabled=false;
+        button.textContent='Consultar saldo';
+      }
+    }
+  }
   if(typeof window.addEventListener==='function'){
-  window.addEventListener('fiado-account-updated',event=>paint(event.detail.clientId));
-  window.addEventListener('financial-state-updated',recheck);
-  window.addEventListener('cloud-data-updated',event=>{
-    if(['clients','sales','payments','paymentAllocations','balanceEvents'].includes(event.detail?.collection))failedAt.clear();
-    // Balance/version checks retire only stale accounts; an unrelated client update must not cancel a valid read.
-    scheduleHydration();
-  });
-  for(const name of ['online','offline'])window.addEventListener(name,recheck);
-  for(const name of ['veconi-spaces-ready','firebase-sync-status'])window.addEventListener(name,()=>{failedAt.clear();scheduleHydration();});
-  window.AppLifecycle?.onResume?.(recheck);
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')recheck();});
-  function observeList(){const app=document.querySelector('#app');if(app)new MutationObserver(scheduleHydration).observe(app,{childList:true,subtree:true});scheduleHydration();}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeList,{once:true});else observeList();
-  setInterval(()=>{if(document.visibilityState!=='hidden'&&visibleIds().length)scheduleHydration();},30000);
+    document.addEventListener('click',event=>{
+      const button=event.target.closest?.('#app .clients-page [data-fiado-lookup]');
+      if(button&&!button.disabled)void lookup(button);
+    });
+    window.addEventListener('fiado-account-updated',event=>paint(event.detail.clientId));
+    window.addEventListener('financial-state-updated',event=>recheck(event.detail?.clientId));
+    window.addEventListener('cloud-data-updated',event=>{
+      const collection=event.detail?.collection;
+      const financial=['sales','payments','paymentAllocations','balanceEvents','balanceAdjustments'].includes(collection);
+      if(window.SpaceContext?.scopesCustomers?.()){
+        if(financial)recheck();
+        else if(collection==='clients'&&window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+        return;
+      }
+      if(financial||collection==='clients')failedAt.clear();
+      scheduleHydration();
+    });
+    for(const name of ['online','offline'])window.addEventListener(name,()=>recheck());
+    for(const name of ['veconi-spaces-ready','firebase-sync-status'])window.addEventListener(name,()=>{
+      if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+      else{failedAt.clear();scheduleHydration();}
+    });
+    window.AppLifecycle?.onResume?.(revisit);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')revisit();});
+    function observeList(){
+      const app=document.querySelector('#app');
+      if(app)new MutationObserver(()=>{if(!window.Clientes?.scopedScreen?.())scheduleHydration();}).observe(app,{childList:true,subtree:true});
+      scheduleHydration();
+    }
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeList,{once:true});else observeList();
+    setInterval(()=>{
+      if(document.visibilityState==='hidden')return;
+      if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+      else if(visibleIds().length)scheduleHydration();
+    },30000);
   }
   function fields(){return `<fieldset id="installment-fields" hidden><legend>Crediário / Parcelado</legend><p>Sem juros ou multa. Registre a entrada e os pagamentos somente após receber Pix ou dinheiro.</p><label class="field">Entrada combinada (R$)<input id="installment-down" type="number" min="0" step="0.01" value="0"></label><label class="field">Forma da entrada<select id="installment-method"><option value="pix">Pix externo</option><option value="cash">Dinheiro</option></select></label><label class="field">Parcelas mensais<input id="installment-count" type="number" min="1" max="60" step="1" value="10"></label><label class="field">Primeiro vencimento<input id="installment-first" type="date" value="${InstallmentPlan.month(InstallmentPlan.today(),1)}"></label><p data-installment-preview role="status"></p></fieldset>`;}
   function read(){return{downPayment:Number(document.querySelector('#installment-down')?.value||0),downPaymentMethod:document.querySelector('#installment-method')?.value||'pix',count:Number(document.querySelector('#installment-count')?.value||10),firstDueDate:document.querySelector('#installment-first')?.value||''};}
@@ -211,5 +300,5 @@ window.InstallmentCredit = (() => {
   };
   document.addEventListener('input',updatePreview);
   document.addEventListener('change',updatePreview);
-  return {has,account,confirmedAccount,hydrateVisible,balanceText,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
+  return {has,account,confirmedAccount,hydrateVisible,lookupButton,balanceText,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
 })();
