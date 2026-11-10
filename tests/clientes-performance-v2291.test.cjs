@@ -42,14 +42,14 @@ for(const size of [100,1000])test('scoped list of '+size+' clients opens without
   const f=fixture({size});try{
     f.render();await f.w.InstallmentCredit.hydrateVisible();await settled();
     assert.equal(f.requests.length,0);
-    assert.match(f.kpis(),/Total por espaço indisponível/);
-    assert.doesNotMatch(f.kpis(),/R\$/);
+    assert.match(f.kpis(),/Parte identificada/);
+    assert.match(f.kpis(),/conta\(s\) a conferir/);
     assert.match(f.w.document.querySelector('.space-unassigned-customers').textContent,/Origem desconhecida/);
     const search=f.w.document.querySelector('#mobile-client-search');search.value='Cliente';search.focus();
     f.button().click();await settled();
     assert.deepEqual(f.requests,['p-0']);
     assert.match(f.w.document.querySelector('[data-mobile-card="p-0"] .mobile-client-balance').textContent,/527,00.*2\.520,00/);
-    assert.doesNotMatch(f.kpis(),/R\$/);assert.equal(search.value,'Cliente');
+    assert.match(f.kpis(),/Parte identificada/);assert.equal(search.value,'Cliente');
     assert.equal(f.w.document.activeElement,search);
     assert.equal(f.h.commits(),0);
   }finally{f.h.close();}
@@ -67,19 +67,19 @@ test('same-account pending reads are shared; payment invalidates only the affect
     f.setRoute('vender');
     f.w.dispatchEvent(new f.w.CustomEvent('financial-state-updated',{detail:{clientId:'p-0'}}));
     f.setRoute('clientes');f.render();
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).status,'unverified');
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[2]).debt,527);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).status,'unverified');
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[2]).debt,527);
     f.setRead(id=>f.payload(id,f.proof(id,{due:42700,financialVersion:14})));
     f.button().click();await settled();
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).debt,427);
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).futureCents,252000);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).debt,427);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).futureCents,252000);
     f.db.clientes[0].saldo=-2520;f.db.clientes[0].financialVersion=15;
     f.w.dispatchEvent(new f.w.CustomEvent('financial-state-updated',{detail:{clientId:'p-0'}}));
     f.setRead(id=>f.payload(id,f.proof(id,{due:0,financialVersion:15})));
     f.button().click();await settled();
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).debt,0);
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).futureCents,252000);
-    assert.doesNotMatch(f.kpis(),/R\$/);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).debt,0);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).futureCents,252000);
+    assert.match(f.kpis(),/Parte identificada/);
   }finally{f.h.close();}
 });
 test('mixed or unknown origin cannot be shown as the scoped balance; failure can be retried',async()=>{
@@ -88,13 +88,14 @@ test('mixed or unknown origin cannot be shown as the scoped balance; failure can
     f.button().click();await settled();assert.equal(f.w.lastToast,'Falha de rede QA');assert.ok(!f.button().disabled);
     f.setRead(id=>f.payload(id,f.proof(id,{origins:['adi','iptv']})));
     f.button().click();await settled();
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[0]).status,'unverified');
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).debt,527);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).futureCents,0);
     assert.equal(f.button(),null);
     f.setRead(id=>f.payload(id,f.proof(id,{origins:['adi',null]})));
     f.button('p-2').click();await settled();
-    assert.equal(f.w.Clientes.financialStatus(f.db.clientes[2]).status,'unverified');
+    assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[2]).partial,true);
     assert.equal(f.button('p-2'),null);
-    assert.doesNotMatch(f.kpis(),/R\$/);
+    assert.match(f.kpis(),/Parte identificada/);
   }finally{f.h.close();}
 });
 test('rapid navigation, reconnect, tenant change and PWA restart never hydrate other accounts',async()=>{

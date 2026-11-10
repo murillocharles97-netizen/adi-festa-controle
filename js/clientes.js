@@ -3,12 +3,135 @@ window.Clientes=(()=>{
   const baseView = () => DB.readForView?.() || DB.carregar();
   const listar = () => baseView().clientes;
   const obter = id => listar().find(c => c.id === id);
-  let lastView;
+  let lastView, displayCache, displayEpoch = 0;
+  // Presentation only. These balances never authorize a financial write.
+  const localListBalances = () => window.Router?.atual?.() === 'clientes' &&
+    Boolean(window.SpaceContext?.activeId && window.SpaceContext?.homeSpaces) &&
+    window.BusinessContext?.get?.().role === 'owner' &&
+    window.TeamAccess?.has?.('customers.view') === true && window.TeamAccess?.has?.('customers.receiveDebt') === true &&
+    !window.OperationalReadPolicy?.restricted?.();
+  const prepareList = () => { displayEpoch++; displayCache = null; lastView = null; };
+  function listBalances(data = baseView()) {
+    const context = window.SpaceContext, bid = DB.getBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
+    const selected = context?.activeId?.(), minute = Math.floor(Date.now() / 60000);
+    const day = displayCache?.minute === minute ? displayCache.day : window.InstallmentPlan.today();
+    if (displayCache?.data === data && displayCache.bid === bid && displayCache.generation === generation && displayCache.selected === selected && displayCache.day === day) return displayCache;
+    const own = row => (!row.businessId || row.businessId === bid) && (row.workspaceGeneration ?? 0) === generation;
+    const spaces = context?.homeSpaces?.() || [], known = new Set(spaces.map(s => s.id));
+    const qaSpaces = new Set(spaces.filter(s => /^VECONI QA\b/i.test(s.name || '')).map(s => s.id));
+    // The approved historical inventory ended at this instant. Later sales keep their own origin.
+    const historicalEnd = Date.parse('2026-11-10T13:27:02.114Z');
+    const approvedCompany = bid === 'adi-festa', adi = 'business_adi-festa';
+    const defaultSpace = approvedCompany ? (known.has(adi) ? adi : null)
+      : !context?.scopesCustomers?.() && spaces.length === 1 ? spaces[0].id : null;
+    const sales = new Map();
+    for (const sale of data.vendas || []) if (own(sale) && sale.formaPagamento === 'fiado' &&
+      sale.active !== false && sale.ativo !== false && !sale.deletedAt && !sale.desfeita && !sale.cancelledAt &&
+      ['fiado', 'applied'].includes(sale.status || 'fiado')) {
+      const id = sale.clienteId || sale.clientId, group = sales.get(id) || [];
+      group.push(sale); sales.set(id, group);
+    }
+    const accounts = new Map();
+    for (const client of data.clientes || []) {
+      if (!own(client)) continue;
+      const book = Math.round(Number(client.saldo || 0) * 100), debt = Math.max(0, -book);
+      const parts = new Map(), plans = [], traditional = [];
+      const clientSales = sales.get(client.id) || [];
+      const testOrigins = new Set(clientSales.map(s => s.spaceId || s.financialSpaceId).filter(Boolean));
+      // Explicit test identities with exclusively QA-space history remain in QA.
+      const accountDefault = approvedCompany && /^qa[-_]/i.test(client.id) && testOrigins.size === 1 &&
+        qaSpaces.has([...testOrigins][0]) ? [...testOrigins][0] : defaultSpace;
+      let unknownCents = 0, calendarUnknown = false;
+      const add = (id, due, future) => {
+        if (!id || !known.has(id)) { unknownCents += due + future; return; }
+        const p = parts.get(id) || {dueCents: 0, futureCents: 0};
+        p.dueCents += due; p.futureCents += future; parts.set(id, p);
+      };
+      const confirmed = window.InstallmentCredit?.confirmedAccount?.(client.id);
+      if (confirmed) {
+        const due = confirmed.entries.filter(e => e.dueDate <= day).reduce((n,e) => n + e.remainingCents, 0);
+        const future = confirmed.entries.filter(e => e.dueDate > day).reduce((n,e) => n + e.remainingCents, 0);
+        if (due !== confirmed.dueCents || future !== confirmed.futureCents) {
+          accounts.set(client.id, {parts, unknownCents: debt, calendarUnknown: true, bookCents: book}); continue;
+        }
+        for (const e of confirmed.entries) add(e.spaceId || accountDefault,
+          e.dueDate <= day ? e.remainingCents : 0, e.dueDate > day ? e.remainingCents : 0);
+        accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book}); continue;
+      }
+      for (const sale of clientSales) {
+        const conflictingSpace = sale.spaceId && sale.financialSpaceId && sale.spaceId !== sale.financialSpaceId;
+        const rawSpace = conflictingSpace ? null : sale.spaceId || sale.financialSpaceId || null;
+        const date = sale.financialAppliedAt || sale.createdAt || sale.data;
+        const historical = !date || Date.parse(date) <= historicalEnd;
+        const exceptional = approvedCompany && sale.id === '6b382859-6f5f-4c16-a5dd-c5af33cbb42e';
+        const unresolvedSpace = conflictingSpace || rawSpace && (!known.has(rawSpace) || qaSpaces.has(rawSpace));
+        const space = exceptional ? (rawSpace === 'ca504a66-0602-434e-bee3-58a274eeb772' ? rawSpace : null)
+          : approvedCompany && historical && !unresolvedSpace ? accountDefault : rawSpace;
+        if (sale.installmentPlan) {
+          try {
+            window.InstallmentPlan.assertSale({...sale, status: 'fiado'});
+            const paid = window.InstallmentPlan.cents(sale.creditPaidAmount || 0), principal = sale.installmentPlan.totalCents;
+            if (paid < 0 || paid > principal || sale.creditOriginalAmount !== undefined && window.InstallmentPlan.cents(sale.creditOriginalAmount) !== principal ||
+              sale.creditRemainingAmount !== undefined && window.InstallmentPlan.cents(sale.creditRemainingAmount) !== principal - paid) throw Error('Inconsistent installment balance');
+            const rows = window.InstallmentPlan.rows(sale, day);
+            plans.push({space, due: rows.filter(r => r.dueDate <= day).reduce((n,r) => n + r.remainingCents, 0),
+              future: rows.filter(r => r.dueDate > day).reduce((n,r) => n + r.remainingCents, 0)});
+          } catch { calendarUnknown = true; }
+        } else if (!(approvedCompany && historical && !unresolvedSpace) && !(defaultSpace && !context?.scopesCustomers?.() && !unresolvedSpace && (!rawSpace || rawSpace === defaultSpace))) {
+          try {
+            const amount = window.InstallmentPlan.cents(sale.creditOriginalAmount ?? sale.valorFinal ?? sale.valorTotal);
+            const paid = window.InstallmentPlan.cents(sale.creditPaidAmount || 0);
+            if (paid > amount || sale.creditRemainingAmount !== undefined && window.InstallmentPlan.cents(sale.creditRemainingAmount) !== amount - paid) throw Error('Inconsistent sale');
+            traditional.push({space, due: amount - paid, future: 0});
+          } catch { calendarUnknown = true; }
+        }
+      }
+      if ((client.hasInstallmentFiado || client.fiadoHistoryVersion === 1 && clientSales.some(s => s.installmentPlan)) && !plans.length) calendarUnknown = true;
+      if (!Number.isSafeInteger(book) || calendarUnknown || plans.reduce((n,p) => n + p.due + p.future, 0) > debt) {
+        accounts.set(client.id, {parts, unknownCents: debt, calendarUnknown: true, bookCents: book}); continue;
+      }
+      for (const p of plans) add(p.space, p.due, p.future);
+      const scheduled = plans.reduce((n,p) => n + p.due + p.future, 0), rest = debt - scheduled;
+      const tracked = traditional.reduce((n,p) => n + p.due, 0);
+      if (tracked > rest) unknownCents += rest;
+      else {
+        for (const p of traditional) add(p.space, p.due, 0);
+        add(accountDefault, rest - tracked, 0);
+      }
+      accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book});
+    }
+    return displayCache = {data, bid, generation, day, minute, accounts, selected};
+  }
+  function listSummary() {
+    if (!localListBalances()) return null;
+    const state = listBalances(); let dueCents = 0, futureCents = 0, debtors = 0, unknown = 0;
+    for (const client of baseView().clientes || []) {
+      if (client.ativo === false || client.active === false || client.deletedAt) continue;
+      const a = state.accounts.get(client.id); if (!a) continue;
+      const p = a.parts.get(state.selected);
+      if (p) { dueCents += p.dueCents; futureCents += p.futureCents; debtors += Number(p.dueCents > 0); }
+      if (a.unknownCents || a.calendarUnknown) unknown++;
+    }
+    return {dueCents, futureCents, debtors, unknown, partial: unknown > 0};
+  }
   function viewData() {
     const data = baseView(), context = window.SpaceContext;
     if (!context?.scopesCustomers?.()) return data;
     const scope = context.viewScope();
-    if (lastView?.data !== data || lastView.scope !== scope) lastView = { data, scope, result: context.contextualData(data, 'clients') };
+    if (lastView?.data !== data || lastView.scope !== scope || lastView.epoch !== displayEpoch) {
+      const result = context.contextualData(data, 'clients');
+      if (localListBalances()) {
+        const state = listBalances(data), included = new Map(result.clientes.map(c => [c.id, c]));
+        for (const client of data.clientes || []) {
+          const part = state.accounts.get(client.id)?.parts.get(state.selected);
+          if (!included.has(client.id) && part && part.dueCents + part.futureCents > 0)
+            included.set(client.id, {...client, totalComprado: 0, quantidadeVendas: 0, ultimaCompra: null, promessaPagamento: null});
+        }
+        result.clientes = [...included.values()];
+        result.unassignedCustomers = (result.unassignedCustomers || []).filter(c => !included.has(c.id));
+      }
+      lastView = {data, scope, epoch: displayEpoch, result};
+    }
     return lastView.result;
   }
   const viewClient = id => (viewData().clientes || []).find(c => c.id === id);
@@ -26,6 +149,17 @@ window.Clientes=(()=>{
     const account = await window.InstallmentCredit.refresh(id);
     if (scope !== context.viewScope() || !viewClient(id) || !accountBelongsTo(account, space)) throw Object.assign(Error(spaceAccountMessage), {code:'fiado-space-unverified'});
     return account;
+  }
+  function listFinancialStatus(client) {
+    if (localListBalances()) {
+      const state = listBalances(), account = state.accounts.get(client?.id), p = account?.parts.get(state.selected);
+      if (!account || account.calendarUnknown || (!p || p.dueCents + p.futureCents === 0) && account.unknownCents) return unknown();
+      const credit = !scopedScreen() && account.bookCents > 0 ? account.bookCents : 0;
+      const saldo = (credit - (p?.dueCents || 0)) / 100;
+      return {saldo, futureCents: p?.futureCents || 0, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero',
+        debt: Math.max(0, -saldo), credit: credit / 100, displayOnly: true, partial: account.unknownCents > 0};
+    }
+    return financialStatus(client);
   }
   function financialStatus(client, scoped = scopedScreen()) {
     if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
@@ -70,5 +204,13 @@ window.Clientes=(()=>{
     else db.clientes.push({...registro,id:registro.id||Utils.uuid(),portalRefToken:registro.portalRefToken||Utils.uuid(),normalizedPhone,saldo:Number(registro.saldo||0),atualizadoEm:registro.atualizadoEm||agora});
   }))};
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('customers.adjustBalance'))throw Error('Você não tem permissão para ajustar saldos.');let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0),financialVersionAnterior=Math.max(0,Number(cliente.financialVersion||0));cliente.saldo=Number(saldoNovo);cliente.financialVersion=financialVersionAnterior+1;cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,expectedFinancialVersion:financialVersionAnterior,financialVersionAfter:cliente.financialVersion,motivo:motivo||'',data:cliente.atualizadoEm,...(window.TeamAccess?.actor?.()||{})};db.movimentacoes.push(movimento)});return movimento};
-  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  let refreshScheduled = false;
+  for (const name of ['financial-state-updated','cloud-data-updated','veconi-space-context-changed','business-context-changed','firebase-session-cleared'])
+    window.addEventListener(name, () => {
+      prepareList();
+      if (!localListBalances() || refreshScheduled || !document.querySelector('#app .clients-page')) return;
+      refreshScheduled = true;
+      queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
+    });
+  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

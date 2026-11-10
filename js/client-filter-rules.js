@@ -28,9 +28,10 @@
   function matchesStatus(client, filter = "todos", adapters = {}) {
     const selected = String(filter || "todos");
     if (selected === "todos" || selected === "todas") return true;
-    if (selected === "debito") return balance(client) < 0;
-    if (selected === "credito") return balance(client) > 0;
-    if (selected === "zero") return balance(client) === 0;
+    const getBalance = adapters.balance || balance;
+    if (selected === "debito") return getBalance(client) < 0;
+    if (selected === "credito") return getBalance(client) > 0;
+    if (selected === "zero") return getBalance(client) === 0;
     if (selected === "semTelefone") return digits(client?.telefone).length < 10;
     if (selected === "nunca") return !adapters.lastCharge?.(client);
     if (selected === "vencida") return Boolean(adapters.chargeExpired?.(client));

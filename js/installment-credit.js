@@ -132,10 +132,11 @@ window.InstallmentCredit = (() => {
   // Update only financial fragments: preserve search, swipe handlers and open forms.
   let totalsScheduled=false;
   function updateVisibleTotals(){
-    if(window.Clientes?.scopedScreen?.()||totalsScheduled)return;totalsScheduled=true;
+    if(!document.querySelector('#app .clients-page'))return;
+    if(window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||totalsScheduled)return;totalsScheduled=true;
     queueMicrotask(()=>{
       totalsScheduled=false;
-      const page=document.querySelector('#app .clients-page');if(!page||!window.ClientesPage?.render||window.Clientes?.scopedScreen?.())return;
+      const page=document.querySelector('#app .clients-page');if(!page||!window.ClientesPage?.render||window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.())return;
       const shell=document.createElement('div');shell.innerHTML=window.ClientesPage.render();
       for(const selector of ['.client-kpis','.mobile-client-kpis']){
         const old=page.querySelector(selector),next=shell.querySelector(selector);
@@ -150,6 +151,7 @@ window.InstallmentCredit = (() => {
   }
   function paint(id){
     const client=clientFor(id);if(!client)return;
+    if(window.Clientes?.localListBalances?.())window.Clientes.prepareList();
     updateVisibleTotals();
     for(const card of document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card]')){
       if((card.dataset.clientId||card.dataset.mobileCard)!==id)continue;
@@ -173,7 +175,7 @@ window.InstallmentCredit = (() => {
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
     const route=window.Router?.atual?.();
-    if((route&&route!=='clientes')||window.Clientes?.scopedScreen?.()||!available())return;
+    if((route&&route!=='clientes')||window.Clientes?.localListBalances?.()||window.Clientes?.scopedScreen?.()||!available())return;
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
       const origin=scope(), queue=visibleIds();queue.forEach(paint);

@@ -96,17 +96,18 @@ test('pending offline operation remains in its original space; a live cart preve
 function proof(f,origins){
   return {clientId:f.c.id,version:2,historyProofVersion:1,asOf:f.w.InstallmentPlan.today(),financialVersion:13,
     dueCents:8000,futureCents:22000,totalCents:30000,creditCents:0,
-    entries:origins.map((spaceId,i)=>({spaceId,dueDate:f.w.InstallmentPlan.today(),remainingCents:i?22000:8000}))};
+    entries:origins.map((spaceId,i)=>({spaceId,dueDate:i?f.w.InstallmentPlan.month(f.w.InstallmentPlan.today(),1):f.w.InstallmentPlan.today(),remainingCents:i?22000:8000}))};
 }
 
 test('scoped Fiado only shows and allows confirmation of a fully proved account from the active space',async()=>{
   const f=fixture();try{
     let a=proof(f,['a','a']);f.w.FirebaseCallable=async()=>({data:{businessId:'qa-business',workspaceGeneration:0,account:a}});
-    assert.equal(f.w.Clientes.financialStatus(f.c).status,'unverified');
+    assert.equal(f.w.Clientes.listFinancialStatus(f.c).status,'unverified');
     assert.equal((await f.w.Clientes.confirmSpaceAccount(f.c.id)).futureCents,22000);
-    assert.equal(f.w.Clientes.financialStatus(f.c).debt,80);assert.equal(f.w.Clientes.financialStatus(f.c).futureCents,22000);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.c).debt,80);assert.equal(f.w.Clientes.listFinancialStatus(f.c).futureCents,22000);
     a=proof(f,['a','b']);await assert.rejects(f.w.Clientes.confirmSpaceAccount(f.c.id),/outro espaço/);
-    assert.equal(f.w.Clientes.financialStatus(f.c).status,'unverified');
+    assert.equal(f.w.Clientes.listFinancialStatus(f.c).debt,80);
+    assert.equal(f.w.Clientes.listFinancialStatus(f.c).futureCents,0);
     a=proof(f,['a',null]);await assert.rejects(f.w.Clientes.confirmSpaceAccount(f.c.id),/origem não comprovada/);
     assert.equal(f.h.commits(),0);
   }finally{f.close();}
