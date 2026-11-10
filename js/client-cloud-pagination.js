@@ -7,7 +7,9 @@
   let activeRequest = 0;
   let pageSequence = 0,
     controllerSequence = 0;
+  let moreObserver = null;
   function current() {
+    if (window.Router?.atual && window.Router.atual() !== 'clientes') return null;
     const mobile = matchMedia("(max-width: 767px)").matches;
     const page = document.querySelector("#app .clients-page");
     if (!page) return null;
@@ -59,8 +61,10 @@
     const renderer = context.mobile ? window.ClientesMobile?.renderCard : window.ClientesPage?.renderCard;
     const list = context.page.querySelector(context.mobile ? "#mobile-client-list" : "#client-list");
     if (!renderer || !list) return;
+    moreObserver?.disconnect();
+    moreObserver = null;
     list.innerHTML = controller.items.length
-      ? controller.items.map((client, index) => renderer(client, index)).join("")
+      ? (context.mobile && window.ClientesMobile?.renderCards?.(controller.items) || controller.items.map((client, index) => renderer(client, index)).join(""))
       : `<div class="empty-state"><i data-lucide="users"></i><strong>Nenhum cliente encontrado</strong><span>Tente ajustar a busca ou os filtros.</span></div>`;
     context.page.querySelectorAll("#load-more-clients,#mobile-load-sentinel,[data-client-cloud-more]").forEach((item) => item.remove());
     if (context.mobile) list.querySelectorAll(".mobile-swipe-shell").forEach((card) => window.ClientesMobile?.bindCard?.(card));
@@ -71,7 +75,12 @@
       else { more.type = "button"; more.className = "btn btn-light load-clients"; more.textContent = "Carregar mais 20 clientes"; }
       list.insertAdjacentElement("afterend", more);
       if (context.mobile && "IntersectionObserver" in window) {
-        const observer = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) { observer.disconnect(); load(context, false); } }, { rootMargin: "240px" });
+        const observer = new IntersectionObserver(entries => {
+          if (observer !== moreObserver || !entries[0]?.isIntersecting || current()?.page !== context.page) return;
+          observer.disconnect();
+          load(context, false);
+        }, { rootMargin: "240px" });
+        moreObserver = observer;
         observer.observe(more);
       } else more.onclick = () => load(context, false);
     }
@@ -111,6 +120,8 @@
     return state;
   }
   async function load(context, reset = true, options = {}) {
+    const mounted = current();
+    if (!mounted || mounted.page !== context.page || keyOf(mounted) !== keyOf(context)) return;
     // The company-wide query cannot paginate a view joined to local space evidence.
     if (window.SpaceContext?.scopesCustomers?.()) return;
     if (!navigator.onLine || !window.SyncFirebase?.queryClientsPage) return;
@@ -190,23 +201,29 @@
   }
   function schedule() { if (!scheduled) { scheduled = true; queueMicrotask(activate); } }
   new MutationObserver(schedule).observe(document.querySelector("#app"), { childList: true, subtree: false });
-  let dataRefreshTimer = null;
+  let dataRefreshTimer = null, refreshAfterModal = null;
   function dataChanged(detail = {}) {
+    const page = current()?.page;
+    if (!page) return;
     const scoped = window.SpaceContext?.scopesCustomers?.();
-    if (detail.collection && !(scoped ? ['clients','sales','customerSubscriptions'].includes(detail.collection) : detail.collection === 'clients')) return;
+    const displaySource = ['clients','sales','customerSubscriptions','payments','balanceEvents','balanceAdjustments','paymentAllocations','charges','messageHistory'].includes(detail.collection);
+    if (detail.collection && !(scoped ? displaySource : detail.collection === 'clients' || window.Clientes?.localListBalances?.() && displaySource)) return;
     clearTimeout(dataRefreshTimer);
-    dataRefreshTimer = setTimeout(() => {
+    refreshAfterModal = null;
+    function refresh() {
       const context = current();
-      if (!context) return;
-      if (scoped) {
-        if (document.querySelector('#modal')?.children.length) return;
+      if (!context || context.page !== page) return;
+      if (scoped || detail.financial || window.Clientes?.localListBalances?.()) {
+        if (document.querySelector('#modal')?.children.length) { refreshAfterModal = refresh; return; }
+        if (!scoped) controllers.delete(keyOf(context));
         window.ClientesPage?.refresh?.();
         return;
       }
       controllers.delete(keyOf(context));
       delete context.page.dataset.clientCloudBound;
       activate(true, { fresh: true, reason: detail.source || "clients-data-changed" });
-    }, 120);
+    }
+    dataRefreshTimer = setTimeout(refresh, 120);
   }
   addEventListener("cloud-data-updated", (event) => dataChanged(event.detail));
   addEventListener("firebase-sync-status", () => {
@@ -236,8 +253,19 @@
     activate,
     refresh: () => activate(true),
     cancel: () => { activeRequest += 1; },
-    clear: () => { activeRequest += 1; controllers.clear(); },
+    leave: () => {
+      activeRequest += 1;
+      clearTimeout(dataRefreshTimer);
+      refreshAfterModal=null;
+      moreObserver?.disconnect();moreObserver=null;
+    },
+    clear: () => { window.ClientCloudPagination.leave(); controllers.clear(); },
     dataChanged,
+    flushDataChanged: () => {
+      const refresh = refreshAfterModal;
+      refreshAfterModal = null;
+      refresh?.();
+    },
     mode: () => current()?.mode || "default",
     resume,
     snapshot: () => diagnostic("snapshot"),

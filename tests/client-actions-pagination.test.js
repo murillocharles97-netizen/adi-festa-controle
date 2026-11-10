@@ -35,8 +35,8 @@ test("paginação separa modo padrão e busca e descarta resposta antiga", () =>
 });
 
 test("busca mobile usa debounce de 300 ms e aciona paginação cloud", () => {
-  assert.match(app, /stableSearchTimer = setTimeout[\s\S]*?300,/);
-  assert.match(mobile, /setTimeout\(\(\)=>searchClients\(state\.query\),300\)/);
+  assert.match(app, /clientSearchTimer = setTimeout[\s\S]*?\}, 300\)/);
+  assert.match(mobile, /searchTimer=setTimeout\(\(\)=>\{[^}]*search\.isConnected[^}]*searchClients\(state\.query\)\},300\)/);
   assert.match(mobile, /ClientCloudPagination\?\.refresh\?\.\(\)/);
   assert.match(app, /ClientCloudPagination\?\.cancel\?\.\(\)/);
   assert.match(sync, /queryAllClientsForAction/);

@@ -31,6 +31,7 @@ function environment() {
   const state = { query: "kaique", filter: "todos", sort: "nomeAsc" };
   let active = pageFixture();
   let localClients = [];
+  const modal = { children: [] };
   const pending = [];
   const listeners = new Map();
   const listen = (name, callback) => {
@@ -40,7 +41,7 @@ function environment() {
   const context = {
     window: null,
     document: {
-      querySelector: (selector) => selector === "#app" ? {} : selector === "#app .clients-page" ? active.page : null,
+      querySelector: (selector) => selector === "#app" ? {} : selector === "#app .clients-page" ? active.page : selector === "#modal" ? modal : null,
       contains: (node) => node === active.page,
       createElement: () => ({ dataset: {}, set type(_) {}, className: "", textContent: "" }),
       visibilityState: "visible",
@@ -82,6 +83,7 @@ function environment() {
   vm.runInContext(pagerSource, context);
   return {
     context,
+    modal,
     state,
     pending,
     active: () => active,
@@ -105,6 +107,37 @@ test("Todos preserva cliente local zerado ausente do índice cloud legado", asyn
   env.pending[0].resolve({ items: [], cursor: null, hasMore: false, documentsRead: 0 });
   await tick();
   assert.match(env.active().list.innerHTML, /Jessica QA Sintetico 050:0/);
+});
+
+test("saída de Clientes descarta resposta e atualização pendentes mesmo ao voltar ao mesmo filtro", async () => {
+  const env = environment();
+  await tick();
+  assert.equal(env.pending.length, 1);
+  env.context.ClientCloudPagination.dataChanged({collection:"clients"});
+  env.context.ClientCloudPagination.leave();
+  const next = env.replacePage();
+  env.pending[0].resolve({items:[{id:"late",nome:"Resposta antiga",saldo:0}],hasMore:false,documentsRead:1});
+  await new Promise(resolve=>setTimeout(resolve,160));
+  assert.equal(next.list.innerHTML, "");
+  assert.equal(env.pending.length, 1);
+  env.context.ClientCloudPagination.activate();
+  await tick();
+  assert.equal(env.pending.length, 2);
+});
+
+test("atualizações de saldo são agrupadas e aparecem ao fechar o modal", async () => {
+  const env = environment();
+  let renders = 0;
+  env.context.ClientesPage = { refresh: () => renders++ };
+  env.modal.children.push({});
+  env.context.ClientCloudPagination.dataChanged({ financial: true });
+  env.context.ClientCloudPagination.dataChanged({ financial: true });
+  await new Promise(resolve => setTimeout(resolve,160));
+  assert.equal(renders,0);
+  env.modal.children.length = 0;
+  env.context.ClientCloudPagination.flushDataChanged();
+  env.context.ClientCloudPagination.flushDataChanged();
+  assert.equal(renders,1);
 });
 
 test("resultado do servidor vence cache local obsoleto para o mesmo cliente", async () => {

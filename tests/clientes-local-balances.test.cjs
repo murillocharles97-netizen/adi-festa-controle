@@ -137,3 +137,43 @@ for(const size of [100,1000])test('fast opening of '+size+' loaded clients does 
     console.log(JSON.stringify({customers:size,renderMs,financialRequests:f.calls(),visibleCards:20}));
   }finally{await f.close();}
 });
+
+test('mobile pagination adds only the next cards and ignores a queued observer after leaving',async()=>{
+  const f=fixture({size:70});try{
+    let latest,route='clientes';
+    f.w.Router.atual=()=>route;
+    f.w.IntersectionObserver=class {
+      constructor(callback){this.callback=callback;latest=this;}
+      observe(){}
+      disconnect(){}
+      fire(){this.callback([{isIntersecting:true}]);}
+    };
+    f.render();await sleep();
+    const root=f.w.document.querySelector('#mobile-client-list'), first=root.firstElementChild;
+    assert.equal(root.children.length,20);assert.ok(latest);
+    latest.fire();
+    assert.equal(root.children.length,40);assert.equal(root.firstElementChild,first);
+    const pending=latest;
+    route='produtos';f.w.ClientesMobile.cancelPending();
+    const app=f.w.document.querySelector('#app');app.innerHTML='<section id="products-fixture">Produtos</section>';
+    pending.fire();f.w.ClientesMobile.search('Cliente');
+    assert.equal(root.children.length,40);assert.ok(app.querySelector('#products-fixture'));
+    assert.equal(f.calls(),0);
+  }finally{await f.close();}
+});
+
+test('charge lookup prepared for the list preserves message deduplication and legacy fallback',async()=>{
+  const f=fixture();try{
+    const data={messageHistory:[
+      {id:'one',operationId:'same',clientId:'mae',type:'charge',status:'opened_whatsapp',createdAt:'2026-11-03'},
+      {id:'other',clientId:'mae',type:'charge',status:'sent_confirmed',sentAt:'2026-11-04'},
+      {id:'draft',clientId:'mae',type:'charge',status:'draft',createdAt:'2026-11-10'},
+    ],cobrancas:[{id:'legacy-old',clienteId:'legacy',data:'2026-11-01'},{id:'legacy-new',clienteId:'legacy',data:'2026-11-02'}]};
+    f.w.MessageSequence={history:()=>[{id:'updated',operationId:'same',clientId:'mae',type:'charge',status:'sent_confirmed',sentAt:'2026-11-05'}]};
+    const lookup=f.w.Mensagens.latestCharges(data);
+    for(const client of [...f.db.clientes,{id:'no-history',lastChargeAt:'2026-11-06'}])
+      assert.deepEqual(lookup(client),f.w.Mensagens.latestCharge(client,data));
+    assert.equal(lookup(f.db.clientes[0]).id,'updated');
+    assert.equal(lookup(f.db.clientes[1]).id,'legacy-new');
+  }finally{await f.close();}
+});

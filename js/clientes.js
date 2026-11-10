@@ -205,9 +205,11 @@ window.Clientes=(()=>{
   }))};
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('customers.adjustBalance'))throw Error('Você não tem permissão para ajustar saldos.');let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0),financialVersionAnterior=Math.max(0,Number(cliente.financialVersion||0));cliente.saldo=Number(saldoNovo);cliente.financialVersion=financialVersionAnterior+1;cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,expectedFinancialVersion:financialVersionAnterior,financialVersionAfter:cliente.financialVersion,motivo:motivo||'',data:cliente.atualizadoEm,...(window.TeamAccess?.actor?.()||{})};db.movimentacoes.push(movimento)});return movimento};
   let refreshScheduled = false;
-  for (const name of ['financial-state-updated','cloud-data-updated','veconi-space-context-changed','business-context-changed','firebase-session-cleared'])
+  for (const name of ['financial-state-updated','cloud-data-updated','veconi-space-context-changed','veconi-spaces-ready','business-context-changed','firebase-session-cleared'])
     window.addEventListener(name, () => {
       prepareList();
+      // The mounted app handles route/space changes, and the pager coalesces cloud updates.
+      if (window.AppPageRuntime) return;
       if (!localListBalances() || refreshScheduled || !document.querySelector('#app .clients-page')) return;
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });

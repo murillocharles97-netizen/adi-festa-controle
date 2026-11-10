@@ -1209,6 +1209,13 @@
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
     const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
+    if (root.dataset.route === "clientes") {
+      clearTimeout(clientSearchTimer);
+      if (clientSpaceFrame !== null) cancelAnimationFrame(clientSpaceFrame);
+      clientSpaceFrame = null;
+      window.ClientesMobile?.cancelPending?.();
+      if (route !== "clientes") window.ClientCloudPagination?.leave?.();
+    }
     if (root.dataset.route === "financeiro" && route !== "financeiro") FinanceiroUI.destroy();
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
@@ -1391,7 +1398,9 @@
   addEventListener("cloud-data-updated", scheduleCloudRender);
   addEventListener("financial-state-updated", () => {
     if (Router.atual() === "clientes") {
-      if (!document.querySelector("#modal")?.children.length)
+      if (window.ClientCloudPagination?.dataChanged)
+        window.ClientCloudPagination.dataChanged({ financial: true });
+      else if (!document.querySelector("#modal")?.children.length)
         window.ClientesPage?.refresh?.();
       return;
     }
@@ -1400,25 +1409,38 @@
   const financialModal = document.querySelector("#modal");
   if (financialModal)
     new MutationObserver(() => {
+      if (!financialModal.children.length) window.ClientCloudPagination?.flushDataChanged?.();
       if (cloudRenderPending && !financialModal.children.length)
         scheduleCloudRender();
     }).observe(financialModal, { childList: true });
+  let clientSpaceFrame = null;
+  function remountSpaceRoute(route) {
+    window.ClientCloudPagination?.clear?.();
+    if (route === 'vender') window.Checkout?.retireSpaceDraft?.();
+    if (document.querySelector('#modal')?.children.length) window.Modais?.fechar?.();
+    try { mountRoute(route); } catch (error) { showAppMountError(error); }
+  }
   function refreshSpaceRoute() {
     const root = document.querySelector('#app'), route = Router.atual();
     if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender'].includes(route)) return;
     const scopeChanged = root.dataset.spaceViewScope !== window.SpaceContext?.viewScope?.();
     if (!scopeChanged) return;
-    window.ClientCloudPagination?.clear?.();
-    if (route === 'vender') window.Checkout?.retireSpaceDraft?.();
-    if (document.querySelector('#modal')?.children.length) window.Modais?.fechar?.();
-    try { mountRoute(route); } catch (error) { showAppMountError(error); }
+    if (route === 'clientes') {
+      if (clientSpaceFrame === null) clientSpaceFrame = requestAnimationFrame(() => {
+        clientSpaceFrame = null;
+        if (Router.atual() === route && root.dataset.route === route &&
+          root.dataset.spaceViewScope !== window.SpaceContext?.viewScope?.()) remountSpaceRoute(route);
+      });
+      return;
+    }
+    remountSpaceRoute(route);
   }
   for (const event of ['veconi-spaces-ready','veconi-space-context-changed','veconi-space-context-local-ready'])
     addEventListener(event, refreshSpaceRoute);
   document.addEventListener("focusout", () => {
     if (cloudRenderPending) setTimeout(scheduleCloudRender, 80);
   });
-  let stableSearchTimer = null;
+  let stableSearchTimer = null, clientSearchTimer = null;
   document.addEventListener(
     "input",
     (event) => {
@@ -1426,19 +1448,18 @@
         product = event.target.id === "mobile-product-search";
       if (!client && !product) return;
       event.stopImmediatePropagation();
-      clearTimeout(stableSearchTimer);
-      const value = event.target.value;
+      const input = event.target, value = input.value;
       if (client) {
+        clearTimeout(clientSearchTimer);
         window.ClientesMobile?.setSearchTerm?.(value);
         window.ClientCloudPagination?.cancel?.();
+        clientSearchTimer = setTimeout(() => {
+          if (input.isConnected && Router.atual() === "clientes") window.ClientesMobile?.search(value);
+        }, 300);
+      } else {
+        clearTimeout(stableSearchTimer);
+        stableSearchTimer = setTimeout(() => window.ProdutosMobile?.search(value), 300);
       }
-      stableSearchTimer = setTimeout(
-        () =>
-          client
-            ? window.ClientesMobile?.search(value)
-            : window.ProdutosMobile?.search(value),
-        300,
-      );
     },
     true,
   );
