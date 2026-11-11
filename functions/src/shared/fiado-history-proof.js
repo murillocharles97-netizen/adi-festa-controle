@@ -5,7 +5,7 @@ const Plan=require('./installment-plan');
 const cents=value=>{if(typeof value!=='number'||!Number.isFinite(value))throw Error('invalid-money');const n=Math.round(value*100);if(!Number.isSafeInteger(n)||Math.abs(value*100-n)>0.00001)throw Error('non-cent-snapshot');return n;};
 const clientId=r=>r.clienteId||r.clientId||r.customerId;
 const time=value=>{const ms=Date.parse(value);if(!Number.isFinite(ms))throw Error('invalid-application-time');return ms;};
-function prove(input,day=Plan.today()){
+function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
  const {client,businessId,generation=0,collections,complete,stable}=input;
  const reasons=[],issues=[];let strict=null,strictError=null,firstPlan=null,firstPlanError=null;
  const own=r=>[r.clienteId,r.clientId,r.customerId].includes(client.id);
@@ -62,7 +62,7 @@ function prove(input,day=Plan.today()){
   if(relevantInvalid.length){reasons.push(...relevantInvalid.map(e=>e.reason));issues.push(...relevantInvalid);throw Error('unproved-financial-effect');}
   const chain=validated.filter(e=>e.at>=start);
   if(anchor&&chain.filter(e=>e.at===start).length!==1)throw Error('ambiguous-zero-anchor');
-  let running=anchor?anchor.before:0;
+  let running=anchor?anchor.before:checkTraditionalChain?chain[0].before:0;
   for(let i=0;i<chain.length;i++){
    const row=chain[i];if(i&&row.at===chain[i-1].at)throw Error('ambiguous-effect-order');
    if(row.before!==running){issues.push({eventId:row.id,declaredBeforeCents:row.before,expectedBeforeCents:running});throw Error('broken-balance-chain');}running=row.after;
@@ -90,6 +90,9 @@ function prove(input,day=Plan.today()){
   }
   const total=-balance;if(future>total)throw Error('future-principal-exceeds-confirmed-debt');
   const account={asOf:day,dueCents:total-future,futureCents:future,totalCents:total};
+  // Traditional routing verifies continuity against the existing opening balance.
+  // It never grants V2 proof or derives a new opening balance.
+  if(checkTraditionalChain)return{...result,traditionalChainVerified:true};
   const backendCompatible=!!strict&&!!firstPlan&&strict.dueCents===account.dueCents&&strict.futureCents===account.futureCents&&strict.totalCents===account.totalCents;
   return{...result,financialProof:true,backendCompatible,currentBackendEligible:backendCompatible,account,confirmedEffects:chain,anchor:anchor?{eventId:anchor.id,at:new Date(anchor.at).toISOString(),kind:'confirmed-zero'}:{eventId:chain[0].id,at:new Date(start).toISOString(),kind:'confirmed-zero-origin'},effectsAfterAnchor:chain.length,reason:backendCompatible?'confirmed-compatible':'confirmed-aggregate-but-current-backend-incompatible'};
  }catch(error){return{...result,reason:error.message,details:[...new Set(reasons)],issues};}

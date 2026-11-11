@@ -37,6 +37,7 @@ window.Fiados = (() => {
       return existing;
     }
     window.SyncFirebase?.assertCustomerPaymentReview?.(clienteId);
+    if(options.receiptRoute)window.SyncFirebase.assertFiadoReceiptQueueClear(clienteId);
     const spaceId = window.SpaceContext?.requireSalesSpace?.(options.spaceId || "") || null;
     if (!spaceId && typeof document !== "undefined") throw Error("Selecione o espaço deste recebimento.");
     const before = DB.carregar(),
@@ -44,6 +45,10 @@ window.Fiados = (() => {
     ((db) => {
       const client = db.clientes.find((entry) => entry.id === clienteId);
       if (!client) throw new Error("Cliente não encontrado");
+      if(options.receiptRoute&&(
+        Math.round(Number(client.saldo)*100)!==options.receiptRoute.bookBalanceCents||
+        (client.financialVersion??0)!==options.receiptRoute.financialVersion))
+        throw Error('O saldo local mudou ou ainda não foi sincronizado. Confira a conta antes de confirmar.');
       const scheduled=client.fiadoHistoryVersion===1||client.hasInstallmentFiado||
         (db.vendas||[]).some(s=>s.clienteId===clienteId&&s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita&&!s.cancelledAt);
       if(scheduled&&options.saleId)throw Error('Utilize o recebimento agregado do Fiado, sem escolher parcelas.');
@@ -168,7 +173,7 @@ window.Fiados = (() => {
           progressConfirmed: Number(event.delta?.progress || 0),
         }));
       }
-      if(account&&window.InstallmentPlan.cents(pagamento.allocatedAmount)!==window.InstallmentPlan.cents(allocatable))
+      if((account||options.receiptRoute)&&window.InstallmentPlan.cents(pagamento.allocatedAmount)!==window.InstallmentPlan.cents(allocatable))
         throw Error('As vendas a quitar precisam estar sincronizadas. Nenhum recebimento foi registrado.');
 
       if(target&&Math.round(pagamento.allocatedAmount*100)!==Math.round(received*100))throw Error('O recebimento não foi alocado integralmente à venda.');
@@ -176,7 +181,9 @@ window.Fiados = (() => {
       db.movimentacoes.push({ ...pagamento });
     })(nextData);
     if (window.SyncFirebase?.createPaymentOperation)
-      window.SyncFirebase.createPaymentOperation(before, nextData, pagamento);
+      window.SyncFirebase.createPaymentOperation(before, nextData, pagamento, options.receiptRoute?{
+        version:1,mode:options.receiptRoute.mode,spaceId:options.receiptRoute.spaceId,quoteHash:options.receiptRoute.quoteHash
+      }:undefined);
     else if (typeof document !== "undefined")
       throw Error("O pipeline de recebimentos não está pronto. Nenhum pagamento foi salvo.");
     else DB.alterar((db) => {
@@ -198,17 +205,17 @@ window.Fiados = (() => {
     access?.assertSession?.(access.captureSession());
   }
 
-  function canOpenOriginal() {
+  function canOpenOriginal(routed=false) {
     const c = window.BusinessContext?.get?.(), uid = window.FirebaseSession?.user?.uid;
     return Boolean(uid && c?.role === 'owner' && c.business?.ownerId === uid &&
-      c.businessId === DB.getBusinessId() && window.Clientes?.scopedScreen?.() &&
+      c.businessId === DB.getBusinessId() && (routed ? window.Router?.atual?.()==='clientes' : window.Clientes?.scopedScreen?.()) &&
       window.TeamAccess?.has?.('customers.view') && window.TeamAccess.has('customers.receiveDebt') &&
       !window.OperationalReadPolicy?.restricted?.());
   }
 
-  function assertOriginal(clientId, origin) {
+  function assertOriginal(clientId, origin, routed=false) {
     const client = (DB.carregar().clientes || []).find(row => row.id === clientId);
-    if (!canOpenOriginal() || origin !== window.SpaceContext?.viewScope?.() || !client ||
+    if (!canOpenOriginal(routed) || origin !== window.SpaceContext?.viewScope?.() || !client ||
       (client.businessId && client.businessId !== DB.getBusinessId()) ||
       (client.workspaceGeneration ?? 0) !== (DB.getWorkspaceGeneration?.() ?? 0) ||
       client.deletedAt || client.active === false || client.ativo === false)
@@ -249,9 +256,70 @@ window.Fiados = (() => {
     };
   }
 
-  function receiptAttempt(clientId, {spaceScope, originalScope} = {}) {
+  const routeMessages = {
+    access_unavailable:'Seu perfil ou a situação da empresa não permite receber este Fiado.',
+    space_unavailable:'O espaço do recebimento está indisponível.',
+    account_unavailable:'Este cadastro não está disponível para recebimento.',
+    pending_payment:'Há um recebimento pendente ou em conflito. Confira a operação original antes de receber novamente.',
+    mixed_origins:'Há dívida aberta em mais de um espaço. Este formulário não pode distribuir o recebimento entre negócios.',
+    other_space:'A dívida está em outro espaço. Selecione o espaço de origem para receber.',
+    origin_unverified:'A origem financeira não pôde ser confirmada com este acesso. Peça ao proprietário para conferir a conta.',
+    history_review:'O histórico financeiro precisa de revisão antes de receber. Nenhum recebimento foi registrado.',
+    no_debt:'Este cliente não possui dívida em aberto.'
+  };
+  let receiptRouteRequest=0;
+
+  function assertRouteScope(scope,session) {
+    window.TeamAccess.assertSession(session);
+    if(window.Router?.atual?.()!=='clientes'||window.SpaceContext.viewScope()!==scope)
+      throw Error('O espaço ou a tela mudou. Abra o recebimento novamente.');
+  }
+
+  async function readReceiptRoute(clientId,scope,session) {
+    assertRouteScope(scope,session);
+    if(!window.SyncFirebase?.assertFiadoReceiptQueueClear||navigator.onLine===false||typeof window.FirebaseCallable!=='function')
+      throw Error('Conecte-se e aguarde a fila local carregar para conferir o recebimento.');
+    window.SyncFirebase.assertFiadoReceiptQueueClear(clientId);
+    const businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
+    const spaceId=window.SpaceContext.requireSalesSpace();
+    const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{
+      kind:'fiado_receipt_route',businessId,workspaceGeneration,clientId,spaceId
+    });
+    assertRouteScope(scope,session);
+    window.SyncFirebase.assertFiadoReceiptQueueClear(clientId);
+    const route=reply.data??reply;
+    if(route?.receiptRouteVersion!==1||route.businessId!==businessId||route.workspaceGeneration!==workspaceGeneration||
+      route.clientId!==clientId||route.spaceId!==spaceId)
+      throw Error('O servidor não confirmou a conta para este espaço. Tente novamente após sincronizar.');
+    if(route.mode==='blocked')throw Error(routeMessages[route.reason]||routeMessages.history_review);
+    if(!['space','original'].includes(route.mode)||!/^[a-f0-9]{64}$/.test(route.quoteHash||'')||
+      !Number.isSafeInteger(route.financialVersion)||!Number.isSafeInteger(route.bookBalanceCents))
+      throw Error(routeMessages.history_review);
+    return route;
+  }
+
+  async function openCardReceive(clientId,{onRecorded}={}) {
+    const request=++receiptRouteRequest;
+    try{
+      assertCanReceive();
+      const scope=window.SpaceContext.viewScope(),session=window.TeamAccess.captureSession();
+      const receiptRoute=await readReceiptRoute(clientId,scope,session);
+      if(request!==receiptRouteRequest)return;
+      return await openReceive(clientId,{onRecorded,receiptRoute,
+        routeCurrent:()=>request===receiptRouteRequest,
+        scoped:receiptRoute.mode==='space',originalScope:receiptRoute.mode==='original'?scope:undefined});
+    }catch(error){
+      if(request!==receiptRouteRequest)return;
+      const code=String(error.code||'').replace(/^functions\//,'');
+      const message=code==='unavailable'||code==='deadline-exceeded'?'Não foi possível conferir o saldo. Verifique a conexão e tente novamente.':
+        code==='permission-denied'?'Seu perfil não permite receber neste espaço ou nesta conta.':error.message;
+      Utils.toast(message,true);
+    }
+  }
+
+  function receiptAttempt(clientId, {spaceScope, originalScope, receiptRoute} = {}) {
     assertCanReceive();const session=window.TeamAccess?.captureSession?.(),operationId=Utils.uuid();let flight=null,payment=null,inputKey='';
-    const basis = originalScope ? paymentContext(assertOriginal(clientId, originalScope)) : null;
+    const basis = originalScope ? paymentContext(assertOriginal(clientId, originalScope, !!receiptRoute)) : null;
     return {operationId,confirm(value,note,options={}){
       if(flight)return flight;
       flight=(async()=>{
@@ -260,15 +328,24 @@ window.Fiados = (() => {
         if(payment&&key!==inputKey)throw Object.assign(Error('Este recebimento já foi preparado com os dados anteriores. Confira a sincronização antes de registrar outro valor.'),{code:'payment-already-prepared'});
         if(!payment){
           const scheduled=window.InstallmentCredit?.has(clientId);
+          if(receiptRoute){
+            const scope=originalScope||spaceScope;
+            const current=await readReceiptRoute(clientId,scope,session);
+            if(current.mode!==receiptRoute.mode||current.quoteHash!==receiptRoute.quoteHash)
+              throw Error('O saldo ou a origem mudou. Reabra a conta antes de confirmar.');
+            await window.SyncFirebase.assertFiadoReceiptWriter(current.businessId,current.workspaceGeneration);
+            assertRouteScope(scope,session);
+            if(originalScope&&scheduled)throw Error(routeMessages.history_review);
+          }
           if(originalScope){
-            assertOriginal(clientId, originalScope);
+            assertOriginal(clientId, originalScope, !!receiptRoute);
             if (!options.spaceId || options.saleId) throw Error('Selecione explicitamente o caixa do recebimento original.');
             window.SpaceContext.requireSalesSpace(options.spaceId);
-            const proof = await originalProof(clientId, scheduled);
-            const current = paymentContext(assertOriginal(clientId, originalScope));
+            const proof = receiptRoute ? null : await originalProof(clientId, scheduled);
+            const current = paymentContext(assertOriginal(clientId, originalScope, !!receiptRoute));
             if (current.expectedFinancialVersion !== basis.expectedFinancialVersion || current.expectedBalance !== basis.expectedBalance)
               throw Error('O saldo mudou desde a consulta. Reabra a conta antes de confirmar.');
-            if (originalOrigins(clientId, proof).known.length > 1) throw Error(mixedOriginalMessage);
+            if (!receiptRoute && originalOrigins(clientId, proof).known.length > 1) throw Error(mixedOriginalMessage);
             if (scheduled) options={...options,fiadoAccount:proof};
           }else if(spaceScope){
             const proof=await window.Clientes.confirmSpaceAccount(clientId,spaceScope);
@@ -277,7 +354,8 @@ window.Fiados = (() => {
             if(scheduled)options={...options,fiadoAccount:proof};
           }else if(scheduled)options={...options,fiadoAccount:await window.InstallmentCredit.refresh(clientId)};
           window.TeamAccess?.assertSession?.(session);
-          payment=receber(clientId,value,note,{...options,operationId});inputKey=key;
+          if(receiptRoute)assertRouteScope(originalScope||spaceScope,session);
+          payment=receber(clientId,value,note,{...options,operationId,receiptRoute});inputKey=key;
         }
         else window.SyncFirebase?.assertPaymentTracked?.(payment);
         try{await DB.flush?.();}catch{throw Object.assign(Error('O recebimento já foi preparado, mas a gravação ainda não foi confirmada. Mantenha esta janela e tente confirmar novamente; não registre outro pagamento.'),{code:'payment-confirmation-pending'});}
@@ -302,10 +380,10 @@ window.Fiados = (() => {
     }
   }
 
-  async function openReceive(clientId,{onRecorded,saleId,scoped=false,originalScope,sourceForm}={}) {
+  async function openReceive(clientId,{onRecorded,saleId,scoped=false,originalScope,sourceForm,receiptRoute,routeCurrent}={}) {
     const spaceScope=scoped?window.SpaceContext.viewScope():null;
     if(window.OperationalReadPolicy?.restricted?.()){try{await window.SyncFirebase.prepareOperationalCustomer(clientId,'payment');}catch(error){Utils.toast(error.message,true);return;}}
-    let attempt;try{if(originalScope)assertOriginal(clientId,originalScope);attempt=receiptAttempt(clientId,{spaceScope,originalScope});}catch(error){Utils.toast(error.message,true);return;}
+    let attempt;try{if(originalScope)assertOriginal(clientId,originalScope,!!receiptRoute);attempt=receiptAttempt(clientId,{spaceScope,originalScope,receiptRoute});}catch(error){Utils.toast(error.message,true);return;}
     const client=(DB.carregar().clientes||[]).find(c=>c.id===clientId);if(!client)return Utils.toast('Cliente não encontrado.',true);
     const target=saleId?(DB.carregar().vendas||[]).find(s=>s.id===saleId&&s.clienteId===clientId):null;
     if(saleId&&!target?.installmentPlan)return Utils.toast('Venda parcelada não disponível. Atualize os dados.',true);
@@ -313,16 +391,25 @@ window.Fiados = (() => {
     if(originalScope){
       try {
         const scheduled = window.InstallmentCredit?.has(clientId);
-        const proof = await originalProof(clientId, scheduled);
-        assertOriginal(clientId,originalScope);
+        if(receiptRoute&&scheduled)throw Error(routeMessages.history_review);
+        const proof = receiptRoute ? null : await originalProof(clientId, scheduled);
+        assertOriginal(clientId,originalScope,!!receiptRoute);
         if (sourceForm && !sourceForm.isConnected) return;
-        original = originalOrigins(clientId,proof);
+        original = receiptRoute ? {known:receiptRoute.origins,unassigned:receiptRoute.hasUnknown} : originalOrigins(clientId,proof);
         if (scheduled) account=proof;
       }catch(error){return Utils.toast(error.message,true);}
     }else if(spaceScope || window.InstallmentCredit?.has(clientId)){try{
       if(spaceScope){selectedSpace=window.SpaceContext.requireSalesSpace();if(target&&target.spaceId!==selectedSpace)throw Error('A parcela não pertence ao espaço ativo.');}
       account=spaceScope?await window.Clientes.confirmSpaceAccount(clientId,spaceScope):await window.InstallmentCredit.refresh(clientId);
     }catch(e){return Utils.toast(e.message,true);}}
+    if(routeCurrent&&!routeCurrent())return;
+    if(receiptRoute){
+      const local=paymentContext(client);
+      if(Math.round(local.expectedBalance*100)!==receiptRoute.bookBalanceCents||local.expectedFinancialVersion!==receiptRoute.financialVersion||
+        account&&(account.asOf!==receiptRoute.asOf||account.financialVersion!==receiptRoute.financialVersion||
+          account.dueCents!==receiptRoute.dueCents||account.futureCents!==receiptRoute.futureCents||account.totalCents!==receiptRoute.totalCents))
+        return Utils.toast('O saldo mudou ou ainda não foi sincronizado. Atualize a conta antes de receber.',true);
+    }
     const due=account?account.dueCents/100:target?Number(target.creditRemainingAmount):Math.abs(Math.min(0,Number(client.saldo||0)));if(!due&&!account?.futureCents)return Utils.toast('Este cliente não possui dívida em aberto.',true);
     const root=document.querySelector('#modal');if(!root)return;
     const hasFuture=Boolean(account?.futureCents), mixed=original?.known.length>1;
@@ -537,7 +624,7 @@ window.Fiados = (() => {
   );
 
   return {
-    spaceField, assertCanReceive, receiptAttempt, openReceive, canOpenOriginal, openOriginalDirectory,
+    spaceField, assertCanReceive, receiptAttempt, openReceive, openCardReceive, canOpenOriginal, openOriginalDirectory,
     listar,
     receber,
     confirmarConflito,

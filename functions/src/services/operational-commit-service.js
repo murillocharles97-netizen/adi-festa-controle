@@ -16,6 +16,7 @@ const SaleMoney=require('../shared/sale-money');
 const INSTALLMENT_CREATION_ENABLED = true; // Compatible rollback pauses only new plans.
 const HISTORY_ACTIVATION_ENABLED = true; // Containment retains already activated accounts and receipts.
 const {paymentConfirmationRead}=require('./payment-confirmation-read');
+const {decideReceiptRoute,assertReceiptRoute}=require('./fiado-receipt-route');
 const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message);};
 const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteger(Math.round(n*100)))fail('Valor inválido.','invalid-argument');return Math.round(n*100);};
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
@@ -73,7 +74,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    require('./payment-recovery-policy').shape(original);
    return commit(request,{paymentRecovery:{dryRun:d.kind==='payment_recovery_review',originalHash:d.originalPayloadHash,expectedReviewHash:d.reviewHash||null}});
   }
-  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
+  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
   if(Buffer.byteLength(JSON.stringify(item))>750*1024)fail('Operação excede o limite seguro.','invalid-argument');
   operationalId(item.operationId,'Operação');
@@ -133,6 +134,11 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     }}
    }
    const incomingPayment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+   if(item.payload.fiadoReceiptRoute!==undefined){
+    const payments=attemptWrites.filter(w=>w.entityType==='payments'&&w.operation==='create');
+    if(item.payload.eventKind!=='payment'||payments.length!==1||paymentRecovery)fail('Recebimento roteado inválido.','failed-precondition');
+    await assertReceiptRoute({intent:item.payload.fiadoReceiptRoute,payment:incomingPayment.data,writes:attemptWrites,tx,c,ref,now:now()});
+   }
    let recoveryFacts=null,recoveryHash=null,recoveryAudit=null;
    if(incomingPayment){
     const p=incomingPayment.data,account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(p.clienteId||p.clientId,'Cliente'),now:now(),checkPermission:false,includeTraditional:!!paymentRecovery||capability&&p.fiadoSchedule?.version===2,historyProofVersion:capability?1:0});
@@ -476,6 +482,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    // Read-only session handshake. No sale/financial data or persistent marker.
    if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
+   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now()});
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
    if(d.kind==='payment_recovery_status')return require('./payment-recovery-policy').status({tx,c,d:{...d,operationId:operationalId(d.operationId,'Operação'),paymentId:operationalId(d.paymentId,'Recebimento'),clientId:validId(d.clientId,'Cliente')},ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
@@ -485,7 +492,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    await c.space(s.spaceId);
    const marker=(await tx.get(ref(c.bid,'processedOperations',op))).data(),e=(await tx.get(ref(c.bid,'balanceEvents',(reversal?'credit_sale_reversal:':'credit_sale:')+sid))).data();
    return{confirmed:!!marker&&!!e&&(reversal?s.active===false&&s.financialReversalEventId:s.financialAppliedAt)!=null&&e.operationId===op&&e.customerId===(s.clienteId||s.customerId)&&e.sourceDocumentId===sid&&cents(e.balanceDelta)===(reversal?1:-1)*cents(s.valorFinal??s.valorTotal)};
-  });
+  },request.data?.kind==='fiado_receipt_route'?{readOnly:true}:undefined);
  }
  async function recognizePreservedPayment(request) {
   const d=request.data||{};

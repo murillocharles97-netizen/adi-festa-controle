@@ -850,6 +850,56 @@ function assertCustomerPaymentReview(clientId) {
     throw Object.assign(Error("Este cliente possui recebimento rejeitado preservado para revisão. Consulte a operação original antes de registrar outra movimentação para ele."),
       {code:"payment-review-required"});
 }
+function assertFiadoReceiptQueueClear(clientId) {
+  if(!currentUser?.uid||currentUser.uid!==auth.currentUser?.uid||!DB.__firebaseSyncWrapped)
+    throw Error('A fila local ainda não está disponível. Aguarde a sincronização antes de receber.');
+  const bid=activeBusinessId(), generation=DB.getWorkspaceGeneration?.()??0;
+  const peek=key=>typeof localStorage.peekItem==='function'?localStorage.peekItem(key):localStorage.getItem(key);
+  const fail=()=>{throw Object.assign(Error('Há uma movimentação financeira pendente ou em revisão para este cliente neste aparelho. Confira a Sincronização antes de registrar outro recebimento.'),{code:'fiado-local-pending'});};
+  const related=w=>{
+    const kind=w.entityType||w.collection, data=w.data||{}, before=w.before||{};
+    const fields=['saldo','financialVersion','legacyBalance','legacyBalanceRemaining','hasInstallmentFiado','fiadoHistoryVersion'];
+    const financial=['payments','paymentAllocations','balanceAdjustments','balanceEvents'].includes(kind)||
+      kind==='clients'&&fields.some(key=>Object.hasOwn(data,key)&&(!w.before||JSON.stringify(data[key])!==JSON.stringify(before[key])))||
+      kind==='sales'&&[data,before].some(row=>row.formaPagamento==='fiado'||row.status==='fiado'||row.installmentPlan);
+    if(!financial)return false;
+    const ids=[kind==='clients'&&(w.entityId||w.id),data.clienteId,data.clientId,data.customerId,before.clienteId,before.clientId,before.customerId].filter(Boolean);
+    return !ids.length||ids.includes(clientId);
+  };
+  const resolved=new Set();
+  for(const item of readQueueStrict({readOnly:true})){
+    if(!item)fail();
+    if(item.businessId&&item.businessId!==bid||item.userId&&item.userId!==currentUser.uid||
+       item.workspaceGeneration!==undefined&&item.workspaceGeneration!==generation)continue;
+    const writes=item.payload?.writes;
+    if(!Array.isArray(writes)||writes.some(w=>!w||typeof w!=='object'))fail();
+    if(!writes.some(related))continue;
+    if(classifyQueueOperation(item).category!=='resolved')fail();
+    resolved.add(String(item.operationId));
+  }
+  // The business-keyed predecessor is active only before its copy to the
+  // current namespace. The global legacy source may still await migration.
+  const oldKey='adiFesta:'+bid+':syncQueue';
+  const oldRaw=window.BusinessContext?.get?.().role==='owner'&&!peek(queueKey())?peek(oldKey):null;
+  const legacyRaw=bid==='adi-festa'&&!peek(queueKey()+':legacyMigrated')?peek(LEGACY_QUEUE_KEY):null;
+  for(const raw of [oldRaw,legacyRaw]){
+    if(!raw)continue;
+    let packets;try{packets=JSON.parse(raw);}catch{fail();}
+    if(!Array.isArray(packets)||packets.some(item=>!item||(item.payload?.writes||[item]).some(related)))fail();
+  }
+  if((DB.carregar().pagamentos||[]).some(p=>[p.clienteId,p.clientId,p.customerId].includes(clientId)&&
+    !p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)&&!resolved.has(String(p.operationId||p.id))))fail();
+}
+async function assertFiadoReceiptWriter(businessId,workspaceGeneration) {
+  if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')
+    throw Error('Conecte-se para confirmar o recebimento com segurança.');
+  assertSyncProtocolBundle();
+  const reply=await window.FirebaseCallable('commitOperationalSync',{kind:'sync_protocol',businessId,workspaceGeneration,
+    syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release)});
+  const result=reply.data??reply;
+  if(result?.fiadoReceiptRouteVersion!==1||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration)
+    throw Object.assign(Error('O servidor ainda não confirmou a versão segura de recebimentos. Tente novamente mais tarde.'),{code:'fiado-writer-unavailable'});
+}
 function saleQueueRequiresReview(item) {
   // Previously denied sales may have been re-entered by another operator.
   // A permission fix must not silently replay their commercial effects. This
@@ -2243,7 +2293,8 @@ function queueWrites(
       operation: action,
       action,
       payload: { writes: part, eventKind,
-        ...(['sale','sale_undo','payment','balance_adjustment'].includes(eventKind)?{fiadoHistoryVersion:1}:{}) },
+        ...(['sale','sale_undo','payment','balance_adjustment'].includes(eventKind)?{fiadoHistoryVersion:1}:{}),
+        ...(options.fiadoReceiptRoute?{fiadoReceiptRoute:options.fiadoReceiptRoute}:{}) },
       payloadVersion: PAYLOAD_VERSION,
       syncProtocolVersion: 1,
       clientRelease: 202,
@@ -2329,7 +2380,7 @@ function resumePreparedSales(operationId = "") {
   if (promoted) scheduleImmediate();
   return promoted;
 }
-function createPaymentOperation(before, after, payment) {
+function createPaymentOperation(before, after, payment, fiadoReceiptRoute) {
   if (!currentUser || readOnlyMode || !DB.__firebaseSyncWrapped)
     throw Error("A sincronização financeira não está pronta. Nenhum pagamento foi salvo.");
   if (!payment?.operationId || !payment?.id || payment.idempotencyKey !== payment.operationId)
@@ -2355,7 +2406,7 @@ function createPaymentOperation(before, after, payment) {
     saveQueue(readQueueStrict().filter((item) => String(item.operationId) !== String(payment.operationId)));
   }
   const queued = queueWrites(writes, payment.operationId, "payment",
-    { status: "local_preparing", schedule: false, source: "payment-write-ahead" });
+    { status: "local_preparing", schedule: false, source: "payment-write-ahead", fiadoReceiptRoute });
   if (queued !== writes.length)
     throw Error("A fila do recebimento não foi criada por completo. Nenhum pagamento foi salvo.");
   DB.salvar(after);
@@ -2754,6 +2805,11 @@ async function commitQueueItem(item) {
   const preflight=queuePreflight(item);
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
     ...(queueSettingsDiagnostic(item) ? {syncDetail:{...queueSettingsDiagnostic(item),service:"Firestore",request:"queue_preflight"}} : {})});
+  if(item.payload?.fiadoReceiptRoute!==undefined){
+    await assertFiadoReceiptWriter(item.businessId,item.workspaceGeneration??0);
+    assertSession();
+    window.WorkspaceRuntime.capture();
+  }
   const settingsWrite = item.payload?.writes?.find(write => write.entityType === "settings");
   if(item.payload?.writes?.length===1&&item.payload.writes[0].entityType==='clients'&&window.TeamAccess?.has?.(item.payload.writes[0].operation==='create'?'customers.create':window.VeconiPermissionPolicy?.customerPermission(item.payload.writes[0])||'customers.edit')===false)
     throw Object.assign(Error('A ação exige autorização de clientes. O original foi preservado; solicite análise ao responsável.'),{code:'customer-edit-permission-required'});
@@ -6989,6 +7045,8 @@ window.SyncFirebase = {
   prepareSaleCustomer,
   assertCustomerForSale,
   assertCustomerPaymentReview,
+  assertFiadoReceiptQueueClear,
+  assertFiadoReceiptWriter,
   assertPaymentTracked,
   isSalePending,
   prepareCustomerForSale,

@@ -153,7 +153,7 @@ window.ClientesPage=(()=>{
     return false;
   }
   function clientForm(id){try{Clientes.assertCanSave?.(id)}catch(error){Utils.toast(error.message,true);return}let context;try{if(!id)context=registrationContext()}catch(error){Utils.toast(error.message,true);return}const c=id?Clientes.obter(id):{};formModal(id?'Editar cliente':'Novo cliente',`<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(c.nome||'')}"></div><div class="field"><label>Telefone</label><input name="telefone" inputmode="tel" value="${esc(c.telefone||'')}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" inputmode="tel" value="${esc(c.telefone2||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(c.email||'')}"></div><div class="field"><label>Documento</label><input name="documento" value="${esc(c.documento||'')}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${esc(c.endereco||'')}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${esc(c.complemento||'')}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${esc(c.observacoes||'')}</textarea></div>${context?registrationFields(context):''}</div>`,(f,form)=>id?Clientes.salvar({id,...Object.fromEntries(f),ativo:true}):registerFromForm(form,context))}
-  function receive(id){return Fiados.openReceive(id,{onRecorded:paymentSuccess, scoped:Clientes.scopedScreen?.()});}
+  function receive(id){return Fiados.openCardReceive(id,{onRecorded:paymentSuccess});}
   function paymentSuccess(p,c){
     if(!window.ReceiptMessageUI)return Utils.toast('A interface do recibo ainda está carregando. Reabra o aplicativo sem limpar os dados.',true);
     try{return window.ReceiptMessageUI.open(p,c)}catch(error){Utils.toast(error.message,true)}
@@ -170,6 +170,8 @@ window.ClientesPage=(()=>{
   function guardedBind(){bind();window.SpaceContext?.bind?.(document.querySelector("#app"));const head=document.querySelector('.client-head .head-actions');if(head&&!head.querySelector('[data-open-receipt-models]')&&(window.ReceiptMessages?.canUse()||window.ReceiptMessages?.canManage())){const button=document.createElement('button');button.className='btn btn-light';button.type='button';button.dataset.openReceiptModels='true';button.textContent='Central de mensagens';button.onclick=()=>window.MobileMessages.openCenter({type:'receipt'});head.append(button);}if(window.Clientes?.canCreate?.()===false)$$('#new-client,#empty-new-client').forEach(button=>{button.disabled=true;button.setAttribute('aria-disabled','true')});if(window.Clientes?.canEdit?.()===false)$$('#import-csv,[data-edit-client]').forEach(button=>{button.disabled=true;button.setAttribute('aria-disabled','true');button.title='Seu perfil pode consultar clientes. Cadastro e edição precisam do responsável.'})}
   document.addEventListener('click', event => {
     if (event.target.closest?.('#app [data-open-original-fiado]')) window.Fiados?.openOriginalDirectory?.();
+    const unassigned=event.target.closest?.('#app [data-receive-unassigned]');
+    if (unassigned) receive(unassigned.dataset.receiveUnassigned);
   });
   return{render,bind:guardedBind,refresh,clientForm:guardedClientForm,registrationContext,registrationFields,registerFromForm,importCSV,receive,whatsapp,profile,adjust,promise,renderCard:card,getState:()=>({...state,selected:undefined})};
 })();

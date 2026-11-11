@@ -183,7 +183,11 @@ window.Clientes=(()=>{
     const rows = viewData().unassignedCustomers || [];
     if (!rows.length) return scopedScreen() && !(viewData().clientes || []).length
       ? '<p class="muted">Nenhum vínculo de cliente foi confirmado neste espaço com os dados disponíveis. O cadastro da empresa continua acessível na seleção de clientes em Vendas.</p>' : '';
-    return `<details class="card space-unassigned-customers"><summary>${rows.length} cliente(s) sem espaço confirmado</summary><p>Cadastros preservados no diretório da empresa. Uma venda ou renovação com espaço identificado permite encontrá-los aqui.</p><ul>${rows.map(client => `<li>${Utils.escapar(client.nome)}</li>`).join('')}</ul></details>`;
+    const mayReceive=window.Fiados?.canOpenOriginal?.();
+    return `<details class="card space-unassigned-customers"><summary>${rows.length} cliente(s) sem espaço confirmado</summary><p>Cadastros preservados no diretório da empresa. Uma venda ou renovação com espaço identificado permite encontrá-los aqui.</p><ul>${rows.map(client => {
+      const receive=mayReceive&&Number(client.saldo)<0?` <button type="button" class="btn btn-light" data-receive-unassigned="${Utils.escapar(client.id)}">Receber</button>`:'';
+      return `<li>${Utils.escapar(client.nome)}${receive}</li>`;
+    }).join('')}</ul></details>`;
   }
   const allowed=key=>window.TeamAccess?window.TeamAccess.has(key)===true:!window.FirebaseSession?.user;
   const assertPermission=key=>{if(!allowed(key))throw Object.assign(Error(window.VeconiPermissionPolicy?.MESSAGE||'Você não tem permissão para realizar esta ação. Solicite ao gestor que habilite esta função em Equipe → Permissões.'),{code:'customer-edit-permission-required',permission:key});};
