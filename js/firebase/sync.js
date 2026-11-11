@@ -775,17 +775,35 @@ const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
-const favoriteWriteWasRejected = (item) => item.source === "mobile-favorite" &&
-  item.status === "error" && ["permission-denied", "invalid-argument"].includes(item.lastErrorCode);
+const isFavoriteProductWrite = (write) =>
+  (QUEUE_ENTITY_ALIASES[write.entityType] || write.entityType) === "products" &&
+  Object.hasOwn(write.data || {}, "favorito");
+const isFavoriteOnlyPacket = (item) => {
+  const writes = item.payload?.writes;
+  return Boolean(Array.isArray(writes) && writes.length && writes.every(write => isFavoriteProductWrite(write) &&
+    write.operation === "update" && typeof write.data.favorito === "boolean" &&
+    Object.keys(write.data).every(key => ["favorito", "atualizadoEm"].includes(key))));
+};
+const favoriteWriteWasRejected = (item) => item.status === "error" &&
+  item.favoriteRejectedWithoutEffect === true && isFavoriteOnlyPacket(item);
+function favoriteRejectedOnFirstAttempt(item, error) {
+  // A definitive response on a retry cannot rule out an earlier request still in flight.
+  return !item.lastAttemptAt && !item.attempts && !item.retryCount && item.status === "pending" &&
+    error.syncDetail?.stage === "server_operational_commit" &&
+    ["permission-denied", "invalid-argument"].includes(errorCode(error)) && isFavoriteOnlyPacket(item);
+}
 function favoriteWriteHasPredecessor(item, queue) {
-  if (item.source !== "mobile-favorite") return false;
-  const products = new Set(item.payload.writes.map(write=>write.entityId));
+  const writes = item.payload?.writes;
+  if (!Array.isArray(writes)) return false;
+  const products = new Set(writes.filter(isFavoriteProductWrite).map(write => String(write.entityId)));
+  if (!products.size) return false;
   for (const prior of queue) {
     if (prior.queueId === item.queueId) break;
-    if (prior.source === item.source && prior.businessId === item.businessId &&
-        prior.userId === item.userId && prior.workspaceGeneration === item.workspaceGeneration &&
-        !favoriteWriteWasRejected(prior) &&
-        prior.payload?.writes?.some(write=>products.has(write.entityId))) return true;
+    if (prior.businessId === item.businessId && prior.userId === item.userId &&
+        (prior.workspaceGeneration ?? 0) === (item.workspaceGeneration ?? 0) &&
+        !favoriteWriteWasRejected(prior) && Array.isArray(prior.payload?.writes) &&
+        prior.payload.writes.some(write => isFavoriteProductWrite(write) && products.has(String(write.entityId))))
+      return true;
   }
   return false;
 }
@@ -2570,28 +2588,36 @@ function saveProductFavorites(changes) {
   window.TeamAccess?.assertSession?.(permissionScope);
   queueWrites(writes, crypto.randomUUID(), "simple", {source:"mobile-favorite"});
   DB.stageProductFavorites(updates);
+  // An in-flight pass took its queue snapshot before this tap. Wake sync after it finishes.
+  const activeSync = manualSyncPromise || automaticSyncPromise || processingPromise;
+  if (activeSync) {
+    const scope = captureCloudReadScope(false);
+    const wake = () => { if (scope === captureCloudReadScope(false)) scheduleImmediate(); };
+    void activeSync.then(wake, wake);
+  }
   return true;
 }
-function restoreRejectedProductFavorites(item,queue,error) {
-  if (item.source !== "mobile-favorite" || !["permission-denied","invalid-argument"].includes(errorCode(error))) return;
+function restoreRejectedProductFavorites(item,queue) {
+  if (!favoriteWriteWasRejected(item)) return;
+  const writtenAt = write => Object.hasOwn(write.data, "atualizadoEm") ?
+    write.data.atualizadoEm : write.before?.atualizadoEm;
   const position = queue.findIndex(row=>row.queueId===item.queueId);
   if (position < 0) return;
   const newer = new Set(queue.slice(position+1)
-    .flatMap(row=>(row.payload?.writes||[]).filter(write=>write.entityType==="products").map(write=>write.entityId)));
+    .flatMap(row=>(row.payload?.writes||[]).filter(isFavoriteProductWrite).map(write=>String(write.entityId))));
   const products = new Map(DB.carregar().produtos.map(product=>[product.id,product]));
   const changes = [], updates = new Map();
   for (const write of item.payload.writes) {
     const {entityId:id,data,before}=write, product=products.get(id);
-    if (write.entityType!=="products" || write.operation!=="update" || !before || !product || newer.has(id) ||
-        Object.keys(data).some(key=>!["favorito","atualizadoEm"].includes(key)) ||
-        typeof data.favorito!=="boolean" || product.favorito!==data.favorito || product.atualizadoEm!==data.atualizadoEm) continue;
+    if (!before || !product || newer.has(String(id)) ||
+        product.favorito!==data.favorito || product.atualizadoEm!==writtenAt(write)) continue;
     let previous = before;
     for (let index = position - 1; index >= 0; index--) {
       const packet = queue[index];
-      const prior = packet.payload?.writes?.find(entry=>entry.entityType==="products" && entry.entityId===id);
+      const prior = packet.payload?.writes?.find(entry=>isFavoriteProductWrite(entry) && entry.entityId===id);
       if (!prior) continue;
-      if (!favoriteWriteWasRejected(packet) || !prior.before || !prior.data ||
-          prior.data.favorito!==previous.favorito || prior.data.atualizadoEm!==previous.atualizadoEm) break;
+      if (!favoriteWriteWasRejected(packet) || !prior.before ||
+          prior.data.favorito!==previous.favorito || writtenAt(prior)!==previous.atualizadoEm) break;
       previous = prior.before;
     }
     const value=Boolean(previous.favorito);
@@ -3833,9 +3859,10 @@ async function processSyncQueue(options = {}) {
       const live = readQueue(),
         position = live.findIndex((item) => item.queueId === queued.queueId);
       // Resolve earlier uncertain commits first so an offline retry cannot supersede a newer favorite.
-      if (position < 0 || favoriteWriteHasPredecessor(queued, live)) continue;
+      if (position < 0 || favoriteWriteHasPredecessor(live[position], live)) continue;
+      const beforeAttempt = live[position];
       live[position] = {
-        ...live[position],
+        ...beforeAttempt,
         status: "syncing",
         lastAttemptAt: now(),
       };
@@ -3929,6 +3956,7 @@ async function processSyncQueue(options = {}) {
             attempts,
             retryCount: attempts,
             status: retryable ? "pending" : "error",
+            ...(favoriteRejectedOnFirstAttempt(beforeAttempt,error) ? {favoriteRejectedWithoutEffect:true} : {}),
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
             lastErrorMessage: String(error?.message || friendlyError(error)).slice(0,800),
@@ -3938,7 +3966,7 @@ async function processSyncQueue(options = {}) {
             lastErrorPaths: error.syncDetail?.transactionPaths || [],
           };
           saveQueue(failed);
-          try { restoreRejectedProductFavorites(queued,failed,error); }
+          try { restoreRejectedProductFavorites(failed[failedIndex],failed); }
           catch (restoreError) { console.warn("[Favoritos] Estado anterior indisponível.", {code:errorCode(restoreError)}); }
         }
         reportError(error, "Queue operation", {

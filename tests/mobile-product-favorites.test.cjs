@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const sync = fs.readFileSync('js/firebase/sync.js','utf8');
-const isRejected = sync.slice(sync.indexOf('const favoriteWriteWasRejected ='),sync.indexOf('const canAttempt ='));
+const isRejected = sync.slice(sync.indexOf('const isFavoriteProductWrite ='),sync.indexOf('const canAttempt ='));
 const helper = sync.slice(sync.indexOf('function saveProductFavorites('),sync.indexOf('async function validateUser('));
 const pendingIds = sync.slice(sync.indexOf('function pendingIds('),sync.indexOf('function markLocalCreditSaleConfirmed('));
 
@@ -14,7 +14,8 @@ function fixture(){
   const saved=[],paints=[],notifications=[],queue=[];
   const context={
     currentUser:{uid:'qa'},now:()=> 'new',crypto:{randomUUID:()=> 'qa-op'},
-    errorCode:error=>error.code,
+    errorCode:error=>error.code,QUEUE_ENTITY_ALIASES:{produtos:'products'},
+    processingPromise:null,manualSyncPromise:null,automaticSyncPromise:null,
     readQueue:()=>queue,readPaymentRecoveryReceipt:()=>null,isHistoricalProjectionBatch:()=>false,
     queueWrites:(writes,id,event,options)=>queue.push({queueId:id,payload:{writes},source:options.source,event}),
     DB:{
@@ -49,9 +50,9 @@ test('mobile favorite uses one existing queue packet with only favorite and time
 test('definitive rejection restores only the matching projection and preserves the failed packet',()=>{
   const f=fixture();f.context.saveProductFavorites([{id:'a',value:true}]);
   // Queued snapshots are serialized by the existing queue before publishing the memory projection.
-  const packet={...f.queue[0],payload:{writes:[{...f.queue[0].payload.writes[0],before:{id:'a',favorito:false,atualizadoEm:'old'}}]}};
+  const packet={...f.queue[0],status:'error',favoriteRejectedWithoutEffect:true,payload:{writes:[{...f.queue[0].payload.writes[0],before:{id:'a',favorito:false,atualizadoEm:'old'}}]}};
   const original=JSON.stringify(packet);
-  f.context.restoreRejectedProductFavorites(packet,[packet],{code:'permission-denied'});
+  f.context.restoreRejectedProductFavorites(packet,[packet]);
   assert.equal(f.items[0].favorito,false);
   assert.equal(f.items[0].preco,25);
   assert.equal(JSON.stringify(packet),original);
@@ -62,8 +63,9 @@ test('definitive rejection restores only the matching projection and preserves t
 test('offline errors and newer writes retain the latest favorite',()=>{
   const f=fixture();f.context.saveProductFavorites([{id:'a',value:true}]);
   const packet=f.queue[0];
-  f.context.restoreRejectedProductFavorites(packet,[packet],{code:'unavailable'});
-  f.context.restoreRejectedProductFavorites(packet,[packet,{queueId:'newer',payload:{writes:[{entityType:'products',entityId:'a'}]}}],{code:'permission-denied'});
+  f.context.restoreRejectedProductFavorites(packet,[packet]);
+  const rejected={...packet,status:'error',favoriteRejectedWithoutEffect:true};
+  f.context.restoreRejectedProductFavorites(rejected,[rejected,{queueId:'newer',payload:{writes:[{entityType:'products',entityId:'a',data:{favorito:false}}]}}]);
   assert.equal(f.items[0].favorito,true);
   assert.equal(f.paints.length,0);
 });
@@ -79,16 +81,16 @@ test('permission failure before enqueue changes neither queue nor local favorite
 
 test('consecutive definitive rejections restore the last state before either write',()=>{
   const f=fixture();
-  const packet=(queueId,before,data)=>({queueId,source:'mobile-favorite',status:'error',lastErrorCode:'permission-denied',
+  const packet=(queueId,before,data)=>({queueId,source:queueId==='older'?'local':'mobile-favorite',status:'error',lastErrorCode:'permission-denied',favoriteRejectedWithoutEffect:true,
     payload:{writes:[{entityType:'products',entityId:'a',operation:'update',before,data}]}});
   const initial={favorito:false,atualizadoEm:'initial'};
   const first={favorito:true,atualizadoEm:'first'};
   const second={favorito:false,atualizadoEm:'second'};
   const older=packet('older',initial,first),newer=packet('newer',first,second);
   Object.assign(f.items[0],second);
-  f.context.restoreRejectedProductFavorites(older,[older,newer],{code:'permission-denied'});
+  f.context.restoreRejectedProductFavorites(older,[older,newer]);
   assert.equal(f.items[0].atualizadoEm,'second');
-  f.context.restoreRejectedProductFavorites(newer,[older,newer],{code:'permission-denied'});
+  f.context.restoreRejectedProductFavorites(newer,[older,newer]);
   assert.equal(f.items[0].atualizadoEm,'initial');
   assert.equal(f.items[0].favorito,false);
 });
@@ -97,22 +99,26 @@ test('an uncertain earlier commit holds only later favorites for the same produc
   const {context}=fixture();
   const packet=(queueId,entityId,extra={})=>({
     queueId,source:'mobile-favorite',userId:'qa',businessId:'qa',workspaceGeneration:1,
-    payload:{writes:[{entityType:'products',entityId}]},...extra,
+    payload:{writes:[{entityType:'products',entityId,operation:'update',data:{favorito:true}}]},...extra,
   });
-  const older=packet('older','a',{status:'pending',lastErrorCode:'unavailable'});
+  const older=packet('older','a',{source:'local',status:'pending',lastErrorCode:'unavailable'});
   const newer=packet('newer','a');
   assert.equal(context.favoriteWriteHasPredecessor(newer,[older,newer]),true);
+  const legacyLater={...newer,source:'local'};
+  assert.equal(context.favoriteWriteHasPredecessor(legacyLater,[{...older,source:'mobile-favorite'},legacyLater]),true);
+  assert.equal(context.favoriteWriteHasPredecessor(newer,[{...older,businessId:'other-tenant'},newer]),false);
+  assert.equal(context.favoriteWriteHasPredecessor(newer,[{...older,userId:'other-member'},newer]),false);
   assert.equal(context.favoriteWriteHasPredecessor(newer,[newer]),false);
   assert.equal(context.favoriteWriteHasPredecessor(newer,[packet('other','b'),newer]),false);
   assert.equal(context.favoriteWriteHasPredecessor(newer,[packet('retired','a',{workspaceGeneration:0}),newer]),false);
-  assert.equal(context.favoriteWriteHasPredecessor(newer,[{...older,status:'error',lastErrorCode:'permission-denied'},newer]),false);
+  assert.equal(context.favoriteWriteHasPredecessor(newer,[{...older,status:'error',lastErrorCode:'permission-denied',favoriteRejectedWithoutEffect:true},newer]),false);
 });
 
 test('a definitively rejected favorite does not pin stock or other product metadata in cache',()=>{
   const f=fixture();
   f.context.saveProductFavorites([{id:'a',value:true}]);
   assert.equal(f.context.pendingIds('products').has('a'),true);
-  Object.assign(f.queue[0],{status:'error',lastErrorCode:'permission-denied'});
+  Object.assign(f.queue[0],{status:'error',lastErrorCode:'permission-denied',favoriteRejectedWithoutEffect:true});
   assert.equal(f.context.pendingIds('products').has('a'),false);
   assert.equal(f.queue.length,1);
 });
