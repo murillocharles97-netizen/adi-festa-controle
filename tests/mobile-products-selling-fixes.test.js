@@ -54,7 +54,8 @@ test("Vender mobile posiciona favorito na imagem e remove Ver todos", () => {
   assert.doesNotMatch(source, />Ver todos</);
   assert.match(css, /\.mobile-sale-favorite\{position:absolute;z-index:4;display:grid;place-items:center;right:9px;top:9px;width:44px;height:44px/);
   assert.match(css, /\.mobile-sale-page \.pos-qty\{left:9px;right:auto/);
-  assert.match(source, /getProductRenewalPeriod/);
+  // The renewal period is shown on the product card itself (the recent-sales strip was removed).
+  assert.match(read("js/checkout.js"), /getProductRenewalPeriod/);
 });
 
 test("Produtos mobile remove a barra inferior e usa período no recorrente", () => {
