@@ -399,7 +399,11 @@
       if (!relations.has(clientId)) relations.set(clientId, new Set());
       relations.get(clientId).add(id);
     }
-    for (const client of db.clientes || []) add(client.id, client);
+    for (const client of db.clientes || []) {
+      add(client.id, client);
+      if (ownRow(client) && Array.isArray(client.customerSpaceIds))
+        for (const id of client.customerSpaceIds) add(client.id, { spaceId: id });
+    }
     for (const sale of db.vendas || []) if (isValidSale(sale) && !sale.desfeita && !sale.cancelledAt) add(sale.clienteId || sale.clientId, sale);
     if (!window.OperationalReadPolicy?.restricted?.())
       for (const renewal of db.customerSubscriptions || []) if (renewal.active !== false && !renewal.deletedAt) add(renewal.clientId, renewal);
@@ -409,7 +413,8 @@
     const selected = activeId();
     if (!selected) return { clients: [], unassigned: [] };
     const own = (db.clientes || []).filter(ownRow);
-    if (!scopesCustomers()) return { clients: own.filter(client => !recordSpace(client) || recordSpace(client) === selected), unassigned: [] };
+    if (!scopesCustomers()) return { clients: own.filter(client =>
+      !recordSpace(client) || recordSpace(client) === selected || client.customerSpaceIds?.includes?.(selected)), unassigned: [] };
     const relations = customerRelations(db), known = new Set(operationalSpaces().map(space => space.id));
     const mayReview = window.BusinessContext?.get?.().role === 'owner' && window.TeamAccess?.has?.('customers.view');
     return {
@@ -634,6 +639,7 @@
     setAdapter,
     homeSpaces,
     salesSpaces,
+    customerSpaces: () => { ensureContext(); return operationalSpaces(); },
     selectedHome,
     selectedSales,
     activeId,

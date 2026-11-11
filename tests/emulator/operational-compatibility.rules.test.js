@@ -4,6 +4,7 @@ const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-test
 const req=require('node:module').createRequire(require('node:path').resolve('functions/package.json'));
 const {initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore}=req('firebase-admin/firestore');
 const operationalSource=process.env.VECONI_TEST_FUNCTION_SOURCE;
+const readerSource=process.env.VECONI_TEST_READER_SOURCE;
 const {operationalCommitService}=operationalSource
  ?require(require('node:path').resolve(operationalSource,'src/services/operational-commit-service'))
  :require('../../functions/src/services/operational-commit-service');
@@ -24,9 +25,90 @@ async function setup(){
  const packet=(before,op=crypto.randomUUID(),eventKind='simple',uid=seller)=>({operationId:op,businessId:bid,userId:uid,workspaceGeneration:0,payload:{eventKind,writes:bridge(h.c.diffWrites(before,h.data()))}});
  const commit=p=>svc.commit({auth:{uid:p.userId},data:{businessId:bid,item:p}});
  const admin=(command,more,uid=owner)=>maintenance.commit({auth:{uid},data:{businessId:bid,workspaceGeneration:0,command,confirmed:true,clientId:'qa-client',expectedBalance:-12,expectedFinancialVersion:12,...more}});
- return{bid,space,other,owner,seller,root,h,read,set,packet,commit,admin,permissions};
+ const directory=(data,uid=owner)=>svc.commit({auth:{uid},data:{kind:'customer_directory',businessId:bid,workspaceGeneration:0,...data}});
+ return{bid,space,other,owner,seller,root,h,read,set,packet,commit,admin,permissions,directory};
 }
 function domains(c){for(const p of ['js/campaign-engine-v2.js','js/customer-subscriptions.js'])vm.runInContext(fs.readFileSync(p,'utf8'),c.h.c);Object.assign(c.h.c.SOURCES,{campaigns:{key:'campanhas'},campaignProgress:{key:'progressosCampanha'},campaignEvents:{key:'eventosCampanha'},campaignRedemptions:{key:'resgatesCampanha'},customerSubscriptions:{key:'customerSubscriptions'},customerSubscriptionEvents:{key:'customerSubscriptionEvents'}});c.h.c.Campanhas={aplicarVendaNoBanco:(data,sale)=>{const r=c.h.c.CampaignEngineV2.applySale(data,sale);sale.campaignEvents=r.events.map(e=>e.id);return r.snapshots;},reverterVendaNoBanco:(data,sale)=>c.h.c.CampaignEngineV2.reverseSale(data,sale)};}
+
+test('customer directory saves the active space and optional links without duplicates on retry',async()=>{
+ const c=await setup();
+ const create=(customerId,activeSpaceId,spaceIds)=>({action:'create',customerId,activeSpaceId,spaceIds,customer:{nome:'Cliente QA'}});
+ for(const [id,space,spaces] of [['qa-iptv',c.other,[c.other]],['qa-festa',c.space,[c.space]],['qa-shared',c.other,[c.other,c.space]]]){
+  const request=create(id,space,spaces);
+  assert.equal((await c.directory(request)).status,'created');
+  assert.equal((await c.directory(request)).clientId,id);
+  const record=await c.read('clients',id);
+  assert.equal(record.spaceId,space);assert.deepEqual(record.customerSpaceIds,spaces);
+  assert.equal(record.saldo,0);assert.equal(record.financialVersion,0);
+ }
+ assert.equal((await c.root.collection('clients').get()).size,4);
+});
+
+test('customer directory detects a formatted legacy WhatsApp and links only the same client after confirmation',async()=>{
+ const c=await setup(),id='qa-legacy-phone',phone='5511987654321';
+ const record={id,businessId:c.bid,spaceId:c.space,telefone:'(11) 98765-4321',nome:'Cliente original',saldo:-81,financialVersion:3};
+ await c.set('clients',id,record);
+ const subscription={id:'qa-sub',businessId:c.bid,clientId:id,spaceId:c.space,expiresAt:'2096-02-29'};
+ const sale={id:'qa-old-sale',businessId:c.bid,clienteId:id,spaceId:c.space,valorFinal:81};
+ await c.set('customerSubscriptions',subscription.id,subscription);
+ await c.set('sales',sale.id,sale);
+ const create={action:'create',customerId:'qa-candidate',activeSpaceId:c.other,spaceIds:[c.other],customer:{nome:'Dados do formulário',telefone:'+55 11 98765-4321'}};
+ assert.deepEqual(await c.directory(create),{status:'duplicate',clientId:id,canLink:true});
+ const link={action:'link',customerId:id,activeSpaceId:c.other,phone};
+ await assert.rejects(c.directory(link),/Confirme o vínculo/);
+ await assert.rejects(c.directory({...link,customerId:'qa-wrong',confirmed:true}),/associado ao WhatsApp mudou/);
+ assert.deepEqual(await c.read('clients',id),record);
+ assert.equal((await c.directory({...link,confirmed:true})).status,'linked');
+ assert.equal((await c.directory({...link,confirmed:true})).status,'already-linked');
+ assert.equal((await c.directory(create)).status,'already-linked');
+ assert.deepEqual(await c.read('clients',id),{...record,customerSpaceIds:[c.other]});
+ assert.deepEqual(await c.read('customerSubscriptions',subscription.id),subscription);
+ assert.deepEqual(await c.read('sales',sale.id),sale);
+ assert.equal(await c.read('clients','qa-candidate'),undefined);
+});
+
+test('customer directory serializes concurrent creates for a WhatsApp across spaces',async()=>{
+ const c=await setup(),customer={nome:'Cliente concorrente QA',telefone:'(11) 98765-4321'};
+ const replies=await Promise.all([c.space,c.other].map((space,i)=>c.directory({
+  action:'create',customerId:'qa-concurrent-'+i,activeSpaceId:space,spaceIds:[space],customer,
+ })));
+ assert.deepEqual(replies.map(reply=>reply.status).sort(),['created','duplicate']);
+ assert.equal(replies[0].clientId,replies[1].clientId);
+ assert.equal((await c.root.collection('clients').where('normalizedPhone','==','5511987654321').get()).size,1);
+ assert.equal((await c.root.collection('customerPhoneKeys').get()).size,1);
+});
+
+test('customer directory rejects foreign targets and redacts an inaccessible source',async()=>{
+ const c=await setup(),phone='5511987654321',id='qa-hidden-source';
+ await c.root.collection('members').doc(c.seller).update({permissions:{...c.permissions,'customers.create':true,'customers.edit':true}});
+ await c.set('clients',id,{id,businessId:c.bid,spaceId:c.other,nome:'Privado',telefone:phone,saldo:-80});
+ const create={action:'create',customerId:'qa-attempt',activeSpaceId:c.space,spaceIds:[c.space],customer:{nome:'QA',telefone:phone}};
+ assert.deepEqual(await c.directory(create,c.seller),{status:'duplicate-private'});
+ await assert.rejects(c.directory({...create,spaceIds:[c.space,c.other]},c.seller),/Espaço não autorizado/);
+ assert.deepEqual(await c.directory({action:'link',customerId:id,activeSpaceId:c.space,phone,confirmed:true},c.seller),{status:'duplicate-private'});
+ assert.equal(await c.read('clients','qa-attempt'),undefined);
+ assert.equal((await c.read('clients',id)).customerSpaceIds,undefined);
+});
+
+test('customer directory reader restores a shared card across sessions without exposing the origin balance', {skip:!readerSource}, async()=>{
+ const c=await setup(),id='qa-shared-directory';
+ const {operationalReadService}=require(require('node:path').resolve(readerSource,'src/services/operational-read-service'));
+ const gateway=operationalReadService(db);
+ await c.root.collection('members').doc(c.seller).update({permissionsVersion:3,allowedSpaceIds:[c.space,c.other]});
+ await c.set('clients',id,{id,businessId:c.bid,spaceId:c.other,customerSpaceIds:[c.space,c.other,'foreign-space'],nome:'QA',telefone:'11987654321',saldo:-81,financialVersion:3,observacoes:'Privado'});
+ const read=(spaceId,extra)=>gateway.read({auth:{uid:c.seller},data:{businessId:c.bid,workspaceGeneration:0,collection:'clients',spaceId,...extra}});
+ const first=(await read(c.space,{mode:'get',id})).record;
+ assert.equal(first.customerDirectoryOnly,true);
+ assert.equal(first.saldo,undefined);assert.equal(first.financialVersion,undefined);assert.equal(first.observacoes,undefined);
+ assert.deepEqual(first.customerSpaceIds,[c.space,c.other]);
+ assert.equal((await read(c.space,{mode:'page',limit:100})).items.find(row=>row.id===id).customerDirectoryOnly,true);
+ const original=(await read(c.other,{mode:'get',id})).record;
+ assert.equal(original.customerDirectoryOnly,false);assert.equal(original.saldo,-81);
+ await assert.rejects(read(c.space,{mode:'last_payment',customerId:id}),/fora do espaço autorizado/);
+ await c.root.collection('members').doc(c.seller).update({allowedSpaceIds:[c.space]});
+ assert.deepEqual((await read(c.space,{mode:'get',id})).record.customerSpaceIds,[c.space]);
+ await assert.rejects(read(c.other,{mode:'get',id}),/Espaço não autorizado/);
+});
 async function campaign(c){domains(c);const value={id:'qa-campaign',businessId:c.bid,type:'buy_get',name:'Campanha fictícia',status:'active',active:true,startsAt:'2020-01-01',qualification:{productIds:['qa-product']},rule:{requiredQuantity:1,multipleCycles:true},rewards:[{id:'reward',type:'product',productId:'qa-product',quantity:1}],updatedAt:'2026-01-01'};c.h.data().campanhas=[value];await c.set('campaigns',value.id,value);return value;}
 
 test('owner reconciles only-local balance exactly once; original event/queue evidence and no stock/sale effects',async()=>{

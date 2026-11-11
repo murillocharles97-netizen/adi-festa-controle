@@ -4321,6 +4321,31 @@ async function readOperationalDocument(name,id,options={}) {
   }
   return getDocFromServer(doc(db,'businesses',activeBusinessId(),name,String(id)));
 }
+async function saveCustomerDirectory(input) {
+  const scope=captureCloudReadScope();
+  await validateUser();
+  assertCloudReadScope(scope);
+  if(navigator.onLine===false)throw Error('Conecte-se para conferir o cadastro. Os dados do formulário foram preservados.');
+  const response=await window.FirebaseCallable('commitOperationalSync',{
+    ...input,kind:'customer_directory',businessId:activeBusinessId(),workspaceGeneration:DB.getWorkspaceGeneration?.()??0,
+    syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release),
+  });
+  assertCloudReadScope(scope);
+  const result=response.data??response;
+  if(!['created','linked','already-linked','duplicate','duplicate-private','duplicate-review'].includes(result?.status))
+    throw Error('O servidor ainda não confirmou o cadastro. Confira a conexão e tente novamente.');
+  let customer=result.created;
+  if(!customer&&['created','linked','already-linked'].includes(result.status)&&window.TeamAccess?.has?.('customers.view')){
+    const snapshot=await readOperationalDocument('clients',result.clientId);
+    assertCloudReadScope(scope);
+    if(snapshot.exists()){
+      const record=snapshot.data();
+      customer={...record,id:snapshot.id,customerSpaceIds:record.customerSpaceIds??result.spaceIds};
+    }
+  }
+  if(customer)applyCloudCollection('clients',[customer],{authoritative:true});
+  return result;
+}
 async function prepareOperationalCustomer(clientId,purpose='checkout') {
   if(!window.OperationalReadPolicy?.restricted?.())return null;
   if(navigator.onLine===false){if(purpose==='payment'&&!window.OperationalReadPolicy.paymentPrepared(clientId))throw Error('Conecte-se para conferir as obrigações deste cliente antes de receber. O formulário e a fila foram preservados.');return null;}
@@ -6877,6 +6902,7 @@ window.SyncFirebase = {
   queryClientsByInactivity,
   queryCustomerSubscriptions,
   queryRenewalsForSpace,
+  saveCustomerDirectory,
   loadProductVariants,
   findProductVariantByBarcode,
   pendingActivityEvents,

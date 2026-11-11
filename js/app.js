@@ -500,16 +500,7 @@
       cupons: "Cupons de desconto",
     };
   function formularioCliente(id) {
-    try { window.Clientes?.assertCanSave?.(id); } catch (error) { toast(error.message, true); return; }
-    const c = id ? Clientes.obter(id) : {};
-    abrirFormulario(
-      id ? "Editar cliente" : "Novo cliente",
-      `<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${escapar(c.nome || "")}"></div><div class="field"><label>Telefone</label><input name="telefone" value="${escapar(c.telefone || "")}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" value="${escapar(c.telefone2 || "")}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${escapar(c.email || "")}"></div><div class="field"><label>Documento</label><input name="documento" value="${escapar(c.documento || "")}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${escapar(c.endereco || "")}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${escapar(c.complemento || "")}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${escapar(c.observacoes || "")}</textarea></div></div>`,
-      (f) => {
-        Clientes.salvar({ id, ...Object.fromEntries(f), ativo: true });
-        toast("Cliente salvo");
-      },
-    );
+    return window.ClientesPage?.clientForm(id);
   }
   function formularioProduto(id) {
     window.ProdutosMobile?.productForm(id);

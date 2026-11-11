@@ -151,6 +151,7 @@ window.Clientes=(()=>{
     return account;
   }
   function listFinancialStatus(client) {
+    if (client?.customerDirectoryOnly) return financialStatus(client);
     if (localListBalances()) {
       const state = listBalances(), account = state.accounts.get(client?.id), p = account?.parts.get(state.selected);
       if (!account || account.calendarUnknown || (!p || p.dueCents + p.futureCents === 0) && account.unknownCents) return unknown();
@@ -162,6 +163,7 @@ window.Clientes=(()=>{
     return financialStatus(client);
   }
   function financialStatus(client, scoped = scopedScreen()) {
+    if (client?.customerDirectoryOnly) return unknown('O saldo precisa ser consultado no espaço de origem.');
     if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
       return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
     const account = (window.InstallmentCredit?.confirmedAccount || window.InstallmentCredit?.account)?.(client?.id);

@@ -9,6 +9,7 @@ const Model=require('../shared/online-store');
 const {stockKey}=require('./online-stock-reservation');
 const execute=require('../shared/commercial-commit-engine');
 const {validateEngagement}=require('./operational-engagement-validation');
+const {manageCustomerDirectory,validateCustomerDirectoryWrites}=require('./customer-directory-service');
 const {operationalId}=require('../shared/operational-id');
 const Policy=require('../shared/permission-policy');
 const SaleMoney=require('../shared/sale-money');
@@ -61,6 +62,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   return c;
  }
  async function commit(request,{priorSale=null,paymentRecovery=null}={}){
+  if(request.data?.kind==='customer_directory')return db.runTransaction(async tx=>{
+   const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0});
+   return manageCustomerDirectory({db,tx,c,request:d});
+  });
   if(!paymentRecovery&&['payment_recovery_review','payment_recovery_apply'].includes(request.data?.kind)){
    const d=request.data,original=d.item;
    if(!original?.payload||Number(d.clientRelease)<227||d.originalPayloadHash!==digest(original?.payload)||!['permission-denied','failed-precondition','invalid-argument','already-exists'].includes(String(original?.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')))fail('Original rejeitado completo e versão compatível são obrigatórios.','failed-precondition');
@@ -162,6 +167,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    }};
    const outcome=await execute({db,item,transaction:buffer,currentUser:{uid:c.uid},FieldValue,has:c.has,actor:{actorUid:c.uid,actorRoleSnapshot:c.role,actorNameSnapshot:c.member?.name||c.user.name||null}});
    await validate(tx,c,item,attemptWrites,plan,get,writes,historyAccount);
+   await validateCustomerDirectoryWrites({db,tx,c,writes:attemptWrites,plan,old:async reference=>(await get(reference)).data()});
    const newPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);if(newPlan){const entry=plan.get(ref(c.bid,'clients',newPlan.data.clienteId).path);if(entry){entry.data.hasInstallmentFiado=true;if(historyAccount?.version===2)entry.data.fiadoHistoryVersion=1;}}
    if(incomingPayment&&historyAccount?.version===2){const entry=plan.get(ref(c.bid,'clients',incomingPayment.data.clienteId||incomingPayment.data.clientId).path);if(entry)entry.data.fiadoHistoryVersion=1;}
    if(priorSale)await priorSale.finalize(tx,c,item,plan,get);
@@ -175,7 +181,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     tx.create(recoveryAudit,{type:'original_payment_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),reviewHash:recoveryHash,...recoveryFacts,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
    }
    for(const p of plan.values())tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
-   const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'))];
+   const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'&&n!=='customerPhoneKeys'))];
    if(names.length){
     const revision='server:'+item.operationId;
     // Never inherit a browser's source identity through merge. Older V202/V203

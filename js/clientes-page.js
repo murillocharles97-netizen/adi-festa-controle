@@ -72,8 +72,84 @@ window.ClientesPage=(()=>{
   }
   function renderList(){const scope=window.SpaceContext?.viewScope?.();if(scope!==selectionScope){selectionScope=scope;state.selected.clear();state.selecting=false;state.drawer=false;}const list=filtered(),visible=list.slice(0,state.limit);return `<div class="clients-page">${window.SpaceContext?.renderBar?.("clients")||""}${Clientes.originalAccountAction?.()||""}${header()}${controls()}${topDebtors()}<section class="professional-client-grid" id="client-list">${visible.map((c,i)=>card(c,i)).join('')||empty()}</section>${list.length>visible.length?`<button class="btn btn-light load-clients" id="load-more-clients">Carregar mais ${Math.min(20,list.length-visible.length)} clientes</button>`:''}${Clientes.unassignedMarkup?.()||""}${drawer()}${selectionBar()}</div>`}
   function refresh(){const app=$('#app');if(!app||Router.atual()!=='clientes'||!$('.clients-page',app))return;const scroll=scrollY;app.innerHTML=window.ClientesPage.render();const page=$('.clients-page',app);if(page)page.dataset.clientsBound='true';window.ClientesPage.bind();scrollTo({top:scroll});window.lucide?.createIcons()}
-  const formModal=(title,body,onSave,label='Salvar')=>{const root=$('#modal');root.innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${title}</h3><button class="icon-btn close">${icon('x')}</button></header><form><div class="modal-body">${body}</div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;$$('.close',root).forEach(b=>b.onclick=Modais.fechar);$('form',root).onsubmit=async e=>{e.preventDefault();const form=e.target;if(form.dataset.saving)return;form.dataset.saving='1';try{await onSave(new FormData(form));await DB.flush?.();Modais.fechar();refresh()}catch(err){Utils.toast(err.message,true)}finally{delete form.dataset.saving}};window.lucide?.createIcons()};
-  function clientForm(id){try{Clientes.assertCanSave?.(id)}catch(error){Utils.toast(error.message,true);return}const c=id?Clientes.obter(id):{};formModal(id?'Editar cliente':'Novo cliente',`<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(c.nome||'')}"></div><div class="field"><label>Telefone</label><input name="telefone" inputmode="tel" value="${esc(c.telefone||'')}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" inputmode="tel" value="${esc(c.telefone2||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(c.email||'')}"></div><div class="field"><label>Documento</label><input name="documento" value="${esc(c.documento||'')}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${esc(c.endereco||'')}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${esc(c.complemento||'')}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${esc(c.observacoes||'')}</textarea></div></div>`,f=>Clientes.salvar({id,...Object.fromEntries(f),ativo:true}))}
+  const formModal=(title,body,onSave,label='Salvar')=>{const root=$('#modal');root.innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${title}</h3><button class="icon-btn close">${icon('x')}</button></header><form><div class="modal-body">${body}</div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;$$('.close',root).forEach(b=>b.onclick=Modais.fechar);$('form',root).onsubmit=async e=>{e.preventDefault();const form=e.target;if(form.dataset.saving)return;form.dataset.saving='1';try{const saved=await onSave(new FormData(form),form);await DB.flush?.();if(saved===false){refresh();return}if(form.isConnected){Modais.fechar();refresh()}}catch(err){Utils.toast(err.message,true)}finally{delete form.dataset.saving}};window.lucide?.createIcons()};
+  function registrationContext() {
+    Clientes.assertCanCreate();
+    const activeId=window.SpaceContext?.activeId?.(),spaces=window.SpaceContext?.customerSpaces?.()||[];
+    if(!spaces.some(space=>space.id===activeId))throw Error('Selecione um espaço operacional antes de cadastrar.');
+    return {activeId,spaces,scope:window.SpaceContext.viewScope(),id:Utils.uuid()};
+  }
+  function registrationFields({activeId,spaces}) {
+    const value='<input type="hidden" name="customerSpaceIds" value="'+esc(activeId)+'">';
+    if(spaces.length===1)return value;
+    const choices=spaces.map(space=>space.id===activeId
+      ? '<label><input type="checkbox" checked disabled> '+esc(space.name)+' (atual)</label>'
+      : '<label><input type="checkbox" name="customerSpaceIds" value="'+esc(space.id)+'"> '+esc(space.name)+'</label>').join('');
+    return '<fieldset class="field full"><legend>Espaços</legend>'+value+choices+'</fieldset>';
+  }
+  async function registerFromForm(form, context, onSaved) {
+    const inScope=()=>form.isConnected&&context.scope===window.SpaceContext?.viewScope?.();
+    const assertScope=()=>{
+      Clientes.assertCanCreate();
+      if(!inScope())throw Error('O espaço ou a sessão mudou. Reabra o cadastro no espaço atual.');
+    };
+    assertScope();
+    const formData=new FormData(form),customer=Object.fromEntries(formData);
+    const phone=Clientes.normalizePhone(customer.telefone);
+    const save=window.SyncFirebase?.saveCustomerDirectory;
+    if(!save)throw Error('Conecte-se à VECONI para conferir o cadastro e os espaços. O formulário foi preservado.');
+    const response=await save({action:'create',activeSpaceId:context.activeId,customerId:context.id,
+      spaceIds:formData.getAll('customerSpaceIds'),customer});
+    if(!inScope())return false;
+    const finish=(id,message)=>{
+      Modais.fechar();
+      onSaved?.(id);
+      Utils.toast(message);
+      return false;
+    };
+    if(response.status==='created')return finish(response.clientId,'Cliente salvo.');
+    form.querySelector('[data-customer-duplicate]')?.remove();
+    const notice=document.createElement('section');
+    notice.dataset.customerDuplicate='true';
+    notice.className='field full';
+    notice.setAttribute('role','status');
+    const message=document.createElement('p');
+    message.textContent=response.status==='already-linked'?'Este cliente já está vinculado ao espaço atual.'
+      :response.status==='duplicate-review'?'Há mais de um cadastro com este WhatsApp. Solicite a conferência do responsável.'
+      :'Este WhatsApp já pertence a um cliente da empresa.';
+    notice.append(message);
+    if(response.canLink||response.status==='already-linked'){
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='btn btn-light';
+      button.textContent=response.canLink?'Vincular cliente ao espaço atual':'Abrir cadastro existente';
+      button.onclick=async()=>{
+        try{
+          assertScope();
+          if(Clientes.normalizePhone(form.elements.telefone.value)!==phone)
+            throw Error('O WhatsApp mudou. Confira o cadastro novamente.');
+          if(response.status==='already-linked'){
+            if(onSaved)finish(response.clientId,'Cliente existente selecionado.');
+            else {Modais.fechar();(window.CRMClienteUI?.open||window.ClientesPage.profile)(response.clientId);}
+            return;
+          }
+          button.disabled=true;
+          const target=context.spaces.find(space=>space.id===context.activeId)?.name;
+          if(!window.confirm('Vincular o cadastro existente ao espaço '+target+'?'))return;
+          const linked=await save({action:'link',activeSpaceId:context.activeId,customerId:response.clientId,phone,confirmed:true});
+          if(!inScope())return;
+          if(!['linked','already-linked'].includes(linked.status))throw Error('O cadastro exige conferência antes de vincular.');
+          finish(linked.clientId,linked.status==='linked'?'Cliente vinculado ao espaço atual.':'O cliente já está neste espaço.');
+          refresh();
+        }catch(error){Utils.toast(error.message,true);}
+        finally{button.disabled=false;}
+      };
+      notice.append(button);
+    }
+    (form.querySelector('.modal-body')||form).append(notice);
+    return false;
+  }
+  function clientForm(id){try{Clientes.assertCanSave?.(id)}catch(error){Utils.toast(error.message,true);return}let context;try{if(!id)context=registrationContext()}catch(error){Utils.toast(error.message,true);return}const c=id?Clientes.obter(id):{};formModal(id?'Editar cliente':'Novo cliente',`<div class="form-grid"><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(c.nome||'')}"></div><div class="field"><label>Telefone</label><input name="telefone" inputmode="tel" value="${esc(c.telefone||'')}"></div><div class="field"><label>Telefone 2</label><input name="telefone2" inputmode="tel" value="${esc(c.telefone2||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(c.email||'')}"></div><div class="field"><label>Documento</label><input name="documento" value="${esc(c.documento||'')}"></div><div class="field full"><label>Endereço</label><input name="endereco" value="${esc(c.endereco||'')}"></div><div class="field full"><label>Complemento</label><input name="complemento" value="${esc(c.complemento||'')}"></div><div class="field full"><label>Observações</label><textarea name="observacoes">${esc(c.observacoes||'')}</textarea></div>${context?registrationFields(context):''}</div>`,(f,form)=>id?Clientes.salvar({id,...Object.fromEntries(f),ativo:true}):registerFromForm(form,context))}
   function receive(id){return Fiados.openReceive(id,{onRecorded:paymentSuccess, scoped:Clientes.scopedScreen?.()});}
   function paymentSuccess(p,c){
     if(!window.ReceiptMessageUI)return Utils.toast('A interface do recibo ainda está carregando. Reabra o aplicativo sem limpar os dados.',true);
@@ -88,9 +164,9 @@ window.ClientesPage=(()=>{
   function bind(){const sort=$('#client-sort');if(sort)sort.value=state.sort;let timer;$('#client-search').oninput=e=>{clearTimeout(timer);timer=setTimeout(()=>{if(!e.target.isConnected||Router.atual()!=='clientes')return;state.query=e.target.value;state.limit=40;refresh()},150)};sort.onchange=e=>{state.sort=e.target.value;save();refresh()};$$('[data-client-chip]').forEach(b=>b.onclick=()=>{state.quick=b.dataset.clientChip;if(state.quick==='debito')state.sort='maiorDebito';state.limit=40;save();refresh()});$('#open-client-filters').onclick=()=>{state.drawer=true;refresh()};$('#close-client-filters').onclick=$('#client-drawer-overlay').onclick=()=>{state.drawer=false;refresh()};$('#filter-debito').value=state.filters.debito;$('#filter-compra').value=state.filters.compra;$('#filter-cobranca').value=state.filters.cobranca;$('#filter-promessa').value=state.filters.promessa;$('#apply-client-filters').onclick=()=>{state.filters.saldo=$('input[name="filter-saldo"]:checked').value;state.filters.debito=$('#filter-debito').value;state.filters.compra=$('#filter-compra').value;state.filters.cobranca=$('#filter-cobranca').value;state.filters.promessa=$('#filter-promessa').value;$$('[data-filter-switch]').forEach(x=>state.filters[x.dataset.filterSwitch]=x.checked);state.drawer=false;save();refresh()};$$('[data-clear-client-filters]').forEach(b=>b.onclick=()=>{state.quick='todos';state.filters={saldo:'todos',debito:'todos',compra:'todos',cobranca:'todos',promessa:'todas',semTelefone:false,nunca:false,vencida:false,inativos:false};state.drawer=false;save();refresh()});$('[data-top-all]')?.addEventListener('click',()=>{state.quick='debito';state.sort='maiorDebito';save();refresh();$('#client-list')?.scrollIntoView({behavior:'smooth'})});$('#load-more-clients')?.addEventListener('click',()=>{state.limit+=40;refresh()});$('#client-select').onclick=()=>{state.selecting=!state.selecting;state.selected.clear();refresh()};$('#new-client').onclick=()=>clientForm();$('#empty-new-client')?.addEventListener('click',()=>clientForm());$('#import-csv').onclick=()=>window.dispatchEvent(new CustomEvent('clientes-import-csv'));$('#client-list').onclick=e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.receiveClient||b.dataset.whatsappClient||b.dataset.profileClient||b.dataset.moreClient||b.dataset.adjustClient||b.dataset.editClient||b.dataset.clientCharges||b.dataset.registerCharge||b.dataset.promiseClient||b.dataset.deleteClient;if(b.dataset.receiveClient)receive(id);if(b.dataset.whatsappClient)whatsapp(id);if(b.dataset.profileClient)profile(id);if(b.dataset.moreClient){const menu=$(`[data-menu-for="${id}"]`),hidden=menu.hidden;$$('.client-more-menu').forEach(x=>x.hidden=true);menu.hidden=!hidden}if(b.dataset.adjustClient)adjust(id);if(b.dataset.editClient)clientForm(id);if(b.dataset.clientCharges)profile(id);if(b.dataset.registerCharge){if(Clientes.scopedScreen?.())return Utils.toast('Use a cobrança individual após conferir o saldo.',true);Cobrancas.registrar(id,'enviado');Utils.toast('Cobrança registrada');refresh()}if(b.dataset.promiseClient)promise(id);if(b.dataset.deleteClient)Modais.confirmar('cliente',()=>{Clientes.excluir(id);refresh()})};$$('[data-client-check]').forEach(x=>x.onchange=()=>{x.checked?state.selected.add(x.dataset.clientCheck):state.selected.delete(x.dataset.clientCheck);refresh()});$('[data-cancel-selection]')?.addEventListener('click',()=>{state.selecting=false;state.selected.clear();refresh()});$('[data-bulk-charge]')?.addEventListener('click',()=>bulk([...state.selected]));$('[data-bulk-mark]')?.addEventListener('click',()=>{if(Clientes.scopedScreen?.())return Utils.toast('Confira o saldo por cliente para cobrar neste espaço.',true);state.selected.forEach(id=>{const c=Clientes.obter(id);if(c&&Clientes.financialStatus(c).saldo<0)Cobrancas.registrar(id,'enviado')});Utils.toast('Clientes marcados como cobrados');refresh()});$('[data-bulk-export]')?.addEventListener('click',()=>{if(Clientes.scopedScreen?.())return Utils.toast('A exportação de saldos pertence à conta da empresa.',true);const rows=[['Nome','Telefone','Saldo'],...[...state.selected].map(Clientes.obter).filter(Boolean).map(c=>[c.nome,c.telefone,c.saldo])],csv=rows.map(r=>r.map(v=>`"${String(v??'').replaceAll('"','""')}"`).join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='clientes-selecionados.csv';a.click()});$('[data-bulk-tag]')?.addEventListener('click',()=>formModal('Adicionar etiqueta','<div class="field"><label>Etiqueta</label><input name="tag" required></div>',f=>DB.alterar(db=>db.clientes.filter(c=>state.selected.has(c.id)).forEach(c=>{c.etiquetas=[...new Set([...(c.etiquetas||[]),f.get('tag')])]}))));window.lucide?.createIcons()}
   new MutationObserver(()=>{const page=$('#app .clients-page');if(page&&!page.dataset.clientsBound){page.dataset.clientsBound='true';queueMicrotask(()=>{if(page.isConnected&&Router.atual()==='clientes')window.ClientesPage.bind()})}}).observe($('#app'),{childList:true});
   function guardedClientForm(id){if(id&&Clientes.scopedScreen?.()&&!Clientes.viewClient(id))return Utils.toast('Cliente sem vínculo confirmado neste espaço.',true);try{window.Clientes?.assertCanSave?.(id);return clientForm(id)}catch(error){Utils.toast(error.message,true)}}
-  function guardedBind(){bind();window.SpaceContext?.bind?.(document.querySelector("#app"));const head=document.querySelector('.client-head .head-actions');if(head&&!head.querySelector('[data-open-receipt-models]')&&(window.ReceiptMessages?.canUse()||window.ReceiptMessages?.canManage())){const button=document.createElement('button');button.className='btn btn-light';button.type='button';button.dataset.openReceiptModels='true';button.textContent='Central de mensagens';button.onclick=()=>window.MobileMessages.openCenter({type:'receipt'});head.append(button);}if(window.Clientes?.canEdit?.()===false)$$('#new-client,#empty-new-client,#import-csv,[data-edit-client],[data-delete-client]').forEach(button=>{button.disabled=true;button.setAttribute('aria-disabled','true');button.title='Seu perfil pode consultar clientes. Cadastro e edição precisam do responsável.'})}
+  function guardedBind(){bind();window.SpaceContext?.bind?.(document.querySelector("#app"));const head=document.querySelector('.client-head .head-actions');if(head&&!head.querySelector('[data-open-receipt-models]')&&(window.ReceiptMessages?.canUse()||window.ReceiptMessages?.canManage())){const button=document.createElement('button');button.className='btn btn-light';button.type='button';button.dataset.openReceiptModels='true';button.textContent='Central de mensagens';button.onclick=()=>window.MobileMessages.openCenter({type:'receipt'});head.append(button);}if(window.Clientes?.canCreate?.()===false)$$('#new-client,#empty-new-client').forEach(button=>{button.disabled=true;button.setAttribute('aria-disabled','true')});if(window.Clientes?.canEdit?.()===false)$$('#import-csv,[data-edit-client]').forEach(button=>{button.disabled=true;button.setAttribute('aria-disabled','true');button.title='Seu perfil pode consultar clientes. Cadastro e edição precisam do responsável.'})}
   document.addEventListener('click', event => {
     if (event.target.closest?.('#app [data-open-original-fiado]')) window.Fiados?.openOriginalDirectory?.();
   });
-  return{render,bind:guardedBind,refresh,clientForm:guardedClientForm,importCSV,receive,whatsapp,profile,adjust,promise,renderCard:card,getState:()=>({...state,selected:undefined})};
+  return{render,bind:guardedBind,refresh,clientForm:guardedClientForm,registrationContext,registrationFields,registerFromForm,importCSV,receive,whatsapp,profile,adjust,promise,renderCard:card,getState:()=>({...state,selected:undefined})};
 })();

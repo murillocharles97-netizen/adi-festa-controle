@@ -37,6 +37,20 @@ test('one active space hides selectors and retains the existing shared directory
   }finally{f.close();}
 });
 
+test('one customer appears in both explicitly linked spaces and remains a single company record',()=>{
+  const f=fixture();
+  try{
+    const client={id:'qa-multi-link',businessId:'qa-business',spaceId:'a',customerSpaceIds:['a','b'],nome:'QA',saldo:0};
+    f.db.clientes.push(client);
+    for(const space of ['a','b']){
+      f.s.selectActive(space);
+      assert.ok(ids(f.w.Clientes.viewData().clientes).includes(client.id));
+      assert.ok(!ids(f.w.Clientes.viewData().unassignedCustomers).includes(client.id));
+    }
+    assert.equal(f.db.clientes.filter(row=>row.id===client.id).length,1);
+  }finally{f.close();}
+});
+
 test('normal selector changes all operational screens and restores the same selection after restart',()=>{
   const f=fixture();let restart;try{
     const scope=f.s.viewScope();f.w.document.querySelector('#app').innerHTML=f.s.renderBar('clients');f.s.bind(f.w.document);

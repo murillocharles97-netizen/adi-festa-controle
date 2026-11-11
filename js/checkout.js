@@ -497,27 +497,29 @@ window.Checkout = (() => {
     return recurringConfiguration(product, null, source);
   }
   function quickClient() {
-    try { window.Clientes?.assertCanCreate?.(); } catch (error) { toast(error.message, true); return; }
-    const origin = [DB.getBusinessId(), DB.getPrincipal(), DB.getWorkspaceGeneration()].join(':');
+    const directory=window.ClientesPage;
+    let context;
+    try { context=directory.registrationContext(); }
+    catch (error) { toast(error.message, true); return; }
     document.querySelector("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div></div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
+      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div>${directory.registrationFields(context)}</div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
     document.querySelector(".cancel").onclick = () => picker();
-    document.querySelector("#quick-client-form").onsubmit = (e) => {
-      e.preventDefault();
-      if (origin !== [DB.getBusinessId(), DB.getPrincipal(), DB.getWorkspaceGeneration()].join(':')) {
-        toast('A conta mudou. Reabra o cadastro na conta atual.', true); return;
-      }
+    document.querySelector("#quick-client-form").onsubmit = async (event) => {
+      event.preventDefault();
+      const form=event.currentTarget;
+      if(form.dataset.saving)return;
+      form.dataset.saving='1';
       try {
-      clients().create(Object.fromEntries(new FormData(e.currentTarget)));
-      const c = clients().list().at(-1),
-        sel = document.querySelector("#sale-client");
-      sel.innerHTML += `<option value="${c.id}">${escapar(c.nome)}</option>`;
-      sel.value = c.id;
-      sel.dispatchEvent(new Event("change"));
-      document.querySelector("#modal").innerHTML = "";
-      refresh();
-      toast(window.SyncFirebase ? "Cliente salvo neste aparelho. Aguarde a confirmação na nuvem antes de vender para ele." : "Cliente salvo e selecionado");
-      } catch (error) { toast(error.message || 'Não foi possível cadastrar o cliente.', true); }
+        await directory.registerFromForm(form,context,id=>{
+          const client=clients().getById(id),select=document.querySelector("#sale-client");
+          if(!client||!select)return;
+          if(![...select.options].some(option=>option.value===id))select.add(new Option(client.nome,id));
+          select.value=id;
+          select.dispatchEvent(new Event("change",{bubbles:true}));
+          refresh();
+        });
+      } catch(error){toast(error.message||'Não foi possível cadastrar o cliente.',true);}
+      finally{delete form.dataset.saving;}
     };
   }
   function enhance() {
