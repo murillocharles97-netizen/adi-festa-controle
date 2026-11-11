@@ -75,7 +75,7 @@
       return;
     }
     scopeKey = key;
-    const host = $('.mobile-product-sort-view', app) || $('.desktop-product-toolbar', app);
+    const host = $('[data-mobile-product-selection-host]', app) || $('.mobile-product-sort-view', app) || $('.desktop-product-toolbar', app);
     if (host && !$('[data-product-selection-tools]', host)) {
       const tools = document.createElement('div');
       tools.dataset.productSelectionTools = '';

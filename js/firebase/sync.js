@@ -578,7 +578,7 @@ function classifyQueueOperation(item) {
     const reason=queueManualReviewReason(item);
     if(reason){const quarantined=Boolean(queueQuarantineReason(item));return result(quarantined?'quarantined':'manual_review',{
       reviewRequired:true,reviewState:quarantined?'quarantined':'manual_review',reviewReason:reason});}
-    if(item.status==='error')return result('error',{activeError:true,canRetry:!monetaryRecoveryRequired(item),
+    if(item.status==='error')return result('error',{activeError:true,canRetry:!monetaryRecoveryRequired(item)&&!favoriteWriteWasRejected(item),
       replayBlocked:monetaryRecoveryRequired(item),reviewReason:monetaryRecoveryRequired(item)?'monetary_recovery_required':null});
     if(item.status==='local_preparing')return result('preparing',{status:'local_preparing'});
     if(item.status==='syncing')return result('processing',{status:'syncing'});
@@ -775,7 +775,22 @@ const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
+const favoriteWriteWasRejected = (item) => item.source === "mobile-favorite" &&
+  item.status === "error" && ["permission-denied", "invalid-argument"].includes(item.lastErrorCode);
+function favoriteWriteHasPredecessor(item, queue) {
+  if (item.source !== "mobile-favorite") return false;
+  const products = new Set(item.payload.writes.map(write=>write.entityId));
+  for (const prior of queue) {
+    if (prior.queueId === item.queueId) break;
+    if (prior.source === item.source && prior.businessId === item.businessId &&
+        prior.userId === item.userId && prior.workspaceGeneration === item.workspaceGeneration &&
+        !favoriteWriteWasRejected(prior) &&
+        prior.payload?.writes?.some(write=>products.has(write.entityId))) return true;
+  }
+  return false;
+}
 const canAttempt = (item, force = false, manualRetry = false) =>
+  !favoriteWriteWasRejected(item) &&
   !classifyQueueOperation(item).replayBlocked &&
   !queueManualReviewReason(item) &&
   !(item.payload?.writes?.length===1 && item.payload.writes[0].entityType==='clients' &&
@@ -2537,6 +2552,58 @@ function installOfflineFirstStorage() {
   };
   DB.__firebaseSyncWrapped = true;
 }
+function saveProductFavorites(changes) {
+  if (!currentUser || !DB.__firebaseSyncWrapped) return false;
+  window.WorkspaceRuntime.capture();
+  const permissionScope = window.TeamAccess?.captureSession?.();
+  const products = new Map(DB.carregar().produtos.map(product => [product.id, product]));
+  const updates = new Map(), writes = [];
+  const timestamp = now();
+  for (const {id,value} of changes) {
+    const product = products.get(id);
+    if (!product || typeof value !== "boolean" || Boolean(product.favorito) === value) continue;
+    const data = {favorito:value, atualizadoEm:timestamp};
+    updates.set(id,data);
+    writes.push({entityType:"products",entityId:id,operation:"update",before:product,data});
+  }
+  if (!writes.length) return true;
+  window.TeamAccess?.assertSession?.(permissionScope);
+  queueWrites(writes, crypto.randomUUID(), "simple", {source:"mobile-favorite"});
+  DB.stageProductFavorites(updates);
+  return true;
+}
+function restoreRejectedProductFavorites(item,queue,error) {
+  if (item.source !== "mobile-favorite" || !["permission-denied","invalid-argument"].includes(errorCode(error))) return;
+  const position = queue.findIndex(row=>row.queueId===item.queueId);
+  if (position < 0) return;
+  const newer = new Set(queue.slice(position+1)
+    .flatMap(row=>(row.payload?.writes||[]).filter(write=>write.entityType==="products").map(write=>write.entityId)));
+  const products = new Map(DB.carregar().produtos.map(product=>[product.id,product]));
+  const changes = [], updates = new Map();
+  for (const write of item.payload.writes) {
+    const {entityId:id,data,before}=write, product=products.get(id);
+    if (write.entityType!=="products" || write.operation!=="update" || !before || !product || newer.has(id) ||
+        Object.keys(data).some(key=>!["favorito","atualizadoEm"].includes(key)) ||
+        typeof data.favorito!=="boolean" || product.favorito!==data.favorito || product.atualizadoEm!==data.atualizadoEm) continue;
+    let previous = before;
+    for (let index = position - 1; index >= 0; index--) {
+      const packet = queue[index];
+      const prior = packet.payload?.writes?.find(entry=>entry.entityType==="products" && entry.entityId===id);
+      if (!prior) continue;
+      if (!favoriteWriteWasRejected(packet) || !prior.before || !prior.data ||
+          prior.data.favorito!==previous.favorito || prior.data.atualizadoEm!==previous.atualizadoEm) break;
+      previous = prior.before;
+    }
+    const value=Boolean(previous.favorito);
+    updates.set(id,{favorito:value,atualizadoEm:previous.atualizadoEm});
+    changes.push({id,previous:data.favorito,value});
+  }
+  if (!changes.length) return;
+  // Preserve the original failed packet and any newer intent in the existing queue.
+  DB.stageProductFavorites(updates);
+  window.Produtos?.renderMobileFavoriteChanges?.(changes);
+  window.Utils?.toast?.("Favoritos: o servidor recusou a alteração. O estado anterior foi restaurado.", true);
+}
 
 async function validateUser() {
   const readScopeToken=captureCloudReadScope();
@@ -3765,7 +3832,8 @@ async function processSyncQueue(options = {}) {
       if (!canAttempt(queued, force, manualRetry)) continue;
       const live = readQueue(),
         position = live.findIndex((item) => item.queueId === queued.queueId);
-      if (position < 0) continue;
+      // Resolve earlier uncertain commits first so an offline retry cannot supersede a newer favorite.
+      if (position < 0 || favoriteWriteHasPredecessor(queued, live)) continue;
       live[position] = {
         ...live[position],
         status: "syncing",
@@ -3870,6 +3938,8 @@ async function processSyncQueue(options = {}) {
             lastErrorPaths: error.syncDetail?.transactionPaths || [],
           };
           saveQueue(failed);
+          try { restoreRejectedProductFavorites(queued,failed,error); }
+          catch (restoreError) { console.warn("[Favoritos] Estado anterior indisponível.", {code:errorCode(restoreError)}); }
         }
         reportError(error, "Queue operation", {
           queueId: queued.queueId,
@@ -3917,7 +3987,8 @@ function pendingIds(name, confirmedPaymentOperation = null) {
   const ids = new Set();
   for (const item of readQueue())
     if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) && !(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
-        !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required"))
+        !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required") &&
+        !(name === "products" && favoriteWriteWasRejected(item)))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
   return ids;
@@ -6908,6 +6979,7 @@ window.SyncFirebase = {
   queryCustomerSubscriptions,
   queryRenewalsForSpace,
   saveCustomerDirectory,
+  saveProductFavorites,
   loadProductVariants,
   findProductVariantByBarcode,
   pendingActivityEvents,

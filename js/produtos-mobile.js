@@ -115,11 +115,11 @@
   }
   function filtered() {
     const db = products(),
-      sold = soldMap(db),
+      sold = state.sort === "vendidos" ? soldMap(db) : null,
       query = norm(state.query),
       barcode = window.normalizeBarcode?.(state.query) || "",
       variantMatches = new Map(
-        (window.ProductVariations?.search(state.query, db) || []).map(
+        (query ? window.ProductVariations?.search(state.query, db) || [] : []).map(
           (item) => [item.product.id, item],
         ),
       );
@@ -231,9 +231,10 @@
         ? `Venda com renovação, ${window.getProductRenewalPeriod?.(product) || "30 dias"}`
         : statusInfo(product).label;
     const category = esc(product.categoria) || "Sem categoria";
+    const favorite = Produtos.mobileFavoriteValue?.(product) ?? Boolean(product.favorito);
     const detail = variable ? `${category} · ${Number(product.activeVariationCount || 0)} opções`
       : category + (state.view === "list" && product.codigo ? ` · ${esc(product.codigo)}` : "");
-    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card mobile-catalog-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${esc(ariaStatus)}"><div class="mobile-product-avatar mobile-card-media color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show mobile-card-favorite ${product.favorito ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${product.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(product.favorito)}">${icon("star")}</button></div><div class="mobile-product-copy mobile-card-copy"><h3 class="mobile-card-name" title="${esc(product.nome)}">${esc(product.nome)}</h3><p>${detail}</p>${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong class="mobile-card-price">${priceLabel(product)}</strong></div>${stock(product)}</article></div>`;
+    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card mobile-catalog-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${esc(ariaStatus)}"><div class="mobile-product-avatar mobile-card-media color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show mobile-card-favorite ${favorite ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${favorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${favorite}">${icon("star")}</button></div><div class="mobile-product-copy mobile-card-copy"><h3 class="mobile-card-name" title="${esc(product.nome)}">${esc(product.nome)}</h3><p>${detail}</p>${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong class="mobile-card-price">${priceLabel(product)}</strong></div>${stock(product)}</article></div>`;
   }
   function empty(list) {
     if (list.length) return "";
@@ -247,9 +248,9 @@
     return `<div class="mobile-product-empty">${icon("search-x")}<h3>Nenhum produto encontrado</h3><button data-clear-product-filters>Limpar filtros</button></div>`;
   }
   function actions() {
-    return `<div class="mobile-product-compact-actions"><button data-product-new>${icon("plus")} Novo produto</button><button data-scan-stock>${icon("package-plus")} Entrada por código</button><button data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button><button data-product-entry-select hidden></button><button data-product-inventory hidden></button></div>`;
+    return `<details class="mobile-product-actions-menu"><summary>Ações</summary><div class="mobile-product-actions-panel"><button type="button" data-product-new>${icon("plus")} Novo produto</button><button type="button" data-scan-stock>${icon("package-plus")} Entrada por código</button><button type="button" data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button><div data-mobile-product-selection-host></div><button data-product-entry-select hidden></button><button data-product-inventory hidden></button></div></details>`;
   }
-  function filtersSheet() {
+  function filtersSheet(c) {
     const categories = [
       ...new Set(
         (products().produtos || [])
@@ -257,7 +258,8 @@
           .map((p) => p.categoria || "Sem categoria"),
       ),
     ].sort((a, b) => a.localeCompare(b, "pt-BR"));
-    return `<div class="product-sheet-overlay ${state.filtersOpen || state.menuId ? "open" : ""}" data-product-sheet-close></div><section class="product-filter-sheet ${state.filtersOpen ? "open" : ""}" ${state.filtersOpen ? "" : "inert"}><div class="sheet-handle"></div><header><div><h3>Filtrar produtos</h3><p>Escolha uma categoria.</p></div><button data-product-sheet-close aria-label="Fechar filtros">${icon("x")}</button></header><div class="product-category-options"><button class="${state.category === "todos" ? "active" : ""}" data-product-category="todos">Todas as categorias</button>${categories.map((category) => `<button class="${state.category === norm(category) ? "active" : ""}" data-product-category="${esc(norm(category))}">${esc(category)}</button>`).join("")}</div></section>`;
+    const extraFilters = [["baixo","Baixo estoque",c.low,"circle-alert"],["esgotado","Esgotados",c.out,"circle-x"],["simples","Simples",c.simple,"box"],["variacoes","Com variações",c.variable,"boxes"]];
+    return `<div class="product-sheet-overlay ${state.filtersOpen || state.menuId ? "open" : ""}" data-product-sheet-close></div><section class="product-filter-sheet ${state.filtersOpen ? "open" : ""}" ${state.filtersOpen ? "" : "inert"}><div class="sheet-handle"></div><header><div><h3>Filtrar produtos</h3><p>Escolha uma categoria.</p></div><button data-product-sheet-close aria-label="Fechar filtros">${icon("x")}</button></header><div class="product-category-options"><button class="${state.category === "todos" ? "active" : ""}" data-product-category="todos">Todas as categorias</button>${categories.map((category) => `<button class="${state.category === norm(category) ? "active" : ""}" data-product-category="${esc(norm(category))}">${esc(category)}</button>`).join("")}</div><div class="mobile-product-extra-filters">${extraFilters.map(args=>chip(...args)).join("")}</div></section>`;
   }
   const canProductAction = permission => !window.TeamAccess || window.TeamAccess.has(permission);
   function menuSheet() {
@@ -283,7 +285,7 @@
     const c = counts(),
       list = filtered(),
       shown = list.slice(0, state.limit);
-    return `<section class="products-mobile-page">${window.SpaceContext?.renderBar?.("products")||""}<div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto ou serviço" aria-label="Buscar produto ou serviço por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar itens">${icon("list-filter")}<span>Filtros</span></button></div>${actions()}<div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Disponíveis", c.available, "package-check")}${chip("baixo", "Baixo estoque", c.low, "circle-alert")}${chip("esgotado", "Esgotados", c.out, "circle-x")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet()}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
+    return `<section class="products-mobile-page">${window.SpaceContext?.renderBar?.("products")||""}<div class="mobile-product-search"><label>${icon("search")}<input id="mobile-product-search" value="${esc(state.query)}" placeholder="Buscar produto ou serviço" aria-label="Buscar produto ou serviço por nome, código de barras ou categoria" autocomplete="off"></label><button id="mobile-product-open-filters" aria-label="Filtrar itens">${icon("list-filter")}<span>Filtros</span></button>${actions()}</div><div class="product-filter-scroll">${chip("todos", "Todos", c.all)}${chip("favoritos", "Favoritos", c.favorites, "star")}${chip("disponivel", "Disponíveis", c.available, "package-check")}</div><div class="mobile-product-sort-view"><label><span>Ordenar por</span><select id="mobile-product-sort" aria-label="Ordenar produtos"><option value="favoritos">Favoritos primeiro</option><option value="nomeAsc">Nome A–Z</option><option value="nomeDesc">Nome Z–A</option><option value="menorEstoque">Menor estoque</option><option value="maiorEstoque">Maior estoque</option><option value="menorPreco">Menor preço</option><option value="maiorPreco">Maior preço</option><option value="alteracao">Última alteração</option><option value="vendidos">Mais vendidos</option></select></label><div class="product-view-toggle"><button class="${state.view === "list" ? "active" : ""}" data-product-view="list">${icon("list")} Lista</button><button class="${state.view === "grid" ? "active" : ""}" data-product-view="grid">${icon("grid-2x2")} Grade</button></div></div><div class="mobile-products ${state.view}" id="mobile-products">${shown.map(card).join("")}${empty(list)}</div>${shown.length < list.length ? `<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>` : ""}${filtersSheet(c)}${menuSheet()}<div class="mobile-product-legacy" aria-hidden="true"><button id="new-product"></button><input id="search"><div id="entity-list"></div></div></section>`;
   }
   function refresh(reset = false) {
     dataCache = null;
@@ -804,30 +806,72 @@
       "Salvar inventário",
     );
   }
-  function toggleFavorite(id, button) {
-    const product = Produtos.obter(id),
-      next = !Boolean(product.favorito),
-      scroll = scrollY;
-    Produtos.favoritar(id, next);
+  function updateFavoriteCards(event) {
+    const grid = $("#mobile-products");
+    if (!grid || !mq.matches || Router.atual() !== "produtos") return;
     dataCache = null;
-    if (state.filter === "favoritos" || state.sort === "favoritos") {
-      refresh();
-      scrollTo({ top: scroll });
-      return;
-    }
-    button.classList.toggle("active", next);
-    button.setAttribute("aria-pressed", String(next));
-    button.setAttribute(
-      "aria-label",
-      next ? "Remover dos favoritos" : "Adicionar aos favoritos",
-    );
-    button
-      .closest("[data-product-shell]")
-      ?.querySelector(".favorite-dot")
-      ?.classList.toggle("show", next);
+    const changes = new Map(event.detail.map(change=>[change.id,change]));
+    const rows = event.detail.map(change=>Produtos.obter(change.id)).filter(product=>product && product.ativo !== false);
+    const visible = window.SpaceContext?.productsForView?.(rows) || rows;
     const count = $('[data-product-filter="favoritos"] b');
-    if (count) count.textContent = counts().favorites;
-    window.lucide?.createIcons();
+    if (count) count.textContent = Number(count.textContent) + visible.reduce((delta,product)=>{
+      const change=changes.get(product.id);
+      return delta+Number(change.value)-Number(change.previous);
+    },0);
+    if (state.filter !== "favoritos" && state.sort !== "favoritos") return;
+
+    const list = filtered(), shown = list.slice(0,state.limit);
+    const wanted = new Set(shown.map(product=>String(product.id)));
+    const existing = new Map();
+    for (const node of [...grid.children]) {
+      if (wanted.has(node.dataset.productShell)) existing.set(node.dataset.productShell,node);
+      else node.remove();
+    }
+    let added = false;
+    shown.forEach((product,index)=>{
+      let node = existing.get(String(product.id));
+      if (!node) {
+        const template = document.createElement("template");
+        template.innerHTML = card(product,index);
+        node = template.content.firstElementChild;
+        bindSwipe(node);
+        added = true;
+      }
+      const current = grid.children[index] || null;
+      if (node !== current) grid.insertBefore(node,current);
+    });
+    if (!shown.length) {
+      grid.innerHTML = empty(list);
+      $("[data-clear-product-filters]",grid)?.addEventListener("click",clearFilters);
+      added = true;
+    }
+    if (list.length <= state.limit) {
+      observer?.disconnect();
+      $("#mobile-product-sentinel")?.remove();
+    } else if (!$("#mobile-product-sentinel")) {
+      grid.insertAdjacentHTML("afterend",'<div class="mobile-product-sentinel" id="mobile-product-sentinel"><i></i>Carregando mais produtos…</div>');
+      bindProductSentinel();
+    }
+    if (added) window.lucide?.createIcons();
+  }
+  window.addEventListener("mobile-product-favorites-updated",updateFavoriteCards);
+  function bindProductSentinel() {
+    observer?.disconnect();
+    const sentinel = $("#mobile-product-sentinel");
+    if (!sentinel) return;
+    observer = new IntersectionObserver(entries=>{
+      if(entries[0].isIntersecting){
+        state.limit += 50;
+        refresh();
+      }
+    },{rootMargin:"220px"});
+    observer.observe(sentinel);
+  }
+  function clearFilters() {
+    state.query = "";
+    state.filter = "todos";
+    state.category = "todos";
+    refresh(true);
   }
   function closeSheet() {
     if (state.menuId && !state.filtersOpen) {
@@ -978,13 +1022,6 @@
       sort = $("#mobile-product-sort");
     if (!search) return;
     updateFab();
-    const filterScroll = $(".product-filter-scroll"),
-      filterCounts = counts();
-    if (filterScroll && !filterScroll.querySelector('[data-product-filter="simples"]'))
-      filterScroll.insertAdjacentHTML(
-        "beforeend",
-        `${chip("simples", "Simples", filterCounts.simple, "box")}${chip("variacoes", "Com variações", filterCounts.variable, "boxes")}`,
-      );
     sort.value = state.sort;
     let timer;
     search.oninput = (event) => {
@@ -1001,6 +1038,7 @@
       (button) =>
         (button.onclick = () => {
           state.filter = button.dataset.productFilter;
+          state.filtersOpen = false;
           if (state.filter === "favoritos" && state.sort === "favoritos")
             state.sort = "nomeAsc";
           refresh(true);
@@ -1035,20 +1073,17 @@
     $("[data-product-entry-select]").onclick = selectEntry;
     $("[data-product-spreadsheet]").onclick = () => window.ProductSpreadsheetUI.open();
     $("[data-product-inventory]").onclick = inventory;
-    $$("[data-clear-product-filters]").forEach(
-      (button) =>
-        (button.onclick = () => {
-          state.query = "";
-          state.filter = "todos";
-          state.category = "todos";
-          refresh(true);
-        }),
-    );
+    $$("[data-clear-product-filters]").forEach(button=>button.onclick=clearFilters);
+    const actions = $(".mobile-product-actions-menu");
+    actions?.addEventListener("click",event=>{if(event.target.closest("button"))actions.open=false;});
+    actions?.addEventListener("keydown",event=>{
+      if(event.key==="Escape"&&actions.open){actions.open=false;actions.querySelector("summary").focus();}
+    });
     $("#mobile-products").onclick = (event) => {
       const favorite = event.target.closest("[data-product-favorite]");
       if (favorite) {
         event.stopPropagation();
-        return toggleFavorite(favorite.dataset.productFavorite, favorite);
+        return Produtos.toggleMobileFavorite(favorite.dataset.productFavorite);
       }
       const card = event.target.closest("[data-product-card]");
       if (card) openCardMenu(card.dataset.productCard);
@@ -1061,20 +1096,7 @@
     };
     bindMenuSheet();
     $$("[data-product-shell]").forEach(bindSwipe);
-    observer?.disconnect();
-    const sentinel = $("#mobile-product-sentinel");
-    if (sentinel) {
-      observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0].isIntersecting) {
-            state.limit += 50;
-            refresh();
-          }
-        },
-        { rootMargin: "220px" },
-      );
-      observer.observe(sentinel);
-    }
+    bindProductSentinel();
     window.lucide?.createIcons();
   }
   function updateFab() {

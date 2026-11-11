@@ -219,15 +219,18 @@ window.Checkout = (() => {
     if(parcelado)window.InstallmentCredit.mountCheckoutPreview(box.querySelector('[data-installment-checkout-preview]'),c,total);
     window.lucide?.createIcons();
   }
-  function filter() {
+  function filter(event) {
+    const favoriteIds = event?.detail?.favoriteIds && new Set(event.detail.favoriteIds);
     const q = norm(document.querySelector("#product-search")?.value),
       cat = document.querySelector("#pos-category")?.value || "",
       brand = document.querySelector("#desktop-sale-brand")?.value || "",
       f = document.querySelector("#pos-filter")?.value || "todos",
       sort = document.querySelector("#pos-sort")?.value || "nome";
-    let cards = [...document.querySelectorAll(".pos-product")];
+    const cards = [...document.querySelectorAll(".pos-product")],
+      catalog = favoriteIds ? new Map(products().list().map(product => [product.id, product])) : null;
     cards.forEach((el) => {
-      const p = products().getById(el.dataset.add),
+      if (favoriteIds && (f !== "favoritos" || !favoriteIds.has(el.dataset.add))) return;
+      const p = catalog ? catalog.get(el.dataset.add) : products().getById(el.dataset.add),
         n = Number(window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual),
         controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false);
       el.hidden = !(
@@ -243,10 +246,10 @@ window.Checkout = (() => {
             n <= Number(p.estoqueMinimo || 0)))
       );
     });
-    cards
-      .sort((a, b) => {
-        const x = products().getById(a.dataset.add),
-          y = products().getById(b.dataset.add);
+    if (!favoriteIds || sort === "favoritos") {
+      cards.sort((a, b) => {
+        const x = catalog ? catalog.get(a.dataset.add) : products().getById(a.dataset.add),
+          y = catalog ? catalog.get(b.dataset.add) : products().getById(b.dataset.add);
         if (sort === "preco") return x.preco - y.preco;
         if (sort === "categoria")
           return String(x.categoria).localeCompare(String(y.categoria));
@@ -254,11 +257,17 @@ window.Checkout = (() => {
         if (sort === "favoritos" && x.favorito !== y.favorito)
           return Number(y.favorito) - Number(x.favorito);
         return x.nome.localeCompare(y.nome);
-      })
-      .forEach((el) =>
-        (document.querySelector("#desktop-sale-products") ||
-          document.querySelector("#pos-grid"))?.append(el),
-      );
+      });
+      const grid = document.querySelector("#desktop-sale-products") || document.querySelector("#pos-grid");
+      if (favoriteIds) {
+        let next = null;
+        for (let index = cards.length - 1; index >= 0; index--) {
+          const card = cards[index];
+          if (favoriteIds.has(card.dataset.add) && card.nextElementSibling !== next) grid?.insertBefore(card, next);
+          next = card;
+        }
+      } else cards.forEach(card => grid?.append(card));
+    }
     dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: cards.filter((card) => !card.hidden).length } }));
   }
   function refreshProducts() {

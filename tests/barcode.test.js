@@ -21,8 +21,8 @@ assert.match(source,/adiBarcodeSound/);
 assert.match(source,/adiBarcodeVibration/);
 assert.match(source,/label\s*:\s*["']Escanear["']\s*,\s*action\s*:\s*["']scan-sale["']/);
 assert.match(source,/label\s*:\s*["']Ler código["']\s*,\s*action\s*:\s*["']scan-product["']/);
-assert.match(productsMobile,/mobile-product-compact-actions/);
-assert.doesNotMatch(productsMobile,/mobile-product-actions/,'the oversized product shortcut row must be removed');
+assert.match(productsMobile,/mobile-product-actions-menu/);
+assert.doesNotMatch(productsMobile,/class="mobile-product-actions"/,'the oversized product shortcut row must be removed');
 assert.match(checkoutMobile,/primaryAction==='scan-sale'/);
 assert.match(clientsMobile,/\['new-client','quick-action'\]\.includes/,'client creation must only handle its own FAB routes');
 

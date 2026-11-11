@@ -57,6 +57,78 @@ window.Produtos=(()=>{
     db.movimentacoesEstoque.push(mov);
   });return mov};
   const historico=produtoId=>DB.carregar().movimentacoesEstoque.filter(m=>m.produtoId===produtoId).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  const favoritar=(id,value)=>DB.alterar(db=>{const product=db.produtos.find(p=>p.id===id);if(!product)throw Error('Produto não encontrado');product.favorito=value===undefined?!product.favorito:Boolean(value);product.atualizadoEm=new Date().toISOString()});
-  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status,favoritar,disponivelNoEspaco:(product,spaceId)=>window.productAllowsSpace(product,spaceId),isVariable:p=>window.ProductVariations?.isVariable?.(p)??p?.productType==='variable',isRecurring:p=>p?.productType==='recurring',isService:p=>p?.itemKind==='service',variacoes:id=>window.ProductVariations?.list(id)||[]};
+  const applyFavorite=(product,value)=>{
+    if(!product)throw Error('Produto não encontrado');
+    product.favorito=value===undefined?!product.favorito:Boolean(value);
+    product.atualizadoEm=new Date().toISOString();
+  };
+  const favoritar=(id,value)=>DB.alterar(db=>applyFavorite(db.produtos.find(p=>p.id===id),value));
+  let favoriteFrame=null;
+  const favoriteScope=()=>JSON.stringify([DB.getBusinessId?.(),DB.getPrincipal?.(),DB.getWorkspaceGeneration?.(),window.TeamAccess?.captureSession?.()]);
+  const mobileFavoriteValue=product=>{
+    const frame=favoriteFrame;
+    return (frame&&frame.scope===favoriteScope()?frame.values.get(product.id):undefined)??Boolean(product.favorito);
+  };
+  function paintMobileFavorite(id,value){
+    const key=CSS.escape(String(id));
+    document.querySelectorAll(`.mobile-card-favorite[data-product-favorite="${key}"],.mobile-card-favorite[data-fav="${key}"]`).forEach(button=>{
+      button.classList.toggle('active',value);
+      button.classList.add('show');
+      button.setAttribute('aria-pressed',String(value));
+      button.setAttribute('aria-label',value?'Remover dos favoritos':'Adicionar aos favoritos');
+    });
+  }
+  function persistMobileFavorites(frame){
+    if(favoriteFrame!==frame)return;
+    favoriteFrame=null;
+    clearTimeout(frame.fallback);
+    if(frame.scope!==favoriteScope())return;
+    const changes=[];
+    try{
+      const products=new Map(listar().map(product=>[product.id,product]));
+      for(const [id,value] of frame.values){
+        const product=products.get(id);
+        if(!product)continue;
+        const previous=Boolean(product.favorito);
+        if(previous!==value)changes.push({id,previous,value});
+      }
+      if(changes.length&&!window.SyncFirebase?.saveProductFavorites?.(changes))DB.alterar(db=>{
+        const updates=new Map(changes.map(change=>[change.id,change.value]));
+        for(const product of db.produtos)if(updates.has(product.id))applyFavorite(product,updates.get(product.id));
+      });
+    }catch(error){
+      if(frame.scope!==favoriteScope())return;
+      for(const id of frame.values.keys())paintMobileFavorite(id,Boolean(obter(id)?.favorito));
+      Utils.toast(error.message||'Não foi possível atualizar Favoritos.',true);
+      return;
+    }
+    if(frame.scope!==favoriteScope())return;
+    for(const [id,value] of frame.values)paintMobileFavorite(id,value);
+    if(changes.length)window.dispatchEvent(new CustomEvent('mobile-product-favorites-updated',{detail:changes}));
+  }
+  function renderMobileFavoriteChanges(changes){
+    const pendingValues=favoriteFrame?.scope===favoriteScope()?favoriteFrame?.values:null;
+    for(const {id,value} of changes){
+      const pending=pendingValues?.get(id);
+      paintMobileFavorite(id,pending??value);
+    }
+    if(changes.length)window.dispatchEvent(new CustomEvent('mobile-product-favorites-updated',{detail:changes}));
+  }
+  function toggleMobileFavorite(id){
+    const product=obter(id);
+    if(!product)return;
+    const scope=favoriteScope(),value=!mobileFavoriteValue(product);
+    if(favoriteFrame?.scope!==scope){
+      const frame={scope,values:new Map()};
+      favoriteFrame=frame;
+      const persist=()=>persistMobileFavorites(frame);
+      // Let the optimistic star paint before the existing local transaction.
+      window.requestAnimationFrame?.(()=>window.requestAnimationFrame(persist));
+      frame.fallback=setTimeout(persist,150);
+    }
+    favoriteFrame.values.set(id,value);
+    paintMobileFavorite(id,value);
+  }
+  if(window.addEventListener)window.addEventListener('pagehide',()=>{if(favoriteFrame)persistMobileFavorites(favoriteFrame);});
+  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status,favoritar,toggleMobileFavorite,mobileFavoriteValue,renderMobileFavoriteChanges,disponivelNoEspaco:(product,spaceId)=>window.productAllowsSpace(product,spaceId),isVariable:p=>window.ProductVariations?.isVariable?.(p)??p?.productType==='variable',isRecurring:p=>p?.productType==='recurring',isService:p=>p?.itemKind==='service',variacoes:id=>window.ProductVariations?.list(id)||[]};
 })();
