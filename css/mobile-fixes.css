@@ -28,7 +28,7 @@
   }
   :is(.mobile-client-copy,.mobile-product-copy,.pos-product,.home-main-metrics article>span,.metric-card)>:is(h2,h3,strong,p,small,span){max-width:100%}
   :is(.mobile-client-copy h3,.mobile-product-copy h3,.pos-product>strong,.client-choice b){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
-  :is(.mobile-client-copy p,.client-choice small,.topbar small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  :is(.mobile-client-copy p,.client-choice small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   :is(.badge,.balance-badge,.mobile-client-status){flex-shrink:0;max-width:100%}
   :is(.btn,button){max-width:100%}
   .btn{white-space:normal;text-wrap:balance}
