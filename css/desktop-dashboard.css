@@ -27,54 +27,69 @@
   .desktop-kpi {
     position: relative;
     display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 11px;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 12px;
     min-width: 0;
-    min-height: 126px;
-    padding: 16px;
+    min-height: 136px;
+    padding: 16px 14px;
+    container-type: inline-size;
   }
   .desktop-kpi-icon {
     display: grid;
     place-items: center;
-    width: 42px;
-    height: 42px;
-    border-radius: 13px;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
     background: #e5f9f4;
     color: #079b7b;
   }
   .desktop-kpi-icon svg {
-    width: 21px;
+    width: 20px;
+    height: 20px;
   }
   .desktop-kpi > div {
+    display: grid;
+    gap: 4px;
     min-width: 0;
   }
   .desktop-kpi > div > * {
     display: block;
+    min-width: 0;
   }
   .desktop-kpi > div > small {
-    color: #6f7d91;
-    font-size: 0.72rem;
+    overflow: hidden;
+    color: #5f6d82;
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .desktop-kpi strong {
-    margin: 6px 0 3px;
-    font-size: clamp(1.15rem, 1.5vw, 1.55rem);
-    line-height: 1.05;
-    overflow-wrap: anywhere;
+    margin: 0;
+    font-size: clamp(0.95rem, 10.5cqi, 1.6rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
   .desktop-kpi em {
     color: #7b8797;
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     font-style: normal;
+    line-height: 1.3;
   }
   .desktop-kpi.danger strong {
     color: #df3848;
   }
+  .desktop-kpi.danger .desktop-kpi-icon {
+    background: #fdecee;
+    color: #d23445;
+  }
   .desktop-kpi-static {
-    position: absolute;
-    right: 14px;
-    bottom: 14px;
-    color: #a3adba;
+    display: none;
   }
   .desktop-kpi-compare {
     grid-column: 1/-1;
@@ -536,6 +551,11 @@
     margin: 16px;
     color: #7b8798;
     text-align: center;
+  }
+}
+@media (min-width: 1181px) and (max-width: 1500px) {
+  .desktop-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (min-width: 768px) and (max-width: 1180px) {
