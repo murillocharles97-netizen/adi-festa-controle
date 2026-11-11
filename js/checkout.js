@@ -65,17 +65,19 @@ window.Checkout = (() => {
         ? `<span class="badge balance-badge credit">Crédito ${dinheiro(s)}</span>`
         : '<span class="badge balance-badge zero">Sem saldo</span>';
   };
-  const stock = (p) => {
+  const stock = (p, mobile) => {
+    const icon = mobile ? '<i data-lucide="box"></i>' : "";
     const current = Number(
-      window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual,
+      window.ProductVariations?.isVariable?.(p) ? p.totalStock : (p.estoqueAtual ?? p.estoque ?? 0),
     );
-    return getProductStockStatus(p) === "sem-controle"
+    const status = getProductStockStatus(p);
+    return status === "sem-controle"
       ? '<small class="pos-stock-neutral">Sem controle de estoque</small>'
-      : getProductStockStatus(p) === "esgotado"
-        ? '<small class="pos-stock-out">Sem estoque</small>'
-        : getProductStockStatus(p) === "baixo"
-          ? `<small class="pos-stock-low">Estoque: ${current} · baixo</small>`
-          : `<small class="pos-stock-ok">Estoque: ${current}</small>`;
+      : status === "esgotado"
+        ? `<small class="pos-stock-out">${icon}Sem estoque</small>`
+        : status === "baixo"
+          ? `<small class="pos-stock-low">${icon}Estoque: ${current} · baixo</small>`
+          : `<small class="pos-stock-ok">${icon}Estoque: ${current}</small>`;
   };
   const card = (p) => {
     const variants =
@@ -92,14 +94,21 @@ window.Checkout = (() => {
           ].join(" "),
         )
         .join(" ") || (p.variationSearchTokens || []).join(" ");
+    const mobile = window.matchMedia?.("(max-width:767px)").matches === true;
+    const variable = window.ProductVariations?.isVariable?.(p);
     const photo = window.ProductImages?.markup?.(p, { className: "sale-product-photo" }) || `<span class="pos-placeholder">${initials(p.nome)}</span>`;
     const recurring = p.productType === "recurring",
       controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false),
-      detail = window.ProductVariations?.isVariable?.(p) ? `${Number(p.activeVariationCount || 0)} opções` : escapar(p.categoria || p.nome),
+      category = escapar(p.categoria || (mobile ? "Sem categoria" : p.nome)),
+      detail = variable ? `${mobile ? category + " · " : ""}${Number(p.activeVariationCount || 0)} opções` : category,
       renewal = recurring && !controlsStock
         ? `<small class="pos-renewal-badge"><i data-lucide="calendar-clock"></i>${escapar(window.getProductRenewalPeriod?.(p) || `${Number(p.durationValue || 30)} ${durationUnitLabel(p.durationUnit, Number(p.durationValue || 30))}`)}</small>`
-        : stock(p);
-    return `<article class="pos-product ${window.ProductVariations?.isVariable?.(p) ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${photo}<strong>${escapar(p.nome)}</strong><small class="pos-full-name">${detail}</small><b>${priceLabel(p)}</b>${renewal}<button class="pos-product-hit" type="button" aria-label="Adicionar ${escapar(p.nome)}"></button><button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${escapar(p.nome)}"><i data-lucide="ellipsis-vertical"></i></button></article>`;
+        : stock(p, mobile);
+    const copy = `<strong class="${mobile ? "mobile-card-name" : ""}">${escapar(p.nome)}</strong><small class="pos-full-name">${detail}</small><b class="${mobile ? "mobile-card-price" : ""}">${priceLabel(p)}</b>`;
+    const content = mobile
+      ? `<div class="mobile-card-media">${photo}</div><div class="mobile-card-copy">${copy}</div><div class="mobile-card-stock">${renewal}</div>`
+      : `${photo}${copy}${renewal}`;
+    return `<article class="pos-product ${mobile ? "mobile-catalog-card" : ""} ${variable ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" data-add="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" data-pos-qty="${p.id}" hidden>0</span>${!mobile && p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${content}<button class="pos-product-hit" type="button" aria-label="Adicionar ${escapar(p.nome)}"></button>${mobile ? "" : `<button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${escapar(p.nome)}"><i data-lucide="ellipsis-vertical"></i></button>`}</article>`;
   };
   const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
   function view() {

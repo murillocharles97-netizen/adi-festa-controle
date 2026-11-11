@@ -48,7 +48,8 @@ function setup({mobile = true, allow = true, batch, preflight} = {}) {
 test('real mobile action sheet closes BEFORE delete dialog; cancel changes nothing and never resurrects stale sheet', async () => {
   const r = setup(); try {
     await wait(); const before=JSON.stringify(r.data);
-    r.$('[data-product-menu="p0"]').click(); assert.ok(r.$('.product-action-sheet.open'));
+    assert.equal(r.$('[data-product-menu="p0"]'),null);
+    r.$('[data-product-card="p0"]').click(); assert.ok(r.$('.product-action-sheet.open'));
     r.$('[data-product-delete="p0"]').click();
     assert.equal(r.$('.product-action-sheet'),null); assert.equal(r.$('.product-sheet-overlay'),null);
     await wait(); assert.equal(r.$('[role="dialog"] h3').textContent,'Excluir produto?');
@@ -136,7 +137,7 @@ test('repeated open cannot stack confirmation dialogs or resurrect the old sheet
 test('unconfirmed product stays visible with an explicit badge; confirmation read removes it without reactivation or another delete',async()=>{
   const r=setup();try{await wait();r.data.produtos[0].ativo=false;r.pending([{productId:'p0'}]);r.w.ProdutosMobile.refresh();await wait();
     assert.ok(r.$('[data-product-card="p0"]'));assert.match(r.$('[data-product-card="p0"]').textContent,/Aguardando confirmação/);assert.equal(r.data.produtos[0].ativo,false);
-    r.$('[data-product-menu="p0"]').click();assert.equal(r.$('.product-action-sheet'),null);
+    r.$('[data-product-card="p0"]').click();assert.equal(r.$('.product-action-sheet'),null);
     r.$('[data-product-check-pending]').click();await wait();assert.equal(r.$('[data-product-card="p0"]'),null);assert.equal(r.calls,0);
   }finally{r.dispose();}
 });

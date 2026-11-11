@@ -17,7 +17,7 @@
     $$('.pos-product',page).forEach(card=>{
       const item=product(card.dataset.add);if(!item)return;
       const status=getProductStockStatus(item);card.classList.add('mobile-sale-product',`stock-${status}`);
-      if(!$('.mobile-sale-favorite',card))card.insertAdjacentHTML('beforeend',`<button type="button" class="mobile-sale-favorite ${item.favorito?'active':''}" data-fav="${item.id}" aria-label="${item.favorito?'Remover dos favoritos':'Adicionar aos favoritos'}" aria-pressed="${Boolean(item.favorito)}">${icon('star')}</button>`);
+      if(!$('.mobile-sale-favorite',card))card.insertAdjacentHTML('beforeend',`<button type="button" class="mobile-sale-favorite mobile-card-favorite ${item.favorito?'active':''}" data-fav="${item.id}" aria-label="${item.favorito?'Remover dos favoritos':'Adicionar aos favoritos'}" aria-pressed="${Boolean(item.favorito)}">${icon('star')}</button>`);
     });
   }
   function paymentChips(summary){
@@ -141,7 +141,7 @@
       startX=event.clientX;startY=event.clientY;
       timer=setTimeout(()=>{
         if(!card.isConnected)return;
-        const overlay=menu(product(card.dataset.add),card.querySelector('[data-sale-product-menu]'));
+        const overlay=menu(product(card.dataset.add),card.querySelector('.pos-product-hit'));
         if(!overlay)return;
         heldClick={grid,overlay};
         navigator.vibrate?.(25);

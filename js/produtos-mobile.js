@@ -14,7 +14,7 @@
     query: "",
     filter: "todos",
     sort: localStorage.getItem("productSortMode") || saved.sort || "nomeAsc",
-    view: localStorage.getItem("productViewMode") || saved.view || "list",
+    view: localStorage.getItem("productViewMode") || saved.view || "grid",
     category: "todos",
     limit: 50,
     menuId: null,
@@ -205,14 +205,14 @@
     return `<button class="product-filter-chip ${state.filter === key ? "active" : ""}" type="button" data-product-filter="${key}">${iconName ? icon(iconName) : ""}<span>${label}</span><b>${count}</b></button>`;
   }
   function stock(product) {
-    const current = productStock(product),
-      info = statusInfo(product),
-      type = status(product);
-    if (product.itemKind === "service")
-      return `<div class="mobile-product-stock sem-controle service"><strong>Serviço</strong><em>${icon("briefcase-business")}Sem estoque físico</em></div>`;
-    if (product.productType === "recurring" && type === "sem-controle")
-      return `<div class="mobile-product-stock sem-controle recurring"><strong>Venda com renovação</strong><em>${icon("calendar-clock")}${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</em></div>`;
-    return `<div class="mobile-product-stock ${type}"><strong>${type === "sem-controle" ? "Sem controle" : `${current} un.`}</strong><em>${info.label}</em></div>`;
+    const type = status(product);
+    const service = product.itemKind === "service";
+    const recurring = product.productType === "recurring" && type === "sem-controle";
+    const text = service ? "Serviço" : recurring ? window.getProductRenewalPeriod?.(product) || "30 dias"
+      : type === "sem-controle" ? "Sem controle de estoque"
+      : type === "esgotado" ? "Sem estoque"
+      : `Estoque: ${productStock(product)}${type === "baixo" ? " · baixo" : ""}`;
+    return `<div class="mobile-product-stock mobile-card-stock ${type} ${service ? "service" : recurring ? "recurring" : ""}"><em>${icon(service ? "briefcase-business" : recurring ? "calendar-clock" : "box")}${esc(text)}</em></div>`;
   }
   function card(product, index) {
     const type = status(product),
@@ -230,7 +230,10 @@
         : product.productType === "recurring" && !controlsStock
         ? `Venda com renovação, ${window.getProductRenewalPeriod?.(product) || "30 dias"}`
         : statusInfo(product).label;
-    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${esc(ariaStatus)}"><div class="mobile-product-avatar color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show ${product.favorito ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${product.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(product.favorito)}">${icon("star")}</button></div><div class="mobile-product-copy"><h3 title="${esc(product.nome)}">${esc(product.nome)}</h3>${variable ? `<span class="product-variation-badge">${Number(product.activeVariationCount || 0)} variações</span>` : `<p>${esc(product.categoria) || "Sem categoria"}${product.codigo ? ` <b>·</b> ${esc(product.codigo)}` : ""}</p>`}${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong>${priceLabel(product)}</strong></div>${stock(product)}<button class="mobile-product-more" type="button" data-product-menu="${product.id}" aria-label="Mais ações de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button></article></div>`;
+    const category = esc(product.categoria) || "Sem categoria";
+    const detail = variable ? `${category} · ${Number(product.activeVariationCount || 0)} opções`
+      : category + (state.view === "list" && product.codigo ? ` · ${esc(product.codigo)}` : "");
+    return `<div class="mobile-product-swipe ${type} ${variable ? "variable" : ""} ${state.view === "grid" ? "grid-mode" : ""}" data-product-shell="${product.id}" data-controls-stock="${controlsStock}" style="--delay:${Math.min(index, 14) * 22}ms;--product-color:${color}">${controlsStock ? `<div class="product-swipe-action entry">${icon("package-plus")}<span>Adicionar entrada</span></div>` : ""}<div class="product-swipe-action edit">${icon("pencil")}<span>Editar produto</span></div><article class="mobile-product-card mobile-catalog-card" data-product-card="${product.id}" tabindex="0" aria-label="${esc(product.nome)}, ${priceLabel(product)}, ${esc(ariaStatus)}"><div class="mobile-product-avatar mobile-card-media color-${color}">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}<button class="favorite-dot show mobile-card-favorite ${product.favorito ? "active" : ""}" type="button" data-product-favorite="${product.id}" aria-label="${product.favorito ? "Remover dos favoritos" : "Adicionar aos favoritos"}" aria-pressed="${Boolean(product.favorito)}">${icon("star")}</button></div><div class="mobile-product-copy mobile-card-copy"><h3 class="mobile-card-name" title="${esc(product.nome)}">${esc(product.nome)}</h3><p>${detail}</p>${product._variationMatch ? `<small class="variation-search-match">${esc(product._variationMatch)}</small>` : ""}<strong class="mobile-card-price">${priceLabel(product)}</strong></div>${stock(product)}</article></div>`;
   }
   function empty(list) {
     if (list.length) return "";
@@ -256,13 +259,24 @@
     ].sort((a, b) => a.localeCompare(b, "pt-BR"));
     return `<div class="product-sheet-overlay ${state.filtersOpen || state.menuId ? "open" : ""}" data-product-sheet-close></div><section class="product-filter-sheet ${state.filtersOpen ? "open" : ""}" ${state.filtersOpen ? "" : "inert"}><div class="sheet-handle"></div><header><div><h3>Filtrar produtos</h3><p>Escolha uma categoria.</p></div><button data-product-sheet-close aria-label="Fechar filtros">${icon("x")}</button></header><div class="product-category-options"><button class="${state.category === "todos" ? "active" : ""}" data-product-category="todos">Todas as categorias</button>${categories.map((category) => `<button class="${state.category === norm(category) ? "active" : ""}" data-product-category="${esc(norm(category))}">${esc(category)}</button>`).join("")}</div></section>`;
   }
+  const canProductAction = permission => !window.TeamAccess || window.TeamAccess.has(permission);
   function menuSheet() {
     if (!state.menuId) return "";
     const product = products().produtos.find(row => row.id === state.menuId);
     if (!product) return "";
-    const controlsStock = window.productControlsStock?.(product) ?? (product.itemKind !== "service" && !product.semControleEstoque && product.controlaEstoque !== false),
-      summary = product.itemKind === "service" ? "Serviço" : product.productType === "recurring" && !controlsStock ? window.getProductRenewalPeriod?.(product) || "30 dias" : statusInfo(product).label;
-    return `<section class="product-action-sheet open"><div class="sheet-handle"></div><header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${money(product.preco)} · ${esc(summary)}</p></div><button data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header><div class="product-sheet-actions">${controlsStock?`<button data-product-entry="${product.id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button data-product-adjust="${product.id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button><button data-product-history="${product.id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button>`:""}<button data-product-edit="${product.id}">${icon("pencil")}<span><b>Editar item</b><small>Alterar dados, preço e disponibilidade</small></span></button><button class="danger" data-product-delete="${product.id}">${icon("trash-2")}<span><b>Excluir item</b><small>Esta ação exige confirmação</small></span></button></div></section>`;
+    const controlsStock = window.productControlsStock?.(product) ?? (product.itemKind !== "service" && !product.semControleEstoque && product.controlaEstoque !== false);
+    const summary = product.itemKind === "service" ? "Serviço" : product.productType === "recurring" && !controlsStock ? window.getProductRenewalPeriod?.(product) || "30 dias" : statusInfo(product).label;
+    const id = esc(product.id);
+    return `<section class="product-action-sheet open" role="dialog" aria-modal="true" aria-label="Opções de ${esc(product.nome)}">
+      <div class="sheet-handle"></div>
+      <header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${priceLabel(product)} · ${esc(summary)}</p></div><button type="button" data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header>
+      <div class="product-sheet-actions">
+        <button type="button" data-product-details="${id}">${icon("info")}<span><b>Ver detalhes</b></span></button>
+        ${controlsStock && canProductAction("inventory.adjust") ? `<button type="button" data-product-entry="${id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button type="button" data-product-adjust="${id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button>` : ""}
+        ${controlsStock && canProductAction("inventory.view") ? `<button type="button" data-product-history="${id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button>` : ""}
+        ${canProductAction("products.edit") ? `<button type="button" data-product-edit="${id}">${icon("pencil")}<span><b>Editar item</b><small>Alterar dados, preço e disponibilidade</small></span></button><button type="button" class="danger" data-product-delete="${id}">${icon("trash-2")}<span><b>Excluir item</b><small>Esta ação exige confirmação</small></span></button>` : ""}
+      </div>
+    </section>`;
   }
   function render() {
     dataCache = null;
@@ -601,7 +615,10 @@
   async function variableDetails(id) {
     const product = Produtos.obter(id),
       variants = await ProductVariations.ensure(id),
-      moves = Produtos.historico(id),
+      canEdit = !mq.matches || canProductAction("products.edit"),
+      canAdjust = !mq.matches || canProductAction("inventory.adjust"),
+      canViewStock = !mq.matches || canProductAction("inventory.view"),
+      moves = canViewStock ? Produtos.historico(id) : [],
       controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
       service = product.itemKind === "service",
       recurringNoStock = product.productType === "recurring" && !controlsStock,
@@ -609,11 +626,10 @@
       operationalLabel = controlsStock ? "Estoque" : service ? "Tipo" : recurringNoStock ? "Renovação" : "Controle",
       operationalValue = controlsStock ? `${Number(product.totalStock || 0)} un.` : service ? "Serviço" : recurringNoStock ? renewalPeriod : "Sem estoque";
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>${service ? "Serviço" : "Produto"} com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>${operationalLabel}</small><b>${esc(operationalValue)}</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section><div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div><div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}">${ProductImages.markup(product, { variant, className: "variation-row-photo" })}<div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${controlsStock ? `${Number(variant.stock)} un.` : service ? "Serviço" : recurringNoStock ? esc(window.getProductRenewalPeriod?.({...product,durationValue:variant.durationValue ?? product.durationValue,durationUnit:variant.durationUnit || product.durationUnit}) || renewalPeriod) : "Sem estoque"}</small></span><button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button>${controlsStock ? `<button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button>` : ""}<button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button></article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div>${controlsStock ? `<p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p>` : ""}</div></section></div>`;
+      `<div class="modal-bg"><section class="modal-box modal-wide variable-detail-modal"><header class="modal-head"><div><small>${service ? "Serviço" : "Produto"} com variações</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section class="variable-summary"><span><small>Variações ativas</small><b>${Number(product.activeVariationCount || 0)}</b></span><span><small>${operationalLabel}</small><b>${esc(operationalValue)}</b></span><span><small>Faixa de preço</small><b>${priceLabel(product)}</b></span></section>${canEdit ? `<div class="variable-detail-actions"><button class="btn btn-light" data-edit-parent>${icon("pencil")} Dados principais</button><button class="btn btn-primary" data-add-variant>${icon("plus")} Nova variação</button></div>` : ""}<div class="variable-detail-list">${variants.map((variant) => `<article class="${variant.active === false ? "inactive" : ""}">${ProductImages.markup(product, { variant, className: "variation-row-photo" })}<div><b>${esc(ProductVariations.displayName(variant))}</b><small>${esc(variant.sku) || "Sem SKU"} · ${esc(variant.barcode) || "Sem código"}</small></div><span><b>${money(variant.price)}</b><small>${controlsStock ? `${Number(variant.stock)} un.` : service ? "Serviço" : recurringNoStock ? esc(window.getProductRenewalPeriod?.({...product,durationValue:variant.durationValue ?? product.durationValue,durationUnit:variant.durationUnit || product.durationUnit}) || renewalPeriod) : "Sem estoque"}</small></span>${canEdit ? `<button data-edit-variant="${variant.id}" aria-label="Editar variação">${icon("pencil")}</button>` : ""}${controlsStock && canAdjust ? `<button data-stock-variant="${variant.id}" aria-label="Entrada de estoque">${icon("package-plus")}</button>` : ""}${canEdit ? `<button data-remove-variant="${variant.id}" aria-label="Excluir ou desativar">${icon("trash-2")}</button>` : ""}</article>`).join("") || '<p class="empty">Nenhuma variação cadastrada.</p>'}</div>${controlsStock && canViewStock ? `<p class="muted">${moves.length} movimentação(ões) de estoque no histórico.</p>` : ""}</div></section></div>`;
     $(".close", $("#modal")).onclick = Modais.fechar;
-    $("[data-edit-parent]", $("#modal")).onclick = () =>
-      ProductImages.openForm(id);
-    $("[data-add-variant]", $("#modal")).onclick = () => editVariant(id);
+    $("[data-edit-parent]", $("#modal"))?.addEventListener("click", () => ProductImages.openForm(id));
+    $("[data-add-variant]", $("#modal"))?.addEventListener("click", () => editVariant(id));
     $$("[data-edit-variant]", $("#modal")).forEach(
       (button) =>
         (button.onclick = () => editVariant(id, button.dataset.editVariant)),
@@ -738,15 +754,16 @@
     const controlsStock = window.productControlsStock?.(product) ?? (!product.semControleEstoque && product.controlaEstoque !== false),
       service = product.itemKind === "service",
       recurringNoStock = product.productType === "recurring" && !controlsStock,
-      moves = Produtos.historico(id),
+      canViewStock = canProductAction("inventory.view"),
+      moves = canViewStock ? Produtos.historico(id) : [],
       entry = moves.find((m) => m.tipo === "entrada"),
       exit = moves.find((m) => m.tipo === "saida_venda"),
       financial = `<section><h4>Preço</h4><div class="product-detail-grid"><span><small>Preço de venda</small><b>${money(product.preco)}</b></span>${window.TeamAccess?.has?.("cost.view") ? `<span><small>Custo</small><b>${product.custo === null ? "—" : money(product.custo)}</b></span>` : ""}</div></section>`;
     $("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do ${service ? "serviço" : "produto"}</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${service ? "Serviço" : recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${service ? `<section><h4>Serviço</h4><div class="product-detail-grid"><span><small>Tipo de item</small><b>Serviço</b></span><span><small>Controle de estoque</small><b>Não utiliza estoque físico</b></span></div></section>` : recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : controlsStock ? `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span><span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span></div></section>` : `<section><h4>Estoque</h4><p>Controle de estoque desativado para este item.</p></section>`}${financial}<section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section></div><footer class="modal-foot"><button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button><button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button></footer></section></div>`;
+      `<div class="modal-bg"><section class="modal-box product-detail-modal"><header class="modal-head"><div><small>Detalhes do ${service ? "serviço" : "produto"}</small><h3>${esc(product.nome)}</h3></div><button class="icon-btn close">${icon("x")}</button></header><div class="modal-body"><section><h4>Informações</h4><div class="product-detail-grid"><span><small>Categoria</small><b>${esc(product.categoria) || "Sem categoria"}</b></span><span><small>Código</small><b>${esc(product.codigo) || "—"}</b></span><span><small>Status</small><b>${service ? "Serviço" : recurringNoStock ? "Venda com renovação" : statusInfo(product).label}</b></span><span><small>Favorito</small><b>${product.favorito ? "Sim" : "Não"}</b></span></div></section>${service ? `<section><h4>Serviço</h4><div class="product-detail-grid"><span><small>Tipo de item</small><b>Serviço</b></span><span><small>Controle de estoque</small><b>Não utiliza estoque físico</b></span></div></section>` : recurringNoStock ? `<section><h4>Renovação</h4><div class="product-detail-grid"><span><small>Período padrão</small><b>${esc(window.getProductRenewalPeriod?.(product) || "30 dias")}</b></span><span><small>Controle de estoque</small><b>Desativado</b></span></div></section>` : controlsStock ? `<section><h4>Estoque</h4><div class="product-detail-grid"><span><small>Estoque atual</small><b>${Number(product.estoqueAtual || 0)} un.</b></span><span><small>Estoque mínimo</small><b>${Number(product.estoqueMinimo || 0)} un.</b></span>${canViewStock ? `<span><small>Última entrada</small><b>${entry ? new Date(entry.data).toLocaleDateString("pt-BR") : "—"}</b></span><span><small>Última saída</small><b>${exit ? new Date(exit.data).toLocaleDateString("pt-BR") : "—"}</b></span>` : ""}</div></section>` : `<section><h4>Estoque</h4><p>Controle de estoque desativado para este item.</p></section>`}${financial}${canViewStock ? `<section><h4>Histórico</h4><p>${moves.length} movimentação(ões) registrada(s).</p></section>` : ""}</div><footer class="modal-foot">${canViewStock ? `<button class="btn btn-light" data-detail-history="${product.id}">${icon("history")} Histórico</button>` : ""}${canProductAction("products.edit") ? `<button class="btn btn-primary" data-detail-edit="${product.id}">${icon("pencil")} Editar</button>` : ""}</footer></section></div>`;
     $("#modal .close").onclick = Modais.fechar;
-    $("[data-detail-history]").onclick = () => history(id);
-    $("[data-detail-edit]").onclick = () => productForm(id);
+    $("[data-detail-history]")?.addEventListener("click", () => { if (canProductAction("inventory.view")) history(id); });
+    $("[data-detail-edit]")?.addEventListener("click", () => { if (canProductAction("products.edit")) productForm(id); });
     window.lucide?.createIcons();
   }
   function selectEntry() {
@@ -813,6 +830,12 @@
     window.lucide?.createIcons();
   }
   function closeSheet() {
+    if (state.menuId && !state.filtersOpen) {
+      const id = state.menuId;
+      dismissSheets();
+      $(`[data-product-card="${CSS.escape(id)}"]`)?.focus({preventScroll:true});
+      return;
+    }
     state.menuId = null;
     state.filtersOpen = false;
     refresh();
@@ -825,7 +848,8 @@
     $(".product-sheet-overlay")?.remove();
   }
   function performSwipe(action, id) {
-    action === "entry" ? stockEntry(id) : productForm(id);
+    if (action === "entry" && canProductAction("inventory.adjust")) stockEntry(id);
+    if (action === "edit" && canProductAction("products.edit")) productForm(id);
   }
   function bindSwipe(shell) {
     if (state.view !== "list") return;
@@ -835,7 +859,8 @@
       delta = 0,
       dragging = false,
       pointer = null,
-      horizontal = false;
+      horizontal = false,
+      swiped = false;
     const reset = () => {
       card.style.transition = "transform .24s ease";
       card.style.transform = "translateX(0)";
@@ -843,6 +868,7 @@
       setTimeout(() => (card.style.transition = ""), 250);
     };
     card.addEventListener("pointerdown", (event) => {
+      swiped = false;
       if (window.ProductSelection?.active?.()) return;
       if (event.target.closest("button,input,a,select")) return;
       startX = event.clientX;
@@ -883,8 +909,9 @@
       dragging = false;
       if (horizontal && Math.abs(delta) >= card.offsetWidth * 0.4) {
         const action = delta > 0 ? "entry" : "edit";
-        if (action === "entry" && shell.dataset.controlsStock !== "true")
-          return reset();
+        swiped = true;
+        if (action === "entry" && (shell.dataset.controlsStock !== "true" || !canProductAction("inventory.adjust"))) return reset();
+        if (action === "edit" && !canProductAction("products.edit")) return reset();
         card.style.transition = "transform .2s ease";
         card.style.transform = `translateX(${delta > 0 ? card.offsetWidth : -card.offsetWidth}px)`;
         navigator.vibrate?.(30);
@@ -895,7 +922,55 @@
       } else reset();
     };
     card.addEventListener("pointerup", end);
-    card.addEventListener("pointercancel", end);
+    card.addEventListener("pointercancel", () => { dragging = false; reset(); });
+    card.addEventListener("click", event => {
+      if (!swiped || !event.isTrusted || event.detail === 0) return;
+      swiped = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+  }
+  function openCardMenu(id) {
+    const page = $(".products-mobile-page");
+    if (!page) return;
+    state.menuId = id;
+    const markup = menuSheet();
+    if (!markup) { state.menuId = null; return; }
+    $(".product-action-sheet", page)?.remove();
+    let overlay = $(".product-sheet-overlay", page);
+    if (!overlay) {
+      page.insertAdjacentHTML("beforeend", '<div class="product-sheet-overlay" data-product-sheet-close></div>');
+      overlay = $(".product-sheet-overlay", page);
+    }
+    overlay.classList.add("open");
+    overlay.onclick = closeSheet;
+    page.insertAdjacentHTML("beforeend", markup);
+    bindMenuSheet();
+    const close = $(".product-action-sheet [data-product-sheet-close]", page);
+    close.onclick = closeSheet;
+    close.focus({preventScroll:true});
+    window.lucide?.createIcons();
+  }
+  function bindMenuSheet() {
+    const sheet = $(".product-action-sheet");
+    if (!sheet) return;
+    sheet.onkeydown = event => { if (event.key === "Escape") closeSheet(); };
+    const bindAction = (attribute, permission, action) => {
+      const button = sheet.querySelector(`[${attribute}]`);
+      if (!button) return;
+      button.onclick = () => {
+        if (!canProductAction(permission)) return;
+        const id = button.getAttribute(attribute);
+        dismissSheets();
+        action(id);
+      };
+    };
+    bindAction("data-product-details", "products.view", details);
+    bindAction("data-product-entry", "inventory.adjust", stockEntry);
+    bindAction("data-product-adjust", "inventory.adjust", stockAdjust);
+    bindAction("data-product-history", "inventory.view", history);
+    bindAction("data-product-edit", "products.edit", productForm);
+    bindAction("data-product-delete", "products.edit", id => window.ProductSelection.open([id], "delete"));
   }
   function bind() {
     window.SpaceContext?.bind?.($("#app"));
@@ -970,49 +1045,21 @@
         }),
     );
     $("#mobile-products").onclick = (event) => {
-      const favorite = event.target.closest("[data-product-favorite]"),
-        menu = event.target.closest("[data-product-menu]"),
-        card = event.target.closest("[data-product-card]");
+      const favorite = event.target.closest("[data-product-favorite]");
       if (favorite) {
         event.stopPropagation();
         return toggleFavorite(favorite.dataset.productFavorite, favorite);
       }
-      if (menu) {
-        event.stopPropagation();
-        state.menuId = menu.dataset.productMenu;
-        return refresh();
-      }
-      if (card) details(card.dataset.productCard);
+      const card = event.target.closest("[data-product-card]");
+      if (card) openCardMenu(card.dataset.productCard);
     };
     $("#mobile-products").onkeydown = (event) => {
-      if (
-        (event.key === "Enter" || event.key === " ") &&
-        event.target.matches("[data-product-card]")
-      ) {
+      if (["Enter", " "].includes(event.key) && event.target.matches("[data-product-card]")) {
         event.preventDefault();
-        details(event.target.dataset.productCard);
+        openCardMenu(event.target.dataset.productCard);
       }
     };
-    $$("[data-product-entry]").forEach(
-      (button) =>
-        (button.onclick = () => stockEntry(button.dataset.productEntry)),
-    );
-    $$("[data-product-adjust]").forEach(
-      (button) =>
-        (button.onclick = () => stockAdjust(button.dataset.productAdjust)),
-    );
-    $$("[data-product-history]").forEach(
-      (button) =>
-        (button.onclick = () => history(button.dataset.productHistory)),
-    );
-    $$("[data-product-edit]").forEach(
-      (button) =>
-        (button.onclick = () => productForm(button.dataset.productEdit)),
-    );
-    $$("[data-product-delete]").forEach(
-      (button) =>
-        (button.onclick = () => window.ProductSelection.open([button.dataset.productDelete], 'delete')),
-    );
+    bindMenuSheet();
     $$("[data-product-shell]").forEach(bindSwipe);
     observer?.disconnect();
     const sentinel = $("#mobile-product-sentinel");
