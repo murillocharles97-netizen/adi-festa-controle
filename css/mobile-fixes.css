@@ -73,3 +73,174 @@
   #app :is(.home-main-metrics,.home-attention-grid,.product-detail-grid){grid-template-columns:minmax(0,1fr)}
   .mobile-sale-page .pos-bag{left:auto;right:max(10px,env(safe-area-inset-right))}
 }
+
+/* Controles equivalentes de Vender, Produtos e Clientes no mobile. */
+@media (max-width: 767px) {
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) {
+    --mobile-control-size: 44px;
+    --mobile-search-size: 46px;
+    --mobile-control-radius: 13px;
+    --mobile-control-gap: 8px;
+    --mobile-control-padding: 11px;
+    --mobile-control-text: 13px;
+  }
+
+  .mobile-sale-page .pos-tools,
+  .products-mobile-page .mobile-product-search,
+  .clients-mobile-page .mobile-client-search-row {
+    gap: var(--mobile-control-gap);
+    margin-bottom: var(--mobile-control-gap);
+  }
+
+  .mobile-sale-page .pos-search-wrap input,
+  .products-mobile-page .mobile-product-search > label,
+  .clients-mobile-page .mobile-client-search-row > label {
+    height: var(--mobile-search-size);
+    min-height: var(--mobile-search-size);
+    border-radius: var(--mobile-control-radius);
+  }
+
+  .mobile-sale-page .pos-search-wrap input,
+  .products-mobile-page .mobile-product-search input,
+  .clients-mobile-page .mobile-client-search-row input { font-size: 16px; }
+
+  :is(#product-search, #mobile-product-search, #mobile-client-search)::placeholder { font-size: 14px; }
+
+  .products-mobile-page .mobile-product-search > label,
+  .clients-mobile-page .mobile-client-search-row > label {
+    gap: var(--mobile-control-gap);
+    padding-inline: var(--mobile-control-padding);
+  }
+
+  .mobile-sale-page .pos-search-wrap > svg {
+    left: var(--mobile-control-padding);
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .mobile-sale-page .pos-search-wrap input { padding-inline: 38px 45px; }
+
+  .mobile-sale-page .mobile-sale-actions-toggle,
+  .products-mobile-page .mobile-product-search > button,
+  .products-mobile-page .mobile-product-actions-menu summary,
+  .clients-mobile-page .mobile-client-search-row > button {
+    min-height: var(--mobile-control-size);
+    border-radius: var(--mobile-control-radius);
+    font-size: var(--mobile-control-text);
+  }
+
+  .products-mobile-page .mobile-product-search > button,
+  .clients-mobile-page .mobile-client-search-row > button {
+    align-self: center;
+    width: var(--mobile-control-size);
+    height: var(--mobile-control-size);
+    padding: 0;
+  }
+
+  .mobile-sale-page .pos-search-wrap #clear-product-search,
+  .clients-mobile-page .mobile-client-search-row .mobile-search-clear {
+    top: 1px;
+    right: 1px;
+    width: var(--mobile-control-size);
+    height: var(--mobile-control-size);
+    border-radius: calc(var(--mobile-control-radius) - 1px);
+  }
+  .clients-mobile-page .mobile-client-search-row label:has(.mobile-search-clear) input { padding-right: 35px; }
+  .clients-mobile-page .mobile-client-search-row label:not(:has(.mobile-search-clear)) input { padding-right: 0; }
+
+  .mobile-sale-page .mobile-sale-filters,
+  .products-mobile-page .product-filter-scroll,
+  .clients-mobile-page .mobile-filter-scroller {
+    gap: var(--mobile-control-gap);
+    margin-bottom: var(--mobile-control-gap);
+    padding-bottom: 4px;
+  }
+
+  .mobile-sale-page .mobile-sale-filters button,
+  .products-mobile-page .product-filter-scroll .product-filter-chip,
+  .clients-mobile-page .mobile-filter-chip {
+    gap: 6px;
+    min-width: var(--mobile-control-size);
+    min-height: var(--mobile-control-size);
+    padding-inline: var(--mobile-control-padding);
+    border-radius: 999px;
+    font-size: var(--mobile-control-text);
+    white-space: nowrap;
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar {
+    gap: var(--mobile-control-gap);
+    min-height: var(--mobile-search-size);
+    margin-bottom: var(--mobile-control-gap);
+    padding: 0;
+    border-radius: var(--mobile-control-radius);
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar > label {
+    position: relative;
+    display: block;
+    grid-column: 1 / -1;
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar label > span {
+    position: absolute;
+    top: 4px;
+    left: 36px;
+    z-index: 1;
+    display: block;
+    font-size: 11px;
+    line-height: 1.2;
+    pointer-events: none;
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar label > span svg {
+    position: absolute;
+    top: 10px;
+    left: -24px;
+    width: 17px;
+    height: 17px;
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar select {
+    width: 100%;
+    height: var(--mobile-control-size);
+    min-height: var(--mobile-control-size);
+    padding: 12px var(--mobile-control-padding) 0 36px;
+    border: 0;
+    border-radius: calc(var(--mobile-control-radius) - 1px);
+    background: transparent;
+    font-size: var(--mobile-control-text);
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar.is-single {
+    display: flex;
+    padding-inline: var(--mobile-control-padding);
+  }
+
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar.is-single > :is(strong, span) {
+    padding: 0;
+    font-size: var(--mobile-control-text);
+  }
+  :is(.mobile-sale-page, .products-mobile-page, .clients-mobile-page) .space-context-bar.is-single > span[role="status"] {
+    display: block;
+  }
+
+  .products-mobile-page .mobile-product-sort-view > label,
+  .products-mobile-page .product-view-toggle,
+  .clients-mobile-page .mobile-sort-row label { border-radius: var(--mobile-control-radius); }
+
+  .clients-mobile-page .mobile-sort-row label { padding-block: 0; }
+  .clients-mobile-page .mobile-sort-row label::after { top: 50%; transform: translateY(-50%); pointer-events: none; }
+  .clients-mobile-page .mobile-sort-row label > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .clients-mobile-page .mobile-sort-row select {
+    height: var(--mobile-control-size);
+    min-height: var(--mobile-control-size);
+    font-size: var(--mobile-control-text);
+  }
+}
