@@ -1,0 +1,72 @@
+@import url("tokens.css");
+/* Protótipo 1 — Início (mobile + desktop). Somente apresentação; nenhum elemento ou ação removido. */
+@media (max-width:767px){
+ body .mobile-home-dashboard{gap:var(--vx-4)!important;color:var(--vx-text)}
+ /* Espaço único: linha discreta em vez de card de 60px. O botão de filtros continua. */
+ body .mobile-home-dashboard .space-context-bar.is-single{min-height:0!important;padding:0 2px!important;border:0!important;background:transparent!important;box-shadow:none!important;grid-template-columns:minmax(0,1fr) 40px!important;align-items:center}
+ body .mobile-home-dashboard .space-context-bar.is-single>strong{font-size:var(--vx-fs-13)!important;font-weight:var(--vx-fw-semibold)!important;color:var(--vx-text-2)!important;padding-left:0!important}
+ body .mobile-home-dashboard .space-context-bar.is-single>strong::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;border-radius:50%;background:var(--vx-brand);vertical-align:1px}
+ body .mobile-home-dashboard .space-context-bar.is-single>button{width:40px!important;height:40px!important;min-height:40px!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;background:var(--vx-surface)!important;box-shadow:none!important}
+ /* Meta: mantém o destaque da marca, com menos altura e tipografia da escala. */
+ body .mobile-home-dashboard .home-goal-card{padding:var(--vx-4)!important;border-radius:var(--vx-r-lg)!important;gap:var(--vx-3)!important;box-shadow:0 8px 24px rgba(8,120,111,.18)!important}
+ body .mobile-home-dashboard .home-goal-card header>span{font-size:var(--vx-fs-12)!important;letter-spacing:.04em}
+ body .mobile-home-dashboard .goal-values strong{font-size:var(--vx-fs-28)!important;letter-spacing:-.02em}
+ body .mobile-home-dashboard .goal-values span{font-size:var(--vx-fs-14)!important}
+ body .mobile-home-dashboard .goal-footer p{font-size:var(--vx-fs-12)!important}
+ body .mobile-home-dashboard .goal-footer button{font-size:var(--vx-fs-13)!important;min-height:36px!important}
+ /* Indicadores: mesmo card, ícone neutro, rótulos ≥12px. */
+ body .mobile-home-dashboard .home-main-metrics{gap:var(--vx-3)!important}
+ body .mobile-home-dashboard .home-main-metrics article{padding:var(--vx-3) var(--vx-4)!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;background:var(--vx-surface)!important;box-shadow:var(--vx-shadow-1)!important;align-items:flex-start!important}
+ body .mobile-home-dashboard .home-main-metrics article{display:flex!important;flex-direction:column!important;gap:var(--vx-2)!important}
+ body .mobile-home-dashboard .home-main-metrics article>svg{width:28px!important;height:28px!important;padding:6px!important;border-radius:var(--vx-r-sm)!important;background:var(--vx-brand-50)!important;color:var(--vx-action)!important;flex:none}
+ body .mobile-home-dashboard .home-main-metrics article>svg{display:none!important}
+ body .mobile-home-dashboard .home-main-metrics article>span{width:100%!important}
+ body .mobile-home-dashboard .home-main-metrics small{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important;font-weight:var(--vx-fw-medium)!important}
+ body .mobile-home-dashboard .home-main-metrics strong{font-size:var(--vx-fs-18)!important;font-weight:var(--vx-fw-bold)!important;color:var(--vx-text)!important}
+ body .mobile-home-dashboard .home-main-metrics em{display:block!important;margin-top:4px!important;padding:0!important;background:none!important;color:var(--vx-text-3)!important;font-size:var(--vx-fs-12)!important;font-style:normal!important;line-height:1.35!important}
+ body .mobile-home-dashboard .home-main-metrics small.negative{color:var(--vx-danger)!important}
+ /* Aviso de totais provisórios: nota discreta, não um parágrafo solto. */
+ body .mobile-home-dashboard .home-exchange-note{margin:0!important;padding:var(--vx-2) var(--vx-3)!important;border-radius:var(--vx-r-sm)!important;background:var(--vx-info-soft)!important;color:var(--vx-info)!important;font-size:var(--vx-fs-12)!important}
+ /* Vendas · itens · clientes: um único bloco com divisórias (3 botões preservados). */
+ body .mobile-home-dashboard .home-secondary-scroller{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:0!important;overflow:hidden!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;background:var(--vx-surface)!important;box-shadow:var(--vx-shadow-1)!important;padding:0!important}
+ body .mobile-home-dashboard .home-secondary-scroller article{min-width:0!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+ body .mobile-home-dashboard .home-secondary-scroller article+article{border-left:1px solid var(--vx-line)!important}
+ body .mobile-home-dashboard .home-secondary-scroller article button{min-height:64px!important;background:none!important;border:0!important;box-shadow:none!important;display:grid!important;grid-template-columns:1fr auto!important;grid-template-rows:auto auto!important;align-content:center!important;justify-items:start!important;column-gap:4px!important;row-gap:2px!important;padding:var(--vx-3)!important;text-align:left!important}
+ body .mobile-home-dashboard .home-secondary-scroller article button>strong{grid-column:1;grid-row:1}
+ body .mobile-home-dashboard .home-secondary-scroller article button>span{grid-column:1;grid-row:2}
+ body .mobile-home-dashboard .home-secondary-scroller article button>svg:last-child{grid-column:2;grid-row:1/3;align-self:center;width:14px!important;color:var(--vx-text-3)!important}
+ body .mobile-home-dashboard .home-secondary-scroller article button>svg:first-child{display:none!important}
+ body .mobile-home-dashboard .home-secondary-scroller article button>strong{font-size:var(--vx-fs-18)!important;color:var(--vx-text)!important}
+ body .mobile-home-dashboard .home-secondary-scroller article button>span{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ /* Prioridades: uma lista com divisórias; cor só onde há risco (falta, baixo, devendo). */
+ body .mobile-home-dashboard .home-attention>header h3,body .mobile-home-dashboard .home-quick-summary>h3{font-size:var(--vx-fs-16)!important;font-weight:var(--vx-fw-semibold)!important;color:var(--vx-text)!important}
+ body .mobile-home-dashboard .home-attention>div{gap:0!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;background:var(--vx-surface)!important;box-shadow:var(--vx-shadow-1)!important;overflow:hidden}
+ body .mobile-home-dashboard .home-attention button{min-height:60px!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;padding:var(--vx-3) var(--vx-4)!important}
+ body .mobile-home-dashboard .home-attention button+button{border-top:1px solid var(--vx-line)!important}
+ body .mobile-home-dashboard .home-attention button>i{width:32px!important;height:32px!important;border-radius:var(--vx-r-sm)!important;background:var(--vx-surface-2)!important;color:var(--vx-text-2)!important}
+ body .mobile-home-dashboard .home-attention button>i.danger{background:var(--vx-danger-soft)!important;color:var(--vx-danger)!important}
+ body .mobile-home-dashboard .home-attention button>i.warning{background:var(--vx-warning-soft)!important;color:var(--vx-warning)!important}
+ body .mobile-home-dashboard .home-attention button b{font-size:var(--vx-fs-14)!important;font-weight:var(--vx-fw-semibold)!important}
+ body .mobile-home-dashboard .home-attention button small{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ body .mobile-home-dashboard .home-quick-summary>div{gap:0!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;background:var(--vx-surface)!important;box-shadow:var(--vx-shadow-1)!important;overflow:hidden}
+ body .mobile-home-dashboard .home-quick-summary button{border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+ body .mobile-home-dashboard .home-quick-summary button+button{border-left:1px solid var(--vx-line)!important}
+ body .mobile-home-dashboard .home-quick-summary button>svg:first-child{background:var(--vx-surface-2)!important;color:var(--vx-text-2)!important}
+ body .mobile-home-dashboard .home-quick-summary small{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+}
+@media (min-width:768px){
+ body .desktop-dashboard{gap:var(--vx-4)!important;color:var(--vx-text)}
+ body .desktop-dashboard .space-context-bar.is-single{min-height:0!important;padding:var(--vx-2) var(--vx-3)!important;border:0!important;background:transparent!important;box-shadow:none!important}
+ body .desktop-dashboard .space-context-bar.is-single>span{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ body .desktop-dashboard .space-data-notice{padding:var(--vx-2) var(--vx-3)!important;border:0!important;border-radius:var(--vx-r-sm)!important;background:var(--vx-info-soft)!important;color:var(--vx-info)!important;font-size:var(--vx-fs-13)!important}
+ body .desktop-dashboard :is(.desktop-panel,.desktop-kpi,.desktop-space-goal){border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;box-shadow:var(--vx-shadow-1)!important;background:var(--vx-surface)!important}
+ body .desktop-dashboard .desktop-kpi-icon{width:32px!important;height:32px!important;border-radius:var(--vx-r-sm)!important;background:var(--vx-brand-50)!important;color:var(--vx-action)!important}
+ body .desktop-dashboard .desktop-kpi.danger .desktop-kpi-icon{background:var(--vx-danger-soft)!important;color:var(--vx-danger)!important}
+ body .desktop-dashboard .desktop-kpi>div>small{font-size:var(--vx-fs-13)!important;color:var(--vx-text-3)!important;font-weight:var(--vx-fw-medium)!important}
+ body .desktop-dashboard .desktop-kpi em{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ body .desktop-dashboard .desktop-kpi.danger strong{color:var(--vx-danger)!important}
+ body .desktop-dashboard :is(.desktop-panel-head h2,.desktop-panel-head h3,.desktop-panel h3){font-size:var(--vx-fs-16)!important;font-weight:var(--vx-fw-semibold)!important;color:var(--vx-text)!important}
+ body .desktop-dashboard .desktop-space-goal-copy small,body .desktop-dashboard .desktop-chart-layout aside small,body .desktop-dashboard .desktop-finance small,body .desktop-dashboard .desktop-sales-performance label{font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ body .desktop-dashboard .desktop-chart-layout aside b,body .desktop-dashboard .desktop-finance b{font-size:var(--vx-fs-14)!important}
+ body .desktop-dashboard .desktop-space-goal{padding:var(--vx-3) var(--vx-4)!important}
+}

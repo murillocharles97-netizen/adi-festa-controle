@@ -1,0 +1,19 @@
+@import url("tokens.css");
+/* Protótipo 2 — Cabeçalho de página único. Um título por tela; ações preservadas. */
+@media (max-width:767px){
+ /* O cabeçalho do app já mostra título e descrição: o título repetido sai, as ações ficam. */
+ body #app :is(.activity-heading>h1,.activity-heading>p,.plans-page-heading h1,.plans-page-heading p,.store-heading .store-eyebrow,.store-heading h1,.store-heading h1+p,.team-heading h1,.team-heading h1+p,.analytics-heading .analytics-eyebrow,.analytics-heading h2,.analytics-heading h2+p,.page-head>div:first-child>h2,.page-head>div:first-child>p){display:none!important}
+ body #app :is(.activity-heading,.plans-page-heading,.team-heading,.analytics-heading,.page-head){min-height:0!important;margin:0 0 var(--vx-3)!important;padding:0!important}
+ body #app :is(.analytics-heading,.page-head){display:flex!important;justify-content:flex-end!important;align-items:center!important;gap:var(--vx-2)!important}
+ body #app .page-head .head-actions{width:100%}
+ body #app .store-heading.online-v2-heading{min-height:0!important;padding:var(--vx-3)!important;margin-bottom:var(--vx-3)!important;background:var(--vx-surface)!important;border:1px solid var(--vx-line)!important;border-radius:var(--vx-r-md)!important;box-shadow:var(--vx-shadow-1)!important}
+}
+@media (min-width:768px){
+ /* Um único título de página, sempre no mesmo estilo. */
+ body #app :is(.page-head,.activity-heading,.analytics-heading,.plans-page-heading,.store-heading,.campaign-page-head,.team-heading,.crm-dashboard-head){min-height:0!important;margin:0 0 var(--vx-5)!important;padding:0!important;border:0!important;background:none!important;box-shadow:none!important;display:flex!important;align-items:flex-end!important;justify-content:space-between!important;gap:var(--vx-4)!important}
+ body #app :is(.page-head h2,.activity-heading h1,.analytics-heading h2,.plans-page-heading h1,.store-heading h1,.campaign-page-head h2,.team-heading h1,.crm-dashboard-head h2){margin:0!important;font-size:var(--vx-fs-28)!important;font-weight:var(--vx-fw-bold)!important;letter-spacing:-.02em!important;line-height:1.15!important;color:var(--vx-text)!important}
+ body #app :is(.page-head h2+p,.activity-heading h1+p,.analytics-heading h2+p,.plans-page-heading h1+p,.store-heading h1+p,.campaign-page-head h2+p,.team-heading h1+p,.crm-dashboard-head h2+p,.crm-dashboard-head h2+span){margin:4px 0 0!important;font-size:var(--vx-fs-14)!important;color:var(--vx-text-3)!important;font-weight:var(--vx-fw-regular)!important}
+ body #app :is(.analytics-eyebrow,.store-eyebrow){display:none!important}
+ /* Título repetido no cabeçalho do app sai quando a página já tem o seu. */
+ body:has(#app :is(.page-head,.activity-heading,.analytics-heading,.plans-page-heading,.store-heading,.campaign-page-head,.team-heading,.crm-dashboard-head)) .topbar .topbar-title{visibility:hidden}
+}

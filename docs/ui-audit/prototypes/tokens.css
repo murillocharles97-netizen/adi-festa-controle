@@ -1,0 +1,30 @@
+/* VECONI DS v2 — proposed tokens (prototype only; would replace --af-* / --veconi-* duplicates). */
+:root{
+ /* Brand & action. Turquoise stays the brand; actions use the darker, AA-compliant shade. */
+ --vx-brand:#16cdbb;            /* logo, focus, progress, highlights (not text on white) */
+ --vx-brand-50:#ecfbf8; --vx-brand-100:#d3f5ef;
+ --vx-action:#08786f;           /* primary buttons: white text 5.35:1 */
+ --vx-action-hover:#0d6b64; --vx-action-text:#08786f; /* links/labels on light bg 4.98:1 */
+ --vx-ink:#101b2d; --vx-header:#07141b;
+ /* Neutrals */
+ --vx-text:#152033; --vx-text-2:#475467; --vx-text-3:#64748b;   /* 3 text levels, all ≥4.7:1 */
+ --vx-bg:#f5f7fa; --vx-surface:#ffffff; --vx-surface-2:#f8fafc;
+ --vx-line:#e5e9f0; --vx-line-strong:#d0d7e2;
+ /* Semantic (text-safe on white) + soft backgrounds */
+ --vx-success:#0f7a55; --vx-success-soft:#e7f7f0;
+ --vx-warning:#b45309; --vx-warning-soft:#fff4e0;
+ --vx-danger:#c0262d;  --vx-danger-soft:#fdecec;
+ --vx-info:#2563a8;    --vx-info-soft:#eaf2fd;
+ /* Type scale (7 steps) */
+ --vx-fs-12:12px; --vx-fs-13:13px; --vx-fs-14:14px; --vx-fs-16:16px; --vx-fs-18:18px; --vx-fs-22:22px; --vx-fs-28:28px;
+ --vx-fw-regular:450; --vx-fw-medium:550; --vx-fw-semibold:650; --vx-fw-bold:750;
+ /* Spacing (4-pt) */
+ --vx-1:4px; --vx-2:8px; --vx-3:12px; --vx-4:16px; --vx-5:20px; --vx-6:24px; --vx-8:32px;
+ /* Radii (3 + pill) */
+ --vx-r-sm:8px; --vx-r-md:12px; --vx-r-lg:16px; --vx-r-pill:999px;
+ /* Elevation (2) */
+ --vx-shadow-1:0 1px 2px rgba(16,27,45,.04),0 1px 3px rgba(16,27,45,.06);
+ --vx-shadow-2:0 12px 32px rgba(16,27,45,.12);
+ /* Controls */
+ --vx-control-sm:36px; --vx-control:44px; --vx-control-lg:52px;
+}
