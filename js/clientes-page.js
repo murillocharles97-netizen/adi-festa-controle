@@ -83,9 +83,9 @@ window.ClientesPage=(()=>{
     const value='<input type="hidden" name="customerSpaceIds" value="'+esc(activeId)+'">';
     if(spaces.length===1)return value;
     const choices=spaces.map(space=>space.id===activeId
-      ? '<label><input type="checkbox" checked disabled> '+esc(space.name)+' (atual)</label>'
-      : '<label><input type="checkbox" name="customerSpaceIds" value="'+esc(space.id)+'"> '+esc(space.name)+'</label>').join('');
-    return '<fieldset class="field full"><legend>Espaços</legend>'+value+choices+'</fieldset>';
+      ? '<label class="customer-space-option"><span>'+esc(space.name)+' (atual)</span><input type="checkbox" checked disabled></label>'
+      : '<label class="customer-space-option"><span>'+esc(space.name)+'</span><input type="checkbox" name="customerSpaceIds" value="'+esc(space.id)+'"></label>').join('');
+    return '<fieldset class="field full customer-space-field"><legend>Espaços</legend>'+value+'<div class="customer-space-options">'+choices+'</div></fieldset>';
   }
   async function registerFromForm(form, context, onSaved) {
     const inScope=()=>form.isConnected&&context.scope===window.SpaceContext?.viewScope?.();
@@ -111,18 +111,21 @@ window.ClientesPage=(()=>{
     form.querySelector('[data-customer-duplicate]')?.remove();
     const notice=document.createElement('section');
     notice.dataset.customerDuplicate='true';
-    notice.className='field full';
+    notice.className='customer-duplicate-notice';
     notice.setAttribute('role','status');
     const message=document.createElement('p');
-    message.textContent=response.status==='already-linked'?'Este cliente já está vinculado ao espaço atual.'
+    const canOpen=response.status==='already-linked',canLink=response.status==='duplicate'&&response.canLink===true;
+    const visibleName=(canOpen||canLink)&&window.TeamAccess?.has?.('customers.view')===true
+      ? Clientes.obter?.(response.clientId)?.nome : '';
+    message.textContent=canOpen?(visibleName?visibleName+' já está no espaço atual.':'Este cliente já está no espaço atual.')
       :response.status==='duplicate-review'?'Há mais de um cadastro com este WhatsApp. Solicite a conferência do responsável.'
-      :'Este WhatsApp já pertence a um cliente da empresa.';
+      :visibleName?'Este WhatsApp já está cadastrado para '+visibleName+'.':'Este WhatsApp já está cadastrado.';
     notice.append(message);
-    if(response.canLink||response.status==='already-linked'){
+    if(canLink||canOpen){
       const button=document.createElement('button');
       button.type='button';
       button.className='btn btn-light';
-      button.textContent=response.canLink?'Vincular cliente ao espaço atual':'Abrir cadastro existente';
+      button.textContent=canLink?'Vincular ao espaço atual':'Abrir cadastro existente';
       button.onclick=async()=>{
         try{
           assertScope();

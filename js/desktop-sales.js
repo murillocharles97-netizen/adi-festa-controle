@@ -129,6 +129,7 @@
         </span>
       </button>
       <button class="desktop-sale-favorite-toggle ${product.favorito ? "active" : ""}" type="button" data-fav="${esc(product.id)}" aria-label="${product.favorito ? "Remover dos" : "Adicionar aos"} favoritos" aria-pressed="${product.favorito ? "true" : "false"}">${icon("star")}</button>
+      <button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button>
       <button class="desktop-sale-add" type="button" data-add="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}" ${meta.disabled ? "disabled" : ""}>${icon(meta.disabled ? "ban" : "plus")}</button>
       <span class="desktop-sale-product-qty" data-pos-qty="${esc(product.id)}" hidden>0</span>
     </article>`;

@@ -6,10 +6,11 @@ const {JSDOM}=require('jsdom');
 function screen(spaces=['iptv','festa']){
  const dom=new JSDOM('<main id="app"></main><div id="modal"></div>',{runScripts:'outside-only',url:'http://localhost'});
  const w=dom.window,requests=[],toasts=[];
- let result={status:'created',clientId:'qa-client'},confirm=true,scope='one';
+ let result={status:'created',clientId:'qa-client'},confirm=true,scope='one',canView=true;
  Object.assign(w,{
   Utils:{escapar:String,dinheiro:String,uuid:()=> 'qa-request',toast:message=>toasts.push(message)},
-  Clientes:{assertCanCreate(){},assertCanSave(){},canCreate:()=>true,canEdit:()=>false,normalizePhone:value=>String(value||'').replace(/\D/g,'')},
+  Clientes:{assertCanCreate(){},assertCanSave(){},canCreate:()=>true,canEdit:()=>false,obter:id=>id==='qa-existing'?{nome:'Cliente existente QA'}:null,normalizePhone:value=>String(value||'').replace(/\D/g,'')},
+  TeamAccess:{has:permission=>permission==='customers.view'&&canView},
   SpaceContext:{activeId:()=>spaces[0],customerSpaces:()=>spaces.map(id=>({id,name:id==='iptv'?'IPTV':'Adi Festa'})),viewScope:()=>scope},
   DB:{flush:async()=>{}},Router:{atual:()=> 'clientes'},matchMedia:()=>({matches:true,addEventListener(){}}),
   Modais:{fechar:()=>{w.document.querySelector('#modal').innerHTML='';}},
@@ -20,7 +21,7 @@ function screen(spaces=['iptv','festa']){
  w.ClientesPage.clientForm();
  const form=w.document.querySelector('#modal form');
  form.elements.nome.value='Cliente de QA';
- return{dom,w,form,requests,toasts,respond:value=>{result=value;},confirm:value=>{confirm=value;},changeScope:()=>{scope='two';}};
+ return{dom,w,form,requests,toasts,respond:value=>{result=value;},confirm:value=>{confirm=value;},changeScope:()=>{scope='two';},denyView:()=>{canView=false;}};
 }
 
 test('mobile registration has one address and complement and preselects the active space',async()=>{
@@ -30,7 +31,7 @@ test('mobile registration has one address and complement and preselects the acti
   assert.equal(h.form.querySelectorAll('[name="complemento"]').length,1);
   assert.equal(h.form.querySelectorAll('[name="apelido"]').length,1);
   assert.match(h.form.textContent,/Espaços.*IPTV \(atual\)/s);
-  h.form.querySelector('input[type="checkbox"][value="festa"]').checked=true;
+  h.form.querySelector('.customer-space-option:has([value="festa"]) span').click();
   await h.form.onsubmit({target:h.form,preventDefault(){}});
   assert.deepEqual(h.requests[0].spaceIds,['iptv','festa']);
   assert.equal(h.requests[0].activeSpaceId,'iptv');
@@ -55,6 +56,8 @@ test('duplicate flow keeps the form and requires confirmation before linking the
   await h.form.onsubmit({target:h.form,preventDefault(){}});
   assert.equal(h.form.isConnected,true);
   const action=h.form.querySelector('[data-customer-duplicate] button');
+  assert.equal(action.textContent,'Vincular ao espaço atual');
+  assert.match(h.form.querySelector('[data-customer-duplicate]').textContent,/Cliente existente QA/);
   h.confirm(false);
   await action.onclick();
   assert.equal(h.requests.length,1);
@@ -69,12 +72,23 @@ test('duplicate flow keeps the form and requires confirmation before linking the
 test('a retired space or private duplicate cannot send a link',async()=>{
  const h=screen();
  try{
-  h.respond({status:'duplicate-private'});
+  h.respond({status:'duplicate-private',clientId:'qa-existing'});
   await h.form.onsubmit({target:h.form,preventDefault(){}});
   assert.equal(h.form.querySelector('[data-customer-duplicate] button'),null);
+  assert.doesNotMatch(h.form.querySelector('[data-customer-duplicate]').textContent,/Cliente existente QA/);
   h.changeScope();
   await h.form.onsubmit({target:h.form,preventDefault(){}});
   assert.equal(h.requests.length,1);
   assert.match(h.toasts.at(-1),/espaço ou a sessão mudou/);
+ }finally{h.dom.window.close();}
+});
+
+test('duplicate notice omits the customer name without view permission',async()=>{
+ const h=screen();
+ try{
+  h.denyView();
+  h.respond({status:'already-linked',clientId:'qa-existing'});
+  await h.form.onsubmit({target:h.form,preventDefault(){}});
+  assert.doesNotMatch(h.form.querySelector('[data-customer-duplicate]').textContent,/Cliente existente QA/);
  }finally{h.dom.window.close();}
 });

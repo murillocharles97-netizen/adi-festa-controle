@@ -24,3 +24,50 @@
 .receipt-payment-dialog .payment-kind input[type=radio]{width:20px;height:20px;min-height:0;margin:0;padding:0;flex:none}
 .receipt-payment-dialog [data-receive-feedback]{color:var(--danger,#b42318);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
 @media(max-width:520px){.payment-confirmation-dialog .modal-head,.payment-confirmation-dialog .modal-body{padding:16px}.payment-confirmation-dialog .payment-success .actions{display:grid;grid-template-columns:1fr}.payment-confirmation-dialog .modal-body{padding-bottom:max(16px,env(safe-area-inset-bottom))}}
+#modal .customer-space-field {
+  min-width: 0;
+  margin-inline: 0;
+  padding: 0;
+  border: 0;
+}
+.customer-space-field legend { padding: 0; font-size: 12px; font-weight: 700; }
+.customer-space-options {
+  max-height: min(192px, 32vh);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+#modal .customer-space-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.customer-space-option + .customer-space-option { border-top: 1px solid var(--line); }
+.customer-space-option span { overflow-wrap: anywhere; }
+#modal .customer-space-option > input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary-dark);
+}
+#modal .customer-space-option > input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--primary-dark);
+  outline-offset: 3px;
+}
+#modal .customer-space-option:has(input:disabled) { cursor: default; background: #f5f8fa; }
+.customer-duplicate-notice {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5f8fa;
+}
+.customer-duplicate-notice p { margin: 0; }
+.customer-duplicate-notice button { margin-top: 8px; }
