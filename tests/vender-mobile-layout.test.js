@@ -21,13 +21,19 @@ function mobileSale({ owner = true } = {}) {
   const data = { produtos: products, clientes: [], vendas: [sale("s1", "coca", 3), sale("s2", "iptv", 2)], pagamentos: [], variacoesProdutos: [], customerSubscriptions: [] };
   const byId = id => products.find(item => item.id === id);
   let route = "vender";
+  let spaceId = "space-a";
   Object.assign(w, {
     structuredClone,
     matchMedia: query => ({ matches: /max-width:\s*767px/.test(query), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
     Utils: { escapar: value => String(value ?? "").replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`), dinheiro: value => `R$ ${Number(value || 0).toFixed(2).replace(".", ",")}`, somenteNumeros: value => String(value || "").replace(/\D/g, ""), uuid: () => "draft-id", toast: message => toasts.push(message) },
     DB: { carregar: () => data, alterar(mutator) { mutator(data); return data; }, getBusinessId: () => "business-a" },
     Router: { atual: () => route, ir: next => { route = next; } },
-    SpaceContext: { salesId: () => "space-a", viewScope: () => "space-a", list: () => [{ id: "space-a" }], renderBar: () => '<section class="space-context-bar" data-space-context="sales"><label><span>Espaço ativo</span><select data-space-select="sales"><option>Adi festa</option></select></label><button type="button" data-space-manage>Gerenciar</button></section>' },
+    SpaceContext: { salesId: () => spaceId, viewScope: () => spaceId, list: () => [{ id: "space-a" }, { id: "space-b" }], renderBar: () => '<section class="space-context-bar" data-space-context="sales"><label><span>Espaço ativo</span><select data-space-select="sales"><option>Adi festa</option></select></label><button type="button" data-space-manage>Gerenciar</button></section>' },
+    SpaceEngine: {
+      isValidSale: sale => sale.active !== false && sale.status !== "cancelado",
+      saleBelongsTo: (sale, selected) => sale.spaceId === selected,
+      productAllowsSpace: () => true,
+    },
     Repositories: {
       productRepository: () => ({ list: () => products, getById: byId }),
       clientRepository: () => ({ list: () => [], getById: () => null }),
@@ -52,7 +58,7 @@ function mobileSale({ owner = true } = {}) {
     .sort((a, b) => Number(a.style.order || 0) - Number(b.style.order || 0))
     .map(card => card.querySelector("strong").textContent.trim());
   const click = selector => app.querySelector(selector).dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  return { w, dom, app, names, click, toasts, added, opened };
+  return { w, dom, app, names, click, toasts, added, opened, data, selectSpace: id => { spaceId = id; } };
 }
 
 test("Vender mobile mostra o período de renovação no card do produto recorrente", async () => {
@@ -106,4 +112,39 @@ test("Ações reúne atalhos existentes e respeita permissões", async () => {
     assert.ok(!menu.includes("prior"), "venda anterior só para o proprietário");
     assert.ok(!menu.includes("product"), "novo produto exige products.edit");
   } finally { await settle(seller); }
+});
+
+
+test("Últimos vendidos usa a data comercial e combina espaço ativo com busca", async () => {
+  const h = mobileSale();
+  try {
+    h.data.vendas.push(
+      { id: "other", spaceId: "space-b", status: "pago", data: "2099-01-01T15:00:00.000Z", itens: [{ produtoId: "poty" }] },
+      { id: "cancelled", spaceId: "space-a", status: "cancelado", data: "2099-01-01T15:00:00.000Z", itens: [{ produtoId: "poty" }] },
+      { id: "prior", spaceId: "space-a", status: "pago", data: "2020-01-01T15:00:00.000Z", createdAt: "2099-01-01T15:00:00.000Z", itens: [{ produtoId: "cone" }] },
+    );
+    h.click('button[data-sale-filter="recent"]');
+    assert.deepEqual(h.names(), ["IPTV", "Coca zero 220ml", "Cone recheado"]);
+    const search = h.app.querySelector("#product-search");
+    search.value = "coca";
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 160));
+    assert.deepEqual(h.names(), ["Coca zero 220ml"]);
+    search.value = "";
+    h.selectSpace("space-b");
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 160));
+    assert.deepEqual(h.names(), ["Poty 220ml"]);
+  } finally { await settle(h); }
+});
+
+test("Ações descarta um atalho aberto antes da troca de espaço", async () => {
+  const h = mobileSale();
+  try {
+    h.click("[data-sale-actions-toggle]");
+    h.selectSpace("space-b");
+    h.w.document.querySelector('#modal [data-sale-action="product"]').click();
+    assert.deepEqual(h.opened, []);
+    assert.equal(h.w.document.querySelector("#modal").innerHTML, "");
+  } finally { await settle(h); }
 });

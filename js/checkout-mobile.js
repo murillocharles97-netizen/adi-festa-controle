@@ -7,7 +7,25 @@
   const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
   let payment='pix',heldClick=null,enhancing=false,pending=null;
   function product(id){return Produtos.obter(id)}
-  function recentProducts(){const ids=[],spaceId=String(window.SpaceContext?.salesId?.()||''),knownIds=new Set((window.SpaceContext?.list?.()||[]).map(space=>space.id)),sales=[...(DB.carregar().vendas||[])].filter(sale=>(!window.SpaceEngine?.isValidSale||window.SpaceEngine.isValidSale(sale))&&(!window.SpaceEngine?.saleBelongsTo||!spaceId||window.SpaceEngine.saleBelongsTo(sale,spaceId,knownIds)));for(let saleIndex=sales.length-1;saleIndex>=0&&ids.length<8;saleIndex--){for(const item of sales[saleIndex].itens||[]){if(item.produtoId&&!ids.includes(item.produtoId))ids.push(item.produtoId);if(ids.length>=8)break}}return ids.map(product).filter(item=>item&&item.ativo!==false&&(!window.SpaceEngine?.productAllowsSpace||window.SpaceEngine.productAllowsSpace(item,spaceId)))}
+  function recentProductIds(cards){
+    const spaceId=String(window.SpaceContext?.salesId?.()||''),engine=window.SpaceEngine;
+    if(engine?.saleBelongsTo&&!spaceId)return [];
+    const knownIds=new Set((window.SpaceContext?.list?.()||[]).map(space=>space.id));
+    const available=new Set(cards.map(card=>card.dataset.add));
+    const sales=(DB.carregar().vendas||[])
+      .filter(sale=>(!engine?.isValidSale||engine.isValidSale(sale))&&
+        (!engine?.saleBelongsTo||engine.saleBelongsTo(sale,spaceId,knownIds)))
+      .map((sale,index)=>({sale,index,at:Date.parse(sale.data||sale.occurredAt||sale.createdAt)||0}))
+      .sort((a,b)=>b.at-a.at||b.index-a.index);
+    const ids=new Set();
+    for(const {sale} of sales){
+      for(const item of sale.itens||[]){
+        if(available.has(String(item.produtoId)))ids.add(String(item.produtoId));
+        if(ids.size===8)return [...ids];
+      }
+    }
+    return [...ids];
+  }
   function mobileHeader(page){
     if($('.mobile-sale-filters',page))return;
     const tools=$('.pos-tools',page),bar=$('.space-context-bar',page);
@@ -21,17 +39,18 @@
   function applyRecentFilter(grid){
     const cards=$$('.pos-product',grid),active=$('.pos-page')?.dataset.saleView==='recent';
     if(!active){cards.forEach(card=>card.style.removeProperty('order'));return}
-    const rank=new Map(recentProducts().map((item,index)=>[String(item.id),index]));
+    const rank=new Map(recentProductIds(cards).map((id,index)=>[id,index]));
     cards.forEach(card=>{const position=rank.get(card.dataset.add);if(position===undefined){card.hidden=true;card.style.removeProperty('order')}else card.style.order=String(position)});
   }
   function saleActions(trigger){
     const root=$('#modal');if(!root)return;
+    const scope=window.SpaceContext?.viewScope?.();
     const allowed=permission=>!window.TeamAccess||window.TeamAccess.has(permission);
     const prior=$('.pos-page [data-prior-start]'),manage=$('.pos-page [data-space-manage]');
     const actions=[
-      window.BarcodeWorkflows?.sale&&['scan','scan-barcode','Escanear código',()=>window.BarcodeWorkflows.sale()],
+      window.BarcodeWorkflows?.sale&&allowed('sales.create')&&['scan','scan-barcode','Escanear código',()=>{if(allowed('sales.create'))window.BarcodeWorkflows.sale();}],
       prior&&!prior.hidden&&['prior','calendar-clock',prior.textContent.trim(),()=>prior.click()],
-      window.ProdutosMobile?.productForm&&allowed('products.edit')&&['product','package-plus','Novo produto',()=>window.ProdutosMobile.productForm()],
+      window.ProdutosMobile?.productForm&&allowed('products.edit')&&['product','package-plus','Novo produto',()=>{if(allowed('products.edit'))window.ProdutosMobile.productForm();}],
       manage&&['spaces','settings-2','Gerenciar espaços',()=>manage.click()],
     ].filter(Boolean);
     root.innerHTML=`<div class="modal-bg mobile-product-menu-bg mobile-sale-actions-bg">
@@ -45,7 +64,12 @@
     $('.close',root).onclick=close;
     $('.mobile-sale-actions-bg',root).onclick=event=>{if(event.target===event.currentTarget)close()};
     $('.mobile-sale-actions-menu',root).onkeydown=event=>{if(event.key==='Escape'){event.stopPropagation();close()}};
-    actions.forEach(([id,,,run])=>{$(`[data-sale-action="${id}"]`,root).onclick=()=>{close();run()}});
+    actions.forEach(([id,,,run])=>{
+      $(`[data-sale-action="${id}"]`,root).onclick=()=>{
+        close();
+        if(trigger?.isConnected&&mq.matches&&Router.atual()==='vender'&&window.SpaceContext?.viewScope?.()===scope)run();
+      };
+    });
     window.lucide?.createIcons();
     $('.close',root).focus({preventScroll:true});
   }
@@ -119,6 +143,7 @@
   function menu(item, trigger){
     const root=$('#modal');if(!root||!item)return;
     const controlsStock=window.productControlsStock?.(item)??(item.itemKind!=='service'&&!item.semControleEstoque&&item.controlaEstoque!==false);
+    const scope=window.SpaceContext?.viewScope?.();
     const allowed=permission=>!window.TeamAccess||window.TeamAccess.has(permission);
     const photo=window.ProductImages?.markup?.(item,{className:'sale-menu-photo'})||`<span>${esc(item.nome.slice(0,2).toUpperCase())}</span>`;
     root.innerHTML=`<div class="modal-bg mobile-product-menu-bg">
