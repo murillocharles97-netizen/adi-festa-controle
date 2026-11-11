@@ -9,13 +9,23 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ACTIVE = "8cfde88fdae680dd3f809fe59ee7fb0a24a68c75e9a78812ecf09cbc89c65e3b"
 FILE = "src/services/operational-read-service.js"
-COMPAT = """ const customerScoped=(v,c)=>scoped(v,c)||v&&(!v.businessId||v.businessId===c.bid)&&gen(v)===gen(c.business)&&
-  v.active!==false&&v.ativo!==false&&!v.deletedAt&&Array.isArray(v.customerSpaceIds)&&v.customerSpaceIds.some(id=>c.ids.includes(id));
- const project=(col,v,c)=>{
+COMPAT = """ async function customerLinkProofs(tx,c,docs){
+  const refs=docs.filter(doc=>Array.isArray(doc.data()?.customerSpaceIds)&&doc.data().customerSpaceIds.length)
+   .map(doc=>c.root.collection('customerDirectoryLinks').doc(doc.id));
+  const proofs=refs.length?await tx.getAll(...refs):[];
+  return new Map(proofs.flatMap(doc=>{
+   const v=doc.data();
+   return v?.clientId===doc.id&&v.businessId===c.bid&&gen(v)===gen(c.business)&&Array.isArray(v.spaceIds)
+    ?[[doc.id,v.spaceIds.filter(id=>c.spaces.some(space=>space.id===id))]]:[];
+  }));
+ }
+ const customerScoped=(v,c,links)=>scoped(v,c)||v&&(!v.businessId||v.businessId===c.bid)&&gen(v)===gen(c.business)&&
+  v.active!==false&&v.ativo!==false&&!v.deletedAt&&links?.some(id=>c.ids.includes(id));
+ const project=(col,v,c,links)=>{
   if(col!=='clients')return Privacy.sanitize(col,v);
   const directoryOnly=!scoped(v,c);
   const output=directoryOnly?Privacy.pick(v,['id','businessId','workspaceGeneration','nome','telefone','active','ativo']):Privacy.sanitize(col,v);
-  if(Array.isArray(v.customerSpaceIds))output.customerSpaceIds=v.customerSpaceIds.filter(id=>c.spaces.some(space=>space.id===id));
+  if(links?.length)output.customerSpaceIds=links;
   output.customerDirectoryOnly=directoryOnly;
   return output;
  };
@@ -37,13 +47,38 @@ def main():
     assert original.count(anchor) == 1
     updated = original.replace(anchor, COMPAT + anchor)
     for old, new in [
-        ("if(!scoped(v,c))throw new HttpsError", "if(!(col==='clients'?customerScoped(v,c):scoped(v,c)))throw new HttpsError"),
-        ("if(!scoped(v,c))continue;if(temporal", "if(!(col==='clients'?customerScoped(v,c):scoped(v,c)))continue;if(temporal"),
-        ("record:Privacy.sanitize(col,{id:d.id,...v})", "record:project(col,{id:d.id,...v},c)"),
-        ("const clean=Privacy.sanitize(col,v);if(clean)", "const clean=project(col,v,c);if(clean)"),
+        (
+            "const v=(await tx.get(c.root.collection(col).doc(d.id))).data();if(!v)return envelope(c,{record:null});if(!scoped(v,c))",
+            "const doc=await tx.get(c.root.collection(col).doc(d.id)),v=doc.data();if(!v)return envelope(c,{record:null});"
+            "const links=col==='clients'?(await customerLinkProofs(tx,c,[doc])).get(doc.id):undefined;"
+            "if(!(col==='clients'?customerScoped(v,c,links):scoped(v,c)))",
+        ),
+        ("const rows=await tx.get(q.limit(max)),items=[];", "const rows=await tx.get(q.limit(max)),items=[],proofs=col==='clients'?await customerLinkProofs(tx,c,rows.docs):null;"),
+        ("if(!scoped(v,c))continue;if(temporal", "const links=proofs?.get(doc.id);if(!(col==='clients'?customerScoped(v,c,links):scoped(v,c)))continue;if(temporal"),
+        ("record:Privacy.sanitize(col,{id:d.id,...v})", "record:project(col,{...v,id:d.id},c,links)"),
+        ("const clean=Privacy.sanitize(col,v);if(clean)", "const clean=project(col,col==='clients'?{...v,id:doc.id}:v,c,links);if(clean)"),
+        (
+            "const client=(await tx.get(c.root.collection('clients').doc(d.customerId))).data();if(!scoped(client,c))throw new HttpsError('permission-denied','Cliente indisponível no espaço autorizado.');\n"
+            "  const result={client:Privacy.sanitize('clients',{id:d.customerId,...client}),sales:[],campaignProgress:[],campaignEvents:[],customerSubscriptions:[]};",
+            """const doc=await tx.get(c.root.collection('clients').doc(d.customerId)),client=doc.data();
+  const origin=scoped(client,c);
+  const links=d.purpose==='checkout'?(await customerLinkProofs(tx,c,[doc])).get(doc.id):undefined;
+  const linkedCheckout=!origin&&d.purpose==='checkout'&&links?.includes(d.spaceId)&&
+   c.ids.includes(d.spaceId)&&c.spaces.some(space=>space.id===d.spaceId&&space.capabilities?.sales===true)&&customerScoped(client,c,links);
+  if(!origin&&!linkedCheckout)throw new HttpsError('permission-denied','Cliente indisponível no espaço autorizado.');
+  const selectedClient={...client,id:doc.id};
+  const result={client:d.purpose==='checkout'?project('clients',selectedClient,c,links):Privacy.sanitize('clients',selectedClient),sales:[],campaignProgress:[],campaignEvents:[],customerSubscriptions:[]};
+  const benefitsQuery=col=>{
+   const q=c.root.collection(col).where('clientId','==',doc.id);
+   return (linkedCheckout?q.where('spaceId','==',d.spaceId):q).limit(301);
+  };""",
+        ),
+        ("c.root.collection(col).where('clientId','==',d.customerId).limit(301)", "benefitsQuery(col)"),
+        ("c.root.collection('campaignEvents').where('clientId','==',d.customerId).limit(301)", "benefitsQuery('campaignEvents')"),
     ]:
+        old = old.replace("\n", "\r\n")
         assert updated.count(old) == 1, old
-        updated = updated.replace(old, new)
+        updated = updated.replace(old, new.replace("\n", "\r\n"))
     files[FILE] = updated.encode()
     with ZipFile(args.output, "x") as archive:
         for name, data in sorted(files.items()):

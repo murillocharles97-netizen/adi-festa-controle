@@ -78,6 +78,34 @@ test('customer directory serializes concurrent creates for a WhatsApp across spa
  assert.equal((await c.root.collection('customerPhoneKeys').get()).size,1);
 });
 
+test('customer directory accepts a queued legacy registration with 3001 existing customers',async()=>{
+ const c=await setup(),id='queued-customer',phone='5511987654321',operationId=crypto.randomUUID();
+ const clients=c.root.collection('clients');
+ for(let start=0;start<3000;start+=450){
+  const batch=db.batch();
+  for(let i=start;i<Math.min(start+450,3000);i++)batch.set(clients.doc('existing-'+i),{businessId:c.bid,nome:'Cliente QA',ativo:true});
+  await batch.commit();
+ }
+ assert.equal((await clients.count().get()).data().count,3001);
+ const item={operationId,businessId:c.bid,userId:c.owner,workspaceGeneration:0,payloadVersion:4,
+  payload:{eventKind:'simple',writes:[{entityType:'clients',entityId:id,operation:'create',data:{
+   id,businessId:c.bid,nome:'Cadastro pendente QA',telefone:'(11) 98765-4321',normalizedPhone:phone,ativo:true,saldo:0,financialVersion:0,
+  }}]}};
+ const before=structuredClone(item);
+ await c.commit(item);
+ assert.equal((await c.commit(item)).replayed,true);
+ assert.deepEqual(item,before);
+ assert.equal((await c.read('clients',id)).saldo,0);
+ const duplicate={action:'create',customerId:'qa-duplicate',activeSpaceId:c.space,spaceIds:[c.space],customer:{nome:'Outro QA',telefone:'+55 11 98765-4321'}};
+ assert.equal((await c.directory(duplicate)).clientId,id);
+ const oldDuplicate={...item,operationId:crypto.randomUUID(),payload:{...item.payload,writes:[{
+  ...item.payload.writes[0],entityId:duplicate.customerId,data:{...item.payload.writes[0].data,id:duplicate.customerId},
+ }]}};
+ await assert.rejects(c.commit(oldDuplicate),{code:'already-exists'});
+ assert.equal((await clients.where('normalizedPhone','==',phone).get()).size,1);
+ assert.equal((await c.root.collection('customerPhoneKeys').get()).size,1);
+});
+
 test('customer directory rejects foreign targets and redacts an inaccessible source',async()=>{
  const c=await setup(),phone='5511987654321',id='qa-hidden-source';
  await c.root.collection('members').doc(c.seller).update({permissions:{...c.permissions,'customers.create':true,'customers.edit':true}});
@@ -90,24 +118,65 @@ test('customer directory rejects foreign targets and redacts an inaccessible sou
  assert.equal((await c.read('clients',id)).customerSpaceIds,undefined);
 });
 
-test('customer directory reader restores a shared card across sessions without exposing the origin balance', {skip:!readerSource}, async()=>{
+test('customer directory checkout reads only the selected linked space, with the original customer ID', {skip:!readerSource}, async()=>{
  const c=await setup(),id='qa-shared-directory';
  const {operationalReadService}=require(require('node:path').resolve(readerSource,'src/services/operational-read-service'));
  const gateway=operationalReadService(db);
  await c.root.collection('members').doc(c.seller).update({permissionsVersion:3,allowedSpaceIds:[c.space,c.other]});
- await c.set('clients',id,{id,businessId:c.bid,spaceId:c.other,customerSpaceIds:[c.space,c.other,'foreign-space'],nome:'QA',telefone:'11987654321',saldo:-81,financialVersion:3,observacoes:'Privado'});
+ await c.directory({action:'create',customerId:id,activeSpaceId:c.other,spaceIds:[c.other,c.space],customer:{nome:'QA',telefone:'11987654321'}});
+ await c.root.collection('clients').doc(id).update({saldo:-81,financialVersion:3,observacoes:'Privado'});
+ for(const spaceId of [c.other,c.space])await c.set('customerSubscriptions',spaceId,{businessId:c.bid,spaceId,clientId:id,expiresAt:'2096-02-29'});
  const read=(spaceId,extra)=>gateway.read({auth:{uid:c.seller},data:{businessId:c.bid,workspaceGeneration:0,collection:'clients',spaceId,...extra}});
  const first=(await read(c.space,{mode:'get',id})).record;
  assert.equal(first.customerDirectoryOnly,true);
  assert.equal(first.saldo,undefined);assert.equal(first.financialVersion,undefined);assert.equal(first.observacoes,undefined);
- assert.deepEqual(first.customerSpaceIds,[c.space,c.other]);
+ assert.deepEqual(first.customerSpaceIds,[c.other,c.space]);
  assert.equal((await read(c.space,{mode:'page',limit:100})).items.find(row=>row.id===id).customerDirectoryOnly,true);
  const original=(await read(c.other,{mode:'get',id})).record;
  assert.equal(original.customerDirectoryOnly,false);assert.equal(original.saldo,-81);
+ const checkout=(spaceId,purpose='checkout',customerId=id)=>read(spaceId,{mode:'customer_context',purpose,customerId});
+ const added=await checkout(c.space),initial=await checkout(c.other);
+ assert.equal(added.client.id,id);assert.equal(initial.client.id,id);
+ assert.equal(added.client.saldo,undefined);assert.equal(added.client.financialVersion,undefined);assert.equal(added.client.spaceId,undefined);
+ assert.equal(initial.client.saldo,-81);
+ assert.deepEqual(added.customerSubscriptions.map(row=>row.spaceId),[c.space]);
+ assert.deepEqual(initial.customerSubscriptions.map(row=>row.spaceId),[c.other]);
+ await assert.rejects(checkout(c.space,'payment'),{code:'permission-denied'});
  await assert.rejects(read(c.space,{mode:'last_payment',customerId:id}),/fora do espaço autorizado/);
  await c.root.collection('members').doc(c.seller).update({allowedSpaceIds:[c.space]});
  assert.deepEqual((await read(c.space,{mode:'get',id})).record.customerSpaceIds,[c.space]);
- await assert.rejects(read(c.other,{mode:'get',id}),/Espaço não autorizado/);
+ assert.equal((await checkout(c.space)).client.id,id);
+ await assert.rejects(checkout(c.other),/Espaço não autorizado/);
+ const unlinked='qa-unlinked';
+ await c.set('clients',unlinked,{id:unlinked,businessId:c.bid,spaceId:c.other,customerSpaceIds:[c.space],nome:'QA'});
+ await assert.rejects(checkout(c.space,'checkout',unlinked),{code:'permission-denied'});
+ await assert.rejects(read(c.space,{mode:'get',id:unlinked}),{code:'permission-denied'});
+ await assertFails(sdk.setDoc(sdk.doc(env.authenticatedContext(c.seller).firestore(),c.root.path+'/customerDirectoryLinks/'+unlinked),{clientId:unlinked,spaceIds:[c.space]}));
+ await c.root.collection('members').doc(c.seller).update({permissions:{...c.permissions,'customers.view':false}});
+ await assert.rejects(checkout(c.space),{code:'permission-denied'});
+});
+
+test('customer directory paid checkout commits stock and counters once without exposing or changing debt', {skip:!readerSource}, async()=>{
+ const c=await setup(),id='qa-client';
+ await c.root.collection('members').doc(c.seller).update({permissionsVersion:3});
+ await c.root.collection('clients').doc(id).update({spaceId:c.other,telefone:'11987654321'});
+ await c.directory({action:'link',customerId:id,activeSpaceId:c.space,phone:'5511987654321',confirmed:true});
+ const {operationalReadService}=require(require('node:path').resolve(readerSource,'src/services/operational-read-service'));
+ const {client}=await operationalReadService(db).read({auth:{uid:c.seller},data:{
+  businessId:c.bid,workspaceGeneration:0,spaceId:c.space,mode:'customer_context',purpose:'checkout',customerId:id,
+ }});
+ assert.equal(client.customerDirectoryOnly,true);
+ c.h.data().clientes[0]=client;
+ const {sale,packet}=c.h.sell({status:'pago',formaPagamento:'pix'});
+ assert.equal(packet.payload.writes.some(w=>w.entityType==='clients'),false);
+ await c.commit(packet);
+ assert.equal((await c.commit(packet)).replayed,true);
+ const saved=await c.read('clients',id);
+ assert.equal(saved.saldo,-12);assert.equal(saved.financialVersion,12);
+ assert.equal(saved.totalComprado,26);assert.equal(saved.quantidadeVendas,2);
+ assert.equal((await c.read('sales',sale.id)).clienteId,id);
+ assert.equal((await c.read('products','qa-product')).estoqueAtual,2);
+ assert.equal((await c.root.collection('stockMovements').get()).size,1);
 });
 async function campaign(c){domains(c);const value={id:'qa-campaign',businessId:c.bid,type:'buy_get',name:'Campanha fictícia',status:'active',active:true,startsAt:'2020-01-01',qualification:{productIds:['qa-product']},rule:{requiredQuantity:1,multipleCycles:true},rewards:[{id:'reward',type:'product',productId:'qa-product',quantity:1}],updatedAt:'2026-01-01'};c.h.data().campanhas=[value];await c.set('campaigns',value.id,value);return value;}
 

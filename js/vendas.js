@@ -370,7 +370,7 @@ window.Vendas = (() => {
           ...actor,
         });
       });
-      if (cliente) {
+      if (cliente && !cliente.customerDirectoryOnly) {
         cliente.totalComprado = Number(cliente.totalComprado || 0) + valorFinal;
         cliente.quantidadeVendas = Number(cliente.quantidadeVendas || 0) + 1;
         cliente.ultimaCompra = criada.data;

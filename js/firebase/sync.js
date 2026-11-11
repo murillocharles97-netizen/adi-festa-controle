@@ -1306,6 +1306,8 @@ function assertCustomerForSale(clientId,options={}) {
   if (!id) return;
   if (!currentUser || !client || client.deletedAt || client.active===false || client.ativo===false || client.businessId&&client.businessId!==activeBusinessId())
     throw Object.assign(Error('Cliente indisponível nesta empresa. Nenhuma venda foi registrada.'),{code:'customer-unconfirmed'});
+  if (client.customerDirectoryOnly && options.affectsDebt!==false)
+    throw Error('Confira o saldo no espaço de origem para vender no Fiado ou no Crediário. O carrinho foi preservado.');
   const creation=readQueue().find(p=>!readRecoveryResolution(p)&&(p.payload?.writes||[]).some(w=>w.entityType==='clients'&&w.operation==='create'&&String(w.entityId)===id));
   // Preserve the legitimate ordered offline flow for a NEW authorized draft.
   // Previously denied/held or pre-protocol packets never qualify, even after a grant changes.
@@ -4067,8 +4069,11 @@ async function prepareCustomerForSale(customerId) {
   // Leitura pontual do servidor: nunca varre a coleção de clientes no checkout.
   const snapshot = await readOperationalDocument('clients',id);
   if (!snapshot.exists()) throw Error("Cliente não encontrado na empresa atual da nuvem.");
-  applyCloudCollection("clients", [{ id, ...snapshot.data() }], { authoritative: true });
-  return { source: "server", financialVersion: financialVersionOf(snapshot.data()) };
+  const client = snapshot.data();
+  if (client.customerDirectoryOnly)
+    throw Error('Confira o saldo no espaço de origem para vender no Fiado ou no Crediário. O carrinho foi preservado.');
+  applyCloudCollection("clients", [{ id, ...client }], { authoritative: true });
+  return { source: "server", financialVersion: financialVersionOf(client) };
 }
 async function confirmCreditSale(sale) {
   if ((sale?.status !== "fiado" && sale?.formaPagamento !== "fiado") || !navigator.onLine) return sale;

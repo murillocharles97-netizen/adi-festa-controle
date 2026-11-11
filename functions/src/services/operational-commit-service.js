@@ -9,7 +9,7 @@ const Model=require('../shared/online-store');
 const {stockKey}=require('./online-stock-reservation');
 const execute=require('../shared/commercial-commit-engine');
 const {validateEngagement}=require('./operational-engagement-validation');
-const {manageCustomerDirectory,validateCustomerDirectoryWrites}=require('./customer-directory-service');
+const {manageCustomerDirectory,validateCustomerDirectoryWrites,updateSharedCustomerSaleCounters}=require('./customer-directory-service');
 const {operationalId}=require('../shared/operational-id');
 const Policy=require('../shared/permission-policy');
 const SaleMoney=require('../shared/sale-money');
@@ -168,6 +168,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    const outcome=await execute({db,item,transaction:buffer,currentUser:{uid:c.uid},FieldValue,has:c.has,actor:{actorUid:c.uid,actorRoleSnapshot:c.role,actorNameSnapshot:c.member?.name||c.user.name||null}});
    await validate(tx,c,item,attemptWrites,plan,get,writes,historyAccount);
    await validateCustomerDirectoryWrites({db,tx,c,writes:attemptWrites,plan,old:async reference=>(await get(reference)).data()});
+   await updateSharedCustomerSaleCounters({tx,c,root,writes:attemptWrites,plan,old:async reference=>(await get(reference)).data()});
    const newPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);if(newPlan){const entry=plan.get(ref(c.bid,'clients',newPlan.data.clienteId).path);if(entry){entry.data.hasInstallmentFiado=true;if(historyAccount?.version===2)entry.data.fiadoHistoryVersion=1;}}
    if(incomingPayment&&historyAccount?.version===2){const entry=plan.get(ref(c.bid,'clients',incomingPayment.data.clienteId||incomingPayment.data.clientId).path);if(entry)entry.data.fiadoHistoryVersion=1;}
    if(priorSale)await priorSale.finalize(tx,c,item,plan,get);

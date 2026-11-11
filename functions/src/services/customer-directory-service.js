@@ -16,11 +16,11 @@ const phoneOf=value=>{
 };
 const registeredPhone=row=>phoneOf(row?.telefone||row?.normalizedPhone||row?.telefoneNormalizado);
 const belongs=(row,c)=>row&&(!row.businessId||row.businessId===c.bid)&&generation(row)===generation(c.business);
-const explicitSpaces=row=>[...new Set([...(Array.isArray(row?.customerSpaceIds)?row.customerSpaceIds:[]),
+const explicitSpaces=(row,links=[])=>[...new Set([...links,
  ...(row?.spaceId&&row.financialSpaceId&&row.spaceId!==row.financialSpaceId?[]:[row?.spaceId||row?.financialSpaceId])
 ].filter(id=>typeof id==='string'&&id))];
 const unrestricted=c=>c.owner||c.member?.spaceAccess==='all';
-const canSeeSource=(c,row)=>c.has('customers.view')&&(unrestricted(c)||explicitSpaces(row).some(id=>c.member?.allowedSpaceIds?.includes(id)));
+const canSeeSource=(c,spaces)=>c.has('customers.view')&&(unrestricted(c)||spaces.some(id=>c.member?.allowedSpaceIds?.includes(id)));
 
 async function findPhone({tx,root,c,phone,rows}){
  const key=root.collection('customerPhoneKeys').doc(digest(phone));
@@ -39,13 +39,18 @@ function directoryRows(tx,root){
   // Legacy records can have only a formatted phone. Check the actual directory
   // without reading balances or financial history, before claiming a new key.
   const rows=await tx.get(root.collection('clients')
-    .select('businessId','workspaceGeneration','telefone','normalizedPhone','telefoneNormalizado','active','ativo','deletedAt').limit(3001));
-  if(rows.size>3000)fail('failed-precondition','O diretório exige conferência administrativa antes de cadastrar com segurança.');
+    .select('businessId','workspaceGeneration','telefone','normalizedPhone','telefoneNormalizado','active','ativo','deletedAt'));
   return rows.docs;
  })();
 }
 
 const keyValue=(c,id)=>({clientId:id,businessId:c.bid,workspaceGeneration:generation(c.business)});
+const linkRef=(root,id)=>root.collection('customerDirectoryLinks').doc(id);
+async function verifiedLinks(tx,root,c,id){
+ const record=(await tx.get(linkRef(root,id))).data();
+ return record?.clientId===id&&record.businessId===c.bid&&generation(record)===generation(c.business)&&Array.isArray(record.spaceIds)
+  ?record.spaceIds:[];
+}
 function signal(tx,root,c,revision){
  tx.set(root.collection('syncMetadata').doc('last-sync'),{
   businessId:c.bid,workspaceGeneration:generation(c.business),revision,updatedAt:new Date().toISOString(),
@@ -104,7 +109,7 @@ async function manageCustomerDirectory({db,tx,c,request}){
   const prior=(await tx.get(ref)).data();
   if(prior){
    if(belongs(prior,c)&&prior.customerRegistrationUid===c.uid&&prior.customerRegistrationHash===proposedHash)
-    return {status:'created',clientId:id,spaceIds:explicitSpaces(prior).filter(space=>unrestricted(c)||c.member?.allowedSpaceIds?.includes(space))};
+    return {status:'created',clientId:id,spaceIds:explicitSpaces(prior,await verifiedLinks(tx,root,c,id)).filter(space=>unrestricted(c)||c.member?.allowedSpaceIds?.includes(space))};
    fail('already-exists','Este identificador já pertence a outro cadastro.');
   }
  }
@@ -113,16 +118,18 @@ async function manageCustomerDirectory({db,tx,c,request}){
  if(lookup?.matches.length){
   const match=lookup.matches[0],existing=(await tx.get(match.ref)).data();
   if(!active(existing)||!c.has('customers.view'))return {status:'duplicate-private'};
-  const linked=explicitSpaces(existing).includes(spaceId)||await knownRelation(tx,root,c,match.id,spaceId);
-  if(!linked&&!canSeeSource(c,existing))return {status:'duplicate-private'};
-  const allowedSpaces=()=>explicitSpaces(existing).filter(space=>unrestricted(c)||c.member?.allowedSpaceIds?.includes(space));
+  const links=await verifiedLinks(tx,root,c,match.id),existingSpaces=explicitSpaces(existing,links);
+  const linked=existingSpaces.includes(spaceId)||await knownRelation(tx,root,c,match.id,spaceId);
+  if(!linked&&!canSeeSource(c,existingSpaces))return {status:'duplicate-private'};
+  const allowedSpaces=()=>existingSpaces.filter(space=>unrestricted(c)||c.member?.allowedSpaceIds?.includes(space));
   if(action==='create')return linked
    ?{status:'already-linked',clientId:match.id,spaceIds:[...new Set([...allowedSpaces(),spaceId])]}
    :{status:'duplicate',...(c.has('customers.edit')?{clientId:match.id,canLink:true}:{})};
   if(match.id!==id)fail('failed-precondition','O cadastro associado ao WhatsApp mudou. Confira novamente.');
   if(linked)return {status:'already-linked',clientId:id,spaceIds:[...new Set([...allowedSpaces(),spaceId])]};
-  const next=[...new Set([...(Array.isArray(existing.customerSpaceIds)?existing.customerSpaceIds:[]),spaceId])];
+  const next=[...new Set([...links,spaceId])];
   tx.update(match.ref,{customerSpaceIds:next});
+  tx.set(linkRef(root,id),{...keyValue(c,id),spaceIds:next});
   signal(tx,root,c,'customer-link:'+id+':'+spaceId);
   return {status:'linked',clientId:id,spaceIds:[...new Set([...allowedSpaces(),spaceId])]};
  }
@@ -141,6 +148,7 @@ async function manageCustomerDirectory({db,tx,c,request}){
   customerRegistrationUid:c.uid,customerRegistrationHash:proposedHash,
  };
  tx.create(ref,record);
+ tx.set(linkRef(root,id),{...keyValue(c,id),spaceIds:spaces});
  if(lookup)tx.set(lookup.key,keyValue(c,id));
  signal(tx,root,c,'customer-create:'+id);
  return {status:'created',clientId:id,spaceIds:spaces,created:{...supplied,id,businessId:c.bid,workspaceGeneration:generation(c.business),spaceId,customerSpaceIds:spaces,ativo:true,saldo:0,financialVersion:0}};
@@ -165,4 +173,24 @@ async function validateCustomerDirectoryWrites({db,tx,c,writes,plan,old}){
  }
 }
 
-module.exports={manageCustomerDirectory,validateCustomerDirectoryWrites};
+async function updateSharedCustomerSaleCounters({tx,c,root,writes,plan,old}){
+ const sale=writes.find(write=>write.entityType==='sales'&&write.operation==='create')?.data;
+ const id=sale?.clienteId||sale?.customerId;
+ if(!id||sale.status!=='pago'||sale.installmentPlan||!['pix','dinheiro','cartao'].includes(sale.formaPagamento))return;
+ const ref=root.collection('clients').doc(id),entry=plan.get(ref.path);
+ if(entry&&['totalComprado','quantidadeVendas','ultimaCompra'].some(field=>Object.hasOwn(entry.data,field)))return;
+ const client=await old(ref);
+ const origin=client?.spaceId||client?.financialSpaceId;
+ if(!belongs(client,c)||!active(client)||!origin||origin===sale.spaceId)return;
+ if(!(await verifiedLinks(tx,root,c,id)).includes(sale.spaceId)||!c.has('customers.view'))return;
+ const total=sale.valorFinal??sale.valorTotal;
+ plan.set(ref.path,{ref,data:{
+  ...entry?.data,
+  totalComprado:Number(client.totalComprado||0)+Number(total),
+  quantidadeVendas:Number(client.quantidadeVendas||0)+1,
+  ultimaCompra:sale.data,
+  atualizadoEm:sale.data,
+ }});
+}
+
+module.exports={manageCustomerDirectory,validateCustomerDirectoryWrites,updateSharedCustomerSaleCounters};

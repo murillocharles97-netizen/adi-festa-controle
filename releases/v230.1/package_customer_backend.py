@@ -46,13 +46,14 @@ def main():
     code = blob(COMMIT).decode()
     new_import = next(line for line in code.splitlines() if "require('./customer-directory-service')" in line)
     hook = next(line for line in code.splitlines() if "await validateCustomerDirectoryWrites(" in line)
+    counters = next(line for line in code.splitlines() if "await updateSharedCustomerSaleCounters(" in line)
     route_start = code.index("  if(request.data?.kind==='customer_directory')")
     route_end = code.index("  if(!paymentRecovery", route_start)
     route = code[route_start:route_end].rstrip("\n")
     original = base[COMMIT].decode()
     updated = insert(original, IMPORT, new_import)
     updated = insert(updated, " async function commit(request,{priorSale=null}={}){", route)
-    updated = insert(updated, VALIDATE, hook)
+    updated = insert(updated, VALIDATE, hook + "\n" + counters)
     name_filter = ".filter(n=>n!=='processedOperations')"
     assert updated.count(name_filter) == 1
     updated = updated.replace(name_filter, ".filter(n=>n!=='processedOperations'&&n!=='customerPhoneKeys')")
