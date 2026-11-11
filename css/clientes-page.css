@@ -37,7 +37,7 @@
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-#modal .customer-space-option {
+#modal .modal-box .modal-body label.customer-space-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
