@@ -293,6 +293,8 @@ function createRawFirestoreRepository(collectionName) {
       ].filter(key => key in product).map(key => [key, product[key]]));
       if (product.availability && typeof product.availability === 'object')
         status.availability = Object.fromEntries(['spaceAccessMode','allowedSpaceIds','defaultSpaceId','spaceScopeVersion'].filter(k => k in product.availability).map(k => [k,product.availability[k]]));
+      const raw = snapshot.data();
+      status.hasInlineCost = Object.hasOwn(raw, 'custo') || Object.hasOwn(raw, 'cost');
       return status;
     },
     async getProductActionSpacesFromServer(ids) {

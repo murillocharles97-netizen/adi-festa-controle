@@ -273,6 +273,7 @@
       <div class="sheet-handle"></div>
       <header><div class="mobile-product-avatar">${window.ProductImages?.markup(product,{className:"mobile-product-card-photo"}) || esc(initials(product.nome))}</div><div><h3>${esc(product.nome)}</h3><p>${priceLabel(product)} · ${esc(summary)}</p></div><button type="button" data-product-sheet-close aria-label="Fechar menu">${icon("x")}</button></header>
       <div class="product-sheet-actions">
+        ${window.SpaceContext?.canReviewProductSpaces?.(product) ? `<button type="button" data-product-review-spaces="${id}">${icon("map-pin")}<span><b>Definir espaços para a equipe</b></span></button>` : ""}
         <button type="button" data-product-details="${id}">${icon("info")}<span><b>Ver detalhes</b></span></button>
         ${controlsStock && canProductAction("inventory.adjust") ? `<button type="button" data-product-entry="${id}">${icon("package-plus")}<span><b>Adicionar entrada</b><small>Somar unidades ao estoque</small></span></button><button type="button" data-product-adjust="${id}">${icon("sliders-horizontal")}<span><b>Ajustar estoque</b><small>Corrigir a quantidade atual</small></span></button>` : ""}
         ${controlsStock && canProductAction("inventory.view") ? `<button type="button" data-product-history="${id}">${icon("history")}<span><b>Histórico</b><small>Ver entradas, saídas e ajustes</small></span></button>` : ""}
@@ -1014,6 +1015,7 @@
     bindAction("data-product-adjust", "inventory.adjust", stockAdjust);
     bindAction("data-product-history", "inventory.view", history);
     bindAction("data-product-edit", "products.edit", productForm);
+    bindAction("data-product-review-spaces", "products.edit", id => window.SpaceContext.reviewProductSpaces(id));
     bindAction("data-product-delete", "products.edit", id => window.ProductSelection.open([id], "delete"));
   }
   function bind() {

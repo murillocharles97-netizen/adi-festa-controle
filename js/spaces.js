@@ -583,6 +583,73 @@
         : formData.get("defaultSpaceId") || fallback.defaultSpaceId,
     }, fallback);
   }
+  function canReviewProductSpaces(product) {
+    ensureContext();
+    const context = window.BusinessContext?.get?.();
+    return Boolean(product?.id && product.active !== false && product.ativo !== false &&
+      !product.deletedAt && state.sessionReady && state.uid && state.businessId &&
+      context?.role === "owner" && context.business?.ownerId === state.uid &&
+      window.TeamAccess?.has?.("products.edit") &&
+      product.businessId === state.businessId &&
+      (product.workspaceGeneration ?? 0) === state.generation &&
+      !product.spaceId && !product.financialSpaceId && !product.availability &&
+      !["spaceAccessMode", "allowedSpaceIds", "defaultSpaceId", "spaceScopeVersion"]
+        .some(field => Object.hasOwn(product, field)));
+  }
+  function reviewProductSpaces(id) {
+    const product = window.Produtos?.obter?.(id);
+    if (!canReviewProductSpaces(product))
+      return window.Utils.toast("O acesso ou o cadastro mudou. Abra o produto novamente.", true);
+    const spaces = salesSpaces();
+    if (!state.loaded || !spaces.length || !window.DB?.__firebaseSyncWrapped)
+      return window.Utils.toast("Aguarde o carregamento dos espaços de venda da empresa.", true);
+    const session = window.TeamAccess.captureSession(), root = document.querySelector("#modal");
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box" role="dialog" aria-modal="true" aria-labelledby="legacy-product-spaces-title"><header class="modal-head"><h3 id="legacy-product-spaces-title">Disponibilidade de ${esc(product.nome)}</h3></header><form><div class="modal-body"><p>Escolha em quais espaços a equipe poderá consultar este item.</p><fieldset class="product-space-availability"><legend>Espaços de venda</legend>${spaces.map(space => `<label><input type="checkbox" name="spaceId" value="${esc(space.id)}"><span>${esc(space.name)}</span></label>`).join("")}</fieldset></div><footer class="modal-foot"><button type="button" class="btn btn-light" data-space-close>Cancelar</button><button class="btn btn-primary" type="submit">Salvar espaços</button></footer></form></section></div>`;
+    root.querySelector("[data-space-close]").onclick = () => window.Modais.fechar();
+    root.querySelector("form").onsubmit = async event => {
+      event.preventDefault();
+      const form = event.currentTarget, submit = form.querySelector('[type="submit"]');
+      if (submit.disabled || !form.isConnected) return;
+      submit.disabled = true;
+      try {
+        window.TeamAccess.assertSession(session);
+        const ids = uniqueIds(new FormData(form).getAll("spaceId")),
+          shown = new Set(spaces.map(space => space.id));
+        if (!ids.length || ids.length > 30 || ids.some(id => !shown.has(id)))
+          throw Error("Escolha de 1 a 30 espaços de venda desta empresa.");
+        const remote = await window.FirestoreRepositories?.products?.getProductStatusFromServer?.(product.id);
+        window.TeamAccess.assertSession(session);
+        if (!form.isConnected) return;
+        if (remote?.id !== product.id || !canReviewProductSpaces(remote) || typeof remote.hasInlineCost !== "boolean")
+          throw Error("Confirme o cadastro na nuvem antes de definir os espaços.");
+        if (remote.hasInlineCost)
+          throw Error("Este produto ainda guarda o custo no cadastro antigo. Peça a conferência do suporte antes de liberar para a equipe.");
+        const authorized = new Set(salesSpaces().map(space => space.id));
+        if (ids.some(id => !authorized.has(id)))
+          throw Error("Os espaços de venda mudaram. Abra o produto novamente.");
+        window.DB.alterar(db => {
+          const current = db.produtos.find(item => item.id === product.id);
+          if (!canReviewProductSpaces(current))
+            throw Error("O acesso ou o cadastro mudou. Abra o produto novamente.");
+          Object.assign(current, normalizeProductAccess({
+            spaceAccessMode: ids.length === 1 ? "single_space" : "selected_spaces",
+            allowedSpaceIds: ids,
+            defaultSpaceId: ids[0],
+          }));
+        });
+        await window.DB.flush();
+        window.TeamAccess.assertSession(session);
+        if (!form.isConnected) return;
+        window.Modais.fechar();
+        window.Utils.toast("Espaços salvos neste aparelho. A equipe terá acesso após a sincronização.");
+      } catch (error) {
+        if (form.isConnected) {
+          submit.disabled = false;
+          window.Utils.toast(error.message || "Não foi possível salvar os espaços.", true);
+        }
+      }
+    };
+  }
   function bind(root = document) {
     root.querySelectorAll("[data-space-picker]").forEach((button) => {
       if (button.dataset.bound) return;
@@ -671,6 +738,8 @@
     availabilityFields,
     bindProductAvailability,
     productAccessFromForm,
+    canReviewProductSpaces,
+    reviewProductSpaces,
     productAllowsSpace,
     resolveSaleSpaceId,
     isValidSale,
