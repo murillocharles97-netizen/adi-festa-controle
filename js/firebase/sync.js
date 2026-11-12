@@ -846,7 +846,7 @@ function assertCustomerPaymentReview(clientId) {
   const candidate = {businessId:activeBusinessId(),userId:currentUser?.uid,
     workspaceGeneration:DB.getWorkspaceGeneration?.() ?? 0,
     payload:{writes:[{entityType:"clients",entityId:String(clientId),data:{saldo:0}}]}};
-  if (paymentQueueDependsOnReview(candidate, readQueue()))
+  if (paymentQueueDependsOnReview(candidate, readQueue().filter(item => !archivedFiadoRecord(String(clientId), null, item.createdAtLocal || item.createdAt))))
     throw Object.assign(Error("Este cliente possui recebimento rejeitado preservado para revisão. Consulte a operação original antes de registrar outra movimentação para ele."),
       {code:"payment-review-required"});
 }
@@ -874,6 +874,7 @@ function assertFiadoReceiptQueueClear(clientId) {
     const writes=item.payload?.writes;
     if(!Array.isArray(writes)||writes.some(w=>!w||typeof w!=='object'))fail();
     if(!writes.some(related))continue;
+    if(archivedFiadoRecord(clientId,null,item.createdAtLocal||item.createdAt))continue;
     if(classifyQueueOperation(item).category!=='resolved')fail();
     resolved.add(String(item.operationId));
   }
@@ -885,10 +886,37 @@ function assertFiadoReceiptQueueClear(clientId) {
   for(const raw of [oldRaw,legacyRaw]){
     if(!raw)continue;
     let packets;try{packets=JSON.parse(raw);}catch{fail();}
-    if(!Array.isArray(packets)||packets.some(item=>!item||(item.payload?.writes||[item]).some(related)))fail();
+    if(!Array.isArray(packets)||packets.some(item=>!item||!archivedFiadoRecord(clientId,null,item.createdAtLocal||item.createdAt)&&(item.payload?.writes||[item]).some(related)))fail();
   }
   if((DB.carregar().pagamentos||[]).some(p=>[p.clienteId,p.clientId,p.customerId].includes(clientId)&&
-    !p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)&&!resolved.has(String(p.operationId||p.id))))fail();
+    !p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)&&!resolved.has(String(p.operationId||p.id))&&
+    !archivedFiadoRecord(clientId,p,p.createdAt||p.data)))fail();
+}
+// Closed legacy Fiado (adi-festa): a record created before the migration belongs to
+// the archived Fiado of a client that now has a valid opening. The server fences
+// those operations (they can never move the new account), so they must not block
+// NEW receipts. Anything created after the migration still blocks as before.
+function archivedFiadoRecord(clientId,row,at){
+  const ctx=window.BusinessContext?.get?.(),marker=ctx?.business?.fiadoLegacyClosed;
+  if(activeBusinessId()!=='adi-festa'||ctx?.businessId!=='adi-festa'||marker?.version!==1||marker.state!=='complete')return false;
+  const client=(DB.carregar().clientes||[]).find(c=>c.id===clientId);
+  if(client?.fiadoOpeningBalance?.version!==1||row?.fiadoOpeningHash)return false;
+  const when=v=>typeof v?.toDate==='function'?v.toDate().getTime():Number.isFinite(v?.seconds)?v.seconds*1000:Date.parse(v||'');
+  const cut=Date.parse(marker.openingsAt||''),time=when(at);
+  return Number.isFinite(cut)&&Number.isFinite(time)&&time<cut;
+}
+// Integrity audit after the legacy closure: archived Fiado records of opened clients
+// (pre-migration, unstamped) are reported as archived, never as financial divergence.
+function archivedFiadoAuditItem(name,item,archivedSales){
+  if(name==='saleFinancials')return archivedSales.has(String(item.saleId||item.id));
+  if(!['sales','payments','balanceAdjustments'].includes(name))return false;
+  if(name==='sales'&&!(item.formaPagamento==='fiado'||item.status==='fiado'||item.installmentPlan||item.formaPagamento==null&&typeof item.saldoAnterior==='number'))return false;
+  const clientId=item.clienteId||item.clientId||item.customerId;
+  return Boolean(clientId)&&archivedFiadoRecord(String(clientId),item,item.createdAt||item.data);
+}
+function withoutArchivedFiado(name,items,archivedSales,archived){
+  const kept=[];for(const item of items||[]){if(archivedFiadoAuditItem(name,item,archivedSales)){archived[name]=(archived[name]||0)+1;continue;}kept.push(item);}
+  return kept;
 }
 async function assertFiadoReceiptWriter(businessId,workspaceGeneration,scopedReceiptVersion) {
   if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')
@@ -5684,13 +5712,17 @@ async function performDeviceComparison(options = {}) {
     raw = {},skippedCollections=[],
     prefetchedEntries=options.prefetched?.businessId===businessId&&options.prefetched.sessionScope===scope?options.prefetched.entries:[];
   const protectedNames={products:'productFinancials',productVariants:'variantFinancials',sales:'saleFinancials'},projections={};
+  // Declared elsewhere in this module; absent only when the audit runs in isolation.
+  const setAside=typeof withoutArchivedFiado==='function'?withoutArchivedFiado:(name,items)=>items||[],
+    isArchived=typeof archivedFiadoAuditItem==='function'?archivedFiadoAuditItem:()=>false;
+  const archivedLegacy={},archivedSales=new Set((data.vendas||[]).filter(sale=>isArchived('sales',sale,new Set())).map(sale=>String(sale.id)));
   for(const [publicName,name] of Object.entries(protectedNames)){
     assertAuditSession();
     if(!allowed(name)||window.OperationalReadPolicy?.handles?.(name)){skippedCollections.push({name,reason:'operational_projection_scope'});continue;}
     const prefetched=prefetchedEntries.find(entry=>entry.name===name);
-    const remoteItems=prefetched?prefetched.documents:await syncStep('orphan_comparison',()=>repositories[name].listAllPaged(200),{service:'Firestore',collection:name,businessId,request:'listAllPaged'});
+    const remoteItems=setAside(name,prefetched?prefetched.documents:await syncStep('orphan_comparison',()=>repositories[name].listAllPaged(200),{service:'Firestore',collection:name,businessId,request:'listAllPaged'}),archivedSales,{});
     assertAuditSession();
-    const localItems=sourceItems(data,name);
+    const localItems=setAside(name,sourceItems(data,name),archivedSales,archivedLegacy);
     projections[publicName]={localFinancial:new Map(localItems.map(x=>[String(x.id),x])),remoteFinancial:new Map(remoteItems.map(x=>[String(x.id),x]))};
     raw[name]={localItems,remoteItems};
     collections[name]=classifyCollectionAudit(name,localItems,remoteItems,queue);
@@ -5698,10 +5730,10 @@ async function performDeviceComparison(options = {}) {
   for (const name of AUDIT_NAMES) {
     assertAuditSession();
     if(!allowed(name)||window.OperationalReadPolicy?.handles?.(name)){skippedCollections.push({name,reason:'operational_projection_scope'});continue;}
-    const localItems = sourceItems(data, name),
-      remoteItems = prefetchedEntries.some(entry => entry.name === name)
+    const localItems = setAside(name, sourceItems(data, name), archivedSales, archivedLegacy),
+      remoteItems = setAside(name, prefetchedEntries.some(entry => entry.name === name)
         ? prefetchedEntries.find(entry => entry.name === name).documents
-        : await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"});
+        : await syncStep("orphan_comparison", () => repositories[name].listAllPaged(200), {service: "Firestore", collection: name, businessId, request: "listAllPaged"}), archivedSales, {});
     assertAuditSession();
     raw[name] = { localItems, remoteItems };
     collections[name] = classifyCollectionAudit(
@@ -5766,7 +5798,7 @@ async function performDeviceComparison(options = {}) {
       businessId,
       deviceId: deviceId(),
       collections,
-      auditScope:{auditedCollections:Object.keys(collections),skippedCollections,financialAudited},
+      auditScope:{auditedCollections:Object.keys(collections),skippedCollections,financialAudited,archivedLegacyFiado:archivedLegacy},
       products: summarize(["products", "productVariants"]),
       clients: summarize(["clients"]),
       financial: financialAudited?{

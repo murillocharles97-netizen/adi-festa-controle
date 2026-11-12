@@ -73,3 +73,38 @@ test('writer capability must come from the active company and protected protocol
   f.s.navigator.onLine=false;
   await assert.rejects(f.s.assertFiadoReceiptWriter('adi-festa',0),/Conecte-se/);
 });
+
+test('closed legacy Fiado: archived pre-migration records of an opened client no longer block a NEW receipt',()=>{
+  const f=fixture(),at='2026-11-12T17:31:17.919Z',client={id:'qa-client',fiadoOpeningBalance:{version:1,hash:'h1'}};
+  const data={pagamentos:f.payments,clientes:[client]};f.s.DB.carregar=()=>data;
+  f.s.BusinessContext.get=()=>({role:'owner',businessId:'adi-festa',business:{fiadoLegacyClosed:{version:1,state:'complete',openingsAt:at}}});
+  // Same shape as the reported case: legacy receipt left in pending_sync since August.
+  f.payments.push({id:'legacy-pay',operationId:'legacy-pay',clienteId:'qa-client',status:'pending_sync',applicationStatus:'pending',valor:40,createdAt:'2026-08-21T21:14:36.524Z'});
+  f.queue([f.packet([receive()],{status:'error',createdAtLocal:'2026-08-21T21:14:36.524Z'}),f.packet([receive()],{status:'archived',createdAt:'2026-09-01T10:00:00.000Z'})]);
+  assert.doesNotThrow(f.assertClear);
+  // Anything created after the migration still blocks, and so does a new (stamped) pending receipt.
+  f.queue([f.packet([receive()],{status:'pending',createdAtLocal:'2026-11-12T18:40:00.000Z'})]);
+  assert.throws(f.assertClear,{code:'fiado-local-pending'});
+  f.queue([]);f.payments.push({id:'new-pay',clienteId:'qa-client',status:'pending_sync',createdAt:'2026-08-01T00:00:00.000Z',fiadoOpeningHash:'h1'});
+  assert.throws(f.assertClear,{code:'fiado-local-pending'});
+  f.payments.pop();assert.doesNotThrow(f.assertClear);
+  // A client without a valid opening keeps the previous protection.
+  delete client.fiadoOpeningBalance;assert.throws(f.assertClear,{code:'fiado-local-pending'});
+});
+
+test('closed legacy Fiado: integrity audit sets archived records aside on both sides, keeps normal and new records',()=>{
+  const f=fixture(),at='2026-11-12T17:31:17.919Z',client={id:'qa-client',fiadoOpeningBalance:{version:1,hash:'h1'}};
+  f.s.DB.carregar=()=>({pagamentos:[],clientes:[client]});
+  f.s.BusinessContext.get=()=>({role:'owner',businessId:'adi-festa',business:{fiadoLegacyClosed:{version:1,state:'complete',openingsAt:at}}});
+  const old='2026-08-21T21:14:36.524Z',ts={seconds:Date.parse(old)/1000,nanoseconds:0};
+  const sales=[{id:'old-fiado',clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',createdAt:old},
+    {id:'old-fiado-remote',clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',createdAt:ts},
+    {id:'old-pix',clienteId:'qa-client',formaPagamento:'pix',status:'pago',createdAt:old},
+    {id:'new-fiado',clienteId:'qa-client',formaPagamento:'fiado',status:'fiado',createdAt:old,fiadoOpeningHash:'h1'},
+    {id:'other-client',clienteId:'someone',formaPagamento:'fiado',status:'fiado',createdAt:old}];
+  const archived={},kept=f.s.withoutArchivedFiado('sales',sales,new Set(),archived);
+  assert.equal(JSON.stringify(kept.map(x=>x.id)),JSON.stringify(['old-pix','new-fiado','other-client']));assert.equal(archived.sales,2);
+  assert.equal(JSON.stringify(f.s.withoutArchivedFiado('saleFinancials',[{id:'old-fiado'},{id:'old-pix'}],new Set(['old-fiado']),{}).map(x=>x.id)),JSON.stringify(['old-pix']));
+  assert.equal(f.s.withoutArchivedFiado('payments',[{id:'p',clienteId:'qa-client',createdAt:old}],new Set(),{}).length,0);
+  assert.equal(f.s.withoutArchivedFiado('products',[{id:'x'}],new Set(),{}).length,1);
+});
