@@ -52,7 +52,7 @@ function checkEvidence({businessId,generation,client,collections,opening},day,sc
     if(!expectedCollection||event.sourceCollection!==expectedCollection||!source||!sourceOperation||
        sourceOperation!==event.operationId||event.id!==event.type+':'+source.id||operationIds.has(sourceOperation)||
        event.status!=='applied'||!Number.isFinite(Date.parse(sourceAt))||Date.parse(sourceAt)!==Date.parse(event.appliedAt)||
-       !owns(marker,businessId,generation)||marker.status!=='processed'||marker.eventKind!==expectedKind||sourceSpace!==eventSpace)return 'history_review';
+       !owns(marker,businessId,generation)||marker.status!=='processed'||(marker.eventKind!==expectedKind&&!(reversal&&marker.eventKind==='sale_cancel'))||sourceSpace!==eventSpace)return 'history_review';
     if(event.type==='payment_received'&&(pending(source)||closed(source)||money(event.balanceDelta)!==money(source.valor??source.amount)))return 'history_review';
     operationIds.add(sourceOperation);
     eventsBySource.set(event.type+':'+source.id,event);
@@ -116,7 +116,7 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     if(input.opening&&!forConfirmation&&scopedReceiptVersion!==1)return blocked('history_review');
     const sales=input.collections.sales.filter(row=>active(row)&&row.formaPagamento==='fiado');
     const scheduled=client.hasInstallmentFiado===true||client.fiadoHistoryVersion===1||sales.some(row=>row.installmentPlan);
-    if(scheduled&&client.hasInstallmentFiado===true&&!input.collections.sales.some(row=>row.installmentPlan))return blocked('history_review');
+    if(!input.opening&&scheduled&&client.hasInstallmentFiado===true&&!input.collections.sales.some(row=>row.installmentPlan))return blocked('history_review');
     const risk=checkEvidence(input,day,scheduled);
     if(risk)return blocked(risk);
     if(bookBalanceCents>=0&&!forConfirmation)return blocked('no_debt');

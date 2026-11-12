@@ -125,9 +125,11 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(incomingPlan&&historyAccount?.version===2&&!HISTORY_ACTIVATION_ENABLED){const client=(await tx.get(ref(c.bid,'clients',incomingPlan.data.clienteId))).data();if(client.fiadoHistoryVersion!==1)fail('Novas ativações do histórico estão pausadas.','failed-precondition');}
    const adjustment=attemptWrites.find(w=>w.entityType==='balanceAdjustments'&&w.operation==='create'),cancellation=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='update'&&(w.data.active===false||w.data.deletedAt));
    if(adjustment||cancellation){
-    const sale=cancellation?(await tx.get(ref(c.bid,'sales',cancellation.entityId))).data():null,cid=adjustment?.data.clienteId||adjustment?.data.clientId||adjustment?.data.customerId||sale?.clienteId;
+    const sale=cancellation?(await tx.get(ref(c.bid,'sales',cancellation.entityId))).data():null,cid=adjustment?.data.clienteId||adjustment?.data.clientId||adjustment?.data.customerId||
+     (sale?.formaPagamento==='fiado'||sale?.status==='fiado'?sale?.clienteId:null);
     if(cid){const client=(await tx.get(ref(c.bid,'clients',cid))).data();
-     if(client?.fiadoOpeningBalance)fail('Ajuste ou cancelamento de conta com saldo confirmado exige conciliação administrativa.','failed-precondition');
+     if(client?.fiadoOpeningBalance&&(adjustment||sale?.fiadoOpeningHash!==client.fiadoOpeningBalance.hash))
+      fail('Operação anterior ao corte não pode alterar a conta nova.','failed-precondition');
      if(client?.fiadoHistoryVersion===1){
      if(!capability)fail('Atualize o aplicativo antes de alterar uma conta com histórico comprovado. A operação foi preservada.','failed-precondition');
      historyAccount=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:cid,now:now(),checkPermission:false,includeTraditional:true,historyProofVersion:1});
@@ -225,12 +227,37 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.fiadoReceiptScope={version:1,spaceId:incomingPayment.data.spaceId};
    }
+   const financialClients=new Set(attemptWrites.filter(w=>w.entityType==='clients').map(w=>w.entityId));
+   let openingHash=null;
+   for(const id of financialClients){
+    const client=(await tx.get(ref(c.bid,'clients',id))).data();
+    if(!client?.fiadoOpeningBalance)continue;
+    if(openingHash&&openingHash!==client.fiadoOpeningBalance.hash)fail('Operação financeira deve pertencer a uma única conta.','failed-precondition');
+    openingHash=client.fiadoOpeningBalance.hash;
+    const sale=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.formaPagamento==='fiado');
+    const change=attemptWrites.find(w=>w.entityType==='clients'&&w.entityId===id);
+    if(sale&&Number(change?.before?.financialVersion)!==Number(client.financialVersion))
+     fail('A venda pertence a uma versão anterior da conta. Atualize antes de criar novo Fiado.','failed-precondition');
+    if(sale){
+     const opening=(await tx.get(ref(c.bid,'fiadoOpeningBalances',id))).data();
+     const occurredAt=Date.parse(sale.data.occurredAt||sale.data.data||''),cutAt=Date.parse(opening?.at||'');
+     if(opening?.hash!==openingHash||!Number.isFinite(cutAt)||!Number.isFinite(occurredAt)||occurredAt<cutAt)
+      fail('Venda anterior ao corte não pode ser lançada na conta nova.','failed-precondition');
+    }
+   }
    if(paymentRecovery){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.paymentRecovery={version:1,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),auditId:recoveryAudit.id};
     tx.create(recoveryAudit,{type:'original_payment_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),reviewHash:recoveryHash,...recoveryFacts,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
    }
-   for(const p of plan.values())tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
+   for(const p of plan.values()){
+    // The browser cannot opt an archived financial source into the new epoch.
+    if(['sales','payments','balanceAdjustments','balanceEvents','paymentAllocations'].includes(p.ref.parent.id)){
+     delete p.data.fiadoOpeningHash;
+     if(openingHash)p.data.fiadoOpeningHash=openingHash;
+    }
+    tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
+   }
    const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'&&n!=='customerPhoneKeys'))];
    if(names.length){
     const revision='server:'+item.operationId;

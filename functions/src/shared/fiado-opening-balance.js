@@ -31,7 +31,7 @@ function calendars(input,day){
    if(row.dueDate>day)balance.futureCents+=row.remainingCents;
   }
   totals.set(spaceId,balance);
-  proof.push({saleId:sale.id,spaceId,scheduleHash:digest([sale.installmentPlan,sale.data,sale.valorFinal,sale.creditOriginalAmount??null])});
+  proof.push({saleId:sale.id,spaceId,paidCents:Plan.cents(sale.creditPaidAmount||0),scheduleHash:digest([sale.installmentPlan,sale.data,sale.valorFinal,sale.creditOriginalAmount??null])});
  }
  return {totals,proof:proof.sort((a,b)=>a.saleId.localeCompare(b.saleId))};
 }
@@ -96,7 +96,8 @@ function readOpening(input,audit){
  const {plan}=audit;
  const actual=new Map(calendars(input,plan.day).proof.map(row=>[row.saleId,row]));
  for(const row of plan.calendars){
-  if(digest(actual.get(row.saleId)??null)!==digest(row))
+  const current=actual.get(row.saleId);
+  if(!current||current.spaceId!==row.spaceId||current.scheduleHash!==row.scheduleHash)
    throw Error('O calendário original do saldo confirmado mudou.');
  }
  return {...plan,at:audit.at,hash:audit.hash};

@@ -641,7 +641,7 @@ test('opening keeps the two spaces separate and preserves the original installme
  assert.equal((await qa.route({scopedReceiptVersion:1})).reason,'history_review');
 });
 
-test('pending payment prevents a checkpoint and a late backdated effect cannot disappear behind an active checkpoint',async()=>{
+test('pending payment prevents a cutoff; archived and late legacy effects cannot enter the new account',async()=>{
  const qa=await setup(),api=openingApi(qa),payments=qa.root.collection('payments');
  const pending=payments.doc('pending-qa');
  await pending.set({businessId:qa.businessId,clienteId:clientId,status:'manual_review',valor:10});
@@ -652,7 +652,97 @@ test('pending payment prevents a checkpoint and a late backdated effect cannot d
  assert.equal((await route()).dueCents,19000);
  await qa.root.collection('balanceEvents').doc('late-backdated-qa').set({businessId:qa.businessId,
   customerId:clientId,type:'payment_received',appliedAt:at,status:'applied',balanceDelta:10,operationId:'not-recorded-qa'});
- assert.equal((await route()).reason,'history_review');
+ assert.equal((await route()).dueCents,19000);
+ await qa.root.collection('sales').doc('old-unproved-sale').set({businessId:qa.businessId,
+  clienteId:clientId,formaPagamento:'fiado',status:'fiado',valorFinal:999,spaceId:qa.spaceId});
+ assert.equal((await route()).dueCents,19000);
+ await qa.clientRef.update({legacyBalance:999,legacyBalanceRemaining:999,hasInstallmentFiado:true});
+ assert.equal((await route()).dueCents,19000);
+});
+
+test('ordinary subscribers create and receive new credit in two spaces without the extraordinary Central',async()=>{
+ const qa=await setup();
+ await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ for(const spaceId of [qa.spaceId,qa.otherId]){
+  const sale=await newCreditSale(qa,spaceId);
+  assert.equal((await callCommit(sale.request)).replayed,false);
+ }
+ for(const spaceId of [qa.spaceId,qa.otherId]){
+  assert.equal((await qa.route({spaceId,scopedReceiptVersion:1})).dueCents,1400);
+  const view=await qa.ui(spaceId);
+  try{
+   await view.open();await view.submit(5);
+   const request=view.request();
+   assert.equal((await callCommit(request)).replayed,false);
+   assert.equal((await callCommit(request)).replayed,true);
+   assert.equal((await qa.route({spaceId,scopedReceiptVersion:1})).dueCents,900);
+   const payment=(await qa.root.collection('payments').doc(request.data.item.operationId).get()).data();
+   await cash.projectPayment(qa.businessId,request.data.item.operationId,payment);
+   assert.equal((await db.collection('financialSpaces/'+spaceId+'/entries').get()).size,1);
+  }finally{view.h.close();}
+ }
+ assert.equal((await qa.clientRef.get()).data().saldo,-18);
+ assert.equal((await qa.root.collection('fiadoOpeningBalances').get()).size,0);
+});
+
+async function newCreditSale(qa,spaceId=qa.spaceId){
+ const {harness:saleHarness}=require('../helpers/fiado-cancellation-harness.cjs');
+ const h=saleHarness({businessId:qa.businessId,spaceId,uid:qa.auth.uid});
+ h.data().clientes=[normalize((await qa.clientRef.get()).data())];
+ const existing=(await qa.root.collection('products').doc('qa-product').get()).data();
+ const product={...h.data().produtos[0],...existing,spaceAccessMode:'selected_spaces',allowedSpaceIds:[qa.spaceId,qa.otherId]};
+ h.data().produtos=[product];
+ await qa.root.collection('products').doc(product.id).set({...product,workspaceGeneration:0});
+ const {sale,packet}=h.sell();
+ const request={auth:qa.auth,data:{businessId:qa.businessId,clientRelease:230,syncProtocolVersion:1,
+  item:{...packet,workspaceGeneration:0,status:'pending'}}};
+ return {sale,request,h};
+}
+
+test('cutoff rejects old offline credit; new sale and cancellation remain scoped, atomic and idempotent',async()=>{
+ const qa=await setup(),api=openingApi(qa),old=await newCreditSale(qa);
+ const staleView=await qa.ui();
+ let stalePayment;
+ try{await staleView.open();await staleView.submit(70,qa.spaceId);stalePayment=staleView.request();}
+ finally{staleView.h.close();}
+ const reason='Saldo final conferido nas anotações do proprietário.';
+ await confirmOpening(api,await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:15000},
+  {spaceId:qa.otherId,totalCents:0}],reason}),{reason});
+ await assert.rejects(callCommit(old.request),{code:'failed-precondition'});
+ await assert.rejects(callCommit(stalePayment),{code:'failed-precondition'});
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,15000);
+ const backdated=await newCreditSale(qa);
+ backdated.request.data.item.payload.writes.find(w=>w.entityType==='sales').data.occurredAt=at;
+ await assert.rejects(callCommit(backdated.request),{code:'failed-precondition'});
+ const fresh=await newCreditSale(qa);
+ assert.equal((await callCommit(fresh.request)).replayed,false);
+ assert.equal((await callCommit(fresh.request)).replayed,true);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,16400);
+ const other=await newCreditSale(qa,qa.otherId);
+ assert.equal((await callCommit(other.request)).replayed,false);
+ assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,1400);
+ const cancel=require('../../functions/src/services/sale-cancellation-service').saleCancellationService(db);
+ const request={auth:qa.auth,data:{businessId:qa.businessId,workspaceGeneration:0,spaceId:qa.spaceId,saleId:fresh.sale.id}};
+ const quote=await cancel.preview(request);
+ const confirmation={...request,data:{...request.data,...quote,confirmed:true,reason:'Cancelamento sintético após corte.'}};
+ assert.equal((await cancel.confirm(confirmation)).replayed,false);
+ assert.equal((await cancel.confirm(confirmation)).replayed,true);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,15000);
+ assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,1400);
+ assert.equal((await qa.root.collection('balanceEvents').where('type','==','credit_sale_reversal').get()).size,1);
+ assert.equal((await qa.root.collection('payments').get()).size,0);
+ assert.equal((await db.collection('financialSpaces/'+qa.spaceId+'/entries').get()).size,0);
+ const undoable=await newCreditSale(qa);
+ await callCommit(undoable.request);
+ undoable.h.data().vendas=[normalize((await qa.root.collection('sales').doc(undoable.sale.id).get()).data())];
+ undoable.h.data().clientes=[normalize((await qa.clientRef.get()).data())];
+ const undo=undoable.h.undo(undoable.sale.id).packet;
+ undo.payload.fiadoHistoryVersion=1;
+ const undoRequest={auth:qa.auth,data:{...undoable.request.data,item:{...undo,workspaceGeneration:0,status:'pending'}}};
+ assert.equal((await callCommit(undoRequest)).replayed,false);
+ assert.equal((await callCommit(undoRequest)).replayed,true);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,15000);
+ assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,1400);
 });
 
 const functionsPort=process.env.VECONI_QA_FUNCTIONS_PORT;
@@ -675,6 +765,7 @@ test('HTTP callable reaches the real Emulator trigger and confirms a lost-respon
   const view=await qa.ui(qa.otherId,{transport:wire});
   try{
     await view.open();
+    assert.ok(view.modal(),view.messages.join(' | '));
     const form=await view.submit(280);
     assert.equal(view.h.commits(),1,form.querySelector('[role=alert]').textContent);
     const request=view.request(),id=request.data.item.operationId;

@@ -6,6 +6,7 @@ async function loadFiadoAccount({tx,c,ref,clientId,now=new Date(),checkPermissio
 
  const client=(await tx.get(ref(c.bid,'clients',clientId))).data();
  if(!client||client.businessId&&client.businessId!==c.bid||(client.workspaceGeneration??0)!==(c.business.workspaceGeneration??0))throw new HttpsError('permission-denied','Cliente não pertence à empresa/geração.');
+ if(client.fiadoOpeningBalance)return(await require('./fiado-history-service').loadHistory({tx,c,ref,clientId,client,day:Plan.today(now)})).account;
  const snapshot=await tx.get(ref(c.bid,'sales','__none__').parent.where('clienteId','==',clientId));
  const sales=snapshot.docs.map(d=>({...d.data(),id:d.id})).filter(s=>(s.workspaceGeneration??0)===(c.business.workspaceGeneration??0));
  if(!includeTraditional&&!client.fiadoHistoryVersion&&!sales.some(s=>s.installmentPlan&&!s.deletedAt&&s.active!==false&&!s.desfeita))return null;

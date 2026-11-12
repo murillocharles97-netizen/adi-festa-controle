@@ -43,7 +43,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
     if((reversal?source.cancelOperationId:source.operationId)!==event.operationId)throw Error('operation-alias-requires-review');
     const marker=markers.get(event.operationId);
     if(!marker||marker.status!=='processed'||marker.businessId&&marker.businessId!==businessId||(marker.workspaceGeneration??0)!==generation)throw Error('missing-or-foreign-processed-marker');
-    if(marker.eventKind!==(reversal?'sale_undo':{sales:'sale',payments:'payment',balanceAdjustments:'balance_adjustment'}[col]))throw Error('marker-kind-mismatch');
+    if(reversal?!['sale_undo','sale_cancel'].includes(marker.eventKind):marker.eventKind!=={sales:'sale',payments:'payment',balanceAdjustments:'balance_adjustment'}[col])throw Error('marker-kind-mismatch');
     if(col==='sales'){
      const cancelled=source.status==='cancelado'&&source.active===false&&source.financialReversalEventId==='credit_sale_reversal:'+source.id&&events.some(e=>e.id===source.financialReversalEventId&&e.operationId===source.cancelOperationId&&e.status==='applied');
      if(source.formaPagamento!=='fiado'||!['fiado','applied'].includes(source.status||'fiado')&&!cancelled)throw Error('not-a-confirmed-credit-sale');
@@ -79,15 +79,16 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
    if(!validated.some(e=>e.col===col&&e.sourceId===source.id))throw Error('source-without-confirmed-effect');
   }
   let future=0;const activeSales=sales.filter(s=>s.active!==false&&!s.deletedAt&&!s.cancelledAt&&!s.desfeita&&s.formaPagamento==='fiado');
-  if(client.hasInstallmentFiado&&!sales.some(s=>s.installmentPlan))throw Error('missing-installment-calendar');
+  if(!opening&&client.hasInstallmentFiado&&!sales.some(s=>s.installmentPlan))throw Error('missing-installment-calendar');
   for(const sale of activeSales){
    if(sale.installmentPlan){
     Plan.assertSale({...sale,status:'fiado'});
     const principal=Plan.cents(sale.creditOriginalAmount??sale.valorFinal),paidSnapshot=Plan.cents(sale.creditPaidAmount||0);
     if(principal!==sale.installmentPlan.totalCents||paidSnapshot>principal||sale.creditRemainingAmount!==undefined&&Plan.cents(sale.creditRemainingAmount)!==principal-paidSnapshot)throw Error('inconsistent-installment-principal');
-    const allocations=collections.paymentAllocations.filter(a=>a.clientId===client.id&&a.saleId===sale.id);
+    const allocations=collections.paymentAllocations.filter(a=>a.clientId===client.id&&a.saleId===sale.id&&!prior(opening,'paymentAllocations',a.id));
     const paid=allocations.reduce((n,a)=>{const p=payments.find(p=>p.id===a.paymentId);if(a.id!==a.paymentId+'__'+sale.id||a.businessId&&a.businessId!==businessId||(a.workspaceGeneration??0)!==generation||!p||!validated.some(e=>e.col==='payments'&&e.sourceId===p.id))throw Error('unproved-installment-allocation');const allocated=collections.paymentAllocations.filter(row=>row.paymentId===p.id).reduce((sum,row)=>sum+Plan.cents(row.amount),0);if(allocated>Plan.cents(p.valor??p.amount))throw Error('overallocated-receipt');return n+Plan.cents(a.amount);},0);
-    if(paid!==Plan.cents(sale.creditPaidAmount||0))throw Error('installment-allocation-mismatch');
+    const initialPaid=opening?.calendars.find(row=>row.saleId===sale.id)?.paidCents||0;
+    if(paid+initialPaid!==Plan.cents(sale.creditPaidAmount||0))throw Error('installment-allocation-mismatch');
     future+=Plan.rows(sale,day).filter(row=>row.dueDate>day).reduce((n,row)=>n+row.remainingCents,0);
    }else if(!prior(opening,'sales',sale.id)&&Account.commercialDay(sale)>day)throw Error('future-traditional-sale-requires-review');
   }
