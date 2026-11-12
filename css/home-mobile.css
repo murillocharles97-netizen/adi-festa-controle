@@ -126,7 +126,7 @@
   .mobile-home-dashboard .home-attention button>i{width:32px;height:32px;border-radius:var(--veconi-radius-sm)}.mobile-home-dashboard .home-attention button>i:not(.danger):not(.warning){background:var(--veconi-surface-soft);color:var(--veconi-text-secondary)}.mobile-home-dashboard .home-attention button>i.danger{background:var(--veconi-danger-soft);color:var(--veconi-danger)}.mobile-home-dashboard .home-attention button>i.warning{background:var(--veconi-warning-soft);color:var(--veconi-warning)}
   .mobile-home-dashboard .home-attention button>i svg{width:18px;height:18px}
   .mobile-home-dashboard .home-attention button b{font-size:var(--veconi-fs-14);font-weight:650}
-  .mobile-home-dashboard .home-attention button small{font-size:var(--veconi-fs-12);line-height:1.4;color:var(--veconi-text-muted)}.mobile-home-dashboard .home-attention button em{font-size:var(--veconi-fs-12)}.mobile-home-dashboard .home-attention>header>span{font-size:var(--veconi-fs-12)}
+  .mobile-home-dashboard .home-attention button small{font-size:var(--veconi-fs-12);line-height:1.4;color:var(--veconi-text-muted)}.mobile-home-dashboard .home-attention button em{font-size:var(--veconi-fs-12)}.mobile-home-dashboard .home-attention>header>span{font-size:var(--veconi-fs-12);color:var(--veconi-danger)}
   .mobile-home-dashboard .home-attention button>strong{grid-column:3}.mobile-home-dashboard .home-attention button>strong svg{width:16px;height:16px}
   .mobile-home-dashboard .home-attention>div>p{grid-template-columns:35px minmax(0,1fr)}
   .home-quick-summary{display:grid;gap:8px;margin-top:1px}.home-quick-summary h3{margin:0;font-size:16px;font-weight:750}
