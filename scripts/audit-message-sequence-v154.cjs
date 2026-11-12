@@ -16,6 +16,8 @@ async function main() {
   const browser = await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
   const results = [], url = `http://127.0.0.1:${server.address().port}/tests/message-sequence-v154.fixture.html`;
   try {
+    const output = process.env.MESSAGE_SEQUENCE_QA_OUTPUT || path.join(root, 'artifacts');
+    fs.mkdirSync(output, { recursive: true });
     const page = await browser.newPage();
     await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
     await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});
@@ -28,6 +30,102 @@ async function main() {
       },count);
       await page.reload();await page.evaluate(count=>{__makeSequenceClients(count);__whatsappAudit.throwAlter=true},count);
     };
+    // Use the production stylesheet order and actual Router/PageRuntime in a synthetic Clientes shell.
+    for (const width of [320, 360, 390, 1366]) {
+      await page.setViewport({ width, height: width === 320 ? 568 : 844, isMobile: width < 768, hasTouch: width < 768 });
+      await page.goto(url);
+      await page.addScriptTag({ url: new URL('../js/router.js', url).href });
+      await page.addScriptTag({ url: new URL('../js/page-runtime.js', url).href });
+      await page.evaluate(async () => {
+        const index = new DOMParser().parseFromString(await (await fetch('/index.html')).text(), 'text/html');
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(node => node.remove());
+        await Promise.all([...index.querySelectorAll('link[rel="stylesheet"]')].map(original => new Promise(resolve => {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = new URL(original.getAttribute('href'), location.origin + '/').href;
+          link.onload = link.onerror = resolve;
+          document.head.append(link);
+        })));
+        history.replaceState(null, '', '#/clientes');
+        const shell = index.querySelector('.shell');
+        shell.querySelector('.topbar-brand-mark').src = '/assets/veconi-symbol.svg';
+        document.querySelector('#title').remove();
+        document.querySelector('#date').remove();
+        document.querySelector('#app').replaceWith(shell);
+        document.body.append(index.querySelector('.bottom-nav'));
+        const root = document.querySelector('#app');
+        const clientButton = '<button id="mobile-message-center" type="button">Central de mensagens</button>';
+        window.AppPageRuntime = PageRuntime.create({ render(route) {
+          root.dataset.pageInstance = String(Number(root.dataset.pageInstance || 0) + 1);
+          document.querySelector('#title').textContent = route === 'clientes' ? 'Clientes' : 'Vender';
+          root.innerHTML = route === 'clientes' ? `<section class="clients-mobile-page">${clientButton}</section>` : '<section data-qa-vender>Vender</section>';
+          root.querySelector('#mobile-message-center')?.addEventListener('click', () => MobileMessages.openCenter());
+        } });
+        Router.iniciar(AppPageRuntime.mount);
+        // One charged today, one without a valid phone and one outside the active view.
+        __whatsappAudit.data.clientes[2].lastChargeAt = new Date().toISOString();
+        __whatsappAudit.data.clientes.push({ id:'foreign-space', nome:'Outro espaço QA', telefone:'11999990000', saldo:-100, ativo:true });
+        Clientes.viewData = () => ({ ...__whatsappAudit.data, clientes: __whatsappAudit.data.clientes.filter(row => row.id !== 'foreign-space') });
+        await MessageSequence.draft(null);
+      });
+      await click('#mobile-message-center');
+      await wait('.message-center-page');
+      const layout = await page.evaluate(() => {
+        const page = document.querySelector('.message-center-page');
+        const heading = page.querySelector('h2');
+        const tabs = [...page.querySelectorAll('[data-message-type]')];
+        const footer = page.querySelector('footer');
+        const inViewport = element => {
+          const r = element.getBoundingClientRect();
+          return r.left >= -1 && r.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1;
+        };
+        return { overflow: document.documentElement.scrollWidth > innerWidth + 1, heading: inViewport(heading),
+          topbar: inViewport(document.querySelector('#title')),
+          buttons: tabs.every(tab => inViewport(tab) && tab.getBoundingClientRect().height >= 44),
+          footer: inViewport(footer), available: page.querySelector('[data-center-available-count]').textContent };
+      });
+      assert.deepEqual(layout, {overflow:false,heading:true,topbar:true,buttons:true,footer:true,available:'2'}, JSON.stringify({width,...layout}));
+      if (width === 390) {
+        const counts = () => page.evaluate(() => [...document.querySelectorAll('[data-center-available-count], [data-center-selected-count]')].map(node => Number(node.textContent)));
+        assert.deepEqual(await counts(), [2, 2]);
+        await click('[data-center-toggle-all]');
+        assert.deepEqual(await counts(), [2, 0]);
+        assert.equal(await page.$eval('[data-center-start]', node => node.disabled), true);
+        await page.$eval('[data-center-client="c1"]', node => node.click());
+        assert.deepEqual(await counts(), [2, 1]);
+        assert.match(await page.$eval('[data-center-selected-total]', node => node.textContent), /351,84/);
+        await click('[data-center-filters]');
+        await click('#center-phone');
+        await click('[data-center-apply]');
+        assert.deepEqual(await counts(), [2, 1]);
+        assert.equal(await page.$eval('[data-center-client="c4"]', node => node.disabled), true);
+        assert.equal(await page.$('[data-center-client="foreign-space"]'), null);
+        await click('[data-center-filters]');
+        await page.select('#center-sort', 'nome');
+        await page.$eval('#center-min', node => { node.value = '350,00'; });
+        await click('[data-center-apply]');
+        assert.deepEqual(await counts(), [1, 1]);
+        await click('[data-center-filters]');
+        await page.$eval('#center-min', node => { node.value = ''; });
+        await click('[data-center-apply]');
+        assert.deepEqual(await counts(), [2, 1]);
+        await click('[data-message-type="notice"]');
+        assert.equal(await page.$('[data-center-selected-total]'), null);
+      }
+      await click('[data-message-center-back]');
+      await wait('#mobile-message-center');
+      assert.equal(await page.$('.message-center-page'), null);
+      assert.equal(await page.evaluate(() => Router.atual()), 'clientes');
+      assert.equal(await page.$eval('#title', node => node.textContent), 'Clientes');
+      if (width === 390) {
+        await click('#mobile-message-center');
+        await wait('.message-center-page');
+        await page.evaluate(() => Router.ir('vender'));
+        await wait('[data-qa-vender]');
+        assert.equal(await page.$('.message-center-page'), null);
+      }
+    }
+    results.push({ centerLayout:[320,360,390,1366], backNavigation:true, availableAndSelected:true, filters:true, invalidPhoneExcluded:true });
     // Real origin quota is exhausted, not just a mocked exception. The new path never calls setItem.
     await clear(80);
     const full=await page.evaluate(()=>{let n=0;try{while(n<100){localStorage.setItem('quota-test-'+n,'x'.repeat(250000));n++}}catch(e){return {code:e.name,keys:n}}});
@@ -119,8 +217,8 @@ async function main() {
     // Desktop uses same engine and native direct gesture button.
     await clear(3);await page.setViewport({width:1280,height:900});await page.evaluate(()=>MobileMessages.openCenter());await click('[data-center-start]');await wait('#sequence-send');
     await click('#sequence-send');await click('[data-sequence-open]');await wait('[data-sequence-confirm]');
-    await page.screenshot({path:path.join(root,'artifacts','sequence-v154-desktop.png')});
-    await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});await wait('[data-sequence-confirm]');await page.screenshot({path:path.join(root,'artifacts','sequence-v154-mobile.png')});
+    await page.screenshot({path:path.join(output,'sequence-v154-desktop.png')});
+    await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});await wait('[data-sequence-confirm]');await page.screenshot({path:path.join(output,'sequence-v154-mobile.png')});
     if(process.env.SEQUENCE_LONG_BACKGROUND==='1'){
       const cdp=await page.createCDPSession();await cdp.send('Page.setWebLifecycleState',{state:'frozen'});
       await new Promise(resolve=>setTimeout(resolve,125000));await cdp.send('Page.setWebLifecycleState',{state:'active'});
