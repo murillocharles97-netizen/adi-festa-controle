@@ -1834,8 +1834,8 @@ const diagnostic = () => {
     orphanOperations: saleIntegrity.count + paymentIntegrity.count,
     saleIntegrity,
     paymentIntegrity,
-    processingOperations: readQueue().filter((item) => item.status === "syncing" && !queueManualReviewReason(item))
-      .length,
+    processingOperations: q.processing || 0,
+    preparingOperations: q.preparing || 0,
     lastAttemptAt: state.lastAttempt,
     lastCompleteSyncAt: state.lastCompleteSync,
     lastSyncAt: state.lastSync,
