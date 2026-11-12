@@ -498,6 +498,32 @@ test('PWA V231 keeps its single-space receipt contract and blocks a mixed accoun
 });
 
 
+test('confirmed opening fences historical cancellation and maintenance atomically',async()=>{
+ const qa=await setup({origin:'one'}),api=openingApi(qa);
+ const saleId='sale-b',operationId='qa-historical-cancel',scope={businessId:qa.businessId,workspaceGeneration:0,spaceId:qa.otherId};
+ await Promise.all([
+  qa.root.collection('sales').doc(saleId).update({...scope,operationId,itens:[{produtoId:'qa-product',quantidade:1}],creditRemainingAmount:70,creditPaidAmount:0,financialAppliedAt:at,data:at}),
+  qa.root.collection('products').doc('qa-product').update({...scope,itemKind:'service',semControleEstoque:true,spaceAccessMode:'single_space',defaultSpaceId:qa.otherId,allowedSpaceIds:[qa.otherId]}),
+  qa.root.collection('balanceEvents').doc('credit_sale:'+saleId).set({...scope,customerId:clientId,sourceCollection:'sales',sourceDocumentId:saleId,type:'credit_sale',operationId,status:'applied',amount:70,balanceDelta:-70,appliedAt:at})
+ ]);
+ const cancel=require('../../functions/src/services/sale-cancellation-service').saleCancellationService(db);
+ const request={auth:qa.auth,data:{...scope,saleId}};
+ const stale=await cancel.preview(request);
+ const reason='Saldo inicial conferido pelo proprietário em QA.';
+ const quote=await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:12000},{spaceId:qa.otherId,totalCents:3000}],reason});
+ await confirmOpening(api,quote,{reason});
+ const snapshot=async()=>Promise.all(['clients','sales','payments','balanceEvents','processedOperations','stockMovements','products','fiadoOpeningBalances'].map(async col=>(await qa.root.collection(col).get()).docs.map(doc=>normalize(doc.data()))));
+ const before=await snapshot();
+ await assert.rejects(cancel.preview(request),error=>error.details?.reason==='fiado-opening-active');
+ await assert.rejects(cancel.confirm({...request,data:{...request.data,...stale,confirmed:true,reason:'Cancelamento antigo sintético.'}}),error=>error.details?.reason==='fiado-opening-active');
+ const maintenance=require('../../functions/src/services/financial-maintenance-service').financialMaintenanceService(db);
+ await assert.rejects(maintenance.commit({auth:qa.auth,data:{businessId:qa.businessId,workspaceGeneration:0,clientId,command:'reconcile_balances',confirmed:true,operationId:randomUUID(),expectedBalance:-150,expectedFinancialVersion:4}}),/saldo de abertura confirmado/);
+ assert.deepEqual(await snapshot(),before);
+ assert.equal((await qa.clientRef.get()).data().saldo,-150);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,12000);
+ assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,3000);
+});
+
 function openingApi(qa,{enabled=true}={}){
  const {createOriginEvidenceHandler}=require('../../functions/src/fiado-origin-evidence-handler');
  const handler=createOriginEvidenceHandler(db,{access:{enabled:true,openingEnabled:enabled,

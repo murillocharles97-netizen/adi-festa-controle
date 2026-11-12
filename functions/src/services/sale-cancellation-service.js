@@ -79,6 +79,7 @@ function saleCancellationService(db,{projectFinancial=null,allowNewCancellations
    const id=validId(s.clienteId||s.customerId,'Cliente'),ref=c.root.collection('clients').doc(id),debitRef=c.root.collection('balanceEvents').doc('credit_sale:'+c.sid);
    const [cs,ds,events]=await Promise.all([tx.get(ref),tx.get(debitRef),tx.get(c.root.collection('balanceEvents').where('customerId','==',id).limit(301))]);
    const value=cs.data();debit=ds.data();
+   if(value?.fiadoOpeningBalance)fail('Esta conta possui saldo de abertura confirmado. O cancelamento antigo não pode alterar a conta nova.','fiado-opening-active');
    if(!scoped(value,c)||!scoped(debit,c)||debit.type!=='credit_sale'||debit.status!=='applied'||debit.sourceDocumentId!==c.sid||String(debit.customerId||debit.clientId)!==id||cents(debit.balanceDelta)!==-amountCents||cents(debit.amount)!==amountCents)fail('O débito original do Fiado não pôde ser comprovado.');
    const debitAt=time(debit.appliedAt||debit.createdAt||s.data);if(!Number.isFinite(debitAt)||events.size>300)fail('Histórico financeiro exige conciliação.');
    if(events.docs.some(d=>{const e=d.data(),at=time(e.appliedAt||e.createdAt);return e.type!=='credit_sale'&&(!Number.isFinite(at)||at>=debitAt);} ))fail('Existem recebimentos, ajustes ou estornos posteriores ou sem data comprovada. É necessária conciliação; eles não serão alterados.','later-customer-financial-event');
