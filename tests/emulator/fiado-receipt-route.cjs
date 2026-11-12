@@ -14,6 +14,10 @@ const readerSource=path.resolve(process.env.VECONI_QA_RECEIPT_READER||'functions
 const writerSource=path.resolve(process.env.VECONI_QA_RECEIPT_WRITER||'functions');
 const readerService=require(path.join(readerSource,'src/services/operational-commit-service'));
 const writerService=require(path.join(writerSource,'src/services/operational-commit-service'));
+// Package QA: point each service at its rebuilt deploy package (defaults to the repo).
+const cancelSource=path.resolve(process.env.VECONI_QA_CANCEL_SOURCE||'functions');
+const maintenanceSource=path.resolve(process.env.VECONI_QA_MAINTENANCE_SOURCE||'functions');
+const centralSource=path.resolve(process.env.VECONI_QA_CENTRAL_SOURCE||'functions');
 const {operationalCallable}=require(path.join(writerSource,'src/shared/operational-callable'));
 const {financialIncomeService}=require('../../functions/src/services/financial-income-service');
 
@@ -508,7 +512,7 @@ test('confirmed opening fences historical cancellation and maintenance atomicall
   qa.root.collection('products').doc('qa-product').update({...scope,itemKind:'service',semControleEstoque:true,spaceAccessMode:'single_space',defaultSpaceId:qa.otherId,allowedSpaceIds:[qa.otherId]}),
   qa.root.collection('balanceEvents').doc('credit_sale:'+saleId).set({...scope,customerId:clientId,sourceCollection:'sales',sourceDocumentId:saleId,type:'credit_sale',operationId,status:'applied',amount:70,balanceDelta:-70,appliedAt:at})
  ]);
- const cancel=require('../../functions/src/services/sale-cancellation-service').saleCancellationService(db);
+ const cancel=require(path.join(cancelSource,'src/services/sale-cancellation-service')).saleCancellationService(db);
  const request={auth:qa.auth,data:{...scope,saleId}};
  const stale=await cancel.preview(request);
  const reason='Saldo inicial conferido pelo proprietário em QA.';
@@ -518,7 +522,7 @@ test('confirmed opening fences historical cancellation and maintenance atomicall
  const before=await snapshot();
  await assert.rejects(cancel.preview(request),error=>error.details?.reason==='fiado-opening-active');
  await assert.rejects(cancel.confirm({...request,data:{...request.data,...stale,confirmed:true,reason:'Cancelamento antigo sintético.'}}),error=>error.details?.reason==='fiado-opening-active');
- const maintenance=require('../../functions/src/services/financial-maintenance-service').financialMaintenanceService(db);
+ const maintenance=require(path.join(maintenanceSource,'src/services/financial-maintenance-service')).financialMaintenanceService(db);
  await assert.rejects(maintenance.commit({auth:qa.auth,data:{businessId:qa.businessId,workspaceGeneration:0,clientId,command:'reconcile_balances',confirmed:true,operationId:randomUUID(),expectedBalance:-150,expectedFinancialVersion:4}}),/saldo de abertura confirmado/);
  assert.deepEqual(await snapshot(),before);
  assert.equal((await qa.clientRef.get()).data().saldo,-150);
@@ -527,7 +531,7 @@ test('confirmed opening fences historical cancellation and maintenance atomicall
 });
 
 function openingApi(qa,{enabled=true}={}){
- const {createOriginEvidenceHandler}=require('../../functions/src/fiado-origin-evidence-handler');
+ const {createOriginEvidenceHandler}=require(path.join(centralSource,'src/fiado-origin-evidence-handler'));
  const handler=createOriginEvidenceHandler(db,{access:{enabled:true,openingEnabled:enabled,
   ownerUid:qa.auth.uid,businessId:qa.businessId,workspaceGeneration:0,adiSpaceId:qa.spaceId,cardSpaceId:qa.otherId}});
  return (action,extra={},auth=qa.auth)=>handler({auth,data:{action,businessId:qa.businessId,
@@ -703,7 +707,7 @@ test('ordinary subscribers create and receive new credit in two spaces without t
  assert.equal((await qa.root.collection('fiadoOpeningBalances').get()).size,0);
 });
 
-async function newCreditSale(qa,spaceId=qa.spaceId){
+async function newCreditSale(qa,spaceId=qa.spaceId,sellOptions){
  const {harness:saleHarness}=require('../helpers/fiado-cancellation-harness.cjs');
  const h=saleHarness({businessId:qa.businessId,spaceId,uid:qa.auth.uid});
  h.data().clientes=[normalize((await qa.clientRef.get()).data())];
@@ -711,11 +715,29 @@ async function newCreditSale(qa,spaceId=qa.spaceId){
  const product={...h.data().produtos[0],...existing,spaceAccessMode:'selected_spaces',allowedSpaceIds:[qa.spaceId,qa.otherId]};
  h.data().produtos=[product];
  await qa.root.collection('products').doc(product.id).set({...product,workspaceGeneration:0});
- const {sale,packet}=h.sell();
+ const {sale,packet}=h.sell(sellOptions);
  const request={auth:qa.auth,data:{businessId:qa.businessId,clientRelease:230,syncProtocolVersion:1,
   item:{...packet,workspaceGeneration:0,status:'pending'}}};
  return {sale,request,h};
 }
+
+test('normal Pix and cash sales commit once, with and without a confirmed opening, and never move the balance',async()=>{
+ const qa=await setup(),api=openingApi(qa);
+ const sell=async method=>{
+  const before=(await qa.clientRef.get()).data(),sale=await newCreditSale(qa,qa.spaceId,{status:'pago',formaPagamento:method});
+  assert.equal((await callCommit(sale.request)).replayed,false);
+  assert.equal((await callCommit(sale.request)).replayed,true);
+  const saved=(await qa.root.collection('sales').doc(sale.sale.id).get()).data(),after=(await qa.clientRef.get()).data();
+  assert.equal(saved.formaPagamento,method);assert.equal(saved.status,'pago');
+  assert.equal(after.saldo,before.saldo);assert.equal(after.financialVersion,before.financialVersion);
+  return saved;
+ };
+ for(const method of ['pix','dinheiro'])assert.equal((await sell(method)).fiadoOpeningHash,undefined);
+ const reason='Saldo final conferido nas anotações do proprietário.';
+ await confirmOpening(api,await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:15000},{spaceId:qa.otherId,totalCents:0}],reason}),{reason});
+ for(const method of ['pix','dinheiro'])await sell(method);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,15000);
+});
 
 test('cutoff rejects old offline credit; new sale and cancellation remain scoped, atomic and idempotent',async()=>{
  const qa=await setup(),api=openingApi(qa),old=await newCreditSale(qa);
@@ -739,7 +761,7 @@ test('cutoff rejects old offline credit; new sale and cancellation remain scoped
  const other=await newCreditSale(qa,qa.otherId);
  assert.equal((await callCommit(other.request)).replayed,false);
  assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,1400);
- const cancel=require('../../functions/src/services/sale-cancellation-service').saleCancellationService(db);
+ const cancel=require(path.join(cancelSource,'src/services/sale-cancellation-service')).saleCancellationService(db);
  const request={auth:qa.auth,data:{businessId:qa.businessId,workspaceGeneration:0,spaceId:qa.spaceId,saleId:fresh.sale.id}};
  const quote=await cancel.preview(request);
  const confirmation={...request,data:{...request.data,...quote,confirmed:true,reason:'Cancelamento sintético após corte.'}};
