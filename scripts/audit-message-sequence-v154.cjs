@@ -85,6 +85,8 @@ async function main() {
           footer: inViewport(footer), available: page.querySelector('[data-center-available-count]').textContent };
       });
       assert.deepEqual(layout, {overflow:false,heading:true,topbar:true,buttons:true,footer:true,available:'2'}, JSON.stringify({width,...layout}));
+      assert.equal(await page.$('.message-center-page [data-message-type]'), null, 'type selector moved to the sequence screen');
+      await page.screenshot({ path: path.join(output, 'center-first-' + width + '.png') });
       if (width === 390) {
         const counts = () => page.evaluate(() => [...document.querySelectorAll('[data-center-available-count], [data-center-selected-count]')].map(node => Number(node.textContent)));
         assert.deepEqual(await counts(), [2, 2]);
@@ -109,8 +111,18 @@ async function main() {
         await page.$eval('#center-min', node => { node.value = ''; });
         await click('[data-center-apply]');
         assert.deepEqual(await counts(), [2, 1]);
-        await click('[data-message-type="notice"]');
-        assert.equal(await page.$('[data-center-selected-total]'), null);
+        await click('[data-center-filters]');
+        await page.select('#center-audience', 'all');
+        await wait('#center-audience');
+        await click('[data-center-apply]');
+        assert.ok((await counts())[0] >= 3, 'all active clients are listed');
+        assert.ok(await page.$('[data-center-selected-total]'), 'selection total stays visible');
+        await click('[data-center-filters]');
+        await page.select('#center-audience', 'debt');
+        await wait('#center-audience');
+        await click('[data-center-apply]');
+        // A new audience is a new list: everyone available is selected again.
+        assert.deepEqual(await counts(), [2, 2]);
       }
       await click('[data-message-center-back]');
       await wait('#mobile-message-center');
@@ -126,6 +138,76 @@ async function main() {
       }
     }
     results.push({ centerLayout:[320,360,390,1366], backNavigation:true, availableAndSelected:true, filters:true, invalidPhoneExcluded:true });
+    for (const width of [320, 360, 390, 1366]) {
+      await clear(4);
+      await page.setViewport({ width, height: width === 320 ? 568 : 844, isMobile: width < 768, hasTouch: width < 768 });
+      await page.evaluate(() => { __whatsappAudit.data.clientes[3].saldo = 0; });
+      await page.evaluate(() => MobileMessages.openCenter()); await click('[data-center-start]'); await wait('#sequence-send');
+      const chips = await page.evaluate(() => {
+        const sheet = document.querySelector('.individual-message-sheet'), list = [...sheet.querySelectorAll('[data-sequence-type]')];
+        const fits = node => { const r = node.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; };
+        return { types: list.map(node => node.textContent), active: sheet.querySelector('[data-sequence-type].active')?.dataset.sequenceType,
+          fit: list.every(fits) && fits(sheet.querySelector('#sequence-template')), height: Math.max(...list.map(node => node.getBoundingClientRect().height)),
+          beforeModel: Boolean(sheet.querySelector('[data-sequence-type] ~ * #sequence-template, .sequence-type-chips + .message-model-field')),
+          overflow: document.documentElement.scrollWidth > innerWidth + 1 };
+      });
+      assert.deepEqual(chips.types, ['Cobrança', 'Campanha', 'Aviso', 'Mensagem'], JSON.stringify({ width, chips }));
+      assert.equal(chips.active, 'charge'); assert.equal(chips.fit, true, JSON.stringify({ width, chips })); assert.equal(chips.overflow, false);
+      assert.equal(chips.beforeModel, true); assert.ok(chips.height >= 32 && chips.height <= 48, JSON.stringify({ width, chips }));
+      await page.screenshot({ path: path.join(output, `center-sequence-${width}.png`) });
+      if (width === 390) {
+        await click('[data-sequence-type="notice"]');
+        await page.waitForFunction(() => document.querySelector('[data-sequence-type="notice"]')?.classList.contains('active'));
+        const notice = await page.evaluate(async () => { const seq = await MessageSequence.active(); return { type: seq.type, ids: seq.selectedCustomerIds.length,
+          models: [...document.querySelectorAll('#sequence-template option')].map(node => node.textContent), title: document.querySelector('.individual-message-sheet h2').textContent }; });
+        assert.equal(notice.type, 'notice'); assert.equal(notice.title, 'Aviso'); assert.ok(notice.models.length >= 1);
+        await click('[data-sequence-type="charge"]');
+        await page.waitForFunction(() => document.querySelector('[data-sequence-type="charge"]')?.classList.contains('active'));
+        const charge = await page.evaluate(async () => (await MessageSequence.active()).selectedCustomerIds);
+        assert.equal(charge.includes('client-3'), false, 'charge keeps only clients with open balance');
+        await click('#sequence-send'); await click('[data-sequence-open]'); await wait('[data-sequence-confirm]');
+        await page.evaluate(() => document.querySelector('[data-sequence-confirm]').click()); await wait('#sequence-send');
+        assert.equal(await page.$eval('[data-sequence-type="campaign"]', node => node.disabled), true, 'type locked after the first message');
+        results.push({ case: 'type and models on the sequence screen', notice: notice.models.length, chargeFiltersZeroBalance: true, lockedAfterFirstSend: true });
+      }
+      await page.evaluate(async () => { const seq = await MessageSequence.active(); if (seq) await MessageSequence.cancel(seq); document.querySelector('#modal').innerHTML = ''; });
+    }
+    // Campanhas: the Central opens with the campaign audience already selected.
+    await clear(6);
+    await page.evaluate(() => MobileMessages.openCenter({ type: 'campaign', clientIds: ['client-1', 'client-4'] }));
+    await wait('[data-center-selected-count]');
+    assert.equal(await page.$eval('[data-center-selected-count]', node => node.textContent), '2');
+    await click('[data-center-start]'); await wait('#sequence-send');
+    const campaign = await page.evaluate(async () => { const seq = await MessageSequence.active(); return { type: seq.type, ids: seq.selectedCustomerIds }; });
+    assert.equal(campaign.type, 'campaign'); assert.deepEqual(campaign.ids.sort(), ['client-1', 'client-4']);
+    await page.evaluate(async () => { await MessageSequence.cancel(await MessageSequence.active()); document.querySelector('#modal').innerHTML = ''; });
+    results.push({ case: 'campaign audience preselected', selected: 2, type: 'campaign' });
+    // Balance: the Central uses the same new-Fiado rule as Clientes/Perfil/Receber.
+    await clear(3);
+    const balance = await page.evaluate(async () => {
+      const id = 'client-1', local = __whatsappAudit.data.clientes.find(c => c.id === id);
+      Object.assign(local, { saldo: -398, fiadoOpeningBalance: { version: 1, hash: 'h1' } }); Object.assign(__canonicalClients.find(c => c.id === id), { saldo: -398, fiadoOpeningBalance: { version: 1, hash: 'h1' } });
+      // Reproduce the bug: on a spaces screen the old origin proof rejected migrated clients.
+      Clientes.scopedScreen = () => true; SpaceContext.viewScope = () => 'adi-scope';
+      let proofCalls = 0; Clientes.confirmSpaceAccount = async () => { proofCalls++; throw Error('Saldo de origem não comprovada'); };
+      let before; try { await Mensagens.refreshCanonicalClient(id); before = 'ok'; } catch (e) { before = e.message; }
+      Clientes.closedOpeningStatus = client => client.fiadoOpeningBalance?.version === 1 ? { saldo: Number(client.saldo), status: 'debt' } : null;
+      const after = await Mensagens.refreshCanonicalClient(id);
+      const text = Mensagens.resolve('Olá {{primeiro_nome}}, saldo {{saldo}}', after);
+      delete Clientes.scopedScreen; delete Clientes.confirmSpaceAccount; delete Clientes.closedOpeningStatus; SpaceContext.viewScope = undefined;
+      return { before, after: after.saldo, proofCallsAfterFix: proofCalls, text };
+    });
+    assert.notEqual(balance.before, 'ok', 'old origin proof reproduced the failure');
+    assert.equal(balance.after, -398); assert.equal(balance.proofCallsAfterFix, 1, 'the fixed path does not call the old proof');
+    assert.match(balance.text, /398,00/);
+    await page.evaluate(() => { const c = __whatsappAudit.data.clientes.find(x => x.id === 'client-1'); delete c.fiadoOpeningBalance; delete __canonicalClients.find(x => x.id === 'client-1').fiadoOpeningBalance; });
+    await page.evaluate(() => MessageSequenceUI.start({ type: 'charge', clientIds: ['client-1'], baseMessage: 'Olá {{primeiro_nome}}, saldo {{saldo}}' }));
+    await wait('#sequence-send');
+    assert.match(await page.$eval('#sequence-preview', node => node.textContent), /398,00/);
+    await click('#sequence-send'); await click('[data-sequence-open]');
+    assert.match(decodeURIComponent(await page.evaluate(() => __whatsappAudit.opened.at(-1))), /saldo R\$\s?398,00/);
+    await page.evaluate(async () => { const seq = await MessageSequence.active(); if (seq) await MessageSequence.cancel(seq); document.querySelector('#modal').innerHTML = ''; });
+    results.push({ case: 'balance rule and {{saldo}}', reproducedOldFailure: balance.before, fixedBalance: 398, preview: true, whatsappUrl: true });
     // Real origin quota is exhausted, not just a mocked exception. The new path never calls setItem.
     await clear(80);
     const full=await page.evaluate(()=>{let n=0;try{while(n<100){localStorage.setItem('quota-test-'+n,'x'.repeat(250000));n++}}catch(e){return {code:e.name,keys:n}}});

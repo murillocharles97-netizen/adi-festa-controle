@@ -80,8 +80,13 @@
     try { client = await currentClient(seq, seq.baseMessage); } catch (caught) { problem = caught.message; }
     if (!scopeMatches(seq)) return;
     const choices = templates(seq.type), local = client || Clientes.obter(seq.currentCustomerId);
+    // The type can change while nothing was sent or skipped yet.
+    const pristine = seq.currentIndex === 0 && !seq.confirmedCount && !seq.skippedCount;
+    const TYPES = [['charge', 'Cobrança'], ['campaign', 'Campanha'], ['notice', 'Aviso'], ['custom', 'Mensagem']];
+    const typeChips = `<nav class="sequence-type-chips" aria-label="Tipo da mensagem">${TYPES.map(([key, label]) =>
+      `<button type="button" data-sequence-type="${key}" aria-pressed="${seq.type === key}" class="${seq.type === key ? 'active' : ''}" ${pristine || seq.type === key ? '' : 'disabled'}>${label}</button>`).join('')}</nav>`;
     const valid = client && Mensagens.validPhone(client);
-    sheet(`<header><div><small>Enviando para ${seq.currentIndex + 1} de ${seq.selectedCustomerIds.length}</small><h2>${esc({ charge: 'Cobrança', campaign: 'Campanha', notice: 'Aviso', custom: 'Mensagem livre' }[seq.type])}</h2></div><button type="button" data-sequence-close aria-label="Fechar">×</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><div><h3>${esc(local?.nome || 'Cliente indisponível')}</h3><p>${esc(local?.telefone)}</p></div>${seq.type === 'charge' && client ? `<strong>${Utils.dinheiro(Math.abs(client.saldo))}<small>em aberto</small></strong>` : ''}</section><p>${seq.confirmedCount} enviados · ${seq.skippedCount} pulados</p><label class="message-model-field">Modelo<select id="sequence-template">${choices.map(item => `<option value="${esc(item.id)}" ${item.id === seq.templateId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><label class="message-text-field">Mensagem<textarea id="sequence-text" rows="9" maxlength="4000">${esc(seq.baseMessage)}</textarea></label><div class="message-variables">${['nome', 'primeiro_nome', 'saldo', 'nome_negocio', 'pix', 'data_atual'].map(name => `<button type="button" data-sequence-variable="${name}">{{${name}}}</button>`).join('')}</div><section class="message-preview"><header>Pré-visualização</header><p id="sequence-preview">${client ? esc(Mensagens.resolve(seq.baseMessage, client)) : ''}</p></section>${problem || !valid ? `<p class="message-phone-error">${esc(problem || 'Telefone inválido — Pular')}</p>` : ''}<p data-sequence-sync-note></p></div><footer><button class="btn btn-light" data-sequence-skip>Pular</button><button class="btn btn-light" data-sequence-end>Encerrar</button><button class="btn btn-whatsapp" id="sequence-send" ${valid && !problem ? '' : 'disabled'}>Enviar no WhatsApp</button></footer>`, 'individual-message-sheet');
+    sheet(`<header><div><small>Enviando para ${seq.currentIndex + 1} de ${seq.selectedCustomerIds.length}</small><h2>${esc({ charge: 'Cobrança', campaign: 'Campanha', notice: 'Aviso', custom: 'Mensagem livre' }[seq.type])}</h2></div><button type="button" data-sequence-close aria-label="Fechar">×</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><div><h3>${esc(local?.nome || 'Cliente indisponível')}</h3><p>${esc(local?.telefone)}</p></div>${seq.type === 'charge' && client ? `<strong>${Utils.dinheiro(Math.abs(client.saldo))}<small>em aberto</small></strong>` : ''}</section><p>${seq.confirmedCount} enviados · ${seq.skippedCount} pulados</p>${typeChips}<label class="message-model-field">Modelo<select id="sequence-template">${choices.map(item => `<option value="${esc(item.id)}" ${item.id === seq.templateId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><label class="message-text-field">Mensagem<textarea id="sequence-text" rows="9" maxlength="4000">${esc(seq.baseMessage)}</textarea></label><div class="message-variables">${['nome', 'primeiro_nome', 'saldo', 'nome_negocio', 'pix', 'data_atual'].map(name => `<button type="button" data-sequence-variable="${name}">{{${name}}}</button>`).join('')}</div><section class="message-preview"><header>Pré-visualização</header><p id="sequence-preview">${client ? esc(Mensagens.resolve(seq.baseMessage, client)) : ''}</p></section>${problem || !valid ? `<p class="message-phone-error">${esc(problem || 'Telefone inválido — Pular')}</p>` : ''}<p data-sequence-sync-note></p></div><footer><button class="btn btn-light" data-sequence-skip>Pular</button><button class="btn btn-light" data-sequence-end>Encerrar</button><button class="btn btn-whatsapp" id="sequence-send" ${valid && !problem ? '' : 'disabled'}>Enviar no WhatsApp</button></footer>`, 'individual-message-sheet');
     let current = seq, editing = Promise.resolve();
     const textarea = $('#sequence-text'), select = $('#sequence-template');
     const saveDraft = () => {
@@ -93,6 +98,23 @@
     textarea.oninput = preview;
     select.onchange = () => { textarea.value = choices.find(item => item.id === select.value)?.content || ''; preview(); };
     root().querySelectorAll('[data-sequence-variable]').forEach(button => button.onclick = () => { textarea.setRangeText(`{{${button.dataset.sequenceVariable}}}`, textarea.selectionStart, textarea.selectionEnd, 'end'); preview(); });
+    root().querySelectorAll('[data-sequence-type]').forEach(button => button.onclick = async () => {
+      const type = button.dataset.sequenceType;
+      if (type === current.type || !pristine || button.disabled) return;
+      root().querySelectorAll('[data-sequence-type]').forEach(item => { item.disabled = true; });
+      try {
+        await editing;
+        let ids = [...current.selectedCustomerIds];
+        if (type === 'charge') ids = ids.filter(id => Number(Clientes.obter(id)?.saldo) < 0);
+        if (!ids.length) { Utils.toast('Nenhum cliente selecionado possui saldo em aberto para cobrança.', true); return composer(current); }
+        const removed = current.selectedCustomerIds.length - ids.length;
+        const template = defaultTemplate(type);
+        await engine().cancel(current);
+        window.MobileMessages?.rememberType?.(type);
+        if (removed) Utils.toast(`${removed} cliente(s) sem saldo em aberto ficaram fora da cobrança.`);
+        await start({ type, clientIds: ids, templateId: template?.id, baseMessage: template?.content || '' });
+      } catch (problem) { error(problem); }
+    });
     action('[data-sequence-close]', async () => { await saveDraft(); close(); });
     action('[data-sequence-skip]', async () => { await saveDraft(); await composer(await engine().advance(current, 'SKIPPED')); });
     action('[data-sequence-end]', async () => { await saveDraft(); finished(await engine().cancel(current)); });

@@ -3,7 +3,8 @@
   const mq=matchMedia('(max-width:767px)'),$=(selector,root=document)=>root.querySelector(selector),$$=(selector,root=document)=>[...root.querySelectorAll(selector)];
   const icon=name=>`<i data-lucide="${name}"></i>`,esc=value=>Utils.escapar(String(value??'')),money=Utils.dinheiro;
   const TYPE_LABELS={charge:'Cobrança',campaign:'Campanha',notice:'Aviso',custom:'Mensagem livre',receipt:'Recebimentos'},PENDING_KEY='adiFestaMessagePendingReturn_v1';
-  const center={type:'charge',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false};
+  const center={type:'charge',audience:'debt',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false};
+  const SEQUENCE_TYPES=['charge','campaign','notice','custom'];
   let returnShown=false,sequenceStarting=false;
   function client(id){return Clientes.obter(id)}
   function typeLabel(type){return TYPE_LABELS[type]||TYPE_LABELS.custom}
@@ -12,7 +13,7 @@
   function setPending(value){try{if(value)sessionStorage.setItem(PENDING_KEY,JSON.stringify(value));else sessionStorage.removeItem(PENDING_KEY)}catch(error){console.error('[WHATSAPP] pending state failed',error)}}
   function getPending(){try{return JSON.parse(sessionStorage.getItem(PENDING_KEY)||'null')}catch{return null}}
   function persistCenter(){return MessageSequence.draft({...center,selected:[...center.selected]}).catch(error=>Utils.toast(MessageSequence.friendly(error),true))}
-  async function restoreCenter(){const saved=await MessageSequence.draft();if(!saved){Object.assign(center,{type:'charge',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false});return false}Object.assign(center,saved,{selected:new Set(saved.selected||[]),initialized:Boolean(saved.initialized)});return true}
+  async function restoreCenter(){const saved=await MessageSequence.draft();if(!saved){Object.assign(center,{type:'charge',audience:'debt',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false});return false}Object.assign(center,saved,{selected:new Set(saved.selected||[]),initialized:Boolean(saved.initialized)});if(!['debt','all'].includes(center.audience))center.audience=center.type==='charge'?'debt':'all';if(center.type==='receipt')center.type='charge';return true}
   function templateOptions(type,selected){return Mensagens.templates(type).map(item=>`<option value="${esc(item.id)}" ${item.id===selected?'selected':''}>${esc(item.name)}${item.isDefault?' · padrão':''}</option>`).join('')}
   function variableButtons(){return['nome','primeiro_nome','saldo','ultima_cobranca','nome_negocio','pix','data_atual'].map(name=>`<button type="button" data-message-variable="${name}">{{${name}}}</button>`).join('')}
   function duplicateWarning(clientId,continuation){const c=client(clientId),root=$('#modal');root.innerHTML=`<div class="message-overlay"><section class="message-confirm-sheet" role="dialog" aria-modal="true" aria-labelledby="charge-repeat-title"><div class="sheet-handle"></div>${icon('message-circle-warning')}<h3 id="charge-repeat-title">Cliente já cobrado hoje</h3><p>${esc(c.nome)} já possui uma cobrança registrada hoje. Deseja cobrar novamente?</p><div><button class="btn btn-light" data-repeat-cancel>Cancelar</button><button class="btn btn-primary" data-repeat-confirm>Cobrar novamente</button></div></section></div>`;$('[data-repeat-cancel]',root).onclick=close;$('[data-repeat-confirm]',root).onclick=()=>continuation();window.lucide?.createIcons()}
@@ -42,7 +43,8 @@
     preview();setTimeout(()=>textarea.focus(),80);window.lucide?.createIcons();
   }
   function centerClients() {
-    const charge = center.type === 'charge';
+    // The list only decides WHO; the message type is chosen on the next screen.
+    const charge = center.audience === 'debt';
     const data = Clientes.viewData?.() || DB.readForView?.() || DB.carregar();
     const candidates = (data.clientes || []).filter(item =>
       item.ativo !== false && item.active !== false && !item.deletedAt && (!charge || Number(item.saldo) < 0));
@@ -83,6 +85,7 @@
     return `<header class="message-center-header">
       <button type="button" data-message-center-back>${icon('arrow-left')}<span>Voltar para Clientes</span></button>
       <h2 tabindex="-1">Central de mensagens</h2>
+      ${window.ReceiptMessages?.canUse?.() || window.ReceiptMessages?.canManage?.() ? `<button type="button" class="message-center-receipts" data-open-receipt-center>${icon('receipt')}<span>Modelos de recibo</span></button>` : ''}
     </header>`;
   }
 
@@ -96,7 +99,7 @@
   function renderCenter(roster) {
     if (center.type === 'receipt') return renderReceiptCenter();
     const { listed, available, ids, withoutPhone, chargedToday, lastCharges } = roster;
-    const charge = center.type === 'charge';
+    const charge = center.audience === 'debt';
     if (!center.initialized) {
       center.selected = new Set(ids);
       center.initialized = true;
@@ -111,13 +114,13 @@
     ].filter(Boolean).join(' · ');
     return `<section class="message-center-page">
       ${centerHeader()}
-      ${centerTabs()}
+      <p class="message-center-audience">${charge ? 'Clientes com saldo em aberto' : 'Todos os clientes ativos'} · tipo e modelo na próxima etapa</p>
       <div class="message-center-kpis" aria-live="polite">
         <article><strong data-center-available-count>${available.length}</strong><span>Disponíveis</span></article>
         <article><strong data-center-selected-count>${count}</strong><span>Selecionados</span></article>
       </div>
       ${exclusions ? `<p class="message-center-note">${exclusions}</p>` : ''}
-      ${charge ? '<p class="message-center-note" data-center-selected-total></p>' : ''}
+      <p class="message-center-note" data-center-selected-total></p>
       <div class="message-center-controls">
         <button type="button" data-center-toggle-all ${available.length ? '' : 'disabled'}>${count === available.length && count > 0 ? 'Desmarcar todos' : 'Selecionar todos'}</button>
         <button type="button" data-center-filters>${icon('list-filter')} Filtros</button>
@@ -144,7 +147,7 @@
       </footer>
     </section>`;
   }
-  function renderReceiptCenter(){return `<section class="message-center-page">${centerHeader()}${centerTabs()}<div class="receipt-model-heading"><h2>Recebimentos</h2>${ReceiptMessages.canManage()?'<button class="btn btn-primary" type="button" data-receipt-new-model>Novo modelo</button>':''}</div><p class="receipt-model-help">Mensagens individuais liberadas somente após o recibo remoto e a conferência do saldo. Abra o recebimento em Clientes ou Fiado para compartilhar. Esta categoria não participa de disparos em massa.</p><div class="receipt-template-list">${ReceiptMessages.list().map(t=>`<article class="receipt-template-card"><h3>${esc(t.name)}</h3><small>${t.receiptKind==='total'?'Saldo quitado':'Saldo em aberto'}${t.isDefault?' · Modelo padrão':''}</small><p>${esc(t.content)}</p>${ReceiptMessages.canManage()?`<button class="btn btn-light" type="button" data-receipt-edit-model="${esc(t.id)}">Editar modelo</button>`:''}</article>`).join('')}</div>${ReceiptMessages.canManage()?'':'<p>Somente o gestor autorizado pode alterar os modelos da empresa.</p>'}</section>`;}
+  function renderReceiptCenter(){return `<section class="message-center-page">${centerHeader()}${Mensagens.canSend()?`<button type="button" class="message-center-back-selection" data-back-selection>${icon('arrow-left')} Voltar à seleção de clientes</button>`:''}<div class="receipt-model-heading"><h2>Recebimentos</h2>${ReceiptMessages.canManage()?'<button class="btn btn-primary" type="button" data-receipt-new-model>Novo modelo</button>':''}</div><p class="receipt-model-help">Mensagens individuais liberadas somente após o recibo remoto e a conferência do saldo. Abra o recebimento em Clientes ou Fiado para compartilhar. Esta categoria não participa de disparos em massa.</p><div class="receipt-template-list">${ReceiptMessages.list().map(t=>`<article class="receipt-template-card"><h3>${esc(t.name)}</h3><small>${t.receiptKind==='total'?'Saldo quitado':'Saldo em aberto'}${t.isDefault?' · Modelo padrão':''}</small><p>${esc(t.content)}</p>${ReceiptMessages.canManage()?`<button class="btn btn-light" type="button" data-receipt-edit-model="${esc(t.id)}">Editar modelo</button>`:''}</article>`).join('')}</div>${ReceiptMessages.canManage()?'':'<p>Somente o gestor autorizado pode alterar os modelos da empresa.</p>'}</section>`;}
   let clientListScroll = 0;
 
   async function openCenter(options = {}) {
@@ -160,6 +163,11 @@
         window.ClientesMobile?.cancelPending?.();
       }
       if (options.type === 'receipt' || !Mensagens.canSend()) center.type = 'receipt';
+      else if (Array.isArray(options.clientIds)) {
+        // Coming from Campanhas: open with that audience already selected.
+        Object.assign(center, { type: SEQUENCE_TYPES.includes(options.type) ? options.type : 'campaign', audience: 'all', days: 'todos', min: '', max: '',
+          selected: new Set(options.clientIds.map(String)), initialized: true });
+      } else if (center.type === 'receipt') center.type = 'charge';
       refreshCenter();
       $('#title').textContent = 'Mensagens';
       $('#date').textContent = '';
@@ -201,12 +209,16 @@
         <header><h3 id="center-filters-title">Filtros da Central</h3>
           <button type="button" data-message-close aria-label="Fechar filtros">${icon('x')}</button>
         </header>
+        <label>Saldo<select id="center-audience">
+          <option value="debt">Com saldo em aberto</option>
+          <option value="all">Todos os clientes ativos</option>
+        </select></label>
         <label>Ordenação<select id="center-sort">
           <option value="maior">Maior dívida primeiro</option>
           <option value="menor">Menor dívida</option>
           <option value="nome">Nome A–Z</option>
         </select></label>
-        ${center.type === 'charge' ? `
+        ${center.audience === 'debt' ? `
           <label>Última cobrança<select id="center-days">
             <option value="todos">Todos os períodos</option>
             <option value="nunca">Nunca cobrados</option>
@@ -221,6 +233,8 @@
       </section>
     </div>`;
     $('#center-sort', root).value = center.sort;
+    $('#center-audience', root).value = center.audience;
+    $('#center-audience', root).onchange = event => { if (event.target.value !== center.audience) { center.audience = event.target.value; center.initialized = false; close(); refreshCenter(); filterSheet(); } };
     if ($('#center-days', root)) $('#center-days', root).value = center.days;
     $('[data-message-close]', root).onclick = () => {
       close();
@@ -229,7 +243,7 @@
     $('[data-center-apply]', root).onclick = () => {
       const min = ($('#center-min', root)?.value || '').trim().replace(',', '.');
       const max = ($('#center-max', root)?.value || '').trim().replace(',', '.');
-      if (center.type === 'charge') {
+      if (center.audience === 'debt') {
         if ([min, max].some(value => value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0)) ||
             min !== '' && max !== '' && Number(min) > Number(max)) {
           Utils.toast('Informe uma faixa de valores válida.', true);
@@ -255,8 +269,8 @@
     const total = $('[data-center-selected-total]', page);
     if (total) {
       const cents = available.filter(item => center.selected.has(item.id))
-        .reduce((sum, item) => sum + Math.round(Math.abs(Number(item.saldo)) * 100), 0);
-      total.textContent = `Saldo cadastral da seleção: ${money(cents / 100)}`;
+        .reduce((sum, item) => sum + Math.max(0, Math.round(-Number(item.saldo) * 100)), 0);
+      total.textContent = `Saldo em aberto da seleção: ${money(cents / 100)}`;
     }
     const toggle = $('[data-center-toggle-all]', page);
     toggle.textContent = count === ids.size && count > 0 ? 'Desmarcar todos' : 'Selecionar todos';
@@ -270,6 +284,8 @@
       button.onclick = () => ReceiptMessageUI.editor(button.dataset.receiptEditModel, { onSaved: refreshModels });
     });
     $('[data-receipt-new-model]', page)?.addEventListener('click', () => ReceiptMessageUI.editor(null, { onSaved: refreshModels }));
+    $('[data-open-receipt-center]', page)?.addEventListener('click', () => { center.type = 'receipt'; refreshCenter(); });
+    $('[data-back-selection]', page)?.addEventListener('click', () => { center.type = center.audience === 'debt' ? 'charge' : 'campaign'; refreshCenter(); });
     $$('[data-message-type]', page).forEach(button => {
       button.onclick = () => {
         const type = button.dataset.messageType;
@@ -318,7 +334,7 @@
       refreshCenter();
       return Utils.toast('Selecione ao menos um cliente com telefone válido.', true);
     }
-    const type = center.type, button = $('[data-center-start]'), scope = window.SpaceContext?.viewScope?.();
+    const type = SEQUENCE_TYPES.includes(center.type) && (center.audience === 'debt' || center.type !== 'charge') ? center.type : (center.audience === 'debt' ? 'charge' : 'campaign'), button = $('[data-center-start]'), scope = window.SpaceContext?.viewScope?.();
     sequenceStarting = true;
     if (button) {
       button.disabled = true;
@@ -343,5 +359,6 @@
   }
   function showReturn(){if($('#modal .receipt-message-dialog'))return;const pending=getPending();if(pending?.sequenceId)return MessageSequenceUI.resume({explicit:true});if($('#modal [data-sequence-layer]'))return;if(!pending||returnShown||document.visibilityState!=='visible')return;returnShown=true;console.info('[SEQUENCE] waiting for next');const root=$('#modal'),c=client(pending.clientId);root.innerHTML=`<div class="message-overlay"><section class="message-return-sheet" role="dialog" aria-modal="true"><div class="message-success-icon">${icon('check')}</div><h2>Mensagem preparada</h2><p>A conversa de <b>${esc(pending.clientName||c?.nome)}</b> foi aberta no WhatsApp.</p><small>O app não consegue confirmar o envio dentro do WhatsApp.</small><button class="btn btn-primary" type="button" data-return-next>${pending.sequenceId?'Marcar enviado e próximo':'Concluir'}</button><button class="btn btn-light" type="button" data-return-reopen>Reabrir mensagem</button><button class="btn btn-light" type="button" data-return-not-sent>Marcar como não enviado</button></section></div>`;$('[data-return-reopen]',root).onclick=()=>{const opened=Mensagens.openWhatsApp(pending.url,{mobile:true});if(!opened.opened)Utils.toast('O navegador bloqueou o WhatsApp.',true)};$('[data-return-next]',root).onclick=()=>{setPending(null);returnShown=false;close();refreshClients()};$('[data-return-not-sent]',root).onclick=()=>{Mensagens.markNotSent(pending.messageId);setPending(null);returnShown=false;close();refreshClients()};window.lucide?.createIcons()}
   window.AppLifecycle?.onResume?.(()=>new Promise(resolve=>setTimeout(()=>{showReturn();resolve()},180)));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(showReturn,180)});addEventListener('focus',()=>setTimeout(showReturn,180));setTimeout(showReturn,0);document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#modal .individual-message-sheet'))close()});
-  window.MobileMessages={openComposer,openCenter,refreshCenter,showReturn,startSequence,formatLastChargeDate:Mensagens.formatLastChargeDate};
+  function rememberType(type){if(SEQUENCE_TYPES.includes(type)){center.type=type;persistCenter();}}
+  window.MobileMessages={openComposer,openCenter,refreshCenter,showReturn,startSequence,rememberType,formatLastChargeDate:Mensagens.formatLastChargeDate};
 })();

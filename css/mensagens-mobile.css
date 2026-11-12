@@ -269,3 +269,59 @@
   .message-center-filter .message-filter-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .message-center-filter .message-filter-check { display: flex; align-items: center; }
 }
+
+/* Central v2: type and models live on the sequence screen; first screen is selection only. */
+.message-center-audience {
+  margin: -4px 0 0;
+  color: var(--veconi-text-muted, #52637a);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.message-center-receipts,
+.message-center-back-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--veconi-border, #dbe2e9);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--veconi-text, #243c58);
+  font-size: 12px;
+  font-weight: 750;
+  justify-self: start;
+}
+.message-center-receipts svg,
+.message-center-back-selection svg { width: 15px; flex: 0 0 15px; }
+.sequence-type-chips {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 12px;
+  padding: 3px;
+  border: 1px solid var(--veconi-border, #dbe2e9);
+  border-radius: 12px;
+  background: #f4f7f9;
+}
+.sequence-type-chips button {
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--veconi-text, #243c58);
+  font-size: clamp(11px, 3.4vw, 12.5px);
+  font-weight: 750;
+  line-height: 1.15;
+  white-space: nowrap;
+  letter-spacing: -.1px;
+}
+.sequence-type-chips button.active {
+  background: #007b68;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+.sequence-type-chips button:disabled:not(.active) { opacity: .45; }
+.sequence-type-chips + .message-model-field { margin-top: 10px; }

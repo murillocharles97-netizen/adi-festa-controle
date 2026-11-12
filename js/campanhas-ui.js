@@ -551,7 +551,15 @@
     $$('[data-detail-tab]').forEach((button) => button.onclick = () => { state.detailTab = button.dataset.detailTab; state.participantPage = 1; refresh(); });
     $$('[data-participant-filter]').forEach((button) => button.onclick = () => { state.participantFilter = button.dataset.participantFilter; state.participantPage = 1; refresh(); });
     $$('[data-campaign-attention]').forEach((button) => button.onclick = () => { state.detailTab = "participants"; state.participantFilter = button.dataset.campaignAttention; state.participantPage = 1; refresh(); });
-    $$('[data-campaign-reminder],[data-campaign-group-action]').forEach((button) => button.onclick = () => { state.detailTab = "participants"; state.participantFilter = button.matches('[data-campaign-reminder]') ? "stalled" : "close"; refresh(); setTimeout(() => Utils.toast('Selecione os clientes e use as ações do CRM.'), 0); });
+    // Lembrete: abre a Central de mensagens com o público da campanha já selecionado.
+    $$('[data-campaign-reminder]').forEach((button) => button.onclick = () => {
+      const campaign = Campanhas.obter(state.detailId);
+      if (!campaign || !window.MobileMessages?.openCenter) return;
+      const clientIds = Campanhas.elegiveis(campaign, DB.carregar()).filter((client) => client.ativo !== false && client.active !== false && !client.deletedAt).map((client) => client.id);
+      if (!clientIds.length) return Utils.toast('Nenhum cliente elegível para esta campanha.', true);
+      window.MobileMessages.openCenter({ type: 'campaign', clientIds });
+    });
+    $$('[data-campaign-group-action]').forEach((button) => button.onclick = () => { state.detailTab = "participants"; state.participantFilter = button.matches('[data-campaign-reminder]') ? "stalled" : "close"; refresh(); setTimeout(() => Utils.toast('Selecione os clientes e use as ações do CRM.'), 0); });
     $$('[data-participant-page]').forEach((button) => button.onclick = () => { if (button.disabled) return; state.participantPage = Number(button.dataset.participantPage); refresh(); });
     $("#campaign-client-search")?.addEventListener("input", (event) => { state.participantQuery = event.target.value; state.participantPage = 1; clearTimeout(state.participantSearchTimer); state.participantSearchTimer = setTimeout(refresh, 160); });
     bindMetricCarousel();

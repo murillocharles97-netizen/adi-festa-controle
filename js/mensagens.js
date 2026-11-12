@@ -62,7 +62,7 @@ window.Mensagens=(()=>{
       const result=await window.SyncFirebase.readCanonicalClient(id,options),client=result?.client;
       if(!client||!Number.isFinite(Number(client.saldo)))throw Object.assign(Error('Resposta canônica sem saldo válido.'),{code:'canonical-balance-missing',stage:'canonical-response'});
       console.info('[CHARGE] confirmed balance',Number(client.saldo));
-      if(spaceScope||window.InstallmentCredit?.has(id)){const account=spaceScope?await window.Clientes.confirmSpaceAccount(id,spaceScope):await window.InstallmentCredit.refresh(id);return {...client,saldo:-account.dueCents/100};}
+      const closedStatus=window.Clientes?.closedOpeningStatus?.({...local,...client});if(closedStatus){console.info('[CHARGE] new Fiado balance',closedStatus.saldo);return {...client,saldo:closedStatus.saldo}}if(spaceScope||window.InstallmentCredit?.has(id)){const account=spaceScope?await window.Clientes.confirmSpaceAccount(id,spaceScope):await window.InstallmentCredit.refresh(id);return {...client,saldo:-account.dueCents/100};}
       return client;
     }catch(error){const code=String(error?.code||'unknown').replace(/^firestore\//,'');console.error('[CHARGE ERROR]',{code,message:String(error?.message||'Falha desconhecida.'),stage:error?.stage||'canonical-client-read',businessId,customerId:id});const visible=Error(code==='fiado-space-unverified'?error.message:canonicalBalanceErrorMessage(error));visible.code=code;visible.stage=error?.stage||'canonical-client-read';throw visible}
   }

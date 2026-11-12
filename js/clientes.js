@@ -249,5 +249,5 @@ window.Clientes=(()=>{
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
     });
-  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();
