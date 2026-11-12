@@ -9,16 +9,23 @@ window.InstallmentCredit = (() => {
     const clients = data.clientes, sales = data.vendas;
     if (index && index.clients === clients && index.sales === sales && index.clientCount === clients?.length && index.saleCount === sales?.length) return index;
     const byId = new Map((clients || []).map(client => [client.id, client]));
-    const withInstallments = new Set();
+    const withInstallments = new Set(), newInstallments = new Map();
     for (const sale of sales || []) {
-      if (sale.installmentPlan && !sale.deletedAt && sale.active !== false && !sale.desfeita && !sale.cancelledAt)
+      if (sale.installmentPlan && !sale.deletedAt && sale.active !== false && !sale.desfeita && !sale.cancelledAt) {
         withInstallments.add(sale.clienteId);
+        if (sale.fiadoOpeningHash) newInstallments.set(sale.clienteId, (newInstallments.get(sale.clienteId) || new Set()).add(sale.fiadoOpeningHash));
+      }
     }
-    return index = {clients, sales, clientCount: clients?.length, saleCount: sales?.length, byId, withInstallments};
+    return index = {clients, sales, clientCount: clients?.length, saleCount: sales?.length, byId, withInstallments, newInstallments};
   }
   function has(id, data = DB.carregar()) {
     if (!id) return false;
-    const {byId, withInstallments} = accountIndex(data), client = byId.get(id);
+    const {byId, withInstallments, newInstallments} = accountIndex(data), client = byId.get(id);
+    // Closed legacy Fiado: only installments created after the opening need the
+    // server calendar; the archived history and its flags no longer do.
+    const opening = client?.fiadoOpeningBalance;
+    if (opening?.version === 1 && window.Clientes?.legacyFiadoClosed?.())
+      return Boolean(client.hasInstallmentFiado || newInstallments.get(id)?.has(opening.hash));
     return Boolean(client?.hasInstallmentFiado || client?.fiadoHistoryVersion === 1 || withInstallments.has(id));
   }
   const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.(),window.SpaceContext?.viewScope?.()]);

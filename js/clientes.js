@@ -17,6 +17,21 @@ window.Clientes=(()=>{
     return context?.businessId === 'adi-festa' && DB.getBusinessId() === context.businessId &&
       marker?.version === 1 && marker.state === 'complete';
   }
+  // Closed legacy Fiado: a valid opening is the whole account. The client record
+  // holds opening + new operations (written by the server), so the screen shows it
+  // directly — no origin review, legacy recount or proof round trip. Only a NEW
+  // installment sale or a NEW Fiado sale outside Adi Festa still uses server proof.
+  function closedOpeningStatus(client) {
+    const opening = client?.fiadoOpeningBalance, adi = 'business_adi-festa';
+    if (!legacyFiadoClosed() || opening?.version !== 1 || typeof opening.hash !== 'string' || client.customerDirectoryOnly) return null;
+    if (window.InstallmentCredit?.has?.(client.id)) return null;
+    const foreign = (baseView().vendas || []).some(s => (s.clienteId || s.clientId) === client.id && s.fiadoOpeningHash === opening.hash &&
+      s.formaPagamento === 'fiado' && !s.deletedAt && s.active !== false && (s.spaceId || s.financialSpaceId || adi) !== adi);
+    const space = window.SpaceContext?.activeId?.();
+    if (foreign || scopedScreen() && space && space !== adi) return null;
+    const saldo = Math.round((Number(client.saldo) || 0) * 100) / 100;
+    return {saldo, futureCents: 0, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero', debt: Math.max(0, -saldo), credit: Math.max(0, saldo)};
+  }
   function listBalances(data = baseView()) {
     const context = window.SpaceContext, bid = DB.getBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
     const selected = context?.activeId?.(), closed = legacyFiadoClosed(), minute = Math.floor(Date.now() / 60000);
@@ -115,6 +130,8 @@ window.Clientes=(()=>{
     const state = listBalances(); let dueCents = 0, futureCents = 0, debtors = 0, unknown = 0;
     for (const client of baseView().clientes || []) {
       if (client.ativo === false || client.active === false || client.deletedAt) continue;
+      const closed = closedOpeningStatus(client);
+      if (closed) { if (state.selected === 'business_adi-festa') { dueCents += Math.round(closed.debt * 100); debtors += Number(closed.debt > 0); } continue; }
       const a = state.accounts.get(client.id); if (!a) continue;
       const p = a.parts.get(state.selected);
       if (p) { dueCents += p.dueCents; futureCents += p.futureCents; debtors += Number(p.dueCents > 0); }
@@ -160,6 +177,8 @@ window.Clientes=(()=>{
   }
   function listFinancialStatus(client) {
     if (client?.customerDirectoryOnly) return financialStatus(client);
+    const closed = closedOpeningStatus(client);
+    if (closed) return closed;
     if (localListBalances()) {
       const state = listBalances(), account = state.accounts.get(client?.id), p = account?.parts.get(state.selected);
       if (!account || account.calendarUnknown || (!p || p.dueCents + p.futureCents === 0) && account.unknownCents) return unknown();
@@ -175,6 +194,8 @@ window.Clientes=(()=>{
     if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
       return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
     const account = (window.InstallmentCredit?.confirmedAccount || window.InstallmentCredit?.account)?.(client?.id);
+    const closed = !account && closedOpeningStatus(client);
+    if (closed) return closed;
     if (scoped) {
       if (account && !accountBelongsTo(account, window.SpaceContext?.activeId?.())) return unknown(spaceAccountMessage);
       if (!account && (Number(client?.saldo) !== 0 || window.InstallmentCredit?.has?.(client?.id))) return unknown();
