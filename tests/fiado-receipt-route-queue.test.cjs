@@ -63,6 +63,9 @@ test('writer capability must come from the active company and protected protocol
   await f.s.assertFiadoReceiptWriter('adi-festa',0);
   assert.equal(f.calls[0].data.syncProtocolVersion,1);
   assert.equal(f.calls[0].data.clientRelease,230);
+  await assert.rejects(f.s.assertFiadoReceiptWriter('adi-festa',0,1),{code:'fiado-writer-unavailable'});
+  f.s.FirebaseCallable=async()=>({data:{businessId:'adi-festa',workspaceGeneration:0,fiadoReceiptRouteVersion:1,fiadoScopedReceiptVersion:1}});
+  await f.s.assertFiadoReceiptWriter('adi-festa',0,1);
   f.s.FirebaseCallable=async()=>({data:{businessId:'adi-festa',workspaceGeneration:0,protocolVersion:1}});
   await assert.rejects(f.s.assertFiadoReceiptWriter('adi-festa',0),{code:'fiado-writer-unavailable'});
   f.s.FirebaseCallable=async()=>({data:{businessId:'adi-festa',workspaceGeneration:1,fiadoReceiptRouteVersion:1}});

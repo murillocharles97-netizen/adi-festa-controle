@@ -3,6 +3,7 @@
 const {HttpsError}=require('firebase-functions/v2/https');
 const {validId}=require('./workspace-reset-policy');
 const {operationalId}=require('../shared/operational-id');
+const {decideReceiptRoute}=require('./fiado-receipt-route');
 const deny=message=>{throw new HttpsError('permission-denied',message);};
 const iso=value=>value?.toDate?.().toISOString()||value||null;
 const money=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isSafeInteger(Math.round(value*100));
@@ -15,7 +16,7 @@ async function paymentConfirmationRead({tx,c,d,ref,now=new Date()}){
   const p=(await tx.get(ref(c.bid,'payments',paymentId))).data();
   if(!p)return{confirmed:false,status:'awaiting_confirmation'};
   if(p.businessId!==c.bid||(p.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)||p.operationId!==operationId||(p.clienteId||p.customerId)!==clientId)deny('O recebimento não corresponde à empresa, cliente ou operação.');
-  await c.space(p.spaceId);
+  const space=await c.space(p.spaceId);
   const eventId='payment_received:'+paymentId;
   const [markerSnapshot,eventSnapshot,clientSnapshot,settingsSnapshot]=await Promise.all([
     tx.get(ref(c.bid,'processedOperations',operationId)),tx.get(ref(c.bid,'balanceEvents',eventId)),
@@ -29,13 +30,24 @@ async function paymentConfirmationRead({tx,c,d,ref,now=new Date()}){
   if(!confirmed)return{confirmed:false,status:['conflict','cancelled','reversed'].includes(p.status)?'requires_review':'awaiting_confirmation'};
   if(!client||client.businessId!==c.bid||(client.workspaceGeneration??0)!==generation||!money(client.saldo)||!Number.isSafeInteger(client.financialVersion)||client.financialVersion<0)
     return{confirmed:false,status:'balance_unconfirmed'};
-  const businessName=String(settings.nome||c.business.name||c.business.nome||'').trim();
+  const scope=marker.fiadoReceiptScope;
+  let account;
+  if(scope!==undefined){
+    if(scope?.version!==1||scope.spaceId!==p.spaceId||p.financialSpaceId!==p.spaceId||
+      (event.spaceId||event.financialSpaceId)!==p.spaceId||event.spaceId&&event.financialSpaceId&&event.spaceId!==event.financialSpaceId)
+      return{confirmed:false,status:'requires_review'};
+    const route=await decideReceiptRoute({tx,c,ref,clientId,spaceId:p.spaceId,now,forConfirmation:true});
+    if(route.scopedReceiptVersion!==1)return{confirmed:false,status:'balance_unconfirmed'};
+    account=route.scopedAccount;
+  }else{
+    account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId,now,historyProofVersion:d.fiadoHistoryVersion===1?1:0});
+  }
+  const businessName=String((scope?space.name||space.nome:settings.nome||c.business.name||c.business.nome)||'').trim();
   if(!businessName||!String(client.nome||'').trim())return{confirmed:false,status:'identity_unconfirmed'};
-  const account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId,now,historyProofVersion:d.fiadoHistoryVersion===1?1:0});
   return{confirmed:true,status:'confirmed',businessId:c.bid,workspaceGeneration:generation,paymentId,operationId,clientId,spaceId:p.spaceId,
     amount:p.valor,paymentDate:iso(p.data||p.createdAt||p.financialAppliedAt),paymentMethod:p.paymentMethod||'other',
     appliedAt:iso(p.financialAppliedAt),balance:account?-account.dueCents/100:client.saldo,...(account?{futureAmount:account.futureCents/100,totalOutstanding:account.totalCents/100,balanceMeaning:'due_now'}:{}),financialVersion:client.financialVersion,checkedAt:new Date().toISOString(),
-    businessName,clientName:String(client.nome),phone:String(client.telefone||''),
+    ...(scope?{balanceScope:'space'}:{}),businessName,clientName:String(client.nome),phone:String(client.telefone||''),
     // Only this category is exposed; no settings, financial lists or other clients.
     templates:Array.isArray(settings.receiptMessageTemplates)?settings.receiptMessageTemplates.filter(t=>t&&t.type==='receipt'&&t.active!==false).map(t=>({id:t.id,name:t.name,type:'receipt',receiptKind:t.receiptKind,content:t.content,isDefault:t.isDefault===true})):[],
   };

@@ -890,14 +890,14 @@ function assertFiadoReceiptQueueClear(clientId) {
   if((DB.carregar().pagamentos||[]).some(p=>[p.clienteId,p.clientId,p.customerId].includes(clientId)&&
     !p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)&&!resolved.has(String(p.operationId||p.id))))fail();
 }
-async function assertFiadoReceiptWriter(businessId,workspaceGeneration) {
+async function assertFiadoReceiptWriter(businessId,workspaceGeneration,scopedReceiptVersion) {
   if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')
     throw Error('Conecte-se para confirmar o recebimento com segurança.');
   assertSyncProtocolBundle();
   const reply=await window.FirebaseCallable('commitOperationalSync',{kind:'sync_protocol',businessId,workspaceGeneration,
     syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release)});
   const result=reply.data??reply;
-  if(result?.fiadoReceiptRouteVersion!==1||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration)
+  if(result?.fiadoReceiptRouteVersion!==1||scopedReceiptVersion===1&&result.fiadoScopedReceiptVersion!==1||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration)
     throw Object.assign(Error('O servidor ainda não confirmou a versão segura de recebimentos. Tente novamente mais tarde.'),{code:'fiado-writer-unavailable'});
 }
 function saleQueueRequiresReview(item) {
@@ -2806,7 +2806,7 @@ async function commitQueueItem(item) {
   if(!preflight.ok)throw Object.assign(Error(preflight.message),{code:preflight.code,
     ...(queueSettingsDiagnostic(item) ? {syncDetail:{...queueSettingsDiagnostic(item),service:"Firestore",request:"queue_preflight"}} : {})});
   if(item.payload?.fiadoReceiptRoute!==undefined){
-    await assertFiadoReceiptWriter(item.businessId,item.workspaceGeneration??0);
+    await assertFiadoReceiptWriter(item.businessId,item.workspaceGeneration??0,item.payload.fiadoReceiptRoute?.scopedReceiptVersion);
     assertSession();
     window.WorkspaceRuntime.capture();
   }

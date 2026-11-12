@@ -154,7 +154,7 @@ strong, h1, h2, h3 { font-weight: 700; }
 .origin-choice input:focus-visible + span { outline: 3px solid #008978; outline-offset: 2px; }
 .note-label { display: grid; gap: 5px; margin-top: 10px; }
 .note-label span { font-weight: 450; color: var(--muted); }
-.note-label textarea {
+.note-label textarea, .note-label input[data-opening-space] {
   resize: vertical; min-height: 54px; width: 100%; border-radius: 8px; border: 1px solid var(--line);
   background: #fbfdfd; color: var(--ink); padding: 8px 9px; font-size: 12px; line-height: 1.4;
 }

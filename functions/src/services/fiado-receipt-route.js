@@ -8,6 +8,7 @@ const {prove}=require('../shared/fiado-history-proof');
 const Plan=require('../shared/installment-plan');
 const {restricted}=require('../shared/operational-privacy-policy');
 const {readHistoryInput}=require('./fiado-history-service');
+const Opening=require('../shared/fiado-opening-balance');
 
 const active=row=>row.active!==false&&!row.deletedAt&&!row.cancelledAt&&!row.desfeita;
 const owns=(row,bid,generation)=>row&&(!row.businessId||row.businessId===bid)&&(row.workspaceGeneration??0)===generation;
@@ -23,21 +24,23 @@ const salesSpace=space=>space.status!=='archived'&&
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const pending=row=>['pending','pending_sync','conflict','error','adjustment_required','not_applied','manual_review','quarantined'].includes(row.status)||
   ['pending','not_applied','conflict','adjustment_required'].includes(row.applicationStatus);
+const origin=row=>row.spaceId||row.financialSpaceId||null;
 const closed=row=>!row.financialAppliedAt&&(['cancelled','superseded'].includes(row.status)||
   row.status==='confirmed'&&row.applicationStatus==='superseded_by_confirmation'&&!!row.resolutionOperationId);
 
-function checkEvidence({businessId,generation,client,collections},day,scheduled){
+function checkEvidence({businessId,generation,client,collections,opening},day,scheduled){
   const {sales,payments,balanceAdjustments,balanceEvents,paymentAllocations,processedOperations}=collections;
-  if(payments.some(pending))return 'pending_payment';
-  const sourceRows=[...sales,...payments,...balanceAdjustments,...balanceEvents,...paymentAllocations];
-  if(sourceRows.some(row=>!owns(row,businessId,generation)||
+ if(payments.some(opening?Opening.pending:pending))return 'pending_payment';
+ const checked=['sales','payments','balanceAdjustments','balanceEvents','paymentAllocations'];
+ for(const name of checked)if(collections[name].some(row=>!owns(row,businessId,generation)||
     [row.clienteId,row.clientId,row.customerId].filter(Boolean).some(id=>id!==client.id)||
-    row.spaceId&&row.financialSpaceId&&row.spaceId!==row.financialSpaceId))return 'history_review';
+    !Opening.prior(opening,name,row.id)&&row.spaceId&&row.financialSpaceId&&row.spaceId!==row.financialSpaceId))return 'history_review';
   const sources={sales:new Map(sales.map(row=>[row.id,row])),payments:new Map(payments.map(row=>[row.id,row])),
     balanceAdjustments:new Map(balanceAdjustments.map(row=>[row.id,row]))};
   const markers=new Map(processedOperations.map(row=>[row.id,row]));
   const eventsBySource=new Map(),operationIds=new Set();
   for(const event of balanceEvents){
+    if(Opening.prior(opening,'balanceEvents',event.id))continue;
     const source=sources[event.sourceCollection]?.get(event.sourceDocumentId);
     const reversal=event.type==='credit_sale_reversal';
     const sourceOperation=reversal?source?.cancelOperationId:source?.operationId;
@@ -55,19 +58,23 @@ function checkEvidence({businessId,generation,client,collections},day,scheduled)
     eventsBySource.set(event.type+':'+source.id,event);
   }
   for(const payment of payments){
+    if(Opening.prior(opening,'payments',payment.id))continue;
     if(!closed(payment)&&!eventsBySource.has('payment_received:'+payment.id)||
        payment.status==='confirmed'&&closed(payment)&&!operationIds.has(payment.resolutionOperationId))return 'history_review';
   }
-  if(balanceAdjustments.some(row=>!eventsBySource.has('balance_adjustment:'+row.id)))return 'history_review';
+  if(balanceAdjustments.some(row=>!Opening.prior(opening,'balanceAdjustments',row.id)&&!eventsBySource.has('balance_adjustment:'+row.id)))return 'history_review';
 
   const byPayment=new Map(),bySale=new Map();
   for(const row of paymentAllocations){
+    if(Opening.prior(opening,'paymentAllocations',row.id))continue;
     if(!sources.sales.has(row.saleId)||!eventsBySource.has('payment_received:'+row.paymentId)||
+       Opening.prior(opening,'sales',row.saleId)&&!sources.sales.get(row.saleId).installmentPlan||
        row.id!==row.paymentId+'__'+row.saleId||money(row.amount)<=0)return 'history_review';
     byPayment.set(row.paymentId,(byPayment.get(row.paymentId)||0)+money(row.amount));
     bySale.set(row.saleId,(bySale.get(row.saleId)||0)+money(row.amount));
   }
   for(const payment of payments){
+    if(Opening.prior(opening,'payments',payment.id))continue;
     const allocated=byPayment.get(payment.id)||0;
     if(closed(payment))continue;
     if(allocated>money(payment.valor??payment.amount)||
@@ -75,6 +82,7 @@ function checkEvidence({businessId,generation,client,collections},day,scheduled)
       payment.legacyAmount!==undefined&&allocated+money(payment.legacyAmount)!==money(payment.valor??payment.amount))return 'history_review';
   }
   for(const sale of sales.filter(row=>active(row)&&row.formaPagamento==='fiado')){
+    if(Opening.prior(opening,'sales',sale.id))continue;
     const paid=money(sale.creditPaidAmount??0),remaining=money(sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal)-paid;
     if(pending(sale)||paid<0||paid!==(bySale.get(sale.id)||0)||remaining<0||
        sale.creditRemainingAmount!==undefined&&remaining!==money(sale.creditRemainingAmount)||
@@ -85,15 +93,15 @@ function checkEvidence({businessId,generation,client,collections},day,scheduled)
   return null;
 }
 
-async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false}){
+async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false,scopedReceiptVersion,forConfirmation=false}){
   const generation=c.business.workspaceGeneration??0;
   const scope={receiptRouteVersion:1,businessId:c.bid,workspaceGeneration:generation,clientId,spaceId};
   const owner=c.owner&&c.business.ownerId===c.uid;
   const blocked=reason=>({...scope,mode:'blocked',reason:owner||['access_unavailable','space_unavailable'].includes(reason)?reason:'origin_unverified'});
-  if(!c.has('customers.view')||!c.has('customers.receiveDebt')||restricted(c.member)||!c.access.canMutate)
+  if(!c.has('customers.view')||!c.has('customers.receiveDebt')||restricted(c.member)||!forConfirmation&&!c.access.canMutate)
     return blocked('access_unavailable');
   const currentSpace=await c.space(spaceId);
-  if(!salesSpace(currentSpace))return blocked('space_unavailable');
+  if(!salesSpace(currentSpace)||currentSpace.workspaceGeneration!==undefined&&currentSpace.workspaceGeneration!==generation)return blocked('space_unavailable');
   const client=(await tx.get(ref(c.bid,'clients',clientId))).data();
   if(!owns(client,c.bid,generation)||!active(client)||client.ativo===false)return blocked('account_unavailable');
 
@@ -105,12 +113,13 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     const day=Plan.today(now);
     // Read evidence internally. Only the result for the authorized route leaves the server.
     const input=await readHistoryInput({tx,c,ref,clientId,client,checkRowAccess:false});
+    if(input.opening&&!forConfirmation&&scopedReceiptVersion!==1)return blocked('history_review');
     const sales=input.collections.sales.filter(row=>active(row)&&row.formaPagamento==='fiado');
     const scheduled=client.hasInstallmentFiado===true||client.fiadoHistoryVersion===1||sales.some(row=>row.installmentPlan);
     if(scheduled&&client.hasInstallmentFiado===true&&!input.collections.sales.some(row=>row.installmentPlan))return blocked('history_review');
     const risk=checkEvidence(input,day,scheduled);
     if(risk)return blocked(risk);
-    if(bookBalanceCents>=0)return blocked('no_debt');
+    if(bookBalanceCents>=0&&!forConfirmation)return blocked('no_debt');
 
     // Keep the traditional writer's source and allocation contract. V2 is only
     // used when its existing proof and receipt contract both apply.
@@ -128,23 +137,42 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     if(account.totalCents!==-bookBalanceCents||account.financialVersion!==version||account.creditCents!==0)return blocked('history_review');
     const origins=[...new Set(account.entries.map(row=>row.spaceId).filter(Boolean))].sort();
     const hasUnknown=account.entries.some(row=>!row.spaceId);
-    if(origins.length>1)return blocked('mixed_origins');
-    if(origins.length===1&&!hasUnknown){
+    const scoped=!hasUnknown&&(forConfirmation||scopedReceiptVersion===1&&origins.length>0&&
+      (origins.length>1||account.version===2));
+    if(forConfirmation&&!scoped)return blocked('origin_unverified');
+    if(origins.length>1&&!scoped)return blocked('mixed_origins');
+    if(scoped){
+      if(account.version===2)account=History.project(input,day,{scoped:true});
+      else{
+        const saleOrigins=new Map(input.collections.sales.map(s=>[s.id,origin(s)]));
+        const paymentOrigins=new Map(input.collections.payments.map(p=>[p.id,origin(p)]));
+        if(input.collections.paymentAllocations.some(a=>!saleOrigins.get(a.saleId)||
+          saleOrigins.get(a.saleId)!==paymentOrigins.get(a.paymentId)||origin(a)&&origin(a)!==saleOrigins.get(a.saleId))||
+          input.collections.payments.some(p=>!closed(p)&&p.legacyAmount>0))return blocked('history_review');
+      }
+      if(account.entries.some(row=>!row.spaceId))return blocked('origin_unverified');
+      const entries=account.entries.filter(row=>row.spaceId===spaceId);
+      if(!entries.length&&!forConfirmation)return blocked('other_space');
+      const dueCents=entries.filter(row=>row.dueDate<=day).reduce((sum,row)=>sum+row.remainingCents,0);
+      const totalCents=entries.reduce((sum,row)=>sum+row.remainingCents,0);
+      account={...account,entries,dueCents,totalCents,futureCents:totalCents-dueCents,
+        hasInstallments:entries.some(row=>Number.isInteger(row.number)),scopedReceiptVersion:1};
+      mode='space';
+    }else if(origins.length===1&&!hasUnknown){
       if(origins[0]!==spaceId)return blocked('other_space');
       mode='space';
-    }else if(owner&&!scheduled&&!account.futureCents&&account.dueCents===account.totalCents){
+    }else if(owner&&!origins.length&&!scheduled&&!account.futureCents&&account.dueCents===account.totalCents){
       // Unknown origin stays unknown. This route never attributes the debt to the active space.
-      if(origins.length){
-        try{const origin=await c.space(origins[0]);if(!salesSpace(origin))return blocked('space_unavailable');}
-        catch(error){if(error.code==='permission-denied')return blocked('space_unavailable');throw error;}
-      }
       mode='original';
     }else return blocked('origin_unverified');
 
     const {asOf,dueCents,futureCents,totalCents}=account;
-    const quoteHash=hash([scope,c.uid,mode,bookBalanceCents,version,account.version,asOf,dueCents,futureCents,totalCents,
-      account.entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents])]);
-    return {...scope,mode,quoteHash,bookBalanceCents,financialVersion:version,asOf,dueCents,futureCents,totalCents,
+    const quoteHash=hash([scope,c.uid,mode,scoped?null:bookBalanceCents,version,account.version,asOf,dueCents,futureCents,totalCents,
+      account.entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents]),
+      ...(input.opening?[input.opening.hash]:scoped&&client.fiadoHistoryActivation?.originLinksDigest?[client.fiadoHistoryActivation.reviewHash]:[])]);
+    return {...scope,mode,quoteHash,financialVersion:version,asOf,dueCents,futureCents,totalCents,
+      ...(scoped?{scopedReceiptVersion:1,scopedAccount:account}:{}),
+      ...(!scoped||includeAccount?{bookBalanceCents}:{}),
       ...(mode==='original'?{origins,hasUnknown}:{}),...(includeAccount?{account}:{})};
   }catch(error){
     // Preserve service/transport errors; a failed read is never a routing decision.
@@ -156,16 +184,23 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
 
 async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
   const invalid=()=>{throw new HttpsError('failed-precondition','A conta ou a origem do recebimento mudou. Confira a operaÃ§Ã£o original na SincronizaÃ§Ã£o antes de receber novamente.',{reason:'fiado-receipt-route-changed'});};
-  if(!payment||typeof intent!=='object'||intent.version!==1||
-     !['space','original'].includes(intent.mode)||!/^[a-f0-9]{64}$/.test(intent.quoteHash||'')||
+  if(!payment||!intent||typeof intent!=='object'||intent.version!==1||
+     !['space','original'].includes(intent.mode)||intent.scopedReceiptVersion!==undefined&&intent.scopedReceiptVersion!==1||!/^[a-f0-9]{64}$/.test(intent.quoteHash||'')||
      typeof intent.spaceId!=='string'||typeof payment.clienteId!=='string'||
      payment.clientId!==payment.clienteId||payment.installmentSaleId||payment.confirmedConflictId||
      !payment.spaceId||payment.financialSpaceId!==payment.spaceId||
      !Number.isFinite(payment.expectedBalance)||!Number.isFinite(payment.valor))return invalid();
-  const result=await decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true});
-  if(result.mode!==intent.mode||result.quoteHash!==intent.quoteHash||payment.expectedFinancialVersion!==result.financialVersion||
+  const result=await decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true,scopedReceiptVersion:intent.scopedReceiptVersion});
+  if(result.scopedReceiptVersion!==intent.scopedReceiptVersion||result.mode!==intent.mode||result.quoteHash!==intent.quoteHash||payment.expectedFinancialVersion!==result.financialVersion||
      money(payment.expectedBalance)!==result.bookBalanceCents||result.mode==='space'&&payment.spaceId!==result.spaceId||
      result.mode==='original'&&payment.fiadoSchedule)return invalid();
+  if(result.scopedReceiptVersion===1){
+    const allowed={clients:'update',sales:'update',payments:'create',paymentAllocations:'create',campaignEvents:'create',campaignProgress:null};
+    if(!payment.fiadoSchedule||payment.fiadoSchedule.version!==result.account.version||payment.fiadoSchedule.asOf!==result.asOf||
+       writes.some(w=>!Object.hasOwn(allowed,w.entityType)||allowed[w.entityType]&&allowed[w.entityType]!==w.operation||
+         w.entityType==='clients'&&w.entityId!==payment.clienteId||
+         ['spaceId','financialSpaceId'].some(key=>w.data[key]&&w.data[key]!==result.spaceId)))return invalid();
+  }
   const amount=money(payment.valor),max=payment.fiadoSchedule?.advance===true?result.totalCents:result.dueCents;
   if(amount<=0||amount>max)return invalid();
   const allocations=writes.filter(w=>w.entityType==='paymentAllocations');
@@ -183,6 +218,7 @@ async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
   if(allocated+money(payment.legacyAmount)!==amount||allocated!==money(payment.allocatedAmount))return invalid();
   const cash=await c.space(payment.spaceId);
   if(!salesSpace(cash))return invalid();
+  return result.scopedReceiptVersion===1?result.account:null;
 }
 
 module.exports={decideReceiptRoute,assertReceiptRoute};

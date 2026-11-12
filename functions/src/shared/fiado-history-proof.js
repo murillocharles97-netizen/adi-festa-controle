@@ -2,11 +2,12 @@
 // Read-only proof. This does not repair projections or authorize a commercial write.
 const Account=require('./fiado-account');
 const Plan=require('./installment-plan');
+const {prior}=require('./fiado-opening-balance');
 const cents=value=>{if(typeof value!=='number'||!Number.isFinite(value))throw Error('invalid-money');const n=Math.round(value*100);if(!Number.isSafeInteger(n)||Math.abs(value*100-n)>0.00001)throw Error('non-cent-snapshot');return n;};
 const clientId=r=>r.clienteId||r.clientId||r.customerId;
 const time=value=>{const ms=Date.parse(value);if(!Number.isFinite(ms))throw Error('invalid-application-time');return ms;};
 function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
- const {client,businessId,generation=0,collections,complete,stable}=input;
+ const {client,businessId,generation=0,collections,complete,stable,opening}=input;
  const reasons=[],issues=[];let strict=null,strictError=null,firstPlan=null,firstPlanError=null;
  const own=r=>[r.clienteId,r.clientId,r.customerId].includes(client.id);
  const sales=collections.sales.filter(own),payments=collections.payments.filter(own),adjustments=collections.balanceAdjustments.filter(own),events=collections.balanceEvents.filter(own);
@@ -55,14 +56,15 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   }
   validated.sort((a,b)=>a.at-b.at||a.id.localeCompare(b.id));
   // An immutable confirmed zero is an explicit anchor; no restored opening debt is invented.
-  const zeros=validated.filter(e=>e.after===0),anchor=zeros.at(-1);
-  const start=anchor?anchor.at:validated[0]?.at;
+  const zeros=opening?[]:validated.filter(e=>e.after===0),anchor=zeros.at(-1);
+  const start=opening?time(opening.at):anchor?anchor.at:validated[0]?.at;
   if(start===undefined)throw Error('no-confirmed-zero-or-origin');
-  const relevantInvalid=invalid.filter(e=>e.at===null||e.at>=start);
+  const relevantInvalid=invalid.filter(e=>opening?!prior(opening,'balanceEvents',e.id):e.at===null||e.at>=start);
   if(relevantInvalid.length){reasons.push(...relevantInvalid.map(e=>e.reason));issues.push(...relevantInvalid);throw Error('unproved-financial-effect');}
-  const chain=validated.filter(e=>e.at>=start);
+  const chain=validated.filter(e=>opening?!prior(opening,'balanceEvents',e.id):e.at>=start);
+  if(opening&&chain.some(e=>e.at<start))throw Error('effect-before-confirmed-opening');
   if(anchor&&chain.filter(e=>e.at===start).length!==1)throw Error('ambiguous-zero-anchor');
-  let running=anchor?anchor.before:checkTraditionalChain?chain[0].before:0;
+  let running=opening?-opening.bookCents:anchor?anchor.before:checkTraditionalChain?chain[0].before:0;
   for(let i=0;i<chain.length;i++){
    const row=chain[i];if(i&&row.at===chain[i-1].at)throw Error('ambiguous-effect-order');
    if(row.before!==running){issues.push({eventId:row.id,declaredBeforeCents:row.before,expectedBeforeCents:running});throw Error('broken-balance-chain');}running=row.after;
@@ -70,8 +72,9 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   if(running!==balance){issues.push({ledgerBalanceCents:running,currentBalanceCents:balance});throw Error('ledger-current-balance-mismatch');}
   // A missing event for a later declared source cannot disappear behind a matching sum.
   for(const [col,map]of Object.entries(sourceMaps))for(const source of map.values()){
+   if(prior(opening,col,source.id))continue;
    const at=source.financialAppliedAt||source.data||source.createdAt;
-   if(!at||time(at)<start)continue;
+   if(!opening&&(!at||time(at)<start))continue;
    if(col==='sales'&&source.formaPagamento!=='fiado')continue;
    if(!validated.some(e=>e.col===col&&e.sourceId===source.id))throw Error('source-without-confirmed-effect');
   }
@@ -86,7 +89,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
     const paid=allocations.reduce((n,a)=>{const p=payments.find(p=>p.id===a.paymentId);if(a.id!==a.paymentId+'__'+sale.id||a.businessId&&a.businessId!==businessId||(a.workspaceGeneration??0)!==generation||!p||!validated.some(e=>e.col==='payments'&&e.sourceId===p.id))throw Error('unproved-installment-allocation');const allocated=collections.paymentAllocations.filter(row=>row.paymentId===p.id).reduce((sum,row)=>sum+Plan.cents(row.amount),0);if(allocated>Plan.cents(p.valor??p.amount))throw Error('overallocated-receipt');return n+Plan.cents(a.amount);},0);
     if(paid!==Plan.cents(sale.creditPaidAmount||0))throw Error('installment-allocation-mismatch');
     future+=Plan.rows(sale,day).filter(row=>row.dueDate>day).reduce((n,row)=>n+row.remainingCents,0);
-   }else if(Account.commercialDay(sale)>day)throw Error('future-traditional-sale-requires-review');
+   }else if(!prior(opening,'sales',sale.id)&&Account.commercialDay(sale)>day)throw Error('future-traditional-sale-requires-review');
   }
   const total=-balance;if(future>total)throw Error('future-principal-exceeds-confirmed-debt');
   const account={asOf:day,dueCents:total-future,futureCents:future,totalCents:total};
@@ -94,7 +97,10 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   // It never grants V2 proof or derives a new opening balance.
   if(checkTraditionalChain)return{...result,traditionalChainVerified:true};
   const backendCompatible=!!strict&&!!firstPlan&&strict.dueCents===account.dueCents&&strict.futureCents===account.futureCents&&strict.totalCents===account.totalCents;
-  return{...result,financialProof:true,backendCompatible,currentBackendEligible:backendCompatible,account,confirmedEffects:chain,anchor:anchor?{eventId:anchor.id,at:new Date(anchor.at).toISOString(),kind:'confirmed-zero'}:{eventId:chain[0].id,at:new Date(start).toISOString(),kind:'confirmed-zero-origin'},effectsAfterAnchor:chain.length,reason:backendCompatible?'confirmed-compatible':'confirmed-aggregate-but-current-backend-incompatible'};
+  const proofAnchor=opening?{at:opening.at,kind:'confirmed-opening'}:
+   anchor?{eventId:anchor.id,at:new Date(anchor.at).toISOString(),kind:'confirmed-zero'}:
+   {eventId:chain[0].id,at:new Date(start).toISOString(),kind:'confirmed-zero-origin'};
+  return{...result,financialProof:true,backendCompatible,currentBackendEligible:backendCompatible,account,confirmedEffects:chain,anchor:proofAnchor,effectsAfterAnchor:chain.length,reason:backendCompatible?'confirmed-compatible':'confirmed-aggregate-but-current-backend-incompatible'};
  }catch(error){return{...result,reason:error.message,details:[...new Set(reasons)],issues};}
 }
 module.exports={prove};
