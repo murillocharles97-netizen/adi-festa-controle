@@ -36,7 +36,7 @@ function calendars(input,day){
  return {totals,proof:proof.sort((a,b)=>a.saleId.localeCompare(b.saleId))};
 }
 
-function createPlan(input,{day,spaceIds,balances}){
+function createPlan(input,{day,spaceIds,balances,reason}){
  const {client,collections,businessId,generation}=input;
  if(!input.complete||!input.stable||!active(client)||client.fiadoOpeningBalance)
   throw Error('A conta não está disponível para confirmação de saldo.');
@@ -53,8 +53,7 @@ function createPlan(input,{day,spaceIds,balances}){
     Number(sale.creditRemainingAmount??(Number(sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal)-Number(sale.creditPaidAmount??0)))>0))
   throw Error('Há dívida registrada em outro espaço. A conta exige conferência.');
  const contractTotal=[...totals.values()].reduce((sum,value)=>sum+value.totalCents,0);
- if(contractTotal>bookCents)throw Error('As parcelas superam o saldo cadastral. A conta exige conciliação.');
- const defaults=spaceIds.map((spaceId,index)=>({spaceId,totalCents:(totals.get(spaceId)?.totalCents||0)+(index===0?bookCents-contractTotal:0)}));
+ const defaults=spaceIds.map((spaceId,index)=>({spaceId,totalCents:(totals.get(spaceId)?.totalCents||0)+(index===0?Math.max(0,bookCents-contractTotal):0)}));
  const selection=balances??defaults;
  if(!Array.isArray(selection)||selection.length!==spaceIds.length||new Set(selection.map(row=>row?.spaceId)).size!==spaceIds.length||
     selection.some(row=>!spaceIds.includes(row?.spaceId)||!Number.isSafeInteger(row.totalCents)||row.totalCents<0))
@@ -66,11 +65,17 @@ function createPlan(input,{day,spaceIds,balances}){
   return {spaceId,totalCents,dueCents:totalCents-calendar.futureCents,futureCents:calendar.futureCents,
    traditionalCents:totalCents-calendar.totalCents};
  });
- if(parts.reduce((sum,part)=>sum+part.totalCents,0)!==bookCents)
-  throw Error('A soma precisa coincidir com o saldo cadastral. Divergência exige conciliação separada.');
+ const confirmedCents=parts.reduce((sum,part)=>sum+part.totalCents,0);
+ if(!Number.isSafeInteger(confirmedCents))throw Error('Saldo final inválido.');
+ const deltaCents=confirmedCents-bookCents;
+ const explanation=typeof reason==='string'?reason.trim():'';
+ if(explanation.length>300||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(explanation))
+  throw Error('Informe uma justificativa válida de até 300 caracteres.');
+ if(balances&&deltaCents&&explanation.length<10)
+  throw Error('Explique a diferença em relação ao cadastro em pelo menos 10 caracteres.');
  const baseline=Object.fromEntries(tracked.map(name=>[name,collections[name].map(row=>row.id).sort()]));
  return {version:1,businessId,workspaceGeneration:generation,clientId:client.id,day,bookCents,financialVersion,
-  parts,baseline,calendars:proof};
+  confirmedCents,deltaCents,reason:explanation,parts,baseline,calendars:proof};
 }
 
 function prior(opening,collection,id){

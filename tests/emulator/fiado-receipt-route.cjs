@@ -512,7 +512,7 @@ async function confirmOpening(api,quote,extra={}){
  return {draft,result:await api('openingConfirm',draft)};
 }
 
-test('owner confirms the traditional closing balance once; old records stay intact and the next receipt starts from the opening',async()=>{
+test('owner corrects 190 to 150 once; old records stay intact and the next receipt starts from the audited opening',async()=>{
  const qa=await setup({origin:'unknown'}),api=openingApi(qa);
  const payments=qa.root.collection('payments'),old=payments.doc('historic-payment');
  await old.set({id:old.id,businessId:qa.businessId,clienteId:clientId,status:'applied',valor:100,financialAppliedAt:at});
@@ -522,23 +522,31 @@ test('owner confirms the traditional closing balance once; old records stay inta
  await assert.rejects(openingApi(qa,{enabled:false})('openingPreview'),{code:'permission-denied'});
  await assert.rejects(api('openingPreview',{}, {uid:'unauthorized-qa'}),{code:'permission-denied'});
  await assert.rejects(api('openingPreview',{businessId:'wrong-company'}),{code:'permission-denied'});
- const quote=await api('openingPreview');
- assert.deepEqual(quote.parts.map(part=>[part.totalCents,part.futureCents]),[[19000,0],[0,0]]);
- await assert.rejects(confirmOpening(api,quote,{queueChecked:false}),{code:'failed-precondition'});
- await assert.rejects(api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:18000},{spaceId:qa.otherId,totalCents:0}]}),
-  /soma precisa coincidir/);
- const {draft,result}=await confirmOpening(api,quote);
+ const initial=await api('openingPreview');
+ assert.deepEqual(initial.parts.map(part=>[part.totalCents,part.futureCents]),[[19000,0],[0,0]]);
+ const balances=[{spaceId:qa.spaceId,totalCents:15000},{spaceId:qa.otherId,totalCents:0}];
+ const reason='Saldo conferido nas anotações da empresa.';
+ await assert.rejects(api('openingPreview',{balances}),/Explique a diferença/);
+ const quote=await api('openingPreview',{balances,reason});
+ assert.deepEqual([quote.bookCents,quote.confirmedCents,quote.deltaCents],[19000,15000,-4000]);
+ await assert.rejects(confirmOpening(api,quote,{reason,queueChecked:false}),{code:'failed-precondition'});
+ await assert.rejects(confirmOpening(api,quote,{reason:'Justificativa diferente da revisada.'}),/Revise novamente/);
+ assert.equal((await qa.clientRef.get()).data().saldo,before.saldo);
+ const {draft,result}=await confirmOpening(api,quote,{reason});
  assert.equal(result.status,'confirmed');assert.equal(result.writesApplied,3);
  assert.deepEqual(await api('openingConfirm',draft),{status:'replayed',writesApplied:0});
  await assert.rejects(api('openingConfirm',{...draft,requestId:randomUUID()}),{code:'failed-precondition'});
- assert.equal((await qa.clientRef.get()).data().saldo,before.saldo);
+ assert.equal((await qa.clientRef.get()).data().saldo,-150);
  assert.equal((await qa.clientRef.get()).data().financialVersion,before.financialVersion+1);
  assert.equal((await payments.get()).size,1);
  assert.equal((await qa.root.collection('balanceEvents').get()).size,0);
  assert.equal((await db.collection('financialSpaces/'+qa.spaceId+'/entries').get()).size,0);
  assert.equal((await qa.root.collection('fiadoOpeningBalances').get()).size,1);
+ const audit=(await qa.root.collection('fiadoOpeningBalances').doc(clientId).get()).data();
+ assert.deepEqual([audit.plan.bookCents,audit.plan.confirmedCents,audit.plan.deltaCents,audit.plan.reason,audit.actorUid],
+  [19000,15000,-4000,reason,qa.auth.uid]);
  const quoteAdi=()=>qa.route({scopedReceiptVersion:1});
- assert.equal((await quoteAdi()).dueCents,19000);
+ assert.equal((await quoteAdi()).dueCents,15000);
  assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).mode,'blocked');
  assert.equal((await qa.route()).mode,'blocked');
  const view=await qa.ui();
@@ -551,8 +559,8 @@ test('owner confirms the traditional closing balance once; old records stay inta
   await assert.rejects(callCommit(unsafe),{code:'failed-precondition'});
   assert.equal((await callCommit(request)).replayed,false);
   assert.equal((await callCommit(request)).replayed,true);
-  assert.equal((await quoteAdi()).dueCents,12000);
-  assert.equal((await qa.clientRef.get()).data().saldo,-120);
+  assert.equal((await quoteAdi()).dueCents,8000);
+  assert.equal((await qa.clientRef.get()).data().saldo,-80);
   assert.equal((await payments.get()).size,2);
   const paid=(await payments.doc(id).get()).data();
   assert.equal(paid.legacyAmount,70);
@@ -563,7 +571,7 @@ test('owner confirms the traditional closing balance once; old records stay inta
  }finally{view.h.close();}
  const last=await qa.ui();
  try{
-  await last.open();const form=await last.submit(120);
+  await last.open();const form=await last.submit(80);
   assert.equal(last.h.commits(),1,form.querySelector('[role=alert]').textContent);
   const request=last.request();
   assert.equal((await callCommit(request)).replayed,false);
@@ -626,6 +634,9 @@ test('HTTP callable reaches the real Emulator trigger and confirms a lost-respon
   {skip:!functionsPort},async()=>{
   assert.match(functionsPort,/^\d+$/);
   const qa=await setup({history:'split',wire:true});
+  const api=openingApi(qa),reason='Saldo antigo ajustado após conferência administrativa.';
+  const opening=await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:15000},{spaceId:qa.otherId,totalCents:280000}],reason});
+  await confirmOpening(api,opening,{reason});
   const base='http://127.0.0.1:'+functionsPort+'/'+project+'/southamerica-east1/';
   const wire=async(name,data,token=qa.token)=>{
     const headers={'Content-Type':'application/json'};
@@ -658,6 +669,7 @@ test('HTTP callable reaches the real Emulator trigger and confirms a lost-respon
     assert.equal(confirmed.spaceId,qa.otherId);
     assert.equal(confirmed.businessName,'Emprestar Cartão QA');
     assert.equal((await wire('commitOperationalSync',request.data)).data.replayed,true);
+    assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,15000);
 
     const entries=id=>db.collection('financialSpaces').doc(id).collection('entries');
     const cashRef=entries(qa.otherId).doc('credit_payment_'+id);
@@ -674,9 +686,9 @@ test('HTTP callable reaches the real Emulator trigger and confirms a lost-respon
     assert.equal((await qa.root.collection('payments').get()).size,1);
     assert.equal((await qa.root.collection('balanceEvents').get()).size,3);
     assert.equal((await qa.root.collection('paymentAllocations').get()).size,1);
-    assert.equal((await qa.clientRef.get()).data().saldo,-2767);
+    assert.equal((await qa.clientRef.get()).data().saldo,-2670);
     const adi=await wire('getOperationalSyncReceipt',{...read,kind:'fiado_receipt_route',
       spaceId:qa.spaceId,scopedReceiptVersion:1});
-    assert.equal(adi.data.dueCents,24700);
+    assert.equal(adi.data.dueCents,15000);
   }finally{view.h.close();}
 });

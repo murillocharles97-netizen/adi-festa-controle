@@ -64,7 +64,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   const chain=validated.filter(e=>opening?!prior(opening,'balanceEvents',e.id):e.at>=start);
   if(opening&&chain.some(e=>e.at<start))throw Error('effect-before-confirmed-opening');
   if(anchor&&chain.filter(e=>e.at===start).length!==1)throw Error('ambiguous-zero-anchor');
-  let running=opening?-opening.bookCents:anchor?anchor.before:checkTraditionalChain?chain[0].before:0;
+  let running=opening?-(opening.confirmedCents??opening.bookCents):anchor?anchor.before:checkTraditionalChain?chain[0].before:0;
   for(let i=0;i<chain.length;i++){
    const row=chain[i];if(i&&row.at===chain[i-1].at)throw Error('ambiguous-effect-order');
    if(row.before!==running){issues.push({eventId:row.id,declaredBeforeCents:row.before,expectedBeforeCents:running});throw Error('broken-balance-chain');}running=row.after;

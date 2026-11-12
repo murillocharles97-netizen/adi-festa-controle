@@ -11,8 +11,8 @@ const actions=Object.freeze({
  prepare:['clientId','mode','revision','items'],
  confirm:['clientId','mode','revision','items','confirmed','requestId','reviewHash'],
  review:['clientId'],reviewLot:[],
- openingPreview:['clientId','balances'],
- openingConfirm:['clientId','balances','confirmed','queueChecked','requestId','reviewHash']
+ openingPreview:['clientId','balances','reason'],
+ openingConfirm:['clientId','balances','reason','confirmed','queueChecked','requestId','reviewHash']
 });
 const common=['action','businessId','workspaceGeneration'];
 const denied=()=>new HttpsError('permission-denied','Central de regularização indisponível para esta conta.');

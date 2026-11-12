@@ -21,7 +21,7 @@ function openingConfirmationService(db,{policy,now}){
   if(!scope.owner||scope.business.ownerId!==uid||scope.member?.status!=='active')throw deny();
   return scope;
  }
- async function plan(tx,scope,id,balances,at){
+ async function plan(tx,scope,id,balances,reason,at){
   const clientRef=ref(scope.bid,'clients',id),client=(await tx.get(clientRef)).data();
   if(!client||(client.workspaceGeneration??0)!==(scope.business.workspaceGeneration??0)||
      client.businessId&&client.businessId!==scope.bid)throw deny();
@@ -34,16 +34,20 @@ function openingConfirmationService(db,{policy,now}){
   const day=Plan.today(at);
   let proposal;
   try{
-   proposal=Opening.createPlan(input,{day,spaceIds:spaces,balances});
-   History.project({...input,opening:{...proposal,at:at.toISOString()}},day,{scoped:true});
+   proposal=Opening.createPlan(input,{day,spaceIds:spaces,balances,reason});
+   History.project({...input,client:{...client,saldo:saldo(proposal)},opening:{...proposal,at:at.toISOString()}},day,{scoped:true});
   }catch(error){throw invalid(error.message);}
   const evidence=require('./fiado-history-regularization').evidenceDigest(input);
   return {clientRef,proposal,evidence,reviewHash:Opening.digest([proposal,evidence])};
  }
- const publicPlan=({proposal,reviewHash})=>({reviewHash,bookCents:proposal.bookCents,parts:proposal.parts,financialVersion:proposal.financialVersion});
+ const saldo=proposal=>proposal.confirmedCents===0?0:-proposal.confirmedCents/100;
+ const publicPlan=({proposal,reviewHash})=>{
+  const {bookCents,confirmedCents,deltaCents,reason,parts,financialVersion}=proposal;
+  return {reviewHash,bookCents,confirmedCents,deltaCents,reason,parts,financialVersion};
+ };
  const preview=request=>db.runTransaction(async tx=>{
   const scope=await owner(tx,request,true);
-  return publicPlan(await plan(tx,scope,validId(request.data.clientId,'Cliente'),request.data.balances,now()));
+  return publicPlan(await plan(tx,scope,validId(request.data.clientId,'Cliente'),request.data.balances,request.data.reason,now()));
  },{readOnly:true});
 
  const confirm=request=>db.runTransaction(async tx=>{
@@ -52,21 +56,21 @@ function openingConfirmationService(db,{policy,now}){
   if(data.confirmed!==true||data.queueChecked!==true||!Array.isArray(data.balances)||!/^[a-f0-9]{64}$/.test(data.reviewHash||''))
    throw invalid('Confira as filas dos aparelhos e confirme o resumo do saldo.');
   const auditRef=ref(scope.bid,Opening.COLLECTION,id),prior=(await tx.get(auditRef)).data();
-  const requestHash=Opening.digest([requestId,data.reviewHash,data.balances]);
+  const requestHash=Opening.digest([requestId,data.reviewHash,data.balances,data.reason??'']);
   if(prior){
    const client=(await tx.get(ref(scope.bid,'clients',id))).data();
    if(prior.actorUid===scope.uid&&prior.workspaceGeneration===data.workspaceGeneration&&prior.requestHash===requestHash&&
       client?.fiadoOpeningBalance?.hash===prior.hash)return {status:'replayed',writesApplied:0};
    throw invalid('Já existe confirmação de saldo para esta conta.');
   }
-  const instant=now(),prepared=await plan(tx,scope,id,data.balances,instant);
+  const instant=now(),prepared=await plan(tx,scope,id,data.balances,data.reason,instant);
   if(prepared.reviewHash!==data.reviewHash)throw invalid('O saldo ou o histórico mudou. Revise novamente.');
   const at=instant.toISOString(),details={plan:prepared.proposal,at,actorUid:scope.uid,requestId,reviewHash:prepared.reviewHash};
   const hash=Opening.digest(details);
   tx.create(auditRef,{...details,type:'fiado_confirmed_opening',version:1,hash,requestHash,evidenceDigest:prepared.evidence,
    clientId:id,businessId:scope.bid,workspaceGeneration:data.workspaceGeneration});
   tx.set(prepared.clientRef,{fiadoOpeningBalance:{version:1,hash},fiadoHistoryVersion:1,
-   financialVersion:prepared.proposal.financialVersion+1,updatedAt:at,updatedByUid:scope.uid},{merge:true});
+   saldo:saldo(prepared.proposal),financialVersion:prepared.proposal.financialVersion+1,updatedAt:at,updatedByUid:scope.uid},{merge:true});
   const revision='server:fiado-opening:'+id+':'+prepared.proposal.financialVersion;
   tx.set(ref(scope.bid,'syncMetadata','last-sync'),{businessId:scope.bid,workspaceGeneration:data.workspaceGeneration,
    publisher:'operational_server',sourceSessionId:revision,sourceOperationId:revision,ownerId:scope.uid,actorUid:scope.uid,

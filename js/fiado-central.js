@@ -259,26 +259,38 @@
 
   async function showOpening(account) {
     const quote=await call('openingPreview',{clientId:account.id});
+    const previous=openingDraft?.clientId===account.id?openingDraft:null;
     openingDraft=null;
     showDialog('Conferir saldo final',account,
       '<p>Saldo cadastral: <strong>'+money(quote.bookCents)+'</strong>. Adi Festa é o padrão. Ajuste a divisão somente para exceções comprovadas.</p>'+
-      '<form id="opening-balances">'+quote.parts.map(part=>
+      '<form id="opening-balances">'+quote.parts.map(part=>{
+        const total=previous?.balances.find(balance=>balance.spaceId===part.spaceId)?.totalCents??part.totalCents;
+        return (
         '<label class="note-label">'+esc(spaceLabel(account,part.spaceId))+' · saldo total, incluindo parcelas'+
-        '<input type="text" required inputmode="decimal" data-opening-space="'+esc(part.spaceId)+'" value="'+displayAmount(part.totalCents)+'"></label>'
-      ).join('')+'</form>',
+        '<input type="text" required inputmode="decimal" data-opening-space="'+esc(part.spaceId)+'" value="'+displayAmount(total)+'"></label>');
+      }).join('')+'<label class="note-label">Justificativa da correção<span>Obrigatória se o total informado for diferente do cadastro.</span>'+
+      '<textarea data-opening-reason maxlength="300" rows="2">'+esc(previous?.reason||'')+'</textarea></label></form>'+
+      '<p class="opening-error" data-opening-error role="alert"></p>',
       '<button type="submit" form="opening-balances" class="btn primary">Revisar saldo final</button>');
   }
 
   async function reviewOpening(account,form) {
     const balances=[...form.querySelectorAll('[data-opening-space]')].map(input=>
       ({spaceId:input.dataset.openingSpace,totalCents:readCents(input.value)}));
-    const quote=await call('openingPreview',{clientId:account.id,balances});
-    openingDraft={clientId:account.id,balances,reviewHash:quote.reviewHash,requestId:crypto.randomUUID()};
+    const reason=form.querySelector('[data-opening-reason]').value.trim();
+    const quote=await call('openingPreview',{clientId:account.id,balances,reason});
+    openingDraft={clientId:account.id,balances,reason:quote.reason,reviewHash:quote.reviewHash,requestId:crypto.randomUUID()};
+    const delta=(quote.deltaCents<0?'− ':quote.deltaCents>0?'+ ':'')+money(Math.abs(quote.deltaCents));
     showDialog('Revisar saldo final',account,
-      '<p>Total cadastral preservado: <strong>'+money(quote.bookCents)+'</strong>. Os lançamentos anteriores ficam no histórico. As parcelas mantêm seus vencimentos.</p>'+
+      '<dl class="opening-totals"><div><dt>Saldo cadastral</dt><dd>'+money(quote.bookCents)+'</dd></div>'+
+      '<div><dt>Saldo final</dt><dd>'+money(quote.confirmedCents)+'</dd></div>'+
+      '<div><dt>Diferença na dívida</dt><dd>'+delta+'</dd></div></dl>'+
       '<div class="batch-list">'+quote.parts.map(part=>'<div class="batch-row"><strong>'+esc(spaceLabel(account,part.spaceId))+
         '</strong><span>'+money(part.dueCents)+' exigíveis · '+money(part.futureCents)+' futuros</span></div>').join('')+'</div>'+
-      '<label class="note-label"><span><input type="checkbox" data-opening-queue> Conferi a sincronização e os recebimentos pendentes em todos os aparelhos.</span></label>',
+      (quote.reason?'<p class="opening-reason"><strong>Justificativa</strong> '+esc(quote.reason)+'</p>':'')+
+      '<p>O saldo final será usado nos próximos recebimentos. O histórico e as parcelas serão preservados. Esta correção não gera pagamento nem lançamento no caixa.</p>'+
+      '<label class="note-label"><span><input type="checkbox" data-opening-queue> Conferi a sincronização e os recebimentos pendentes em todos os aparelhos.</span></label>'+
+      '<p class="opening-error" data-opening-error role="alert"></p>',
       '<button type="button" class="btn secondary" data-opening>Voltar</button>'+
       '<button type="button" class="btn primary" data-opening-confirm disabled>Confirmar saldo final</button>');
   }
@@ -423,13 +435,16 @@
   async function run(action) {
     if(busy)return;
     busy=true;
+    const openingError=byId('review').querySelector('[data-opening-error]');
+    if(openingError)openingError.textContent='';
     try{await action();}
     catch(error){
       if(byId('central').hidden){
         byId('denied').querySelector('p').textContent=error.message;
         byId('denied').hidden=false;
         decorate();
-      }else notify(error.message);
+      }else if(openingError)openingError.textContent=error.message;
+      else notify(error.message);
     }finally{busy=false;}
   }
 
