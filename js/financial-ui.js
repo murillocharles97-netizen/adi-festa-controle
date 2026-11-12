@@ -271,11 +271,13 @@ window.FinanceiroUI = (() => {
   </article>`;
 
   function consolidatedSummaryMarkup(summary = {}) {
-    const resultClass = Number(summary.resultCents || 0) < 0 ? "is-negative" : "is-positive";
+    // Zero is not an alert: keep the color only for values that actually exist.
+    const zero = (cents) => Number(cents || 0) === 0 ? " is-zero" : "";
+    const resultClass = (Number(summary.resultCents || 0) < 0 ? "is-negative" : "is-positive") + zero(summary.resultCents);
     return `<section class="financial-home-summary" data-tour="finance-summary"><header><h2>Resumo do mês</h2><small>${icon("circle-dot")} Atualizado agora</small></header><div>
       <article>${icon("wallet")}<span><small>Saldo disponível</small><strong class="is-income">${money(summary.availableBalanceCents)}</strong><em>Contas e carteiras incluídas</em></span></article>
-      <article>${icon("credit-card")}<span><small>Faturas do mês</small><strong class="is-expense">${money(summary.invoiceTotalCents)}</strong><em>Compras no crédito</em></span></article>
-      <article>${icon("receipt-text")}<span><small>Contas a pagar</small><strong class="is-expense">${money(summary.pendingAccountsCents)}</strong><em>Sem repetir faturas</em></span></article>
+      <article>${icon("credit-card")}<span><small>Faturas do mês</small><strong class="is-expense${zero(summary.invoiceTotalCents)}">${money(summary.invoiceTotalCents)}</strong><em>Compras no crédito</em></span></article>
+      <article>${icon("receipt-text")}<span><small>Contas a pagar</small><strong class="is-expense${zero(summary.pendingAccountsCents)}">${money(summary.pendingAccountsCents)}</strong><em>Sem repetir faturas</em></span></article>
       <article>${icon("chart-no-axes-column-increasing")}<span><small>Resultado do mês</small><strong class="${resultClass}">${summary.resultCents >= 0 ? "+ " : "− "}${money(Math.abs(Number(summary.resultCents || 0)))}</strong><em>Entradas menos saídas</em></span></article>
     </div></section>`;
   }

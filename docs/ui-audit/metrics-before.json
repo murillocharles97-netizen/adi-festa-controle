@@ -1,0 +1,1109 @@
+{
+ "inicio@390": {
+  "texts": 32,
+  "fontSizes": [
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   20,
+   31.5
+  ],
+  "minFont": 9,
+  "smallTextCount": 10,
+  "smallSamples": [
+   "Vendido hoje",
+   "-9% vs. ontem",
+   "Lucro hoje",
+   "Custos e lucro em revisão — ajustes de t",
+   "vendas",
+   "itens"
+  ],
+  "fontWeights": [
+   "400",
+   "550",
+   "600",
+   "650",
+   "700",
+   "750",
+   "800",
+   "850"
+  ],
+  "targets": 11,
+  "smallTargets": 1,
+  "smallTargetSamples": [
+   "Editar 56x34"
+  ],
+  "radii": 13,
+  "radiiValues": [
+   "15px",
+   "19px",
+   "21px",
+   "999px",
+   "20px",
+   "18px",
+   "50%",
+   "7px",
+   "10px",
+   "14px",
+   "99px",
+   "16px"
+  ],
+  "shadows": 5,
+  "textColors": 11,
+  "buttonVariants": 6,
+  "pageHeight": 1223
+ },
+ "vender@390": {
+  "texts": 40,
+  "fontSizes": [
+   10,
+   13,
+   13.5,
+   14,
+   17,
+   18
+  ],
+  "minFont": 10,
+  "smallTextCount": 1,
+  "smallSamples": [
+   "30 dias"
+  ],
+  "fontWeights": [
+   "500",
+   "700",
+   "750",
+   "800",
+   "850"
+  ],
+  "targets": 25,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 5,
+  "radiiValues": [
+   "13px",
+   "12px",
+   "999px",
+   "16px",
+   "50%"
+  ],
+  "shadows": 8,
+  "textColors": 9,
+  "buttonVariants": 10,
+  "pageHeight": 1514
+ },
+ "produtos@390": {
+  "texts": 61,
+  "fontSizes": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   15.5,
+   16.5
+  ],
+  "minFont": 10,
+  "smallTextCount": 8,
+  "smallSamples": [
+   "Sem estoque",
+   "30 dias",
+   "Estoque: 9 · baixo",
+   "Estoque: 86",
+   "Estoque: 4 · baixo",
+   "Estoque: 48"
+  ],
+  "fontWeights": [
+   "400",
+   "500",
+   "700",
+   "750",
+   "800",
+   "850"
+  ],
+  "targets": 31,
+  "smallTargets": 1,
+  "smallTargetSamples": [
+   "Fechar filtros 38x38"
+  ],
+  "radii": 12,
+  "radiiValues": [
+   "13px",
+   "9px",
+   "999px",
+   "20px",
+   "10px",
+   "17px",
+   "16px",
+   "15px",
+   "50%",
+   "24px",
+   "8px",
+   "12px"
+  ],
+  "shadows": 9,
+  "textColors": 19,
+  "buttonVariants": 13,
+  "pageHeight": 1392
+ },
+ "clientes@390": {
+  "texts": 139,
+  "fontSizes": [
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   16.5
+  ],
+  "minFont": 9,
+  "smallTextCount": 56,
+  "smallSamples": [
+   "Em aberto",
+   "Saldo cadastral · conferir antes de rece",
+   "Clientes devendo",
+   "50% dos cadastros carregados",
+   "Cobranças hoje",
+   "registradas"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750",
+   "850",
+   "900"
+  ],
+  "targets": 70,
+  "smallTargets": 43,
+  "smallTargetSamples": [
+   "Dispensar dica 32x32",
+   "Cobrar Fernanda Lima pelo Wh 24x24",
+   "Mais ações para Fernanda Lim 22x32",
+   "Receber 153x38",
+   "WhatsApp 125x38",
+   "Mais ações 42x38"
+  ],
+  "radii": 12,
+  "radiiValues": [
+   "13px",
+   "16px",
+   "50%",
+   "999px",
+   "20px",
+   "12px",
+   "9px",
+   "18px",
+   "11px",
+   "24px",
+   "8px",
+   "10px"
+  ],
+  "shadows": 7,
+  "textColors": 29,
+  "buttonVariants": 15,
+  "pageHeight": 2039
+ },
+ "historico@390": {
+  "texts": 14,
+  "fontSizes": [
+   12,
+   13,
+   14,
+   18,
+   28
+  ],
+  "minFont": 12,
+  "smallTextCount": 0,
+  "smallSamples": [],
+  "fontWeights": [
+   "400",
+   "700"
+  ],
+  "targets": 11,
+  "smallTargets": 8,
+  "smallTargetSamples": [
+   "Todos 69x36",
+   "Vendas 76x36",
+   "Pagamentos 106x36",
+   "Ajustes 75x36",
+   "Estoque 80x36",
+   "Campanhas 103x36"
+  ],
+  "radii": 3,
+  "radiiValues": [
+   "13px",
+   "12px",
+   "18px"
+  ],
+  "shadows": 1,
+  "textColors": 5,
+  "buttonVariants": 3,
+  "pageHeight": 920
+ },
+ "cobrancas@390": {
+  "texts": 65,
+  "fontSizes": [
+   11,
+   11.5,
+   12,
+   13,
+   14,
+   16.5,
+   23.5,
+   24
+  ],
+  "minFont": 11,
+  "smallTextCount": 0,
+  "smallSamples": [],
+  "fontWeights": [
+   "400",
+   "700",
+   "800"
+  ],
+  "targets": 20,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "12px",
+   "18px",
+   "15px",
+   "20px"
+  ],
+  "shadows": 1,
+  "textColors": 5,
+  "buttonVariants": 4,
+  "pageHeight": 2376
+ },
+ "relatorios@390": {
+  "texts": 96,
+  "fontSizes": [
+   0,
+   9,
+   10,
+   11,
+   12,
+   13,
+   15,
+   22,
+   24,
+   29
+  ],
+  "minFont": 0,
+  "smallTextCount": 49,
+  "smallSamples": [
+   "VISÃO DO NEGÓCIO",
+   "Atualizar análise",
+   "EspaçoTodos os espaços permitidosLoja Ce",
+   "PeríodoHoje7 dias30 dias90 diasEste mêsM",
+   "America/Sao_Paulo",
+   "Faturamento"
+  ],
+  "fontWeights": [
+   "400",
+   "600",
+   "650",
+   "700",
+   "750",
+   "800"
+  ],
+  "targets": 5,
+  "smallTargets": 3,
+  "smallTargetSamples": [
+   "Todos os espaços permitidosL 164x36",
+   "Hoje7 dias30 dias90 diasEste 164x36",
+   "Data do gráfico 100x18"
+  ],
+  "radii": 5,
+  "radiiValues": [
+   "12px",
+   "8px",
+   "14px",
+   "6px",
+   "7px"
+  ],
+  "shadows": 0,
+  "textColors": 4,
+  "buttonVariants": 2,
+  "pageHeight": 2627
+ },
+ "configuracoes@390": {
+  "texts": 30,
+  "fontSizes": [
+   10,
+   12,
+   14,
+   15,
+   16,
+   18,
+   20
+  ],
+  "minFont": 10,
+  "smallTextCount": 2,
+  "smallSamples": [
+   "VECONI · v229",
+   "v229"
+  ],
+  "fontWeights": [
+   "400",
+   "700"
+  ],
+  "targets": 11,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "21px",
+   "50%",
+   "17px",
+   "20px"
+  ],
+  "shadows": 3,
+  "textColors": 8,
+  "buttonVariants": 4,
+  "pageHeight": 1405
+ },
+ "crm@390": {
+  "texts": 22,
+  "fontSizes": [
+   8.5,
+   9,
+   10,
+   10.5,
+   11,
+   15,
+   16.5
+  ],
+  "minFont": 8.54,
+  "smallTextCount": 20,
+  "smallSamples": [
+   "Segmentos prontos para você agir agora.",
+   "Sumidos há 30 dias",
+   "clientes",
+   "Renovações em até 7 dias",
+   "clientes",
+   "Clientes VIP"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750",
+   "850"
+  ],
+  "targets": 11,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "16px",
+   "13px",
+   "12px",
+   "15px"
+  ],
+  "shadows": 1,
+  "textColors": 5,
+  "buttonVariants": 3,
+  "pageHeight": 920
+ },
+ "campanhas@390": {
+  "texts": 18,
+  "fontSizes": [
+   9.5,
+   10.5,
+   11,
+   13.5,
+   14
+  ],
+  "minFont": 9.52,
+  "smallTextCount": 6,
+  "smallSamples": [
+   "Clientes que podem participar",
+   "Clientes participando",
+   "80% ou mais da meta",
+   "Benefícios disponíveis",
+   "Total confirmado",
+   "Crie sua primeira campanha para fideliza"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750"
+  ],
+  "targets": 12,
+  "smallTargets": 5,
+  "smallTargetSamples": [
+   "Mostrar indicador 1 20x5",
+   "Mostrar indicador 2 8x5",
+   "Mostrar indicador 3 8x5",
+   "Mostrar indicador 4 8x5",
+   "Mostrar indicador 5 8x5"
+  ],
+  "radii": 4,
+  "radiiValues": [
+   "20px",
+   "16px",
+   "99px",
+   "14px"
+  ],
+  "shadows": 2,
+  "textColors": 7,
+  "buttonVariants": 5,
+  "pageHeight": 920
+ },
+ "pedidos@390": {
+  "texts": 17,
+  "fontSizes": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   17,
+   18,
+   26
+  ],
+  "minFont": 10,
+  "smallTextCount": 5,
+  "smallSamples": [
+   "CENTRAL DE PEDIDOS",
+   "Novos",
+   "Em andamento",
+   "Concluídos hoje",
+   "Cancelados"
+  ],
+  "fontWeights": [
+   "400",
+   "500",
+   "600",
+   "650",
+   "700",
+   "750",
+   "800"
+  ],
+  "targets": 8,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 6,
+  "radiiValues": [
+   "19px",
+   "13px",
+   "16px",
+   "12px",
+   "18px",
+   "9px"
+  ],
+  "shadows": 1,
+  "textColors": 7,
+  "buttonVariants": 5,
+  "pageHeight": 1085
+ },
+ "planos@390": {
+  "texts": 24,
+  "fontSizes": [
+   10.5,
+   11,
+   11.5,
+   12,
+   13,
+   14,
+   15,
+   17,
+   28
+  ],
+  "minFont": 10.5,
+  "smallTextCount": 1,
+  "smallSamples": [
+   "Depois do teste, seus dados ficam preser"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "800"
+  ],
+  "targets": 11,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 7,
+  "radiiValues": [
+   "16px",
+   "8px",
+   "50%",
+   "11px",
+   "6px",
+   "10px",
+   "17px"
+  ],
+  "shadows": 1,
+  "textColors": 9,
+  "buttonVariants": 3,
+  "pageHeight": 1171
+ },
+ "inicio@1440": {
+  "texts": 133,
+  "fontSizes": [
+   8,
+   8.5,
+   9,
+   9.5,
+   10,
+   10.5,
+   11,
+   11.5,
+   12,
+   12.5,
+   13,
+   13.5,
+   14,
+   22.5,
+   23
+  ],
+  "minFont": 8.12,
+  "smallTextCount": 105,
+  "smallSamples": [
+   "Espaço",
+   "Somente as vendas deste espaço entram no",
+   "R$ 39,00 de R$ 600,00",
+   "Editar",
+   "Vendas hoje",
+   "2 venda(s)"
+  ],
+  "fontWeights": [
+   "400",
+   "600",
+   "700",
+   "750",
+   "800",
+   "850",
+   "900"
+  ],
+  "targets": 15,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 8,
+  "radiiValues": [
+   "16px",
+   "11px",
+   "13px",
+   "99px",
+   "10px",
+   "12px",
+   "9px",
+   "50%"
+  ],
+  "shadows": 3,
+  "textColors": 21,
+  "buttonVariants": 6,
+  "pageHeight": 1705
+ },
+ "vender@1440": {
+  "texts": 72,
+  "fontSizes": [
+   8,
+   8.5,
+   9,
+   9.5,
+   10,
+   10.5,
+   11,
+   12,
+   12.5,
+   14,
+   17.5,
+   18
+  ],
+  "minFont": 8.12,
+  "smallTextCount": 38,
+  "smallSamples": [
+   "Espaço",
+   "Categoria",
+   "Marca",
+   "Ordenar por",
+   "Coca-Cola lata",
+   "Bebidas"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750",
+   "800"
+  ],
+  "targets": 47,
+  "smallTargets": 25,
+  "smallTargetSamples": [
+   "Limpar busca 28x34",
+   "Remover dos favoritos 30x30",
+   "Opções de Brigadeiro gourmet 30x30",
+   "Adicionar Brigadeiro gourmet 30x30",
+   "Adicionar aos favoritos 30x30",
+   "Opções de Bolo de pote Ninho 30x30"
+  ],
+  "radii": 9,
+  "radiiValues": [
+   "16px",
+   "11px",
+   "12px",
+   "10px",
+   "9px",
+   "7px",
+   "50%",
+   "18px",
+   "999px"
+  ],
+  "shadows": 3,
+  "textColors": 18,
+  "buttonVariants": 12,
+  "pageHeight": 927
+ },
+ "produtos@1440": {
+  "texts": 120,
+  "fontSizes": [
+   10,
+   10.5,
+   11,
+   12,
+   12.5,
+   13,
+   14,
+   17,
+   28
+  ],
+  "minFont": 10,
+  "smallTextCount": 25,
+  "smallSamples": [
+   "Espaço",
+   "Preço",
+   "Estoque",
+   "Variações",
+   "Preço",
+   "Estoque"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750",
+   "800",
+   "850"
+  ],
+  "targets": 64,
+  "smallTargets": 32,
+  "smallTargetSamples": [
+   "Remover dos favoritos 38x38",
+   "Adicionar entrada 141x36",
+   "Histórico 94x36",
+   "Mais ações de Brigadeiro gou 38x36",
+   "Remover dos favoritos 38x38",
+   "Adicionar entrada 141x36"
+  ],
+  "radii": 9,
+  "radiiValues": [
+   "12px",
+   "16px",
+   "13px",
+   "999px",
+   "50%",
+   "18px",
+   "14px",
+   "11px",
+   "9px"
+  ],
+  "shadows": 4,
+  "textColors": 19,
+  "buttonVariants": 10,
+  "pageHeight": 1261
+ },
+ "clientes@1440": {
+  "texts": 176,
+  "fontSizes": [
+   9,
+   10,
+   10.5,
+   11,
+   11.5,
+   12,
+   12.5,
+   14,
+   16.5,
+   20,
+   21
+  ],
+  "minFont": 9,
+  "smallTextCount": 33,
+  "smallSamples": [
+   "Espaço",
+   "COBRANÇA VENCIDA",
+   "Última compra",
+   "Última cobrança",
+   "Total comprado",
+   "CRÉDITO"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "750",
+   "800",
+   "900"
+  ],
+  "targets": 76,
+  "smallTargets": 9,
+  "smallTargetSamples": [
+   "Ver todos 79x23",
+   "INPUT 20x20",
+   "INPUT 20x20",
+   "INPUT 20x20",
+   "INPUT 20x20",
+   "INPUT 20x20"
+  ],
+  "radii": 8,
+  "radiiValues": [
+   "16px",
+   "12px",
+   "50%",
+   "999px",
+   "17px",
+   "13px",
+   "8px",
+   "10px"
+  ],
+  "shadows": 4,
+  "textColors": 21,
+  "buttonVariants": 13,
+  "pageHeight": 1660
+ },
+ "historico@1440": {
+  "texts": 15,
+  "fontSizes": [
+   13,
+   14,
+   16,
+   18,
+   34
+  ],
+  "minFont": 13,
+  "smallTextCount": 0,
+  "smallSamples": [],
+  "fontWeights": [
+   "400",
+   "700"
+  ],
+  "targets": 11,
+  "smallTargets": 8,
+  "smallTargetSamples": [
+   "Todos 69x40",
+   "Vendas 76x40",
+   "Pagamentos 106x40",
+   "Ajustes 75x40",
+   "Estoque 80x40",
+   "Campanhas 103x40"
+  ],
+  "radii": 3,
+  "radiiValues": [
+   "15px",
+   "12px",
+   "18px"
+  ],
+  "shadows": 1,
+  "textColors": 6,
+  "buttonVariants": 3,
+  "pageHeight": 900
+ },
+ "cobrancas@1440": {
+  "texts": 65,
+  "fontSizes": [
+   10.5,
+   11,
+   11.5,
+   12.5,
+   13,
+   14,
+   16.5,
+   26,
+   28
+  ],
+  "minFont": 10.5,
+  "smallTextCount": 18,
+  "smallSamples": [
+   "Todos com débito",
+   "Nunca cobrados",
+   "Não cobrados hoje",
+   "Acima de R$ 10",
+   "Acima de R$ 50",
+   "Sem telefone"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "800"
+  ],
+  "targets": 20,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "12px",
+   "18px",
+   "15px",
+   "20px"
+  ],
+  "shadows": 1,
+  "textColors": 5,
+  "buttonVariants": 3,
+  "pageHeight": 1034
+ },
+ "relatorios@1440": {
+  "texts": 99,
+  "fontSizes": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   27,
+   27.5,
+   29
+  ],
+  "minFont": 10,
+  "smallTextCount": 42,
+  "smallSamples": [
+   "VISÃO DO NEGÓCIO",
+   "EspaçoTodos os espaços permitidosLoja Ce",
+   "PeríodoHoje7 dias30 dias90 diasEste mêsM",
+   "America/Sao_Paulo",
+   "Sem período anterior para comparação",
+   "Sem período anterior para comparação"
+  ],
+  "fontWeights": [
+   "400",
+   "600",
+   "650",
+   "700",
+   "750",
+   "800"
+  ],
+  "targets": 5,
+  "smallTargets": 5,
+  "smallTargetSamples": [
+   "Atualizar análise 159x38",
+   "Todos os espaços permitidosL 194x36",
+   "Hoje7 dias30 dias90 diasEste 155x36",
+   "Data do gráfico 100x18",
+   "Ver clientes 131x38"
+  ],
+  "radii": 5,
+  "radiiValues": [
+   "12px",
+   "8px",
+   "14px",
+   "6px",
+   "7px"
+  ],
+  "shadows": 0,
+  "textColors": 4,
+  "buttonVariants": 1,
+  "pageHeight": 1775
+ },
+ "configuracoes@1440": {
+  "texts": 30,
+  "fontSizes": [
+   14,
+   15,
+   16,
+   18,
+   22
+  ],
+  "minFont": 14,
+  "smallTextCount": 0,
+  "smallSamples": [],
+  "fontWeights": [
+   "400",
+   "700"
+  ],
+  "targets": 11,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "21px",
+   "50%",
+   "20px",
+   "17px"
+  ],
+  "shadows": 3,
+  "textColors": 8,
+  "buttonVariants": 2,
+  "pageHeight": 1342
+ },
+ "crm@1440": {
+  "texts": 52,
+  "fontSizes": [
+   10,
+   11,
+   11.5,
+   14,
+   16.5,
+   17.5,
+   21.5
+  ],
+  "minFont": 10.08,
+  "smallTextCount": 17,
+  "smallSamples": [
+   "Período",
+   "Clientes ativos",
+   "últimos 30 dias",
+   "Receita da base",
+   "no período",
+   "Ticket médio"
+  ],
+  "fontWeights": [
+   "400",
+   "700"
+  ],
+  "targets": 21,
+  "smallTargets": 1,
+  "smallTargetSamples": [
+   "Ver todos 78x23"
+  ],
+  "radii": 6,
+  "radiiValues": [
+   "12px",
+   "18px",
+   "11px",
+   "16px",
+   "14px",
+   "999px"
+  ],
+  "shadows": 1,
+  "textColors": 9,
+  "buttonVariants": 7,
+  "pageHeight": 1284
+ },
+ "campanhas@1440": {
+  "texts": 22,
+  "fontSizes": [
+   9,
+   10,
+   12.5,
+   14,
+   16.5,
+   23
+  ],
+  "minFont": 9.1,
+  "smallTextCount": 10,
+  "smallSamples": [
+   "Elegíveis",
+   "Clientes que podem participar",
+   "Com progresso",
+   "Clientes participando",
+   "Próximos de ganhar",
+   "80% ou mais da meta"
+  ],
+  "fontWeights": [
+   "400",
+   "700",
+   "800"
+  ],
+  "targets": 9,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 4,
+  "radiiValues": [
+   "12px",
+   "16px",
+   "13px",
+   "11px"
+  ],
+  "shadows": 3,
+  "textColors": 8,
+  "buttonVariants": 4,
+  "pageHeight": 900
+ },
+ "pedidos@1440": {
+  "texts": 17,
+  "fontSizes": [
+   10,
+   11,
+   13,
+   14,
+   17,
+   18,
+   28
+  ],
+  "minFont": 10,
+  "smallTextCount": 1,
+  "smallSamples": [
+   "CENTRAL DE PEDIDOS"
+  ],
+  "fontWeights": [
+   "400",
+   "500",
+   "600",
+   "650",
+   "700",
+   "750",
+   "800"
+  ],
+  "targets": 8,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 6,
+  "radiiValues": [
+   "19px",
+   "13px",
+   "16px",
+   "12px",
+   "18px",
+   "9px"
+  ],
+  "shadows": 1,
+  "textColors": 7,
+  "buttonVariants": 5,
+  "pageHeight": 900
+ },
+ "planos@1440": {
+  "texts": 24,
+  "fontSizes": [
+   11,
+   11.5,
+   12,
+   13,
+   14,
+   15,
+   23,
+   34
+  ],
+  "minFont": 11,
+  "smallTextCount": 0,
+  "smallSamples": [],
+  "fontWeights": [
+   "400",
+   "700",
+   "800"
+  ],
+  "targets": 11,
+  "smallTargets": 0,
+  "smallTargetSamples": [],
+  "radii": 8,
+  "radiiValues": [
+   "19px",
+   "8px",
+   "50%",
+   "11px",
+   "16px",
+   "6px",
+   "10px",
+   "17px"
+  ],
+  "shadows": 1,
+  "textColors": 9,
+  "buttonVariants": 3,
+  "pageHeight": 1050
+ }
+}

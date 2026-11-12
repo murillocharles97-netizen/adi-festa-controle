@@ -6,7 +6,7 @@
   .desktop-dashboard {
     display: grid;
     gap: 16px;
-    color: #17233b;
+    color: var(--veconi-text);
   }
   .desktop-dashboard button,
   .desktop-dashboard select {
@@ -14,10 +14,10 @@
   }
   .desktop-panel,
   .desktop-kpi {
-    background: #fff;
-    border: 1px solid #e4e9ef;
-    border-radius: 16px;
-    box-shadow: 0 6px 22px rgba(30, 46, 70, 0.055);
+    background: var(--veconi-surface);
+    border: 1px solid var(--veconi-border);
+    border-radius: var(--veconi-radius-card);
+    box-shadow: var(--veconi-shadow-sm);
   }
   .desktop-kpis {
     display: grid;
@@ -38,11 +38,11 @@
   .desktop-kpi-icon {
     display: grid;
     place-items: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 12px;
-    background: #e5f9f4;
-    color: #079b7b;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-primary-soft);
+    color: var(--veconi-action);
   }
   .desktop-kpi-icon svg {
     width: 20px;
@@ -59,9 +59,9 @@
   }
   .desktop-kpi > div > small {
     overflow: hidden;
-    color: #5f6d82;
-    font-size: 0.74rem;
-    font-weight: 600;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-medium);
     line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -76,17 +76,17 @@
     font-variant-numeric: tabular-nums;
   }
   .desktop-kpi em {
-    color: #7b8797;
-    font-size: 0.72rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
     font-style: normal;
     line-height: 1.3;
   }
   .desktop-kpi.danger strong {
-    color: #df3848;
+    color: var(--veconi-danger);
   }
   .desktop-kpi.danger .desktop-kpi-icon {
-    background: #fdecee;
-    color: #d23445;
+    background: var(--veconi-danger-soft);
+    color: var(--veconi-danger);
   }
   .desktop-kpi-static {
     display: none;
@@ -100,8 +100,8 @@
     margin-top: auto;
   }
   .desktop-kpi-compare small {
-    font-size: 0.63rem;
-    color: #8490a0;
+    font-size: var(--veconi-fs-12);
+    color: var(--veconi-text-muted);
   }
   .desktop-kpi-trend {
     display: inline-flex;
@@ -109,20 +109,20 @@
     gap: 3px;
     padding: 4px 7px;
     border-radius: 99px;
-    font-size: 0.66rem;
-    font-weight: 800;
+    font-size: var(--veconi-fs-12);
+    font-weight: var(--veconi-fw-bold);
   }
   .desktop-kpi-trend svg {
     width: 12px;
     height: 12px;
   }
   .desktop-kpi-trend.positive {
-    background: #e3f8f1;
-    color: #078461;
+    background: var(--veconi-success-soft);
+    color: var(--veconi-success);
   }
   .desktop-kpi-trend.negative {
-    background: #fee9ec;
-    color: #c73140;
+    background: var(--veconi-danger-soft);
+    color: var(--veconi-danger);
   }
   .desktop-panel-head {
     display: flex;
@@ -133,19 +133,21 @@
   }
   .desktop-panel-head h3 {
     margin: 0;
-    font-size: 0.96rem;
+    font-size: var(--veconi-fs-16);
+    font-weight: var(--veconi-fw-semibold);
   }
   .desktop-panel-head button {
     display: flex;
     align-items: center;
     gap: 4px;
     border: 0;
-    background: #f3f6f8;
-    color: #344052;
-    border-radius: 9px;
-    padding: 8px 10px;
-    font-size: 0.7rem;
-    font-weight: 750;
+    background: var(--veconi-surface-soft);
+    color: var(--veconi-text-secondary);
+    border-radius: var(--veconi-radius-sm);
+    min-height: var(--veconi-control-sm);
+    padding: 0 12px;
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-semibold);
   }
   .desktop-panel-head button svg {
     width: 14px;
@@ -170,16 +172,17 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #748096;
-    font-size: 0.7rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
   }
   .desktop-sales-performance select {
     height: 36px;
-    border: 1px solid #dfe5ec;
-    border-radius: 9px;
-    background: #fff;
+    border: 1px solid var(--veconi-border-strong);
+    border-radius: var(--veconi-radius-sm);
+    background: var(--veconi-surface);
     padding: 0 26px 0 9px;
-    color: #344052;
+    color: var(--veconi-text);
+    font-size: var(--veconi-fs-13);
   }
   .desktop-performance-value {
     display: flex;
@@ -190,6 +193,10 @@
   .desktop-performance-value > strong {
     font-size: 1.65rem;
   }
+  .desktop-performance-value small {
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-13);
+  }
   .desktop-chart-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 142px;
@@ -199,8 +206,37 @@
   .desktop-sales-chart svg {
     display: block;
     width: 100%;
-    height: 220px;
+    height: auto;
+    aspect-ratio: 720 / 220;
+    max-height: 220px;
     overflow: visible;
+  }
+  /* Rótulos do eixo em HTML: 12 px reais em qualquer largura (no SVG encolhiam com o viewBox). */
+  .desktop-chart-axis {
+    position: relative;
+    height: 18px;
+    margin: 2px 0 0;
+  }
+  .desktop-chart-axis span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
+    line-height: 18px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .desktop-chart-axis span:first-child { transform: none; }
+  .desktop-chart-axis span:last-child { transform: translateX(-100%); }
+  .desktop-sales-chart {
+    align-self: center;
+    container-type: inline-size;
+  }
+  /* Gráfico estreito: um rótulo sim, outro não (o último sempre aparece). */
+  @container (max-width: 480px) {
+    .desktop-chart-axis span:nth-child(even):not(:last-child) { display: none; }
+    .desktop-chart-axis span:nth-last-child(2):nth-child(odd) { display: none; }
   }
   .desktop-sales-chart .chart-grid {
     stroke: #e7ecf0;
@@ -221,37 +257,33 @@
     stroke: #fff;
     stroke-width: 2;
   }
-  .desktop-sales-chart text {
-    fill: #7b8798;
-    font-size: 10px;
-  }
   .desktop-chart-layout aside {
     display: grid;
     align-content: center;
     gap: 9px;
     padding: 12px;
-    border-radius: 13px;
-    background: #f6f8fa;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-surface-soft);
   }
   .desktop-chart-layout aside span {
     display: grid;
     gap: 3px;
     padding-bottom: 8px;
-    border-bottom: 1px solid #e2e7ec;
+    border-bottom: 1px solid var(--veconi-border);
   }
   .desktop-chart-layout aside span:last-child {
     border: 0;
   }
   .desktop-chart-layout aside small {
-    color: #7b8798;
-    font-size: 0.66rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
   }
   .desktop-chart-layout aside b {
-    font-size: 0.82rem;
+    font-size: var(--veconi-fs-14);
   }
   .desktop-chart-layout aside em {
-    font-size: 0.7rem;
-    color: #079b7b;
+    font-size: var(--veconi-fs-12);
+    color: var(--veconi-action);
     font-style: normal;
   }
   .desktop-finance > div {
@@ -263,36 +295,44 @@
     justify-content: space-between;
     gap: 10px;
     padding: 15px 4px;
-    border-top: 1px solid #edf0f3;
+    border-top: 1px solid var(--veconi-border);
   }
   .desktop-finance small {
-    color: #6e7a8c;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-13);
   }
   .desktop-finance b {
-    font-size: 0.78rem;
+    font-size: var(--veconi-fs-14);
     text-align: right;
   }
   .desktop-finance b.positive {
-    color: #078461;
+    color: var(--veconi-success);
   }
   .desktop-finance b.negative {
-    color: #d93645;
+    color: var(--veconi-danger);
   }
   .desktop-finance b em {
     display: block;
-    color: #9aa4b2;
-    font-size: 0.58rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
+    font-weight: var(--veconi-fw-regular);
     font-style: normal;
+  }
+  /* Despesas ainda não entram no saldo previsto: dizer isso em vez de exibir um R$ 0,00 fixo. */
+  .desktop-finance b.is-pending {
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-medium);
   }
   .desktop-finance .forecast {
     margin-top: 6px;
     padding: 14px 11px;
     border: 0;
-    border-radius: 11px;
-    background: #e8f9f4;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-primary-soft);
   }
   .desktop-finance .forecast b {
-    color: #078461;
+    color: var(--veconi-action);
   }
   .desktop-top-products > div {
     display: grid;
@@ -302,9 +342,9 @@
     display: grid;
     grid-template-columns: 26px minmax(0, 1fr) 48px 76px;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     padding: 10px 0;
-    border-top: 1px solid #edf0f3;
+    border-top: 1px solid var(--veconi-border);
   }
   .desktop-top-products article > span {
     display: grid;
@@ -312,25 +352,31 @@
     width: 23px;
     height: 23px;
     border-radius: 50%;
-    background: #e4f8f2;
-    color: #078461;
-    font-size: 0.67rem;
-    font-weight: 850;
+    background: var(--veconi-surface-soft);
+    color: var(--veconi-text-secondary);
+    font-size: var(--veconi-fs-12);
+    font-weight: var(--veconi-fw-bold);
   }
+  /* Nome em até duas linhas antes de cortar; o nome completo fica no title. */
   .desktop-top-products b {
+    display: -webkit-box;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.75rem;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+    font-size: var(--veconi-fs-13);
   }
   .desktop-top-products small {
-    color: #748096;
+    color: var(--veconi-text-muted);
     text-align: right;
-    font-size: 0.65rem;
+    font-size: var(--veconi-fs-12);
   }
   .desktop-top-products strong {
     text-align: right;
-    font-size: 0.7rem;
+    font-size: var(--veconi-fs-13);
+    font-variant-numeric: tabular-nums;
   }
   .desktop-quick-actions {
     padding-bottom: 13px;
@@ -349,29 +395,30 @@
     min-width: 0;
     padding: 11px;
     border: 1px solid transparent;
-    border-radius: 11px;
-    background: #f7f9fb;
-    color: #17233b;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-surface-soft);
+    color: var(--veconi-text);
     text-align: left;
   }
   .desktop-quick-actions > div > button:hover {
-    border-color: #aee7d9;
-    background: #edfaf6;
+    border-color: var(--veconi-primary);
+    background: var(--veconi-primary-soft);
   }
   .desktop-quick-actions svg {
     width: 20px;
-    color: #079b7b;
+    color: var(--veconi-action);
   }
   .desktop-quick-actions span > * {
     display: block;
   }
   .desktop-quick-actions b {
-    font-size: 0.74rem;
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-semibold);
   }
   .desktop-quick-actions small {
     margin-top: 3px;
-    color: #788497;
-    font-size: 0.61rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
   }
   .desktop-command-grid {
     display: grid;
@@ -390,18 +437,18 @@
   }
   .desktop-table-head {
     padding: 8px 0;
-    color: #7a8698;
-    font-size: 0.62rem;
-    text-transform: uppercase;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
+    font-weight: var(--veconi-fw-medium);
   }
   .desktop-table article {
     padding: 10px 0;
-    border-top: 1px solid #edf0f3;
+    border-top: 1px solid var(--veconi-border);
   }
   .desktop-table time,
   .desktop-table b,
   .desktop-table strong {
-    font-size: 0.69rem;
+    font-size: var(--veconi-fs-13);
   }
   .desktop-table b {
     overflow: hidden;
@@ -410,22 +457,23 @@
   }
   .desktop-table strong {
     text-align: right;
+    font-variant-numeric: tabular-nums;
   }
   .desktop-status {
     justify-self: start;
     padding: 4px 7px;
     border-radius: 99px;
-    font-size: 0.6rem;
-    font-weight: 800;
+    font-size: var(--veconi-fs-12);
+    font-weight: var(--veconi-fw-semibold);
     text-transform: capitalize;
   }
   .desktop-status.paid {
-    background: #e1f8f0;
-    color: #087d62;
+    background: var(--veconi-success-soft);
+    color: var(--veconi-success);
   }
   .desktop-status.debt {
-    background: #fff0d8;
-    color: #9a6100;
+    background: var(--veconi-warning-soft);
+    color: #9a4a05;
   }
   .desktop-alerts > div {
     display: grid;
@@ -438,9 +486,9 @@
     gap: 9px;
     padding: 10px;
     border: 0;
-    border-radius: 10px;
-    background: #f6f8fa;
-    color: #17233b;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-surface-soft);
+    color: var(--veconi-text);
     text-align: left;
     margin-bottom: 6px;
   }
@@ -452,40 +500,32 @@
   }
   .desktop-alerts button > svg:last-child {
     width: 16px;
-    color: #7d8999;
+    color: var(--veconi-text-muted);
   }
   .desktop-alerts button span > * {
     display: block;
   }
   .desktop-alerts button b {
-    font-size: 0.7rem;
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-semibold);
   }
   .desktop-alerts button small {
     margin-top: 2px;
-    color: #748096;
-    font-size: 0.6rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
   }
-  .desktop-alerts button.danger {
-    background: #fff0f2;
-  }
+  /* Cor só onde há risco: falta (perigo) e estoque baixo (aviso); demais alertas em neutro. */
   .desktop-alerts button.danger > svg:first-child {
-    color: #d93645;
-    background: #ffe0e4;
-  }
-  .desktop-alerts button.warning {
-    background: #fff7e8;
+    color: var(--veconi-danger);
+    background: var(--veconi-danger-soft);
   }
   .desktop-alerts button.warning > svg:first-child {
-    color: #b06c00;
-    background: #ffedc8;
+    color: var(--veconi-warning);
+    background: var(--veconi-warning-soft);
   }
-  .desktop-alerts button.info > svg:first-child {
-    color: #235fc0;
-    background: #e8f0ff;
-  }
-  .desktop-alerts button.violet > svg:first-child {
-    color: #7042bd;
-    background: #f0e9ff;
+  .desktop-alerts button:is(.info, .violet) > svg:first-child {
+    color: var(--veconi-text-secondary);
+    background: var(--veconi-surface);
   }
   .desktop-crm-summary > div {
     display: grid;
@@ -498,12 +538,12 @@
     align-items: center;
     gap: 8px;
     padding: 10px;
-    border-radius: 10px;
-    background: #f6f8fa;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-surface-soft);
   }
   .desktop-crm-summary article > svg {
     width: 18px;
-    color: #079b7b;
+    color: var(--veconi-action);
   }
   .desktop-crm-summary span > * {
     display: block;
@@ -512,8 +552,8 @@
     font-size: 0.9rem;
   }
   .desktop-crm-summary small {
-    color: #748096;
-    font-size: 0.62rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
   }
   .desktop-campaign-summary {
     padding-bottom: 14px;
@@ -530,12 +570,12 @@
     justify-content: center;
     gap: 9px;
     min-height: 70px;
-    border-radius: 11px;
-    background: #f6f8fa;
+    border-radius: var(--veconi-radius-md);
+    background: var(--veconi-surface-soft);
   }
   .desktop-campaign-summary article > svg {
     width: 20px;
-    color: #079b7b;
+    color: var(--veconi-action);
   }
   .desktop-campaign-summary span > * {
     display: block;
@@ -544,12 +584,56 @@
     font-size: 1rem;
   }
   .desktop-campaign-summary small {
-    color: #748096;
-    font-size: 0.64rem;
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-12);
+  }
+  /* Início: meta e espaço único com a escala do DS v2 (spaces.css continua intacto). */
+  .desktop-dashboard .space-context-bar.is-single {
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .desktop-dashboard .space-context-bar.is-single > span {
+    font-size: var(--veconi-fs-12);
+    color: var(--veconi-text-muted);
+  }
+  /* Nota de trocas: informativa enquanto carrega ou quando confirmada; âmbar quando os ajustes
+     não puderam ser confirmados (data-state="warning"). O texto nunca é escondido. */
+  .desktop-dashboard p.space-data-notice {
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--veconi-radius-sm);
+    background: var(--veconi-info-soft);
+    color: var(--veconi-info);
+    font-size: var(--veconi-fs-13);
+  }
+  .desktop-dashboard p.space-data-notice[data-state="warning"] {
+    background: var(--veconi-warning-soft);
+    color: #9a4a05;
+  }
+  .desktop-dashboard .desktop-space-goal-copy b {
+    font-size: var(--veconi-fs-14);
+  }
+  .desktop-dashboard .desktop-space-goal-copy small,
+  .desktop-dashboard .desktop-space-goal-values > span {
+    font-size: var(--veconi-fs-12);
+    color: var(--veconi-text-muted);
+  }
+  .desktop-dashboard .desktop-space-goal > button {
+    min-height: var(--veconi-control-sm);
+    font-size: var(--veconi-fs-13);
+  }
+  /* Tablet: o botão Editar com 13 px não cabe na grade original (colunas mínimas de 170 + 220 px). */
+  @media (max-width: 1023px) {
+    .desktop-dashboard .desktop-space-goal {
+      grid-template-columns: 36px minmax(0, 1fr) minmax(150px, 0.9fr) auto auto;
+      gap: 10px;
+    }
   }
   .desktop-empty {
     margin: 16px;
-    color: #7b8798;
+    color: var(--veconi-text-muted);
     text-align: center;
   }
 }

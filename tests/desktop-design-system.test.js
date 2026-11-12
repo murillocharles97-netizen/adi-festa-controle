@@ -30,8 +30,8 @@ test("componentes oficiais permanecem limitados ao desktop", () => {
 
 test("index carrega tokens antes dos módulos e o desktop system por último", () => {
   const html = read("index.html");
-  const tokens = html.indexOf("css/design-system/tokens.css?v=94");
-  const campaigns = html.indexOf("css/campanhas.css?v=94");
+  const tokens = html.indexOf("css/design-system/tokens.css?v=2311-ds2");
+  const campaigns = html.indexOf("css/campanhas.css?v=2311-ds2");
   const desktop = html.indexOf("css/design-system/desktop.css?v=94");
   assert.ok(tokens > 0 && tokens < campaigns);
   assert.ok(desktop > campaigns);

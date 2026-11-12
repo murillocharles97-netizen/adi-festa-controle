@@ -176,3 +176,7 @@
 .campaign-how-it-works{display:flex;gap:11px;margin-top:17px;padding:14px;border-radius:13px;background:#f2f6f9;color:#3d526b}.campaign-how-it-works>svg{width:20px;flex:none;color:#1284a5}.campaign-how-it-works b,.campaign-how-it-works p{display:block;margin:0}.campaign-how-it-works p{margin-top:3px;font-size:.77rem;line-height:1.45}
 .campaign-progress-kpis{grid-template-columns:repeat(4,1fr)}.campaign-pending-explanation{padding:11px 13px;border-radius:11px;background:#fff7e8;color:#855b0c;font-size:.8rem}
 @media(max-width:767px){.campaign-rule-layout{grid-template-columns:1fr}.campaign-rule-preview{order:-1}.campaign-progress-kpis{grid-template-columns:1fr 1fr}}
+
+/* DS v2: botões e filtros da barra de Campanhas em 13 px no desktop/tablet. Com o corpo de 14 px do DS v2
+   a barra não cabia (+5 a 6 px de rolagem lateral); 13 px mantém o piso de 12 px e devolve o espaço. */
+@media (min-width:768px){.campaigns-page :is(.campaign-page-head .btn,.campaign-filter-chips button,.campaign-filter-button,.campaign-toolbar button){font-size:var(--veconi-fs-13)}}

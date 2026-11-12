@@ -22,7 +22,7 @@ function assertSafePublicFile(file, bytes) {
     if (file !== '.nojekyll') throw new Error('Invalid public path');
   }
   const allowed = ROOT_FILES.has(file) || SHARED_FILES.has(file) ||
-    /^(?:js\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.js|css\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.css|assets\/[a-zA-Z0-9_.-]+\.(?:png|svg|ico|js|txt))$/.test(file);
+    /^(?:js\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.js|css\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.css|assets\/[a-zA-Z0-9_.-]+\.(?:png|svg|ico|js|txt)|assets\/fonts\/[a-zA-Z0-9_.-]+\.(?:woff2|txt))$/.test(file);
   if (!allowed || RETIRED_FILES.has(path.posix.basename(file).toLowerCase())) throw new Error('Non-public resource rejected: ' + file);
   if (bytes) {
     const normalized = bytes.toString('utf8').replace(/\r\n/g, '\n');

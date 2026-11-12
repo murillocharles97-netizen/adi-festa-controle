@@ -1,56 +1,122 @@
+/* VECONI Design System v2 — tokens de fonte e escala.
+ *
+ * Migração incremental e reversível:
+ * - As cores canônicas ficam em `veconi-theme.css` (:root), carregado depois de
+ *   `visual.css`/`style.css`, que ainda declaram `--primary`/`--muted` legados.
+ * - `--af-*` (Design System desktop V1) passa a ser apelido dos tokens `--veconi-*`.
+ *   Nenhuma regra existente precisa mudar; cada tela adota a escala quando for refinada.
+ * - Reverter = reverter este commit; nenhum seletor de tela depende destes nomes novos.
+ */
+
+/* Inter variável (OFL, subconjunto latino com acentos do português, 48 KB, todos os pesos).
+ * Nome próprio para não depender de uma Inter instalada no aparelho. `swap` mostra o
+ * texto imediatamente com o fallback de métricas ajustadas abaixo, evitando salto de layout. */
+@font-face {
+  font-family: "VECONI Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../../assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations"),
+       url("../../assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "VECONI Inter Fallback";
+  src: local("Arial"), local("Helvetica"), local("Roboto");
+  ascent-override: 90.49%;
+  descent-override: 22.56%;
+  line-gap-override: 0%;
+  size-adjust: 107.06%;
+}
+
 :root {
-  --af-color-primary: #0caf82;
-  --af-color-primary-hover: #078f6c;
-  --af-color-primary-active: #06775c;
-  --af-color-primary-soft: #e8f8f3;
-  --af-color-primary-softer: #f4fcf9;
-  --af-color-navy: #17283f;
-  --af-color-navy-soft: #26384f;
-  --af-color-text: #17243a;
-  --af-color-text-secondary: #5f6e82;
-  --af-color-muted: #8290a2;
-  --af-color-success: #07966f;
-  --af-color-success-soft: #e3f8f0;
-  --af-color-warning: #c87900;
-  --af-color-warning-soft: #fff2dc;
-  --af-color-danger: #d93645;
-  --af-color-danger-soft: #ffeaed;
-  --af-color-info: #2478bf;
-  --af-color-info-soft: #e8f3ff;
-  --af-color-surface: #ffffff;
-  --af-color-surface-alt: #f7f9fb;
-  --af-color-background: #f4f6f8;
-  --af-color-border: #e1e7ed;
-  --af-color-border-strong: #ced7e0;
-  --af-radius-sm: 8px;
-  --af-radius-md: 11px;
-  --af-radius-lg: 15px;
-  --af-radius-xl: 20px;
+  /* Tipografia: 7 passos em px (a raiz do app é 14 px; rem daria 10,5 px no passo de 12).
+     Mínimo de 12 px para qualquer texto lido. */
+  --veconi-fs-12: 12px;
+  --veconi-fs-13: 13px;
+  --veconi-fs-14: 14px;
+  --veconi-fs-16: 16px;
+  --veconi-fs-18: 18px;
+  --veconi-fs-22: 22px;
+  --veconi-fs-28: 28px;
+  --veconi-fw-regular: 450;
+  --veconi-fw-medium: 550;
+  --veconi-fw-semibold: 650;
+  --veconi-fw-bold: 750;
+  --veconi-line-tight: 1.2;
+  --veconi-line-body: 1.5;
+
+  /* Espaço (grade de 4 px). */
+  --veconi-space-1: 4px;
+  --veconi-space-2: 8px;
+  --veconi-space-3: 12px;
+  --veconi-space-4: 16px;
+  --veconi-space-5: 20px;
+  --veconi-space-6: 24px;
+  --veconi-space-7: 32px;
+  --veconi-space-8: 40px;
+
+  /* Controles. A busca compacta da V231 (46 px) continua definida nas telas. */
+  --veconi-control-sm: 36px;
+  --veconi-control-md: 44px;
+  --veconi-control-search: 46px;
+  --veconi-control-lg: 52px;
+
+  /* Apelidos do Design System desktop V1 (compatibilidade durante a transição).
+   Cada apelido tem fallback com o valor canônico, para páginas que carregam só este arquivo. */
+  --af-color-primary: var(--veconi-primary, #16cdbb);
+  --af-color-primary-hover: var(--veconi-primary-hover, #10b5a5);
+  --af-color-primary-active: var(--veconi-primary-active, #078f89);
+  --af-color-primary-soft: var(--veconi-primary-soft, #e6faf7);
+  --af-color-primary-softer: #f4fcfb;
+  --af-color-navy: var(--veconi-ink, #101b2d);
+  --af-color-navy-soft: var(--veconi-ink-soft, #27364d);
+  --af-color-text: var(--veconi-text, #172235);
+  --af-color-text-secondary: var(--veconi-text-secondary, #475467);
+  --af-color-muted: var(--veconi-text-muted, #5b6b80);
+  --af-color-success: var(--veconi-success, #0b7e5b);
+  --af-color-success-soft: var(--veconi-success-soft, #e5f8f2);
+  --af-color-warning: var(--veconi-warning, #b45309);
+  --af-color-warning-soft: var(--veconi-warning-soft, #fff3de);
+  --af-color-danger: var(--veconi-danger, #c0262d);
+  --af-color-danger-soft: var(--veconi-danger-soft, #ffebee);
+  --af-color-info: var(--veconi-info, #2563a8);
+  --af-color-info-soft: var(--veconi-info-soft, #eaf3ff);
+  --af-color-surface: var(--veconi-surface, #ffffff);
+  --af-color-surface-alt: var(--veconi-surface-soft, #f0f4f7);
+  --af-color-background: var(--veconi-bg, #f5f7fa);
+  --af-color-border: var(--veconi-border, #dde4ea);
+  --af-color-border-strong: var(--veconi-border-strong, #cbd6df);
+  --af-radius-sm: var(--veconi-radius-sm, 8px);
+  --af-radius-md: var(--veconi-radius-md, 12px);
+  --af-radius-lg: var(--veconi-radius-card, 16px);
+  --af-radius-xl: var(--veconi-radius-card, 16px);
   --af-radius-pill: 999px;
-  --af-shadow-sm: 0 5px 18px rgba(25, 44, 63, 0.06);
-  --af-shadow-md: 0 14px 42px rgba(22, 39, 57, 0.12);
+  --af-shadow-sm: var(--veconi-shadow-sm, 0 1px 2px rgba(16, 27, 45, 0.04), 0 1px 3px rgba(16, 27, 45, 0.06));
+  --af-shadow-md: var(--veconi-shadow-md, 0 12px 32px rgba(16, 27, 45, 0.12));
   --af-shadow-lg: 0 28px 90px rgba(16, 35, 59, 0.22);
-  --af-space-1: 4px;
-  --af-space-2: 8px;
-  --af-space-3: 12px;
-  --af-space-4: 16px;
-  --af-space-5: 20px;
-  --af-space-6: 24px;
-  --af-space-7: 32px;
-  --af-space-8: 40px;
-  --af-font-xs: 0.6875rem;
-  --af-font-sm: 0.75rem;
-  --af-font-md: 0.875rem;
-  --af-font-lg: 1rem;
+  --af-space-1: var(--veconi-space-1);
+  --af-space-2: var(--veconi-space-2);
+  --af-space-3: var(--veconi-space-3);
+  --af-space-4: var(--veconi-space-4);
+  --af-space-5: var(--veconi-space-5);
+  --af-space-6: var(--veconi-space-6);
+  --af-space-7: var(--veconi-space-7);
+  --af-space-8: var(--veconi-space-8);
+  /* Piso de 12 px: o antigo `xs` (11 px) passa a 12 px. */
+  --af-font-xs: var(--veconi-fs-12);
+  --af-font-sm: var(--veconi-fs-12);
+  --af-font-md: var(--veconi-fs-14);
+  --af-font-lg: var(--veconi-fs-16);
   --af-font-xl: 1.25rem;
   --af-font-page: clamp(1.5rem, 2vw, 1.75rem);
-  --af-line-compact: 1.2;
-  --af-line-body: 1.5;
-  --af-control-height-sm: 36px;
-  --af-control-height-md: 44px;
+  --af-line-compact: var(--veconi-line-tight);
+  --af-line-body: var(--veconi-line-body);
+  --af-control-height-sm: var(--veconi-control-sm);
+  --af-control-height-md: var(--veconi-control-md);
   --af-control-height-lg: 50px;
   --af-page-max: 1440px;
   --af-page-padding: clamp(20px, 2.2vw, 32px);
   --af-transition: 150ms ease;
-  --af-focus-ring: 0 0 0 3px rgba(12, 175, 130, 0.2);
+  --af-focus-ring: var(--veconi-focus, 0 0 0 3px rgba(22, 205, 187, 0.24));
 }

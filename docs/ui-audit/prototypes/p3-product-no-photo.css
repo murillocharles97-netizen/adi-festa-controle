@@ -1,0 +1,19 @@
+@import url("tokens.css");
+/* Protótipo 3 — Produto sem foto. Cards com foto não mudam; sem foto, o espaço vazio vira informação. */
+@media (max-width:767px){
+ body #app .mobile-catalog-card .mobile-card-media:has(.is-fallback,.pos-placeholder){aspect-ratio:auto!important;height:64px!important;min-height:64px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;padding:0 var(--vx-3)!important;background:var(--vx-surface-2)!important;border-bottom:1px solid var(--vx-line)!important;border-radius:0!important}
+ body #app .mobile-catalog-card .mobile-card-media:has(.is-fallback,.pos-placeholder)>:is(.is-fallback,.pos-placeholder){position:static!important;inset:auto!important;width:40px!important;height:40px!important;min-height:40px!important;flex:none!important;display:grid!important;place-items:center!important;border-radius:var(--vx-r-md)!important;background:var(--vx-brand-50)!important;color:var(--vx-action)!important;font-size:var(--vx-fs-14)!important;font-weight:var(--vx-fw-bold)!important;letter-spacing:.02em}
+ body #app .mobile-catalog-card .mobile-card-media:has(.is-fallback,.pos-placeholder) .product-photo-fallback{font-size:var(--vx-fs-14)!important;color:var(--vx-action)!important;background:none!important}
+ body #app .mobile-catalog-card .mobile-card-media:has(.is-fallback,.pos-placeholder) .mobile-card-favorite{top:10px!important;right:8px!important;width:44px!important;height:44px!important;box-shadow:none!important;border:1px solid var(--vx-line)!important;background:var(--vx-surface)!important}
+ /* Tipografia do card na escala; estoque e preço com a mesma hierarquia nas duas telas. */
+ body #app .mobile-catalog-card .mobile-card-copy>:is(p,.pos-full-name){font-size:var(--vx-fs-12)!important;color:var(--vx-text-3)!important}
+ body #app .products-mobile-page .mobile-catalog-card .mobile-card-stock>:is(em,small){font-size:var(--vx-fs-12)!important;font-weight:var(--vx-fw-medium)!important;padding:4px 8px!important}
+}
+@media (min-width:768px){
+ body #app .desktop-product-card:has(.desktop-product-card-photo.is-fallback){min-height:0!important;grid-template-columns:76px minmax(0,1fr)!important}
+ body #app .desktop-product-card:has(.desktop-product-card-photo.is-fallback) .desktop-product-card-media{min-height:0!important;padding:var(--vx-4) 0 var(--vx-4) var(--vx-4)!important}
+ body #app .desktop-product-card-photo.is-fallback{width:48px!important;height:48px!important;min-height:48px!important;border-radius:var(--vx-r-md)!important;background:var(--vx-brand-50)!important}
+ body #app .desktop-product-card-photo.is-fallback .product-photo-fallback{font-size:var(--vx-fs-16)!important;color:var(--vx-action)!important;background:none!important}
+ /* A estrela sai de cima da foto inexistente e fica alinhada ao ladrilho. */
+ body #app .desktop-product-card:has(.desktop-product-card-photo.is-fallback) .desktop-product-favorite{top:72px!important;left:22px!important;right:auto!important;width:36px!important;height:36px!important;box-shadow:none!important}
+}
