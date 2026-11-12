@@ -24,3 +24,5 @@
 @media(min-width:781px){.financial-accounts-cards-page{max-width:1180px}.financial-accounts-cards-page>.financial-compact-context{max-width:650px}.financial-institution-summary{max-width:650px}.financial-institution-note{max-width:760px}.financial-institution-action-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:780px){body:has(.financial-page) .topbar{display:grid}}
 @media(max-width:520px){.financial-account-duplicate-list article{grid-template-columns:42px minmax(0,1fr)}.financial-account-duplicate-list article .btn{grid-column:1/-1;width:100%}}
+/* DS v2: zero não é alerta. Despesas/resultado iguais a R$ 0,00 ficam neutros (financial.css usa !important). */
+.financial-home-summary strong.is-zero{color:var(--veconi-text)!important}
