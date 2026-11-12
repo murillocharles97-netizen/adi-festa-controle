@@ -553,7 +553,7 @@ const readQueueStrict = ({readOnly=false}={}) => {
 const saveQueue = (queue) => {
   const previous = readQueueStrict();
   for (const item of previous) {
-    if (!queueQuarantineReason(item) && !paymentQueueRequiresReview(item) && !readPaymentRecoveryReceipt(item)) continue;
+    if (!queueQuarantineReason(item) && !paymentQueueRequiresReview(item) && !readPaymentRecoveryReceipt(item) && !rejectedProductStockUpdate(item)) continue;
     const next = queue.find(entry => entry.queueId === item.queueId &&
       entry.operationId === item.operationId);
     if (!next || JSON.stringify(next) !== JSON.stringify(item))
@@ -578,8 +578,12 @@ function classifyQueueOperation(item) {
     const reason=queueManualReviewReason(item);
     if(reason){const quarantined=Boolean(queueQuarantineReason(item));return result(quarantined?'quarantined':'manual_review',{
       reviewRequired:true,reviewState:quarantined?'quarantined':'manual_review',reviewReason:reason});}
-    if(item.status==='error')return result('error',{activeError:true,canRetry:!monetaryRecoveryRequired(item)&&!favoriteWriteWasRejected(item),
-      replayBlocked:monetaryRecoveryRequired(item),reviewReason:monetaryRecoveryRequired(item)?'monetary_recovery_required':null});
+    if(item.status==='error'){
+      const reviewReason=monetaryRecoveryRequired(item)?'monetary_recovery_required':
+        rejectedProductStockUpdate(item)?'product_stock_review_required':null;
+      return result('error',{activeError:true,canRetry:!reviewReason&&!favoriteWriteWasRejected(item),
+        replayBlocked:Boolean(reviewReason),reviewReason});
+    }
     if(item.status==='local_preparing')return result('preparing',{status:'local_preparing'});
     if(item.status==='syncing')return result('processing',{status:'syncing'});
     return result('pending',{sendable:true,canRetry:true,replayBlocked:false});
@@ -587,6 +591,71 @@ function classifyQueueOperation(item) {
 }
 function monetaryRecoveryRequired(item){return item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
   (item.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');}
+function rejectedProductStockUpdate(item) {
+  const writes=item.payload?.writes;
+  return item.status==='error'&&item.lastErrorStage==='server_operational_commit'&&
+    item.lastErrorCode==='permission-denied'&&item.lastErrorMessage==='Estoque sem movimento autorizado.'&&
+    Array.isArray(writes)&&writes.length===1&&writes[0]?.entityType==='products'&&writes[0]?.operation==='update';
+}
+async function assertCancellationQueueClear(quote) {
+  const uid=currentUser?.uid, bid=activeBusinessId(), generation=DB.getWorkspaceGeneration?.()??0, key=queueKey();
+  const peek=k=>typeof localStorage.peekItem==='function'?localStorage.peekItem(k):localStorage.getItem(k);
+  const fail=()=>{throw Error('Há alterações locais sem comprovação de independência. Confira Sincronização → Ver detalhes. Nenhuma operação será reenviada por este fluxo.');};
+  const assertScope=()=>{
+    if(!uid||uid!==currentUser?.uid||uid!==auth.currentUser?.uid||bid!==activeBusinessId()||
+       generation!==(DB.getWorkspaceGeneration?.()??0)||key!==queueKey()||!DB.__firebaseSyncWrapped)fail();
+  };
+  assertScope();
+  const snapshot=peek(key);
+  // A queue awaiting migration has no verified footprint in this namespace.
+  if(!snapshot&&peek('adiFesta:'+bid+':syncQueue')||bid==='adi-festa'&&!peek(key+':legacyMigrated')&&peek(LEGACY_QUEUE_KEY))fail();
+  const queue=readQueueStrict({readOnly:true});
+  const unresolved=queue.filter(item=>!['resolved','archived'].includes(classifyQueueOperation(item).category));
+  if(!unresolved.length)return;
+  const context=window.BusinessContext?.get?.();
+  const valid=id=>typeof id==='string'&&/^[-A-Za-z0-9_:]{3,160}$/.test(id);
+  if(context?.businessId!==bid||context?.business?.ownerId!==uid||context?.role!=='owner'||
+     !quote||quote.isCredit!==false||!['pix','dinheiro'].includes(quote.paymentMethod)||
+     !valid(quote.saleId)||!Array.isArray(quote.stockReturns)||!quote.stockReturns.length||
+     quote.stockReturns.some(row=>!valid(row?.productId)))fail();
+  const targetProducts=new Set(quote.stockReturns.map(row=>row.productId)), documents=new Set();
+  for(const item of unresolved){
+    const writes=item.payload?.writes;
+    if(item.status!=='error'||item.lastErrorStage!=='server_operational_commit'||
+       item.businessId!==bid||item.userId!==uid||(item.workspaceGeneration??0)!==generation||
+       !valid(item.operationId)||!Array.isArray(writes)||!writes.length||
+       writes.some(w=>!valid(w?.entityId)||!w.data||typeof w.data!=='object'||Array.isArray(w.data)||
+         w.data.businessId&&w.data.businessId!==bid||
+         w.data.workspaceGeneration!==undefined&&w.data.workspaceGeneration!==generation))fail();
+    const classification=classifyQueueOperation(item);
+    if(classification.category!=='error'||classification.reviewRequired||!classification.replayBlocked)fail();
+    const productUpdate=rejectedProductStockUpdate(item);
+    if(!productUpdate){
+      const sales=writes.filter(w=>w.entityType==='sales');
+      const sale=sales[0]?.data;
+      if(!monetaryRecoveryRequired(item)||sales.length!==1||sales[0].operation!=='create'||
+         sales[0].entityId===quote.saleId||!['pix','dinheiro'].includes(sale.formaPagamento)||
+         sale.status!=='pago'||sale.installmentPlan||sale.paymentIntentId||sale.onlineOrderId||
+         sale.source==='online_store'||sale.source==='exchange_credit_checkout'||sale.exchangeCreditUsedCents||
+         sale.subscriptionUpdates?.length||sale.campaignUpdates?.length||sale.appliedCampaignIds?.length||
+         !Array.isArray(sale.itens)||!sale.itens.length||
+         sale.itens.some(row=>!valid(row?.produtoId)||targetProducts.has(row.produtoId))||
+         writes.some(w=>w.entityType!=='sales'&&!(
+           w.entityType==='products'&&w.operation==='update'||
+           w.entityType==='stockMovements'&&w.operation==='create'&&valid(w.data.produtoId)&&
+           !targetProducts.has(w.data.produtoId)&&w.data.vendaId===sales[0].entityId)))fail();
+    }
+    if(writes.some(w=>w.entityType==='products'&&targetProducts.has(w.entityId)))fail();
+    documents.add('processedOperations/'+item.operationId);
+    for(const write of writes)if(write.operation==='create')documents.add(write.entityType+'/'+write.entityId);
+  }
+  if(documents.size>40)fail();
+  // Read server evidence only. The terminal rejections remain in the queue
+  // and cannot be retried by either automatic or manual synchronization.
+  const evidence=await Promise.all([...documents].map(p=>getDocFromServer(doc(db,'businesses',bid,...p.split('/'))))).catch(fail);
+  assertScope();
+  if(evidence.some(s=>s.exists())||peek(key)!==snapshot)fail();
+}
 function queueStateFields(counts=queueCounts()){
   return{pending:counts.pending,errors:counts.errors,queueTotal:counts.active,
     preservedOccurrences:counts.quarantined,archivedOccurrences:counts.archived,
@@ -7078,6 +7147,7 @@ window.SyncFirebase = {
   assertCustomerForSale,
   assertCustomerPaymentReview,
   assertFiadoReceiptQueueClear,
+  assertCancellationQueueClear,
   archivedFiadoRecord,
   assertFiadoReceiptWriter,
   assertPaymentTracked,
