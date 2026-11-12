@@ -30,14 +30,15 @@
 }
 
 :root {
-  /* Tipografia: 7 passos, mínimo de 12 px para qualquer texto lido. */
-  --veconi-fs-12: 0.75rem;
-  --veconi-fs-13: 0.8125rem;
-  --veconi-fs-14: 0.875rem;
-  --veconi-fs-16: 1rem;
-  --veconi-fs-18: 1.125rem;
-  --veconi-fs-22: 1.375rem;
-  --veconi-fs-28: 1.75rem;
+  /* Tipografia: 7 passos em px (a raiz do app é 14 px; rem daria 10,5 px no passo de 12).
+     Mínimo de 12 px para qualquer texto lido. */
+  --veconi-fs-12: 12px;
+  --veconi-fs-13: 13px;
+  --veconi-fs-14: 14px;
+  --veconi-fs-16: 16px;
+  --veconi-fs-18: 18px;
+  --veconi-fs-22: 22px;
+  --veconi-fs-28: 28px;
   --veconi-fw-regular: 450;
   --veconi-fw-medium: 550;
   --veconi-fw-semibold: 650;
