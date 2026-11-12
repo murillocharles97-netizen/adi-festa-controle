@@ -1,7 +1,7 @@
 (function(){
   'use strict';
   const mq=matchMedia('(max-width:767px)'),$=(selector,root=document)=>root.querySelector(selector),$$=(selector,root=document)=>[...root.querySelectorAll(selector)];
-  const icon=name=>`<i data-lucide="${name}"></i>`,esc=value=>Utils.escapar(String(value??'')),money=Utils.dinheiro,digits=value=>String(value||'').replace(/\D/g,'');
+  const icon=name=>`<i data-lucide="${name}"></i>`,esc=value=>Utils.escapar(String(value??'')),money=Utils.dinheiro;
   const TYPE_LABELS={charge:'Cobrança',campaign:'Campanha',notice:'Aviso',custom:'Mensagem livre',receipt:'Recebimentos'},PENDING_KEY='adiFestaMessagePendingReturn_v1';
   const center={type:'charge',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false};
   let returnShown=false,sequenceStarting=false;
@@ -41,16 +41,306 @@
     $('#message-send',root).onclick=()=>{console.info('[WHATSAPP] action clicked');const finalMessage=Mensagens.resolve(textarea.value,c);if(!finalMessage)return Utils.toast('Digite uma mensagem',true);if(!Mensagens.validPhone(c))return Utils.toast('Telefone inválido. Revise o DDD e o número do cliente.',true);if(type!=='charge')return executeSend(null);if(root.querySelector('[data-charge-confirm-layer]'))return;const layer=document.createElement('div');layer.className='message-overlay message-confirm-layer';layer.dataset.chargeConfirmLayer='true';layer.innerHTML=`<section class="message-confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="charge-send-title"><div class="sheet-handle"></div>${icon('message-circle')}<h3 id="charge-send-title">Enviar cobrança?</h3><p>Esta cobrança será registrada como enviada hoje.</p><div><button class="btn btn-light" type="button" data-charge-send-cancel>Cancelar</button><button class="btn btn-primary" type="button" data-charge-send-continue>Continuar para WhatsApp</button></div></section>`;root.append(layer);$('[data-charge-send-cancel]',layer).onclick=()=>layer.remove();$('[data-charge-send-continue]',layer).onclick=()=>executeSend(layer);window.lucide?.createIcons()};
     preview();setTimeout(()=>textarea.focus(),80);window.lucide?.createIcons();
   }
-  function sequenceClients(type){if(type==='receipt')return[];const db=DB.carregar(),active=(db.clientes||[]).filter(item=>item.ativo!==false),phoneValid=item=>Mensagens.validPhone(item);let list=type==='charge'?active.filter(item=>Number(item.saldo)<0&&!Mensagens.wasChargedToday(item)):active;list=list.filter(item=>!center.phone||phoneValid(item));if(type==='charge'){const min=Number(center.min),max=Number(center.max);if(center.min!=='')list=list.filter(item=>Math.abs(Number(item.saldo))>=min);if(center.max!=='')list=list.filter(item=>Math.abs(Number(item.saldo))<=max);if(center.days!=='todos')list=list.filter(item=>{const charge=Mensagens.latestCharge(item);if(center.days==='nunca')return!charge;const days=charge?Math.floor((Date.now()-new Date(charge.date))/86400000):Infinity;return days>=Number(center.days)})}list.sort((a,b)=>center.sort==='menor'?Math.abs(Number(a.saldo))-Math.abs(Number(b.saldo)):center.sort==='nome'?String(a.nome).localeCompare(String(b.nome),'pt-BR'):Math.abs(Number(b.saldo))-Math.abs(Number(a.saldo)));return list}
-  function centerStats(){const db=DB.carregar(),active=(db.clientes||[]).filter(item=>item.ativo!==false),debtors=active.filter(item=>Number(item.saldo)<0),today=debtors.filter(Mensagens.wasChargedToday),noPhone=(center.type==='charge'?debtors:active).filter(item=>!Mensagens.validPhone(item)),available=sequenceClients(center.type);return{active,debtors,today,noPhone,available,total:available.reduce((sum,item)=>sum+(center.type==='charge'?Math.abs(Number(item.saldo)):0),0)}}
-  function resetSelection(){center.selected=new Set(sequenceClients(center.type).map(item=>item.id));center.initialized=true}
-  function renderCenter(){if(center.type==='receipt')return renderReceiptCenter();const stats=centerStats(),list=stats.available;if(!center.initialized)resetSelection();const visibleIds=new Set(list.map(item=>item.id));center.selected=new Set([...center.selected].filter(id=>visibleIds.has(id)));persistCenter();return`<section class="message-center-page"><header class="message-center-header"><button type="button" data-message-center-back aria-label="Voltar">${icon('arrow-left')}</button><div><h2>Central de mensagens</h2><p>Envio manual e seguro pelo WhatsApp.</p></div><button type="button" data-message-center-menu aria-label="Mais opções">${icon('ellipsis-vertical')}</button></header><div class="message-type-chips">${Object.entries(TYPE_LABELS).map(([key,label])=>`<button type="button" data-message-type="${key}" class="${center.type===key?'active':''}">${label}</button>`).join('')}</div><div class="message-center-kpis"><article><small>Clientes</small><strong>${list.length}</strong><span>disponíveis</span></article>${center.type==='charge'?`<article><small>Em aberto</small><strong class="kpi-money-value">${money(stats.total)}</strong><span>na sequência</span></article><article><small>Contatados hoje</small><strong>${stats.today.length}</strong><span>${stats.today.length} excluídos</span></article>`:''}<article><small>Sem telefone</small><strong>${stats.noPhone.length}</strong><span>excluídos</span></article></div><div class="message-center-controls"><button type="button" data-center-toggle-all>${center.selected.size===list.length?'Desmarcar todos':'Selecionar todos'}</button><button type="button" data-center-filters>${icon('list-filter')} Filtros</button></div><div class="message-center-list">${list.map(item=>{const last=Mensagens.latestCharge(item);return`<label class="message-center-client"><input type="checkbox" data-center-client="${item.id}" ${center.selected.has(item.id)?'checked':''}><span class="message-check"></span><span class="message-client-avatar">${esc(String(item.nome||'?').split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase())}</span><span><b>${esc(item.nome)}</b><small>${esc(item.telefone)||'Sem telefone'} · ${Mensagens.formatLastChargeDate(last?.date)}</small></span>${center.type==='charge'?`<strong>${money(Math.abs(Number(item.saldo)))}</strong>`:''}</label>`}).join('')||`<div class="message-center-empty">${icon('message-circle-check')}<h3>Nenhum cliente disponível</h3><p>Clientes cobrados hoje e sem telefone ficam fora da sequência.</p></div>`}</div><footer><span><b>${center.selected.size}</b> selecionado${center.selected.size===1?'':'s'}</span><button type="button" class="btn btn-primary" data-center-start ${center.selected.size?'':'disabled'}>${icon('play')} Iniciar envio em sequência</button></footer></section>`}
-  function renderReceiptCenter(){return `<section class="message-center-page"><header class="message-center-header"><button type="button" data-message-center-back aria-label="Voltar">${icon('arrow-left')}</button><div><h2>Central de mensagens</h2><p>Modelos de comunicação da sua empresa.</p></div></header><div class="message-type-chips">${Object.entries(TYPE_LABELS).filter(([key])=>key==='receipt'||Mensagens.canSend()).map(([key,label])=>`<button type="button" data-message-type="${key}" class="${key==='receipt'?'active':''}">${label}</button>`).join('')}</div><div class="receipt-model-heading"><h2>Recebimentos</h2>${ReceiptMessages.canManage()?'<button class="btn btn-primary" type="button" data-receipt-new-model>Novo modelo</button>':''}</div><p class="receipt-model-help">Mensagens individuais liberadas somente após o recibo remoto e a conferência do saldo. Abra o recebimento em Clientes ou Fiado para compartilhar. Esta categoria não participa de disparos em massa.</p><div class="receipt-template-list">${ReceiptMessages.list().map(t=>`<article class="receipt-template-card"><h3>${esc(t.name)}</h3><small>${t.receiptKind==='total'?'Saldo quitado':'Saldo em aberto'}${t.isDefault?' · Modelo padrão':''}</small><p>${esc(t.content)}</p>${ReceiptMessages.canManage()?`<button class="btn btn-light" type="button" data-receipt-edit-model="${esc(t.id)}">Editar modelo</button>`:''}</article>`).join('')}</div>${ReceiptMessages.canManage()?'':'<p>Somente o gestor autorizado pode alterar os modelos da empresa.</p>'}</section>`;}
-  async function openCenter(options={}){if(!Mensagens.canSend()&&!window.ReceiptMessages?.canUse()&&!window.ReceiptMessages?.canManage())return Utils.toast('Seu acesso não permite enviar mensagens.',true);try{if(options.type!=='receipt'&&Mensagens.canSend())await restoreCenter();if(options.type==='receipt'||!Mensagens.canSend())center.type='receipt';const app=$('#app');app.innerHTML=renderCenter();$('#title').textContent='Central de mensagens';$('#date').textContent='Cobranças, campanhas, avisos e mensagens';bindCenter();scrollTo({top:0});window.lucide?.createIcons();if(center.type!=='receipt')await MessageSequenceUI.resume({explicit:true})}catch(error){Utils.toast(MessageSequence.friendly(error),true)}}
-  function refreshCenter(){const app=$('#app');if(!app)return;app.innerHTML=renderCenter();bindCenter();window.lucide?.createIcons()}
-  function filterSheet(){const root=$('#modal');root.innerHTML=`<div class="message-overlay"><section class="message-filter-sheet" role="dialog" aria-modal="true"><div class="sheet-handle"></div><header><h3>Filtros da Central</h3><button type="button" data-message-close>${icon('x')}</button></header><label>Ordenação<select id="center-sort"><option value="maior">Maior dívida primeiro</option><option value="menor">Menor dívida</option><option value="nome">Nome A-Z</option></select></label>${center.type==='charge'?`<label>Última cobrança<select id="center-days"><option value="todos">Todos os períodos</option><option value="nunca">Nunca cobrados</option><option value="3">Há mais de 3 dias</option><option value="7">Há mais de 7 dias</option><option value="15">Há mais de 15 dias</option><option value="30">Há mais de 30 dias</option></select></label><div class="message-filter-values"><label>Valor mínimo<input id="center-min" inputmode="decimal" value="${esc(center.min)}"></label><label>Valor máximo<input id="center-max" inputmode="decimal" value="${esc(center.max)}"></label></div>`:''}<label class="message-filter-check"><input id="center-phone" type="checkbox" ${center.phone?'checked':''}> Somente clientes com telefone</label><button class="btn btn-primary" type="button" data-center-apply>Aplicar filtros</button></section></div>`;$('#center-sort',root).value=center.sort;if($('#center-days',root))$('#center-days',root).value=center.days;$('[data-message-close]',root).onclick=close;$('[data-center-apply]',root).onclick=()=>{center.sort=$('#center-sort',root).value;center.days=$('#center-days',root)?.value||'todos';center.min=$('#center-min',root)?.value||'';center.max=$('#center-max',root)?.value||'';center.phone=$('#center-phone',root).checked;center.initialized=false;close();refreshCenter()};window.lucide?.createIcons()}
-  function bindCenter(){$$('[data-receipt-edit-model]').forEach(button=>button.onclick=()=>ReceiptMessageUI.editor(button.dataset.receiptEditModel,{onSaved:refreshCenter}));$('[data-receipt-new-model]')?.addEventListener('click',()=>ReceiptMessageUI.editor(null,{onSaved:refreshCenter}));$$('[data-message-type]').forEach(button=>button.onclick=()=>{center.type=button.dataset.messageType;center.initialized=false;if(center.type!=='receipt')persistCenter();refreshCenter()}); $('[data-message-center-back]')?.addEventListener('click',()=>{if(center.type!=='receipt')persistCenter();window.ClientesMobile?.refresh?.(true);$('#title').textContent='Clientes';$('#date').textContent='Contas, compras e contato em um só lugar.'});$('[data-center-toggle-all]')?.addEventListener('click',()=>{const ids=sequenceClients(center.type).map(item=>item.id);center.selected=center.selected.size===ids.length?new Set():new Set(ids);center.initialized=true;persistCenter();refreshCenter()});$$('[data-center-client]').forEach(input=>input.onchange=()=>{input.checked?center.selected.add(input.dataset.centerClient):center.selected.delete(input.dataset.centerClient);center.initialized=true;persistCenter();refreshCenter()});$('[data-center-filters]')?.addEventListener('click',filterSheet);$('[data-center-start]')?.addEventListener('click',startSequence)}
-  async function startSequence(){if(center.type==='receipt')return Utils.toast('Recebimentos não podem ser enviados em sequência.',true);console.info('[SEQUENCE] start clicked');if(sequenceStarting)return;const ids=sequenceClients(center.type).map(item=>item.id).filter(id=>center.selected.has(id));console.info(`[SEQUENCE] selected customers = ${ids.length}`);if(!ids.length)return Utils.toast('Selecione ao menos um cliente',true);sequenceStarting=true;const button=$('[data-center-start]');if(button){button.disabled=true;button.textContent='Preparando sequência…'}try{await persistCenter();const template=MessageSequenceUI.defaultTemplate(center.type);await MessageSequenceUI.start({type:center.type,clientIds:ids,templateId:template?.id,baseMessage:template?.content||''})}catch(error){Utils.toast(MessageSequence.friendly(error),true)}finally{sequenceStarting=false;if(button?.isConnected){button.disabled=false;button.textContent='Iniciar envio em sequência'}}}
+  function centerClients() {
+    const charge = center.type === 'charge';
+    const data = Clientes.viewData?.() || DB.readForView?.() || DB.carregar();
+    const candidates = (data.clientes || []).filter(item =>
+      item.ativo !== false && item.active !== false && !item.deletedAt && (!charge || Number(item.saldo) < 0));
+    const latest = charge ? Mensagens.latestCharges(data) : () => null;
+    const lastCharges = new Map();
+    const today = new Date().toDateString();
+    let chargedToday = 0;
+    const list = candidates.filter(item => {
+      if (!charge) return true;
+      const last = latest(item);
+      if (last?.date && new Date(last.date).toDateString() === today) {
+        chargedToday++;
+        return false;
+      }
+      lastCharges.set(item.id, last);
+      const balance = Math.abs(Number(item.saldo));
+      if (center.min !== '' && balance < Number(center.min)) return false;
+      if (center.max !== '' && balance > Number(center.max)) return false;
+      if (center.days === 'todos') return true;
+      if (center.days === 'nunca') return !last;
+      return !last || Math.floor((Date.now() - new Date(last.date)) / 86400000) >= Number(center.days);
+    });
+    const debt = item => Math.abs(Number(item.saldo) || 0);
+    list.sort((a, b) => center.sort === 'menor' ? debt(a) - debt(b) :
+      center.sort === 'nome' ? String(a.nome).localeCompare(String(b.nome), 'pt-BR') : debt(b) - debt(a));
+    const available = list.filter(Mensagens.validPhone);
+    return {
+      listed: center.phone ? available : list,
+      available,
+      ids: new Set(available.map(item => item.id)),
+      withoutPhone: list.length - available.length,
+      chargedToday,
+      lastCharges,
+    };
+  }
+
+  function centerHeader() {
+    return `<header class="message-center-header">
+      <button type="button" data-message-center-back>${icon('arrow-left')}<span>Voltar para Clientes</span></button>
+      <h2 tabindex="-1">Central de mensagens</h2>
+    </header>`;
+  }
+
+  function centerTabs() {
+    return `<nav class="message-type-chips" aria-label="Tipos de mensagem">
+      ${Object.entries(TYPE_LABELS).filter(([key]) => key === 'receipt' || Mensagens.canSend()).map(([key, label]) =>
+        `<button type="button" data-message-type="${key}" aria-pressed="${center.type === key}" class="${center.type === key ? 'active' : ''}">${key === 'custom' ? 'Mensagem' : label}</button>`).join('')}
+    </nav>`;
+  }
+
+  function renderCenter(roster) {
+    if (center.type === 'receipt') return renderReceiptCenter();
+    const { listed, available, ids, withoutPhone, chargedToday, lastCharges } = roster;
+    const charge = center.type === 'charge';
+    if (!center.initialized) {
+      center.selected = new Set(ids);
+      center.initialized = true;
+    } else {
+      center.selected = new Set([...center.selected].filter(id => ids.has(id)));
+    }
+    persistCenter();
+    const count = center.selected.size;
+    const exclusions = [
+      chargedToday ? `${chargedToday} já cobrados hoje` : '',
+      withoutPhone ? `${withoutPhone} sem telefone válido` : '',
+    ].filter(Boolean).join(' · ');
+    return `<section class="message-center-page">
+      ${centerHeader()}
+      ${centerTabs()}
+      <div class="message-center-kpis" aria-live="polite">
+        <article><strong data-center-available-count>${available.length}</strong><span>Disponíveis</span></article>
+        <article><strong data-center-selected-count>${count}</strong><span>Selecionados</span></article>
+      </div>
+      ${exclusions ? `<p class="message-center-note">${exclusions}</p>` : ''}
+      ${charge ? '<p class="message-center-note" data-center-selected-total></p>' : ''}
+      <div class="message-center-controls">
+        <button type="button" data-center-toggle-all ${available.length ? '' : 'disabled'}>${count === available.length && count > 0 ? 'Desmarcar todos' : 'Selecionar todos'}</button>
+        <button type="button" data-center-filters>${icon('list-filter')} Filtros</button>
+      </div>
+      <div class="message-center-list">
+        ${listed.map(item => {
+          const valid = ids.has(item.id), last = lastCharges.get(item.id);
+          const detail = valid ? item.telefone : 'Sem telefone válido';
+          const initials = String(item.nome || '?').trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+          return `<label class="message-center-client${valid ? '' : ' is-unavailable'}">
+            <input type="checkbox" data-center-client="${esc(item.id)}" ${center.selected.has(item.id) ? 'checked' : ''} ${valid ? '' : 'disabled'}>
+            <span class="message-check" aria-hidden="true"></span>
+            <span class="message-client-avatar" aria-hidden="true">${esc(initials)}</span>
+            <span class="message-center-client-copy">
+              <b>${esc(item.nome)}</b>
+              <small>${esc(detail)}${charge ? ' · ' + esc(Mensagens.formatLastChargeDate(last?.date)) : ''}</small>
+            </span>
+            ${charge ? `<strong>${money(Math.abs(Number(item.saldo)))}</strong>` : ''}
+          </label>`;
+        }).join('') || '<div class="message-center-empty"><h3>Nenhum cliente neste filtro</h3><p>Altere os filtros para consultar outros clientes.</p></div>'}
+      </div>
+      <footer class="message-center-footer">
+        <button type="button" class="btn btn-primary" data-center-start ${count ? '' : 'disabled'}>${icon('play')} Iniciar sequência</button>
+      </footer>
+    </section>`;
+  }
+  function renderReceiptCenter(){return `<section class="message-center-page">${centerHeader()}${centerTabs()}<div class="receipt-model-heading"><h2>Recebimentos</h2>${ReceiptMessages.canManage()?'<button class="btn btn-primary" type="button" data-receipt-new-model>Novo modelo</button>':''}</div><p class="receipt-model-help">Mensagens individuais liberadas somente após o recibo remoto e a conferência do saldo. Abra o recebimento em Clientes ou Fiado para compartilhar. Esta categoria não participa de disparos em massa.</p><div class="receipt-template-list">${ReceiptMessages.list().map(t=>`<article class="receipt-template-card"><h3>${esc(t.name)}</h3><small>${t.receiptKind==='total'?'Saldo quitado':'Saldo em aberto'}${t.isDefault?' · Modelo padrão':''}</small><p>${esc(t.content)}</p>${ReceiptMessages.canManage()?`<button class="btn btn-light" type="button" data-receipt-edit-model="${esc(t.id)}">Editar modelo</button>`:''}</article>`).join('')}</div>${ReceiptMessages.canManage()?'':'<p>Somente o gestor autorizado pode alterar os modelos da empresa.</p>'}</section>`;}
+  let clientListScroll = 0;
+
+  async function openCenter(options = {}) {
+    if (!Mensagens.canSend() && !window.ReceiptMessages?.canUse() && !window.ReceiptMessages?.canManage())
+      return Utils.toast('Seu acesso não permite enviar mensagens.', true);
+    const app = $('#app'), page = app.firstElementChild, instance = app.dataset.pageInstance;
+    const route = window.Router?.atual?.();
+    try {
+      if (options.type !== 'receipt' && Mensagens.canSend()) await restoreCenter();
+      if (app.firstElementChild !== page || app.dataset.pageInstance !== instance || window.Router?.atual?.() !== route) return;
+      if (!page?.classList.contains('message-center-page')) {
+        clientListScroll = window.scrollY;
+        window.ClientesMobile?.cancelPending?.();
+      }
+      if (options.type === 'receipt' || !Mensagens.canSend()) center.type = 'receipt';
+      refreshCenter();
+      $('#title').textContent = 'Mensagens';
+      $('#date').textContent = '';
+      scrollTo({ top: 0 });
+      $('.message-center-header h2', app)?.focus({ preventScroll: true });
+      if (center.type !== 'receipt') await MessageSequenceUI.resume({ explicit: true });
+    } catch (error) {
+      Utils.toast(MessageSequence.friendly(error), true);
+    }
+  }
+
+  function backToClients() {
+    if (center.type !== 'receipt') persistCenter();
+    if (window.Router?.atual?.() !== 'clientes') {
+      window.Router?.ir?.('clientes');
+      return;
+    }
+    if (!window.AppPageRuntime?.mount?.('clientes')) return;
+    const trigger = $('#mobile-message-center, [data-open-receipt-models]');
+    trigger?.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected) scrollTo({ top: clientListScroll });
+    });
+  }
+
+  function refreshCenter() {
+    const app = $('#app');
+    if (!app) return;
+    const roster = center.type === 'receipt' ? null : centerClients();
+    app.innerHTML = renderCenter(roster);
+    bindCenter(roster);
+    window.lucide?.createIcons();
+  }
+  function filterSheet() {
+    const root = $('#modal');
+    root.innerHTML = `<div class="message-overlay message-center-filter">
+      <section class="message-filter-sheet" role="dialog" aria-modal="true" aria-labelledby="center-filters-title">
+        <div class="sheet-handle"></div>
+        <header><h3 id="center-filters-title">Filtros da Central</h3>
+          <button type="button" data-message-close aria-label="Fechar filtros">${icon('x')}</button>
+        </header>
+        <label>Ordenação<select id="center-sort">
+          <option value="maior">Maior dívida primeiro</option>
+          <option value="menor">Menor dívida</option>
+          <option value="nome">Nome A–Z</option>
+        </select></label>
+        ${center.type === 'charge' ? `
+          <label>Última cobrança<select id="center-days">
+            <option value="todos">Todos os períodos</option>
+            <option value="nunca">Nunca cobrados</option>
+            ${[3, 7, 15, 30].map(days => `<option value="${days}">Há pelo menos ${days} dias</option>`).join('')}
+          </select></label>
+          <div class="message-filter-values">
+            <label>Valor mínimo<input id="center-min" inputmode="decimal" value="${esc(center.min)}"></label>
+            <label>Valor máximo<input id="center-max" inputmode="decimal" value="${esc(center.max)}"></label>
+          </div>` : ''}
+        <label class="message-filter-check"><input id="center-phone" type="checkbox" ${center.phone ? 'checked' : ''}> Mostrar apenas clientes com telefone válido</label>
+        <button class="btn btn-primary" type="button" data-center-apply>Aplicar filtros</button>
+      </section>
+    </div>`;
+    $('#center-sort', root).value = center.sort;
+    if ($('#center-days', root)) $('#center-days', root).value = center.days;
+    $('[data-message-close]', root).onclick = () => {
+      close();
+      $('[data-center-filters]')?.focus({ preventScroll: true });
+    };
+    $('[data-center-apply]', root).onclick = () => {
+      const min = ($('#center-min', root)?.value || '').trim().replace(',', '.');
+      const max = ($('#center-max', root)?.value || '').trim().replace(',', '.');
+      if (center.type === 'charge') {
+        if ([min, max].some(value => value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0)) ||
+            min !== '' && max !== '' && Number(min) > Number(max)) {
+          Utils.toast('Informe uma faixa de valores válida.', true);
+          return;
+        }
+        center.days = $('#center-days', root).value;
+        center.min = min;
+        center.max = max;
+      }
+      center.sort = $('#center-sort', root).value;
+      center.phone = $('#center-phone', root).checked;
+      close();
+      refreshCenter();
+      $('[data-center-filters]')?.focus({ preventScroll: true });
+    };
+    $('#center-sort', root).focus({ preventScroll: true });
+    window.lucide?.createIcons();
+  }
+
+  function updateCenterSelection(page, { available, ids }) {
+    const count = center.selected.size, label = $('[data-center-selected-count]', page);
+    label.textContent = count;
+    const total = $('[data-center-selected-total]', page);
+    if (total) {
+      const cents = available.filter(item => center.selected.has(item.id))
+        .reduce((sum, item) => sum + Math.round(Math.abs(Number(item.saldo)) * 100), 0);
+      total.textContent = `Saldo cadastral da seleção: ${money(cents / 100)}`;
+    }
+    const toggle = $('[data-center-toggle-all]', page);
+    toggle.textContent = count === ids.size && count > 0 ? 'Desmarcar todos' : 'Selecionar todos';
+    $('[data-center-start]', page).disabled = sequenceStarting || !count;
+  }
+
+  function bindCenter(roster) {
+    const page = $('.message-center-page');
+    const refreshModels = () => { if (page.isConnected) refreshCenter(); };
+    $$('[data-receipt-edit-model]', page).forEach(button => {
+      button.onclick = () => ReceiptMessageUI.editor(button.dataset.receiptEditModel, { onSaved: refreshModels });
+    });
+    $('[data-receipt-new-model]', page)?.addEventListener('click', () => ReceiptMessageUI.editor(null, { onSaved: refreshModels }));
+    $$('[data-message-type]', page).forEach(button => {
+      button.onclick = () => {
+        const type = button.dataset.messageType;
+        if (type === center.type || type !== 'receipt' && !Mensagens.canSend()) return;
+        center.type = type;
+        center.initialized = false;
+        refreshCenter();
+        $(`[data-message-type="${type}"]`)?.focus({ preventScroll: true });
+      };
+    });
+    $('[data-message-center-back]', page).onclick = backToClients;
+    if (center.type === 'receipt') return;
+
+    const checkboxes = $$('[data-center-client]', page);
+    const applySelection = () => {
+      updateCenterSelection(page, roster);
+      persistCenter();
+    };
+    $('[data-center-toggle-all]', page).onclick = () => {
+      center.selected = center.selected.size === roster.ids.size ? new Set() : new Set(roster.ids);
+      checkboxes.forEach(input => { input.checked = center.selected.has(input.dataset.centerClient); });
+      applySelection();
+    };
+    checkboxes.forEach(input => {
+      input.onchange = () => {
+        const id = input.dataset.centerClient;
+        if (!roster.ids.has(id)) return;
+        if (input.checked) center.selected.add(id);
+        else center.selected.delete(id);
+        applySelection();
+      };
+    });
+    $('[data-center-filters]', page).onclick = filterSheet;
+    $('[data-center-start]', page).onclick = startSequence;
+    updateCenterSelection(page, roster);
+  }
+
+  async function startSequence() {
+    if (center.type === 'receipt') return Utils.toast('Recebimentos não podem ser enviados em sequência.', true);
+    if (sequenceStarting || !Mensagens.canSend()) return;
+    console.info('[SEQUENCE] start clicked');
+    const { available } = centerClients();
+    const ids = available.map(item => item.id).filter(id => center.selected.has(id));
+    console.info(`[SEQUENCE] selected customers = ${ids.length}`);
+    if (!ids.length) {
+      refreshCenter();
+      return Utils.toast('Selecione ao menos um cliente com telefone válido.', true);
+    }
+    const type = center.type, button = $('[data-center-start]'), scope = window.SpaceContext?.viewScope?.();
+    sequenceStarting = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Preparando sequência…';
+    }
+    try {
+      await persistCenter();
+      if (button && !button.isConnected || window.SpaceContext?.viewScope?.() !== scope || !Mensagens.canSend()) return;
+      const template = MessageSequenceUI.defaultTemplate(type);
+      await MessageSequenceUI.start({ type, clientIds: ids, templateId: template?.id, baseMessage: template?.content || '' });
+    } catch (error) {
+      Utils.toast(MessageSequence.friendly(error), true);
+    } finally {
+      sequenceStarting = false;
+      const currentButton = $('[data-center-start]');
+      if (currentButton) {
+        currentButton.disabled = !center.selected.size;
+        currentButton.innerHTML = `${icon('play')} Iniciar sequência`;
+        window.lucide?.createIcons();
+      }
+    }
+  }
   function showReturn(){if($('#modal .receipt-message-dialog'))return;const pending=getPending();if(pending?.sequenceId)return MessageSequenceUI.resume({explicit:true});if($('#modal [data-sequence-layer]'))return;if(!pending||returnShown||document.visibilityState!=='visible')return;returnShown=true;console.info('[SEQUENCE] waiting for next');const root=$('#modal'),c=client(pending.clientId);root.innerHTML=`<div class="message-overlay"><section class="message-return-sheet" role="dialog" aria-modal="true"><div class="message-success-icon">${icon('check')}</div><h2>Mensagem preparada</h2><p>A conversa de <b>${esc(pending.clientName||c?.nome)}</b> foi aberta no WhatsApp.</p><small>O app não consegue confirmar o envio dentro do WhatsApp.</small><button class="btn btn-primary" type="button" data-return-next>${pending.sequenceId?'Marcar enviado e próximo':'Concluir'}</button><button class="btn btn-light" type="button" data-return-reopen>Reabrir mensagem</button><button class="btn btn-light" type="button" data-return-not-sent>Marcar como não enviado</button></section></div>`;$('[data-return-reopen]',root).onclick=()=>{const opened=Mensagens.openWhatsApp(pending.url,{mobile:true});if(!opened.opened)Utils.toast('O navegador bloqueou o WhatsApp.',true)};$('[data-return-next]',root).onclick=()=>{setPending(null);returnShown=false;close();refreshClients()};$('[data-return-not-sent]',root).onclick=()=>{Mensagens.markNotSent(pending.messageId);setPending(null);returnShown=false;close();refreshClients()};window.lucide?.createIcons()}
   window.AppLifecycle?.onResume?.(()=>new Promise(resolve=>setTimeout(()=>{showReturn();resolve()},180)));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(showReturn,180)});addEventListener('focus',()=>setTimeout(showReturn,180));setTimeout(showReturn,0);document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#modal .individual-message-sheet'))close()});
   window.MobileMessages={openComposer,openCenter,refreshCenter,showReturn,startSequence,formatLastChargeDate:Mensagens.formatLastChargeDate};
