@@ -66,7 +66,7 @@
         state.rows??=[];state.rows.push(...data.rows);state.next=data.next;state.complete=data.complete;state.asOf=data.asOf;
         if(!state.next)break;
       }
-    }catch(error){if(request===state.request){state.complete=false;state.error=error.code==='functions/permission-denied'?'Seu perfil não tem acesso a esta análise.':`Não foi possível completar a consulta. ${error.message||'Tente novamente.'}`;console.warn('[ANALYTICS]',{stage:'period_query',code:error.code||'unknown'});}}
+    }catch(error){if(request===state.request){state.complete=false;state.error=error.code==='functions/permission-denied'?'Seu perfil não tem acesso a esta análise.':`Não foi possível completar a consulta. ${window.Utils?.friendlyError?.(error,'Tente novamente.')??(error.message||'Tente novamente.')}`;console.warn('[ANALYTICS]',{stage:'period_query',code:error.code||'unknown'});}}
     finally{if(request===state.request&&id===identity()){state.busy=false;repaint();}}
   }
   function bind(auto=true){

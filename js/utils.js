@@ -8,4 +8,17 @@ window.Utils=(()=>{const dinheiro=v=>Number(v||0).toLocaleString('pt-BR',{style:
   x.setAttribute('role',e?'alert':'status');
   host.append(x);
   setTimeout(()=>x.remove(),mobileSale&&!e?1400:3000);
-};return{dinheiro,dataHora,somenteNumeros,telefoneWhatsApp,escapar,uuid,hoje,mesAtual,toast}})();
+};
+// Messages written for the merchant (server HttpsError and app errors, in Portuguese) are kept.
+// Raw SDK/runtime text (English or a bare code such as "internal") becomes a clear sentence;
+// the technical code stays available to callers for diagnostics.
+const friendlyError=(error,fallback='Não foi possível concluir agora. Tente novamente.')=>{
+  const code=String(error?.code||'').replace(/^(functions|firestore|auth)\//,'');
+  const message=String(error?.message||'').trim();
+  const byCode={'permission-denied':'Seu perfil não tem acesso a esta informação.','unauthenticated':'Sua sessão expirou. Entre novamente para continuar.','unavailable':'Sem conexão com a nuvem agora. Confira a internet e tente novamente.','deadline-exceeded':'A consulta demorou mais que o esperado. Tente novamente.','resource-exhausted':'Muitas consultas em pouco tempo. Aguarde um instante e tente novamente.'};
+  if(error instanceof TypeError||error instanceof ReferenceError)return fallback;
+  const accented=/[áéíóúâêôãõçÁÉÍÓÚÂÊÔÃÕÇ]/.test(message);
+  const sdkText=!message||message===code||/^[a-z-]+$/.test(message)||!accented&&/\b(the|to|of|from|or|not|be|is|cannot|failed|missing|insufficient)\b/i.test(message);
+  if(!sdkText)return message;
+  return byCode[code]||(globalThis.navigator?.onLine===false?byCode.unavailable:fallback);
+};return{dinheiro,dataHora,somenteNumeros,telefoneWhatsApp,escapar,uuid,hoje,mesAtual,toast,friendlyError}})();

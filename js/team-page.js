@@ -78,7 +78,7 @@
     try {
       const [members, invites] = await Promise.all([window.TeamService.listMembers(), window.TeamService.listInvites()]);
       if (businessId === window.BusinessContext?.get?.().businessId) Object.assign(state, {members, invites});
-    } catch (error) { if(businessId === window.BusinessContext?.get?.().businessId)state.error = error.message || "Tente novamente."; }
+    } catch (error) { if(businessId === window.BusinessContext?.get?.().businessId){state.error = window.Utils?.friendlyError?.(error, "Tente novamente.") ?? (error.message || "Tente novamente.");console.warn("[TEAM] load failed", { code: error?.code || error?.name || "unknown" });} }
     state.loading = false; rerender();
     })().finally(()=>{loadingPromise=null;});
     return loadingPromise;
