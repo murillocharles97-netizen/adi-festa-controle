@@ -61,7 +61,7 @@ async function open(browser, base, width, { stub } = {}) {
   const browser = await chromium.launch();
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
   try {
-    for (const width of [320, 390, 430, 1440]) check(`Início ${width}px: 12 px floor, WCAG AA, no overflow, every block present`, async () => {
+    for (const width of [320, 390, 430, 768, 1024, 1440]) check(`Início ${width}px: 12 px floor, WCAG AA, no overflow, every block present`, async () => {
       const s = await open(browser, base, width); try {
         await s.go('inicio');
         const f = await s.page.evaluate(textFacts);
@@ -71,6 +71,11 @@ async function open(browser, base, width, { stub } = {}) {
           : { goal: !!document.querySelector('.desktop-space-goal'), kpis: document.querySelectorAll('.desktop-kpi').length, panels: document.querySelectorAll('.desktop-panel').length, actions: document.querySelectorAll('.desktop-quick-actions button').length, placeholder: /placeholder/i.test(document.querySelector('#app').innerText) }, width < 768);
         if (width < 768) assert.deepEqual(blocks, { goal: true, metrics: 2, shortcuts: 3, priorities: 4, summary: 2, filter: true });
         else assert.deepEqual(blocks, { goal: true, kpis: 6, panels: 8, actions: 6, placeholder: false });
+        if (width >= 768) {
+          const axis = await s.page.evaluate(() => [...document.querySelectorAll('.desktop-chart-axis span')].filter(e => getComputedStyle(e).display !== 'none').map(e => e.getBoundingClientRect()));
+          assert.ok(axis.length >= 2, 'chart axis labels visible');
+          for (let i = 1; i < axis.length; i++) assert.ok(axis[i].left >= axis[i - 1].right, 'chart axis labels overlap');
+        }
         if (SHOTS) await s.page.screenshot({ path: path.join(SHOTS, `inicio-${width}.png`), fullPage: true });
       } finally { await s.ctx.close(); }
     });
