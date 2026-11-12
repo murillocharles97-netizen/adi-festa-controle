@@ -532,7 +532,7 @@
   }
   function legacyNotice(view) {
     const count = view.unassignedLegacySales;
-    const exchangeNote=window.ExchangeEconomics?`<p class="space-data-notice" role="status">${esc(window.ExchangeEconomics.statusMessage())}${view.exchangeCount?` Ajustes no período: ${money(view.exchangeAdjustment)}. Custos e lucro das trocas em revisão.`:''}</p>`:'';
+    const exchangeNote=window.ExchangeEconomics?`<p class="space-data-notice" data-state="${(s=>s.mode==='unavailable'||s.mode==='historical'||!s.ready&&s.error?'warning':s.ready?'ok':'pending')(window.ExchangeEconomics.state())}" role="status">${esc(window.ExchangeEconomics.statusMessage())}${view.exchangeCount?` Ajustes no período: ${money(view.exchangeAdjustment)}. Custos e lucro das trocas em revisão.`:''}</p>`:'';
     if (!count) return exchangeNote;
     return `${exchangeNote}<aside class="space-data-notice" role="status">${icon("history")}<span><b>${count} venda${count === 1 ? " antiga" : "s antigas"} sem espaço</b><small>${view.isAllSpaces ? (count === 1 ? "Ela continua nesta visão agregada." : "Elas continuam nesta visão agregada.") : count === 1 ? "Ela ficou fora desta visão para não ser atribuída ao espaço errado." : "Elas ficaram fora desta visão para não serem atribuídas ao espaço errado."}</small></span></aside>`;
   }
