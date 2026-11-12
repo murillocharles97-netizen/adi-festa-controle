@@ -61,14 +61,14 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
   assert.match(read('functions/src/services/mercado-pago-service.js'), /reason:`VECONI - \$\{plan\.name\}`/);
 });
 
-test('service worker da integração troca o cache e preserva os recursos de marca, Financeiro e Central', () => {
+test('service worker troca o cache, mantém os recursos de marca e retira a Central do precache', () => {
   const worker = read('service-worker.js');
-  assert.match(worker, /const CACHE='veconi-v2311-fiado-saldo-final-v2'/);
+  assert.match(worker, /const CACHE='veconi-v2311-fiado-definitivo-v1'/);
   assert.match(worker, /financial-refinement\.css/);
   assert.match(worker, /release:\s*'229'/);
   for (const asset of ['veconi-theme.css','veconi-brand.js','veconi-symbol.svg','veconi-maskable-512-v133.png','veconi-apple-touch-icon-180-v133.png','veconi-favicon-32-v133.png']) assert.match(worker, new RegExp(asset.replace('.', '\\.')));
-  for (const asset of ['./assets/fonts/inter-latin-wght-normal.woff2','./central-fiado.html',
-    './css/fiado-central.css','./js/fiado-central-entry.js','./js/fiado-central.js']) assert.ok(worker.includes(asset), asset);
+  assert.match(worker, /\.\/assets\/fonts\/inter-latin-wght-normal\.woff2/);
+  assert.doesNotMatch(worker, /\.\/(?:central-fiado\.html|css\/fiado-central\.css|js\/fiado-central(?:-entry)?\.js)/);
 });
 
 test('fixture do screenshot gate cobre todos os módulos pedidos', () => {

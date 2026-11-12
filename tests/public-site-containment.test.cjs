@@ -92,7 +92,7 @@ test('symlinked source cannot escape the allowlist', () => {
   fs.symlinkSync(path.join(fixture, 'js'), path.join(linkedRoot, 'js'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => buildPublicSite({root: linkedRoot, manifest: {...manifest, files: ['js/app.js']}}), /Symlink rejected/);
 });
-for (const resource of ['/js/kyteData.js', '/js/kyteBalances.js', '/js/saldoCorrecoes.js', '/js/kyteData.js?cache=old', '/js/kyte%44ata.js', '/js/kyteBootstrap.js', '/js/cleanupDemo.js', '/js/financeMigration.js', '/tests/private.json', '/tests/fixtures/client-actions-harness.html', '/tests/mobile-home-clients-polish.fixture.html', '/.git/config', '/diagnostic.json', '/functions/src/private.js']) {
+for (const resource of ['/js/kyteData.js', '/js/kyteBalances.js', '/js/saldoCorrecoes.js', '/js/kyteData.js?cache=old', '/js/kyte%44ata.js', '/js/kyteBootstrap.js', '/js/cleanupDemo.js', '/js/financeMigration.js', '/tests/private.json', '/tests/fixtures/client-actions-harness.html', '/tests/mobile-home-clients-polish.fixture.html', '/.git/config', '/diagnostic.json', '/functions/src/private.js', '/central-fiado.html', '/css/fiado-central.css', '/js/fiado-central-entry.js', '/js/fiado-central.js']) {
   test('anonymous retired/private resource is unavailable: ' + resource, async () => {
     const response = await fetch(origin + resource);
     assert.equal(response.status, 404);

@@ -209,7 +209,7 @@ window.Fiados = (() => {
 
   function canOpenOriginal(routed=false) {
     const c = window.BusinessContext?.get?.(), uid = window.FirebaseSession?.user?.uid;
-    return Boolean(uid && c?.role === 'owner' && c.business?.ownerId === uid &&
+    return Boolean(!window.Clientes?.legacyFiadoClosed?.() && uid && c?.role === 'owner' && c.business?.ownerId === uid &&
       c.businessId === DB.getBusinessId() && (routed ? window.Router?.atual?.()==='clientes' : window.Clientes?.scopedScreen?.()) &&
       window.TeamAccess?.has?.('customers.view') && window.TeamAccess.has('customers.receiveDebt') &&
       !window.OperationalReadPolicy?.restricted?.());

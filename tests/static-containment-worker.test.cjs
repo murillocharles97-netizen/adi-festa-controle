@@ -39,7 +39,7 @@ function harness({offline = false} = {}) {
     },
   };
 }
-for (const path of ['/js/kyteData.js', '/js/kyteBalances.js', '/js/saldoCorrecoes.js', '/js/kyteBootstrap.js', '/js/cleanupDemo.js', '/js/financeMigration.js', '/js/kyteData.js?old=1', '/js/kyte%44ata.js', '/js/KYTEDATA.JS', '/js/kyteData.js/']) {
+for (const path of ['/js/kyteData.js', '/js/kyteBalances.js', '/js/saldoCorrecoes.js', '/js/kyteBootstrap.js', '/js/cleanupDemo.js', '/js/financeMigration.js', '/js/kyteData.js?old=1', '/js/kyte%44ata.js', '/js/KYTEDATA.JS', '/js/kyteData.js/', '/central-fiado.html', '/css/fiado-central.css', '/js/fiado-central-entry.js', '/js/fiado-central.js']) {
   test('retired URL cannot serve old cached data, even offline: ' + path, async () => {
     const h = harness({offline: true});
     const response = await h.request(path);

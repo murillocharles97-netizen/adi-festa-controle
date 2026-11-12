@@ -78,3 +78,53 @@ test('scoped staff, changed owner context and stale preview cannot invoke a lega
   assert.equal(f.h.commits(),0);
  }finally{f.close();}
 });
+
+test('closed Adi Festa shows the opening account and keeps scoped WhatsApp charging without legacy options',async()=>{
+ const f=fixture({scheduled:true});
+ try{
+  const {w,db,client,h}=f;
+  const space='business_adi-festa',openingHash='opening',day=w.InstallmentPlan.today();
+  const initial=h.context();
+  const profile={...initial.userProfile,businessId:'adi-festa'};
+  Object.assign(w.FirebaseSession,{businessId:'adi-festa',profile});
+  h.setContext({businessId:'adi-festa',userProfile:profile,business:{...initial.business,id:'adi-festa',
+   fiadoLegacyClosed:{version:1,state:'complete'}}});
+  Object.assign(client,{businessId:'adi-festa',saldo:-150,fiadoOpeningBalance:{version:1,hash:openingHash},
+   customerSpaceIds:[space],hasInstallmentFiado:false});
+  db.config={nome:'Negócio de teste'};
+  client.telefone='11912345678';
+  Object.assign(db.vendas[0],{businessId:'adi-festa'});
+  w.SpaceContext={
+   activeId:()=>space,
+   homeSpaces:()=>[{id:space}],
+   scopesCustomers:()=>true,
+   viewScope:()=>space,
+   contextualData:()=>db
+  };
+  assert.equal(w.Clientes.originalAccountAction(),'');
+  w.Fiados.openOriginalDirectory();
+  assert.equal(w.document.querySelector('#modal form'),null);
+  assert.equal(w.Clientes.listFinancialStatus(client).debt,150);
+  assert.equal(w.Clientes.listFinancialStatus(client).futureCents,0);
+  w.SyncFirebase.isReady=()=>true;
+  w.SyncFirebase.readCanonicalClient=async()=>({client});
+  w.FirebaseCallable=async(name,data)=>{
+   assert.equal(name,'getOperationalSyncReceipt');
+   assert.equal(data.kind,'fiado_account');
+   return {data:{businessId:'adi-festa',workspaceGeneration:0,account:{
+    clientId:client.id,version:2,historyProofVersion:1,asOf:day,financialVersion:client.financialVersion,
+    dueCents:15000,futureCents:0,totalCents:15000,creditCents:0,
+    entries:[{spaceId:space,dueDate:day,remainingCents:15000}]
+   }}};
+  };
+  w.Utils.telefoneWhatsApp=phone=>'55'+phone;
+  w.Utils.dinheiro=value=>value.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  w.eval(fs.readFileSync('js/mensagens.js','utf8'));
+  const canonical=await w.Mensagens.refreshCanonicalClient(client.id);
+  const message=w.Mensagens.resolve('Saldo: {{saldo}}',canonical);
+  const link=new URL(w.Mensagens.whatsappUrl(canonical,message));
+  assert.equal(link.pathname,'/5511912345678');
+  assert.match(link.searchParams.get('text'),/150,00/);
+  assert.equal(h.commits(),0);
+ }finally{f.close();}
+});

@@ -11,11 +11,17 @@ window.Clientes=(()=>{
     window.TeamAccess?.has?.('customers.view') === true && window.TeamAccess?.has?.('customers.receiveDebt') === true &&
     !window.OperationalReadPolicy?.restricted?.();
   const prepareList = () => { displayEpoch++; displayCache = null; lastView = null; };
+  function legacyFiadoClosed() {
+    const context = window.BusinessContext?.get?.();
+    const marker = context?.business?.fiadoLegacyClosed;
+    return context?.businessId === 'adi-festa' && DB.getBusinessId() === context.businessId &&
+      marker?.version === 1 && marker.state === 'complete';
+  }
   function listBalances(data = baseView()) {
     const context = window.SpaceContext, bid = DB.getBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
-    const selected = context?.activeId?.(), minute = Math.floor(Date.now() / 60000);
+    const selected = context?.activeId?.(), closed = legacyFiadoClosed(), minute = Math.floor(Date.now() / 60000);
     const day = displayCache?.minute === minute ? displayCache.day : window.InstallmentPlan.today();
-    if (displayCache?.data === data && displayCache.bid === bid && displayCache.generation === generation && displayCache.selected === selected && displayCache.day === day) return displayCache;
+    if (displayCache?.data === data && displayCache.bid === bid && displayCache.generation === generation && displayCache.selected === selected && displayCache.closed === closed && displayCache.day === day) return displayCache;
     const own = row => (!row.businessId || row.businessId === bid) && (row.workspaceGeneration ?? 0) === generation;
     const spaces = context?.homeSpaces?.() || [], known = new Set(spaces.map(s => s.id));
     const qaSpaces = new Set(spaces.filter(s => /^VECONI QA\b/i.test(s.name || '')).map(s => s.id));
@@ -36,7 +42,9 @@ window.Clientes=(()=>{
       if (!own(client)) continue;
       const book = Math.round(Number(client.saldo || 0) * 100), debt = Math.max(0, -book);
       const parts = new Map(), plans = [], traditional = [];
-      const clientSales = sales.get(client.id) || [];
+      const openingHash = closed ? client.fiadoOpeningBalance?.hash : null;
+      const cachedSales = sales.get(client.id) || [];
+      const clientSales = openingHash ? cachedSales.filter(sale => sale.fiadoOpeningHash === openingHash) : cachedSales;
       const testOrigins = new Set(clientSales.map(s => s.spaceId || s.financialSpaceId).filter(Boolean));
       // Explicit test identities with exclusively QA-space history remain in QA.
       const accountDefault = approvedCompany && /^qa[-_]/i.test(client.id) && testOrigins.size === 1 &&
@@ -100,7 +108,7 @@ window.Clientes=(()=>{
       }
       accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book});
     }
-    return displayCache = {data, bid, generation, day, minute, accounts, selected};
+    return displayCache = {data, bid, generation, day, minute, accounts, selected, closed};
   }
   function listSummary() {
     if (!localListBalances()) return null;
@@ -220,5 +228,5 @@ window.Clientes=(()=>{
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
     });
-  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();
