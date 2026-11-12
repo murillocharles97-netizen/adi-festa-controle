@@ -18,13 +18,15 @@ const money=value=>{
  return value<0?-cents:cents;
 };
 
-function calendars(input,day){
+// Only installment calendars already registered in the opening spaces are
+// preserved (e.g. Emprestar Cartão). Archived installments elsewhere, or with
+// no/ambiguous space, stay in the backup and are not part of the opening.
+function calendars(input,day,spaceIds){
  const totals=new Map(),proof=[];
  for(const sale of input.collections.sales.filter(sale=>sale.installmentPlan&&active(sale))){
-  Plan.assertSale({...sale,status:'fiado'});
   const spaceId=origin(sale);
-  if(!spaceId||sale.spaceId&&sale.financialSpaceId&&sale.spaceId!==sale.financialSpaceId)
-   throw Error('Há parcelamento sem espaço financeiro comprovado.');
+  if(!spaceId||sale.spaceId&&sale.financialSpaceId&&sale.spaceId!==sale.financialSpaceId||!spaceIds.includes(spaceId))continue;
+  Plan.assertSale({...sale,status:'fiado'});
   const balance=totals.get(spaceId)||{totalCents:0,futureCents:0};
   for(const row of Plan.rows(sale,day)){
    balance.totalCents+=row.remainingCents;
@@ -42,16 +44,13 @@ function createPlan(input,{day,spaceIds,balances,reason}){
   throw Error('A conta não está disponível para confirmação de saldo.');
  if([...collections.payments,...collections.sales.filter(sale=>sale.formaPagamento==='fiado'),...collections.balanceAdjustments].some(pending))
   throw Error('Há operação financeira pendente no servidor. Revise a sincronização.');
- const bookCents=-money(client.saldo);
+ // The owner's confirmation is the source of truth: the archived history is
+ // not validated. The recorded balance is only the suggested value.
+ const bookCents=Math.max(0,-money(client.saldo));
  const financialVersion=client.financialVersion??0;
- if(bookCents<=0||!Number.isSafeInteger(financialVersion)||financialVersion<0||financialVersion>=Number.MAX_SAFE_INTEGER)
+ if(!Number.isSafeInteger(financialVersion)||financialVersion<0||financialVersion>=Number.MAX_SAFE_INTEGER)
   throw Error('Saldo ou versão cadastral fora do escopo desta confirmação.');
- const {totals,proof}=calendars(input,day);
- if([...totals.keys()].some(id=>!spaceIds.includes(id)))
-  throw Error('Há parcelamento vinculado a outro espaço. A conta exige conferência.');
- if(collections.sales.some(sale=>sale.formaPagamento==='fiado'&&active(sale)&&origin(sale)&&!spaceIds.includes(origin(sale))&&
-    Number(sale.creditRemainingAmount??(Number(sale.creditOriginalAmount??sale.valorFinal??sale.valorTotal)-Number(sale.creditPaidAmount??0)))>0))
-  throw Error('Há dívida registrada em outro espaço. A conta exige conferência.');
+ const {totals,proof}=calendars(input,day,spaceIds);
  const contractTotal=[...totals.values()].reduce((sum,value)=>sum+value.totalCents,0);
  const defaults=spaceIds.map((spaceId,index)=>({spaceId,totalCents:(totals.get(spaceId)?.totalCents||0)+(index===0?Math.max(0,bookCents-contractTotal):0)}));
  const selection=balances??defaults;
@@ -66,7 +65,7 @@ function createPlan(input,{day,spaceIds,balances,reason}){
    traditionalCents:totalCents-calendar.totalCents};
  });
  const confirmedCents=parts.reduce((sum,part)=>sum+part.totalCents,0);
- if(!Number.isSafeInteger(confirmedCents))throw Error('Saldo final inválido.');
+ if(!Number.isSafeInteger(confirmedCents)||confirmedCents<=0)throw Error('Informe um saldo inicial maior que zero.');
  const deltaCents=confirmedCents-bookCents;
  const explanation=typeof reason==='string'?reason.trim():'';
  if(explanation.length>300||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(explanation))
@@ -94,7 +93,7 @@ function readOpening(input,audit){
     !Number.isFinite(Date.parse(audit.at))||digest({plan:audit.plan,at:audit.at,actorUid:audit.actorUid,requestId:audit.requestId,reviewHash:audit.reviewHash})!==marker.hash)
   throw Error('Saldo final sem confirmação e auditoria correspondentes.');
  const {plan}=audit;
- const actual=new Map(calendars(input,plan.day).proof.map(row=>[row.saleId,row]));
+ const actual=new Map(calendars(input,plan.day,plan.parts.map(part=>part.spaceId)).proof.map(row=>[row.saleId,row]));
  for(const row of plan.calendars){
   const current=actual.get(row.saleId);
   if(!current||current.spaceId!==row.spaceId||current.scheduleHash!==row.scheduleHash)

@@ -156,39 +156,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      recoveryAudit=ref(c.bid,'auditLogs','payment_recovery_'+item.operationId);if((await tx.get(recoveryAudit)).exists)fail('Existe evidência de recuperação sem recibo canônico completo; revisão individual obrigatória.','failed-precondition');
     }
     historyAccount=account;
-    if(!scopedReceiptAccount){
-     const cid=validId(p.clienteId||p.clientId,'Cliente');
-     let entries=account?.entries;
-     if(!entries){
-      const rows=await tx.get(ref(c.bid,'sales','__none__').parent.where('clienteId','==',cid).limit(351));
-      if(rows.size>350)fail('Histórico de Fiado excede limite da transação.','failed-precondition');
-      entries=rows.docs.map(d=>d.data()).filter(s=>gen(s)===gen(c.business)&&s.formaPagamento==='fiado'&&
-        s.active!==false&&!s.deletedAt&&!s.cancelledAt&&!s.desfeita&&!s.creditSettled&&
-        Number(s.creditRemainingAmount??(Number(s.creditOriginalAmount??s.valorFinal??s.valorTotal)-Number(s.creditPaidAmount??0)))>0);
-     }
-     const explicit=entries.filter(e=>e.spaceId||e.financialSpaceId);
-     const rejectScope=()=>fail('Use o recebimento verificado do espaço de origem. A operação original foi preservada.','failed-precondition');
-     if(explicit.some(e=>e.spaceId&&e.financialSpaceId&&e.spaceId!==e.financialSpaceId||
-       (e.spaceId||e.financialSpaceId)!==p.spaceId))rejectScope();
-     const owner=c.owner&&c.business.ownerId===c.uid;
-     if(!account&&!explicit.length&&!owner)rejectScope();
-     let needsUniqueSpace=(account||explicit.length>0)&&explicit.length!==entries.length;
-     if(!account&&explicit.length&&!needsUniqueSpace){
-      const client=(await tx.get(ref(c.bid,'clients',cid))).data();
-      const trackedCents=explicit.reduce((sum,s)=>sum+cents(s.creditRemainingAmount??
-        (Number(s.creditOriginalAmount??s.valorFinal??s.valorTotal)-Number(s.creditPaidAmount??0))),0);
-      needsUniqueSpace=!client||trackedCents!==-cents(client.saldo);
-     }
-     if(needsUniqueSpace){
-      if(!owner)rejectScope();
-      // Cached PWA envelopes can still use the historical account when the
-      // tenant has exactly one linked space, including inactive spaces in the check.
-      const spaces=db.collection('financialSpaces');
-      const linked=await Promise.all(['businessId','linkedBusinessId'].map(field=>tx.get(spaces.where(field,'==',c.bid).limit(2))));
-      const ids=new Set(linked.flatMap(snapshot=>snapshot.docs.map(doc=>doc.id)));
-      if(ids.size!==1||!ids.has(p.spaceId))rejectScope();
-     }
-    }
+    // Space-scoped receipt rules apply only to accounts with a confirmed opening
+    // (scopedReceiptAccount). Other accounts keep the pre-cutoff receipt contract.
     if(account?.version===2&&!HISTORY_ACTIVATION_ENABLED){const client=(await tx.get(ref(c.bid,'clients',p.clienteId||p.clientId))).data();if(client.fiadoHistoryVersion!==1)fail('Novas ativações do histórico estão pausadas.','failed-precondition');}
     if(account){
      if(account.version===2&&p.fiadoSchedule?.version!==2)fail('Atualize o contrato de recebimento histórico. A operação original foi preservada.','failed-precondition');
@@ -363,7 +332,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(!c.has(payment?'customers.receiveDebt':'customers.adjustBalance'))fail('Permissão financeira operacional ausente.');
    const source=planned(primary.entityType,primary.entityId)||primary.data,cid=validId(source.clienteId||source.customerId,'Cliente'),client=await old('clients',cid);
    if(!client)fail('Cliente não confirmado.');
-   if(payment&&(!spaceId||source.financialSpaceId&&source.financialSpaceId!==spaceId))fail('Origem ou caixa do recebimento inválido.');
+   const scopedReceipt=historyAccount?.scopedReceiptVersion===1;
+   if(scopedReceipt&&payment&&(!spaceId||source.financialSpaceId&&source.financialSpaceId!==spaceId))fail('Origem ou caixa do recebimento inválido.');
    if(spaceId)await c.space(spaceId);else if(!c.owner&&c.member?.spaceAccess!=='all')fail('Recebimento sem espaço exige revisão; não presumir o espaço atual.','failed-precondition');
    const delta=payment?Number(source.valor??source.amount):Number(source.saldoNovo)-Number(source.saldoAnterior);
    if(!numeric(delta)||payment&&delta<=0||adjust&&(!String(source.motivo||'').trim()||!same(source.saldoAnterior,client.saldo)||Number(source.expectedFinancialVersion)!==Number(client.financialVersion||0)))fail('Recebimento/ajuste inconsistente.','failed-precondition');
@@ -382,10 +352,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      if(s[key]===undefined)delete settlement[key];else settlement[key]=s[key];
     }
     const origin=s.spaceId||s.financialSpaceId;
-    if(origin){
+    if(scopedReceipt&&origin){
      if(origin!==spaceId||s.spaceId&&s.financialSpaceId&&s.spaceId!==s.financialSpaceId)fail('Recebimento não pode alocar venda de outro espaço.');
      await c.space(origin);
-    }
+    }else if(s.spaceId)await c.space(s.spaceId);
     // The historical document and client have already been read from this
     // business. Only an authenticated active owner may settle a legacy sale
     // with no space; keep its history unchanged rather than inventing a scope.

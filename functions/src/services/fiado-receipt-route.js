@@ -161,8 +161,13 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     }else if(origins.length===1&&!hasUnknown){
       if(origins[0]!==spaceId)return blocked('other_space');
       mode='space';
-    }else if(owner&&!origins.length&&!scheduled&&!account.futureCents&&account.dueCents===account.totalCents){
+    }else if(owner&&!scheduled&&!account.futureCents&&account.dueCents===account.totalCents){
       // Unknown origin stays unknown. This route never attributes the debt to the active space.
+      // Unchanged pre-cutoff contract for accounts without a confirmed opening.
+      if(origins.length){
+        try{const origin=await c.space(origins[0]);if(!salesSpace(origin))return blocked('space_unavailable');}
+        catch(error){if(error.code==='permission-denied')return blocked('space_unavailable');throw error;}
+      }
       mode='original';
     }else return blocked('origin_unverified');
 

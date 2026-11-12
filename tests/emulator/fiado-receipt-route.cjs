@@ -348,7 +348,9 @@ test('scoped V2 receives partial and full in Adi Festa and Emprestar Cartão ind
       if(checkForged){
         const missing=structuredClone(request);
         delete missing.data.item.payload.fiadoReceiptRoute;
-        await assert.rejects(callCommit(missing),{code:'failed-precondition'});
+        // Without an opening, an unrouted receipt keeps the pre-cutoff contract and
+        // is rejected by the full-account allocation check (no write either way).
+        await assert.rejects(callCommit(missing),e=>['failed-precondition','permission-denied'].includes(e.code));
         const wrongSpace=structuredClone(request);
         const payment=wrongSpace.data.item.payload.writes.find(w=>w.entityType==='payments');
         payment.data.spaceId=qa.spaceId;
@@ -658,6 +660,22 @@ test('pending payment prevents a cutoff; archived and late legacy effects cannot
  assert.equal((await route()).dueCents,19000);
  await qa.clientRef.update({legacyBalance:999,legacyBalanceRemaining:999,hasInstallmentFiado:true});
  assert.equal((await route()).dueCents,19000);
+});
+
+test('owner confirmation does not depend on archived history: other-space debt and a zero record do not block',async()=>{
+ const qa=await setup(),api=openingApi(qa);
+ await qa.root.collection('sales').doc('archived-other-space-qa').set({id:'archived-other-space-qa',businessId:qa.businessId,
+  clienteId:clientId,formaPagamento:'fiado',status:'fiado',valorFinal:45,creditRemainingAmount:45,spaceId:'archived-space-qa',active:true});
+ await qa.clientRef.update({saldo:0});
+ const reason='Saldo conferido nas minhas anotações do WhatsApp.';
+ await assert.rejects(api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:0},{spaceId:qa.otherId,totalCents:0}],reason}),/maior que zero/);
+ const quote=await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:8000},{spaceId:qa.otherId,totalCents:0}],reason});
+ assert.deepEqual([quote.bookCents,quote.confirmedCents],[0,8000]);
+ const {result}=await confirmOpening(api,quote,{reason});
+ assert.equal(result.status,'confirmed');
+ assert.equal((await qa.clientRef.get()).data().saldo,-80);
+ assert.equal((await qa.route({scopedReceiptVersion:1})).dueCents,8000);
+ assert.equal((await qa.root.collection('sales').doc('archived-other-space-qa').get()).data().creditRemainingAmount,45);
 });
 
 test('ordinary subscribers create and receive new credit in two spaces without the extraordinary Central',async()=>{
