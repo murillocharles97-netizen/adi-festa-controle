@@ -293,6 +293,12 @@
     font-weight: var(--veconi-fw-regular);
     font-style: normal;
   }
+  /* Despesas ainda não entram no saldo previsto: dizer isso em vez de exibir um R$ 0,00 fixo. */
+  .desktop-finance b.is-pending {
+    color: var(--veconi-text-muted);
+    font-size: var(--veconi-fs-13);
+    font-weight: var(--veconi-fw-medium);
+  }
   .desktop-finance .forecast {
     margin-top: 6px;
     padding: 14px 11px;
