@@ -56,7 +56,9 @@ window.Fiados = (() => {
         assertScopedAccount(options.receiptRoute,spaceId):scheduled?window.InstallmentCredit.assertAccount(client,options.fiadoAccount):null;
       if(account&&account.asOf!==window.InstallmentPlan.today())throw Error('O dia comercial mudou. Confira o saldo exigível novamente.');
       if(account&&!['pix','cash'].includes(options.paymentMethod))throw Error('Utilize Pix externo ou dinheiro.');
-      if(account&&(db.pagamentos||[]).some(p=>p.clienteId===clienteId&&!p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)))throw Error('Existe recebimento pendente neste cliente. Consulte a operação original antes de registrar outra.');
+      // Archived pre-migration receipts of an opened client never block (same rule as the queue check).
+      const archivedReceipt=p=>window.SyncFirebase?.archivedFiadoRecord?.(clienteId,p,p.createdAt||p.data)===true;
+      if(account&&(db.pagamentos||[]).some(p=>p.clienteId===clienteId&&!p.financialAppliedAt&&!['applied','cancelled','superseded'].includes(p.status)&&!archivedReceipt(p)))throw Error('Existe recebimento pendente neste cliente. Consulte a operação original antes de registrar outra.');
       const target=options.saleId?(db.vendas||[]).find(s=>s.id===options.saleId):null;
       if(options.saleId&&(!target?.installmentPlan||target.clienteId!==clienteId||target.deletedAt||target.active===false||target.desfeita||target.spaceId!==spaceId||target.businessId!==DB.getBusinessId()||!['pix','cash'].includes(options.paymentMethod)))throw Error('Venda parcelada, cliente, espaço ou meio de recebimento inválido.');
       if(target&&Math.abs(Number(valor)*100-Math.round(Number(valor)*100))>0.00001)throw Error('Informe o recebimento em centavos.');

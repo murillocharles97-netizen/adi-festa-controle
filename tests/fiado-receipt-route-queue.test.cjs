@@ -108,3 +108,11 @@ test('closed legacy Fiado: integrity audit sets archived records aside on both s
   assert.equal(f.s.withoutArchivedFiado('payments',[{id:'p',clienteId:'qa-client',createdAt:old}],new Set(),{}).length,0);
   assert.equal(f.s.withoutArchivedFiado('products',[{id:'x'}],new Set(),{}).length,1);
 });
+
+test('the receipt form guard uses the same archived-record rule exported by the sync module',()=>{
+  const fiados=fs.readFileSync('js/fiados.js','utf8');
+  const exported=source.slice(source.lastIndexOf('assertFiadoReceiptQueueClear,'));
+  assert.ok(exported.slice(0,80).includes('archivedFiadoRecord,'),'sync module exports the shared rule');
+  assert.ok(fiados.includes("window.SyncFirebase?.archivedFiadoRecord?.(clienteId,p,p.createdAt||p.data)===true"));
+  assert.ok(fiados.includes("&&!archivedReceipt(p)))throw Error('Existe recebimento pendente"));
+});

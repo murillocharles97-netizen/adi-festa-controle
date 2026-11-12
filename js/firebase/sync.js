@@ -7078,6 +7078,7 @@ window.SyncFirebase = {
   assertCustomerForSale,
   assertCustomerPaymentReview,
   assertFiadoReceiptQueueClear,
+  archivedFiadoRecord,
   assertFiadoReceiptWriter,
   assertPaymentTracked,
   isSalePending,
