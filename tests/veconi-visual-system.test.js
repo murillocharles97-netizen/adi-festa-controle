@@ -23,7 +23,18 @@ test('manifesto publica a identidade e todos os ícones VECONI', () => {
 
 test('design system centraliza tokens, primitives e estados acessíveis', () => {
   const css = read('css/design-system/veconi-theme.css');
-  for (const token of ['--veconi-primary: #16cdbb','--veconi-cyan: #22e2d5','--veconi-ink: #101b2d','--veconi-bg: #f5f7fa','--veconi-danger: #e34855','--veconi-radius-card: 18px']) assert.match(css, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const token of ['--veconi-primary: #16cdbb','--veconi-cyan: #22e2d5','--veconi-ink: #101b2d','--veconi-bg: #f5f7fa','--veconi-danger: #c0262d','--veconi-radius-card: 16px']) assert.match(css, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // DS v2: every text token meets WCAG AA (4.5:1) on white, and the turquoise button keeps dark text.
+  const value = name => css.match(new RegExp(`${name}: (#[0-9a-f]{6});`, 'i'))?.[1];
+  const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+  for (const name of ['--veconi-text','--veconi-text-secondary','--veconi-text-muted','--veconi-success','--veconi-warning','--veconi-danger','--veconi-info','--veconi-action']) {
+    assert.ok(value(name), name);
+    assert.ok(ratio(value(name), '#ffffff') >= 4.5, `${name} ${ratio(value(name), '#ffffff').toFixed(2)}:1`);
+  }
+  assert.ok(ratio(value('--veconi-on-primary'), value('--veconi-primary')) >= 4.5);
+  assert.ok(ratio(value('--veconi-on-primary'), value('--veconi-primary-hover')) >= 4.5);
+  assert.match(css, /\.btn-primary:hover[^}]*color: var\(--veconi-on-primary\)/);
   for (const primitive of ['.v-card','.v-button','.v-input','.v-chip','.v-tabs','.v-badge','.v-icon-button','.v-modal','.v-sheet','.v-empty-state']) assert.match(css, new RegExp(primitive.replace('.', '\\.')));
   assert.match(css, /focus-visible/);
   assert.match(css, /prefers-reduced-motion/);

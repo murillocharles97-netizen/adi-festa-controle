@@ -15,25 +15,31 @@
   --veconi-border: #dde4ea;
   --veconi-border-strong: #cbd6df;
   --veconi-text: #172235;
-  --veconi-text-muted: #758195;
-  --veconi-success: #16a77c;
+  --veconi-text-secondary: #475467;
+  --veconi-text-muted: #5b6b80;
+  --veconi-success: #0b7e5b;
   --veconi-success-soft: #e5f8f2;
-  --veconi-warning: #c88716;
+  --veconi-warning: #b45309;
   --veconi-warning-soft: #fff3de;
-  --veconi-danger: #e34855;
+  --veconi-danger: #c0262d;
   --veconi-danger-soft: #ffebee;
-  --veconi-info: #3c82d8;
+  --veconi-info: #2563a8;
   --veconi-info-soft: #eaf3ff;
+  /* Ação em texto (links, chips/abas ativas, valores de destaque): 5,35:1 no branco.
+     Botão primário continua turquesa com texto escuro (8,8:1), preservando a identidade. */
+  --veconi-action: #08786f;
+  --veconi-action-hover: #0d6b64;
+  --veconi-on-primary: #071c20;
   --veconi-gradient: linear-gradient(135deg, var(--veconi-cyan), var(--veconi-primary));
-  --veconi-radius-sm: 10px;
+  --veconi-radius-sm: 8px;
   --veconi-radius-md: 12px;
-  --veconi-radius-card: 18px;
-  --veconi-radius-modal: 24px;
-  --veconi-shadow-sm: 0 5px 18px rgba(12, 32, 47, .055);
-  --veconi-shadow-md: 0 16px 44px rgba(8, 28, 42, .12);
+  --veconi-radius-card: 16px;
+  --veconi-radius-modal: 16px;
+  --veconi-shadow-sm: 0 1px 2px rgba(16, 27, 45, .04), 0 1px 3px rgba(16, 27, 45, .06);
+  --veconi-shadow-md: 0 12px 32px rgba(16, 27, 45, .12);
   --veconi-focus: 0 0 0 3px rgba(22, 205, 187, .24);
   --veconi-control: 50px;
-  --veconi-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --veconi-font-family: "VECONI Inter", "VECONI Inter Fallback", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --veconi-font-page: clamp(1.625rem, 2.4vw, 2.125rem);
   --veconi-font-section: clamp(1.25rem, 1.7vw, 1.5rem);
   --veconi-font-card: clamp(.9375rem, 1.2vw, 1.125rem);
@@ -61,7 +67,7 @@
   --af-color-navy: var(--veconi-ink);
   --af-color-navy-soft: var(--veconi-ink-soft);
   --af-color-text: var(--veconi-text);
-  --af-color-text-secondary: #5e6d82;
+  --af-color-text-secondary: var(--veconi-text-secondary);
   --af-color-muted: var(--veconi-text-muted);
   --af-color-success: var(--veconi-success);
   --af-color-success-soft: var(--veconi-success-soft);
@@ -120,8 +126,8 @@ body { min-width: 280px; overflow-x: hidden; }
 }
 
 .v-button, .btn { min-height: 44px; border-radius: var(--veconi-radius-md); font-weight: 800; }
-.btn-primary, .v-button--primary { border-color: transparent; background: var(--veconi-primary); color: #071c20; }
-.btn-primary:hover, .v-button--primary:hover { background: var(--veconi-primary-hover); color: #fff; }
+.btn-primary, .v-button--primary { border-color: transparent; background: var(--veconi-primary); color: var(--veconi-on-primary); }
+.btn-primary:hover, .v-button--primary:hover { background: var(--veconi-primary-hover); color: var(--veconi-on-primary); }
 .btn-light, .v-button--secondary { border: 1px solid var(--veconi-border); background: var(--veconi-surface); color: var(--veconi-text); }
 .v-button--ghost { border-color: transparent; background: transparent; color: var(--veconi-text); }
 .v-button--ghost:hover { background: var(--veconi-surface-soft); }
@@ -152,15 +158,15 @@ body { min-width: 280px; overflow-x: hidden; }
 :where(input[type="checkbox"], input[type="radio"]) { min-width: 20px; min-height: 20px; accent-color: var(--veconi-primary-hover); }
 
 .v-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 13px; border: 1px solid var(--veconi-border); border-radius: 999px; background: var(--veconi-surface); color: var(--veconi-text); font-size: .8125rem; font-weight: 750; }
-.v-chip.is-active, .v-chip[aria-pressed="true"] { border-color: var(--veconi-primary); background: var(--veconi-primary-soft); color: #087f75; }
+.v-chip.is-active, .v-chip[aria-pressed="true"] { border-color: var(--veconi-primary); background: var(--veconi-primary-soft); color: var(--veconi-action); }
 .v-tabs { display: flex; gap: 4px; padding: 5px; border: 1px solid var(--veconi-border); border-radius: 14px; background: var(--veconi-surface-soft); }
 .v-tabs > button { flex: 1; min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--veconi-text-muted); font-weight: 800; }
-.v-tabs > button.is-active, .v-tabs > button[aria-selected="true"] { background: var(--veconi-surface); color: #087f75; box-shadow: var(--veconi-shadow-sm); }
+.v-tabs > button.is-active, .v-tabs > button[aria-selected="true"] { background: var(--veconi-surface); color: var(--veconi-action); box-shadow: var(--veconi-shadow-sm); }
 .v-badge { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: var(--veconi-surface-soft); color: var(--veconi-text-muted); font-size: .75rem; font-weight: 800; }
-.v-badge--success { background: var(--veconi-success-soft); color: #08785c; }
-.v-badge--warning { background: var(--veconi-warning-soft); color: #955d08; }
-.v-badge--danger { background: var(--veconi-danger-soft); color: #b92f3b; }
-.v-badge--info { background: var(--veconi-info-soft); color: #246ab5; }
+.v-badge--success { background: var(--veconi-success-soft); color: var(--veconi-success); }
+.v-badge--warning { background: var(--veconi-warning-soft); color: #9a4a05; }
+.v-badge--danger { background: var(--veconi-danger-soft); color: var(--veconi-danger); }
+.v-badge--info { background: var(--veconi-info-soft); color: var(--veconi-info); }
 
 :where(.badge-paid, .af-badge--success, .status-success, .client-status.good) { background: var(--veconi-success-soft); color: #08785c; }
 :where(.badge-debt, .status-warning) { background: var(--veconi-warning-soft); color: #955d08; }
@@ -223,9 +229,10 @@ tr:hover td { background: #f7fcfb; }
 .avatar { background: var(--veconi-ink); color: #fff; }
 
 .bottom-nav { border-color: var(--veconi-border); background: rgba(255, 255, 255, .96); backdrop-filter: blur(16px); }
-.bottom-nav :where(a, button) { color: #65758b; }
-.bottom-nav a.active { background: transparent; color: #078f83; }
-.bottom-nav .mobile-client-fab { background: transparent; color: #65758b; box-shadow: none; }
+.bottom-nav :where(a, button) { color: var(--veconi-text-muted); }
+.bottom-nav a:not(.active) { color: var(--veconi-text-muted); }
+.bottom-nav a.active { background: transparent; color: var(--veconi-action); }
+.bottom-nav .mobile-client-fab { background: transparent; color: var(--veconi-text-muted); box-shadow: none; }
 .bottom-nav .mobile-client-fab > svg { background: var(--veconi-gradient); color: #062529; box-shadow: 0 10px 25px rgba(9, 162, 151, .24); }
 
 /* Módulos preservam semântica, mas compartilham a marca. */
