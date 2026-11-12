@@ -77,11 +77,21 @@ function saleCancellationService(db,{projectFinancial=null,allowNewCancellations
   if(oldReversal.exists||s.financialReversalEventId)fail('Já existe estorno financeiro desta venda. Conferência necessária.');
   if(isCredit){
    const id=validId(s.clienteId||s.customerId,'Cliente'),ref=c.root.collection('clients').doc(id),debitRef=c.root.collection('balanceEvents').doc('credit_sale:'+c.sid);
-   const [cs,ds,events]=await Promise.all([tx.get(ref),tx.get(debitRef),tx.get(c.root.collection('balanceEvents').where('customerId','==',id).limit(301))]);
+   const [cs,ds,events]=await Promise.all([tx.get(ref),tx.get(debitRef),tx.get(s.fiadoOpeningHash?c.root.collection('balanceEvents').where('fiadoOpeningHash','==',s.fiadoOpeningHash).limit(301):c.root.collection('balanceEvents').where('customerId','==',id).limit(301))]);
    const value=cs.data();debit=ds.data();
+   if(value?.fiadoOpeningBalance){
+    if(s.fiadoOpeningHash!==value.fiadoOpeningBalance.hash||debit?.fiadoOpeningHash!==value.fiadoOpeningBalance.hash)
+     fail('O cancelamento antigo não pode alterar a conta nova.','fiado-opening-active');
+    const snapshot=await require('./fiado-history-service').readHistoryInput({tx,c:{...c,owner:c.business.ownerId===c.uid,
+     has:()=>true,space:async id=>{if(id!==c.spaceId)fail('Espaço não autorizado.');return c.space;}},
+     ref:(bid,col,id)=>db.doc('businesses/'+bid+'/'+col+'/'+id),clientId:id,client:value,checkRowAccess:false});
+    const account=require('../shared/fiado-history-account').project(snapshot,undefined,{scoped:true});
+    const eligible=account.entries.filter(row=>row.spaceId===c.spaceId&&(row.saleId===c.sid||row.historyEventId==='credit_sale:'+c.sid));
+    if(eligible.reduce((sum,row)=>sum+row.remainingCents,0)!==amountCents)fail('A dívida desta venda já foi recebida ou não pertence ao espaço.');
+   }
    if(!scoped(value,c)||!scoped(debit,c)||debit.type!=='credit_sale'||debit.status!=='applied'||debit.sourceDocumentId!==c.sid||String(debit.customerId||debit.clientId)!==id||cents(debit.balanceDelta)!==-amountCents||cents(debit.amount)!==amountCents)fail('O débito original do Fiado não pôde ser comprovado.');
    const debitAt=time(debit.appliedAt||debit.createdAt||s.data);if(!Number.isFinite(debitAt)||events.size>300)fail('Histórico financeiro exige conciliação.');
-   if(events.docs.some(d=>{const e=d.data(),at=time(e.appliedAt||e.createdAt);return e.type!=='credit_sale'&&(!Number.isFinite(at)||at>=debitAt);} ))fail('Existem recebimentos, ajustes ou estornos posteriores ou sem data comprovada. É necessária conciliação; eles não serão alterados.','later-customer-financial-event');
+   if(!value?.fiadoOpeningBalance&&events.docs.some(d=>{const e=d.data(),at=time(e.appliedAt||e.createdAt);return e.type!=='credit_sale'&&(!Number.isFinite(at)||at>=debitAt);} ))fail('Existem recebimentos, ajustes ou estornos posteriores ou sem data comprovada. É necessária conciliação; eles não serão alterados.','later-customer-financial-event');
    const balance=cents(value.saldo),version=value.financialVersion;
    if(!Number.isSafeInteger(balance)||balance+amountCents>0||!Number.isSafeInteger(version)||version<Number(s.financialVersionAnterior||0)+1||s.creditRemainingAmount!=null&&cents(s.creditRemainingAmount)!==amountCents)fail('O saldo ou débito restante exige conciliação.');
    client={id,ref,value,balanceBefore:balance,balanceAfter:balance+amountCents,version};
@@ -102,7 +112,7 @@ function saleCancellationService(db,{projectFinancial=null,allowNewCancellations
    const p=await prepare(tx,c);if(d.fingerprint!==p.fingerprint)fail('A venda, saldo ou estoque mudou. Revise novamente antes de confirmar.','cancellation-state-changed');
    const refund=p.isCredit?'not_applicable':d.refundHandling;
    if(!p.isCredit&&!['external_refund_confirmed','not_due'].includes(refund))throw new HttpsError('invalid-argument','Confirme a devolução externa do pagamento ou que não há reembolso devido. A VECONI não devolve dinheiro automaticamente.');
-   const now=Timestamp.now(),scope={businessId:c.bid,spaceId:c.spaceId,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:c.operationId},movementIds=[];
+   const now=Timestamp.now(),scope={businessId:c.bid,spaceId:c.spaceId,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:c.operationId,...(p.client?.value.fiadoOpeningBalance?{fiadoOpeningHash:p.client.value.fiadoOpeningBalance.hash}:{})},movementIds=[];
    for(const [index,r]of p.rows.entries()){const id=c.operationId+'_stock_'+index;movementIds.push(id);tx.create(c.root.collection('stockMovements').doc(id),{...scope,id,vendaId:c.sid,source:'sale_cancellation',tipo:'entrada_cancelamento_venda',produtoId:r.productId,variantId:r.variantId,quantidade:r.quantity,estoqueAnterior:r.before,estoqueNovo:r.after,reason,data:now,createdAt:now,updatedAt:now,schemaVersion:3});tx.update(r.ref,{...(r.variantId?{stock:r.after}:{estoqueAtual:r.after,estoque:r.after,totalStock:r.after}),updatedAt:now,version:FieldValue.increment(1)});}
    for(const parent of p.parents.values())if(parent.total!==undefined)tx.update(parent.ref,{totalStock:parent.total,estoqueAtual:parent.total,estoque:parent.total,updatedAt:now,version:FieldValue.increment(1)});
    const patch={status:'cancelado',active:false,cancelledAt:now,reversedAt:now,updatedAt:now,cancelOperationId:c.operationId,reversalOperationId:c.operationId,cancelledByUid:c.uid,cancellationReason:reason,cancellationMode:'canonical_transaction',refundHandling:refund,automaticRefund:false,updatedByUid:c.uid,version:FieldValue.increment(1)};

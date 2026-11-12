@@ -31,6 +31,7 @@ function financialMaintenanceService(db){
    if(audit){if(audit.requestHash!==requestHash||audit.actorUid!==c.uid)fail('Identificador já utilizado com conteúdo diferente.','already-exists');return{...audit.result,idempotent:true};}
    if(command!=='recover_only_local_sale'&&await get('processedOperations',operationId))fail('Marcador anterior sem recibo desta manutenção. Revisão necessária.');
    const cid=command==='recover_only_local_sale'&&!d.clientId?null:validId(d.clientId,'Cliente'),client=cid?await get('clients',cid):null;
+   if(client?.fiadoOpeningBalance)fail('A manutenção do histórico antigo não pode alterar uma conta com saldo de abertura confirmado.');
    if(cid&&(!client||client.businessId&&client.businessId!==c.bid||(client.workspaceGeneration??0)!==(c.business.workspaceGeneration??0)))fail('Cliente não confirmado nesta empresa/geração.');
    if(client&&(!equal(client.saldo,d.expectedBalance)||Number(client.financialVersion||0)!==Number(d.expectedFinancialVersion)))fail('Saldo ou versão mudou após a prévia. Nenhum efeito foi aplicado.');
    const plan=[],put=(col,id,value,merge=false)=>plan.push({ref:ref(col,id),value:{...value,businessId:c.bid,workspaceGeneration:c.business.workspaceGeneration??0},merge});

@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const actions = new Set(['list','account','prepare','confirm','review','reviewLot']);
+  const actions = new Set(['list','account','prepare','confirm','review','reviewLot','openingPreview','openingConfirm']);
   const app = document.getElementById('app');
   let session, permitted, launcher, dialog, frame, pending;
   let scheduled = false;
@@ -96,6 +96,11 @@
       const scope = identity();
       if (!frame || frame.contentWindow !== caller || !permitted || key(scope) !== session || !actions.has(action))
         throw Error('A Central está indisponível nesta sessão.');
+      if(action==='openingConfirm'){
+        if(typeof window.SyncFirebase?.assertFiadoReceiptQueueClear!=='function')
+          throw Error('Aguarde a sincronização para conferir a fila deste aparelho.');
+        window.SyncFirebase.assertFiadoReceiptQueueClear(data.clientId);
+      }
       const result = await call(scope, action, data);
       if (frame?.contentWindow !== caller) throw Error('A Central foi fechada.');
       return result;

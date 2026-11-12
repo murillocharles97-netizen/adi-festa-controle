@@ -16,7 +16,7 @@
   const balance = (space, due, future, confirmed) => ({space, due, future, confirmed});
   const remote = {accounts: [], cursor: null};
   const state = {filter: 'pending', query: '', accountId: null, recordId: null};
-  let confirmation, noticeTimer;
+  let confirmation, openingDraft, noticeTimer;
   let busy = false;
 
   const normalize = value => value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
@@ -29,6 +29,7 @@
   function accountState(account, latest) {
     const outstanding = account.records.filter(item => !item.origin && !spaceNames[latest.get(item.id)?.choice]).length;
     if (!account.loaded) return {text: 'Abrir conferência', style: 'review', outstanding};
+    if (account.openingConfirmed) return {text: 'Saldo final confirmado', style: 'ready', outstanding};
     if (account.ready) return {text: 'Pronto para regularização', style: 'ready', outstanding};
     if (account.issue || outstanding || account.serverState === 'origin_pending')
       return {text: 'Origem pendente', style: account.issue ? 'divergent' : 'pending', outstanding};
@@ -151,7 +152,10 @@
       '<header class="detail-head"><button type="button" class="mobile-back" data-back>' + icon('arrow-left') +
       ' Voltar às contas</button><div class="detail-identity"><div><h2 tabindex="-1" id="selected-account">' +
       esc(account.name) + '</h2><p>' + esc(intro) + '</p></div>' + status(result.text, result.style) + '</div>' +
-      renderBalances(account) + '</header><section class="records"><div class="records-heading"><h3>Lançamentos</h3>' +
+      renderBalances(account) +
+      (account.openingEnabled&&!account.openingConfirmed?'<button type="button" class="btn primary" data-opening>' +
+        icon('calculator') + ' Conferir saldo final</button>':'') +
+      '</header><section class="records"><div class="records-heading"><h3>Lançamentos</h3>' +
       (canBatch ? '<button type="button" class="btn secondary" data-batch>' + icon('list-checks') + ' Conferir em lote</button>' : '') +
       '</div><p class="record-count">' +
       plural(account.records.length, 'lançamento', 'lançamentos') + ' · ' +
@@ -241,6 +245,65 @@
       icon('x')+'</button></form></header><div class="review-body">'+body+'</div><footer class="review-footer">'+footer+'</footer>';
     decorate();
     if(!byId('review').open)byId('review').showModal();
+  }
+
+  const spaceLabel = (account,id) => spaceNames[Object.keys(account.spaceIds).find(key=>account.spaceIds[key]===id)];
+  const displayAmount = cents => (cents/100).toFixed(2).replace('.',',');
+  const readCents = value => {
+    const parts=String(value).trim().match(/^(\d+)(?:[.,](\d{1,2}))?$/);
+    if(!parts)throw Error('Informe os valores em reais, com até duas casas decimais.');
+    const cents=Number(parts[1])*100+Number((parts[2]||'').padEnd(2,'0'));
+    if(!Number.isSafeInteger(cents))throw Error('Valor inválido.');
+    return cents;
+  };
+
+  async function showOpening(account) {
+    const quote=await call('openingPreview',{clientId:account.id});
+    const previous=openingDraft?.clientId===account.id?openingDraft:null;
+    openingDraft=null;
+    showDialog('Conferir saldo final',account,
+      '<p>Saldo cadastral: <strong>'+money(quote.bookCents)+'</strong>. Adi Festa é o padrão. Ajuste a divisão somente para exceções comprovadas.</p>'+
+      '<form id="opening-balances">'+quote.parts.map(part=>{
+        const total=previous?.balances.find(balance=>balance.spaceId===part.spaceId)?.totalCents??part.totalCents;
+        return (
+        '<label class="note-label">'+esc(spaceLabel(account,part.spaceId))+' · saldo total, incluindo parcelas'+
+        '<input type="text" required inputmode="decimal" data-opening-space="'+esc(part.spaceId)+'" value="'+displayAmount(total)+'"></label>');
+      }).join('')+'<label class="note-label">Justificativa da correção<span>Obrigatória se o total informado for diferente do cadastro.</span>'+
+      '<textarea data-opening-reason maxlength="300" rows="2">'+esc(previous?.reason||'')+'</textarea></label></form>'+
+      '<p class="opening-error" data-opening-error role="alert"></p>',
+      '<button type="submit" form="opening-balances" class="btn primary">Revisar saldo final</button>');
+  }
+
+  async function reviewOpening(account,form) {
+    const balances=[...form.querySelectorAll('[data-opening-space]')].map(input=>
+      ({spaceId:input.dataset.openingSpace,totalCents:readCents(input.value)}));
+    const reason=form.querySelector('[data-opening-reason]').value.trim();
+    const quote=await call('openingPreview',{clientId:account.id,balances,reason});
+    openingDraft={clientId:account.id,balances,reason:quote.reason,reviewHash:quote.reviewHash,requestId:crypto.randomUUID()};
+    const delta=(quote.deltaCents<0?'− ':quote.deltaCents>0?'+ ':'')+money(Math.abs(quote.deltaCents));
+    showDialog('Revisar saldo final',account,
+      '<dl class="opening-totals"><div><dt>Saldo cadastral</dt><dd>'+money(quote.bookCents)+'</dd></div>'+
+      '<div><dt>Saldo final</dt><dd>'+money(quote.confirmedCents)+'</dd></div>'+
+      '<div><dt>Diferença na dívida</dt><dd>'+delta+'</dd></div></dl>'+
+      '<div class="batch-list">'+quote.parts.map(part=>'<div class="batch-row"><strong>'+esc(spaceLabel(account,part.spaceId))+
+        '</strong><span>'+money(part.dueCents)+' exigíveis · '+money(part.futureCents)+' futuros</span></div>').join('')+'</div>'+
+      (quote.reason?'<p class="opening-reason"><strong>Justificativa</strong> '+esc(quote.reason)+'</p>':'')+
+      '<p>O saldo final será usado nos próximos recebimentos. O histórico e as parcelas serão preservados. Esta correção não gera pagamento nem lançamento no caixa.</p>'+
+      '<label class="note-label"><span><input type="checkbox" data-opening-queue> Conferi a sincronização e os recebimentos pendentes em todos os aparelhos.</span></label>'+
+      '<p class="opening-error" data-opening-error role="alert"></p>',
+      '<button type="button" class="btn secondary" data-opening>Voltar</button>'+
+      '<button type="button" class="btn primary" data-opening-confirm disabled>Confirmar saldo final</button>');
+  }
+
+  async function confirmOpening(account) {
+    const draft=openingDraft;
+    if(draft?.clientId!==account?.id||!byId('review').querySelector('[data-opening-queue]')?.checked)return;
+    await call('openingConfirm',{...draft,confirmed:true,queueChecked:true});
+    await loadAccount(account);
+    openingDraft=null;
+    byId('review').close();
+    render();
+    notify('Saldo final confirmado e auditado.');
   }
 
   async function showLotReview() {
@@ -344,6 +407,8 @@
     account.ready=false;
     account.balances=[];
     account.spaceIds={adi,card};
+    account.openingEnabled=result.openingEnabled===true;
+    account.openingConfirmed=result.openingConfirmed===true;
     account.bookBalanceCents=result.bookBalanceCents;
     account.reviewIssue=null;
     account.issue=account.records.some(item=>item.conflict)?'Há lançamentos com divergência na origem ou na prova. Confira-os individualmente.':null;
@@ -370,13 +435,16 @@
   async function run(action) {
     if(busy)return;
     busy=true;
+    const openingError=byId('review').querySelector('[data-opening-error]');
+    if(openingError)openingError.textContent='';
     try{await action();}
     catch(error){
       if(byId('central').hidden){
         byId('denied').querySelector('p').textContent=error.message;
         byId('denied').hidden=false;
         decorate();
-      }else notify(error.message);
+      }else if(openingError)openingError.textContent=error.message;
+      else notify(error.message);
     }finally{busy=false;}
   }
 
@@ -422,6 +490,10 @@
       if(items.length)run(()=>prepareEvidence(current(),'batch',items));
     } else if(button.hasAttribute('data-confirm-evidence')) {
       run(confirmEvidence);
+    } else if(button.hasAttribute('data-opening')) {
+      run(()=>showOpening(current()));
+    } else if(button.hasAttribute('data-opening-confirm')) {
+      run(()=>confirmOpening(current()));
     } else if(button.hasAttribute('data-review-lot')) {
       run(showLotReview);
     } else if(button.hasAttribute('data-more')) {
@@ -429,11 +501,18 @@
     }
   });
   byId('review').addEventListener('change',event=>{
+    if(event.target.matches('[data-opening-queue]'))
+      byId('review').querySelector('[data-opening-confirm]').disabled=!event.target.checked;
     if(event.target.matches('[data-batch-record]'))byId('review').querySelector('[data-review-batch]').disabled=
       !byId('review').querySelector('[data-batch-record]:checked');
   });
+  byId('review').addEventListener('submit',event=>{
+    if(event.target.id!=='opening-balances')return;
+    event.preventDefault();
+    run(()=>reviewOpening(current(),event.target));
+  });
   byId('review').addEventListener('close',()=>{
-    if(!byId('review').open){confirmation=null;byId('review-content').replaceChildren();}
+    if(!byId('review').open){confirmation=null;openingDraft=null;byId('review-content').replaceChildren();}
   });
   byId('search').addEventListener('input', event => {
     if (busy) return;

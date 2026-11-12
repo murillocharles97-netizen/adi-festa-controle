@@ -74,7 +74,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    require('./payment-recovery-policy').shape(original);
    return commit(request,{paymentRecovery:{dryRun:d.kind==='payment_recovery_review',originalHash:d.originalPayloadHash,expectedReviewHash:d.reviewHash||null}});
   }
-  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
+  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,fiadoScopedReceiptVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
   if(Buffer.byteLength(JSON.stringify(item))>750*1024)fail('Operação excede o limite seguro.','invalid-argument');
   operationalId(item.operationId,'Operação');
@@ -125,8 +125,12 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(incomingPlan&&historyAccount?.version===2&&!HISTORY_ACTIVATION_ENABLED){const client=(await tx.get(ref(c.bid,'clients',incomingPlan.data.clienteId))).data();if(client.fiadoHistoryVersion!==1)fail('Novas ativações do histórico estão pausadas.','failed-precondition');}
    const adjustment=attemptWrites.find(w=>w.entityType==='balanceAdjustments'&&w.operation==='create'),cancellation=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='update'&&(w.data.active===false||w.data.deletedAt));
    if(adjustment||cancellation){
-    const sale=cancellation?(await tx.get(ref(c.bid,'sales',cancellation.entityId))).data():null,cid=adjustment?.data.clienteId||adjustment?.data.customerId||sale?.clienteId;
-    if(cid){const client=(await tx.get(ref(c.bid,'clients',cid))).data();if(client?.fiadoHistoryVersion===1){
+    const sale=cancellation?(await tx.get(ref(c.bid,'sales',cancellation.entityId))).data():null,cid=adjustment?.data.clienteId||adjustment?.data.clientId||adjustment?.data.customerId||
+     (sale?.formaPagamento==='fiado'||sale?.status==='fiado'?sale?.clienteId:null);
+    if(cid){const client=(await tx.get(ref(c.bid,'clients',cid))).data();
+     if(client?.fiadoOpeningBalance&&(adjustment||sale?.fiadoOpeningHash!==client.fiadoOpeningBalance.hash))
+      fail('Operação anterior ao corte não pode alterar a conta nova.','failed-precondition');
+     if(client?.fiadoHistoryVersion===1){
      if(!capability)fail('Atualize o aplicativo antes de alterar uma conta com histórico comprovado. A operação foi preservada.','failed-precondition');
      historyAccount=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:cid,now:now(),checkPermission:false,includeTraditional:true,historyProofVersion:1});
      if(adjustment){const delta=cents(adjustment.data.saldoNovo)-cents(client.saldo),historical=historyAccount.entries.filter(e=>!e.saleId).reduce((n,e)=>n+e.remainingCents,0);if(delta>historical||require('../shared/fiado-account').commercialDay(adjustment.data)>historyAccount.asOf)fail('Ajuste não pode quitar parcelas contratuais ou criar obrigação futura sem prova.','failed-precondition');}
@@ -134,27 +138,33 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     }}
    }
    const incomingPayment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+   let scopedReceiptAccount=null;
    if(item.payload.fiadoReceiptRoute!==undefined){
     const payments=attemptWrites.filter(w=>w.entityType==='payments'&&w.operation==='create');
     if(item.payload.eventKind!=='payment'||payments.length!==1||paymentRecovery)fail('Recebimento roteado inválido.','failed-precondition');
-    await assertReceiptRoute({intent:item.payload.fiadoReceiptRoute,payment:incomingPayment.data,writes:attemptWrites,tx,c,ref,now:now()});
+    scopedReceiptAccount=await assertReceiptRoute({intent:item.payload.fiadoReceiptRoute,payment:incomingPayment.data,writes:attemptWrites,tx,c,ref,now:now()});
    }
    let recoveryFacts=null,recoveryHash=null,recoveryAudit=null;
    if(incomingPayment){
-    const p=incomingPayment.data,account=await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(p.clienteId||p.clientId,'Cliente'),now:now(),checkPermission:false,includeTraditional:!!paymentRecovery||capability&&p.fiadoSchedule?.version===2,historyProofVersion:capability?1:0});
+    const p=incomingPayment.data,id=validId(p.clienteId||p.clientId,'Cliente');
+    if(!scopedReceiptAccount&&(await tx.get(ref(c.bid,'clients',id))).data()?.fiadoOpeningBalance)
+     fail('Use o recebimento verificado do espaço para esta conta. A operação original foi preservada.','failed-precondition');
+    const account=scopedReceiptAccount||await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:id,now:now(),checkPermission:false,includeTraditional:!!paymentRecovery||capability&&p.fiadoSchedule?.version===2,historyProofVersion:capability?1:0});
     if(paymentRecovery){
      const client=(await tx.get(ref(c.bid,'clients',p.clienteId||p.clientId))).data();recoveryFacts=require('./payment-recovery-policy').prepare({item,client,account,day:require('../shared/installment-plan').today(now())});
      recoveryHash=digest({originalHash:hash,facts:recoveryFacts,effectivePayloadHash:digest(item.payload)});if(!paymentRecovery.dryRun&&recoveryHash!==paymentRecovery.expectedReviewHash)fail('A revisão mudou. Consulte novamente; nenhum recebimento foi reaplicado.','failed-precondition');
      recoveryAudit=ref(c.bid,'auditLogs','payment_recovery_'+item.operationId);if((await tx.get(recoveryAudit)).exists)fail('Existe evidência de recuperação sem recibo canônico completo; revisão individual obrigatória.','failed-precondition');
     }
     historyAccount=account;
+    // Space-scoped receipt rules apply only to accounts with a confirmed opening
+    // (scopedReceiptAccount). Other accounts keep the pre-cutoff receipt contract.
     if(account?.version===2&&!HISTORY_ACTIVATION_ENABLED){const client=(await tx.get(ref(c.bid,'clients',p.clienteId||p.clientId))).data();if(client.fiadoHistoryVersion!==1)fail('Novas ativações do histórico estão pausadas.','failed-precondition');}
     if(account){
      if(account.version===2&&p.fiadoSchedule?.version!==2)fail('Atualize o contrato de recebimento histórico. A operação original foi preservada.','failed-precondition');
      if(!p.fiadoSchedule||p.installmentSaleId||p.paymentMode!=='partial'||!['pix','cash'].includes(p.paymentMethod)||!same(p.valor,p.requestedAmount)||!same(p.valor,p.effectiveAmount)||(!/^\d{4}-\d{2}-\d{2}$/.test(p.fiadoSchedule.asOf)||p.fiadoSchedule.asOf>account.asOf)||Number(p.expectedFinancialVersion)!==account.financialVersion)fail('Atualize o saldo exigível e preserve o recebimento original para revisão.','failed-precondition');
      let rows;try{require('../shared/installment-plan').date(p.fiadoSchedule.asOf);const originalDay={...account,asOf:p.fiadoSchedule.asOf,dueCents:account.entries.filter(e=>e.dueDate<=p.fiadoSchedule.asOf).reduce((n,e)=>n+e.remainingCents,0)};rows=require('../shared/fiado-account').allocate(originalDay,cents(p.valor),{advance:p.fiadoSchedule.advance===true});}catch(e){fail(e.message,'failed-precondition');}
      if(canonical(rows)!==canonical(p.fiadoSchedule.rows))fail('Ordem/alocação de vencimentos divergente.');
-     if(account.version===2)account.validatedPaymentRows=rows;
+     if(account.version===2||scopedReceiptAccount)account.validatedPaymentRows=rows;
      const expected=new Map();for(const row of rows)if(row.saleId)expected.set(row.saleId,(expected.get(row.saleId)||0)+row.amountCents);
      const allocations=attemptWrites.filter(w=>w.entityType==='paymentAllocations');
      if(allocations.length!==expected.size||allocations.some(a=>expected.get(a.data.saleId)!==cents(a.data.amount)||canonical(a.data.scheduleRows)!==canonical(rows.filter(r=>r.saleId===a.data.saleId)))||!same(p.legacyAmount,rows.filter(r=>!r.saleId).reduce((n,r)=>n+r.amountCents,0)/100))fail('Alocação contábil não corresponde ao exigível.');
@@ -182,12 +192,41 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(!plan.size)return{operationId:item.operationId,outcome,replayed:false};
    const marker=plan.get(op.path);
    if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1});
+   if(scopedReceiptAccount){
+    if(!marker)fail('Marcador canônico ausente.','failed-precondition');
+    marker.data.fiadoReceiptScope={version:1,spaceId:incomingPayment.data.spaceId};
+   }
+   const financialClients=new Set(attemptWrites.filter(w=>w.entityType==='clients').map(w=>w.entityId));
+   let openingHash=null;
+   for(const id of financialClients){
+    const client=(await tx.get(ref(c.bid,'clients',id))).data();
+    if(!client?.fiadoOpeningBalance)continue;
+    if(openingHash&&openingHash!==client.fiadoOpeningBalance.hash)fail('Operação financeira deve pertencer a uma única conta.','failed-precondition');
+    openingHash=client.fiadoOpeningBalance.hash;
+    const sale=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.formaPagamento==='fiado');
+    const change=attemptWrites.find(w=>w.entityType==='clients'&&w.entityId===id);
+    if(sale&&Number(change?.before?.financialVersion)!==Number(client.financialVersion))
+     fail('A venda pertence a uma versão anterior da conta. Atualize antes de criar novo Fiado.','failed-precondition');
+    if(sale){
+     const opening=(await tx.get(ref(c.bid,'fiadoOpeningBalances',id))).data();
+     const occurredAt=Date.parse(sale.data.occurredAt||sale.data.data||''),cutAt=Date.parse(opening?.at||'');
+     if(opening?.hash!==openingHash||!Number.isFinite(cutAt)||!Number.isFinite(occurredAt)||occurredAt<cutAt)
+      fail('Venda anterior ao corte não pode ser lançada na conta nova.','failed-precondition');
+    }
+   }
    if(paymentRecovery){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.paymentRecovery={version:1,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),auditId:recoveryAudit.id};
     tx.create(recoveryAudit,{type:'original_payment_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),reviewHash:recoveryHash,...recoveryFacts,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
    }
-   for(const p of plan.values())tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
+   for(const p of plan.values()){
+    // The browser cannot opt an archived financial source into the new epoch.
+    if(['sales','payments','balanceAdjustments','balanceEvents','paymentAllocations'].includes(p.ref.parent.id)){
+     delete p.data.fiadoOpeningHash;
+     if(openingHash)p.data.fiadoOpeningHash=openingHash;
+    }
+    tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
+   }
    const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'&&n!=='customerPhoneKeys'))];
    if(names.length){
     const revision='server:'+item.operationId;
@@ -293,6 +332,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(!c.has(payment?'customers.receiveDebt':'customers.adjustBalance'))fail('Permissão financeira operacional ausente.');
    const source=planned(primary.entityType,primary.entityId)||primary.data,cid=validId(source.clienteId||source.customerId,'Cliente'),client=await old('clients',cid);
    if(!client)fail('Cliente não confirmado.');
+   const scopedReceipt=historyAccount?.scopedReceiptVersion===1;
+   if(scopedReceipt&&payment&&(!spaceId||source.financialSpaceId&&source.financialSpaceId!==spaceId))fail('Origem ou caixa do recebimento inválido.');
    if(spaceId)await c.space(spaceId);else if(!c.owner&&c.member?.spaceAccess!=='all')fail('Recebimento sem espaço exige revisão; não presumir o espaço atual.','failed-precondition');
    const delta=payment?Number(source.valor??source.amount):Number(source.saldoNovo)-Number(source.saldoAnterior);
    if(!numeric(delta)||payment&&delta<=0||adjust&&(!String(source.motivo||'').trim()||!same(source.saldoAnterior,client.saldo)||Number(source.expectedFinancialVersion)!==Number(client.financialVersion||0)))fail('Recebimento/ajuste inconsistente.','failed-precondition');
@@ -310,7 +351,11 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      if(Object.hasOwn(w.data,key)&&s[key]!==undefined&&!sameValue(w.data[key],s[key])&&!oldEnvelopeAlias&&!receivingEnvelope)fail('Recebimento não pode reescrever a origem da venda ('+key+').');
      if(s[key]===undefined)delete settlement[key];else settlement[key]=s[key];
     }
-    if(s.spaceId)await c.space(s.spaceId);
+    const origin=s.spaceId||s.financialSpaceId;
+    if(scopedReceipt&&origin){
+     if(origin!==spaceId||s.spaceId&&s.financialSpaceId&&s.spaceId!==s.financialSpaceId)fail('Recebimento não pode alocar venda de outro espaço.');
+     await c.space(origin);
+    }else if(s.spaceId)await c.space(s.spaceId);
     // The historical document and client have already been read from this
     // business. Only an authenticated active owner may settle a legacy sale
     // with no space; keep its history unchanged rather than inventing a scope.
@@ -326,15 +371,16 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(source.installmentSaleId){const target=await old('sales',validId(source.installmentSaleId,'Venda'));const allocations=writes.filter(w=>w.entityType==='paymentAllocations');if(!target?.installmentPlan||target.clienteId!==cid||target.spaceId!==spaceId||target.deletedAt||target.active===false||!['pix','cash'].includes(source.paymentMethod)||allocations.length!==1||allocations[0].data.saleId!==source.installmentSaleId||!same(allocations[0].data.amount,delta))fail('Recebimento parcelado exige alocação exata à venda autorizada.');}
     const allocated=writes.filter(w=>w.entityType==='paymentAllocations').reduce((n,w)=>n+cents(w.data.amount),0);if(allocated>cents(delta)||writes.some(w=>w.entityType==='paymentAllocations'&&!events.some(s=>s.entityId===w.data.saleId)))fail('Recebimento aloca mais que o valor confirmado.');
     if(source.status!=='conflict'){
-     let legacyRemaining=historyAccount?.version===2?historyAccount.entries.filter(e=>!e.saleId).reduce((n,e)=>n+e.remainingCents,0)/100:Number(client.legacyBalanceRemaining);
+     const verifiedSchedule=historyAccount?.version===2||historyAccount?.scopedReceiptVersion===1;
+     let legacyRemaining=verifiedSchedule?historyAccount.entries.filter(e=>!e.saleId).reduce((n,e)=>n+e.remainingCents,0)/100:Number(client.legacyBalanceRemaining);
      if(!Number.isFinite(legacyRemaining)){
       const tracked=await tx.get(ref(c.bid,'sales','__none__').parent.where('clienteId','==',cid).limit(351));if(tracked.size>350)fail('Histórico de Fiado excede limite da transação.','failed-precondition');
       const open=tracked.docs.map(s=>s.data()).filter(s=>s.formaPagamento==='fiado'&&s.active!==false&&!s.deletedAt).reduce((n,s)=>n+Math.max(0,Number(s.creditRemainingAmount??s.valorFinal??0)),0);
       legacyRemaining=Math.max(0,Math.abs(Math.min(0,Number(client.saldo)))-open);
      }
-     const legacyAmount=historyAccount?.version===2?historyAccount.validatedPaymentRows.filter(r=>!r.saleId).reduce((n,r)=>n+r.amountCents,0)/100:source.installmentSaleId?0:Math.min(delta,legacyRemaining),clientPatch=planned('clients',cid);
+     const legacyAmount=verifiedSchedule?historyAccount.validatedPaymentRows.filter(r=>!r.saleId).reduce((n,r)=>n+r.amountCents,0)/100:source.installmentSaleId?0:Math.min(delta,legacyRemaining),clientPatch=planned('clients',cid);
      if(source.legacyAmount!==undefined&&!same(source.legacyAmount,legacyAmount))fail('Parcela histórica do recebimento divergente.');
-     if(clientPatch&&historyAccount?.version===2){for(const key of ['legacyBalance','legacyBalanceRemaining','campaignFinanceVersion']){if(Object.hasOwn(clientPatch,key)&&!same(clientPatch[key],client[key]))fail('Projeções históricas devem permanecer preservadas.');delete clientPatch[key];}}
+     if(clientPatch&&verifiedSchedule){for(const key of ['legacyBalance','legacyBalanceRemaining','campaignFinanceVersion']){if(Object.hasOwn(clientPatch,key)&&!same(clientPatch[key],client[key]))fail('Projeções históricas devem permanecer preservadas.');delete clientPatch[key];}}
      else if(clientPatch){clientPatch.legacyBalance=client.legacyBalance??legacyRemaining;clientPatch.legacyBalanceRemaining=Math.max(0,legacyRemaining-legacyAmount);clientPatch.campaignFinanceVersion=2;}
      source.legacyAmount=legacyAmount;source.allocatedAmount=allocated/100;
     }
@@ -389,6 +435,9 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(!expected&&!before&&[...financialFields,...counterFields].some(key=>!['saldo','financialVersion'].includes(key)&&patch[key]!=null&&patch[key]!==0))fail('Cadastro não pode criar projeções comerciais ou financeiras.');
     if(expected){for(const [field,delta]of [['totalComprado',expected.amount],['quantidadeVendas',expected.count]])if(Object.hasOwn(patch,field)&&!same(Number(patch[field])-Number(before?.[field]||0),delta))fail('Contador não corresponde à venda.');}
     if(Object.hasOwn(patch,'fiadoHistoryVersion')&&patch.fiadoHistoryVersion!==before?.fiadoHistoryVersion)fail('Versão do histórico é exclusiva do servidor.');
+    if(Object.hasOwn(patch,'fiadoOpeningBalance')&&canonical(patch.fiadoOpeningBalance)!==canonical(before?.fiadoOpeningBalance))
+     fail('A confirmação do saldo é exclusiva da Central.');
+    if(Object.hasOwn(patch,'fiadoHistoryActivation')&&canonical(patch.fiadoHistoryActivation)!==canonical(before?.fiadoHistoryActivation))fail('Ativação do histórico é exclusiva do servidor.');
     if(expected&&createSales.length&&credit){const legacy=before.legacyBalance??Math.abs(Math.min(0,Number(before.saldo))),newInstallment=createSales.some(w=>w.data.installmentPlan),oldInitializer=newInstallment&&before.legacyBalance===undefined&&same(patch.legacyBalance,legacy);
      if(Object.hasOwn(patch,'legacyBalance')&&!same(patch.legacyBalance,legacy)||Object.hasOwn(patch,'legacyBalanceRemaining')&&!same(patch.legacyBalanceRemaining,before.legacyBalanceRemaining??legacy)&&!(oldInitializer&&same(patch.legacyBalanceRemaining,legacy)))fail('Saldo histórico não pode ser reescrito pela venda.');
      if(newInstallment){
@@ -482,7 +531,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    // Read-only session handshake. No sale/financial data or persistent marker.
    if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
-   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now()});
+   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion});
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
    if(d.kind==='payment_recovery_status')return require('./payment-recovery-policy').status({tx,c,d:{...d,operationId:operationalId(d.operationId,'Operação'),paymentId:operationalId(d.paymentId,'Recebimento'),clientId:validId(d.clientId,'Cliente')},ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');
@@ -492,7 +541,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    await c.space(s.spaceId);
    const marker=(await tx.get(ref(c.bid,'processedOperations',op))).data(),e=(await tx.get(ref(c.bid,'balanceEvents',(reversal?'credit_sale_reversal:':'credit_sale:')+sid))).data();
    return{confirmed:!!marker&&!!e&&(reversal?s.active===false&&s.financialReversalEventId:s.financialAppliedAt)!=null&&e.operationId===op&&e.customerId===(s.clienteId||s.customerId)&&e.sourceDocumentId===sid&&cents(e.balanceDelta)===(reversal?1:-1)*cents(s.valorFinal??s.valorTotal)};
-  },request.data?.kind==='fiado_receipt_route'?{readOnly:true}:undefined);
+  },['fiado_receipt_route','payment_confirmation'].includes(request.data?.kind)?{readOnly:true}:undefined);
  }
  async function recognizePreservedPayment(request) {
   const d=request.data||{};
@@ -504,4 +553,5 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
  // Internal authorization shared by typed maintenance commands, not a callable.
  return{commit,receipt,recognizePreservedPayment,authorize:context};
 }
-module.exports={operationalCommitService};
+// Exported read-only so typed maintenance commands honor the same containment switch.
+module.exports={operationalCommitService,HISTORY_ACTIVATION_ENABLED};

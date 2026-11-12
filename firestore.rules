@@ -246,14 +246,15 @@ service cloud.firestore {
     }
     function unchangedBalance() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-        'saldo','financialVersion','openBalance','financialRevision','financialReconciledAt',
+        'saldo','financialVersion','openBalance','financialRevision','financialReconciledAt','fiadoOpeningBalance','fiadoHistoryVersion','fiadoHistoryActivation',
         'totalComprado','quantidadeVendas','ultimaCompra','legacyBalance','legacyBalanceRemaining','campaignFinanceVersion'
       ]);
     }
     function zeroInitialBalance() {
       return request.resource.data.get('saldo',0) == 0 && request.resource.data.get('financialVersion',0) == 0
         && request.resource.data.get('totalComprado',0) == 0 && request.resource.data.get('quantidadeVendas',0) == 0
-        && request.resource.data.get('openBalance',0) == 0;
+        && request.resource.data.get('openBalance',0) == 0
+        && !request.resource.data.keys().hasAny(['fiadoOpeningBalance','fiadoHistoryVersion','fiadoHistoryActivation']);
     }
     function unchangedStock() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
@@ -1418,6 +1419,9 @@ service cloud.firestore {
               && canAccessSpace(businessId, resource.data.spaceId))
           && canUpdateGenericDocument(businessId, 'payments', documentId);
         allow delete: if false;
+      }
+      match /fiadoOpeningBalances/{clientId} {
+        allow read, write: if false;
       }
       match /financialIncomeRoutes/{documentId} {
         // Projection receipts are server-owned; clients cannot move/replay income.
