@@ -1,0 +1,27 @@
+/* Protótipo 2b — Um título por tela, mesma regra no celular e no desktop.
+ * O cabeçalho do app (título + descrição da página) é o título único. O cabeçalho
+ * interno das páginas guarda só as ações. A barra superior nunca fica vazia.
+ * Somente CSS; nenhuma ação é removida. Usa os tokens do DS v2 já na branch. */
+
+/* Títulos e descrições repetidos dentro da página saem; ações ficam. */
+body #app :is(.activity-heading>h1,.activity-heading>p,.plans-page-heading h1,.plans-page-heading p,.store-heading .store-eyebrow,.store-heading h1,.store-heading h1+p,.team-heading h1,.team-heading h1+p,.analytics-heading>div,.page-head>div:first-child,.campaign-page-head h2,.campaign-page-head h2+p,.crm-dashboard-head h2,.crm-dashboard-head h2+span,.crm-dashboard-head h2+p){display:none!important}
+body #app :is(.activity-heading,.plans-page-heading,.team-heading,.page-head,.campaign-page-head,.crm-dashboard-head){min-height:0!important;margin:0 0 var(--veconi-space-3)!important;padding:0!important;border:0!important;background:none!important;box-shadow:none!important;display:flex!important;justify-content:flex-end!important;align-items:center!important;gap:var(--veconi-space-2)!important}
+body #app .activity-heading:not(:has(button,a)),body #app .plans-page-heading:not(:has(button,a)){display:none!important}
+body #app .store-heading.online-v2-heading{min-height:0!important;padding:var(--veconi-space-3)!important;margin-bottom:var(--veconi-space-3)!important;background:var(--veconi-surface)!important;border:1px solid var(--veconi-border)!important;border-radius:var(--veconi-radius-md)!important;box-shadow:var(--veconi-shadow-sm)!important}
+
+/* Desempenho: "Atualizar análise" entra no cartão de filtros, ao lado do período. */
+body #app .analytics-page{display:grid!important}
+body #app .analytics-heading{display:contents!important}
+body #app .analytics-heading>button{grid-row:1;grid-column:1;z-index:1;justify-self:end;align-self:end;margin:0 12px 10px 0!important}
+body #app .analytics-filters{grid-row:1;grid-column:1}
+@media (max-width:767px){
+ body #app .analytics-heading>button{width:40px!important;min-width:40px!important;height:40px!important;min-height:40px!important;padding:0!important}
+ body #app .analytics-filters .analytics-range-label{min-height:40px;display:flex!important;flex-wrap:wrap;align-items:center;column-gap:6px;padding-right:52px}
+}
+@media (min-width:768px){
+ body #app .analytics-heading>button{align-self:center;margin:0 16px 0 0!important}
+ body #app .analytics-filters{padding-right:190px!important}
+ /* O título do cabeçalho do app ganha peso de título de página. */
+ body .topbar #title{font-size:var(--veconi-fs-22)!important;font-weight:var(--veconi-fw-bold)!important;letter-spacing:-.02em}
+ body .topbar #date{font-size:var(--veconi-fs-13)!important;color:var(--veconi-text-muted)!important}
+}

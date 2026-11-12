@@ -17,7 +17,7 @@ function page(root){
  return html;
 }
 function serve(root){
- const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json','.webp':'image/webp','.jpg':'image/jpeg'};
+ const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json','.webp':'image/webp','.jpg':'image/jpeg','.woff2':'font/woff2'};
  return http.createServer((req,res)=>{
   const url=new URL(req.url,'http://x');
   if(url.pathname==='/audit.html'){res.setHeader('Content-Type','text/html; charset=utf-8');return res.end(page(root));}
