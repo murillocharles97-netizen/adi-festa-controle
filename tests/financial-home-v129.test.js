@@ -132,6 +132,6 @@ test("privacidade usa o catálogo global já autorizado sem nova consulta de esp
 });
 
 test("release inclui o CSS da Home no HTML e no cache offline", () => {
-  assert.match(html, /financial-home-v2\.css\?v=132/);
+  assert.match(html, /financial-home-v2\.css\?v=2311-ds2/);
   assert.match(sw, /css\/financial-home-v2\.css/);
 });

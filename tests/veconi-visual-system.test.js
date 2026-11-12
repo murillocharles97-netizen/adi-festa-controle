@@ -46,7 +46,7 @@ test('shell identifica VECONI sem fixar um negócio legado antes da hidratação
   assert.match(html, /<title>VECONI<\/title>/);
   assert.match(html, /data-veconi-logo="horizontal"/);
   assert.match(html, /data-mobile-business-name data-business-name>Seu negócio/);
-  assert.match(html, /veconi-theme\.css\?v=123/);
+  assert.match(html, /veconi-theme\.css\?v=2311-ds2/);
   assert.match(html, /veconi-apple-touch-icon-180-v133\.png/);
   assert.doesNotMatch(html, /apple-mobile-web-app-title" content="Adi Festa"/);
 });
