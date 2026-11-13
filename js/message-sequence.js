@@ -36,7 +36,7 @@
       confirmedCount: seq.confirmedCount, skippedCount: seq.skippedCount,
       remainingCount: seq.selectedCustomerIds.length - seq.currentIndex, updatedAt: seq.updatedAt });
   }
-  async function change(expected, action, strict = false) {
+  async function change(expected, action, strict = false, { keepRevision = false } = {}) {
     allowed(); const ctx = context(); await ready();
     const result = await DB.localRecords.transaction('readwrite', (store, done, fail) => {
       const request = store.get(activeKey(ctx));
@@ -51,7 +51,8 @@
           }
           if (TERMINAL.has(seq.status)) throw fault('Esta sequência já foi encerrada.');
           action(seq, store, ctx);
-          seq.updatedAt = stamp(); seq.revision++;
+          // keepRevision: bookkeeping that must not invalidate the buttons already on screen.
+          seq.updatedAt = stamp(); if (!keepRevision) seq.revision++;
           write(store, seq); if (TERMINAL.has(seq.status)) summary(store, seq);
           done(seq);
         } catch (error) { fail(error); }
@@ -126,11 +127,15 @@
   function makeSequence(ctx, input) {
     const ids = [...new Set((input.clientIds || []).map(String))];
     if (!ids.length) throw fault('Selecione ao menos um cliente.');
+    if (input.type === 'renewal' && !window.RenewalMessages?.sanitize?.(input.renewal, ids))
+      throw fault('Abra o lembrete de renovação a partir da tela Renovações.', 'invalid-argument');
     const spaceId = window.SpaceContext?.homeId?.();
     return { key: activeKey(ctx), scope: ctx.scope, kind: 'sequence', id: crypto.randomUUID(), businessId: ctx.businessId,
       actorUid: ctx.actorUid, actorNameSnapshot: ctx.actor.actorNameSnapshot || null, actorRoleSnapshot: ctx.actor.actorRoleSnapshot || null,
       spaceId: spaceId && spaceId !== 'all_spaces' ? spaceId : null,
       type: Mensagens.TYPES.includes(input.type) ? input.type : 'custom', templateId: input.templateId || null,
+      // Renewal reminders carry WHICH subscriptions each client is reminded about (one space).
+      renewal: input.type === 'renewal' ? window.RenewalMessages?.sanitize?.(input.renewal, ids) || null : null,
       baseMessage: String(input.baseMessage || '').slice(0, 4000), selectedCustomerIds: ids,
       currentIndex: 0, currentCustomerId: ids[0], status: 'PREPARED', current: null, revision: 0,
       confirmedCount: 0, skippedCount: 0, startedAt: stamp(), updatedAt: stamp() };
@@ -162,10 +167,19 @@
       current.baseMessage = String(input.baseMessage || '').slice(0, 4000); current.templateId = input.templateId || null;
       current.current = { clientId: input.clientId, clientName: String(input.clientName || ''), phone: input.phone,
         finalMessage: String(input.finalMessage || '').slice(0, 4000), amountAtSend: current.type === 'charge' ? input.amountAtSend : null,
-        operationId: `sequence_${encodeURIComponent(current.id)}_${encodeURIComponent(input.clientId)}`, preparedAt: stamp() };
+        operationId: `sequence_${encodeURIComponent(current.id)}_${encodeURIComponent(input.clientId)}`, preparedAt: stamp(), openedAt: null,
+        renewal: current.type === 'renewal' && input.renewal ? { spaceId: input.renewal.spaceId ?? null,
+          subscriptionIds: [...new Set((input.renewal.items || []).map(item => String(item.id)))],
+          items: (input.renewal.items || []).map(item => ({ id: String(item.id), label: item.label, contractedPrice: item.contractedPrice, expiresAt: item.expiresAt, spaceId: item.spaceId ?? null })) } : null };
+      if (current.type === 'renewal' && !current.current.renewal?.subscriptionIds.length) throw fault('Nenhuma assinatura conferida para este cliente.');
       current.status = 'AWAITING_CONFIRMATION'; current.openingTabId = tabId;
     }, true);
   }
+  // "WhatsApp aberto" is recorded apart from "preparada" and from the operator's confirmation.
+  const markOpened = seq => change(seq, current => {
+    if (current.status !== 'AWAITING_CONFIRMATION' || !current.current) throw fault('Prepare a mensagem antes de abrir o WhatsApp.');
+    current.current.openedAt ||= stamp(); current.current.openCount = (current.current.openCount || 0) + 1;
+  }, true, { keepRevision: true });
   const unprepare = seq => change(seq, current => { current.status = 'PREPARED'; current.current = null; }, true);
   const edit = (seq, input) => change(seq, current => {
     if (current.status !== 'PREPARED') throw fault('Confirme o contato atual antes de editar a mensagem.');
@@ -182,7 +196,10 @@
           spaceId: current.spaceId, clientId: item.clientId, customerId: item.clientId, clientName: item.clientName,
           phone: item.phone, type: current.type, messageType: current.type, channel: 'whatsapp', source: 'message_center',
           templateId: current.templateId, sequenceId: current.id, finalMessage: item.finalMessage, amountAtSend: item.amountAtSend,
-          status: 'sent_confirmed', confirmedByUser: true, sentAt: stamp(), confirmedAt: stamp(), createdAt: stamp(), updatedAt: stamp() };
+          status: 'sent_confirmed', confirmedByUser: true, sentAt: stamp(), confirmedAt: stamp(), createdAt: stamp(), updatedAt: stamp(),
+          // The operator confirms; WhatsApp never reports delivery to the app.
+          confirmation: 'operator', deliveryVerified: false, preparedAt: item.preparedAt || null, whatsappOpenedAt: item.openedAt || null };
+        if (item.renewal) Object.assign(event, { subscriptionIds: item.renewal.subscriptionIds, renewalSpaceId: item.renewal.spaceId, renewalItems: item.renewal.items });
         // Progress and its business event commit together, including during offline use.
         write(store, { key: `message-event:${ctx.scope}:${event.id}`, scope: ctx.scope, kind: 'event', event, syncedAt: null, updatedAt: event.updatedAt });
         current.confirmedCount++;
@@ -228,5 +245,5 @@
   }
   addEventListener('online', flush);
   addEventListener('firebase-auth-ready', () => { if (Mensagens.canSend()) ready().then(flush).catch(error => console.error('[SEQUENCE INIT]', error)); });
-  window.MessageSequence = Object.freeze({ ready, active, start, draft, edit, prepare, unprepare, advance, cancel, history, flush, friendly, tabId });
+  window.MessageSequence = Object.freeze({ ready, active, start, draft, edit, prepare, markOpened, unprepare, advance, cancel, history, flush, friendly, tabId });
 })();

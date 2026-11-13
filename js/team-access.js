@@ -23,7 +23,7 @@
   });
   const ROLE_LABELS = Object.freeze({ owner: "Proprietário", manager: "Gerente", seller: "Vendedor / Caixa", stock: "Estoque" });
   const ROUTE_PERMISSIONS = Object.freeze({
-    vender: "sales.create", clientes: "customers.view", fiados: "customers.receiveDebt", crm: "reports.view",
+    vender: "sales.create", clientes: "customers.view", renovacoes: "customers.view", fiados: "customers.receiveDebt", crm: "reports.view",
     cobrancas: "customers.receiveDebt", produtos: "products.view", campanhas: "reports.view",
     financeiro: "financial.view", catalogo: "products.edit", pedidos: "sales.viewAll",
     historico: "sales.create", relatorios: "reports.view", equipe: "team.view", configuracoes: "settings.manage",

@@ -260,6 +260,9 @@
     "service-worker.js",
     "functions/src/shared/installment-plan.js",
     "js/installment-credit.js",
-    "functions/src/shared/fiado-account.js"
+    "functions/src/shared/fiado-account.js",
+    "js/renewal-messages.js",
+    "js/renovacoes.js",
+    "css/renovacoes.css"
   ]
 }

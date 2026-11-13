@@ -1,0 +1,79 @@
+[
+  {
+    "name": "320-vencem-hoje",
+    "sw": 320,
+    "iw": 320,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "320-vencidas",
+    "sw": 320,
+    "iw": 320,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "360-proximos-7-dias",
+    "sw": 360,
+    "iw": 360,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "360-offline",
+    "sw": 360,
+    "iw": 360,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "390-selecao-lote",
+    "sw": 390,
+    "iw": 390,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "390-limite-500",
+    "sw": 390,
+    "iw": 390,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "390-restrito",
+    "sw": 390,
+    "iw": 390,
+    "minFont": 13,
+    "smallButtons": 0
+  },
+  {
+    "name": "390-vazio",
+    "sw": 390,
+    "iw": 390,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "390-busca-sem-resultado",
+    "sw": 390,
+    "iw": 390,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "1366-ativas-selecao",
+    "sw": 1366,
+    "iw": 1366,
+    "minFont": 12,
+    "smallButtons": 0
+  },
+  {
+    "name": "1366-renovadas",
+    "sw": 1366,
+    "iw": 1366,
+    "minFont": 12,
+    "smallButtons": 0
+  }
+]

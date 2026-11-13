@@ -1,0 +1,246 @@
+[
+  {
+    "width": 390,
+    "steps": {
+      "1-renovacoes": 2,
+      "1-renovacoes-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 12,
+        "small": []
+      },
+      "2-selecao": "2 assinaturas · 1 cliente",
+      "2-selecao-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 12,
+        "small": []
+      },
+      "3-central": true,
+      "3-central-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": null,
+        "small": []
+      },
+      "4-composer": true,
+      "4-composer-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 10,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      },
+      "5-preparada": true,
+      "5-preparada-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 13,
+        "small": []
+      },
+      "6-whatsapp-aberto": "https://wa.me/5511988881234?text=Olá, Joana! Passando para lembrar da sua renova",
+      "6-whatsapp-aberto-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 11.6667,
+        "small": []
+      },
+      "7-encerrada": true,
+      "7-encerrada-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 11.6667,
+        "small": []
+      },
+      "8-volta-renovacoes": true,
+      "8-volta-renovacoes-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 12,
+        "small": []
+      }
+    }
+  },
+  {
+    "width": 360,
+    "steps": {
+      "1-renovacoes": 2,
+      "1-renovacoes-metrics": {
+        "sw": 360,
+        "iw": 360,
+        "minFont": 12,
+        "small": []
+      },
+      "2-selecao": "2 assinaturas · 1 cliente",
+      "2-selecao-metrics": {
+        "sw": 360,
+        "iw": 360,
+        "minFont": 12,
+        "small": []
+      },
+      "3-central": true,
+      "3-central-metrics": {
+        "sw": 360,
+        "iw": 360,
+        "minFont": null,
+        "small": []
+      },
+      "4-composer": true,
+      "4-composer-metrics": {
+        "sw": 360,
+        "iw": 360,
+        "minFont": 10,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      },
+      "5-preparada": true,
+      "5-preparada-metrics": {
+        "sw": 360,
+        "iw": 360,
+        "minFont": 13,
+        "small": []
+      }
+    }
+  },
+  {
+    "width": 320,
+    "steps": {
+      "1-renovacoes": 2,
+      "1-renovacoes-metrics": {
+        "sw": 320,
+        "iw": 320,
+        "minFont": 12,
+        "small": []
+      },
+      "2-selecao": "2 assinaturas · 1 cliente",
+      "2-selecao-metrics": {
+        "sw": 320,
+        "iw": 320,
+        "minFont": 12,
+        "small": []
+      },
+      "3-central": true,
+      "3-central-metrics": {
+        "sw": 320,
+        "iw": 320,
+        "minFont": null,
+        "small": []
+      },
+      "4-composer": true,
+      "4-composer-metrics": {
+        "sw": 320,
+        "iw": 320,
+        "minFont": 10,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      },
+      "5-preparada": true,
+      "5-preparada-metrics": {
+        "sw": 320,
+        "iw": 320,
+        "minFont": 13,
+        "small": []
+      }
+    }
+  },
+  {
+    "width": 1366,
+    "steps": {
+      "1-renovacoes": 2,
+      "1-renovacoes-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": 12,
+        "small": []
+      },
+      "2-selecao": "2 assinaturas · 1 cliente",
+      "2-selecao-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": 12,
+        "small": []
+      },
+      "3-central": true,
+      "3-central-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": null,
+        "small": []
+      },
+      "4-composer": true,
+      "4-composer-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": 10.8333,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      },
+      "5-preparada": true,
+      "5-preparada-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": 13,
+        "small": []
+      },
+      "6-whatsapp-aberto": "https://wa.me/5511988881234?text=Olá, Joana! Passando para lembrar da sua renova",
+      "6-whatsapp-aberto-metrics": {
+        "sw": 1366,
+        "iw": 1366,
+        "minFont": 11.6667,
+        "small": []
+      }
+    }
+  },
+  {
+    "width": 390,
+    "steps": {
+      "a-composer": {
+        "preview": "Olá, Joana! Passando para lembrar da sua renovação na Studio Fictício QA:\n\n• Plano Mensal Pilates — R$ 180,00 / 1 mês — vence hoje (13/11/2026)\n• Personal 2x semana — R$ 140,00 / 1 mês — vence em 40 dias (23/12/2026)\n\nPosso renovar para você?",
+        "repeat": true
+      },
+      "a-composer-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 10,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      },
+      "b-renovada-no-meio": {
+        "dropped": "Um plano saiu da mensagem\nPersonal 2x semana: a assinatura foi renovada ou alterada depois da seleção.\nNenhum dado desatualizado será enviado. Atualize Renovações para conferir.",
+        "preview": "Olá, Joana! Passando para lembrar da sua renovação na Studio Fictício QA:\n\n• Plano Mensal Pilates — R$ 180,00 / 1 mês — vence hoje (13/11/2026)\n\nPosso renovar para você?",
+        "opened": 0
+      },
+      "b-renovada-no-meio-metrics": {
+        "sw": 390,
+        "iw": 390,
+        "minFont": 10,
+        "small": [
+          "{{primeiro_nome}}",
+          "{{nome}}",
+          "{{renovacoes}}",
+          "{{plano}}"
+        ]
+      }
+    }
+  }
+]

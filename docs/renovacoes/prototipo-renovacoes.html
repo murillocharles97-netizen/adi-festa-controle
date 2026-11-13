@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Renovações VECONI</title>
+<style>
+:root{--primary:#08ad81;--primary-ink:#06775a;--primary-soft:#e3f8f1;--ink:#17233a;--muted:#647189;--line:#e4e9ef;--bg:#f5f7fa;--card:#fff;--danger:#c8323f;--danger-soft:#fdecee;--warn:#a96400;--warn-soft:#fff4df;--blue:#2563c9;--blue-soft:#e8f0fd;--violet:#6a4fc8;--violet-soft:#efebfd;--radius:16px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#e8edf5;--muted:#9aa6ba;--line:#2a3446;--bg:#0f1521;--card:#172030;--primary-soft:#123b31;--danger-soft:#3a1c22;--warn-soft:#3a2c12;--blue-soft:#18294a;--violet-soft:#261f45}}
+:root[data-theme="dark"]{--ink:#e8edf5;--muted:#9aa6ba;--line:#2a3446;--bg:#0f1521;--card:#172030;--primary-soft:#123b31;--danger-soft:#3a1c22;--warn-soft:#3a2c12;--blue-soft:#18294a;--violet-soft:#261f45}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);min-width:300px}button,input{font:inherit;color:inherit}
+.shell{max-width:1180px;margin:0 auto;padding:20px 16px 110px}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}.top h1{margin:0;font-size:1.45rem;letter-spacing:-.01em}.top p{margin:2px 0 0;color:var(--muted);font-size:.86rem}.top>div{flex:1;min-width:200px}
+.space{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:var(--card);font-size:.78rem;font-weight:700;color:var(--muted)}.space i{width:8px;height:8px;border-radius:50%;background:var(--primary)}
+.search{position:relative;margin-bottom:14px}.search input{width:100%;min-height:48px;border:1px solid var(--line);border-radius:14px;padding:0 14px 0 42px;background:var(--card);font-size:16px}.search svg{position:absolute;left:14px;top:14px;width:20px;height:20px;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.kpi{all:unset;cursor:pointer;display:grid;gap:4px;padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);min-width:0;transition:border-color .15s,box-shadow .15s}.kpi:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+.kpi small{color:var(--muted);font-weight:700;font-size:.74rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpi b{font-size:1.6rem;line-height:1.1}.kpi em{font-style:normal;font-size:.74rem;color:var(--muted)}
+.kpi[aria-pressed="true"]{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.kpi.today b{color:var(--danger)}.kpi.soon b{color:var(--warn)}.kpi.expired b{color:var(--danger)}.kpi.renewed b{color:var(--violet)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}.panel-head h2{margin:0;font-size:1rem;flex:1}.panel-head small{color:var(--muted)}
+.row{display:grid;grid-template-columns:40px minmax(0,1.4fr) minmax(0,1fr) 110px auto;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}
+.avatar{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-weight:800;font-size:.85rem;background:var(--primary-soft);color:var(--primary-ink)}
+.who b,.plan b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.who small,.plan small{color:var(--muted);font-size:.76rem}
+.due{font-size:.76rem;font-weight:800;padding:5px 9px;border-radius:999px;justify-self:start;white-space:nowrap}.due.today,.due.late{background:var(--danger-soft);color:var(--danger)}.due.soon{background:var(--warn-soft);color:var(--warn)}.due.ok{background:var(--blue-soft);color:var(--blue)}.due.renewed{background:var(--violet-soft);color:var(--violet)}
+.actions{display:flex;gap:6px;justify-content:flex-end}
+.btn{min-height:40px;border-radius:11px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-weight:700;font-size:.82rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn svg{width:16px;height:16px}
+.btn.icon{width:40px;padding:0;justify-content:center}
+.side{display:grid;gap:12px}.side .panel{padding:16px}.side h3{margin:0 0 6px;font-size:.95rem}.side p{margin:0 0 12px;color:var(--muted);font-size:.82rem;line-height:1.45}.money{font-size:1.35rem;font-weight:800}
+.steps{margin:0;padding-left:18px;color:var(--muted);font-size:.8rem;line-height:1.6}
+.empty{padding:36px 16px;text-align:center;color:var(--muted)}
+.bulk{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);width:min(720px,calc(100% - 24px));display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:16px;background:#17233a;color:#fff;box-shadow:0 12px 30px rgba(10,20,40,.28)}.bulk span{flex:1;font-size:.86rem}.bulk b{color:#7ff0d2}.bulk .btn{border:0}
+.note{margin-top:18px;font-size:.76rem;color:var(--muted)}
+@media(max-width:980px){.layout{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){
+ .kpis{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -16px 14px;padding:2px 16px 6px;scrollbar-width:none}.kpis::-webkit-scrollbar{display:none}
+ .kpi{flex:0 0 132px;scroll-snap-align:start;padding:12px}.kpi b{font-size:1.35rem}
+ .row{grid-template-columns:40px minmax(0,1fr) auto;grid-template-areas:"a w d" "a p p" "x x x";row-gap:8px}
+ .row .avatar{grid-area:a;align-self:start}.row .who{grid-area:w}.row .plan{grid-area:p}.row .due{grid-area:d;justify-self:end}.row .actions{grid-area:x;justify-content:stretch}.row .actions .btn{flex:1;justify-content:center}.row .actions .btn.icon{flex:0 0 44px}
+ .side{grid-template-columns:1fr}.btn{min-height:44px}
+}
+@media(max-width:350px){.top h1{font-size:1.25rem}.kpi{flex-basis:118px}.row{grid-template-columns:34px minmax(0,1fr) auto}.avatar{width:34px;height:34px}.bulk{flex-wrap:wrap}.bulk .btn{width:100%;justify-content:center}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div><h1>Renovações</h1><p>Planos mensais e serviços recorrentes dos seus clientes.</p></div>
+    <span class="space"><i></i>Espaço: Loja Centro</span>
+  </header>
+  <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Buscar cliente, telefone ou plano" aria-label="Buscar cliente, telefone ou plano"></label>
+  <nav class="kpis" id="kpis" aria-label="Filtros de renovação"></nav>
+  <div class="layout">
+    <section class="panel" aria-live="polite"><header class="panel-head"><h2 id="list-title"></h2><small id="list-count"></small></header><div id="list"></div></section>
+    <aside class="side">
+      <section class="panel"><h3>Previsão dos próximos 7 dias</h3><p>Soma do valor contratado do que vence hoje e na semana.</p><div class="money" id="forecast"></div></section>
+      <section class="panel"><h3>Lembrete em lote</h3><p>Abre a Central de Mensagens com estes clientes já selecionados. Você escolhe o modelo e envia um a um pelo WhatsApp.</p><ol class="steps"><li>Escolha um filtro acima</li><li>Toque em “Lembrar todos”</li><li>Revise a sequência na Central</li></ol></section>
+    </aside>
+  </div>
+  <p class="note">Protótipo com dados fictícios. A lista usa <code>CustomerSubscriptions.view.board()</code>; “Renovar” chama <code>Checkout.prepareRenewal(id)</code> e “Lembrar todos” chama <code>MobileMessages.openCenter({ type: 'campaign', clientIds })</code>.</p>
+</main>
+<div class="bulk" id="bulk" role="region" aria-label="Ação em lote"><span id="bulk-text"></span><button class="btn primary" type="button" id="bulk-btn">Lembrar todos</button></div>
+<script>
+const day=86400000,today=new Date();today.setHours(12,0,0,0);
+const at=d=>new Date(today.getTime()+d*day).toISOString();
+const rows=[
+ {id:1,client:"Joana Conceição",phone:"(11) 98888-1234",label:"Plano Mensal Pilates",price:180,expires:0,renewed:null},
+ {id:2,client:"Marcos Lima",phone:"(11) 97777-2211",label:"Academia 3x semana",price:99.9,expires:0,renewed:null},
+ {id:3,client:"Bia Souza",phone:"(21) 96666-1010",label:"IPTV Família",price:39.9,expires:2,renewed:null},
+ {id:4,client:"Carlos Prado",phone:"(31) 95555-0001",label:"Mensalidade Inglês",price:250,expires:5,renewed:null},
+ {id:5,client:"Ana Ribeiro",phone:"(11) 94444-7788",label:"Corte + barba (pacote)",price:120,expires:7,renewed:null},
+ {id:6,client:"Rafael Nunes",phone:"(19) 93333-4545",label:"Academia 3x semana",price:99.9,expires:18,renewed:-3},
+ {id:7,client:"Lúcia Martins",phone:"(11) 92222-9090",label:"Plano Mensal Pilates",price:180,expires:26,renewed:-4},
+ {id:8,client:"Pedro Alves",phone:"(41) 91111-3030",label:"IPTV Família",price:39.9,expires:-2,renewed:null},
+ {id:9,client:"Sônia Reis",phone:"(11) 90000-5656",label:"Mensalidade Inglês",price:250,expires:-9,renewed:null},
+];
+const buckets=[
+ ["dueToday","Vencem hoje","today",r=>r.expires===0],
+ ["next7","Próximos 7 dias","soon",r=>r.expires>=1&&r.expires<=7],
+ ["expired","Vencidas","expired",r=>r.expires<0],
+ ["renewedRecently","Renovadas (30 dias)","renewed",r=>r.renewed!==null&&r.renewed>=-30],
+ ["active","Ativas","active",r=>r.expires>=0],
+];
+let current="dueToday",query="";
+const money=v=>v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const norm=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+const initials=n=>n.split(" ").map(p=>p[0]).slice(0,2).join("").toUpperCase();
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function matches(r){if(!query)return true;const d=query.replace(/\D/g,"");return norm(`${r.client} ${r.label}`).includes(norm(query))||(d.length>=3&&r.phone.replace(/\D/g,"").includes(d))}
+function due(r){if(current==="renewedRecently")return["renewed",`Renovou há ${-r.renewed} d`];if(r.expires===0)return["today","Vence hoje"];if(r.expires<0)return["late",`Venceu há ${-r.expires} d`];if(r.expires===1)return["soon","Vence amanhã"];return[r.expires<=7?"soon":"ok",`Em ${r.expires} dias`]}
+function render(){
+ const visible=rows.filter(matches);
+ document.getElementById("kpis").innerHTML=buckets.map(([k,l,t,f])=>{const n=visible.filter(f).length;return`<button class="kpi ${t}" type="button" data-k="${k}" aria-pressed="${k===current}"><small>${l}</small><b>${n}</b><em>${k==="expired"?"recuperar":k==="renewedRecently"?"confirmadas":k==="active"?"em vigência":"para lembrar"}</em></button>`}).join("");
+ const [,label,,f]=buckets.find(b=>b[0]===current),list=visible.filter(f).sort((a,b)=>current==="expired"?b.expires-a.expires:a.expires-b.expires);
+ document.getElementById("list-title").textContent=label;
+ document.getElementById("list-count").textContent=`${list.length} ${list.length===1?"assinatura":"assinaturas"}`;
+ document.getElementById("list").innerHTML=list.map(r=>{const[t,txt]=due(r);return`<article class="row"><span class="avatar" aria-hidden="true">${initials(r.client)}</span><div class="who"><b>${esc(r.client)}</b><small>${esc(r.phone)}</small></div><div class="plan"><b>${esc(r.label)}</b><small>${money(r.price)} / mês · vence ${new Date(at(r.expires)).toLocaleDateString("pt-BR")}</small></div><span class="due ${t}">${txt}</span><div class="actions"><button class="btn primary" type="button">Renovar</button><button class="btn" type="button">Lembrar</button><button class="btn icon" type="button" aria-label="Abrir perfil de ${esc(r.client)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button></div></article>`}).join("")||`<p class="empty">Nada por aqui${query?" para essa busca":""}.</p>`;
+ document.getElementById("forecast").textContent=money(visible.filter(r=>r.expires>=0&&r.expires<=7).reduce((s,r)=>s+r.price,0));
+ const ids=[...new Set(list.map(r=>r.id))],bulk=document.getElementById("bulk");
+ bulk.hidden=!ids.length||current==="active"||current==="renewedRecently";
+ document.getElementById("bulk-text").innerHTML=`<b>${ids.length}</b> ${ids.length===1?"cliente":"clientes"} em “${label}”`;
+}
+document.getElementById("kpis").addEventListener("click",e=>{const b=e.target.closest("[data-k]");if(b){current=b.dataset.k;render()}});
+document.getElementById("q").addEventListener("input",e=>{query=e.target.value.trim();render()});
+document.getElementById("bulk-btn").addEventListener("click",()=>alert("No app: MobileMessages.openCenter({ type: 'campaign', clientIds })"));
+render();
+</script>
+</body>
+</html>

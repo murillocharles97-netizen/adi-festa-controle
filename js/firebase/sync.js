@@ -5469,6 +5469,7 @@ async function queryCustomerSubscriptions(options = {}) {
     orders: [{ field: lastRenewedFrom ? "lastRenewedAt" : "expiresAt", direction: options.direction === "asc" ? "asc" : "desc" }],
     max,
     includeInactive: true,
+    cursor: options.page === true ? options.cursor || null : null,
   });
   assertCloudReadScope(scope, spaceView);
   const context = window.SpaceContext;
@@ -5476,19 +5477,44 @@ async function queryCustomerSubscriptions(options = {}) {
     ? result.items.filter(item => context.showsRenewal(item) || context.showsUnassignedRenewal(item))
     : result.items;
   applyCloudCollection("customerSubscriptions", items, { authoritative: false });
-  return items;
+  // Renovações screen pages through a status with the Firestore cursor; other callers keep the array.
+  return options.page === true ? { items, cursor: result.cursor || null, hasMore: Boolean(result.hasMore) } : items;
 }
-async function queryRenewalsForSpace() {
+// Renovações: today's confirmed reminders from any device (existing messageHistory, read-only).
+// Single-field range on sentAt (automatic index); type is filtered here. At most 200 records.
+async function queryMessageHistorySince(since, { pages = 4 } = {}) {
   const scope = captureCloudReadScope();
   await validateUser();
   assertCloudReadScope(scope);
-  const context = window.SpaceContext, id = context?.activeId?.();
+  if (!canPullSource("messageHistory")) return [];
+  const value = new Date(since).toISOString(), items = [];
+  let cursor = null;
+  for (let page = 0; page < pages; page += 1) {
+    const result = await repositories.messageHistory.listQueryPage({ filters: [{ field: "sentAt", operator: ">=", value }],
+      orders: [{ field: "sentAt", direction: "desc" }], max: 50, cursor, includeInactive: true });
+    assertCloudReadScope(scope);
+    items.push(...result.items);
+    if (!result.hasMore || !result.cursor) break;
+    cursor = result.cursor;
+  }
+  applyCloudCollection("messageHistory", items, { authoritative: false });
+  return items;
+}
+// Without an argument: the active space (existing callers). With spaceId: one of the
+// spaces this member may operate (Renovações "Todos os espaços"); anything else reads nothing.
+async function queryRenewalsForSpace(spaceId = null) {
+  const scope = captureCloudReadScope();
+  await validateUser();
+  assertCloudReadScope(scope);
+  const context = window.SpaceContext, id = spaceId ? String(spaceId) : context?.activeId?.();
   if (!id || !context.scopesCustomers() || !canPullSource("customerSubscriptions") ||
       window.OperationalReadPolicy?.restricted?.() || window.TeamAccess?.canRoute?.("clientes") === false) return [];
+  if (spaceId && !(context.customerSpaces?.() || []).some(space => space.id === id)) return [];
+  const belongs = spaceId ? item => context.recordSpace(item) === id : item => context.showsRenewal(item);
   const repository = repositories.customerSubscriptions;
   const groups = await Promise.all(["spaceId", "financialSpaceId"].map(field => repository.listWherePaged(field, id)));
   assertCloudReadScope(scope);
-  const items = [...new Map(groups.flat().filter(item => !item.deletedAt && context.showsRenewal(item))
+  const items = [...new Map(groups.flat().filter(item => !item.deletedAt && belongs(item))
     .map(item => [item.id, item])).values()];
   applyCloudCollection("customerSubscriptions", items, { authoritative: false });
   return items;
@@ -7166,6 +7192,7 @@ window.SyncFirebase = {
   queryAllClientsForAction,
   queryClientsByInactivity,
   queryCustomerSubscriptions,
+  queryMessageHistorySince,
   queryRenewalsForSpace,
   saveCustomerDirectory,
   saveProductFavorites,

@@ -465,6 +465,7 @@
       inicio: inicioCompleto,
       vender,
       clientes,
+      renovacoes: () => window.RenovacoesUI?.render?.() || vazio("Renovações indisponíveis"),
       crm: () => CRMDashboard.render(),
       cobrancas,
       fiados,
@@ -484,6 +485,7 @@
       inicio: "Início",
       vender: "Vender",
       clientes: "Clientes",
+      renovacoes: "Renovações",
       crm: "CRM e Relacionamento",
       cobrancas: "Cobranças",
       fiados: "Fiados",
@@ -1198,6 +1200,11 @@
     const renderStartedAt = performance.now();
     const deniedRoute = typeof window.TeamAccess?.canRoute === "function" && !window.TeamAccess.canRoute(route);
     if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
+    // Renovações uses the customerSubscriptions plan feature (same gate as the checkout renewal).
+    if (route === "renovacoes" && window.PlanLimitService?.canUseFeature?.("customerSubscriptions")?.ok === false) {
+      window.PlansUI?.openProModal?.("customerSubscriptions", window.PlanLimitService.canUseFeature("customerSubscriptions"));
+      route = "inicio";
+    }
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
     const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
@@ -1263,6 +1270,7 @@
     if (route === "campanhas") CampanhasUI.bind();
     if (route === "financeiro") FinanceiroUI.bind();
     if (route === "historico") window.ActivityCenter?.bind?.();
+    if (route === "renovacoes" && !deniedRoute) window.RenovacoesUI?.bind?.();
     if (route === "planos") window.PlansUI.bind($("#app"));
     window.PlansUI?.syncLegacyNotice?.();
     if (route === "cupons") window.CouponsAdmin?.bind?.();

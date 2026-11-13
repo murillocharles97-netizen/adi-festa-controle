@@ -13,7 +13,7 @@ test('legacy space counts never become operational priorities or goal-editor lin
 test('every priority has a supported useful destination, with separate low/out stock',()=>{
  const {home}=runtime(),m={...home.model(),out:[{}],low:[{}],renewals:{dueToday:1,due7:1,forecastValue:10},pendingOrders:[{}],debtors:[{}],debt:30};
  const targets=Array.from(home.attentionItems(m),x=>x.target);
- assert.deepEqual(targets,['products-out','clients-renewals','orders','products-low','clients-debt']);
+ assert.deepEqual(targets,['products-out','renewals','orders','products-low','clients-debt']);
  for(const target of targets)assert.ok(source.includes(`'${target}'`));
  assert.equal(runtime(false).home.attentionItems(m).length,0,'no priority leading to unauthorized route');
 });
