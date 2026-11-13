@@ -129,8 +129,15 @@
     const privacy = window.OperationalPrivacyPolicy;
     return Boolean(privacy?.restricted({ ...s.draft, permissionsVersion: 3 }) && !privacy.restricted(s.original));
   }
-  function readPolicyBlocked(s) {
+  function readPolicyPreparationNeeded(s) {
     return readPolicyTransition(s) && context().business?.operationalReadPolicyVersion !== 1;
+  }
+  function canPrepareReadPolicy() {
+    const { business, member, userProfile } = context();
+    return member?.role === 'owner' && Boolean(userProfile?.uid) && business?.ownerId === userProfile.uid;
+  }
+  function readPolicyBlocked(s) {
+    return readPolicyPreparationNeeded(s) && !canPrepareReadPolicy();
   }
   function updateInsets(){
     const page=q('[data-permission-editor]');if(!page)return;
@@ -159,6 +166,7 @@
       <div class="tp-block-heading tp-permissions-heading"><span>${icon('shield-check')}</span><div><h2>O que esta pessoa pode fazer</h2><p>Abra cada área para revisar os acessos.</p></div></div>
       <div class="tp-permission-grid">${groups.map(group=>category(group,s)).join('')}</div>
       ${transitionPending?'<aside class="tp-rollout-note" role="status">'+icon('shield-check')+'<div><b>Alterações ainda não podem ser salvas</b><p>Para aplicar um perfil sem histórico, a empresa precisa concluir a preparação de segurança. Os acessos atuais continuam em vigor.</p>'+(M.explicit(member)['performance.history']?'<p>Para salvar outras alterações agora, mantenha a opção de histórico já autorizada.</p>':'')+'</div></aside>':''}
+      ${readPolicyPreparationNeeded(s)&&canPrepareReadPolicy()?'<aside class="tp-rollout-note" role="status">'+icon('shield-check')+'<div><b>Proteção do histórico</b><p>Ao salvar, o servidor confere se a empresa pode ativar a proteção. Se houver links antigos que precisem de revisão, nenhum acesso será alterado.</p></div></aside>':''}
       ${legacy?`<details class="tp-compat"><summary>${icon('shield-check')}Acessos atuais preservados${icon('chevron-down')}</summary><p>${esc(legacy)}</p></details>`:''}
       <div class="tp-feedback ${s.feedbackType==='error'?'is-error':''}" data-tp-feedback role="${s.feedbackType==='error'?'alert':'status'}" aria-live="polite">${esc(s.message||'')}</div>
       <footer class="tp-savebar"><div><b>${pending?'Alterações não salvas':'Acessos atuais preservados'}</b><small>${pending?diff.added.length+' a liberar · '+diff.removed.length+' a remover':'Nada muda sem a sua confirmação'}</small></div><button class="tp-button" type="button" data-tp-back ${s.busy?'disabled':''}>Cancelar</button><button class="tp-button tp-primary" type="button" data-tp-save ${owner||!pending||s.busy||s.invalid||transitionPending?'disabled':''}>${icon('check')}${s.busy?'Salvando…':'Salvar permissões'}</button></footer></section>`;
@@ -195,6 +203,7 @@
     const transition=readPolicyTransition(s),conflicts=window.OperationalPrivacyPolicy?.incompatibleGrants(payload)||[];
     if(conflicts.length){s.feedbackType='error';s.message='O perfil sem histórico não pode manter estes acessos gerenciais: '+conflicts.map(k=>labels[k]||k).join(', ')+'. Revise as escolhas; nenhum acesso foi alterado.';render(s);return;}
     if(transition){payload.confirmReadPolicyTransition=true;}
+    if(readPolicyPreparationNeeded(s)&&canPrepareReadPolicy())payload.prepareReadPolicy=true;
     const diff = M.difference(M.explicit(s.original), s.draft.permissions);
     const list = keys => keys.length ? `<ul>${keys.map(key => `<li>${esc(labels[key])}</li>`).join("")}</ul>` : "<p>Nenhuma.</p>";
     dialog(s, "Revisar alterações", `<p>Funcionário: <b>${esc(s.original.name)}</b>. Confira tudo abaixo. Nada será alterado até tocar em Confirmar e salvar.</p>${transition?'<p class="tp-caution">Confirme que os aparelhos estão atualizados e as filas foram conferidas. A restrição bloqueia novas leituras históricas, mas não apaga dados já obtidos. Atendimentos de vendas antigas exigirão autorização pontual do proprietário.</p>':''}<h3>Acessos que serão liberados</h3>${list(diff.added)}<h3>Acessos que serão removidos</h3>${list(diff.removed)}<p>Cargo após salvar: <b>${esc(roleLabel(payload.role))}</b></p><p>Espaços liberados após salvar: <b>${payload.spaceAccess === "all" ? "Todos os atuais e futuros" : s.spaces.filter(space => payload.allowedSpaceIds.includes(space.id)).map(space => esc(space.name)).join(", ")}</b></p>${diff.added.some(key => ["financial.view", "cost.view", "profit.view", "team.manage", "settings.manage", "spaces.manage", "billing.manage"].includes(key)) ? '<p class="tp-caution">Atenção: você está liberando acesso financeiro ou administrativo. Liberar Financeiro permite registrar receitas e despesas. Liberar custos ou lucro pode permitir consultar os dois. Confirme somente se deseja conceder esses acessos.</p>' : ""}`, "Confirmar e salvar", async () => {

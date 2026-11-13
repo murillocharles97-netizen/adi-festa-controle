@@ -139,7 +139,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const data=invite.data(),expired=data.expiresAt?.toMillis?.()<=Date.now();
     return{businessName:text(business.data()?.name,120),name:text(data.name,120),email:email(data.email),role:data.role,status:expired?'expired':data.status,expiresAt:data.expiresAt?.toDate?.().toISOString()||null};
   }
-  async function needsInviteReadPolicy(transaction,context,businessId,confirmed){
+  async function needsOperationalReadPolicy(transaction,context,businessId,confirmed){
     const company=(await transaction.get(context.businessRef)).data();
     const access=computeAccess(company.subscription||{});
     if(company.active!==true||!access.canMutate||(!access.unlimited&&!access.features.teamManagement))
@@ -147,16 +147,27 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const version=company.operationalReadPolicyVersion??0;
     if(version===1)return false;
     if(version!==0||context.uid!==company.ownerId||context.member.role!=='owner'||!confirmed)
-      throw new HttpsError('failed-precondition','O proprietário precisa confirmar a proteção do histórico antes deste convite.');
+      throw new HttpsError('failed-precondition','O proprietário precisa confirmar a preparação da proteção do histórico.');
     // The policy also closes anonymous legacy portal history. Do not change an
     // existing public link as a side effect of creating a staff invitation.
     const catalogs=await transaction.get(db.collection('publicCatalogs').where('businessId','==',businessId).limit(51));
-    if(catalogs.size>50)throw new HttpsError('failed-precondition','A proteção do histórico precisa de uma revisão dos links antigos. Procure o suporte antes de enviar o convite.');
+    if(catalogs.size>50)throw new HttpsError('failed-precondition','A proteção do histórico precisa de uma revisão dos links antigos. Procure o suporte.');
     const legacy=catalogs.docs.filter(doc=>doc.data().legacyStoreRetired!==true);
     const bindings=await Promise.all(legacy.map(doc=>transaction.get(db.doc(`catalogStoreBindings/${doc.id}`))));
-    if(bindings.some(binding=>!binding.exists))
-      throw new HttpsError('failed-precondition','Esta empresa ainda usa um portal antigo. Procure o suporte para revisar os links antes de convidar alguém sem acesso ao histórico.');
+    if(bindings.some((snapshot,index)=>{
+      const binding=snapshot.data(),catalog=legacy[index].data();
+      return catalog.schemaVersion!==6||catalog.catalogType!=='space_store'||!catalog.spaceId||
+        binding?.status!=='completed'||binding.businessId!==businessId||binding.spaceId!==catalog.spaceId||
+        !binding.storeId||binding.storeId!==catalog.visitId||
+        (binding.workspaceGeneration??0)!==(company.workspaceGeneration??0)||
+        (catalog.workspaceGeneration??0)!==(company.workspaceGeneration??0);
+    }))throw new HttpsError('failed-precondition','Há links antigos da empresa que ainda precisam ser revisados. As permissões atuais foram mantidas.');
     return true;
+  }
+  function provisionOperationalReadPolicy(transaction,context,businessId,now){
+    transaction.update(context.businessRef,{operationalReadPolicyVersion:1});
+    const audit=db.doc(`businesses/${businessId}/auditLogs/operational_read_policy_v1`);
+    transaction.create(audit,{id:audit.id,businessId,type:'operational_read_policy_enabled',actorUid:context.uid,createdAt:now,schemaVersion:1});
   }
   async function createInvite(request){
     const businessId=text(request.data?.businessId,128),context=await actorContext(request,businessId),role=text(request.data?.role,40).toLowerCase(),inviteEmail=email(request.data?.email),name=text(request.data?.name,120),spaceAccess=request.data?.spaceAccess==='all'?'all':'selected';
@@ -177,7 +188,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     await refreshActor(transaction,context,businessId);
     assertDelegatedSpaces(context,spaceAccess,allowedSpaceIds);
     if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied',Policy.MESSAGE);
-    const provision=inviteRestricted&&await needsInviteReadPolicy(transaction,context,businessId,request.data?.confirmReadPolicyTransition===true);
+    const provision=inviteRestricted&&await needsOperationalReadPolicy(transaction,context,businessId,request.data?.confirmReadPolicyTransition===true);
     const duplicate=await transaction.get(db.collection(`businesses/${businessId}/members`).where('email','==',inviteEmail).where('status','==','active').limit(1));
     if(!duplicate.empty)throw new HttpsError('already-exists','Este e-mail já pertence à equipe ativa.');
     const [activeMembers,pendingInvites]=await Promise.all([
@@ -192,11 +203,7 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
     const seats=activeMembers.size+liveInvites.filter(item=>item.id!==replaceInviteId).length;
     if(Number.isFinite(limit)&&limit>=0&&seats>=limit)throw new HttpsError('resource-exhausted',`Seu plano permite até ${limit} membro(s) de equipe.`);
     const batch=transaction;
-    if(provision){
-      batch.update(context.businessRef,{operationalReadPolicyVersion:1});
-      const policyAudit=db.doc(`businesses/${businessId}/auditLogs/operational_read_policy_v1`);
-      batch.create(policyAudit,{id:policyAudit.id,businessId,type:'operational_read_policy_enabled',actorUid:context.uid,createdAt:now,schemaVersion:1});
-    }
+    if(provision)provisionOperationalReadPolicy(batch,context,businessId,now);
     if(replacing)batch.update(replacing.ref,{status:'replaced',replacedBy:inviteId,updatedAt:now});
     batch.set(ref,{id:inviteId,businessId,workspaceGeneration:request.data?.workspaceGeneration??0,name,email:inviteEmail,role,status:'pending',spaceAccess,allowedSpaceIds,permissions,permissionsVersion,tokenHash:hash,expiresAt,createdAt:now,createdBy:context.uid,updatedAt:now,schemaVersion:1});
     batch.set(db.doc(`teamInviteTokens/${hash}`),{businessId,inviteId,expiresAt,createdAt:now},{merge:false});
@@ -271,8 +278,17 @@ function teamAccessService(db,{Timestamp,FieldValue,appUrl}){
       if(context.member.role!=='owner'&&(role==='owner'||PERMISSIONS.some(key=>permissions[key]&&!hasPermission(context.member,key))))throw new HttpsError('permission-denied','Você não pode conceder uma permissão que não possui.');
       const nextAccess={role,permissionsVersion:version,permissions};
       if(require('../shared/operational-privacy-policy').incompatibleGrants(nextAccess).length)throw new HttpsError('invalid-argument','Este perfil ainda autoriza dados gerenciais. Revise Financeiro, custos, lucro, relatórios e configurações explicitamente; nenhum acesso foi alterado.');
-      if(require('../shared/operational-privacy-policy').restricted(nextAccess)&&!require('../shared/operational-privacy-policy').restricted(current)&&(context.business.operationalReadPolicyVersion!==1||request.data?.confirmReadPolicyTransition!==true))throw new HttpsError('failed-precondition','Antes de restringir, ative os leitores e Rules V224 e confirme os aparelhos, preservando as filas.');
+      const restrictHistory=Privacy.restricted(nextAccess)&&!Privacy.restricted(current);
+      let provision=false;
+      if(restrictHistory){
+        if(request.data?.confirmReadPolicyTransition!==true)
+          throw new HttpsError('failed-precondition','Confirme a atualização dos aparelhos e a conferência das filas antes de restringir o histórico.');
+        if(request.data?.prepareReadPolicy===true&&expectedAccess===undefined)
+          throw new HttpsError('failed-precondition','Reabra as permissões e revise os acessos atuais antes de preparar a proteção.');
+        provision=await needsOperationalReadPolicy(transaction,context,businessId,request.data?.prepareReadPolicy===true);
+      }
       const now=FieldValue.serverTimestamp(),patch={name:text(request.data?.name??current.name,120),role,status,spaceAccess,allowedSpaceIds,permissions,permissionsVersion:version,updatedAt:now,updatedBy:context.uid};
+      if(provision)provisionOperationalReadPolicy(transaction,context,businessId,now);
       transaction.set(targetRef,patch,{merge:true});
       transaction.set(db.doc(`users/${targetUid}`),{name:patch.name,role,permissions,permissionsVersion:version,active:status==='active',updatedAt:now},{merge:true});
       transaction.set(db.doc(`memberships/${businessId}_${targetUid}`),{role,status,active:status==='active',updatedAt:now},{merge:true});

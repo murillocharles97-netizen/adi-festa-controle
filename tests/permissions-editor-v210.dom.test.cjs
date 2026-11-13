@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {JSDOM}=require('jsdom'),Policy=require('../functions/src/shared/permission-policy');
 function setup(width=390,member={},business={}){
  const dom=new JSDOM('<main id="app"></main><div id="modal"></div>',{url:'https://qa.example.invalid',runScripts:'outside-only'}),w=dom.window;
- let context={businessId:'qa',businessName:'Loja fictícia QA',business,role:'owner',permissions:['*']},calls=[],resolve,reject;
+ let context={businessId:'qa',businessName:'Loja fictícia QA',business,role:'owner',permissions:['*'],member:{role:'owner'},userProfile:{uid:'qa-owner'}},calls=[],resolve,reject;
  w.BusinessContext={get:()=>context};w.FirebaseSession={user:{uid:'qa-owner'}};w.matchMedia=()=>({matches:width<=640});w.lucide={createIcons(){}};w.HTMLElement.prototype.scrollIntoView=function(){};
  w.SpaceContext={homeSpaces:()=>[{id:'qa-a',name:'Loja QA',businessId:'qa'},{id:'qa-b',name:'QA adicional',businessId:'qa'}]};w.VeconiPermissionPolicy=Policy;
  for(const file of ['js/team-permission-model.js','js/team-access.js','js/team-permission-editor.js'])w.eval(fs.readFileSync(file,'utf8'));
@@ -19,6 +19,24 @@ for(const width of [320,360,390,430,768,1440])test('real DOM '+width+'px: indepe
  h.click('[data-tp-save]');assert.match(h.q('#modal').textContent,/Cadastrar clientes/);assert.equal(h.calls.length,0);h.click('[data-tp-dialog-confirm]');h.click('[data-tp-save]');assert.equal(h.calls.length,1);
  assert.equal(h.calls[0].input.permissions['customers.edit'],false);assert.equal(h.calls[0].input.permissionsVersion,3);assert.deepEqual(Array.from(h.calls[0].input.allowedSpaceIds),['qa-a']);
  h.finish();await new Promise(setImmediate);assert.match(h.w.document.body.textContent,/Permissões salvas/);assert.equal(h.q('[data-tp-save]').disabled,true);await h.close();
+});
+test('canonical owner sees exact additions and historical removal before requesting policy preparation',async()=>{
+ const h=setup(390,{permissionsVersion:1,permissions:{'sales.create':true,'customers.view':true,'products.view':true,'inventory.view':true}},{ownerId:'qa-owner'});
+ h.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ for(const key of ['performance.history','customers.create','customers.edit'])h.click('[data-tp-key="'+key+'"]');
+ assert.equal(h.q('[data-tp-key="performance.daily"]').checked,true);
+ h.click('[data-tp-save]');
+ const review=h.q('#modal');
+ assert.match(review.textContent,/Cadastrar clientes/);assert.match(review.textContent,/Editar clientes/);
+ assert.match(review.textContent,/removidos.*histórico/i);
+ assert.equal(h.calls.length,0);
+ h.click('[data-tp-dialog-confirm]');
+ assert.equal(h.calls[0].input.prepareReadPolicy,true);
+ assert.equal(h.calls[0].input.confirmReadPolicyTransition,true);
+ assert.equal(h.calls[0].input.permissions['sales.create'],true);
+ assert.equal(h.calls[0].input.permissions['performance.daily'],true);
+ assert.equal(h.calls[0].input.permissions['performance.history'],false);
+ h.finish();await h.close();
 });
 test('legacy preview preserves 3 already-authorized duties; opening/cancel never migrates a member',async()=>{
  const h=setup(390,{permissionsVersion:1,permissions:{'customers.view':true,'customers.edit':true}}),original=JSON.stringify(h.original);
@@ -129,16 +147,12 @@ test('explicit V3 denial of history survives an additive customer edit in both f
  assert.equal(old.calls[0].input.confirmReadPolicyTransition,undefined);
  old.finish();await old.close();
 });
-test('old member form requires preparation and an explicit confirmation to remove history',async()=>{
- const unprepared=await openOldEditor();
- unprepared.permission('performance.history').click();unprepared.submit();
- assert.match(unprepared.q('[data-team-form-error]').textContent,/ainda não está preparada/);
- assert.equal(unprepared.calls.length,0);
- await unprepared.close();
- const prepared=await openOldEditor({business:{operationalReadPolicyVersion:1}});
- prepared.permission('performance.history').click();prepared.submit();
- assert.equal(prepared.calls.length,0);
- prepared.click('[name="confirmPrivacyTransition"]');prepared.submit();
- assert.equal(prepared.calls[0].input.confirmReadPolicyTransition,true);
- prepared.finish();await prepared.close();
+test('old member form directs history removal to the editor with a review, even when the policy is active',async()=>{
+ for(const business of [{},{operationalReadPolicyVersion:1}]){
+  const old=await openOldEditor({business});
+  old.permission('performance.history').click();old.submit();
+  assert.match(old.q('[data-team-form-error]').textContent,/Equipe → Permissões e espaços/);
+  assert.equal(old.calls.length,0);
+  await old.close();
+ }
 });
