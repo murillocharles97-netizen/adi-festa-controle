@@ -100,8 +100,8 @@
     const formBusinessId = window.BusinessContext?.get?.().businessId;
     root.innerHTML = `<div class="modal-bg team-modal-bg"><section class="modal-box team-modal" role="dialog" aria-modal="true" aria-labelledby="team-modal-title"><header class="modal-head"><div><small>Equipe e acessos</small><h3 id="team-modal-title">${editing ? "Editar funcionário" : "Adicionar funcionário"}</h3></div><button class="icon-btn" type="button" data-team-close aria-label="Fechar">${icon("x")}</button></header><form data-team-form><div class="modal-body team-form"><div class="field"><label for="team-name">Nome *</label><div class="team-input">${icon("user")}<input id="team-name" name="name" placeholder="Nome do funcionário" maxlength="120" required value="${esc(item?.name || "")}" autocomplete="name"></div></div>${editing ? "" : `<div class="field"><label for="team-email">E-mail *</label><div class="team-input">${icon("mail")}<input id="team-email" name="email" type="email" placeholder="email@empresa.com" maxlength="320" required value="${esc(item?.email || "")}" autocomplete="email"></div></div>`}<div class="field"><label for="team-role">Cargo</label><div class="team-input">${icon("briefcase")}<select id="team-role" name="role" required>${roleOptions(role)}</select></div></div>${editing ? `<div class="field"><label for="team-status">Status</label><select id="team-status" name="status"><option value="active" ${item.status === "active" ? "selected" : ""}>Ativo</option><option value="disabled" ${item.status === "disabled" ? "selected" : ""}>Desativado</option></select></div>` : ""}${permissionFields(item || { role })}${spacesFields(item || { role })}<p class="team-form-info">${icon("info")} O funcionário verá apenas os módulos e espaços liberados.</p>${editing?'<label class="team-radio"><input type="checkbox" name="confirmPrivacyTransition"><span>Confirme a restrição após conferir se os aparelhos estão atualizados e as operações pendentes estão salvas. Dados já obtidos não serão apagados.</span></label>':window.BusinessContext?.get?.().business?.operationalReadPolicyVersion!==1?'<label class="team-radio"><input type="checkbox" name="confirmPrivacyTransition"><span>Ativar a proteção do histórico financeiro para convidar funcionários sem acesso a ele.</span></label>':''}<p class="team-form-error" data-team-form-error role="alert"></p></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-team-close>Cancelar</button><button class="btn btn-primary" data-team-submit>${editing ? "Salvar alterações" : "Enviar convite"}</button></footer></form></section></div>`;
     const form = $("[data-team-form]", root), roleInput = form.elements.role, syncSpace = () => {
-      const selected = form.elements.spaceAccess.value, box = $("[data-team-space-options]", form);
-      box.hidden = selected === "all"; $$('input[type="checkbox"]', box).forEach((input) => input.disabled = selected === "all");
+      const all = roleInput.value === "owner" || form.elements.spaceAccess.value === "all", box = $("[data-team-space-options]", form);
+      box.hidden = all; $$('input[type="checkbox"]', box).forEach((input) => input.disabled = all);
     }, applyPreset = () => {
       const values = ["seller", "manager"].includes(roleInput.value) ? window.TeamPermissionModel.preset(roleInput.value) : window.TeamAccess.permissionsFor(roleInput.value, window.TeamAccess.PRESETS[roleInput.value]);
       Object.entries(values).forEach(([key, enabled]) => { const input = form.elements[`permission:${key}`]; if (input) input.checked = enabled; });
@@ -116,7 +116,8 @@
     $$('[data-team-quick]', form).forEach(button=>button.onclick=()=>{const input=form.elements[`permission:${button.dataset.teamQuick}`]; input.checked=!input.checked; syncPermissions();});
     $$('[name^="permission:"]', form).forEach(input=>input.onchange=syncPermissions);
     $$('[name="spaceAccess"]', form).forEach((input) => input.onchange = syncSpace);
-    roleInput.onchange = applyPreset; syncSpace(); syncPermissions();
+    roleInput.onchange = editing && item.role !== "owner" ? () => { syncSpace(); syncPermissions(); } : applyPreset;
+    syncSpace(); syncPermissions();
     if (memberUid(item) === window.FirebaseSession?.user?.uid && item?.role === "owner") { roleInput.disabled=true; form.elements.status.disabled=true; }
     const previousFocus = document.activeElement;
     const close = () => { if(formBusy)return; root.innerHTML=""; previousFocus?.focus?.(); };
@@ -137,6 +138,10 @@
       const privacy=window.OperationalPrivacyPolicy,conflicts=privacy?.incompatibleGrants(input)||[];
       if(conflicts.length){error.textContent='Perfil sem histórico incompatível com acessos gerenciais: '+conflicts.join(', ')+'. Revise as permissões; nada foi salvo.';return;}
       if(privacy?.restricted(input)&&(!editing||!privacy.restricted(item))){
+        if (editing && window.BusinessContext?.get?.().business?.operationalReadPolicyVersion !== 1) {
+          error.textContent="A restrição de histórico ainda não está preparada para esta empresa. As permissões atuais foram preservadas.";
+          return;
+        }
         if ((editing || window.BusinessContext?.get?.().business?.operationalReadPolicyVersion!==1) && !fd.has('confirmPrivacyTransition')) {
           error.textContent=editing?'Confirme a restrição do histórico antes de salvar.':'Confirme a proteção do histórico antes de enviar o convite.';return;
         }

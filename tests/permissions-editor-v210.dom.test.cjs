@@ -61,3 +61,84 @@ test('legacy membership preserves draft when restricting history requires busine
  assert.equal(prepared.calls[0].input.confirmReadPolicyTransition,true);
  prepared.finish();await prepared.close();
 });
+test('reselecting the current seller role preserves effective history and customer additions in the review',async()=>{
+ const h=setup(390,{permissionsVersion:1,permissions:{'sales.create':true,'customers.view':true,'products.view':true,'inventory.view':true}});
+ h.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ h.click('[data-tp-key="customers.create"]');
+ h.click('[data-tp-preset="seller"]');
+ assert.equal(h.q('[data-tp-dialog-confirm]'),null);
+ assert.equal(h.q('[data-tp-key="performance.history"]').checked,true);
+ assert.equal(h.q('[data-tp-key="customers.create"]').checked,true);
+ h.click('[data-tp-key="customers.edit"]');
+ h.click('[data-tp-save]');
+ assert.match(h.q('#modal').textContent,/Cadastrar clientes.*Editar clientes existentes.*Acessos que serão removidosNenhuma/);
+ h.click('[data-tp-dialog-confirm]');
+ assert.deepEqual(plain(h.calls[0].input.expectedAccess.permissions),h.original.permissions);
+ for(const key of ['customers.create','customers.edit','performance.history','performance.daily'])
+   assert.equal(h.calls[0].input.permissions[key],true,key);
+ assert.equal(h.calls[0].input.confirmReadPolicyTransition,undefined);
+ h.finish();await h.close();
+});
+
+const plain=value=>JSON.parse(JSON.stringify(value));
+async function openOldEditor({version=2,business={},history}={}){
+ const h=setup(390,{},business);
+ h.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ const member={...h.original,permissionsVersion:version,permissions:{
+   'sales.create':true,'customers.view':true,'products.view':true,'inventory.view':true,
+   ...(history!==undefined?{'performance.daily':true,'performance.history':history}:{})
+ }};
+ Object.assign(h.w.TeamService,{listMembers:async()=>[member],listInvites:async()=>[]});
+ h.w.eval(fs.readFileSync('js/team-page.js','utf8'));
+ h.q('#app').innerHTML=h.w.TeamPage.render();h.w.TeamPage.bind();await h.w.TeamPage.load();
+ h.click('[data-team-edit]');h.click('[data-team-menu-edit="name"]');
+ return {...h,member,permission:key=>h.q(`[name="permission:${key}"]`),submit:()=>h.q('[data-team-form]').dispatchEvent(new h.w.Event('submit',{cancelable:true}))};
+}
+for(const version of [2,3])test(`old member form V${version}: choosing and returning to the current role preserves ACL, history and space`,async()=>{
+ const h=await openOldEditor({version,history:version===3?true:undefined});
+ h.permission('customers.create').click();
+ for(const role of ['manager','seller']){
+   const select=h.q('[name="role"]');select.value=role;select.dispatchEvent(new h.w.Event('change'));
+ }
+ h.permission('customers.edit').click();
+ assert.equal(h.permission('performance.history').checked,true);
+ h.submit();
+ const input=h.calls[0].input;
+ assert.deepEqual(plain(input.expectedAccess.permissions),h.member.permissions);
+ assert.deepEqual(plain(input.allowedSpaceIds),['qa-a']);
+ for(const key of ['customers.create','customers.edit','performance.history','performance.daily'])
+   assert.equal(input.permissions[key],true,key);
+ assert.equal(input.permissions['customers.archive'],false);
+ assert.equal(input.confirmReadPolicyTransition,undefined);
+ h.finish();await h.close();
+});
+test('explicit V3 denial of history survives an additive customer edit in both forms',async()=>{
+ const permissions={'sales.create':true,'customers.view':true,'performance.daily':true,'performance.history':false};
+ const modern=setup(390,{permissionsVersion:3,permissions});
+ modern.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ modern.click('[data-tp-preset="seller"]');
+ modern.click('[data-tp-key="customers.create"]');
+ modern.click('[data-tp-save]');modern.click('[data-tp-dialog-confirm]');
+ assert.equal(modern.calls[0].input.permissions['performance.history'],false);
+ assert.equal(modern.calls[0].input.confirmReadPolicyTransition,undefined);
+ modern.finish();await modern.close();
+
+ const old=await openOldEditor({version:3,history:false});
+ old.permission('customers.create').click();old.submit();
+ assert.equal(old.calls[0].input.permissions['performance.history'],false);
+ assert.equal(old.calls[0].input.confirmReadPolicyTransition,undefined);
+ old.finish();await old.close();
+});
+test('old member form requires preparation and an explicit confirmation to remove history',async()=>{
+ const unprepared=await openOldEditor();
+ unprepared.permission('performance.history').click();unprepared.submit();
+ assert.match(unprepared.q('[data-team-form-error]').textContent,/ainda não está preparada/);
+ assert.equal(unprepared.calls.length,0);
+ await unprepared.close();
+ const prepared=await openOldEditor({business:{operationalReadPolicyVersion:1}});
+ prepared.permission('performance.history').click();prepared.submit();
+ assert.equal(prepared.calls.length,0);
+ prepared.click('[name="confirmPrivacyTransition"]');prepared.submit();
+ assert.equal(prepared.calls[0].input.confirmReadPolicyTransition,true);
+ prepared.finish();await prepared.close();
+});

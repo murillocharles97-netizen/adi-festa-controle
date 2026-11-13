@@ -213,7 +213,7 @@
   }
   function bind(s) {
     qa("[data-tp-back], [data-tp-switch]").forEach(button => { button.onclick = () => leave(s); });
-    q("[data-tp-help]").onclick = () => dialog(s, "Como funcionam as permissões?", "<p>Visualizar permite consultar. Executar / Editar permite realizar ações ou alterar dados. Uma opção Vinculada faz parte de outro acesso e não pode ser alterada separadamente nesta versão.</p><p>Vendedor / Caixa e Gerente são modelos prontos. Ao escolher um, as opções desta tela e o cargo serão substituídos somente depois de confirmar e salvar. Os espaços escolhidos serão mantidos. Esses modelos não liberam Financeiro, custos, lucro, gestão de equipe ou configurações.</p><p>Ao ajustar uma permissão manualmente, o perfil passa a Personalizado, sem mudar o cargo escolhido. Desligar uma opção também desliga as que precisam dela nesta tela. Você verá todas as remoções antes de salvar. Abrir ou cancelar esta tela não muda os acessos atuais.</p>", "", null);
+    q("[data-tp-help]").onclick = () => dialog(s, "Como funcionam as permissões?", "<p>Visualizar permite consultar. Executar / Editar permite realizar ações ou alterar dados. Uma opção Vinculada faz parte de outro acesso e não pode ser alterada separadamente nesta versão.</p><p>Selecionar o cargo atual mantém as permissões do funcionário. Escolher um modelo de outro cargo substitui as escolhas do rascunho após confirmação. Confira as mudanças antes de salvar. Os espaços escolhidos são preservados.</p><p>Ao ajustar uma permissão manualmente, o perfil passa a Personalizado, sem mudar o cargo escolhido. Desligar uma opção também desliga as que precisam dela nesta tela. Você verá todas as remoções antes de salvar. Abrir ou cancelar esta tela não muda os acessos atuais.</p>", "", null);
     qa("[data-tp-group]").forEach(details => { details.ontoggle = () => { if (details.open) s.open.add(details.dataset.tpGroup); else s.open.delete(details.dataset.tpGroup); }; });
     qa("[data-tp-key]").forEach(input => { input.onchange = () => {
       if (!valid(s) || s.busy || s.invalid) return invalidate();
@@ -228,6 +228,12 @@
       s.feedbackType='';
       const profile = button.dataset.tpPreset;
       if (profile === "custom") { s.profile = profile; render(s); q('[data-tp-preset="custom"]').focus(); return; }
+      if (profile === s.draft.role) {
+        s.message = "Este cargo já está selecionado. Marque somente os acessos que deseja alterar. As escolhas atuais foram mantidas.";
+        render(s);
+        q(`[data-tp-preset="${profile}"]`)?.focus();
+        return;
+      }
       const values = M.preset(profile);
       if (context().role !== "owner" && M.KEYS.some(key => values[key] && !window.TeamAccess.has(key))) { s.message = "Este modelo inclui acessos que você não tem permissão para liberar. Peça ao proprietário para revisar."; render(s); return; }
       dialog(s, "Usar este modelo de acesso?", `<p>Escolher ${profile === "seller" ? "Vendedor / Caixa" : "Gerente"} substituirá as permissões desta tela e o cargo ao salvar. Isso pode remover acessos liberados anteriormente.</p><p>Não inclui Financeiro, custos, lucro, gestão de equipe ou configurações. Os espaços escolhidos serão mantidos.</p><p>Por enquanto, a mudança fica somente nesta tela. Você ainda revisará tudo e confirmará antes de salvar.</p>`, "Usar este modelo", () => { s.draft.permissions = values; s.draft.role = profile; s.profile = profile; s.message = "Modelo aplicado somente nesta tela. Revise os acessos e o cargo antes de confirmar e salvar."; render(s); });
