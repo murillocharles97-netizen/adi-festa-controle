@@ -1,12 +1,13 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto');
 const source=fs.readFileSync('js/sale-exchanges.js','utf8');
-function node(){return {dataset:{},hidden:false,disabled:false,textContent:'',innerHTML:'',setAttribute(){},matches:()=>false};}
+function node(){return {dataset:{},hidden:false,disabled:false,textContent:'',innerHTML:'',isConnected:true,value:'',setAttribute(){},matches:()=>false,focus(){}};}
 function harness(mode='normal',storage=new Map()){
  const inputs=[{...node(),value:'1',dataset:{return:'0'},max:'2'}],restock={...node(),checked:true},ack={...node(),checked:true},reason={value:'Preferência do cliente'},detail={value:'Tamanho diferente'},method={value:'dinheiro'},newRows=[];
- const controls={close:node(),error:node(),review:node(),confirm:node(),history:node(),quote:node(),note:node(),add:node(),consult:node(),retry:node(),revise:node()};
+ const controls={close:node(),error:node(),review:node(),confirm:node(),history:node(),quote:node(),note:node(),add:node(),consult:node(),retry:node(),revise:node(),search:node(),results:node(),scan:node(),pickerStatus:node()};
  const root=node(),form=node(),newContainer={append:row=>newRows.push(row)};
- const select=(s)=>s==='[data-return="0"]'?inputs[0]:s==='[data-return-remaining="0"]'?node():s==='[data-restock="0"]'?restock:s==='[data-ex-received]'?ack:s==='[data-ex-new]'?newContainer:s==='[data-ex-quote]'?controls.quote:s==='[data-ex-footer-note]'?controls.note:s==='[data-ex-add]'?controls.add:s==='[data-ex-consult]'?controls.consult:s==='[data-ex-retry]'?controls.retry:s==='[data-ex-revise]'?controls.revise:null;
+ const picker={'[data-ex-search]':controls.search,'[data-ex-results]':controls.results,'[data-ex-scan]':controls.scan,'[data-ex-picker-status]':controls.pickerStatus};
+ const select=(s)=>picker[s]|| (s==='[data-return="0"]'?inputs[0]:s==='[data-return-remaining="0"]'?node():s==='[data-restock="0"]'?restock:s==='[data-ex-received]'?ack:s==='[data-ex-new]'?newContainer:s==='[data-ex-quote]'?controls.quote:s==='[data-ex-footer-note]'?controls.note:s==='[data-ex-add]'?controls.add:s==='[data-ex-consult]'?controls.consult:s==='[data-ex-retry]'?controls.retry:s==='[data-ex-revise]'?controls.revise:null);
  form.elements={reasonType:reason,reasonDetail:detail,paymentMethod:method};form.reportValidity=()=>true;form.querySelector=select;
  form.querySelectorAll=s=>s==='[data-return]'?inputs:s==='[data-ex-new] article'?newRows:s.startsWith('[data-ex-consult]')?[controls.consult,controls.retry,controls.revise]:[...inputs,restock,controls.confirm,controls.quote,controls.add];
  controls.review.querySelector=select;
@@ -17,7 +18,10 @@ function harness(mode='normal',storage=new Map()){
  s.navigator.locks={request:async(_key,_options,fn)=>fn({})};
  vm.createContext(s);vm.runInContext(source.replace('return { open, attach };','return { open, attach, catalogFor, identity, scopeKey, readAttempt, rejection };'),s);
  const sale={id:'sale',spaceId:'space',status:'pago',formaPagamento:'dinheiro',itens:[{produtoId:'original',nome:'Creme',quantidade:2,precoUnitario:50}]};
- return {s,sale,root,form,controls,storage,calls,inputs,ack,events,dispatched,api:s.window.SaleExchanges,open:()=>s.window.SaleExchanges.open(sale),quote:()=>form.onsubmit({preventDefault(){}}),confirm:()=>controls.confirm.onclick(),release:()=>resolver?.()};
+ return {s,sale,root,form,controls,storage,calls,inputs,ack,events,dispatched,api:s.window.SaleExchanges,open:()=>s.window.SaleExchanges.open(sale),quote:()=>{
+   if(!newRows.length){controls.search.value='serum';controls.search.oninput();controls.results.onclick({target:{closest:()=>({dataset:{exResult:'0'}})}});}
+   return form.onsubmit({preventDefault(){}});
+ },confirm:()=>controls.confirm.onclick(),release:()=>resolver?.()};
 }
 test('catalog uses original sale space, excludes another company and inactive variations',()=>{const h=harness(),db={produtos:[{id:'shared',nome:'A'},{id:'scope',nome:'B',spaceAccessMode:'selected_spaces',allowedSpaceIds:['other']},{id:'foreign',nome:'C',businessId:'another'},{id:'variable',nome:'D',productType:'variable'}],variacoesProdutos:[{id:'good',parentProductId:'variable',active:true},{id:'bad',parentProductId:'variable',active:false},{id:'foreign-v',parentProductId:'variable',businessId:'another'}]};assert.deepEqual(JSON.parse(JSON.stringify(h.api.catalogFor(db,h.sale,{businessId:'business'}))).map(x=>x.productId+':'+(x.variantId||'')),['shared:','variable:good']);});
 test('safe legacy pending envelope and UID/business/generation/sale scoped key',()=>{const h=harness();h.storage.set('attempt',JSON.stringify({operationId:'same-id',returns:[],replacements:[]}));assert.equal(h.api.readAttempt('attempt').request.operationId,'same-id');assert.equal(h.api.scopeKey({uid:'seller',businessId:'biz',generation:4},'sale'),'veconi:exchange:seller:biz:4:sale');h.storage.set('bad','{"request":{}}');assert.throws(()=>h.api.readAttempt('bad'));});

@@ -11,15 +11,34 @@ window.SaleExchanges = (() => {
   const rejection = error => ['failed-precondition', 'invalid-argument', 'out-of-range'].includes(String(error?.code || '').replace(/^functions\//, ''));
   function assertCausalQueue(){const d=window.SyncFirebase?.getFirebaseDiagnostic?.();if(d&&(Number(d.pending)>0||Number(d.syncErrors)>0||d.queueStorageCorrupt))throw Error('Existem alterações locais anteriores aguardando sincronização. Resolva essas pendências antes de confirmar a troca. Nenhuma operação será reenviada por este fluxo.');}
   let disposeStorage = null;
+  const normalizeSearch = value => String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  const normalizeCode = value => window.BarcodeIndex?.normalize(value) ?? String(value ?? '').trim();
   function catalogFor(db, sale, origin) {
+    const variants = new Map();
+    for (const v of db.variacoesProdutos || []) {
+      if (v.active === false || v.deletedAt || v.deleted || v.businessId && v.businessId !== origin.businessId ||
+          v.spaceId && v.spaceId !== sale.spaceId) continue;
+      const list = variants.get(v.parentProductId) || [];
+      list.push(v);
+      variants.set(v.parentProductId, list);
+    }
+    const item = (p, v) => {
+      const source = v || p;
+      const variantName = v ? (window.ProductVariations?.displayName?.(v) || v.displayName || v.name || v.id) : '';
+      const codes = [source.barcode, ...(Array.isArray(source.alternateBarcodes) ? source.alternateBarcodes : [])].map(normalizeCode).filter(Boolean);
+      const identifier = source.sku || source.codigo || source.codigoInterno || codes[0] || '';
+      const search = normalizeSearch([p.nome, variantName, p.sku, p.codigo, p.codigoInterno, source.sku, source.codigo, source.codigoInterno, ...codes].filter(Boolean).join(' '));
+      return { productId: p.id, variantId: v?.id || null, name: p.nome, variantName, codes, identifier, search };
+    };
     return (db.produtos || []).filter(p => p.ativo !== false && p.active !== false && !p.deletedAt && !p.deleted && (!p.businessId || p.businessId === origin.businessId)
-      && !['service', 'recurring'].includes(p.productType) && p.controlarEstoque !== false
+      && !['service', 'recurring'].includes(p.productType) && p.itemKind !== 'service'
+      && !p.semControleEstoque && p.controlaEstoque !== false && p.controlarEstoque !== false && (!p.spaceId || p.spaceId === sale.spaceId)
       && (window.SpaceEngine?.productAllowsSpace ? window.SpaceEngine.productAllowsSpace(p, sale.spaceId)
         : (p.spaceAccessMode || 'all_spaces') === 'all_spaces' || (p.allowedSpaceIds || []).includes(sale.spaceId)))
-      .flatMap(p => p.productType === 'variable' ? (db.variacoesProdutos || []).filter(v => v.parentProductId === p.id && v.active !== false && !v.deletedAt && !v.deleted && (!v.businessId || v.businessId === origin.businessId))
-        .map(v => ({ productId: p.id, variantId: v.id, name: p.nome, variantName: v.displayName || v.name || v.id }))
-        : [{ productId: p.id, variantId: null, name: p.nome, variantName: '' }]);
+      .flatMap(p => p.productType === 'variable' ? (variants.get(p.id) || []).map(v => item(p, v)) : [item(p)]);
   }
+  const itemDetails = item => `<b>${esc(item.name)}</b>${item.variantName ? `<small>${esc(item.variantName)}</small>` : ''}${item.identifier ? `<small>Código ${esc(item.identifier)}</small>` : ''}`;
+  const replacementPicker = `<div class="exchange-picker"><label>Pesquisar ou bipar produto<input type="search" data-ex-search autocomplete="off" enterkeyhint="search" placeholder="Nome, variação, SKU ou código de barras" aria-describedby="exchange-picker-status"></label><div class="exchange-picker-actions"><button type="button" class="exchange-button-secondary" data-ex-add>Adicionar produto</button><button type="button" class="exchange-button-secondary" data-ex-scan>Ler com câmera</button></div><p id="exchange-picker-status" data-ex-picker-status role="status"></p><ul class="exchange-results" data-ex-results aria-label="Produtos encontrados" hidden></ul></div><div data-ex-new></div>`;
   function readAttempt(key) {
     const stored = JSON.parse(localStorage.getItem(key) || 'null');
     if (!stored) return null;
@@ -34,6 +53,7 @@ window.SaleExchanges = (() => {
     if (!origin.uid || !origin.businessId || !modal) return;
     disposeStorage?.();
     const key = scopeKey(origin, sale.id), catalog = catalogFor(db, sale, origin);
+    const replacements = new Map();
     let busy = false, quote = null, pending = null, knownUncommitted = false;
     try { pending = readAttempt(key); } catch { throw Error('Não foi possível ler a tentativa preservada. Reabra a venda antes de continuar.'); }
     const current = () => same(origin, identity()) && allowed() && modal.dataset.exchangeToken === token;
@@ -47,7 +67,7 @@ window.SaleExchanges = (() => {
     };
     const blocked = sale.status === 'fiado' || sale.formaPagamento === 'fiado';
     modal.dataset.exchangeToken = token;
-    modal.innerHTML = `<div class="modal-bg"><section class="modal-box exchange-sheet" role="dialog" aria-modal="true" aria-labelledby="exchange-title"><header class="exchange-header"><div><span class="exchange-eyebrow">Histórico · venda #${esc(sale.id.slice(0, 8))}</span><h2 id="exchange-title">Trocar itens</h2><p>Receba, escolha e revise antes de confirmar.</p></div><button type="button" class="exchange-icon-button" data-ex-close aria-label="Fechar troca">×</button></header><div class="exchange-notice">A venda original permanece no histórico. A troca será registrada separadamente.</div><div data-ex-error role="alert" aria-live="assertive"></div>${blocked ? '<section class="exchange-caution"><h3>Troca de venda Fiado indisponível</h3><p>Nesta versão, trocas não alteram débitos de Fiado. Nenhum saldo será modificado.</p></section>' : `<form data-ex-form><div class="exchange-columns"><section><div class="exchange-section-title"><span class="exchange-step">1</span><div><h3>Você recebe</h3><p>Escolha os itens que o cliente está devolvendo.</p></div></div>${(sale.itens || []).map((i, n) => `<article class="exchange-return-row"><div class="exchange-product-info"><b>${esc(i.nome || i.produtoNome || i.produtoId)}</b><small>${esc(i.variantName || '')}</small><small data-return-remaining="${n}">${esc(i.quantidade)} un. comprada(s) · ${money(Math.round(Number(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco ?? 0) * 100))} / un.</small></div><label>Devolver<input type="number" min="0" max="${esc(i.quantidade)}" step="1" value="0" inputmode="numeric" data-return="${n}"></label><label class="exchange-check"><input type="checkbox" data-restock="${n}"><span>Apto para revenda<small>Desmarcado: registrar avaria, sem repor estoque.</small></span></label></article>`).join('')}</section><section><div class="exchange-section-title"><span class="exchange-step">2</span><div><h3>Cliente leva</h3><p>Preços e disponibilidade serão conferidos online.</p></div></div><div data-ex-new></div><button type="button" class="exchange-button-secondary" data-ex-add>+ Adicionar produto</button>${!catalog.length ? '<p class="exchange-caution">Nenhum produto elegível disponível neste espaço.</p>' : ''}</section></div><section><div class="exchange-section-title"><span class="exchange-step">3</span><div><h3>Motivo e diferença</h3><p>Registre o motivo e a forma de receber um eventual complemento.</p></div></div><div class="exchange-fields"><label>Motivo da troca<select name="reasonType" required><option value="">Selecione o motivo</option><option>Tamanho ou variação</option><option>Preferência do cliente</option><option>Defeito ou avaria</option><option>Produto diferente do solicitado</option><option>Outro motivo</option></select></label><label>Complemento, se houver<select name="paymentMethod"><option value="dinheiro">Dinheiro</option><option value="pix">Pix recebido manualmente</option><option value="cartao">Cartão em máquina externa</option></select></label></div><label>Detalhes do motivo <span class="exchange-optional">(opcional)</span><textarea name="reasonDetail" maxlength="400" rows="2" placeholder="Acrescente detalhes úteis para o histórico"></textarea></label><p class="exchange-help">Valor menor gera crédito de troca para o cliente da venda, válido apenas nesta empresa e espaço. O crédito fica separado do Fiado. Não há reembolso automático.</p></section><div data-ex-review aria-live="polite"></div><footer><span data-ex-footer-note>Confira os valores antes de confirmar.</span><button type="submit" data-ex-quote>Revisar troca <span aria-hidden="true">→</span></button><button type="button" data-ex-confirm hidden>Confirmar troca</button></footer></form>`}<section class="exchange-history" data-ex-history><h3>Trocas vinculadas</h3><p>Consultando histórico…</p></section></section></div>`;
+    modal.innerHTML = `<div class="modal-bg"><section class="modal-box exchange-sheet" role="dialog" aria-modal="true" aria-labelledby="exchange-title"><header class="exchange-header"><div><span class="exchange-eyebrow">Histórico · venda #${esc(sale.id.slice(0, 8))}</span><h2 id="exchange-title">Trocar itens</h2><p>Receba, escolha e revise antes de confirmar.</p></div><button type="button" class="exchange-icon-button" data-ex-close aria-label="Fechar troca">×</button></header><div class="exchange-notice">A venda original permanece no histórico. A troca será registrada separadamente.</div><div data-ex-error role="alert" aria-live="assertive"></div>${blocked ? '<section class="exchange-caution"><h3>Troca de venda Fiado indisponível</h3><p>Nesta versão, trocas não alteram débitos de Fiado. Nenhum saldo será modificado.</p></section>' : `<form data-ex-form><div class="exchange-columns"><section><div class="exchange-section-title"><span class="exchange-step">1</span><div><h3>Você recebe</h3><p>Escolha os itens que o cliente está devolvendo.</p></div></div>${(sale.itens || []).map((i, n) => `<article class="exchange-return-row"><div class="exchange-product-info"><b>${esc(i.nome || i.produtoNome || i.produtoId)}</b><small>${esc(i.variantName || '')}</small><small data-return-remaining="${n}">${esc(i.quantidade)} un. comprada(s) · ${money(Math.round(Number(i.precoFinalUnitario ?? i.precoUnitario ?? i.preco ?? 0) * 100))} / un.</small></div><label>Devolver<input type="number" min="0" max="${esc(i.quantidade)}" step="1" value="0" inputmode="numeric" data-return="${n}"></label><label class="exchange-check"><input type="checkbox" data-restock="${n}"><span>Apto para revenda<small>Desmarcado: registrar avaria, sem repor estoque.</small></span></label></article>`).join('')}</section><section><div class="exchange-section-title"><span class="exchange-step">2</span><div><h3>Cliente leva</h3><p>Preços e disponibilidade serão conferidos online.</p></div></div>${replacementPicker}${!catalog.length ? '<p class="exchange-caution">Nenhum produto elegível disponível neste espaço.</p>' : ''}</section></div><section><div class="exchange-section-title"><span class="exchange-step">3</span><div><h3>Motivo e diferença</h3><p>Registre o motivo e a forma de receber um eventual complemento.</p></div></div><div class="exchange-fields"><label>Motivo da troca<select name="reasonType" required><option value="">Selecione o motivo</option><option>Tamanho ou variação</option><option>Preferência do cliente</option><option>Defeito ou avaria</option><option>Produto diferente do solicitado</option><option>Outro motivo</option></select></label><label>Complemento, se houver<select name="paymentMethod"><option value="dinheiro">Dinheiro</option><option value="pix">Pix recebido manualmente</option><option value="cartao">Cartão em máquina externa</option></select></label></div><label>Detalhes do motivo <span class="exchange-optional">(opcional)</span><textarea name="reasonDetail" maxlength="400" rows="2" placeholder="Acrescente detalhes úteis para o histórico"></textarea></label><p class="exchange-help">Valor menor gera crédito de troca para o cliente da venda, válido apenas nesta empresa e espaço. O crédito fica separado do Fiado. Não há reembolso automático.</p></section><div data-ex-review aria-live="polite"></div><footer><span data-ex-footer-note>Confira os valores antes de confirmar.</span><button type="submit" data-ex-quote>Revisar troca <span aria-hidden="true">→</span></button><button type="button" data-ex-confirm hidden>Confirmar troca</button></footer></form>`}<section class="exchange-history" data-ex-history><h3>Trocas vinculadas</h3><p>Consultando histórico…</p></section></section></div>`;
     window.Modais?.layout?.(modal.querySelector('[role="dialog"]'));
     const form = modal.querySelector('[data-ex-form]'), error = modal.querySelector('[data-ex-error]'), review = modal.querySelector('[data-ex-review]'), confirm = modal.querySelector('[data-ex-confirm]');
     const showError = e => { if (current()) error.textContent = e.message || 'Não foi possível concluir. Sua tentativa permanece preservada.'; };
@@ -66,13 +86,127 @@ window.SaleExchanges = (() => {
       quote = null; confirm.hidden = true; review.innerHTML = ''; form.querySelector('[data-ex-quote]').hidden = false;
       note('Confira os valores antes de confirmar.');
     }
-    function add() {
-      if (busy || pending || !catalog.length || !current()) return;
+    const pickerReady = () => current() && form?.isConnected && !busy && !pending;
+    function add(item) {
+      const itemKey = JSON.stringify([item.productId, item.variantId]);
+      const existing = replacements.get(itemKey);
+      if (existing) {
+        const quantity = existing.quantity;
+        if (!quantity.validity.valid || Number(quantity.value) >= Number(quantity.max)) {
+          quantity.focus();
+          return { error: true, message: 'Confira a quantidade do produto já adicionado.' };
+        }
+        quantity.stepUp();
+        invalidate();
+        return { message: `${item.name} já estava na troca. Quantidade: ${quantity.value}.` };
+      }
+      if (replacements.size >= 40) return { error: true, message: 'A troca aceita até 40 itens diferentes.' };
       invalidate();
       const row = document.createElement('article'); row.className = 'exchange-new-row';
-      row.innerHTML = `<label>Produto / variação<select data-product>${catalog.map((p, n) => `<option value="${n}">${esc(p.name)}${p.variantName ? ` · ${esc(p.variantName)}` : ''}</option>`).join('')}</select></label><label>Quantidade<input data-quantity type="number" min="1" max="999" step="1" value="1" inputmode="numeric"></label><button type="button" class="exchange-remove" data-remove aria-label="Remover produto">Remover</button>`;
-      row.querySelector('[data-remove]').onclick = () => { if (!busy && !pending && current()) { row.remove(); invalidate(); } };
+      row.innerHTML = `<div class="exchange-product-info">${itemDetails(item)}</div><label>Quantidade<input data-quantity type="number" min="1" max="999" step="1" value="1" required inputmode="numeric"></label><button type="button" class="exchange-remove" data-remove aria-label="Remover ${esc([item.name, item.variantName].filter(Boolean).join(' · '))}">Remover</button>`;
+      const quantity = row.querySelector('[data-quantity]');
+      row.querySelector('[data-remove]').onclick = () => {
+        if (!pickerReady()) return;
+        replacements.delete(itemKey);
+        row.remove();
+        invalidate();
+        form.querySelector('[data-ex-search]').focus({ preventScroll: true });
+      };
+      replacements.set(itemKey, { item, quantity });
       form.querySelector('[data-ex-new]').append(row);
+      return { message: `${[item.name, item.variantName].filter(Boolean).join(' · ')} adicionado à troca.` };
+    }
+    function bindPicker() {
+      const input = form.querySelector('[data-ex-search]'), results = form.querySelector('[data-ex-results]'),
+        status = form.querySelector('[data-ex-picker-status]');
+      const codes = new Map();
+      for (const item of catalog) for (const code of new Set(item.codes)) {
+        const items = codes.get(code) || [];
+        items.push(item);
+        codes.set(code, items);
+      }
+      let matches = [], lookup = 0;
+      const focus = () => input.focus({ preventScroll: true });
+      function show(items = [], message = '', limit = 12) {
+        matches = items.slice(0, limit);
+        results.innerHTML = matches.map((item, index) =>
+          `<li><button type="button" data-ex-result="${index}">${itemDetails(item)}</button></li>`).join('');
+        results.hidden = matches.length === 0;
+        status.textContent = items.length > limit ? `${message} Mostrando ${limit} de ${items.length}. Refine a busca.` : message;
+      }
+      const exact = code => codes.get(code) || [];
+      function filter() {
+        const query = normalizeSearch(input.value);
+        if (!query) return show();
+        const byCode = exact(normalizeCode(input.value));
+        const words = query.split(/\s+/);
+        const found = byCode.length ? byCode : catalog.filter(item => words.every(word => item.search.includes(word)));
+        show(found, found.length ? '' : 'Nenhum produto encontrado.');
+      }
+      async function scan(raw, useFocus = true) {
+        if (!pickerReady()) return { error: true, message: 'A troca não está disponível para leitura.' };
+        const code = normalizeCode(raw), request = ++lookup;
+        if (!code) return { error: true, message: 'Informe um código de barras.' };
+        input.value = '';
+        show();
+        let found = exact(code);
+        if (!found.length && window.BarcodeWorkflows?.findAsync) {
+          const resolved = await window.BarcodeWorkflows.findAsync(code);
+          if (!pickerReady() || request !== lookup) return { error: true, message: 'Leitura encerrada.' };
+          if (resolved) {
+            const live = catalogFor(DB.readForView?.() || DB.carregar(), sale, origin);
+            found = live.filter(item => item.codes.includes(code));
+            if (found.length) codes.set(code, found);
+          }
+        }
+        let response;
+        if (found.length === 1) response = add(found[0]);
+        else if (found.length) {
+          input.value = code;
+          response = { error: true, message: 'Mais de um item usa este código. Escolha o produto ou a variação.' };
+        } else response = { error: true, message: 'Produto não encontrado para este código neste espaço.' };
+        show(found.length > 1 ? found : [], response.message);
+        if (useFocus && !form.querySelector('[data-quantity]:focus')) focus();
+        return response;
+      }
+      input.oninput = () => { if (pickerReady()) { lookup++; filter(); } };
+      input.onkeydown = event => {
+        if (event.isComposing || event.key !== 'Enter') return;
+        event.preventDefault();
+        if (event.repeat || !pickerReady() || !normalizeCode(input.value)) return;
+        const code = normalizeCode(input.value);
+        if (!exact(code).length && matches.length && !/^\d{4,}$/.test(code)) {
+          results.querySelector('button')?.focus();
+          return;
+        }
+        void scan(input.value).catch(() => {
+          if (pickerReady()) show([], 'Não foi possível consultar este código. Tente novamente.');
+        });
+      };
+      results.onclick = event => {
+        const button = event.target.closest('[data-ex-result]');
+        const item = button && matches[Number(button.dataset.exResult)];
+        if (!pickerReady() || !item) return;
+        lookup++;
+        const { message } = add(item);
+        input.value = '';
+        show([], message);
+        if (!form.querySelector('[data-quantity]:focus')) focus();
+      };
+      form.querySelector('[data-ex-add]').onclick = () => {
+        if (!pickerReady()) return;
+        if (!input.value) show([], 'Digite parte do nome ou leia o código de barras.');
+        focus();
+      };
+      form.querySelector('[data-ex-scan]').onclick = () => {
+        if (!pickerReady()) return;
+        window.BarcodeUI?.open({
+          mode: 'exchange',
+          title: 'Ler produto da troca',
+          onDetected: ({ value }) => scan(value, false),
+          onClose: () => { if (pickerReady()) focus(); }
+        });
+      };
     }
     function showQuote(q) {
       form.classList?.add('exchange-reviewing');
@@ -113,7 +247,12 @@ window.SaleExchanges = (() => {
       localStorage.removeItem(key); pending = null;
       form.classList?.remove('exchange-reviewing');
       window.dispatchEvent(new CustomEvent('sale-exchange-completed', { detail: { businessId: origin.businessId, spaceId: sale.spaceId, saleId: sale.id, operationId: id } }));
-      form.innerHTML = `<section class="exchange-success"><div class="exchange-success-icon" aria-hidden="true">✓</div><h3>Troca confirmada</h3><p>Registro #${esc(id.slice(0, 8))}. A venda original foi preservada.</p><p>Estoque e eventual crédito foram registrados juntos. O recebimento complementar segue a automação financeira do espaço.</p><p class="exchange-help">O histórico e os produtos serão atualizados pelo Sync.</p></section>`;
+      const content = form.querySelector('.viewport-form-content');
+      const historySection = content?.querySelector('[data-ex-history]');
+      const summary = content || form;
+      summary.innerHTML = `<section class="exchange-success"><div class="exchange-success-icon" aria-hidden="true">✓</div><h3>Troca confirmada</h3><p>Registro #${esc(id.slice(0, 8))}. A venda original foi preservada.</p><p>Estoque e eventual crédito foram registrados juntos. O recebimento complementar segue a automação financeira do espaço.</p><p class="exchange-help">O histórico e os produtos serão atualizados pelo Sync.</p></section>`;
+      if (content) form.querySelector('footer').hidden = true;
+      if (historySection) summary.append(historySection);
       await history();
     }
     async function consult() {
@@ -166,17 +305,22 @@ window.SaleExchanges = (() => {
     window.addEventListener('storage', onStorage);
     disposeStorage = () => window.removeEventListener('storage', onStorage);
     if (form) {
-      form.querySelector('[data-ex-add]').onclick = add; add();
-      form.oninput = e => { if (!e.target.matches('[data-ex-received]')) invalidate(); };
-      form.onchange = e => { if (!e.target.matches('[data-ex-received]')) invalidate(); };
+      bindPicker();
+      form.oninput = e => { if (!e.target.matches('[data-ex-received],[data-ex-search]')) invalidate(); };
+      form.onchange = e => { if (!e.target.matches('[data-ex-received],[data-ex-search]')) invalidate(); };
       form.onsubmit = async e => {
         e.preventDefault(); if (busy || pending || !current()) return;
         if (!form.reportValidity()) return;
+        if (!replacements.size) {
+          showError(Error('Adicione um produto em Cliente leva para revisar a troca.'));
+          form.querySelector('[data-ex-search]').focus();
+          return;
+        }
         error.textContent = ''; lock(true);
         try {
           const data = { reason: [form.elements.reasonType.value, form.elements.reasonDetail.value.trim()].filter(Boolean).join(' — '), paymentMethod: form.elements.paymentMethod.value,
             returns: Array.from(form.querySelectorAll('[data-return]')).filter(x => Number(x.value) > 0).map(x => ({ line: Number(x.dataset.return), quantity: Number(x.value), restock: form.querySelector(`[data-restock="${x.dataset.return}"]`).checked })),
-            replacements: Array.from(form.querySelectorAll('[data-ex-new] article')).map(x => { const p = catalog[Number(x.querySelector('[data-product]').value)]; return { productId: p?.productId, variantId: p?.variantId, quantity: Number(x.querySelector('[data-quantity]').value) }; }) };
+            replacements: Array.from(replacements.values(), ({ item, quantity }) => ({ productId: item.productId, variantId: item.variantId, quantity: Number(quantity.value) })) };
           quote = { data, result: await call('quoteSaleExchange', data) }; showQuote(quote.result);
         } catch (e) { showError(e); } finally { if (current()) lock(false); }
       };

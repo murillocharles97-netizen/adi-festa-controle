@@ -5,8 +5,9 @@
 <script>
 'use strict';
 const sale={id:'qa-sale-original',spaceId:'qa-space',clienteId:'qa-camila',status:'pago',formaPagamento:'dinheiro',valorFinal:130,itens:[{produtoId:'qa-cream',nome:'Creme facial Vitamina C',quantidade:2,precoUnitario:50},{produtoId:'qa-lipstick',variantId:'qa-red',variantName:'Vermelho · 4 g',nome:'Batom luminoso',quantidade:1,precoUnitario:30}]};
-const products=[{id:'qa-serum',nome:'Sérum iluminador',preco:80,estoqueAtual:6},{id:'qa-cream',nome:'Creme facial Vitamina C',preco:50,estoqueAtual:4},{id:'qa-lipstick',nome:'Batom luminoso',productType:'variable',preco:30}];
-const variants=[{id:'qa-red',parentProductId:'qa-lipstick',displayName:'Vermelho · 4 g',price:30,stock:5},{id:'qa-nude',parentProductId:'qa-lipstick',displayName:'Nude · 4 g',price:30,stock:5}];
+const products=[{id:'qa-serum',nome:'Sérum iluminador',codigo:'SER-01',barcode:'0789123456789',preco:80,estoqueAtual:6},{id:'qa-cream',nome:'Creme facial Vitamina C',preco:50,estoqueAtual:4},{id:'qa-lipstick',nome:'Batom luminoso',productType:'variable',preco:30}];
+const variants=[{id:'qa-red',parentProductId:'qa-lipstick',displayName:'Vermelho · 4 g',sku:'BAT-VER',barcode:'7891234567895',price:30,stock:5},{id:'qa-nude',parentProductId:'qa-lipstick',displayName:'Nude · 4 g',sku:'BAT-NU',barcode:'7891234567895',price:30,stock:5},{id:'qa-pink',parentProductId:'qa-lipstick',displayName:'Rosa · 4 g',sku:'BAT-ROSA',barcode:'7891234567888',price:30,stock:5}];
+if(new URLSearchParams(location.search).has('large')) for(let i=1;i<=1000;i++) products.push({id:'qa-large-'+i,nome:'Produto extra '+i,codigo:'EXTRA-'+i,preco:12,estoqueAtual:7});
 window.FirebaseSession={user:{uid:'qa-owner'}};window.TeamAccess={has:()=>true};window.DB={getBusinessId:()=> 'qa-business',getWorkspaceGeneration:()=>0,carregar:()=>({produtos:products,variacoesProdutos:variants})};
 window.fixtureCalls=[];window.fixtureExchanges=[];let simulatedFailure=false;
 const linePrice=(r)=>{const p=products.find(p=>p.id===r.productId),v=variants.find(v=>v.id===r.variantId);return {name:p.nome,variantName:v?.displayName||'',unitCents:Math.round((v?.price??p.preco)*100)};};
@@ -14,7 +15,14 @@ function plan(data){const returns=data.returns.map(r=>{const p=sale.itens[r.line
 window.FirebaseCallable=async(name,data)=>{
  fixtureCalls.push({name,data});
  if(name==='listSaleExchanges')return {items:fixtureExchanges,remainingQuantities:sale.itens.map((i,line)=>i.quantidade-fixtureExchanges.reduce((sum,e)=>sum+e.returns.filter(r=>r.line===line).reduce((n,r)=>n+r.quantity,0),0))};
- if(name==='quoteSaleExchange'){if(!data.returns.length||!data.replacements.length)throw Error('Selecione itens devolvidos e novos.');return plan(data);}
+ if(name==='quoteSaleExchange'){
+   if(!data.returns.length||!data.replacements.length)throw Error('Selecione itens devolvidos e novos.');
+   for(const item of data.replacements){
+     const p=products.find(p=>p.id===item.productId),v=variants.find(v=>v.id===item.variantId);
+     if(item.quantity>(v?.stock??p?.estoqueAtual??0))throw Error('Estoque disponível insuficiente.');
+   }
+   return plan(data);
+ }
  if(name==='lookupSaleExchange')return {found:fixtureExchanges.some(x=>x.id===data.operationId),item:fixtureExchanges.find(x=>x.id===data.operationId),retryAllowed:true};
  if(name==='confirmSaleExchange'){
    const existing=fixtureExchanges.find(x=>x.id===data.operationId);if(existing)return {id:existing.id,replayed:true};
@@ -27,7 +35,7 @@ window.FirebaseCallable=async(name,data)=>{
 };
 async function start(){const mode=document.querySelector('[data-fixture-mode]').value;simulatedFailure=false;await SaleExchanges.open(mode==='fiado'?{...sale,status:'fiado',formaPagamento:'fiado'}:sale);}
 document.querySelector('[data-fixture-open]').onclick=start;
-</script><script src="../../js/sale-exchanges.js"></script><script>
+</script><script src="../../js/barcode.js"></script><script src="../../js/sale-exchanges.js"></script><script>
 const params=new URLSearchParams(location.search);if(params.has('case'))document.querySelector('[data-fixture-mode]').value=params.get('case');
-window.fixtureReady=(async()=>{await start();if(params.get('stage')==='review'){document.querySelector('[data-return="0"]').value='1';document.querySelector('[data-restock="0"]').checked=true;document.querySelector('[name="reasonType"]').value='Preferência do cliente';const mode=document.querySelector('[data-fixture-mode]').value;document.querySelector('[data-product]').value=mode==='credit'?'2':mode==='equal'?'1':'0';await document.querySelector('[data-ex-form]').onsubmit({preventDefault(){}});}})();
+window.fixtureReady=(async()=>{await start();if(params.get('stage')==='review'){document.querySelector('[data-return="0"]').value='1';document.querySelector('[data-restock="0"]').checked=true;document.querySelector('[name="reasonType"]').value='Preferência do cliente';const mode=document.querySelector('[data-fixture-mode]').value,input=document.querySelector('[data-ex-search]');input.value=mode==='credit'?'BAT-VER':mode==='equal'?'creme':'serum';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-ex-result]').click();await document.querySelector('[data-ex-form]').onsubmit({preventDefault(){}});}})();
 </script></body></html>

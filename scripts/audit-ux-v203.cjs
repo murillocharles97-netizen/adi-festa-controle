@@ -65,7 +65,7 @@ async function main(){
   });
   await check('exchange review/edit preserves form handlers and fixed actions',async()=>{
    await open(fixture('sale-exchanges.html')+'?case=equal',390,844);await page.addStyleTag({url:origin+'/css/style.css'});await page.addScriptTag({content:fs.readFileSync(path.join(root,'js/recibos.js'),'utf8').split('(function(){')[0]});await page.evaluate(()=>Modais.layout(document.querySelector('.exchange-sheet')));
-   await page.evaluate(()=>{document.querySelector('[data-return="0"]').value='1';document.querySelector('[name=reasonType]').value='Preferência do cliente';document.querySelector('[data-product]').value='1';document.querySelector('[data-ex-form]').requestSubmit();});
+   await page.evaluate(()=>{document.querySelector('[data-return="0"]').value='1';document.querySelector('[name=reasonType]').value='Preferência do cliente';const input=document.querySelector('[data-ex-search]');input.value='creme';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-ex-result]').click();document.querySelector('[data-ex-form]').requestSubmit();});
    await page.waitForSelector('[data-ex-confirm]:not([hidden])');await bounded();assert.equal(await page.$eval('.exchange-columns',e=>getComputedStyle(e).display),'none');assert.equal(await page.evaluate(()=>fixtureExchanges.length),0);
    await page.click('[data-ex-edit]');await page.waitForSelector('[data-ex-quote]:not([hidden])');assert.notEqual(await page.$eval('.exchange-columns',e=>getComputedStyle(e).display),'none');await bounded();
   });
