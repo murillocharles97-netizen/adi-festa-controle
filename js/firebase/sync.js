@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "./workspace-firestore.js";
-import { createFirestoreRepository } from "./firestore-repository.js?v=224";
+import { createFirestoreRepository, renewalReadSpaces } from "./firestore-repository.js?v=renewal-space-1";
 import {
   normalizeFirestoreData,
   sanitizeForFirestore,
@@ -105,6 +105,9 @@ const IDEMPOTENT_EVENT_NAMES = new Set([
 ]);
 const CLOUD_NAMES = [...Object.keys(SOURCES), "settings"];
 const SIGNAL_NAMES = [...CLOUD_NAMES, "businessProfile", "userProfile"];
+const RENEWAL_READ_NAMES = new Set(["customerSubscriptions","customerSubscriptionEvents"]);
+const renewalCatalogPending = () => window.BusinessContext?.get?.().role!=="owner"&&
+  window.SpaceContext?.snapshot?.().loaded===false;
 function canPullSource(name) {
   if(window.OperationalReadPolicy?.handles?.(name)&&!window.OperationalReadPolicy.allowedRead(name))return false;
   const has = window.TeamAccess?.has;
@@ -4682,6 +4685,7 @@ function startCloudSubscriptions() {
   const allowed=name=>SIGNAL_NAMES.includes(name)&&
     (['businessProfile','userProfile'].includes(name)||canPullSource(name));
   const pending=()=>[...signalCollections];
+  const ready=()=>pending().filter(name=>!RENEWAL_READ_NAMES.has(name)||!renewalCatalogPending());
   const publishState=(status,nextRetryAt=null)=>emit({remoteReadRefresh:{
     pending:signalCollections.size,status,attempt,nextRetryAt,lastErrorCode:lastFailure?.code||'',updatedAt:now()}});
   const persist=()=>{
@@ -4690,7 +4694,7 @@ function startCloudSubscriptions() {
       versions:Object.fromEntries([...signalVersions].filter(([name])=>allowed(name)))}));
   };
   const schedule=(delay=120)=>{
-    if(!isCurrent()||!signalCollections.size||inFlight||!navigator.onLine||permanentFailure()||attempt>backoff.length)return;
+    if(!isCurrent()||!ready().length||inFlight||!navigator.onLine||permanentFailure()||attempt>backoff.length)return;
     clearTimeout(signalPullTimer);signalPullTimer=setTimeout(download,delay);
   };
   const fail=error=>{
@@ -4710,7 +4714,8 @@ function startCloudSubscriptions() {
     signalPullTimer=null;
     if(!isCurrent()||inFlight||!signalCollections.size||!navigator.onLine)return;
     inFlight=true;
-    const changed=pending(),versions=Object.fromEntries(changed.map(name=>[name,signalVersions.get(name)]));
+    const changed=ready(),versions=Object.fromEntries(changed.map(name=>[name,signalVersions.get(name)]));
+    if(!changed.length){inFlight=false;return;}
     try {
       publishState('reading');
       const cloudNames=changed.filter(name=>CLOUD_NAMES.includes(name)&&!REALTIME_NAMES.has(name)&&allowed(name));
@@ -4960,8 +4965,12 @@ async function pullCloudCollections(options = {}) {
   let initialCollections = 0,
     documentsRead = 0;
   for (const name of names) {
+    if(RENEWAL_READ_NAMES.has(name)&&renewalCatalogPending())continue;
     const markerKey = `${businessId}:${name}`,
-      readScope = name==='sales' ? salesReadScope() : null,
+      readScope = name==='sales' ? salesReadScope()
+        : RENEWAL_READ_NAMES.has(name)
+          ? JSON.stringify(['renewal-space-v1',salesReadScope(),renewalReadSpaces()])
+          : null,
       scopeChanged = Boolean(readScope && pullState[`${markerKey}:readScope`]!==readScope),
       completeRead = full || INITIAL_FULL_NAMES.has(name) || scopeChanged,
       since = full || scopeChanged ? "" : pullState[markerKey] || "",
@@ -5433,11 +5442,14 @@ async function queryClientsPage(options = {}) {
 async function queryCustomerSubscriptions(options = {}) {
   const spaceView = options.spaceView === true;
   const scope = captureCloudReadScope(spaceView);
+  const empty = () => options.page === true ? {items:[],cursor:null,hasMore:false} : [];
   await validateUser();
   assertCloudReadScope(scope, spaceView);
   if(window.OperationalReadPolicy?.restricted?.()){
     if(!options.clientId)throw Error('Selecione o cliente para consultar sua vigência atual. Indicadores de renovações anteriores exigem histórico autorizado.');
-    return (await prepareOperationalCustomer(String(options.clientId),'checkout'))?.customerSubscriptions||[];
+    const rows=(await prepareOperationalCustomer(String(options.clientId),'checkout'))?.customerSubscriptions||[];
+    const items=options.subscriptionId?rows.filter(row=>row.id===options.subscriptionId):rows;
+    return options.page === true ? {items,cursor:null,hasMore:false} : items;
   }
   const clientId = String(options.clientId || "").trim(),
     productId = String(options.productId || "").trim(),
@@ -5461,6 +5473,11 @@ async function queryCustomerSubscriptions(options = {}) {
   if (clientId) filters.push({ field: "clientId", operator: "==", value: clientId });
   if (productId) filters.push({ field: "productId", operator: "==", value: productId });
   if (status) filters.push({ field: "status", operator: "==", value: status });
+  if(spaceView&&window.SpaceContext?.scopesCustomers?.()&&renewalReadSpaces()!==null){
+    const spaceId=window.SpaceContext.activeId();
+    if(!renewalReadSpaces().includes(spaceId))return empty();
+    filters.push({field:"spaceId",operator:"==",value:spaceId});
+  }
   if (lastRenewedFrom) filters.push({ field: "lastRenewedAt", operator: ">=", value: lastRenewedFrom });
   if (options.from) filters.push({ field: "expiresAt", operator: ">=", value: new Date(options.from).toISOString() });
   if (options.to) filters.push({ field: "expiresAt", operator: "<=", value: new Date(options.to).toISOString() });
@@ -5510,9 +5527,12 @@ async function queryRenewalsForSpace(spaceId = null) {
   if (!id || !context.scopesCustomers() || !canPullSource("customerSubscriptions") ||
       window.OperationalReadPolicy?.restricted?.() || window.TeamAccess?.canRoute?.("clientes") === false) return [];
   if (spaceId && !(context.customerSpaces?.() || []).some(space => space.id === id)) return [];
+  const authorized = renewalReadSpaces();
+  if (authorized !== null && !authorized.includes(id)) return [];
   const belongs = spaceId ? item => context.recordSpace(item) === id : item => context.showsRenewal(item);
   const repository = repositories.customerSubscriptions;
-  const groups = await Promise.all(["spaceId", "financialSpaceId"].map(field => repository.listWherePaged(field, id)));
+  const fields = authorized === null ? ["spaceId", "financialSpaceId"] : ["spaceId"];
+  const groups = await Promise.all(fields.map(field => repository.listWherePaged(field, id)));
   assertCloudReadScope(scope);
   const items = [...new Map(groups.flat().filter(item => !item.deletedAt && belongs(item))
     .map(item => [item.id, item])).values()];
@@ -7067,7 +7087,10 @@ function restartCloudReadsIfScopeChanged() {
 }
 addEventListener('business-context-changed',restartCloudReadsIfScopeChanged);
 addEventListener('veconi-space-context-changed',restartCloudReadsIfScopeChanged);
-addEventListener('veconi-spaces-ready',restartCloudReadsIfScopeChanged);
+addEventListener('veconi-spaces-ready',()=>{
+  restartCloudReadsIfScopeChanged();
+  cloudReadController?.wake();
+});
 addEventListener("online", () => {
   emit({ status: "waiting", message: "Conexão recuperada. Sincronizando…" });
   scheduleImmediate();

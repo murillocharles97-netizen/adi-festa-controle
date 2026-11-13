@@ -347,7 +347,9 @@ window.CustomerSubscriptions = (() => {
   function inSpaces(spaceIds) {
     const context = window.SpaceContext, allowed = new Set((context?.customerSpaces?.() || []).map((space) => space.id));
     const ids = new Set(spaceIds.filter((id) => allowed.has(id)));
+    const access = window.BusinessContext?.get?.();
     return (item) => Boolean(context && !window.OperationalReadPolicy?.restricted?.() && window.TeamAccess?.canRoute?.("clientes") !== false &&
+      (!access?.businessId || access.role === "owner" || item.spaceId && context.recordSpace(item) === item.spaceId) &&
       ids.has(context.recordSpace(item)));
   }
   async function loadBoardRows({ maxPages = BOARD_MAX_PAGES, spaceIds = null } = {}) {

@@ -45,6 +45,23 @@ const cacheKey = (businessId, collectionName, variant) => {
   return `${businessId}:${uid}:${permissionSignature}:${scope.spaceAccess}:${(scope.allowedSpaceIds||[]).join(',')}:store-sales-v2:${collectionName}:${variant}`;
 };
 const repositoryScopeKey=()=>cacheKey(requireBusinessId(),'session','visibility');
+const renewalCollections = new Set(['customerSubscriptions','customerSubscriptionEvents']);
+export const renewalReadSpaces = () => {
+  const context=window.BusinessContext?.get?.()||{};
+  if(context.role==='owner')return null;
+  if(window.SpaceContext?.snapshot?.().loaded===false)
+    throw Object.assign(Error('Aguarde a confirmação dos espaços autorizados para consultar renovações.'),{code:'renewal-spaces-unconfirmed'});
+  const allowed=new Set(context.allowedSpaceIds||[]);
+  return [...new Set((window.SpaceContext?.homeSpaces?.()||[]).filter(s=>s.businessId===context.businessId)
+    .map(s=>s.id).filter(id=>id&&(context.spaceAccess==='all'||allowed.has(id))))].sort();
+};
+const renewalGroups = () => {
+  const ids=renewalReadSpaces();
+  // Each query may read a business, membership and one document per space
+  // in Rules. Stay below the access-call limit for disjunctive queries.
+  return ids===null?null:Array.from({length:Math.ceil(ids.length/4)},(_,i)=>ids.slice(i*4,i*4+4));
+};
+const renewalScopeKey = name => renewalCollections.has(name)?JSON.stringify(renewalReadSpaces()):null;
 const visibilityConstraints = (collectionName,spaceIds=null) => {
   if(collectionName==='products'){
     const context=window.BusinessContext?.get?.()||{};
@@ -163,12 +180,25 @@ function createRawFirestoreRepository(collectionName) {
   // than downloading a global variants collection and filtering it in the UI.
   const readVisible = async (constraints,{reader=getDocsFromServer,sort='__name__',direction='asc',max=null}={}) => {
     const context=window.BusinessContext?.get?.()||{};
-    const scopeKey=repositoryScopeKey(),assertScope=()=>{if(scopeKey!==repositoryScopeKey())throw Error('A empresa, sessão ou permissão ativa mudou.');};
+    const scopeKey=repositoryScopeKey(),renewalScope=renewalScopeKey(collectionName),
+      assertScope=()=>{if(scopeKey!==repositoryScopeKey()||renewalScope!==renewalScopeKey(collectionName))throw Error('A empresa, sessão ou permissão ativa mudou.');};
     const merge=docs=>{
       assertScope();const unique=[...new Map(docs.map(d=>[d.id,d])).values()],val=d=>sort==='__name__'?d.id:d.data()[sort]?.toMillis?.()??d.data()[sort];
-      unique.sort((a,b)=>{const x=val(a),y=val(b);return ((x<y?-1:x>y?1:0)*(direction==='desc'?-1:1))||(a.id<b.id?-1:a.id>b.id?1:0);});
+      unique.sort((a,b)=>{const x=val(a),y=val(b),sign=direction==='desc'?-1:1;
+        return (x<y?-1:x>y?1:0)*sign||
+          (a.id<b.id?-1:a.id>b.id?1:0)*(renewalScope!==null?sign:1);});
       const selected=max?unique.slice(0,max):unique;return {docs:selected,size:selected.length,metadata:{fromCache:false,hasPendingWrites:false}};
     };
+    const scopedRenewals=renewalScope!==null?renewalGroups():null;
+    if(scopedRenewals){
+      const docs=[];
+      for(const ids of scopedRenewals){
+        assertScope();
+        // Use the authenticated server result; cached docs may predate a revocation.
+        docs.push(...(await getDocsFromServer(query(collectionRef(),where('spaceId','in',ids),...constraints))).docs);
+      }
+      return merge(docs);
+    }
     const groups=collectionName==='activityEvents'?activityGroups():null;
     if(groups){
       const docs=[],extra=constraints.slice(visibilityConstraints(collectionName).length);
@@ -227,6 +257,7 @@ function createRawFirestoreRepository(collectionName) {
       return lastReadMetadata ? structuredClone(lastReadMetadata) : null;
     },
     async countFromServer() {
+      if(renewalCollections.has(collectionName)&&renewalReadSpaces()!==null)return (await this.listAllPaged()).length;
       if(collectionName==='products'&&window.BusinessContext?.get?.()?.role!=='owner')return (await this.listAllPaged()).length;
       if(['productVariants','productFinancials','variantFinancials','saleFinancials','stockMovementFinancials'].includes(collectionName)&&window.BusinessContext?.get?.()?.role!=='owner')return (await this.listAllPaged()).length;
       const snapshot = await timed("read", `${collectionName}:count`, async () => {
@@ -245,7 +276,7 @@ function createRawFirestoreRepository(collectionName) {
     },
     async list(options = {}) {
       const key = cacheKey(requireBusinessId(), collectionName, "all"),
-        hit = !options.force && cached(key);
+        hit = !options.force && !renewalCollections.has(collectionName) && cached(key);
       if (hit) return hit;
       const snapshot = await timed("read", collectionName, () =>
         readVisible(visibilityConstraints(collectionName),{reader:getDocs}),
@@ -330,9 +361,10 @@ function createRawFirestoreRepository(collectionName) {
     },
     async listWherePaged(field, value, max = 100) {
       const businessId=requireBusinessId(),uid=requireUser().uid,reference=collectionRef(),items=[];
+      const scope=renewalScopeKey(collectionName);
       let cursor=null;
       do {
-        if(requireBusinessId()!==businessId||requireUser().uid!==uid)throw Error('A empresa ou sessão ativa mudou.');
+        if(requireBusinessId()!==businessId||requireUser().uid!==uid||scope!==renewalScopeKey(collectionName))throw Error('A empresa, sessão ou espaços autorizados mudaram.');
         const constraints=[...visibilityConstraints(collectionName),where(field,'==',value),orderBy(documentId()),limit(max)];
         if(cursor)constraints.push(startAfter(cursor));
         const snapshot=rememberMetadata(await timed('read',collectionName,()=>readVisible(constraints,{max})),'server');
@@ -384,7 +416,7 @@ function createRawFirestoreRepository(collectionName) {
           collectionName,
           `recent:${max}`,
         ),
-        hit = !options.force && cached(key);
+        hit = !options.force && !renewalCollections.has(collectionName) && cached(key);
       if (hit) return hit;
       const snapshot = rememberMetadata(await timed("read", collectionName, () =>
         readVisible([...visibilityConstraints(collectionName),orderBy('createdAt','desc'),limit(max)],{sort:'createdAt',direction:'desc',max}),
@@ -398,8 +430,9 @@ function createRawFirestoreRepository(collectionName) {
     },
     async listChangedSince(since, max = 200) {
       if (!since) return this.list({ force: true });
-      const scopeKey=repositoryScopeKey(),pageSize=Math.min(500,Math.max(1,Number(max)||200)),unique=new Map();
-      const assertScope=()=>{if(scopeKey!==repositoryScopeKey())throw Object.assign(Error('A sessão ou permissão mudou durante a leitura.'),{code:'sync-session-retired'});};
+      const scopeKey=repositoryScopeKey(),pageSize=Math.min(500,Math.max(1,Number(max)||200)),unique=new Map(),
+        renewalScope=renewalScopeKey(collectionName);
+      const assertScope=()=>{if(scopeKey!==repositoryScopeKey()||renewalScope!==renewalScopeKey(collectionName))throw Object.assign(Error('A sessão ou permissão mudou durante a leitura.'),{code:'sync-session-retired'});};
       const readPages=async value=>{
         let cursor=null;
         for(let page=0;page<20;page++){
@@ -482,12 +515,12 @@ function createRawFirestoreRepository(collectionName) {
       };
     },
     async listAllPaged(max = 200) {
-      const scopeKey=repositoryScopeKey();
+      const scopeKey=repositoryScopeKey(),renewalScope=renewalScopeKey(collectionName);
       const items = [];
       let cursor = null,
         hasMore = true;
       while (hasMore) {
-        if(scopeKey!==repositoryScopeKey())throw Error('A sessão ou permissão mudou durante a leitura.');
+        if(scopeKey!==repositoryScopeKey()||renewalScope!==renewalScopeKey(collectionName))throw Error('A sessão ou permissão mudou durante a leitura.');
         const constraints = [...visibilityConstraints(collectionName), orderBy(documentId())];
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(max));

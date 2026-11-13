@@ -140,7 +140,16 @@ function operationalReadService(db,{clock=()=>new Date()}={}){
   }
   // Only the selected customer's CURRENT benefit state is required at checkout;
   // historical revenue, redemption lists and purchase summaries are not returned.
-  for(const [col,key]of [['campaignProgress','campaignProgress'],['customerSubscriptions','customerSubscriptions']]){const rows=await tx.get(benefitsQuery(col));if(rows.size>300)throw new HttpsError('resource-exhausted','Vínculo operacional excede o limite seguro.');result[key]=rows.docs.map(s=>({id:s.id,...s.data()})).filter(v=>scoped(v,c)&&v.active!==false&&!v.deletedAt).map(v=>Privacy.pick(v,col==='campaignProgress'?[...Privacy.scopeFields,'campaignId','clientId','pendingProgress','confirmedProgress','pendingPoints','availablePoints','availableRewards','redeemedRewards','cycleRemainder','benefitDebt','ledgerBaseline']:[...Privacy.scopeFields,'clientId','productId','variantId','startedAt','expiresAt','durationValue','durationUnit','contractedPrice','renewalCount','lastRenewedAt','createdFromSaleId','lastSaleId','reminders','renewalMessage','label']));}
+  for(const col of ['campaignProgress','customerSubscriptions']){
+   const rows=await tx.get(benefitsQuery(col));
+   if(rows.size>300)throw new HttpsError('resource-exhausted','Vínculo operacional excede o limite seguro.');
+   const subscriptions=col==='customerSubscriptions';
+   const fields=subscriptions
+    ?['clientId','productId','variantId','startedAt','expiresAt','durationValue','durationUnit','contractedPrice','renewalCount','lastRenewedAt','createdFromSaleId','lastSaleId','reminders','renewalMessage','label']
+    :['campaignId','clientId','pendingProgress','confirmedProgress','pendingPoints','availablePoints','availableRewards','redeemedRewards','cycleRemainder','benefitDebt','ledgerBaseline'];
+   result[col]=rows.docs.map(s=>({id:s.id,...s.data()})).filter(v=>scoped(v,c)&&v.active!==false&&!v.deletedAt&&
+    (!subscriptions||c.owner||typeof v.spaceId==='string'&&c.ids.includes(v.spaceId))).map(v=>Privacy.pick(v,[...Privacy.scopeFields,...fields]));
+  }
   const events=await tx.get(benefitsQuery('campaignEvents'));if(events.size>300)throw new HttpsError('resource-exhausted','Benefícios precisam de revisão do gestor.');
   const allEvents=events.docs.map(s=>({id:s.id,...s.data()})),confirmed=new Set(allEvents.filter(e=>e.transition==='confirmed'||e.transition==='reversed').map(e=>e.confirmsEventId||e.reversedEventId));
   result.campaignEvents=allEvents.filter(e=>e.status==='pending'&&e.transition==='earned'&&!confirmed.has(e.id)&&scoped(e,c)).map(e=>({...Privacy.pick(e,[...Privacy.scopeFields,'campaignId','clientId','sourceType','sourceId','transition','expiresAt','saleId']),delta:Privacy.pick(e.delta||{},['progress','points','rewards'])}));

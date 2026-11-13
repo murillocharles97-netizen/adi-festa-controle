@@ -225,6 +225,7 @@ test('cold renewal link reads use the authorized active space and discard late A
       assertCloudReadScope:(scope)=>{if(scope!==s.viewScope())throw Error('retired');},
       validateUser:async()=>{},
       canPullSource:()=>true,
+      renewalReadSpaces:()=>null,
       applyCloudCollection:(name,items)=>merged.push([name,ids(items)]),
     });
     let finish,startRead;

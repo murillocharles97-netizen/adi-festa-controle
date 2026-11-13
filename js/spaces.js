@@ -378,6 +378,10 @@
   }
   function showsRenewal(row) {
     const id = activeId();
+    const access = window.BusinessContext?.get?.();
+    if (access?.businessId && access.role !== 'owner' &&
+        (!row.spaceId || recordSpace(row) !== row.spaceId ||
+          !operationalSpaces().some(space => space.id === row.spaceId))) return false;
     return Boolean(id && ownRow(row) && !window.OperationalReadPolicy?.restricted?.() &&
       window.TeamAccess?.canRoute?.('clientes') !== false && (!scopesCustomers() || recordSpace(row) === id));
   }
