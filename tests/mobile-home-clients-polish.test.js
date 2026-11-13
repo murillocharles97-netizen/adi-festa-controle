@@ -46,7 +46,7 @@ test("Home consulta renovações por uma única query limitada e indexável", as
   assert.match(calls[0].from, /^2026-08-15/);
   assert.ok(new Date(calls[0].to) - new Date(calls[0].from) >= 7 * 86400000);
   assert.ok(new Date(calls[0].to) - new Date(calls[0].from) < 8 * 86400000);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), { dueToday: 1, due7: 1, forecastValue: 65.9, clientIds: ["c1", "c2"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { limited: false, dueToday: 1, due7: 1, forecastValue: 65.9, clientIds: ["c1", "c2"] });
 });
 
 test("Clientes preserva paginação, busca robusta e contexto condicional de renovação", () => {

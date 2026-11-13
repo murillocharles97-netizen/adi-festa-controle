@@ -1,0 +1,104 @@
+[
+  {
+    "email": "renov-owner@example.test",
+    "result": {
+      "kpis": [
+        "dueToday=1",
+        "next7=3",
+        "expired=1",
+        "renewedRecently=1",
+        "active=5",
+        "paused=1"
+      ],
+      "renewModal": "Venda com renovação | Plano Mensal Pilates | Plano Mensal Pilates | Cliente Márcio Dias | Espaço Loja Centro | Variação Sem variação | Nome ",
+      "active": "qa-renov-multi-centro",
+      "cart": 0,
+      "localSales": 0
+    },
+    "permissionErrors": [],
+    "errors": [
+      "[SpaceService] initialization failed Object",
+      "[SpaceService] initialization failed Object",
+      "<i data-lucide=\"contactless\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"contactless\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"contactless\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"contactless\"></i> icon name was not found in the provided icons object."
+    ]
+  },
+  {
+    "email": "renov-owner@example.test",
+    "result": {
+      "bar": "2 assinaturas · 1 cliente",
+      "preview": "Olá, Joana! Passando para lembrar da sua renovação na Studio Fictício QA:\n\n• Plano Mensal Pilates — R$ 180,00 / 1 mês — vence hoje (13/11/2026)\n• Personal 2x semana — R$ 140,00 / 1 mês — vence amanhã (14/11/2026)\n\nPosso renovar para você?",
+      "states": "Mensagem preparada · 16:29 | WhatsApp aberto · 16:29 | Envio a confirmar por você · o WhatsApp não informa a entrega",
+      "opened": 1,
+      "route": "#/renovacoes",
+      "page": "renewals-page",
+      "badges": 1
+    },
+    "permissionErrors": [],
+    "errors": [
+      "[SpaceService] initialization failed Object",
+      "[SpaceService] initialization failed Object",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object."
+    ]
+  },
+  {
+    "email": "renov-seller@example.test",
+    "result": {
+      "src": "space",
+      "rows": [
+        "s-carlos-centro",
+        "s-joana-centro",
+        "s-joana-centro-2",
+        "s-marcos-centro"
+      ],
+      "selector": false
+    },
+    "permissionErrors": [],
+    "errors": [
+      "[SpaceService] initialization failed Object",
+      "[SpaceService] initialization failed Object",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object.",
+      "<i data-lucide=\"message-circle-check\" aria-hidden=\"true\"></i> icon name was not found in the provided icons object."
+    ]
+  },
+  {
+    "email": "renov-manager@example.test",
+    "result": {
+      "src": "space",
+      "spaces": [
+        "Loja Bairro",
+        "Loja Centro"
+      ],
+      "notice": ""
+    },
+    "permissionErrors": [],
+    "errors": [
+      "[SpaceService] initialization failed Object",
+      "[SpaceService] initialization failed Object"
+    ]
+  },
+  {
+    "email": "renov-v3probe@example.test",
+    "result": {
+      "restrictedPolicy": true,
+      "src": "restricted",
+      "notice": "Seu acesso consulta a vigência pelo perfil de cada cliente. Abra o cliente em Clientes par",
+      "hash": "#/renovacoes"
+    },
+    "permissionErrors": [],
+    "errors": [
+      "[SpaceService] initialization failed Object",
+      "[SpaceService] initialization failed Object",
+      "[SYNC ERROR] {\"stage\":\"Realtime collection listener\",\"code\":\"internal\",\"message\":\"internal\",\"collection\":\"settings\",\"path\":\"businesses/qa-renov-multi/settings/default\",\"at\":\"2026-11-13T19:30:20.645Z\",\"operation\":\"listen\"",
+      "[Realtime collection listener] Object",
+      "[Operation Settings] cache local mantido functions/internal",
+      "[SYNC ERROR] {\"stage\":\"client_projection\",\"code\":\"functions/internal\",\"message\":\"internal\",\"exception\":\"FirebaseError\",\"at\":\"2026-11-13T19:30:21.151Z\",\"operation\":\"\",\"businessId\":\"qa-renov-multi\",\"authUid\":\"0DzVXYxHZ7RQy"
+    ]
+  }
+]

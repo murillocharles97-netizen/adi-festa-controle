@@ -1,6 +1,6 @@
 window.Mensagens=(()=>{
   'use strict';
-  const TYPES=['charge','campaign','notice','custom'];
+  const TYPES=['charge','campaign','notice','custom','renewal'];
   const now=()=>new Date().toISOString(),digits=value=>String(value||'').replace(/\D/g,''),dayKey=value=>{const d=new Date(value);return Number.isNaN(d.getTime())?'':`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
   let readCache=null,readCacheQueued=false;
   function readData(){if(!readCache){readCache=DB.carregar();if(!readCacheQueued){readCacheQueued=true;queueMicrotask(()=>{readCache=null;readCacheQueued=false})}}return readCache}
@@ -10,7 +10,8 @@ window.Mensagens=(()=>{
     {id:'charge-firm',name:'Cobrança firme',type:'charge',content:'Olá, {{nome}}. Consta em aberto na {{nome_negocio}} o valor de {{saldo}}. Por favor, entre em contato para regularizarmos o pagamento.'},
     {id:'campaign-default',name:'Campanha',type:'campaign',isDefault:true,content:'Olá, {{primeiro_nome}}! Temos novidades na {{nome_negocio}} 🎉\n\nEscreva aqui os detalhes da campanha.'},
     {id:'notice-default',name:'Aviso geral',type:'notice',isDefault:true,content:'Olá, {{primeiro_nome}}! Este é um aviso da {{nome_negocio}}:\n\nEscreva aqui seu aviso.'},
-    {id:'custom-default',name:'Mensagem livre',type:'custom',isDefault:true,content:'Olá, {{primeiro_nome}}!'}
+    {id:'custom-default',name:'Mensagem livre',type:'custom',isDefault:true,content:'Olá, {{primeiro_nome}}!'},
+    {id:'renewal-default',name:'Lembrete de renovação',type:'renewal',isDefault:true,content:'Olá, {{primeiro_nome}}! Passando para lembrar da sua renovação na {{nome_negocio}}:\n\n{{renovacoes}}\n\nPosso renovar para você?'}
   ];
   function ensureTemplates(){const db=DB.carregar(),existing=new Set((db.messageTemplates||[]).map(item=>item.id)),missing=DEFAULTS.filter(item=>!existing.has(item.id));if(!missing.length)return db.messageTemplates;DB.alterar(data=>{data.messageTemplates??=[];for(const item of missing)data.messageTemplates.push({...item,system:true,active:true,createdAt:now(),updatedAt:now()})});return DB.carregar().messageTemplates}
   function templates(type){if(type==='receipt')return window.ReceiptMessages.list();return ensureTemplates().filter(item=>item.active!==false&&(!type||item.type===type)).sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||a.name.localeCompare(b.name,'pt-BR'))}

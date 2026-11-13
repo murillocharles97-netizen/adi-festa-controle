@@ -55,7 +55,7 @@
     const allowed=route=>window.TeamAccess?.canRoute?.(route)!==false;
     if(allowed('produtos')&&data.out.length)list.push({priority:1,icon:'package-x',tone:'danger',title:'Produtos em falta',detail:`${data.out.length} produto${data.out.length===1?'':'s'} para repor`,action:'Ver estoque',target:'products-out'});
     if(allowed('produtos')&&data.low.length)list.push({priority:4,icon:'triangle-alert',tone:'warning',title:'Estoque baixo',detail:`${data.low.length} produto${data.low.length===1?'':'s'} para revisar`,action:'Ver estoque',target:'products-low'});
-    if(allowed('clientes')&&(data.renewals.dueToday||data.renewals.due7))list.push({priority:data.renewals.dueToday?2:4,icon:'refresh-cw',tone:data.renewals.dueToday?'danger':'blue',title:'Renovações',detail:`${data.renewals.dueToday?`${data.renewals.dueToday} vence${data.renewals.dueToday===1?'':'m'} hoje`:''}${data.renewals.dueToday&&data.renewals.due7?' · ':''}${data.renewals.due7?`${data.renewals.due7} nos próximos 7 dias`:''}`,meta:`${money(data.renewals.forecastValue)} previstos`,action:'Ver clientes',target:'clients-renewals'});
+    if(allowed('clientes')&&(data.renewals.dueToday||data.renewals.due7))list.push({priority:data.renewals.dueToday?2:4,icon:'refresh-cw',tone:data.renewals.dueToday?'danger':'blue',title:'Renovações',detail:`${data.renewals.dueToday?`${data.renewals.dueToday} vence${data.renewals.dueToday===1?'':'m'} hoje`:''}${data.renewals.dueToday&&data.renewals.due7?' · ':''}${data.renewals.due7?`${data.renewals.due7}${data.renewals.limited?'+':''} nos próximos 7 dias`:''}`,meta:`${data.renewals.limited?'Ao menos ':''}${money(data.renewals.forecastValue)} previstos`,action:'Ver renovações',target:'renewals'});
     if(allowed('pedidos')&&data.pendingOrders.length)list.push({priority:3,icon:'clipboard-list',tone:'blue',title:'Pedidos online',detail:`${data.pendingOrders.length} pedido${data.pendingOrders.length===1?'':'s'} aguardando`,action:'Ver pedidos',target:'orders'});
     // Unassigned historical sales are not an operational task. Never point them
     // at the goal editor or change their financial/space attribution here.
@@ -83,7 +83,7 @@
     if(target==='day-summary'||target==='week-summary')return summaryModal(target==='week-summary');
     if(target==='goal')return goalModal();
     if(target==='clients-debt'){window.ClientesMobile?.applyFilter('debito','maiorDebito');return Router.ir('clientes')}
-    if(target==='clients-renewals'){window.ClientesMobile?.applyRenewalAttention?.();return Router.ir('clientes')}
+    if(target==='renewals')return Router.ir(window.TeamAccess?.canRoute?.('renovacoes')===false?'clientes':'renovacoes');if(target==='clients-renewals'){window.ClientesMobile?.applyRenewalAttention?.();return Router.ir('clientes')}
     if(target==='orders')return Router.ir('pedidos');
     if(target.startsWith('products-')){const filter=target==='products-low'?'baixo':target==='products-out'?'esgotado':model().out.length?'esgotado':'baixo';window.ProdutosMobile?.applyFilter(filter,'menorEstoque');return Router.ir('produtos')}
   }

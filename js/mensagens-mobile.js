@@ -2,9 +2,11 @@
   'use strict';
   const mq=matchMedia('(max-width:767px)'),$=(selector,root=document)=>root.querySelector(selector),$$=(selector,root=document)=>[...root.querySelectorAll(selector)];
   const icon=name=>`<i data-lucide="${name}"></i>`,esc=value=>Utils.escapar(String(value??'')),money=Utils.dinheiro;
-  const TYPE_LABELS={charge:'Cobrança',campaign:'Campanha',notice:'Aviso',custom:'Mensagem livre',receipt:'Recebimentos'},PENDING_KEY='adiFestaMessagePendingReturn_v1';
+  const TYPE_LABELS={charge:'Cobrança',campaign:'Campanha',notice:'Aviso',custom:'Mensagem livre',receipt:'Recebimentos',renewal:'Lembrete de renovação'},PENDING_KEY='adiFestaMessagePendingReturn_v1';
   const center={type:'charge',audience:'debt',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false};
-  const SEQUENCE_TYPES=['charge','campaign','notice','custom'];
+  const SEQUENCE_TYPES=['charge','campaign','notice','custom','renewal'];
+  // Renewal reminders exist only with the subscriptions frozen by Renovações (center.renewal).
+  const renewalMode=()=>center.type==='renewal'&&Boolean(center.renewal?.items);
   let returnShown=false,sequenceStarting=false;
   function client(id){return Clientes.obter(id)}
   function typeLabel(type){return TYPE_LABELS[type]||TYPE_LABELS.custom}
@@ -44,10 +46,11 @@
   }
   function centerClients() {
     // The list only decides WHO; the message type is chosen on the next screen.
-    const charge = center.audience === 'debt';
+    const charge = center.audience === 'debt' && !renewalMode();
     const data = Clientes.viewData?.() || DB.readForView?.() || DB.carregar();
+    const reminder = renewalMode() ? new Set(Object.keys(center.renewal.items)) : null;
     const candidates = (data.clientes || []).filter(item =>
-      item.ativo !== false && item.active !== false && !item.deletedAt && (!charge || Number(item.saldo) < 0));
+      item.ativo !== false && item.active !== false && !item.deletedAt && (!charge || Number(item.saldo) < 0) && (!reminder || reminder.has(String(item.id))));
     const latest = charge ? Mensagens.latestCharges(data) : () => null;
     const lastCharges = new Map();
     const today = new Date().toDateString();
@@ -83,7 +86,7 @@
 
   function centerHeader() {
     return `<header class="message-center-header">
-      <button type="button" data-message-center-back>${icon('arrow-left')}<span>Voltar para Clientes</span></button>
+      <button type="button" data-message-center-back>${icon('arrow-left')}<span>Voltar para ${RETURN_LABELS[returnRoute]||'Clientes'}</span></button>
       <h2 tabindex="-1">Central de mensagens</h2>
       ${window.ReceiptMessages?.canUse?.() || window.ReceiptMessages?.canManage?.() ? `<button type="button" class="message-center-receipts" data-open-receipt-center>${icon('receipt')}<span>Modelos de recibo</span></button>` : ''}
     </header>`;
@@ -99,7 +102,7 @@
   function renderCenter(roster) {
     if (center.type === 'receipt') return renderReceiptCenter();
     const { listed, available, ids, withoutPhone, chargedToday, lastCharges } = roster;
-    const charge = center.audience === 'debt';
+    const charge = center.audience === 'debt' && !renewalMode();
     if (!center.initialized) {
       center.selected = new Set(ids);
       center.initialized = true;
@@ -114,13 +117,13 @@
     ].filter(Boolean).join(' · ');
     return `<section class="message-center-page">
       ${centerHeader()}
-      <p class="message-center-audience">${charge ? 'Clientes com saldo em aberto' : 'Todos os clientes ativos'} · tipo e modelo na próxima etapa</p>
+      <p class="message-center-audience">${renewalMode() ? `Lembrete de renovação · ${esc(center.renewal.spaceName || 'espaço selecionado')} · assinaturas escolhidas em Renovações` : `${charge ? 'Clientes com saldo em aberto' : 'Todos os clientes ativos'} · tipo e modelo na próxima etapa`}</p>
       <div class="message-center-kpis" aria-live="polite">
         <article><strong data-center-available-count>${available.length}</strong><span>Disponíveis</span></article>
         <article><strong data-center-selected-count>${count}</strong><span>Selecionados</span></article>
       </div>
       ${exclusions ? `<p class="message-center-note">${exclusions}</p>` : ''}
-      <p class="message-center-note" data-center-selected-total></p>
+      ${renewalMode() ? '' : '<p class="message-center-note" data-center-selected-total></p>'}
       <div class="message-center-controls">
         <button type="button" data-center-toggle-all ${available.length ? '' : 'disabled'}>${count === available.length && count > 0 ? 'Desmarcar todos' : 'Selecionar todos'}</button>
         <button type="button" data-center-filters>${icon('list-filter')} Filtros</button>
@@ -136,25 +139,30 @@
             <span class="message-client-avatar" aria-hidden="true">${esc(initials)}</span>
             <span class="message-center-client-copy">
               <b>${esc(item.nome)}</b>
-              <small>${esc(detail)}${charge ? ' · ' + esc(Mensagens.formatLastChargeDate(last?.date)) : ''}</small>
+              <small>${esc(detail)}${charge ? ' · ' + esc(Mensagens.formatLastChargeDate(last?.date)) : ''}${renewalMode() ? ' · ' + esc((center.renewal.items[item.id] || []).map(plan => plan.label).join(' + ')) : ''}</small>
             </span>
-            ${charge ? `<strong>${money(Math.abs(Number(item.saldo)))}</strong>` : ''}
+            ${charge ? `<strong>${money(Math.abs(Number(item.saldo)))}</strong>` : renewalMode() ? `<strong class="message-renewal-count">${(center.renewal.items[item.id] || []).length}<small> ${(center.renewal.items[item.id] || []).length === 1 ? 'plano' : 'planos'}</small></strong>` : ''}
           </label>`;
         }).join('') || '<div class="message-center-empty"><h3>Nenhum cliente neste filtro</h3><p>Altere os filtros para consultar outros clientes.</p></div>'}
       </div>
       <footer class="message-center-footer">
-        <button type="button" class="btn btn-primary" data-center-start ${count ? '' : 'disabled'}>${icon('play')} Iniciar sequência</button>
+        <button type="button" class="btn btn-primary" data-center-start ${count ? '' : 'disabled'}>${icon('play')} ${renewalMode() ? 'Iniciar lembretes' : 'Iniciar sequência'}</button>
       </footer>
     </section>`;
   }
   function renderReceiptCenter(){return `<section class="message-center-page">${centerHeader()}${Mensagens.canSend()?`<button type="button" class="message-center-back-selection" data-back-selection>${icon('arrow-left')} Voltar à seleção de clientes</button>`:''}<div class="receipt-model-heading"><h2>Recebimentos</h2>${ReceiptMessages.canManage()?'<button class="btn btn-primary" type="button" data-receipt-new-model>Novo modelo</button>':''}</div><p class="receipt-model-help">Mensagens individuais liberadas somente após o recibo remoto e a conferência do saldo. Abra o recebimento em Clientes ou Fiado para compartilhar. Esta categoria não participa de disparos em massa.</p><div class="receipt-template-list">${ReceiptMessages.list().map(t=>`<article class="receipt-template-card"><h3>${esc(t.name)}</h3><small>${t.receiptKind==='total'?'Saldo quitado':'Saldo em aberto'}${t.isDefault?' · Modelo padrão':''}</small><p>${esc(t.content)}</p>${ReceiptMessages.canManage()?`<button class="btn btn-light" type="button" data-receipt-edit-model="${esc(t.id)}">Editar modelo</button>`:''}</article>`).join('')}</div>${ReceiptMessages.canManage()?'':'<p>Somente o gestor autorizado pode alterar os modelos da empresa.</p>'}</section>`;}
   let clientListScroll = 0;
+  // Screens other than Clientes that may open the Central and expect "Voltar" to bring them back.
+  const RETURN_LABELS = {renovacoes:'Renovações'};
+  let returnRoute = null;
 
   async function openCenter(options = {}) {
     if (!Mensagens.canSend() && !window.ReceiptMessages?.canUse() && !window.ReceiptMessages?.canManage())
       return Utils.toast('Seu acesso não permite enviar mensagens.', true);
     const app = $('#app'), page = app.firstElementChild, instance = app.dataset.pageInstance;
     const route = window.Router?.atual?.();
+    if (options.returnRoute) returnRoute = RETURN_LABELS[options.returnRoute] && options.returnRoute === route ? route : null;
+    else if (route === 'clientes') returnRoute = null;
     try {
       if (options.type !== 'receipt' && Mensagens.canSend()) await restoreCenter();
       if (app.firstElementChild !== page || app.dataset.pageInstance !== instance || window.Router?.atual?.() !== route) return;
@@ -162,12 +170,19 @@
         clientListScroll = window.scrollY;
         window.ClientesMobile?.cancelPending?.();
       }
-      if (options.type === 'receipt' || !Mensagens.canSend()) center.type = 'receipt';
+      if (options.type === 'renewal' && options.renewal?.items && Array.isArray(options.clientIds) && Mensagens.canSend()) {
+        Object.assign(center, { type: 'renewal', renewal: options.renewal, audience: 'all', days: 'todos', min: '', max: '',
+          selected: new Set(options.clientIds.map(String)), initialized: true });
+      } else if (options.type === 'receipt' || !Mensagens.canSend()) center.type = 'receipt';
       else if (Array.isArray(options.clientIds)) {
         // Coming from Campanhas: open with that audience already selected.
         Object.assign(center, { type: SEQUENCE_TYPES.includes(options.type) ? options.type : 'campaign', audience: 'all', days: 'todos', min: '', max: '',
           selected: new Set(options.clientIds.map(String)), initialized: true });
       } else if (center.type === 'receipt') center.type = 'charge';
+      if (options.type !== 'renewal' && (center.type === 'renewal' || center.renewal)) {
+        center.renewal = null;
+        if (center.type === 'renewal') Object.assign(center, { type: 'charge', audience: 'debt', initialized: false });
+      }
       refreshCenter();
       $('#title').textContent = 'Mensagens';
       $('#date').textContent = '';
@@ -181,6 +196,12 @@
 
   function backToClients() {
     if (center.type !== 'receipt') persistCenter();
+    const back = returnRoute;
+    if (back && window.Router?.atual?.() === back) {
+      returnRoute = null;
+      window.AppPageRuntime?.mount?.(back);
+      return;
+    }
     if (window.Router?.atual?.() !== 'clientes') {
       window.Router?.ir?.('clientes');
       return;
@@ -267,7 +288,7 @@
     const count = center.selected.size, label = $('[data-center-selected-count]', page);
     label.textContent = count;
     const total = $('[data-center-selected-total]', page);
-    if (total) {
+    if (total && !renewalMode()) {
       const cents = available.filter(item => center.selected.has(item.id))
         .reduce((sum, item) => sum + Math.max(0, Math.round(-Number(item.saldo) * 100)), 0);
       total.textContent = `Saldo em aberto da seleção: ${money(cents / 100)}`;
@@ -334,7 +355,7 @@
       refreshCenter();
       return Utils.toast('Selecione ao menos um cliente com telefone válido.', true);
     }
-    const type = SEQUENCE_TYPES.includes(center.type) && (center.audience === 'debt' || center.type !== 'charge') ? center.type : (center.audience === 'debt' ? 'charge' : 'campaign'), button = $('[data-center-start]'), scope = window.SpaceContext?.viewScope?.();
+    const type = renewalMode() ? 'renewal' : SEQUENCE_TYPES.includes(center.type) && center.type !== 'renewal' && (center.audience === 'debt' || center.type !== 'charge') ? center.type : (center.audience === 'debt' ? 'charge' : 'campaign'), button = $('[data-center-start]'), scope = window.SpaceContext?.viewScope?.();
     sequenceStarting = true;
     if (button) {
       button.disabled = true;
@@ -344,7 +365,8 @@
       await persistCenter();
       if (button && !button.isConnected || window.SpaceContext?.viewScope?.() !== scope || !Mensagens.canSend()) return;
       const template = MessageSequenceUI.defaultTemplate(type);
-      await MessageSequenceUI.start({ type, clientIds: ids, templateId: template?.id, baseMessage: template?.content || '' });
+      await MessageSequenceUI.start({ type, clientIds: ids, templateId: template?.id, baseMessage: template?.content || '',
+        renewal: type === 'renewal' ? window.RenewalMessages?.sanitize?.(center.renewal, ids) : undefined });
     } catch (error) {
       Utils.toast(MessageSequence.friendly(error), true);
     } finally {
@@ -352,7 +374,7 @@
       const currentButton = $('[data-center-start]');
       if (currentButton) {
         currentButton.disabled = !center.selected.size;
-        currentButton.innerHTML = `${icon('play')} Iniciar sequência`;
+        currentButton.innerHTML = `${icon('play')} ${renewalMode() ? 'Iniciar lembretes' : 'Iniciar sequência'}`;
         window.lucide?.createIcons();
       }
     }

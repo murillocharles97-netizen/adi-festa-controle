@@ -217,12 +217,29 @@ window.CustomerSubscriptions = (() => {
     const status = effectiveStatus(item, from), expiry = new Date(item.expiresAt || 0).getTime();
     return statuses.includes(status) && (!clientId || item.clientId === clientId) && expiry >= new Date(from).getTime() && (!to || expiry <= new Date(to).getTime());
   });
+  // Dashboards count days on the São Paulo civil calendar (the same one used to compute
+  // vigências), so "vence hoje" never depends on the device clock zone. Stored instants
+  // (expiresAt) and effectiveStatus keep their meaning: only the day grouping is civil.
+  const civilDay = (value) => {
+    const instant = new Date(value);
+    if (value == null || value === "" || !Number.isFinite(instant.getTime())) return null;
+    const local = calendarDate(instant);
+    return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  };
+  const daysUntil = (value, reference = now()) => {
+    const target = civilDay(timestampValue(value)), today = civilDay(reference);
+    return target === null || today === null ? null : Math.round((target - today) / 86400000);
+  };
+  const civilDayEnd = (reference = now(), plusDays = 0) => {
+    const day = civilDay(reference);
+    if (day === null) return new Date(reference).toISOString();
+    const next = new Date(day + (Math.max(0, number(plusDays)) + 1) * 86400000).toISOString().slice(0, 10);
+    return new Date(calendarInstant(next).getTime() - 1).toISOString();
+  };
   const metrics = (reference = now(), rows = list()) => {
-    const endToday = new Date(reference); endToday.setHours(23, 59, 59, 999);
-    const end7 = new Date(endToday); end7.setDate(end7.getDate() + 7);
     const active = rows.filter((item) => effectiveStatus(item, reference) === "active");
-    const dueToday = active.filter((item) => new Date(item.expiresAt) <= endToday);
-    const due7 = active.filter((item) => new Date(item.expiresAt) > endToday && new Date(item.expiresAt) <= end7);
+    const dueToday = active.filter((item) => daysUntil(item.expiresAt, reference) === 0);
+    const due7 = active.filter((item) => { const days = daysUntil(item.expiresAt, reference); return days >= 1 && days <= 7; });
     const expired = rows.filter((item) => effectiveStatus(item, reference) === "expired");
     return { dueToday: dueToday.length, due7: due7.length, expired: expired.length, forecastValue: [...dueToday, ...due7].reduce((sum, item) => sum + number(item.contractedPrice), 0) };
   };
@@ -240,8 +257,7 @@ window.CustomerSubscriptions = (() => {
     return remote || list().filter((item) => effectiveStatus(item) === status);
   }
   async function loadExpiring(days = 7, reference = now(), limit = 50) {
-    const end = new Date(reference); end.setDate(end.getDate() + Math.max(0, number(days))); end.setHours(23, 59, 59, 999);
-    return loadUpcoming({ from: reference, to: end.toISOString(), status: "active", limit });
+    return loadUpcoming({ from: reference, to: civilDayEnd(reference, days), status: "active", limit });
   }
   async function loadExpired(reference = now(), limit = 50) {
     if (!window.SyncFirebase?.queryCustomerSubscriptions)
@@ -261,30 +277,142 @@ window.CustomerSubscriptions = (() => {
   }
   async function loadDashboardMetrics(reference = now()) {
     const [due7, expired] = await Promise.all([loadExpiring(7, reference, 50), loadExpired(reference, 50)]);
-    const endToday = new Date(reference); endToday.setHours(23, 59, 59, 999);
     return {
-      dueToday: due7.filter((item) => new Date(item.expiresAt) <= endToday).length,
-      due7: due7.filter((item) => new Date(item.expiresAt) > endToday).length,
+      dueToday: due7.filter((item) => daysUntil(item.expiresAt, reference) === 0).length,
+      due7: due7.filter((item) => daysUntil(item.expiresAt, reference) >= 1).length,
       expired: expired.length,
       forecastValue: due7.reduce((sum, item) => sum + number(item.contractedPrice), 0),
+      // A limited read (50 per query) cannot prove it is a total.
+      limited: due7.length >= 50 || expired.length >= 50,
     };
   }
   async function loadHomeMetrics(reference = now()) {
-    return homeMetrics(await loadExpiring(7, reference, 50), reference);
+    return homeMetrics(await loadExpiring(7, reference, 50), reference, 50);
   }
-  function homeMetrics(due, reference) {
-    const endToday = new Date(reference);
-    endToday.setHours(23, 59, 59, 999);
+  function homeMetrics(due, reference, limit = null) {
     return {
-      dueToday: due.filter((item) => new Date(item.expiresAt) <= endToday).length,
-      due7: due.filter((item) => new Date(item.expiresAt) > endToday).length,
+      limited: Number.isFinite(limit) && due.length >= limit,
+      dueToday: due.filter((item) => daysUntil(item.expiresAt, reference) === 0).length,
+      due7: due.filter((item) => daysUntil(item.expiresAt, reference) >= 1).length,
       forecastValue: due.reduce((sum, item) => sum + number(item.contractedPrice), 0),
       clientIds: [...new Set(due.map((item) => item.clientId).filter(Boolean))],
     };
   }
+  // Renewals board (presentation only). It never writes and never renews.
+  const searchable = (value) => String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const BOARD_BUCKETS = ["active", "dueToday", "next7", "expired", "paused", "renewedRecently"];
+  function board(rows = list(), { reference = now(), recentDays = 30, query = "", describe = null } = {}) {
+    const needle = searchable(query), digits = String(query || "").replace(/\D/g, "");
+    const matches = (item) => {
+      if (!needle) return true;
+      const extra = String(describe?.(item) || "");
+      return searchable(`${item.label || ""} ${extra}`).includes(needle) ||
+        (digits.length >= 3 && extra.replace(/\D/g, "").includes(digits));
+    };
+    const buckets = Object.fromEntries(BOARD_BUCKETS.map((key) => [key, []]));
+    const recentLimit = Math.max(1, number(recentDays, 30));
+    for (const source of rows || []) {
+      if (!source || source.deletedAt || source.active === false || !matches(source)) continue;
+      const status = effectiveStatus(source, reference), days = daysUntil(source.expiresAt, reference);
+      const row = { ...source, effectiveStatus: status, daysUntil: days };
+      if (status === "active") {
+        buckets.active.push(row);
+        if (days === 0) buckets.dueToday.push(row);
+        else if (days !== null && days >= 1 && days <= 7) buckets.next7.push(row);
+      } else if (status === "expired") buckets.expired.push(row);
+      else if (status === "paused") buckets.paused.push(row);
+      const renewedAgo = source.lastRenewedAt ? -daysUntil(source.lastRenewedAt, reference) : null;
+      if (status !== "cancelled" && Number.isFinite(renewedAgo) && renewedAgo >= 0 && renewedAgo <= recentLimit)
+        buckets.renewedRecently.push({ ...row, renewedDaysAgo: renewedAgo });
+    }
+    const expiry = (item) => new Date(timestampValue(item.expiresAt) || 0).getTime();
+    ["active", "dueToday", "next7", "paused"].forEach((key) => buckets[key].sort((a, b) => expiry(a) - expiry(b)));
+    buckets.expired.sort((a, b) => expiry(b) - expiry(a));
+    buckets.renewedRecently.sort((a, b) => new Date(b.lastRenewedAt) - new Date(a.lastRenewedAt));
+    const clientIds = Object.fromEntries(BOARD_BUCKETS.map((key) => [key, [...new Set(buckets[key].map((item) => item.clientId).filter(Boolean))]]));
+    const counts = Object.fromEntries(BOARD_BUCKETS.map((key) => [key, buckets[key].length]));
+    return {
+      reference, buckets, counts, clientIds,
+      forecastValue: [...buckets.dueToday, ...buckets.next7].reduce((sum, item) => sum + number(item.contractedPrice), 0),
+      expiredValue: buckets.expired.reduce((sum, item) => sum + number(item.contractedPrice), 0),
+    };
+  }
   // Presentation only. Checkout and sale application use the V228 methods above.
   const visible = (item) => window.SpaceContext?.showsRenewal?.(item) ?? true;
-  let spaceRead;
+  let spaceRead, spaceLoaded = null;
+  const BOARD_PAGE = 50, BOARD_MAX_PAGES = 10, BOARD_STATUSES = ["active", "expired", "paused"];
+  // Rows for the Renovações screen plus how much of the business they prove to cover.
+  // complete=false means the numbers are a lower bound and the screen must say so.
+  // Rows of the given authorized spaces (Renovações "Todos os espaços"), by the record's origin space.
+  function inSpaces(spaceIds) {
+    const context = window.SpaceContext, allowed = new Set((context?.customerSpaces?.() || []).map((space) => space.id));
+    const ids = new Set(spaceIds.filter((id) => allowed.has(id)));
+    return (item) => Boolean(context && !window.OperationalReadPolicy?.restricted?.() && window.TeamAccess?.canRoute?.("clientes") !== false &&
+      ids.has(context.recordSpace(item)));
+  }
+  async function loadBoardRows({ maxPages = BOARD_MAX_PAGES, spaceIds = null } = {}) {
+    const context = window.SpaceContext, sync = window.SyncFirebase, scope = context?.viewScope?.() ?? null;
+    const many = Array.isArray(spaceIds) && spaceIds.length > 0 && context?.scopesCustomers?.();
+    const filter = many ? inSpaces(spaceIds) : visible;
+    const local = (source, extra = {}) => ({ rows: list().filter(filter), source, complete: false, limitReached: false, localOnly: 0, scope, ...extra });
+    if (window.OperationalReadPolicy?.restricted?.()) return { ...local("restricted"), rows: [] };
+    // Signed in but no authorized space is loaded: nothing can be scoped, so nothing is counted.
+    if (context && context.snapshot?.().businessId && !context.activeId?.()) return { ...local("no-space"), rows: [] };
+    if (!navigator.onLine || !sync?.queryCustomerSubscriptions) return local("device");
+    if (many) {
+      // Each authorized space is read completely (paged by spaceId/financialSpaceId).
+      const results = await Promise.allSettled(spaceIds.map((id) => sync.queryRenewalsForSpace(id)));
+      if (scope !== context.viewScope()) throw Error("O espaço ativo mudou. Abra Renovações novamente.");
+      const ok = results.every((result) => result.status === "fulfilled");
+      return local(ok ? "space" : "device", { complete: ok });
+    }
+    if (context?.activeId?.() && context.scopesCustomers?.()) {
+      // Space read is complete (paged by spaceId/financialSpaceId until exhausted).
+      await refreshSpace();
+      const ok = spaceLoaded === scope && scope === context.viewScope();
+      return local(ok ? "space" : "device", { complete: ok });
+    }
+    const rows = new Map(), reference = now(), complete = {};
+    let lastActive = null;
+    // Each window is read in the order that keeps its most urgent rows first, so a capped
+    // read still has exact "hoje" / "7 dias" when the cap falls after day 7.
+    const windows = [
+      ["active", { status: "active", from: reference, direction: "asc" }],
+      ["staleActive", { status: "active", to: reference, direction: "desc" }],
+      ["expired", { status: "expired", direction: "desc" }],
+      ["paused", { status: "paused", direction: "asc" }],
+    ];
+    for (const [name, query] of windows) {
+      let cursor = null, pages = 0, hasMore = true;
+      while (hasMore && pages < maxPages) {
+        const page = await sync.queryCustomerSubscriptions({ ...query, limit: BOARD_PAGE, page: true, cursor, spaceView: true });
+        const items = Array.isArray(page) ? page : page?.items || [];
+        items.forEach((item) => rows.set(item.id, item));
+        if (name === "active" && items.length) lastActive = items.at(-1);
+        cursor = Array.isArray(page) ? null : page?.cursor || null;
+        hasMore = !Array.isArray(page) && Boolean(page?.hasMore) && Boolean(cursor);
+        pages += 1;
+      }
+      complete[name] = !hasMore;
+    }
+    const limitReached = Object.values(complete).some((value) => !value);
+    const pastWeek = lastActive && daysUntil(lastActive.expiresAt, reference) > 7;
+    const exact = {
+      active: complete.active, paused: complete.paused,
+      dueToday: complete.active || Boolean(pastWeek), next7: complete.active || Boolean(pastWeek),
+      expired: complete.staleActive && complete.expired, renewedRecently: !limitReached,
+    };
+    if (scope !== (context?.viewScope?.() ?? null)) throw Error("O espaço ativo mudou. Abra Renovações novamente.");
+    let localOnly = 0;
+    for (const item of list()) {
+      const cloud = rows.get(item.id);
+      // A renewal just made on this device may not be in the cloud read yet; never drop it silently.
+      if (cloud && new Date(item.updatedAt || 0) > new Date(cloud.updatedAt || 0)) rows.set(item.id, item);
+      else if (!cloud && !item.deletedAt && item.status !== "cancelled" && visible(item)) localOnly += 1;
+    }
+    return { rows: [...rows.values()].filter(visible), source: "cloud", complete: !limitReached, limitReached, exact,
+      limit: BOARD_PAGE * maxPages, localOnly, scope };
+  }
   function refreshSpace() {
     const context = window.SpaceContext, sync = window.SyncFirebase;
     if (!navigator.onLine || !context?.activeId?.() || !context.scopesCustomers() ||
@@ -293,8 +421,9 @@ window.CustomerSubscriptions = (() => {
     if (spaceRead?.scope === scope && (spaceRead.promise || Date.now() - spaceRead.updatedAt < 120000))
       return spaceRead.promise;
     const read = spaceRead = { scope, updatedAt: 0, promise: null };
-    read.promise = sync.queryRenewalsForSpace().then(() => { read.updatedAt = Date.now(); })
+    read.promise = sync.queryRenewalsForSpace().then(() => { read.updatedAt = Date.now(); spaceLoaded = scope; })
       .catch(error => {
+        if (spaceLoaded === scope) spaceLoaded = null;
         if (scope === context.viewScope()) console.warn("[Renovações] Não foi possível atualizar este espaço.", { code: error?.code || "offline" });
       }).finally(() => { read.promise = null; });
     return read.promise;
@@ -306,20 +435,21 @@ window.CustomerSubscriptions = (() => {
     hasUnassigned: (id) => forClient(id).some((item) => window.SpaceContext?.showsUnassignedRenewal?.(item)),
     loadForClient: (id) => window.SyncFirebase?.queryCustomerSubscriptions?.({ clientId: id, limit: 50, spaceView: true }),
     metrics: (reference = now()) => metrics(reference, list().filter(visible)),
+    board: (options = {}) => board(list().filter(visible), options),
+    loadBoardRows,
+    // Lets "Atualizar" bypass the 2-minute space read throttle (never cancels a read in flight).
+    invalidateSpace() { if (!spaceRead?.promise) spaceRead = null; },
     async loadHomeMetrics(reference = now()) {
       if (window.SpaceContext?.scopesCustomers?.()) {
         await refreshSpace();
         return view.metrics(reference);
       }
-      const end = new Date(reference);
-      end.setDate(end.getDate() + 7);
-      end.setHours(23, 59, 59, 999);
       const due = await window.SyncFirebase?.queryCustomerSubscriptions?.({
-        status: "active", from: reference, to: end.toISOString(), direction: "asc",
+        status: "active", from: reference, to: civilDayEnd(reference, 7), direction: "asc",
         limit: 50, spaceView: true,
       });
-      return due ? homeMetrics(due, reference) : view.metrics(reference);
+      return due ? homeMetrics(due, reference, 50) : view.metrics(reference);
     },
   };
-  return { view, duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, renewalPolicyVersion, originSpace, renewalSnapshot, requireRenewable, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
+  return { view, board, daysUntil, civilDayEnd, duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, renewalPolicyVersion, originSpace, renewalSnapshot, requireRenewable, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
 })();

@@ -349,3 +349,53 @@ test("desfazer venda recorrente restaura saldo e remove a primeira vigência", (
   assert.equal(data.clientes[0].saldo, 0);
   assert.ok(data.customerSubscriptionEvents.some(event => event.transition === "sale_reversed"));
 });
+
+const boardRows = () => [
+  // 23:30 in São Paulo is already the next day in UTC: it still expires "today" for the business.
+  { id: "today-late", clientId: "client-a", label: "Plano Mensal", status: "active", expiresAt: "2026-08-15T02:30:00.000Z", contractedPrice: 50 },
+  { id: "in-3", clientId: "client-a", label: "Academia", status: "active", expiresAt: "2026-08-17T15:00:00.000Z", contractedPrice: 30 },
+  { id: "in-8", clientId: "client-b", label: "IPTV", status: "active", expiresAt: "2026-08-22T15:00:00.000Z", contractedPrice: 25 },
+  { id: "expired", clientId: "client-c", label: "Pilates", status: "active", expiresAt: "2026-08-10T15:00:00.000Z", contractedPrice: 80 },
+  { id: "expired-older", clientId: "client-c", label: "Pilates antigo", status: "expired", expiresAt: "2026-07-01T15:00:00.000Z", contractedPrice: 10 },
+  { id: "paused", clientId: "client-d", label: "Aulas", status: "paused", expiresAt: "2026-08-16T15:00:00.000Z", contractedPrice: 99 },
+  { id: "cancelled", clientId: "client-e", label: "Cancelada", status: "cancelled", expiresAt: "2026-09-16T15:00:00.000Z", lastRenewedAt: "2026-08-13T15:00:00.000Z" },
+  { id: "renewed", clientId: "client-f", label: "Mensalidade", status: "active", expiresAt: "2026-09-09T15:00:00.000Z", lastRenewedAt: "2026-08-10T15:00:00.000Z", contractedPrice: 60 },
+  { id: "renewed-old", clientId: "client-g", label: "Mensalidade", status: "active", expiresAt: "2026-09-29T15:00:00.000Z", lastRenewedAt: "2026-06-01T15:00:00.000Z" },
+  { id: "deleted", clientId: "client-h", label: "Removida", status: "active", expiresAt: "2026-08-14T20:00:00.000Z", deletedAt: "2026-08-01T00:00:00.000Z" },
+];
+
+test("quadro de renovações agrupa por dia civil de São Paulo e prepara público da Central", () => {
+  const { context } = runtime(), rows = boardRows(), snapshot = structuredClone(rows);
+  const result = context.CustomerSubscriptions.board(rows, { reference: "2026-08-14T12:00:00.000Z" });
+  const ids = key => [...result.buckets[key].map(item => item.id)];
+  assert.deepEqual(ids("dueToday"), ["today-late"]);
+  assert.deepEqual(ids("next7"), ["in-3"]);
+  assert.deepEqual(ids("active"), ["today-late", "in-3", "in-8", "renewed", "renewed-old"]);
+  assert.deepEqual(ids("expired"), ["expired", "expired-older"]);
+  assert.deepEqual(ids("renewedRecently"), ["renewed"]);
+  assert.equal(result.buckets.renewedRecently[0].renewedDaysAgo, 4);
+  assert.equal(result.buckets.next7[0].daysUntil, 3);
+  assert.equal(result.counts.paused, 1);
+  assert.deepEqual([...result.clientIds.dueToday, ...result.clientIds.next7], ["client-a", "client-a"]);
+  assert.deepEqual([...result.clientIds.expired], ["client-c"]);
+  assert.equal(result.forecastValue, 80);
+  assert.equal(result.expiredValue, 90);
+  assert.deepEqual(rows, snapshot, "o quadro não altera as vigências originais");
+});
+
+test("quadro de renovações busca cliente sem acento ou por telefone e respeita o espaço", () => {
+  const { context, data } = runtime();
+  const clients = { "client-a": "Joana Conceição · (11) 98888-1234", "client-c": "Márcio Dias · (21) 97777-0000" };
+  const describe = item => clients[item.clientId] || "";
+  const search = query => context.CustomerSubscriptions.board(boardRows(), { reference: "2026-08-14T12:00:00.000Z", query, describe });
+  assert.deepEqual([search("conceicao").buckets.active.map(item => item.id)].flat(), ["today-late", "in-3"]);
+  assert.deepEqual([search("MARCIO").buckets.expired.map(item => item.id)].flat(), ["expired", "expired-older"]);
+  assert.deepEqual([...search("1234").clientIds.dueToday], ["client-a"]);
+  assert.equal(search("pilates").counts.expired, 2);
+  data.customerSubscriptions.push(...boardRows().map(item => ({ ...item, spaceId: item.clientId === "client-a" ? "space-1" : "space-2" })));
+  context.SpaceContext = { showsRenewal: item => item.spaceId === "space-1" };
+  const scoped = context.CustomerSubscriptions.view.board({ reference: "2026-08-14T12:00:00.000Z" });
+  assert.deepEqual([...scoped.buckets.active.map(item => item.id)], ["today-late", "in-3"]);
+  assert.equal(scoped.counts.expired, 0);
+  assert.equal(context.CustomerSubscriptions.daysUntil("2026-08-15T02:30:00.000Z", "2026-08-14T12:00:00.000Z"), 0);
+});

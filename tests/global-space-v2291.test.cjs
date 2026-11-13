@@ -216,7 +216,7 @@ test('the renewal overview counts only the active space and preserves legacy met
 test('cold renewal link reads use the authorized active space and discard late A → B → A results',async()=>{
   const f=fixture();try{
     const source=fs.readFileSync('js/firebase/sync.js','utf8');
-    const start=source.indexOf('async function queryRenewalsForSpace()');
+    const start=source.indexOf('async function queryRenewalsForSpace(');
     const end=source.indexOf('async function queryAllClientsForAction',start);
     assert(start>=0&&end>start);
     const {w,s}=f,calls=[],merged=[];
