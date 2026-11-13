@@ -9,6 +9,8 @@ const {stockKey}=require('./online-stock-reservation');
 const {salePlan}=require('../shared/exchange-credit');
 const Model=require('../shared/online-store');
 const {allowsExchangeProduct}=require('../shared/exchange-product-scope');
+const {restricted,pick}=require('../shared/operational-privacy-policy');
+const {visiblePerformanceRecord}=require('../shared/permission-policy');
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const generation=value=>value?.workspaceGeneration??0;
@@ -92,6 +94,14 @@ function creditService(db){
   };
   const signal=(tx,c,now)=>tx.set(c.root.collection('syncMetadata').doc('last-sync'),{...scope(c),revision:now.toDate().toISOString(),updatedAt:now,changedCollections:['sales','products','productVariants','stockMovements'],collectionVersions:Object.fromEntries(['sales','products','productVariants','stockMovements'].map(n=>[n,now.toDate().toISOString()]))},{merge:true});
   const safeSale=s=>({id:s.id,businessId:s.businessId,spaceId:s.spaceId,workspaceGeneration:s.workspaceGeneration,operationId:s.operationId,status:s.status,clienteId:s.clienteId,clienteNome:s.clienteNome,itens:s.itens,valorTotal:s.valorTotal,valorFinal:s.valorFinal,formaPagamento:s.formaPagamento,exchangeCreditUsedCents:s.exchangeCreditUsedCents,cashReceivedCents:s.cashReceivedCents,createdAt:s.createdAt.toDate().toISOString(),data:s.createdAt.toDate().toISOString(),actorUid:s.actorUid,source:s.source});
+  async function confirmationSale(tx,c,sale){
+    if(restricted(c.member)){
+      const settings=(await tx.get(c.root.collection('settings').doc('default'))).data();
+      if(!visiblePerformanceRecord(c.member,sale,new Date(),c.business.timezone||settings?.timezone||'America/Sao_Paulo'))
+        return pick(sale,['id','businessId','spaceId','workspaceGeneration','operationId','status','clienteId']);
+    }
+    return safeSale(sale);
+  }
   async function prepare(tx,c,input){
     const stock=await stocksFor(tx,c,input.items),credits=await creditsFor(tx,c);
     let plan;try{plan=salePlan(input,stock.rows,credits);}catch(error){fail('failed-precondition',error.message);}
@@ -105,7 +115,7 @@ function creditService(db){
     return db.runTransaction(async tx=>{
       const c=await context(tx,request),saleRef=c.root.collection('sales').doc(saleId),markerRef=c.root.collection('processedOperations').doc(operationId);
       const [existing,marker]=await Promise.all([tx.get(saleRef),tx.get(markerRef)]);
-      if(existing.exists||marker.exists){const s=existing.data(),m=marker.data();if(!s||!m||s.operationId!==operationId||s.actorUid!==c.uid||s.exchangeCreditRequestHash!==checksum||m.checksum!==checksum||m.eventKind!=='sale_exchange_credit'||m.saleId!==saleId||m.spaceId!==c.spaceId||m.businessId!==c.bid||generation(m)!==generation(c.business)||s.spaceId!==c.spaceId||s.businessId!==c.bid||generation(s)!==generation(c.business)||s.clienteId!==c.clientId)fail('already-exists','Identificador em uso ou recibo incompleto.');return {saleId,operationId,replayed:true,sale:safeSale(s),receipt:{operationId,checksum,status:'processed'}};}
+      if(existing.exists||marker.exists){const s=existing.data(),m=marker.data();if(!s||!m||s.operationId!==operationId||s.actorUid!==c.uid||s.exchangeCreditRequestHash!==checksum||m.checksum!==checksum||m.eventKind!=='sale_exchange_credit'||m.saleId!==saleId||m.spaceId!==c.spaceId||m.businessId!==c.bid||generation(m)!==generation(c.business)||s.spaceId!==c.spaceId||s.businessId!==c.bid||generation(s)!==generation(c.business)||s.clienteId!==c.clientId)fail('already-exists','Identificador em uso ou recibo incompleto.');return {saleId,operationId,replayed:true,sale:await confirmationSale(tx,c,s),receipt:{operationId,checksum,status:'processed'}};}
       const p=await prepare(tx,c,d);
       if(d.fingerprint!==p.fingerprint)fail('failed-precondition','Preço, estoque ou crédito mudou. Revise novamente.');
       const now=Timestamp.now(),stamp={...scope(c),actorUid:c.uid,operationId,createdAt:now,updatedAt:now},sale={...stamp,id:saleId,idempotencyKey:operationId,ownerId:c.uid,updatedByUid:c.uid,entityType:'sales',schemaVersion:3,version:1,source:'exchange_credit_checkout',status:'pago',formaPagamento:p.plan.paymentMethod||'credito_troca',clienteId:c.clientId,clienteNome:c.client.nome||'Cliente',data:now,paidAt:now,
@@ -120,7 +130,7 @@ function creditService(db){
       return {saleId,operationId,replayed:false,sale:safeSale(sale),receipt:{operationId,checksum,status:'processed'},stockChanges:p.stock.rows.map(r=>({productId:r.productId,variantId:r.variantId,stock:r.after}))};
     });
   }
-  async function status(request){return db.runTransaction(async tx=>{const c=await context(tx,request),d=request.data||{},saleId=validId(d.saleId,'Venda'),operationId=validId(d.operationId,'Operação');const [s,m]=await Promise.all([tx.get(c.root.collection('sales').doc(saleId)),tx.get(c.root.collection('processedOperations').doc(operationId))]);if(!s.exists&&!m.exists)return {committed:false};const sale=s.data(),marker=m.data();if(!sale||!marker||sale.operationId!==operationId||sale.actorUid!==c.uid||sale.businessId!==c.bid||generation(sale)!==generation(c.business)||sale.spaceId!==c.spaceId||sale.clienteId!==c.clientId||marker.eventKind!=='sale_exchange_credit'||marker.checksum!==sale.exchangeCreditRequestHash||marker.saleId!==saleId||marker.businessId!==c.bid||marker.spaceId!==c.spaceId||generation(marker)!==generation(c.business))fail('failed-precondition','Recibo inconsistente.');return {committed:true,saleId,operationId,sale:safeSale(sale),receipt:{operationId,checksum:marker.checksum,status:'processed'}};});}
+  async function status(request){return db.runTransaction(async tx=>{const c=await context(tx,request),d=request.data||{},saleId=validId(d.saleId,'Venda'),operationId=validId(d.operationId,'Operação');const [s,m]=await Promise.all([tx.get(c.root.collection('sales').doc(saleId)),tx.get(c.root.collection('processedOperations').doc(operationId))]);if(!s.exists&&!m.exists)return {committed:false};const sale=s.data(),marker=m.data();if(!sale||!marker||sale.operationId!==operationId||sale.actorUid!==c.uid||sale.businessId!==c.bid||generation(sale)!==generation(c.business)||sale.spaceId!==c.spaceId||sale.clienteId!==c.clientId||marker.eventKind!=='sale_exchange_credit'||marker.checksum!==sale.exchangeCreditRequestHash||marker.saleId!==saleId||marker.businessId!==c.bid||marker.spaceId!==c.spaceId||generation(marker)!==generation(c.business))fail('failed-precondition','Recibo inconsistente.');return {committed:true,saleId,operationId,sale:await confirmationSale(tx,c,sale),receipt:{operationId,checksum:marker.checksum,status:'processed'}};});}
   async function cancel(request){
     const d=request.data||{},saleId=validId(d.saleId,'Venda'),operationId=validId(d.operationId,'Operação de cancelamento'),checksum=hash(['cancel',...inputIdentity(d),saleId,operationId]);
     return db.runTransaction(async tx=>{

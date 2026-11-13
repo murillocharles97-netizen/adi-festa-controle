@@ -44,6 +44,8 @@ initializeApp();
 const db=getFirestore(),REGION='southamerica-east1';
 const saleRecoveries=require('./services/sale-recovery-service').saleRecoveryService(db,{FieldValue});
 const RECOVERY_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:3};
+exports.readOperationalWorkspace=onCall(RECOVERY_OPTIONS,request=>require('./services/operational-read-service').operationalReadService(db).read(request));
+exports.authorizeOperationalSaleRead=onCall(RECOVERY_OPTIONS,request=>require('./services/operational-read-service').operationalReadService(db).authorize(request));
 const operationalCommits=require('./services/operational-commit-service').operationalCommitService(db);
 const priorSales=require('./services/prior-sale-service').priorSaleService(db,{enabled:process.env.PRIOR_SALES_ENABLED!=='false'});
 exports.previewPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.preview(request));

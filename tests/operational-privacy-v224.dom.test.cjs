@@ -69,6 +69,6 @@ test('campaign operational DTO keeps stacking and discount semantics without old
 });
 test('editing a projected customer never invents a replacement for an undisclosed portal token',()=>{
  const vm=require('node:vm'),data={clientes:[{id:'c',nome:'Fictício',documento:'QA-only',estado:'SP'}]};
- const c={Utils:{uuid:()=> 'new-only-for-creation'},PhoneUtils:{normalizeBrazilianPhone:String},DB:{carregar:()=>data,alterar:f=>f(data)},TeamAccess:{has:()=>true}};c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync('js/clientes.js','utf8'),c);
+ const c={Utils:{uuid:()=> 'new-only-for-creation'},PhoneUtils:{normalizeBrazilianPhone:String},DB:{carregar:()=>data,alterar:f=>f(data)},TeamAccess:{has:()=>true},addEventListener(){}};c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync('js/clientes.js','utf8'),c);
  c.Clientes.salvar({id:'c',nome:'Fictício atualizado',documento:'QA-only',estado:'SP'});assert.equal(data.clientes[0].id,'c');assert.equal(data.clientes[0].portalRefToken,undefined);assert.equal(data.clientes[0].documento,'QA-only');
 });

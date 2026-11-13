@@ -4,6 +4,8 @@ const {HttpsError}=require('firebase-functions/v2/https');
 const {validId}=require('./workspace-reset-policy');
 const {operationalId}=require('../shared/operational-id');
 const {decideReceiptRoute}=require('./fiado-receipt-route');
+const {restricted}=require('../shared/operational-privacy-policy');
+const {visiblePerformanceRecord}=require('../shared/permission-policy');
 const deny=message=>{throw new HttpsError('permission-denied',message);};
 const iso=value=>value?.toDate?.().toISOString()||value||null;
 const money=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isSafeInteger(Math.round(value*100));
@@ -23,6 +25,8 @@ async function paymentConfirmationRead({tx,c,d,ref,now=new Date()}){
     tx.get(ref(c.bid,'clients',clientId)),tx.get(ref(c.bid,'settings','default')),
   ]);
   const marker=markerSnapshot.data(),event=eventSnapshot.data(),client=clientSnapshot.data(),settings=settingsSnapshot.data()||{},generation=c.business.workspaceGeneration??0;
+  if(restricted(c.member)&&!visiblePerformanceRecord(c.member,p,now,c.business.timezone||settings.timezone||'America/Sao_Paulo'))
+    deny('O comprovante de outro dia deve ser consultado pelo proprietário.');
   const confirmed=marker?.status==='processed'&&marker.eventKind==='payment'&&marker.authorizationVersion===1&&/^[a-f0-9]{64}$/.test(marker.requestHash||'')&&marker.businessId===c.bid&&(marker.workspaceGeneration??0)===generation&&(marker.actorUid||marker.ownerId)===(p.actorUid||p.ownerId)&&
     p.status==='applied'&&p.applicationStatus==='applied'&&p.financialAppliedAt&&p.financialOperationId===eventId&&!p.financialReversedAt&&!p.reversedAt&&
     event?.status==='applied'&&event.type==='payment_received'&&event.businessId===c.bid&&(event.workspaceGeneration??0)===generation&&event.operationId===operationId&&event.customerId===clientId&&event.sourceCollection==='payments'&&event.sourceDocumentId===paymentId&&

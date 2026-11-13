@@ -8,6 +8,8 @@ const {stockKey}=require('./online-stock-reservation');
 const {planExchange}=require('../shared/sale-exchange');
 const Model=require('../shared/online-store');
 const {allowsExchangeProduct}=require('../shared/exchange-product-scope');
+const {restricted}=require('../shared/operational-privacy-policy');
+const {visiblePerformanceRecord}=require('../shared/permission-policy');
 const fail=(code,message)=>{throw new HttpsError(code,message);};
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function saleExchangeService(db) {
@@ -26,6 +28,7 @@ function saleExchangeService(db) {
     validId(sale.spaceId,'Espaço');
     const space=(await tx.get(db.doc(`financialSpaces/${sale.spaceId}`))).data();
     if(!space||!belongsToWorkspace(space,bid)||space.active===false||space.capabilities?.sales!==true||(!owner&&member.spaceAccess!=='all'&&!member.allowedSpaceIds?.includes(sale.spaceId)))fail('permission-denied','Espaço não autorizado.');
+    await require('./operational-sale-access').assertOperationalSaleAccess(tx,db,{uid,bid,root,business,member},{...sale,id:sid},{purpose:mode==='undo'?'cancel':'exchange',grantId:d.operationalGrantId,operationId:d.operationId,allowOwnReceipt:mode==='lookup'||mode==='confirm'});
     return {uid,bid,sid,root,business,member,sale,space,actorName:String(member.displayName||member.name||u.data()?.displayName||u.data()?.name||uid).slice(0,120)};
   }
   async function prepare(tx,c,input) {
@@ -69,7 +72,7 @@ function saleExchangeService(db) {
   async function confirm(request){
     const input=request.data||{},id=validId(input.operationId,'Operação'),requestHash=hash([input.saleId,input.returns,input.replacements,input.reason,input.paymentMethod||null,input.fingerprint]);
     return db.runTransaction(async tx=>{
-      const c=await context(tx,request),ref=c.root.collection('saleExchanges').doc(id),marker=c.root.collection('processedOperations').doc(id);
+      const c=await context(tx,request,'confirm'),ref=c.root.collection('saleExchanges').doc(id),marker=c.root.collection('processedOperations').doc(id);
       const [existing,processed]=await Promise.all([tx.get(ref),tx.get(marker)]);
       if(existing.exists){const e=existing.data();if(e.requestHash!==requestHash||e.actorUid!==c.uid||e.originalSaleId!==c.sid)fail('already-exists','Identificador utilizado por outra troca.');const receipt=processed.data();if(!receipt||receipt.eventKind!=='sale_exchange'||receipt.checksum!==requestHash||receipt.businessId!==c.bid||receipt.spaceId!==c.sale.spaceId)fail('failed-precondition','Recibo incompleto; revisão necessária.');return {id,replayed:true};}
       if(processed.exists)fail('already-exists','Identificador de outra operação.');
@@ -95,10 +98,17 @@ function saleExchangeService(db) {
   }
   const safeEvent=data=>{const {requestHash,...v}=data;return {...v,createdAt:v.createdAt.toDate().toISOString()};};
   async function list(request){return db.runTransaction(async tx=>{const c=await context(tx,request),q=await tx.get(c.root.collection('saleExchanges').where('originalSaleId','==',c.sid).limit(101)),summary=(await tx.get(c.root.collection('saleExchangeSummaries').doc(c.sid))).data();return {items:q.docs.slice(0,100).map(s=>safeEvent(s.data())),hasMore:q.size>100,remainingQuantities:c.sale.itens.map((i,n)=>Math.max(0,Number(i.quantidade)-(summary?.returned?.[n]||0)))};});}
-  async function lookup(request){return db.runTransaction(async tx=>{const c=await context(tx,request),id=validId(request.data.operationId,'Operação');const [event,marker]=await Promise.all([tx.get(c.root.collection('saleExchanges').doc(id)),tx.get(c.root.collection('processedOperations').doc(id))]);if(!event.exists)return{found:false,retryAllowed:!marker.exists};const e=event.data();if(e.actorUid!==c.uid||e.originalSaleId!==c.sid||e.businessId!==c.bid||e.spaceId!==c.sale.spaceId||!marker.exists||marker.data().checksum!==e.requestHash)fail('permission-denied','Recibo de outra origem ou incompleto.');return {found:true,item:safeEvent(e)};});}
+  async function lookup(request){return db.runTransaction(async tx=>{const c=await context(tx,request,'lookup'),id=validId(request.data.operationId,'Operação');const [event,marker]=await Promise.all([tx.get(c.root.collection('saleExchanges').doc(id)),tx.get(c.root.collection('processedOperations').doc(id))]);if(!event.exists)return{found:false,retryAllowed:!marker.exists};const e=event.data();if(e.actorUid!==c.uid||e.originalSaleId!==c.sid||e.businessId!==c.bid||e.spaceId!==c.sale.spaceId||!marker.exists||marker.data().checksum!==e.requestHash)fail('permission-denied','Recibo de outra origem ou incompleto.');
+    if(restricted(c.member)){
+      const settings=(await tx.get(c.root.collection('settings').doc('default'))).data(),zone=c.business.timezone||settings?.timezone||'America/Sao_Paulo',now=new Date();
+      if(!visiblePerformanceRecord(c.member,c.sale,now,zone)||!visiblePerformanceRecord(c.member,e,now,zone,'createdAt'))
+        return {found:true,item:{id}};
+    }
+    return {found:true,item:safeEvent(e)};
+  });}
   async function adjustments(request){
     const uid=request.auth?.uid;if(!uid)fail('unauthenticated','Entre na sua conta.');const d=request.data||{},bid=validId(d.businessId,'Empresa'),spaceId=validId(d.spaceId,'Espaço');
-    return db.runTransaction(async tx=>{const root=db.doc(`businesses/${bid}`),[b,m,u,s]=await Promise.all([tx.get(root),tx.get(root.collection('members').doc(uid)),tx.get(db.doc(`users/${uid}`)),tx.get(db.doc(`financialSpaces/${spaceId}`))]);const business=b.data(),member=m.data(),space=s.data();if(!business||!member||member.status!=='active'||u.data()?.active!==true||u.data()?.businessId!==bid)fail('permission-denied','Vínculo ativo obrigatório.');assertWritable(business,d.workspaceGeneration??0);const owner=business.ownerId===uid&&member.role==='owner';if(!owner&&member.permissions?.['sales.create']!==true&&member.permissions?.['sales.viewAll']!==true)fail('permission-denied','Consulta operacional não autorizada.');if(!space||!belongsToWorkspace(space,bid)||space.active===false||space.capabilities?.sales!==true||!owner&&member.spaceAccess!=='all'&&!member.allowedSpaceIds?.includes(spaceId))fail('permission-denied','Espaço não autorizado.');let q=root.collection('saleExchangeMetrics').where('spaceId','==',spaceId).orderBy('__name__').limit(201);if(d.cursor)q=q.startAfter(validId(d.cursor,'Página'));const rows=await tx.get(q);return {businessId:bid,workspaceGeneration:business.workspaceGeneration??0,items:rows.docs.slice(0,200).filter(r=>(r.data().workspaceGeneration??0)===(business.workspaceGeneration??0)).map(r=>({...r.data(),createdAt:r.data().createdAt.toDate().toISOString()})),nextCursor:rows.size>200?rows.docs[199].id:null};});
+    return db.runTransaction(async tx=>{const root=db.doc(`businesses/${bid}`),[b,m,u,s]=await Promise.all([tx.get(root),tx.get(root.collection('members').doc(uid)),tx.get(db.doc(`users/${uid}`)),tx.get(db.doc(`financialSpaces/${spaceId}`))]);const business=b.data(),member=m.data(),space=s.data();if(!business||!member||member.status!=='active'||u.data()?.active!==true||u.data()?.businessId!==bid)fail('permission-denied','Vínculo ativo obrigatório.');assertWritable(business,d.workspaceGeneration??0);const owner=business.ownerId===uid&&member.role==='owner';if(!require('../shared/permission-policy').has(member,'performance.history')||!owner&&member.permissions?.['sales.create']!==true&&member.permissions?.['sales.viewAll']!==true)fail('permission-denied','Consulta operacional não autorizada.');if(!space||!belongsToWorkspace(space,bid)||space.active===false||space.capabilities?.sales!==true||!owner&&member.spaceAccess!=='all'&&!member.allowedSpaceIds?.includes(spaceId))fail('permission-denied','Espaço não autorizado.');let q=root.collection('saleExchangeMetrics').where('spaceId','==',spaceId).orderBy('__name__').limit(201);if(d.cursor)q=q.startAfter(validId(d.cursor,'Página'));const rows=await tx.get(q);return {businessId:bid,workspaceGeneration:business.workspaceGeneration??0,items:rows.docs.slice(0,200).filter(r=>(r.data().workspaceGeneration??0)===(business.workspaceGeneration??0)).map(r=>({...r.data(),createdAt:r.data().createdAt.toDate().toISOString()})),nextCursor:rows.size>200?rows.docs[199].id:null};});
   }
   async function checkUndo(request){return db.runTransaction(async tx=>{const c=await context(tx,request,'undo'),summary=await tx.get(c.root.collection('saleExchangeSummaries').doc(c.sid));return {allowed:!summary.exists&&c.sale.source!=='exchange_credit_checkout',reason:summary.exists?'sale-has-exchanges':c.sale.source==='exchange_credit_checkout'?'exchange-credit-tender':null};});}
   return {quote,confirm,list,lookup,adjustments,checkUndo};
