@@ -86,7 +86,7 @@
     'customers.create':'Cadastros novos com saldo zero. Não permite editar clientes existentes.',
     'customers.edit':'Atualiza dados cadastrais, como nome e telefone. Não altera saldos.',
     'customers.archive':'Desativa ou reativa o cadastro, preservando dívidas e histórico.',
-    'customers.receiveDebt':'Registra pagamentos de Fiado sem liberar todo o Financeiro.',
+    'customers.receiveDebt':'Registra pagamentos de Fiado sem liberar todo o Financeiro. O recebimento pelo card exige acesso ao histórico e uma conta comprovada no espaço autorizado.',
     'customers.adjustBalance':'Corrige o saldo devedor. Não é uma simples edição de cadastro.',
     'products.view':'Consulta os produtos dos espaços autorizados.',
     'products.edit':'Cadastra, edita e gerencia produtos, preservando seus vínculos históricos.',
@@ -125,6 +125,13 @@
     const linkedContent=!linkedRows.length?'':direct.length?`<details class="tp-linked-list" data-tp-extra="${group.id}" ${s.open.has('extras:'+group.id)?'open':''}><summary>${icon('link-2')}Ações incluídas nestes acessos${icon('chevron-down')}</summary>${linkedMarkup}</details>`:`<div class="tp-linked-list">${linkedMarkup}</div>`;
     return `<details class="tp-section ${group.id==='goals'?'tp-section-goals':''}" data-tp-group="${group.id}" ${s.open.has(group.id)?'open':''}><summary><span class="tp-section-icon">${icon(group.icon)}</span><span class="tp-category-name">${group.name}<small>${direct.length?'Permissões ativas':'Ações vinculadas aos acessos existentes'}</small></span><span class="tp-count" aria-label="${count} ${direct.length?'permissões ativas':'ações disponíveis'}">${count}</span>${icon('chevron-down')}</summary><div class="tp-section-content">${guidance}${group.notice?`<details class="tp-category-help"><summary>${icon('info')}Sobre este acesso</summary><p>${esc(group.notice)}</p></details>`:''}${direct.map(r=>permissionRow(r,s)).join('')}${group.id==='goals'?dashboardPreview(s):''}${linkedContent}</div></details>`;
   }
+  function readPolicyTransition(s) {
+    const privacy = window.OperationalPrivacyPolicy;
+    return Boolean(privacy?.restricted({ ...s.draft, permissionsVersion: 3 }) && !privacy.restricted(s.original));
+  }
+  function readPolicyBlocked(s) {
+    return readPolicyTransition(s) && context().business?.operationalReadPolicyVersion !== 1;
+  }
   function updateInsets(){
     const page=q('[data-permission-editor]');if(!page)return;
     const viewport=window.visualViewport,keyboard=viewport?Math.max(0,innerHeight-viewport.height-viewport.offsetTop):0;
@@ -143,7 +150,7 @@
     if(Number(member.permissionsVersion||1)<3)legacy='As opções refletem os acessos já autorizados. Nenhum funcionário foi alterado automaticamente. Para limitar o histórico, revise as escolhas e confirme antes de salvar. Dados já obtidos em dispositivos não são apagados.';
     if(Number(member.permissionsVersion||1)<2&&M.explicit(member)['customers.edit'])legacy+=' O acesso antigo a editar clientes já incluía cadastrar e desativar. Esses acessos foram preservados nesta revisão e podem ser separados explicitamente.';
     if(Array.isArray(member.permissions))legacy='Este vínculo usa um formato legado que o servidor não autoriza como mapa de permissões. O original foi preservado. Revise e confirme os acessos antes de salvar.';
-    const transitionPending=!owner&&!s.draft.permissions['performance.history']&&Number(context().business?.operationalReadPolicyVersion||0)<1;
+    const transitionPending=readPolicyBlocked(s);
     root.innerHTML=`<section class="tp-page" data-permission-editor aria-labelledby="tp-title"><nav class="tp-breadcrumb" aria-label="Localização"><button type="button" data-tp-back>${icon('arrow-left')}Equipe</button><span aria-hidden="true">/</span><span>Permissões</span></nav>
       <header class="tp-heading"><div><span class="tp-eyebrow">PESSOAS E ACESSOS</span><h1 id="tp-title" tabindex="-1">Permissões da equipe</h1><p>Defina o que cada pessoa pode ver e fazer na sua empresa.</p></div><button type="button" class="tp-button tp-help" data-tp-help aria-label="Como funcionam as permissões?">${icon('circle-help')}<span>Como funciona</span></button></header>
       <article class="tp-identity"><span class="tp-avatar" aria-hidden="true">${esc(initials(member.name))}</span><div class="tp-person"><div class="tp-name"><h2>${esc(member.name||'Funcionário')}</h2><span class="tp-status ${member.status==='active'?'':'is-inactive'}">${status}</span></div><p>${icon('user-round')}${esc(roleLabel(member.role))}</p><p>${icon('store')}${esc(name)}</p></div><button class="tp-button tp-switch" type="button" data-tp-switch>${icon('arrow-left-right')}<span>Trocar funcionário</span></button></article>
@@ -151,10 +158,10 @@
       <section class="tp-spaces" aria-labelledby="tp-spaces-title"><div class="tp-block-heading"><span>${icon('layers')}</span><div><h2 id="tp-spaces-title">Espaços autorizados</h2><p>Escolha onde esta pessoa poderá trabalhar.</p></div></div><div class="tp-space-mode" role="group" aria-label="Alcance dos espaços">${[['selected','Espaços específicos'],['all','Todos os espaços']].map(([value,label])=>`<label><input type="radio" name="tp-space-mode" value="${value}" ${s.draft.spaceAccess===value?'checked':''} ${owner||s.invalid||s.busy?'disabled':''}><span>${label}</span></label>`).join('')}</div>${s.draft.spaceAccess==='all'?'<p class="tp-note">Inclui os espaços atuais e os que forem criados no futuro nesta empresa.</p>':`<div class="tp-space-chips">${s.spaces.map(space=>`<label><input type="checkbox" data-tp-space="${esc(space.id)}" ${s.draft.allowedSpaceIds.includes(space.id)?'checked':''} ${owner||s.invalid||s.busy?'disabled':''}><span>${icon('store')}${esc(space.name)}</span></label>`).join('')||'<p>Nenhum espaço disponível. Não é possível salvar sem um espaço autorizado.</p>'}</div>`}</section>
       <div class="tp-block-heading tp-permissions-heading"><span>${icon('shield-check')}</span><div><h2>O que esta pessoa pode fazer</h2><p>Abra cada área para revisar os acessos.</p></div></div>
       <div class="tp-permission-grid">${groups.map(group=>category(group,s)).join('')}</div>
-      ${transitionPending?'<aside class="tp-rollout-note">'+icon('shield-check')+'<div><b>Restrição de histórico em preparação</b><p>Você pode revisar as opções. Para aplicar um perfil sem histórico, a empresa precisa concluir a preparação de segurança. Os acessos atuais serão mantidos.</p></div></aside>':''}
+      ${transitionPending?'<aside class="tp-rollout-note" role="status">'+icon('shield-check')+'<div><b>Alterações ainda não podem ser salvas</b><p>Para aplicar um perfil sem histórico, a empresa precisa concluir a preparação de segurança. Os acessos atuais continuam em vigor.</p>'+(M.explicit(member)['performance.history']?'<p>Para salvar outras alterações agora, mantenha a opção de histórico já autorizada.</p>':'')+'</div></aside>':''}
       ${legacy?`<details class="tp-compat"><summary>${icon('shield-check')}Acessos atuais preservados${icon('chevron-down')}</summary><p>${esc(legacy)}</p></details>`:''}
       <div class="tp-feedback ${s.feedbackType==='error'?'is-error':''}" data-tp-feedback role="${s.feedbackType==='error'?'alert':'status'}" aria-live="polite">${esc(s.message||'')}</div>
-      <footer class="tp-savebar"><div><b>${pending?'Alterações não salvas':'Acessos atuais preservados'}</b><small>${pending?diff.added.length+' a liberar · '+diff.removed.length+' a remover':'Nada muda sem a sua confirmação'}</small></div><button class="tp-button" type="button" data-tp-back ${s.busy?'disabled':''}>Cancelar</button><button class="tp-button tp-primary" type="button" data-tp-save ${owner||!pending||s.busy||s.invalid?'disabled':''}>${icon('check')}${s.busy?'Salvando…':'Salvar permissões'}</button></footer></section>`;
+      <footer class="tp-savebar"><div><b>${pending?'Alterações não salvas':'Acessos atuais preservados'}</b><small>${pending?diff.added.length+' a liberar · '+diff.removed.length+' a remover':'Nada muda sem a sua confirmação'}</small></div><button class="tp-button" type="button" data-tp-back ${s.busy?'disabled':''}>Cancelar</button><button class="tp-button tp-primary" type="button" data-tp-save ${owner||!pending||s.busy||s.invalid||transitionPending?'disabled':''}>${icon('check')}${s.busy?'Salvando…':'Salvar permissões'}</button></footer></section>`;
     bind(s);updateInsets();window.lucide?.createIcons();
   }
 
@@ -181,11 +188,11 @@
   }
   async function save(s) {
     if(window.AdiFestaBuild?.permissionsV2EditingPaused){s.feedbackType='error';s.message='A edição de permissões está pausada para manutenção. Os acessos atuais foram preservados.';render(s);return;}
-    if (!valid(s) || s.invalid || s.busy || !dirty(s)) return;
+    if (!valid(s) || s.invalid || s.busy || !dirty(s) || readPolicyBlocked(s)) return;
     let payload;
     try { payload = M.serialize(s.original, s.draft); }
     catch (error) { s.feedbackType='error'; s.message = error.message; render(s); q("[data-tp-feedback]").scrollIntoView({ block: "center" }); return; }
-    const privacy=window.OperationalPrivacyPolicy,transition=privacy?.restricted(payload)&&!privacy.restricted(s.original),conflicts=privacy?.incompatibleGrants(payload)||[];
+    const transition=readPolicyTransition(s),conflicts=window.OperationalPrivacyPolicy?.incompatibleGrants(payload)||[];
     if(conflicts.length){s.feedbackType='error';s.message='O perfil sem histórico não pode manter estes acessos gerenciais: '+conflicts.map(k=>labels[k]||k).join(', ')+'. Revise as escolhas; nenhum acesso foi alterado.';render(s);return;}
     if(transition){payload.confirmReadPolicyTransition=true;}
     const diff = M.difference(M.explicit(s.original), s.draft.permissions);

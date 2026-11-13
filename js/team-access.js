@@ -26,7 +26,7 @@
     vender: "sales.create", clientes: "customers.view", fiados: "customers.receiveDebt", crm: "reports.view",
     cobrancas: "customers.receiveDebt", produtos: "products.view", campanhas: "reports.view",
     financeiro: "financial.view", catalogo: "products.edit", pedidos: "sales.viewAll",
-    historico: "sales.create", relatorios: "reports.view", equipe: "team.view", configuracoes: "settings.manage",
+    relatorios: "reports.view", equipe: "team.view", configuracoes: "settings.manage",
     planos: "billing.manage", cupons: "platform.admin",
   });
   const normalizeRole = (role) => ({ admin: "manager", cashier: "seller", viewer: "seller" })[String(role || "").toLowerCase()] || String(role || "seller").toLowerCase();
@@ -88,6 +88,7 @@
   }
   const canRoute = (route) => {
     if (['relatorios','crm','campanhas'].includes(route) && !has('performance.history')) return false;
+    if (route === 'historico') return has('sales.create') || (has('sales.viewAll') && has('performance.history'));
     return !ROUTE_PERMISSIONS[route] || has(ROUTE_PERMISSIONS[route]);
   };
   const ACTION_PERMISSIONS = Object.freeze({

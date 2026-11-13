@@ -1,9 +1,9 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
 const {JSDOM}=require('jsdom'),Policy=require('../functions/src/shared/permission-policy');
-function setup(width=390,member={}){
+function setup(width=390,member={},business={}){
  const dom=new JSDOM('<main id="app"></main><div id="modal"></div>',{url:'https://qa.example.invalid',runScripts:'outside-only'}),w=dom.window;
- let context={businessId:'qa',businessName:'Loja fictícia QA',role:'owner',permissions:['*']},calls=[],resolve,reject;
+ let context={businessId:'qa',businessName:'Loja fictícia QA',business,role:'owner',permissions:['*']},calls=[],resolve,reject;
  w.BusinessContext={get:()=>context};w.FirebaseSession={user:{uid:'qa-owner'}};w.matchMedia=()=>({matches:width<=640});w.lucide={createIcons(){}};w.HTMLElement.prototype.scrollIntoView=function(){};
  w.SpaceContext={homeSpaces:()=>[{id:'qa-a',name:'Loja QA',businessId:'qa'},{id:'qa-b',name:'QA adicional',businessId:'qa'}]};w.VeconiPermissionPolicy=Policy;
  for(const file of ['js/team-permission-model.js','js/team-access.js','js/team-permission-editor.js'])w.eval(fs.readFileSync(file,'utf8'));
@@ -35,4 +35,29 @@ test('session switch during pending save cannot announce old success or alter ne
 });
 test('compatible rollback pauses permission saves but keeps existing access and drafts intact',async()=>{
  const h=setup();h.w.AdiFestaBuild={permissionsV2EditingPaused:true};const input=h.q('[data-tp-key="customers.create"]');input.checked=true;input.dispatchEvent(new h.w.Event('change'));h.click('[data-tp-save]');assert.equal(h.calls.length,0);assert.match(h.w.document.body.textContent,/pausada para manutenção/);assert.equal(h.q('[data-tp-key="customers.create"]').checked,true);await h.close();
+});
+test('legacy membership preserves draft when restricting history requires business preparation',async()=>{
+ const member={permissionsVersion:1,permissions:{'sales.create':true,'customers.view':true}};
+ const h=setup(390,member);
+ h.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ h.click('[data-tp-key="performance.history"]');
+ h.click('[data-tp-key="customers.receiveDebt"]');
+ assert.equal(h.q('[data-tp-save]').disabled,true);
+ assert.match(h.q('[data-permission-editor]').textContent,/Alterações ainda não podem ser salvas/);
+ assert.equal(h.q('[data-tp-key="customers.receiveDebt"]').checked,true);
+ assert.equal(h.calls.length,0);
+ h.click('[data-tp-key="performance.history"]');
+ assert.equal(h.q('[data-tp-save]').disabled,false);
+ h.click('[data-tp-save]');h.click('[data-tp-dialog-confirm]');
+ assert.equal(h.calls[0].input.permissions['performance.history'],true);
+ assert.equal(h.calls[0].input.permissions['customers.receiveDebt'],true);
+ assert.equal(h.calls[0].input.confirmReadPolicyTransition,undefined);
+ h.finish();await h.close();
+
+ const prepared=setup(390,member,{operationalReadPolicyVersion:1});
+ prepared.w.OperationalPrivacyPolicy=require('../functions/src/shared/operational-privacy-policy');
+ prepared.click('[data-tp-key="performance.history"]');
+ prepared.click('[data-tp-save]');prepared.click('[data-tp-dialog-confirm]');
+ assert.equal(prepared.calls[0].input.confirmReadPolicyTransition,true);
+ prepared.finish();await prepared.close();
 });

@@ -48,6 +48,21 @@ test("cache privado remove custo e lucro de forma independente", () => {
   assert.equal("lucro" in data.vendas[0], false);
 });
 
+test("Histórico aceita consulta operacional sem conceder criação de vendas", () => {
+  const member = { role: "seller", status: "active", permissionsVersion: 3,
+    permissions: { "sales.viewAll": true, "sales.create": false, "performance.daily": true, "performance.history": true } };
+  const sandbox = loadTeamAccess({ BusinessContext: { get: () => ({ role: "seller", member }) } });
+  assert.equal(sandbox.TeamAccess.canRoute("historico"), true);
+  assert.equal(sandbox.TeamAccess.canRoute("vender"), false);
+  assert.equal(sandbox.TeamAccess.has("sales.cancel"), false);
+  assert.equal(sandbox.TeamAccess.canRoute("financeiro"), false);
+  member.permissions["performance.history"] = false;
+  assert.equal(sandbox.TeamAccess.canRoute("historico"), false);
+  member.permissions["performance.history"] = true;
+  member.permissions["sales.viewAll"] = false;
+  assert.equal(sandbox.TeamAccess.canRoute("historico"), false);
+});
+
 test("integração V150 contém ator, isolamento de cache e coleções financeiras protegidas", () => {
   const sync = fs.readFileSync("js/firebase/sync.js", "utf8");
   const storage = fs.readFileSync("js/storage.js", "utf8");
