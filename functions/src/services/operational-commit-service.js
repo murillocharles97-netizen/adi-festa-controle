@@ -62,6 +62,18 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   };
   return c;
  }
+ async function readAppliedQueuePayment(tx,c,paymentId,operationId){
+  if(!c.has('customers.receiveDebt')||!c.has('customers.view'))fail('Sem acesso ao comprovante do recebimento.');
+  const [payment,event]=await Promise.all([tx.get(ref(c.bid,'payments',paymentId)),tx.get(ref(c.bid,'balanceEvents','payment_received:'+paymentId))]);
+  const p=payment.data(),e=event.data(),workspaceGeneration=gen(c.business);
+  if(!p||p.businessId!==c.bid||gen(p)!==workspaceGeneration||p.operationId!==operationId||
+    (p.actorUid||p.ownerId)!==c.uid||p.status!=='applied'||p.applicationStatus!=='applied'||!p.financialAppliedAt||p.reversedAt||p.financialReversedAt||
+    p.financialOperationId!=='payment_received:'+paymentId||e?.status!=='applied'||e.businessId!==c.bid||gen(e)!==workspaceGeneration||
+    e.type!=='payment_received'||e.operationId!==operationId||e.sourceCollection!=='payments'||e.sourceDocumentId!==paymentId||
+    e.customerId!==(p.clienteId||p.clientId||p.customerId)||!numeric(p.valor,true)||!numeric(e.balanceDelta,true)||cents(e.balanceDelta)!==cents(p.valor))return null;
+  await c.space(p.spaceId);
+  return p;
+ }
  async function commit(request,{priorSale=null,paymentRecovery=null}={}){
   if(request.data?.kind==='customer_directory')return db.runTransaction(async tx=>{
    const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0});
@@ -108,6 +120,13 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(prior.exists){
     const p=prior.data();
     if(p.ownerId!==c.uid&&p.actorUid!==c.uid||p.businessId!==c.bid||gen(p)!==gen(c.business)||p.requestHash&&p.requestHash!==hash)fail('Recibo de outra origem ou conteúdo.','already-exists');
+    const payment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+    if(payment){
+     const applied=p.requestHash===hash&&p.status==='processed'&&await readAppliedQueuePayment(tx,c,payment.entityId,item.operationId);
+     // Older PWAs treat a successful replay without an outcome as confirmation of their original amount.
+     if(!applied||!numeric(payment.data.valor,true)||cents(applied.valor)!==cents(payment.data.valor))
+      fail('O recebimento anterior precisa ser conferido. O original foi preservado.','failed-precondition');
+    }
     // Old receipts have no hash: do not trust them without the actual primary
     // event. No receipt/backfill is created by this check.
     if(!p.requestHash){const primary=writes.find(w=>['sales','payments','stockMovements','balanceAdjustments'].includes(w.entityType)&&w.operation==='create');const event=primary&&(await tx.get(ref(c.bid,primary.entityType,primary.entityId))).data();if(!event||event.operationId!==item.operationId)fail('Recibo legado exige revisão; nenhum efeito foi reaplicado.','failed-precondition');}
@@ -553,16 +572,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     const applied=data.queueRecoveryVersion===1?data.queueRecoveryApplied===true:
       ['simple','stock_entry','stock_adjustment','sale'].includes(data.eventKind);
     if(applied&&data.queueRecoveryPaymentId){
-     if(!c.has('customers.receiveDebt')||!c.has('customers.view'))fail('Sem acesso ao comprovante do recebimento.');
      const paymentId=operationalId(data.queueRecoveryPaymentId,'Recebimento');
-     const [payment,event]=await Promise.all([tx.get(ref(c.bid,'payments',paymentId)),tx.get(ref(c.bid,'balanceEvents','payment_received:'+paymentId))]);
-     const p=payment.data(),e=event.data();
-     if(!p||p.businessId!==c.bid||gen(p)!==workspaceGeneration||p.operationId!==operationId||
-       (p.actorUid||p.ownerId)!==c.uid||p.status!=='applied'||p.applicationStatus!=='applied'||!p.financialAppliedAt||p.reversedAt||p.financialReversedAt||
-       p.financialOperationId!=='payment_received:'+paymentId||e?.status!=='applied'||e.businessId!==c.bid||gen(e)!==workspaceGeneration||
-       e.type!=='payment_received'||e.operationId!==operationId||e.sourceCollection!=='payments'||e.sourceDocumentId!==paymentId||
-       e.customerId!==(p.clienteId||p.clientId||p.customerId)||!numeric(p.valor,true)||!numeric(e.balanceDelta,true)||cents(e.balanceDelta)!==cents(p.valor))return result('review');
-     await c.space(p.spaceId);
+     if(!await readAppliedQueuePayment(tx,c,paymentId,operationId))return result('review');
     }
     return result(applied?'applied':'review');
    }

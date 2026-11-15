@@ -128,10 +128,34 @@ test('queued status reconciles a proved payment, rejects an uncertain resend and
  assert.equal((await queuedStatus(c,item)).status,'absent');
  await service.commit(request);
  assert.equal((await queuedStatus(c,item)).status,'applied');
+ assert.equal((await service.commit(request)).replayed,true);
  assert.equal((await read(c,'clients','qa-client')).saldo,-7);
  assert.equal((await c.root.collection('balanceEvents').where('operationId','==',item.operationId).get()).size,1);
  await c.root.collection('payments').doc(item.operationId).update({status:'reversed'});
  assert.equal((await queuedStatus(c,item)).status,'review');
+ await assert.rejects(service.commit(request),{code:'failed-precondition'});
+});
+test('old frontend retains an adjusted payment on lost response, including a marker from before Sync stage two',async()=>{
+ const c=await setup(),item=packetFor(c,c.owner,'payment',[]),before=await read(c,'clients','qa-client');
+ const data={id:item.operationId,operationId:item.operationId,businessId:c.bid,spaceId:c.space,clienteId:'qa-client',
+  valor:12,saldoAnterior:-12,saldoNovo:0,expectedFinancialVersion:12,expectedBalance:-12,financialStateDependent:true,
+  paymentMode:'total',paymentMethod:'pix',data:new Date().toISOString()};
+ item.payload.writes=[{entityType:'payments',entityId:item.operationId,operation:'create',data},
+  {entityType:'clients',entityId:'qa-client',operation:'update',before,data:{saldo:0,financialVersion:13}}];
+ await c.root.collection('clients').doc('qa-client').update({saldo:-7,financialVersion:13});
+ const request=c.request(item),first=await service.commit(request);
+ assert.equal(first.outcome.status,'financial_payment_applied_adjusted');
+ assert.equal(first.outcome.effectiveAmount,7);
+ assert.equal((await queuedStatus(c,item)).status,'review');
+ await assert.rejects(service.commit(request),{code:'failed-precondition'});
+ await c.root.collection('processedOperations').doc(item.operationId).update(
+  Object.fromEntries(['queueRecoveryVersion','queueRecoveryApplied','queueRecoveryPaymentId']
+   .map(field=>[field,req('firebase-admin/firestore').FieldValue.delete()])));
+ await assert.rejects(service.commit(request),{code:'failed-precondition'});
+ assert.equal((await read(c,'clients','qa-client')).saldo,0);
+ assert.equal((await read(c,'payments',item.operationId)).valor,7);
+ assert.equal((await c.root.collection('payments').where('operationId','==',item.operationId).get()).size,1);
+ assert.equal((await c.root.collection('balanceEvents').where('operationId','==',item.operationId).get()).size,1);
 });
 test('quarantine/review/archive cannot replay through normal OR forced entry point',async()=>{
  for(const mode of ['local-quarantine','archive','review','archived-receipt']){const c=await setup(),{packet}=c.h.sell();if(mode==='local-quarantine')packet.status='quarantined';if(mode==='archive')await c.root.collection('syncIncidentArchives').doc(packet.operationId).set({operationId:packet.operationId});if(mode==='review')await c.root.collection('saleRecoveryOperations').doc(packet.operationId).set({status:'closed_without_effects'});if(mode==='archived-receipt')await c.root.collection('processedOperations').doc(packet.operationId).set({status:'archived_without_effects'});await assert.rejects(service.commit(c.request(packet)));assert.equal((await read(c,'products','qa-product')).estoqueAtual,3);}
