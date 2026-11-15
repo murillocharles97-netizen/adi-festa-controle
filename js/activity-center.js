@@ -353,6 +353,7 @@
         expired: "Renovação expirada",
         reactivated: "Renovação reativada",
         sale_reversed: "Renovação revertida",
+        expiry_customized: "Vencimento personalizado",
       },
       client = clientName(db, item.clientId),
       product = productName(

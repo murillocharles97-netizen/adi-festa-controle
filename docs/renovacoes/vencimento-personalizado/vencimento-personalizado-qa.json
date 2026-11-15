@@ -1,0 +1,57 @@
+{
+  "w390": {
+    "open": "Venda com renovação\nPlano Mensal Pilates\nPlano Mensal Pilates\n\nCliente Joana Con",
+    "shot-modal-padrao": true,
+    "shot-personalizado": {
+      "auto": "2026-12-14",
+      "chosen": "2026-12-15",
+      "note": "Vence em 15/12/2026 às 10:30 · cálculo automático: 14/12/2026 (+1 dia)",
+      "preview": "Vencimento atual | 14/11/2026 | Renovado até · personalizado | 15/12/2026"
+    },
+    "sw": {
+      "sw": 390,
+      "iw": 390
+    },
+    "errors": []
+  },
+  "w320": {
+    "open": "Venda com renovação\nPlano Mensal Pilates\nPlano Mensal Pilates\n\nCliente Joana Con",
+    "shot-modal-padrao": true,
+    "shot-personalizado": {
+      "auto": "2026-12-14",
+      "chosen": "2026-12-15",
+      "note": "Vence em 15/12/2026 às 10:30 · cálculo automático: 14/12/2026 (+1 dia)",
+      "preview": "Vencimento atual | 14/11/2026 | Renovado até · personalizado | 15/12/2026"
+    },
+    "sw": {
+      "sw": 320,
+      "iw": 320
+    },
+    "errors": []
+  },
+  "w1366": {
+    "open": "Venda com renovação\nPlano Mensal Pilates\nPlano Mensal Pilates\n\nCliente Joana Con",
+    "shot-modal-padrao": true,
+    "shot-personalizado": {
+      "auto": "2026-12-14",
+      "chosen": "2026-12-15",
+      "note": "Vence em 15/12/2026 às 10:30 · cálculo automático: 14/12/2026 (+1 dia)",
+      "preview": "Vencimento atual | 14/11/2026 | Renovado até · personalizado | 15/12/2026"
+    },
+    "sw": {
+      "sw": 1366,
+      "iw": 1366
+    },
+    "errors": []
+  },
+  "profile": {
+    "shot-perfil-auditoria": {
+      "error": "SyntaxError: Invalid regular expression: missing /"
+    },
+    "sw": {
+      "sw": 390,
+      "iw": 390
+    },
+    "errors": []
+  }
+}

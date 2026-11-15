@@ -240,3 +240,18 @@
   .mobile-sale-page .pos-grid .mobile-catalog-card .mobile-card-copy { padding: 10px 9px 0; }
   .mobile-sale-page .pos-grid .mobile-catalog-card .mobile-card-stock { padding: 3px 9px 12px; }
 }
+/* Personalizar vencimento (ativação/renovação): desligado por padrão, compacto e legível em 320px. */
+.recurring-custom-expiry{margin-top:10px;padding:10px 12px;border:1px solid #dde4ea;border-radius:14px;background:#fff}
+#modal .modal-box .modal-body label.recurring-custom-toggle,.recurring-sale-sheet label.recurring-custom-toggle{display:flex;align-items:flex-start;gap:10px;min-height:44px;cursor:pointer}
+.recurring-sale-sheet .recurring-custom-toggle input{flex:none;width:22px;height:22px;margin:2px 0 0;accent-color:#08786f}
+.recurring-custom-toggle span{display:grid;gap:2px;min-width:0}
+.recurring-custom-toggle b{font-size:14px;color:#101b2d}
+.recurring-custom-toggle small{font-size:12px;line-height:1.35;color:#617285}
+.recurring-custom-fields{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:10px;margin-top:10px}
+.recurring-custom-fields .field{margin:0;min-width:0}
+.recurring-custom-fields input{width:100%;min-height:44px;font-size:16px}
+.recurring-custom-fields label small{font-weight:500;color:#617285}
+.recurring-custom-note{margin:8px 0 0;font-size:13px;line-height:1.4;color:#08624f;font-weight:600}
+.recurring-custom-note.is-error{color:#c0262d}
+@media(max-width:359px){.recurring-custom-fields{grid-template-columns:1fr}}
+#modal .modal-box .modal-body .recurring-custom-fields label.recurring-custom-label,#modal .modal-box .modal-body .recurring-custom-fields .field>label{display:block}

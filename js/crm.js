@@ -298,14 +298,15 @@
         const product = (data.produtos || []).find((item) => item.id === subscriptionEvent.productId),
           transition = subscriptionEvent.transition,
           type = transition === "activation" ? "subscription_activation" : transition === "renewal" ? "subscription_renewal" : "subscription_status",
-          labels = { paused: "Renovação pausada", reactivated: "Renovação reativada", expired: "Renovação vencida", cancelled: "Renovação cancelada", sale_reversed: "Vigência revertida com a venda", price_changed: "Valor contratado alterado", plan_changed: "Plano da renovação alterado" },
+          labels = { paused: "Renovação pausada", reactivated: "Renovação reativada", expired: "Renovação vencida", cancelled: "Renovação cancelada", sale_reversed: "Vigência revertida com a venda", price_changed: "Valor contratado alterado", plan_changed: "Plano da renovação alterado", expiry_customized: "Vencimento personalizado" },
           next = subscriptionEvent.next || {};
         items.push(event(type, {
           id: `subscription:${subscriptionEvent.id}`,
           sourceId: subscriptionEvent.id,
           title: labels[transition] || undefined,
           value: ["activation", "renewal"].includes(transition) ? num(next.contractedPrice) : null,
-          description: `${next.label || product?.renewalLabel || product?.nome || "Renovação"}${next.expiresAt ? ` · até ${new Date(next.expiresAt).toLocaleDateString("pt-BR")}` : ""}`,
+          // The audit note carries the chosen and the automatic dates.
+          description: transition === "expiry_customized" && subscriptionEvent.note ? subscriptionEvent.note : `${next.label || product?.renewalLabel || product?.nome || "Renovação"}${next.expiresAt ? ` · até ${new Date(next.expiresAt).toLocaleDateString("pt-BR")}` : ""}`,
           date: subscriptionEvent.createdAt,
           meta: { subscriptionId: subscriptionEvent.subscriptionId, transition },
         }));

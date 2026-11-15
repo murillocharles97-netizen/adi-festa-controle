@@ -399,3 +399,126 @@ test("quadro de renovações busca cliente sem acento ou por telefone e respeita
   assert.equal(scoped.counts.expired, 0);
   assert.equal(context.CustomerSubscriptions.daysUntil("2026-08-15T02:30:00.000Z", "2026-08-14T12:00:00.000Z"), 0);
 });
+
+// ---- Personalizar vencimento (painéis externos com outra regra de vencimento) ----
+const plainValue = (value) => JSON.parse(JSON.stringify(value));
+const policy = (extra = {}) => ({ renewalPolicyVersion: 1, ...extra });
+// Versioned renewals are bound to the subscription's origin space (existing rule).
+const spaced = (value) => ({ ...value, spaceId: "space-a" });
+test("ativação com vencimento personalizado: data escolhida, cálculo automático preservado na auditoria e idempotência", () => {
+  const { context, data } = runtime(), domain = context.CustomerSubscriptions;
+  const current = sale("sale-1", "2026-08-14T12:00:00.000Z", policy({ customExpiry: { expiresAt: "2026-09-14T15:00:00.000Z", timeSet: true } }));
+  domain.applySaleInData(data, current);
+  domain.applySaleInData(data, current);
+  const sub = data.customerSubscriptions[0];
+  assert.equal(sub.expiresAt, "2026-09-14T15:00:00.000Z");
+  assert.deepEqual(plainValue(sub.expiryOverride), { expiresAt: "2026-09-14T15:00:00.000Z", automaticExpiresAt: "2026-09-13T12:00:00.000Z", saleId: "sale-1", timeSet: true });
+  assert.equal(sub.renewalCalendarAnchor, null, "dias não usam referência de calendário");
+  assert.equal(sub.contractedPrice, 25.9, "valor intacto");
+  assert.deepEqual(plainValue(data.customerSubscriptionEvents.map((e) => e.transition)), ["activation", "expiry_customized"], "repetir a venda não duplica eventos");
+  assert.equal(data.customerSubscriptionEvents[1].note, "Vencimento personalizado: 14/09/2026 12:00 (cálculo automático: 13/09/2026 09:00)");
+  const item = current.itens[0];
+  assert.equal(item.subscriptionExpiresAt, "2026-09-14T15:00:00.000Z");
+  assert.equal(item.subscriptionAutomaticExpiresAt, "2026-09-13T12:00:00.000Z");
+  assert.equal(item.subscriptionExpiryCustomized, true);
+});
+
+test("renovação antecipada mensal personalizada vira referência; a próxima renovação automática continua dela e limpa o override", () => {
+  const { context, data } = runtime(), domain = context.CustomerSubscriptions;
+  domain.applySaleInData(data, spaced(sale("act", "2026-08-14T12:00:00.000Z", policy({ durationValue: 1, durationUnit: "months" }))));
+  const sub = data.customerSubscriptions[0];
+  assert.equal(sub.expiresAt, "2026-09-14T12:00:00.000Z");
+  const renew = (id, date, extra = {}) => spaced(sale(id, date, policy({ durationValue: 1, durationUnit: "months", subscriptionId: sub.id,
+    expectedSubscription: domain.renewalSnapshot(data.customerSubscriptions[0]), ...extra })));
+  // Painel externo: vence dia 15 às 23:00 de São Paulo (02:00Z do dia 16).
+  domain.applySaleInData(data, renew("r1", "2026-08-20T12:00:00.000Z", { customExpiry: { expiresAt: "2026-10-16T02:00:00.000Z", timeSet: true } }));
+  assert.equal(sub.expiresAt, "2026-10-16T02:00:00.000Z");
+  assert.deepEqual(plainValue(sub.renewalCalendarAnchor), { day: 15, expiresAt: "2026-10-16T02:00:00.000Z" }, "dia civil 15 em São Paulo");
+  assert.equal(sub.expiryOverride.automaticExpiresAt, "2026-10-14T12:00:00.000Z", "antecipada somou ao vencimento atual");
+  domain.applySaleInData(data, renew("r2", "2026-10-01T12:00:00.000Z"));
+  assert.equal(sub.expiresAt, "2026-11-16T02:00:00.000Z", "renovação automática continua do vencimento personalizado, no dia 15");
+  assert.equal(sub.expiryOverride, null);
+  assert.equal(sub.renewalCount, 2);
+});
+
+test("vencimento personalizado inválido não altera nada: passado, além de 1 ano do automático, texto livre ou pacote legado", () => {
+  const cases = [
+    ["2026-08-14T11:00:00.000Z", policy(), /depois da data da venda/],
+    ["2027-09-14T12:00:01.000Z", policy(), /1 ano além do cálculo automático/],
+    ["15/09/2026", policy(), /inválida/],
+    ["2026-09-14T15:00:00.000Z", {}, /política de renovação atual/],
+  ];
+  for (const [expiresAt, extra, message] of cases) {
+    const { context, data } = runtime();
+    assert.throws(() => context.CustomerSubscriptions.applySaleInData(data, sale(`s-${expiresAt}`, "2026-08-14T12:00:00.000Z", { ...extra, customExpiry: { expiresAt } })), message);
+    assert.equal(data.customerSubscriptions.length, 0);
+    assert.equal(data.customerSubscriptionEvents.length, 0);
+  }
+});
+
+test("desfazer a venda personalizada restaura a vigência anterior e limpa a personalização", () => {
+  const { context, data } = runtime(), domain = context.CustomerSubscriptions;
+  domain.applySaleInData(data, spaced(sale("act", "2026-08-14T12:00:00.000Z", policy({ durationValue: 1, durationUnit: "months" }))));
+  const sub = data.customerSubscriptions[0], before = plainValue(sub);
+  const renewal = spaced(sale("r1", "2026-08-20T12:00:00.000Z", policy({ durationValue: 1, durationUnit: "months", subscriptionId: sub.id,
+    expectedSubscription: domain.renewalSnapshot(sub), customExpiry: { expiresAt: "2026-10-20T15:00:00.000Z" } })));
+  domain.applySaleInData(data, renewal);
+  domain.reverseSaleInData(data, renewal);
+  const restored = data.customerSubscriptions[0];
+  assert.equal(restored.expiresAt, before.expiresAt);
+  assert.equal(restored.expiryOverride, null, "null explícito para limpar o campo na nuvem");
+  assert.equal(data.customerSubscriptionEvents.at(-1).transition, "sale_reversed");
+});
+
+test("data e horário do calendário viram o instante de São Paulo; sem horário mantém o horário do cálculo automático", () => {
+  const { context } = runtime(), h = context.CustomerSubscriptions.customExpiryHelpers;
+  assert.equal(h.customExpiryInstant("2026-12-15", "", "2026-12-14T18:23:00.000Z"), "2026-12-15T18:23:00.000Z");
+  assert.equal(h.customExpiryInstant("2026-12-15", "10:30", "2026-12-14T18:23:00.000Z"), "2026-12-15T13:30:00.000Z");
+  assert.equal(h.customExpiryInstant("15/12/2026", "", "2026-12-14T18:23:00.000Z"), null);
+  assert.equal(h.civilInputDate("2026-12-15T02:30:00.000Z"), "2026-12-14", "23:30 em São Paulo ainda é dia 14");
+  assert.equal(h.checkCustomExpiry("2026-08-14T11:00:00.000Z", { at: "2026-08-14T12:00:00.000Z", automatic: "2026-09-13T12:00:00.000Z" }), "O vencimento personalizado precisa ser depois da data da venda.");
+  assert.equal(h.checkCustomExpiry("2026-09-14T12:00:00.000Z", { at: "2026-08-14T12:00:00.000Z", automatic: "2026-09-13T12:00:00.000Z" }), null);
+  assert.equal(h.daysBetween("2026-12-14T18:23:00.000Z", "2026-12-15T18:23:00.000Z"), 1);
+});
+
+test("app e servidor aplicam exatamente a mesma regra (código espelhado) e o servidor verifica o override", () => {
+  const cut = (s, a, b) => { const i = s.indexOf(a); assert.ok(i >= 0, a); return s.slice(i, s.indexOf(b, i)); }, n = (x) => x.replace(/\s+/g, " ").trim();
+  const app = fs.readFileSync("js/customer-subscriptions.js", "utf8"), server = fs.readFileSync("functions/src/shared/engagement-domain.js", "utf8");
+  const shared = (source) => n(cut(source, "const expiryPad", "function reverseSaleInData"));
+  assert.equal(shared(app), shared(server));
+  assert.equal(n(cut(app, "function reverseSaleInData", "const changeStatus")).replace(/\/\/ Checkout UI helpers.*$/, "").trim(), n(cut(server, "function reverseSaleInData", "const changeStatus")));
+  assert.equal(n(cut(app, "const preview =", "const event =")), n(cut(server, "const preview =", "const event =")));
+  const validation = fs.readFileSync("functions/src/services/operational-engagement-validation.js", "utf8");
+  assert.match(validation, /const versionedFields=\[\.\.\.subscriptionFields,'financialSpaceId','renewalCalendarAnchor','expiryOverride'\];/);
+  assert.match(validation, /Personalizar o vencimento exige a venda/);
+});
+
+test("modal de renovação: personalizar é opcional; ligado, a sacola leva a data exata e o horário informado", async () => {
+  const h = renewalCheckout();
+  try {
+    assert.equal(h.w.Checkout.prepareRenewal("selected"), true);
+    await new Promise(setImmediate);
+    const modal = h.w.document.querySelector("#modal");
+    assert.match(modal.textContent, /Personalizar vencimento/);
+    assert.equal(modal.querySelector('[name="customExpiryDate"]'), null, "desligado por padrão");
+    const toggle = modal.querySelector('[name="customExpiryOn"]');
+    toggle.checked = true; toggle.onchange();
+    const date = modal.querySelector('[name="customExpiryDate"]'), time = modal.querySelector('[name="customExpiryTime"]');
+    assert.equal(date.value, "2096-02-29", "começa no cálculo automático");
+    date.value = "2096-03-01"; time.value = "10:30"; date.onchange();
+    assert.match(modal.querySelector(".recurring-custom-note").textContent, /Vence em 01\/03\/2096 às 10:30 · cálculo automático: 29\/02\/2096 \(\+1 dia\)/);
+    assert.match(modal.querySelector(".recurring-preview").textContent, /personalizado/);
+    modal.querySelector("[data-confirm-recurring]").onclick();
+    assert.deepEqual(plainValue(h.added[0].recurringActivation.customExpiry), { expiresAt: "2096-03-01T13:30:00.000Z", timeSet: true });
+  } finally { h.dom.window.close(); }
+});
+
+test("sem personalização nada muda: a venda não leva customExpiry e a vigência segue o cálculo automático", async () => {
+  const h = renewalCheckout();
+  try {
+    assert.equal(h.w.Checkout.prepareRenewal("selected"), true);
+    await new Promise(setImmediate);
+    h.w.document.querySelector("#modal [data-confirm-recurring]").onclick();
+    assert.equal(Object.hasOwn(h.added[0].recurringActivation, "customExpiry"), false);
+  } finally { h.dom.window.close(); }
+});

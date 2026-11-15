@@ -366,6 +366,60 @@ test('versioned renewal persists the selected contract and calendar anchor once'
  assert.equal(restored.renewalCalendarAnchor, null);
  assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 3);
 });
+test('custom due date is recomputed by the server, audited, idempotent and reverted with the sale', async () => {
+ const c = await setup();
+ domains(c);
+ const product = Object.assign(c.h.data().produtos[0], { productType: 'recurring', itemKind: 'service', durationValue: 1, durationUnit: 'months' });
+ await c.set('products', 'qa-product', bridge(product));
+ await c.commit(c.h.sell({ status: 'pago' }).packet);
+ const sub = c.h.data().customerSubscriptions[0];
+ sub.expiresAt = '2096-01-31T15:00:00.000Z';
+ await c.root.collection('customerSubscriptions').doc(sub.id).update({ expiresAt: sub.expiresAt });
+ const domain = c.h.c.CustomerSubscriptions, custom = '2096-03-01T13:30:00.000Z';
+ const before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
+ const sale = c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
+   itens: [{ produtoId: 'qa-product', quantidade: 1, precoFinalUnitario: 14, precoOriginal: 14, recurringActivation: {
+     subscriptionId: sub.id, durationValue: 1, durationUnit: 'months', renewalPolicyVersion: domain.renewalPolicyVersion,
+     expectedSubscription: domain.renewalSnapshot(sub), customExpiry: { expiresAt: custom, timeSet: true },
+   } }],
+ });
+ const renewal = c.packet(before, operationId, 'sale');
+ const saleWrite = packet => packet.payload.writes.find(write => write.entityType === 'sales');
+ // The subscription the device wants to write must match what the server derives from the sale.
+ const moved = structuredClone(renewal);
+ saleWrite(moved).data.itens[0].recurringActivation.customExpiry.expiresAt = '2096-03-05T13:30:00.000Z';
+ await assert.rejects(c.commit(moved), /Vigência divergente/);
+ const dropped = structuredClone(renewal);
+ delete saleWrite(dropped).data.itens[0].recurringActivation.customExpiry;
+ await assert.rejects(c.commit(dropped), /Vigência divergente|Evento de renovação|evento/i);
+ const past = structuredClone(renewal);
+ saleWrite(past).data.itens[0].recurringActivation.customExpiry.expiresAt = '2020-01-01T00:00:00.000Z';
+ await assert.rejects(c.commit(past)); // the server wraps the domain error in its generic review message
+ assert.equal((await c.root.collection('sales').get()).size, 1);
+ await c.commit(renewal);
+ await c.commit(renewal);
+ const saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, custom);
+ assert.deepEqual(saved.expiryOverride, { expiresAt: custom, automaticExpiresAt: '2096-02-29T15:00:00.000Z', saleId: sale.id, timeSet: true });
+ assert.deepEqual(saved.renewalCalendarAnchor, { day: 1, expiresAt: custom }, 'monthly renewals keep the chosen day');
+ assert.equal(saved.renewalCount, 1);
+ assert.equal(saved.contractedPrice, 14, 'value unchanged');
+ const audit = await c.read('customerSubscriptionEvents', `${sub.id}:expiry_customized:${sale.id}`);
+ assert.equal(audit.note, 'Vencimento personalizado: 01/03/2096 10:30 (cálculo automático: 29/02/2096 12:00)');
+ assert.equal((await c.root.collection('customerSubscriptionEvents').get()).size, 3);
+ assert.equal((await c.root.collection('sales').get()).size, 2);
+ const cancellation = c.h.undo(sale.id);
+ await c.commit(cancellation.packet);
+ const restored = await c.read('customerSubscriptions', sub.id);
+ assert.equal(restored.expiresAt, '2096-01-31T15:00:00.000Z');
+ assert.equal(restored.expiryOverride, null);
+ assert.equal(restored.renewalCalendarAnchor, null);
+ // A status change cannot smuggle a personalized due date without its sale.
+ const prior = structuredClone(c.h.data());
+ domain.changeStatus(sub.id, 'paused', 'QA');
+ c.h.data().customerSubscriptions.find(item => item.id === sub.id).expiryOverride = { expiresAt: '2097-01-01T00:00:00.000Z' };
+ await assert.rejects(c.commit(c.packet(prior)), /Personalizar o vencimento exige/);
+});
 for(const mode of ['explicit','foreign','ambiguous'])test(`all_spaces initial stock origin captured before upload: ${mode}`,async()=>{
  // A restricted editor may not publish a new product to every space. The
  // positive path uses explicit all-space authorization, not a scope bypass.

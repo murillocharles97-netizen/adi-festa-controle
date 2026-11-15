@@ -11,7 +11,7 @@ const coreEvents=['id','campaignId','clientId','sourceType','sourceId','transiti
 const projections=['id','campaignId','clientId','pendingProgress','confirmedProgress','pendingPoints','availablePoints','availableRewards','redeemedRewards','cycleRemainder','benefitDebt'];
 const values=(v,fields)=>Object.fromEntries(fields.map(k=>[k,v?.[k]??null]));
 const subscriptionFields=['id','clientId','productId','variantId','spaceId','status','startedAt','expiresAt','durationValue','durationUnit','contractedPrice','renewalCount','lastRenewedAt','createdFromSaleId','lastSaleId','reminders','renewalMessage','label'];
-const versionedFields=[...subscriptionFields,'financialSpaceId','renewalCalendarAnchor'];
+const versionedFields=[...subscriptionFields,'financialSpaceId','renewalCalendarAnchor','expiryOverride'];
 function policyItems(sale){
  return (Array.isArray(sale?.itens)?sale.itens:[]).filter(line=>{
   const config=line?.recurringActivation;
@@ -76,6 +76,9 @@ async function validateEngagement({db,tx,c,item,writes,plan,old,effective}){
   if(!strictIds.has(w.entityId)&&Object.hasOwn(w.data,'renewalCalendarAnchor')&&
      canonical(w.data.renewalCalendarAnchor??null)!==canonical(value?.renewalCalendarAnchor??null))
    fail('Alterar a referência de vencimento exige a política de renovação correspondente.');
+  if(!strictIds.has(w.entityId)&&Object.hasOwn(w.data,'expiryOverride')&&
+     canonical(w.data.expiryOverride??null)!==canonical(value?.expiryOverride??null))
+   fail('Personalizar o vencimento exige a venda de ativação ou renovação correspondente.');
   if(!value)continue;
   await c.space(value.spaceId);
   if(sale&&value.spaceId!==sale.spaceId)fail('A renovação deve permanecer no espaço da vigência original.');

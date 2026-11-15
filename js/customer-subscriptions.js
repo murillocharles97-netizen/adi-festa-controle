@@ -115,6 +115,26 @@ window.CustomerSubscriptions = (() => {
       note: details.note || "", createdAt: details.createdAt || now(), schemaVersion: 13,
     });
   };
+  // Personalized due date (external panels with their own rules). The operator picks an exact
+  // instant at checkout; it travels in the sale and is validated here, identically on the device
+  // and on the server. The automatic date is kept for the audit trail.
+  const expiryPad = (value) => String(value).padStart(2, "0");
+  const expiryLabel = (value) => {
+    const local = calendarDate(new Date(value));
+    return `${expiryPad(local.getUTCDate())}/${expiryPad(local.getUTCMonth() + 1)}/${local.getUTCFullYear()} ${expiryPad(local.getUTCHours())}:${expiryPad(local.getUTCMinutes())}`;
+  };
+  const MAX_CUSTOM_EXPIRY_MS = 366 * 86400000; // beyond the automatic date: catches a mistyped year
+  function customExpiry(config, saleDate, versioned, automatic) {
+    if (config.customExpiry == null) return null;
+    if (!versioned) throw Error("O vencimento personalizado exige a política de renovação atual.");
+    const raw = config.customExpiry?.expiresAt, at = new Date(raw), start = new Date(saleDate).getTime();
+    if (typeof raw !== "string" || !Number.isFinite(at.getTime()) || at.toISOString() !== raw)
+      throw Error("Data de vencimento personalizada inválida.");
+    if (at.getTime() <= start) throw Error("O vencimento personalizado precisa ser depois da data da venda.");
+    if (at.getTime() - new Date(automatic).getTime() > MAX_CUSTOM_EXPIRY_MS)
+      throw Error("O vencimento personalizado não pode passar de 1 ano além do cálculo automático.");
+    return raw;
+  }
   function applySaleInData(db, sale) {
     db.customerSubscriptions ??= [];
     if (!sale?.clientId && !sale?.clienteId) {
@@ -150,6 +170,9 @@ window.CustomerSubscriptions = (() => {
       const previous = existing ? structuredClone(existing) : null;
       const id = existing?.id || subscriptionId || Utils.uuid();
       const dates = preview({ subscription: existing, at: saleDate, durationValue: normalized.value, durationUnit: normalized.unit, legacy: !versioned });
+      const automaticExpiresAt = dates.expiresAt, custom = customExpiry(config, saleDate, versioned, dates.expiresAt);
+      // The chosen date also becomes the calendar reference, so later monthly renewals keep its day.
+      if (custom) Object.assign(dates, { expiresAt: custom, anchorDay: calendarUnits.has(normalized.unit) ? calendarDate(new Date(custom)).getUTCDate() : null });
       const variant = item.variantId ? (db.variacoesProdutos || []).find((entry) => entry.id === item.variantId) : null;
       const next = {
         ...(existing || {}), id, operationId: id, businessId: DB.getBusinessId?.() || null,
@@ -165,15 +188,20 @@ window.CustomerSubscriptions = (() => {
         renewalMessage: config.renewalMessage || existing?.renewalMessage || product?.renewalMessage || "",
         createdAt: existing?.createdAt || saleDate, updatedAt: saleDate, schemaVersion: 14,
       };
+      if (versioned) next.expiryOverride = custom
+        ? { expiresAt: custom, automaticExpiresAt, saleId: sale.id, timeSet: config.customExpiry.timeSet === true } : null;
       if (versioned) next.renewalCalendarAnchor = dates.anchorDay ? { day: dates.anchorDay, expiresAt: dates.expiresAt } : null;
       if (existing) Object.assign(existing, next); else db.customerSubscriptions.push(next);
       Object.assign(item, {
         productType: "recurring", subscriptionId: id, subscriptionAction: existing ? "renewal" : "activation",
         renewalLabel: next.label, durationValue: normalized.value, durationUnit: normalized.unit,
         subscriptionStartedAt: dates.startsAt, subscriptionExpiresAt: next.expiresAt,
+        subscriptionAutomaticExpiresAt: automaticExpiresAt, subscriptionExpiryCustomized: Boolean(custom),
         subscriptionPrevious: previous,
       });
       event(db, next, existing ? "renewal" : "activation", sale.id, { previous, next: structuredClone(next), createdAt: saleDate });
+      if (custom) event(db, next, "expiry_customized", sale.id, { previous, next: structuredClone(next), createdAt: saleDate,
+        note: `Vencimento personalizado: ${expiryLabel(custom)} (cálculo automático: ${expiryLabel(automaticExpiresAt)})` });
       if (existing && number(previous?.contractedPrice) !== number(next.contractedPrice))
         event(db, next, "price_changed", sale.id, { previous, next: structuredClone(next), createdAt: saleDate });
       if (existing && String(previous?.variantId || "") !== String(next.variantId || ""))
@@ -190,9 +218,9 @@ window.CustomerSubscriptions = (() => {
       if (!current || current.lastSaleId !== sale.id) return;
       const previous = item.subscriptionPrevious || null;
       if (previous) {
-        // Explicit null clears an anchor when the restored record predates it.
+        // Explicit null clears an anchor/override when the restored record predates it.
         db.customerSubscriptions[index] = item.recurringActivation?.renewalPolicyVersion === renewalPolicyVersion
-          ? { ...previous, renewalCalendarAnchor: previous.renewalCalendarAnchor ?? null }
+          ? { ...previous, renewalCalendarAnchor: previous.renewalCalendarAnchor ?? null, expiryOverride: previous.expiryOverride ?? null }
           : previous;
       }
       else db.customerSubscriptions.splice(index, 1);
@@ -201,6 +229,26 @@ window.CustomerSubscriptions = (() => {
     });
     return reversed;
   }
+  // Checkout UI helpers for "Personalizar vencimento" (São Paulo civil calendar).
+  const civilInputDate = (value) => {
+    const local = calendarDate(new Date(value));
+    return `${local.getUTCFullYear()}-${expiryPad(local.getUTCMonth() + 1)}-${expiryPad(local.getUTCDate())}`;
+  };
+  // Date (YYYY-MM-DD) + optional time (HH:MM) → exact instant. Without a time, the automatic
+  // calculation's time of day is kept, so only the day changes.
+  function customExpiryInstant(date, time, automatic) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) return null;
+    const midnight = calendarInstant(date), auto = calendarDate(new Date(automatic));
+    const [hours, minutes] = /^\d{2}:\d{2}$/.test(String(time || "")) ? time.split(":").map(Number) : [auto.getUTCHours(), auto.getUTCMinutes()];
+    if (!Number.isFinite(midnight.getTime()) || hours > 23 || minutes > 59) return null;
+    return new Date(midnight.getTime() + (hours * 60 + minutes) * 60000).toISOString();
+  }
+  function checkCustomExpiry(value, { at = now(), automatic } = {}) {
+    if (!value) return "Escolha a data de vencimento.";
+    try { customExpiry({ customExpiry: { expiresAt: value } }, at, true, automatic); return null; }
+    catch (error) { return error.message; }
+  }
+  const customExpiryHelpers = { civilInputDate, customExpiryInstant, checkCustomExpiry, expiryLabel, daysBetween: (a, b) => daysUntil(b, a) };
   const changeStatus = (id, requested, note = "") => {
     if (!STATUS.has(requested)) throw Error("Status de renovação inválido.");
     let saved;
@@ -453,5 +501,5 @@ window.CustomerSubscriptions = (() => {
       return due ? homeMetrics(due, reference, 50) : view.metrics(reference);
     },
   };
-  return { view, board, daysUntil, civilDayEnd, duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, renewalPolicyVersion, originSpace, renewalSnapshot, requireRenewable, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
+  return { customExpiryHelpers, view, board, daysUntil, civilDayEnd, duration, addDuration, effectiveStatus, list, events, get, forClient, matching, matchingProduct, preview, renewalPolicyVersion, originSpace, renewalSnapshot, requireRenewable, applySaleInData, reverseSaleInData, changeStatus, upcoming, metrics, loadForClient, loadUpcoming, loadByStatus, loadExpiring, loadExpired, loadRecentlyRenewed, loadDashboardMetrics, loadHomeMetrics };
 })();
