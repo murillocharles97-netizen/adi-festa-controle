@@ -650,7 +650,7 @@ window.Checkout = (() => {
     const key = draftKey();
     if (!key || restoredDraftKey && (key !== restoredDraftKey || restoredDraftPrincipal !== draftPrincipal())) return;
     try {
-      if (!cart.length) return sessionStorage.removeItem(key);
+      if (!cart.length&&!activeAttempt?.locked&&!hasSavedSaleAttempt()) return sessionStorage.removeItem(key);
       sessionStorage.setItem(key, JSON.stringify({
         version: 1,
         principal: draftPrincipal(),
@@ -661,6 +661,7 @@ window.Checkout = (() => {
         manual,
         selectedCampaignIds: [...selectedCampaignIds],
         paymentAttemptId: activeAttempt?.saleId || null,
+        operationId: activeAttempt?.operationId || null,
         details: captureDraftDetails(),
         savedAt: new Date().toISOString(),
       }));
@@ -706,7 +707,7 @@ window.Checkout = (() => {
       manual = Boolean(saved.manual);
       selectedCampaignIds = new Set(saved.selectedCampaignIds || []);
       draftDetails = { ...draftDetails, ...(saved.details || {}) };
-      if (saved.paymentAttemptId) activeAttempt = { saleId: saved.paymentAttemptId, restored: true };
+      if (saved.paymentAttemptId) activeAttempt = { saleId: saved.paymentAttemptId, operationId: saved.operationId || null, restored: true };
       if (cart.length) traceSale("[CART] draft restored", { items: cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0) });
     } catch (error) {
       try { sessionStorage.removeItem(key); } catch {}
@@ -726,10 +727,14 @@ window.Checkout = (() => {
     if (discountPercent) discountPercent.value = draftDetails.discountPercent || "0";
     window.CheckoutPaymentMethod = payment?.value || "pix";
   }
-  function invalidateAttempt() { if (!finishing) activeAttempt = null; }
+  function hasSavedSaleAttempt() {
+    return Boolean(activeAttempt?.saleId && (DB.carregar().vendas || [])
+      .some(sale=>sale.id===activeAttempt.saleId||activeAttempt.operationId&&sale.operationId===activeAttempt.operationId));
+  }
+  function invalidateAttempt() { if (!finishing&&!activeAttempt?.locked&&!hasSavedSaleAttempt()) activeAttempt = null; }
   function setSubmissionState(state, message = "") {
     const button = document.querySelector("#finish-sale"), feedback = document.querySelector("#sale-submit-feedback"),
-      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente', conflict: '<i data-lucide="cloud-search"></i> Comparar com a nuvem' };
+      labels = { normal: '<i data-lucide="check"></i> Concluir venda', processing: '<i data-lucide="loader-circle"></i> Processando…', success: message.startsWith("Venda salva") ? '<i data-lucide="circle-check"></i> Venda salva' : '<i data-lucide="circle-check"></i> Venda concluída', error: '<i data-lucide="rotate-ccw"></i> Tentar novamente', conflict: '<i data-lucide="cloud-search"></i> Comparar com a nuvem', review: '<i data-lucide="cloud-search"></i> Conferir venda original' };
     if (button) {
       button.dataset.saleState = state;
       button.disabled = state === "processing" || state === "success";
@@ -746,10 +751,61 @@ window.Checkout = (() => {
           setSubmissionState("normal");
         };
       } else feedback.textContent = message;
-      feedback.classList.toggle("error", state === "error" || state === "conflict");
+      feedback.classList.toggle("error", ["error","conflict","review"].includes(state));
       feedback.classList.toggle("success", state === "success");
     }
     window.lucide?.createIcons();
+  }
+  function holdOriginalSale(message='A venda original continua neste aparelho. Abra Sincronização → Ver detalhes para conferir a pendência antes de repetir.') {
+    if(activeAttempt)activeAttempt.locked=true;
+    setSubmissionState('review',message);
+    saveDraft();
+  }
+  function finishSavedSale(sale,{usingExchangeCredit=false,tracking}={}) {
+    if(tracking==='review')return holdOriginalSale();
+    activeConflict=null;
+    cart=[];
+    selectedCampaignIds.clear();
+    manual=false;
+    discountKind=null;
+    draftDetails={clientId:'',paymentMethod:'pix',note:'',discountValue:'0',discountPercent:'0'};
+    clearDraft();
+    activeAttempt=null;
+    finishing=false;
+    if(usingExchangeCredit)window.ExchangeCreditCheckout?.reset?.();
+    const pending=!usingExchangeCredit&&(tracking?tracking==='pending':navigator.onLine===false||window.SyncFirebase?.isSalePending?.(sale));
+    setSubmissionState('success',pending?'Venda salva no aparelho e aguardando sincronização.':'Venda concluída com sucesso.');
+    refreshClients();
+    closeCartSurface({immediate:true});
+    traceSale('[SALE] completed',{operationId:sale.operationId,saleId:sale.id,spaceId:sale.spaceId});
+    try{Recibos.mostrar(sale,sale.clienteId?clients().getById(sale.clienteId):null);}
+    catch{toast('Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.',true);}
+  }
+  async function resumeCheckoutSale() {
+    if(!activeAttempt?.saleId)return false;
+    const spaceId=selectedSalesSpaceId(),scope=draftKey(),principal=draftPrincipal();
+    const attempt=activeAttempt;
+    try{
+      const original=window.SyncFirebase?.inspectCheckoutSaleAttempt?.({...attempt,spaceId});
+      if(!original){
+        if(!hasSavedSaleAttempt()&&!attempt.locked)return false;
+        holdOriginalSale();
+        return true;
+      }
+      if(original.status==='review'){
+        holdOriginalSale();
+        return true;
+      }
+      finishing=true;
+      setSubmissionState('processing','Conferindo a venda original…');
+      await DB.flush?.();
+      if(scope===draftKey()&&principal===draftPrincipal()&&attempt===activeAttempt)
+        finishSavedSale(original.sale,{tracking:original.status});
+    }catch(error){
+      if(scope===draftKey()&&principal===draftPrincipal()&&attempt===activeAttempt)
+        holdOriginalSale(error.code==='sale-original-review-required'?error.message:undefined);
+    }finally{finishing=false;}
+    return true;
   }
   const totals = (items = cart) => {
     const original = items.reduce(
@@ -1136,12 +1192,13 @@ window.Checkout = (() => {
       };
       if (window.ExchangeCreditCheckout?.hasPending?.()) return validationError("Há uma confirmação com crédito preservada. Use Consultar confirmação no cartão de crédito de troca. Não registre outra venda.");
       if (restoredDraftKey && (restoredDraftKey !== draftKey() || restoredDraftPrincipal !== draftPrincipal())) return validationError('O espaço do carrinho mudou. Reabra a venda no espaço de origem.');
-      if (!cart.length) return validationError("Adicione ao menos um produto.");
       const pendingTerminal = window.TerminalPayments?.getCurrent?.();
       if (pendingTerminal && (window.TerminalPayments.ACTIVE_STATUSES.has(pendingTerminal.status) || pendingTerminal.status === "approved")) {
         void window.TerminalPayments.recover();
         return validationError("Existe um pagamento em andamento. Confirme o resultado antes de concluir outra venda.");
       }
+      if(await resumeCheckoutSale()) return;
+      if (!cart.length) return validationError("Adicione ao menos um produto.");
       let spaceId;
       try {
         spaceId = window.SpaceContext?.requireSalesSpace?.() || "";
@@ -1188,7 +1245,7 @@ window.Checkout = (() => {
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const spaceScope = window.SpaceContext?.viewScope?.();
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
-        attempt = activeAttempt?.fingerprint === fingerprint || (activeAttempt?.restored && paymentMethod === "cartao_presencial") ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
+        attempt = activeAttempt?.fingerprint === fingerprint || activeAttempt?.restored ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
           if (spaceScope !== window.SpaceContext?.viewScope?.() || spaceId !== selectedSalesSpaceId())
             return validationError('O espaço da venda mudou. Revise o carrinho antes de confirmar.');
@@ -1283,32 +1340,15 @@ window.Checkout = (() => {
               activeConflict = { customerId: error.customerId || clienteId,
                 saleId: error.saleId || "", operationId: error.operationId || "" };
               setSubmissionState("conflict", message);
-            } else setSubmissionState("error", `${message} Toque em “Tentar novamente”.`);
+            } else if(hasSavedSaleAttempt()||error.code==='sale-original-review-required') holdOriginalSale();
+            else setSubmissionState("error", message);
             saveDraft();
             traceSale("[SALE] failed", { operationId: attempt.operationId, code: error?.code || error?.name || "unknown" });
             if (error.code !== "customer-credit-orphan") toast(message, true);
             return;
           }
           if (spaceScope !== window.SpaceContext?.viewScope?.()) { finishing=false; return; }
-          activeConflict = null;
-          cart = [];
-          selectedCampaignIds.clear();
-          manual = false;
-          discountKind = null;
-          draftDetails = { clientId: "", paymentMethod: "pix", note: "", discountValue: "0", discountPercent: "0" };
-          clearDraft();
-          activeAttempt = null;
-          finishing = false;
-          if (usingExchangeCredit) window.ExchangeCreditCheckout?.reset?.();
-          const pendingSync = !usingExchangeCredit && (navigator.onLine === false || window.SyncFirebase?.isSalePending?.(sale));
-          setSubmissionState("success", pendingSync
-            ? "Venda salva no aparelho e aguardando sincronização."
-            : "Venda concluída com sucesso.");
-          refreshClients();
-          closeCartSurface({ immediate: true });
-          traceSale("[SALE] completed", { operationId: sale.operationId, saleId: sale.id, spaceId: sale.spaceId });
-          try { Recibos.mostrar(sale, clienteId ? clients().getById(clienteId) : null); }
-          catch { toast("Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.", true); }
+          finishSavedSale(sale,{usingExchangeCredit});
         };
       const missing = Vendas.estoqueInsuficiente(cart);
       if (

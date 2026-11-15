@@ -1216,9 +1216,9 @@ function queuedProductIds(item){
 }
 function stockQueueDependsOnRejection(item,queue){
   const products=queuedProductIds(item);
-  if(!item.queueId||!products.size)return false;
+  if(!products.size)return false;
   for(const prior of queue){
-    if(prior.queueId===item.queueId)break;
+    if(item.queueId&&prior.queueId===item.queueId)break;
     if(prior.businessId===item.businessId&&prior.userId===item.userId&&
       (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&rejectedProductStockUpdate(prior)&&
       products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior))return true;
@@ -2593,7 +2593,11 @@ function createSaleOperation(before, after, sale) {
       Number(clientWrite.data.financialVersion) !== Number(sale.financialVersionAnterior) + 1)))
     throw Error("Venda e saldo não formam uma operação financeira única. Nenhuma venda foi salva.");
   window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
-  const existing = readQueueStrict().filter((item) => String(item.operationId) === String(sale.operationId));
+  const queue=readQueueStrict(), existing=queue.filter(item=>String(item.operationId)===String(sale.operationId));
+  if(stockQueueDependsOnRejection({businessId:activeBusinessId(),userId:currentUser.uid,
+    workspaceGeneration:DB.getWorkspaceGeneration?.()??0,payload:{writes}},queue))
+    throw Object.assign(Error('Este produto tem uma pendência de estoque em Sincronização. Confira a pendência antes de concluir. Nenhuma nova venda foi salva.'),
+      {code:'sale-stock-review-required'});
   if (existing.length) {
     const localSale = (DB.carregar().vendas || []).some((entry) =>
       String(entry.operationId) === String(sale.operationId));
@@ -4372,20 +4376,43 @@ function markLocalPaymentConfirmed(item, confirmedAt = now()) {
 }
 function assertSaleTracked(sale) {
   const credit = sale?.status === "fiado" || sale?.formaPagamento === "fiado";
-  if (!credit && Number(sale?.syncPipelineVersion || 0) < 2) return;
-  if (sale.financialAppliedAt || sale.syncConfirmedAt) return;
+  if (!credit && Number(sale?.syncPipelineVersion || 0) < 2) return 'confirmed';
+  if (sale.financialAppliedAt || sale.syncConfirmedAt) return 'confirmed';
   if (typeof resumePreparedSales === "function") resumePreparedSales(sale.operationId);
-  const writes = readQueue().filter((item) =>
-    item.status !== "local_preparing" &&
+  const tracked = readQueueStrict().filter((item) =>
+    item.businessId===activeBusinessId()&&item.userId===currentUser?.uid&&
+    (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&
     (String(item.operationId) === String(sale.operationId) ||
       String(item.operationId).startsWith(`${sale.operationId}:`)))
-    .flatMap((item) => item.payload?.writes || []);
-  const queued = writes.some((write) => write.entityType === "sales" &&
+    .map(item=>({item,state:classifyQueueOperation(item)}))
+    .filter(({state})=>state.category!=='preparing');
+  const writes=tracked.flatMap(({item})=>item.payload?.writes||[]);
+  const queued=writes.some((write) => write.entityType === "sales" &&
       write.operation === "create" && String(write.entityId) === String(sale.id) &&
       String(write.data?.operationId || "") === String(sale.operationId || "")) &&
     (!credit || writes.some((write) => write.entityType === "clients" &&
       String(write.entityId) === String(sale.clienteId)));
-  if (!queued) throw Error("A venda ficou sem confirmação nem fila de sincronização. Ela foi preservada neste aparelho; exporte o diagnóstico antes de repetir.");
+  if(!queued)throw Object.assign(Error('A venda original está neste aparelho, mas sua confirmação precisa de revisão. Abra Sincronização → Ver detalhes e exporte o diagnóstico.'),
+    {code:'sale-original-review-required'});
+  return tracked.some(({state})=>!['pending','processing'].includes(state.category))?'review':'pending';
+}
+function inspectCheckoutSaleAttempt({saleId,operationId,spaceId}) {
+  if(!saleId)return null;
+  const sale=(DB.carregar().vendas||[]).find(row=>row.id===saleId||operationId&&row.operationId===operationId);
+  const review=()=>Object.assign(Error('A tentativa original precisa de conferência. Abra Sincronização → Ver detalhes antes de registrar outra venda.'),
+    {code:'sale-original-review-required'});
+  if(!sale){
+    if(readQueueStrict({readOnly:true}).some(item=>item.businessId===activeBusinessId()&&item.userId===currentUser?.uid&&
+      (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&
+      (item.payload?.writes||[]).some(write=>write.entityType==='sales'&&write.operation==='create'&&
+        (write.entityId===saleId||operationId&&write.data?.operationId===operationId))))throw review();
+    return null;
+  }
+  if(!currentUser?.uid||currentUser.uid!==auth.currentUser?.uid||sale.actorUid&&sale.actorUid!==currentUser.uid||
+     sale.businessId!==activeBusinessId()||sale.spaceId!==spaceId||
+     (sale.workspaceGeneration??0)!==(DB.getWorkspaceGeneration?.()??0)||sale.deletedAt||sale.active===false||
+     sale.id!==saleId||operationId&&sale.operationId!==operationId)throw review();
+  return {sale,status:assertSaleTracked(sale)};
 }
 function assertPaymentTracked(payment) {
   if (payment?.applicationStatus === "applied" || payment?.syncConfirmedAt) return;
@@ -7351,6 +7378,7 @@ window.SyncFirebase = {
   createSaleOperation,
   createPaymentOperation,
   assertSaleTracked,
+  inspectCheckoutSaleAttempt,
   prepareOperationalCustomer,
   prepareSaleCustomer,
   assertCustomerForSale,
