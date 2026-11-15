@@ -113,6 +113,13 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(!p.requestHash){const primary=writes.find(w=>['sales','payments','stockMovements','balanceAdjustments'].includes(w.entityType)&&w.operation==='create');const event=primary&&(await tx.get(ref(c.bid,primary.entityType,primary.entityId))).data();if(!event||event.operationId!==item.operationId)fail('Recibo legado exige revisão; nenhum efeito foi reaplicado.','failed-precondition');}
     return{replayed:true,operationId:item.operationId,outcome:null};
    }
+   // An absent marker cannot distinguish a lost unapplied payment outcome
+   // from a request that did not reach the server. Never retry that write here.
+   if(request.data?.queueRecoveryVersion===1){
+    const payment=attemptWrites.find(w=>w.entityType==='payments'&&w.operation==='create');
+    if(payment)
+     fail('O recebimento anterior precisa ser conferido antes de outra tentativa.','failed-precondition');
+   }
    if(paymentRecovery&&(!c.has('customers.receiveDebt')||!c.has('customers.view')))fail('Sem autorização para revisar este recebimento.');
    const priorFailure=String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'');
    const protectedFinancialIntent=attemptWrites.some(w=>w.operation==='create'&&(w.entityType==='payments'||w.entityType==='sales'&&w.data.installmentPlan));
@@ -191,7 +198,9 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(paymentRecovery?.dryRun)return{status:'ready_for_explicit_confirmation',reviewHash:recoveryHash,originalPayloadHash:hash,operationId:item.operationId,...recoveryFacts,writesApplied:0};
    if(!plan.size)return{operationId:item.operationId,outcome,replayed:false};
    const marker=plan.get(op.path);
-   if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1});
+   if(marker)Object.assign(marker.data,{requestHash:hash,actorUid:c.uid,workspaceGeneration:gen(c.business),authorizationVersion:1,
+    queueRecoveryVersion:1,queueRecoveryApplied:!outcome&&!paymentRecovery&&marker.data.status==='processed',
+    ...(incomingPayment?{queueRecoveryPaymentId:incomingPayment.entityId}:{})});
    if(scopedReceiptAccount){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.fiadoReceiptScope={version:1,spaceId:incomingPayment.data.spaceId};
@@ -529,7 +538,34 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   return db.runTransaction(async tx=>{
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
-   if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,queueRecoveryVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
+   if(d.kind==='queued_operation_status'){
+    const operationId=operationalId(d.operationId,'Operação'),workspaceGeneration=gen(c.business);
+    if(typeof d.payloadHash!=='string'||!/^[a-f0-9]{64}$/.test(d.payloadHash))fail('Identificação do conteúdo inválida.','invalid-argument');
+    const [marker,archive,review]=await Promise.all(['processedOperations','syncIncidentArchives','saleRecoveryOperations'].map(col=>tx.get(ref(c.bid,col,operationId))));
+    const result=status=>({version:1,status,operationId,businessId:c.bid,workspaceGeneration});
+    if(archive.exists||review.exists||marker.data()?.status==='archived_without_effects')return result('review');
+    if(!marker.exists)return result('absent');
+    const data=marker.data();
+    if((data.actorUid||data.ownerId)!==c.uid||data.businessId!==c.bid||gen(data)!==workspaceGeneration)
+     fail('Comprovante fora da sessão autorizada.');
+    if(data.requestHash!==d.payloadHash||data.authorizationVersion!==1||data.status!=='processed')return result('review');
+    const applied=data.queueRecoveryVersion===1?data.queueRecoveryApplied===true:
+      ['simple','stock_entry','stock_adjustment','sale'].includes(data.eventKind);
+    if(applied&&data.queueRecoveryPaymentId){
+     if(!c.has('customers.receiveDebt')||!c.has('customers.view'))fail('Sem acesso ao comprovante do recebimento.');
+     const paymentId=operationalId(data.queueRecoveryPaymentId,'Recebimento');
+     const [payment,event]=await Promise.all([tx.get(ref(c.bid,'payments',paymentId)),tx.get(ref(c.bid,'balanceEvents','payment_received:'+paymentId))]);
+     const p=payment.data(),e=event.data();
+     if(!p||p.businessId!==c.bid||gen(p)!==workspaceGeneration||p.operationId!==operationId||
+       (p.actorUid||p.ownerId)!==c.uid||p.status!=='applied'||p.applicationStatus!=='applied'||!p.financialAppliedAt||p.reversedAt||p.financialReversedAt||
+       p.financialOperationId!=='payment_received:'+paymentId||e?.status!=='applied'||e.businessId!==c.bid||gen(e)!==workspaceGeneration||
+       e.type!=='payment_received'||e.operationId!==operationId||e.sourceCollection!=='payments'||e.sourceDocumentId!==paymentId||
+       e.customerId!==(p.clienteId||p.clientId||p.customerId)||!numeric(p.valor,true)||!numeric(e.balanceDelta,true)||cents(e.balanceDelta)!==cents(p.valor))return result('review');
+     await c.space(p.spaceId);
+    }
+    return result(applied?'applied':'review');
+   }
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
    if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion});
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
@@ -541,7 +577,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    await c.space(s.spaceId);
    const marker=(await tx.get(ref(c.bid,'processedOperations',op))).data(),e=(await tx.get(ref(c.bid,'balanceEvents',(reversal?'credit_sale_reversal:':'credit_sale:')+sid))).data();
    return{confirmed:!!marker&&!!e&&(reversal?s.active===false&&s.financialReversalEventId:s.financialAppliedAt)!=null&&e.operationId===op&&e.customerId===(s.clienteId||s.customerId)&&e.sourceDocumentId===sid&&cents(e.balanceDelta)===(reversal?1:-1)*cents(s.valorFinal??s.valorTotal)};
-  },['fiado_receipt_route','payment_confirmation'].includes(request.data?.kind)?{readOnly:true}:undefined);
+  },['fiado_receipt_route','payment_confirmation','queued_operation_status'].includes(request.data?.kind)?{readOnly:true}:undefined);
  }
  async function recognizePreservedPayment(request) {
   const d=request.data||{};

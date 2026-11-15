@@ -11,6 +11,7 @@ const clientCode =
   slice('function classifyQueueOperation(', 'function queueStateFields(') +
   slice('const retryDelay =', 'function paymentQueueRequiresReview(') +
   slice('function migrateScopedQueueCompatibility(', 'function queueWrites(') +
+  slice('function queuedProductIds(', 'function stockQueueDependsOnRejection(') +
   slice('function saveProductFavorites(', 'async function validateUser(') +
   slice('async function processSyncQueue(', 'function markLocalCreditSaleConfirmed(');
 
@@ -29,7 +30,7 @@ const denied = () => Object.assign(Error('Denied'), {code:'permission-denied',sy
 function harness(initial, remoteCommit) {
   const data={produtos:['a','b'].map(id=>({id,favorito:initial,atualizadoEm:'initial',estoqueAtual:7}))};
   const remote=new Map(data.produtos.map(product=>[product.id,{...product}]));
-  const receipts=new Set(), attempts=[], applied=[], wakeups=[], notifications=[], stars=new Map(), frames=[];
+  const receipts=new Set(), attempts=[], lookups=[], applied=[], wakeups=[], notifications=[], stars=new Map(), frames=[];
   let persisted='[]', clock=Date.now(), nextId=0;
   const queued=()=>JSON.parse(persisted), enqueue=item=>{persisted=JSON.stringify([...queued(),item]);};
   const date=class extends Date { static now() {return clock;} };
@@ -47,7 +48,7 @@ function harness(initial, remoteCommit) {
       data.produtos=data.produtos.map(product=>updates.has(product.id)?{...product,...updates.get(product.id)}:product);
     },
   };
-  let respond;
+  let respond, readReceipt;
   let context;
 
   async function apply(item) {
@@ -68,8 +69,8 @@ function harness(initial, remoteCommit) {
         },
       },
       setTimeout:()=>1,clearTimeout(){},
-      processingPromise:null,manualSyncPromise:null,automaticSyncPromise:null,readOnlyMode:false,cloudPaused:false,
-      currentUser:account,auth:{currentUser:account},state:{userProfile:{businessId}},syncSessionGeneration:1,
+      processingPromise:null,manualSyncPromise:null,automaticSyncPromise:null,readOnlyMode:false,cloudPaused:false,queueRetryTimer:null,queueRetryWakes:new Map(),
+      currentUser:account,auth:{currentUser:account},state:{userProfile:{businessId},operationalProtocol:{queueRecoveryVersion:1}},syncSessionGeneration:1,
       activeBusinessId:()=>businessId,navigator:{onLine:true},now:()=>new Date(++clock).toISOString(),currentPath:'',
       captureCloudReadScope:()=>businessId,scheduleImmediate:()=>wakeups.push('sync'),
       readQueue:queued,readQueueStrict,saveQueue:queue=>{persisted=JSON.stringify(queue);},queueKey:()=> 'qa-queue',
@@ -78,13 +79,14 @@ function harness(initial, remoteCommit) {
       QUEUE_ENTITY_ALIASES:{produtos:'products'},CLOUD_NAMES:['products','sales','payments','stockMovements'],
       IDEMPOTENT_EVENT_NAMES:new Set(['sales','payments','stockMovements']),PAYLOAD_VERSION:3,deviceId:()=> 'qa-device',
       sanitizeForFirestore:value=>value,stableLegacyOperationId:item=>item.operationId,queueSubtype:()=> 'simple',
-      validateUser:async()=>{},refreshRecoveryResolutions:async()=>{},emit(){},reportError(){},
+      validateUser:async()=>{},refreshRecoveryResolutions:async()=>{},emit(){},reportError(){},traceSync(){},
       readPaymentRecoveryReceipt:()=>null,readRecoveryResolution:()=>null,readQueueArchive:()=>null,recoveryResolutionKey:()=> 'qa-resolution',
       queueManualReviewReason:item=>item.reviewRequired?'manual':'',queuePreflight:()=>({ok:true}),
       preserveQueueQuarantine:item=>Boolean(item.reviewRequired),paymentQueueRequiresReview:()=>false,
       paymentQueueDependsOnReview:()=>false,saleQueueRequiresReview:()=>false,queueErrorBreakdown:()=>[],
       isHistoricalProjectionBatch:()=>false,verifySaleQueueCommit:async()=>{},markLocalSaleConfirmed(){},markLocalPaymentConfirmed(){},
-      errorCode:error=>error.code,async commitQueueItem(item) {
+      errorCode:error=>error.code,async commitQueueItem(item,{checkingPreviousAttempt}={}) {
+        if(checkingPreviousAttempt){lookups.push(item.operationId);if(readReceipt?await readReceipt(item):receipts.has(item.operationId))return;}
         attempts.push(item.operationId);
         if(respond)await respond(item,remoteCommit || apply);
         else await (remoteCommit || apply)(item);
@@ -98,7 +100,9 @@ function harness(initial, remoteCommit) {
 
   start();
   return {
-    attempts, applied, remote, data, stars, wakeups, notifications, queued, enqueue,
+    attempts, lookups, applied, remote, data, stars, wakeups, notifications, queued, enqueue,
+    seedReceipt:id=>receipts.add(id),
+    readReceipt:fn=>{readReceipt=fn;},
     seed: item=>{enqueue(item); for(const write of item.payload.writes) if(Object.hasOwn(write.data,'favorito')){
       const product=data.produtos.find(p=>p.id===write.entityId);
       Object.assign(product,write.data);
@@ -184,18 +188,19 @@ test('a tap during an in-flight commit paints immediately and wakes sync after t
   assert.equal(h.stars.get('a'),false);
 });
 
-test('restart replays an in-flight envelope with its original ID after a lost response',async()=>{
+test('restart recognizes an in-flight envelope by original ID after a lost response',async()=>{
   const h=harness(false);
   const original=favorite('old','local',true,'a',{status:'syncing',lastAttemptAt:'2026-01-01T00:00:00Z'});
   h.seed(original);h.tap('a');h.flushTap();
   h.remote.get('a').favorito=true;
-  h.respond(async(item,apply)=>{if(item.operationId!=='old')await apply(item);}); // Old ID is already confirmed.
+  h.seedReceipt('old');
   h.restart();
   assert.equal(h.queued()[0].status,'pending');
   assert.deepEqual(h.queued()[0].payload,original.payload);
   assert.equal(h.stars.get('a'),false);
   await h.retry();
-  assert.deepEqual(h.attempts,['old','new-1']);
+  assert.deepEqual(h.lookups,['old']);
+  assert.deepEqual(h.attempts,['new-1']);
   assert.deepEqual(h.applied,['new-1']);
   assert.equal(h.remote.get('a').favorito,false);
   assert.equal(h.stars.get('a'),false);
@@ -222,7 +227,7 @@ test('a rejection on retry cannot release a successor while the original outcome
   h.seed(favorite('old','local',true));
   h.tap('a');h.flushTap();
   h.respond(async(item,apply)=>{
-    if(h.attempts.length===1){await apply(item);throw unavailable();}
+    if(h.attempts.length===1)throw unavailable();
     if(h.attempts.length===2)throw denied();
     await apply(item);
   });
@@ -263,6 +268,7 @@ test('Firestore Emulator confirms the last intent, one receipt per operation and
   const {initializeApp,deleteApp}=fromFunctions('firebase-admin/app');
   const {getFirestore}=fromFunctions('firebase-admin/firestore');
   const {operationalCommitService}=require('../functions/src/services/operational-commit-service');
+  const {createHash}=require('node:crypto'),{canonical}=require('../js/sale-recovery-client');
   const app=initializeApp({projectId:'demo-veconi-favorite-order'},'favorites-queue-qa');
   const db=getFirestore(app);
   const root=db.doc('businesses/'+businessId);
@@ -278,13 +284,18 @@ test('Firestore Emulator confirms the last intent, one receipt per operation and
       product.set({id:'a',businessId,favorito:false,estoqueAtual:7,preco:25,spaceAccessMode:'all_spaces',allowedSpaceIds:[]}),
     ]);
     const h=harness(false,commit);
+    h.readReceipt(async item=>{
+      const payloadHash=createHash('sha256').update(canonical(item.payload)).digest('hex');
+      const result=await service.receipt({auth:{uid:userId},data:{businessId,kind:'queued_operation_status',operationId:item.operationId,payloadHash}});
+      assert.ok(['applied','absent'].includes(result.status));
+      return result.status==='applied';
+    });
     h.seed(favorite('old','local',true));
     h.tap('a');h.flushTap();
     h.respond(async(item,send)=>{
       if(h.attempts.length===1)throw unavailable();
       const result=await send(item);
       if(h.attempts.length===2){assert.equal(result.replayed,false);throw unavailable();}
-      if(item.operationId==='old')assert.equal(result.replayed,true);
     });
     await h.retry();
     assert.equal((await marker('new-1').get()).exists,false);
@@ -301,7 +312,8 @@ test('Firestore Emulator confirms the last intent, one receipt per operation and
     assert.equal(newReceipt.exists,true);
     assert.equal((await root.collection('processedOperations').get()).size,2);
     assert.equal(h.stars.get('a'),false);
-    assert.deepEqual(h.attempts,['old','old','old','new-1']);
+    assert.deepEqual(h.attempts,['old','old','new-1']);
+    assert.deepEqual(h.lookups,['old','old']);
     assert.equal(h.queued().length,0);
 
     await root.collection('members').doc(userId).set({status:'active',role:'seller',spaceAccess:'all'});

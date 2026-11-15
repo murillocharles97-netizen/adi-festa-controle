@@ -98,6 +98,41 @@ test('forged server intent with wrong saldo delta, stock delta, sale total or ca
  }
 });
 test('same operationId with changed content rejects; original receipt/payload immutable',async()=>{const c=await setup(),{packet}=c.h.sell();await service.commit(c.request(packet));const original=await read(c,'processedOperations',packet.operationId),changed=structuredClone(packet);changed.payload.writes[0].data.observacao='Conteúdo diferente';await assert.rejects(service.commit(c.request(changed)));assert.deepEqual(await read(c,'processedOperations',packet.operationId),original);});
+const queuedStatus=(c,item,changes={})=>service.receipt({auth:{uid:changes.uid||item.userId},data:{businessId:c.bid,
+ kind:'queued_operation_status',operationId:item.operationId,workspaceGeneration:0,
+ payloadHash:crypto.createHash('sha256').update(require('../../js/sale-recovery-client').canonical(item.payload)).digest('hex'),...changes}});
+test('queued status is read only and binds a lost sale response to the exact payload, generation, company and actor',async()=>{
+ const c=await setup(),{packet,sale}=c.h.sell({status:'pago'});
+ assert.equal((await queuedStatus(c,packet)).status,'absent');
+ assert.equal((await c.root.collection('processedOperations').get()).size,0);
+ await service.commit(c.request(packet)); // Caller intentionally ignores the response.
+ const original=await read(c,'processedOperations',packet.operationId);
+ assert.deepEqual(await queuedStatus(c,packet),{version:1,status:'applied',operationId:packet.operationId,businessId:c.bid,workspaceGeneration:0});
+ assert.equal((await queuedStatus(c,packet,{payloadHash:'a'.repeat(64)})).status,'review');
+ await assert.rejects(queuedStatus(c,packet,{uid:c.owner}),{code:'permission-denied'});
+ await assert.rejects(queuedStatus(c,packet,{businessId:'other-shop'}),{code:'permission-denied'});
+ await assert.rejects(queuedStatus(c,packet,{workspaceGeneration:1}));
+ assert.deepEqual(await read(c,'processedOperations',packet.operationId),original);
+ assert.equal((await read(c,'sales',sale.id)).operationId,packet.operationId);
+ assert.equal((await read(c,'products','qa-product')).estoqueAtual,2);
+ assert.equal((await c.root.collection('stockMovements').where('operationId','==',packet.operationId).get()).size,1);
+});
+test('queued status reconciles a proved payment, rejects an uncertain resend and refuses a reversed payment',async()=>{
+ const c=await setup(),item=packetFor(c,c.owner,'payment',[]),before=await read(c,'clients','qa-client');
+ const data={id:item.operationId,operationId:item.operationId,businessId:c.bid,spaceId:c.space,clienteId:'qa-client',valor:5,
+  saldoAnterior:-12,saldoNovo:-7,expectedFinancialVersion:12,expectedBalance:-12,financialStateDependent:true,paymentMode:'partial',data:new Date().toISOString()};
+ item.payload.writes=[{entityType:'payments',entityId:item.operationId,operation:'create',data},
+  {entityType:'clients',entityId:'qa-client',operation:'update',before,data:{saldo:-7,financialVersion:13}}];
+ const request=c.request(item);
+ await assert.rejects(service.commit({...request,data:{...request.data,queueRecoveryVersion:1}}),{code:'failed-precondition'});
+ assert.equal((await queuedStatus(c,item)).status,'absent');
+ await service.commit(request);
+ assert.equal((await queuedStatus(c,item)).status,'applied');
+ assert.equal((await read(c,'clients','qa-client')).saldo,-7);
+ assert.equal((await c.root.collection('balanceEvents').where('operationId','==',item.operationId).get()).size,1);
+ await c.root.collection('payments').doc(item.operationId).update({status:'reversed'});
+ assert.equal((await queuedStatus(c,item)).status,'review');
+});
 test('quarantine/review/archive cannot replay through normal OR forced entry point',async()=>{
  for(const mode of ['local-quarantine','archive','review','archived-receipt']){const c=await setup(),{packet}=c.h.sell();if(mode==='local-quarantine')packet.status='quarantined';if(mode==='archive')await c.root.collection('syncIncidentArchives').doc(packet.operationId).set({operationId:packet.operationId});if(mode==='review')await c.root.collection('saleRecoveryOperations').doc(packet.operationId).set({status:'closed_without_effects'});if(mode==='archived-receipt')await c.root.collection('processedOperations').doc(packet.operationId).set({status:'archived_without_effects'});await assert.rejects(service.commit(c.request(packet)));assert.equal((await read(c,'products','qa-product')).estoqueAtual,3);}
 });

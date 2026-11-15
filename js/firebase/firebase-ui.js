@@ -1,4 +1,4 @@
-import './sync.js?v=v224-renovacoes';
+import './sync.js?v=sync-recovery-1';
 import '../sale-recovery-client.js?v=208';
 import '../sale-recovery-ui.js?v=208';
 import '../sale-monetary-analysis-ui.js?v=215';
@@ -154,6 +154,8 @@ function openQueueDetails(filter={}){
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
   if(errors.some(item=>item.reviewReason==='product_stock_review_required'))
     errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento. O original está preservado. Use Comparar com a nuvem e confira o estoque físico antes de decidir se é necessário usar Ajustar estoque.</p>');
+  if(errors.some(item=>item.reviewReason==='sync_receipt_review_required'))
+    errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="status">Confira o resultado desta operação na nuvem antes de registrar outra. A tentativa original continua salva neste aparelho.</p>');
   if(errors.some(item=>item.reviewState==='verification_failed'))errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="alert">Há confirmação inválida ou divergente. Os erros originais foram preservados e o reenvio permanece bloqueado. É necessário conferir o recibo e a identidade da operação.</p>');
   const resolved=items.filter(item=>item.reviewState==='resolved'),manual=items.filter(item=>item.reviewState==='manual_review');
   const grid=root.querySelector('.firebase-sync-grid');
@@ -161,7 +163,8 @@ function openQueueDetails(filter={}){
   root.querySelector('h3').textContent='Sincronização dos dados';
   if(resolved.length)errorSection?.insertAdjacentHTML('beforebegin',`<section role="status"><b>${resolved.length} ocorrências resolvidas preservadas para auditoria.</b><p>Reenvio bloqueado. Fila e payloads originais preservados.</p>${resolved.map(i=>`<details><summary>${escape(i.operationId)}</summary><p>${escape(i.resolution.status)} · ${escape(formattedTime(i.resolution.resolvedAt))}<br>Registro confirmado: ${escape(i.resolution.paymentId||i.resolution.linkedSaleId||i.resolution.saleId||'Nenhum — encerrado sem efeitos')}</p><p>Erro original preservado: ${escape(i.errorCode)} · ${escape(i.errorMessage)}<br>Tentativas originais: ${escape(i.retryCount)}<br>Checksum original: <code>${escape(i.payloadChecksum)}</code></p></details>`).join('')}</section>`);
   if(manual.length)errorSection?.insertAdjacentHTML('beforebegin','<p role="status">Revisão manual — confirmação pendente. Nenhum reenvio automático será realizado.</p>');
-  const held=items.filter(item=>item.reviewRequired),quarantined=held.filter(item=>item.reviewState==='quarantined'),retainedSales=held.filter(item=>item.reviewState==='manual_review'&&!item.paymentReview&&!item.paymentDependency);
+  const held=items.filter(item=>item.reviewRequired),quarantined=held.filter(item=>item.reviewState==='quarantined'),retainedSales=held.filter(item=>item.reviewState==='manual_review'&&!item.paymentReview&&!item.paymentDependency&&item.reviewReason!=='product_stock_dependency');
+  if(held.some(item=>item.reviewReason==='product_stock_dependency'))errorSection?.insertAdjacentHTML('beforebegin','<p role="status">Há operações aguardando a conferência do estoque do mesmo produto. Operações de outros produtos podem continuar.</p>');
   const receipts=held.filter(item=>item.paymentReview);
   if(receipts.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning"><h4>Recebimentos preservados para revisão</h4><p>Sem reenvio automático. Somente movimentações financeiramente dependentes ficam bloqueadas.</p>${receipts.map(item=>`<article><code>${escape(item.operationId)}</code><p>${escape(item.errorMessage)}</p><button type="button" class="btn btn-light" data-payment-open="${escape(item.operationId)}">Exportar ou conferir original</button></article>`).join('')}</section>`);
   if(held.some(item=>item.paymentDependency))errorSection?.insertAdjacentHTML('beforebegin','<p role="status">Há movimentações de dívida aguardando revisão de um recebimento do mesmo cliente. Outras vendas independentes podem sincronizar.</p>');
