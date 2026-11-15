@@ -20,7 +20,10 @@ test('one-time v204 policy performs read-only catch-up despite old acknowledged 
 function pager(count,{pageSize=500,legacy=false,changeScope=false}={}){
  const repo=read('js/firebase/firestore-repository.js'),all=Array.from({length:count},(_,i)=>({id:'qa-'+String(i).padStart(5,'0'),data:()=>({updatedAt:'2026-10-25T15:00:00.000Z'})}));let scope='qa',calls=0;
  const c={collectionName:legacy?'catalogOrders':'sales',repositoryScopeKey:()=>scope,visibilityConstraints:()=>[],where:(f,o,v)=>({type:'where',v}),orderBy:()=>({type:'order'}),startAfter:d=>({type:'cursor',d}),limit:v=>({type:'limit',v}),Timestamp:{fromDate:d=>d.toISOString()},rememberMetadata:x=>x,timed:async(_t,_c,fn)=>fn(),convert:d=>({id:d.id,...d.data()}),lastReadMetadata:{},readVisible:async cs=>{calls++;const cursor=cs.find(x=>x.type==='cursor')?.d.id;if(changeScope)scope='other';return{docs:all.filter(d=>!cursor||d.id>cursor).slice(0,cs.find(x=>x.type==='limit').v)};}};
- vm.createContext(c);const start=repo.indexOf('    async listChangedSince(');vm.runInContext('globalThis.target={'+repo.slice(start,repo.indexOf('    async listPage(',start))+'};',c);return{run:()=>c.target.listChangedSince('2026-10-25T00:00:00.000Z',pageSize),calls:()=>calls};
+ vm.createContext(c);
+ const renewalStart=repo.indexOf('const renewalCollections =');
+ if(renewalStart!==-1)vm.runInContext(repo.slice(renewalStart,repo.indexOf('const visibilityConstraints =',renewalStart)).replace('export const renewalReadSpaces','const renewalReadSpaces'),c);
+ const start=repo.indexOf('    async listChangedSince(');vm.runInContext('globalThis.target={'+repo.slice(start,repo.indexOf('    async listPage(',start))+'};',c);return{run:()=>c.target.listChangedSince('2026-10-25T00:00:00.000Z',pageSize),calls:()=>calls};
 }
 for(const count of [0,499,500,501,1001])test('incremental DocumentSnapshot paging reads '+count+' tied timestamps without a stalled cursor',async()=>{const p=pager(count);assert.equal((await p.run()).length,count);});
 test('pagination rejects a retired query scope before returning data',async()=>{await assert.rejects(pager(501,{changeScope:true}).run(),{code:'sync-session-retired'});});

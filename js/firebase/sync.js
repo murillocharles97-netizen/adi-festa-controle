@@ -196,6 +196,9 @@ let currentUser = null,
   manualSyncPromise = null,
   autoTimer = null,
   quickTimer = null,
+  queueRetryTimer = null,
+  queueRetryWakes = new Map(),
+  syncConnectionAttempts = 0,
   unsubscribers = [],
   subscribers = new Set(),
   lastError = "",
@@ -583,7 +586,8 @@ function classifyQueueOperation(item) {
       reviewRequired:true,reviewState:quarantined?'quarantined':'manual_review',reviewReason:reason});}
     if(item.status==='error'){
       const reviewReason=monetaryRecoveryRequired(item)?'monetary_recovery_required':
-        rejectedProductStockUpdate(item)?'product_stock_review_required':null;
+        rejectedProductStockUpdate(item)?'product_stock_review_required':
+        ['sync-receipt-review-required','sync-retry-exhausted'].includes(item.lastErrorCode)?'sync_receipt_review_required':null;
       return result('error',{activeError:true,canRetry:!reviewReason&&!favoriteWriteWasRejected(item),
         replayBlocked:Boolean(reviewReason),reviewReason});
     }
@@ -670,6 +674,7 @@ const queueCounts = () => {
   const quarantined=count('quarantined'),resolved=count('resolved'),archiveOnly=count('archived'),archived=resolved+archiveOnly;
   return {
     pending: count('pending'),errors:count('error'),manualReview:count('manual_review')+quarantined,
+    awaitingReceipt: queue.filter((item,i)=>classes[i].sendable&&needsQueuedReceipt(item)).length,
     processing:count('processing'),preparing:count('preparing'),resolved,archiveOnly,
     historicalErrors:queue.filter(item=>item.lastErrorCode||item.lastErrorMessage).length,
     quarantined, archived, active: queue.length - quarantined - archived,
@@ -847,6 +852,9 @@ const retryDelay = (attempts, code = "") =>
   code === "resource-exhausted"
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
+const transientSyncCodes = new Set(['unavailable','deadline-exceeded','network-request-failed','aborted','resource-exhausted']);
+const needsQueuedReceipt = item => item.syncConfirmationPending === true ||
+  Number(item.attempts||0)>0 && transientSyncCodes.has(item.lastErrorCode);
 const isFavoriteProductWrite = (write) =>
   (QUEUE_ENTITY_ALIASES[write.entityType] || write.entityType) === "products" &&
   Object.hasOwn(write.data || {}, "favorito");
@@ -876,6 +884,21 @@ function favoriteWriteHasPredecessor(item, queue) {
         !favoriteWriteWasRejected(prior) && Array.isArray(prior.payload?.writes) &&
         prior.payload.writes.some(write => isFavoriteProductWrite(write) && products.has(String(write.entityId))))
       return true;
+  }
+  return false;
+}
+function hasUnconfirmedPredecessor(item,queue){
+  const footprint=packet=>new Set([
+    ...(Array.isArray(packet.payload?.writes)?packet.payload.writes:[]).filter(Boolean).map(write=>`${write.entityType}:${write.entityId}`),
+    ...[...queuedProductIds(packet)].map(id=>`products:${id}`),
+  ]),affected=footprint(item);
+  for(const prior of queue){
+    if(prior.queueId===item.queueId)break;
+    if(prior.businessId===item.businessId&&prior.userId===item.userId&&
+      (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&
+      (prior.status==='syncing'||needsQueuedReceipt(prior))&&!isFavoriteOnlyPacket(prior)&&
+      !['resolved','archived'].includes(classifyQueueOperation(prior).category)&&
+      (!prior.payload?.writes?.length||[...footprint(prior)].some(key=>affected.has(key))))return true;
   }
   return false;
 }
@@ -1174,7 +1197,33 @@ function queueQuarantineReason(item) {
 function queueManualReviewReason(item) {
   return queueQuarantineReason(item) || (paymentQueueRequiresReview(item) ? 'payment_recovery_review_required' :
     paymentQueueDependsOnReview(item,readQueue()) ? 'payment_financial_dependency' :
+    stockQueueDependsOnRejection(item,readQueue()) ? 'product_stock_dependency' :
     saleQueueRequiresReview(item) ? "sale_recovery_review_required" : "");
+}
+function queuedProductIds(item){
+  const products=new Set();
+  for(const write of Array.isArray(item.payload?.writes)?item.payload.writes:[]){
+    if(!write)continue;
+    if(write.entityType==='products')products.add(write.entityId);
+    for(const row of [write.data,write.before]){
+      if(write.entityType==='productVariants'&&row?.parentProductId)products.add(row.parentProductId);
+      if(write.entityType==='stockMovements'&&row?.produtoId)products.add(row.produtoId);
+      if(write.entityType==='sales'&&Array.isArray(row?.itens))
+        for(const line of row.itens)if(line?.produtoId||line?.productId)products.add(line.produtoId||line.productId);
+    }
+  }
+  return products;
+}
+function stockQueueDependsOnRejection(item,queue){
+  const products=queuedProductIds(item);
+  if(!item.queueId||!products.size)return false;
+  for(const prior of queue){
+    if(prior.queueId===item.queueId)break;
+    if(prior.businessId===item.businessId&&prior.userId===item.userId&&
+      (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&rejectedProductStockUpdate(prior)&&
+      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior))return true;
+  }
+  return false;
 }
 function preserveQueueQuarantine(item) {
   if(readRecoveryResolution(item))return false;
@@ -2015,6 +2064,9 @@ function updateQueueState() {
         : !q.pending&&q.manualReview ? `Revisão manual — confirmação pendente. ${q.manualReview} ocorrência(s) preservada(s), sem reenvio automático.`
         : q.processing?'Há operação em processamento; a confirmação será consultada sem novo lançamento.'
         : q.preparing?'Há operação aguardando confirmação da gravação local. Não refaça o lançamento.'
+        : q.awaitingReceipt?state.operationalProtocol?.status==='verified'&&state.operationalProtocol.queueRecoveryVersion!==1
+          ?'A confirmação exige uma atualização do servidor. A operação original continua salva.'
+          :'Aguardando confirmação do servidor. A VECONI vai conferir automaticamente quando possível.'
         : `${q.pending} alteração(ões) aguardando sincronização`,
     });
   else if(state.status!=='syncing'&&(state.integrityStatus==='failed'||state.integrityFailure))
@@ -2279,6 +2331,13 @@ function migrateScopedQueueCompatibility() {
         !canWriteSharedSettings()) return item;
     // A permanent failure is evidence. Compatibility is not an authorized retry.
     if (item.status === "error") return item;
+    if(item.syncProtocolVersion===1&&item.queueId&&item.operationId&&item.businessId===businessId&&item.userId===currentUser.uid){
+      if(item.status==='syncing'){
+        migrated++;
+        return {...item,status:'pending',syncConfirmationPending:true};
+      }
+      if(needsQueuedReceipt(item))return item;
+    }
     const copy = structuredClone(item),
       writes = Array.isArray(copy.payload?.writes) ? copy.payload.writes : [];
     copy.queueId ||= crypto.randomUUID();
@@ -2850,7 +2909,7 @@ async function ensureBusinessDocument() {
     });
   return reference;
 }
-async function testFirestoreConnection() {
+async function testFirestoreConnection({reportFailure=true}={}) {
   const readScopeToken=captureCloudReadScope();
   emit({ status: "testing", message: "Verificando a nuvem…" });
   try {
@@ -2865,7 +2924,7 @@ async function testFirestoreConnection() {
     return true;
   } catch (error) {
     if(readScopeToken!==captureCloudReadScope())throw error;
-    reportError(error, "Connection test", { path: currentPath });
+    if(reportFailure)reportError(error, "Connection test", { path: currentPath });
     throw error;
   }
 }
@@ -2887,11 +2946,33 @@ async function verifyOperationalProtocol() {
   const protocol=result.data;
   if(protocol?.protocolVersion!==1||protocol.channel!=='commitOperationalSync'||protocol.businessId!==businessId||protocol.workspaceGeneration!==workspaceGeneration||!Number.isInteger(protocol.minClientRelease)||protocol.minClientRelease<202||Number(window.AdiFestaBuild.release)<protocol.minClientRelease)
     throw Object.assign(Error('Atualize a VECONI. O canal de sincronização ainda não foi confirmado; nenhuma operação foi enviada.'),{code:'sync-update-required'});
-  state.operationalProtocol={status:'verified',protocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release),permissionsVersion:protocol.permissionsVersion||1,confirmedAt:now()};
+  state.operationalProtocol={status:'verified',protocolVersion:1,clientRelease:Number(window.AdiFestaBuild.release),permissionsVersion:protocol.permissionsVersion||1,queueRecoveryVersion:protocol.queueRecoveryVersion,confirmedAt:now()};
   verifiedProtocolSession=key;
   return protocol;
 }
-async function commitQueueItem(item) {
+const queuedReceiptReview = () => Object.assign(
+  Error('O servidor encontrou uma confirmação que precisa ser conferida. O original foi preservado e não será reenviado.'),
+  {code:'sync-receipt-review-required'});
+async function readQueuedOperationStatus(item){
+  const scope=captureCloudReadScope(false), payload=JSON.stringify(item.payload),
+    workspaceGeneration=item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0;
+  const assertOriginal=()=>{
+    assertCloudReadScope(scope,false);
+    const live=readQueueStrict({readOnly:true}).find(row=>row.queueId===item.queueId);
+    if(live?.operationId!==item.operationId||live.status!=='syncing'||live.lastAttemptAt!==item.lastAttemptAt||JSON.stringify(live.payload)!==payload)
+      throw Object.assign(Error('A operação mudou durante a consulta; a confirmação antiga foi ignorada.'),{code:'sync-session-retired'});
+  };
+  const payloadHash=await paymentHash(JSON.parse(payload));
+  assertOriginal();
+  const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'queued_operation_status',
+    operationId:item.operationId,businessId:item.businessId,workspaceGeneration,payloadHash});
+  assertOriginal();
+  const receipt=reply.data;
+  if(receipt?.version!==1||receipt.operationId!==item.operationId||receipt.businessId!==item.businessId||
+    receipt.workspaceGeneration!==workspaceGeneration||!['absent','applied'].includes(receipt.status))throw queuedReceiptReview();
+  return receipt.status;
+}
+async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
   const generation=syncSessionGeneration,uid=currentUser?.uid;
   const assertSession=()=>{if(generation!==syncSessionGeneration||uid!==currentUser?.uid||uid!==auth.currentUser?.uid)throw Object.assign(Error('A sessão da operação foi substituída. A fila original foi preservada.'),{code:'sync-session-retired'});};
   assertSession();
@@ -2922,10 +3003,18 @@ async function commitQueueItem(item) {
   // No fallback to direct commercial writes on Function/network failure. The
   // durable original envelope, IDs and checksum remain in their UID namespace.
   if (window.FirebaseCallable) {
+    if(checkingPreviousAttempt){
+      if(await readQueuedOperationStatus(item)==='applied')return null;
+      if(item.payload.writes.some(write=>write.entityType==='payments'&&write.operation==='create'))throw queuedReceiptReview();
+      if(Number(item.attempts||0)>=6)throw Object.assign(
+        Error('O servidor não confirmou esta operação após as tentativas automáticas. Confira os detalhes antes de repetir.'),{code:'sync-retry-exhausted'});
+    }
+    assertSession();
     let result;
     try { result = await window.FirebaseCallable('commitOperationalSync', {
       businessId: activeBusinessId(),
       syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release)||202,
+      ...(checkingPreviousAttempt?{queueRecoveryVersion:1}:{}),
       item: {...item, operationId:stableLegacyOperationId(item),
         workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0},
     }); } catch(error) {
@@ -2937,6 +3026,11 @@ async function commitQueueItem(item) {
       throw error;
     }
     assertSession();
+    if(state.operationalProtocol?.queueRecoveryVersion===1){
+      if(result.data?.operationId!==item.operationId||typeof result.data.replayed!=='boolean')
+        throw Object.assign(Error('A resposta não confirmou o identificador da operação.'),{code:'unavailable'});
+      if(result.data.replayed&&await readQueuedOperationStatus(item)!=='applied')throw queuedReceiptReview();
+    }
     return result.data?.outcome || null;
   }
   const businessId = activeBusinessId(),
@@ -3944,10 +4038,14 @@ async function processSyncQueue(options = {}) {
     assertSession();
     if(window.location || window.AdiFestaBuild)await verifyOperationalProtocol();
     assertSession();
+    if(!force&&state.operationalProtocol?.queueRecoveryVersion===1&&readQueue().some(item=>item.status==='pending'&&
+      item.lastErrorCode==='resource-exhausted'&&Date.parse(item.lastAttemptAt)+retryDelay(item.attempts||0,item.lastErrorCode)>Date.now()))
+      return {sent:0,collections:[],quotaBackoff:true};
     await refreshRecoveryResolutions(current);
     assertSession();
     let sent = 0,
       reviewHeld = 0,
+      quotaBackoff = false,
       financialConflicts = 0,
       financialAdjustments = 0,
       index = 0,
@@ -4011,11 +4109,13 @@ async function processSyncQueue(options = {}) {
         }
         continue;
       }
+      const checkingPreviousAttempt=needsQueuedReceipt(queued);
+      if(checkingPreviousAttempt&&state.operationalProtocol?.queueRecoveryVersion!==1)continue;
       if (!canAttempt(queued, force, manualRetry)) continue;
       const live = readQueue(),
         position = live.findIndex((item) => item.queueId === queued.queueId);
       // Resolve earlier uncertain commits first so an offline retry cannot supersede a newer favorite.
-      if (position < 0 || favoriteWriteHasPredecessor(live[position], live)) continue;
+      if (position < 0 || favoriteWriteHasPredecessor(live[position],live)||hasUnconfirmedPredecessor(live[position],live)) continue;
       const beforeAttempt = live[position];
       live[position] = {
         ...beforeAttempt,
@@ -4031,10 +4131,16 @@ async function processSyncQueue(options = {}) {
         progress: Math.round(((index + 1) / Math.max(1, queue.length)) * 100),
       });
       try {
-        const outcome = await commitQueueItem(live[position]);
+        const outcome = await commitQueueItem(live[position],{checkingPreviousAttempt});
         assertSession();
         await verifySaleQueueCommit(live[position]);
         assertSession();
+        if(checkingPreviousAttempt){
+          const latest=readQueue().find(row=>row.queueId===queued.queueId);
+          if(latest?.status!=='syncing'||latest.lastAttemptAt!==live[position].lastAttemptAt||latest.operationId!==queued.operationId||
+            JSON.stringify(latest.payload)!==JSON.stringify(queued.payload))
+            throw Object.assign(Error('A operação original mudou durante a confirmação.'),{code:'sync-session-retired'});
+        }
         markLocalSaleConfirmed(live[position]);
         if (!["financial_conflict", "financial_payment_adjustment_required",
           "financial_payment_applied_adjusted"].includes(outcome?.status))
@@ -4043,6 +4149,11 @@ async function processSyncQueue(options = {}) {
           (item) => item.queueId !== queued.queueId,
         );
         saveQueue(after);
+        if(state.syncFailure?.operationId===queued.operationId&&state.syncFailure.businessId===queued.businessId&&
+          state.syncFailure.actorUid===queued.userId&&needsQueuedReceipt(beforeAttempt)&&
+          ['server_operational_commit','Queue operation'].includes(state.syncFailure.stage)&&
+          String(state.syncFailure.code||'').replace(/^functions\//,'')===beforeAttempt.lastErrorCode)
+          state.syncFailure=null;
         if (outcome?.status === "financial_conflict") {
           rollbackPaymentConflict(live[position], outcome);
           financialConflicts++;
@@ -4097,21 +4208,17 @@ async function processSyncQueue(options = {}) {
           failedIndex = failed.findIndex(
             (item) => item.queueId === queued.queueId,
           );
+        let retryScheduled=false;
         if (failedIndex >= 0) {
           const attempts = Number(failed[failedIndex].attempts || 0) + 1,
-            temporary = [
-              "unavailable",
-              "deadline-exceeded",
-              "resource-exhausted",
-              "network-request-failed",
-              "aborted",
-            ].includes(errorCode(error)),
-            retryable = temporary && attempts < 6;
+            temporary = transientSyncCodes.has(errorCode(error)),
+            retryable = temporary && (state.operationalProtocol?.queueRecoveryVersion===1?attempts<=6:attempts<6);
           failed[failedIndex] = {
             ...failed[failedIndex],
             attempts,
             retryCount: attempts,
             status: retryable ? "pending" : "error",
+            ...(checkingPreviousAttempt||retryable?{syncConfirmationPending:true}:{}),
             ...(favoriteRejectedOnFirstAttempt(beforeAttempt,error) ? {favoriteRejectedWithoutEffect:true} : {}),
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
@@ -4122,14 +4229,18 @@ async function processSyncQueue(options = {}) {
             lastErrorPaths: error.syncDetail?.transactionPaths || [],
           };
           saveQueue(failed);
+          retryScheduled=retryable&&state.operationalProtocol?.queueRecoveryVersion===1;
           try { restoreRejectedProductFavorites(failed[failedIndex],failed); }
           catch (restoreError) { console.warn("[Favoritos] Estado anterior indisponível.", {code:errorCode(restoreError)}); }
         }
-        reportError(error, "Queue operation", {
-          queueId: queued.queueId,
-          operationId: queued.operationId,
-        });
-        if (errorCode(error) === "resource-exhausted") cloudPaused = true;
+        if(retryScheduled){
+          traceSync('queue_retry_waiting',{code:errorCode(error)});
+          emit({status:'waiting',message:'A confirmação está pendente. A VECONI vai conferir o servidor automaticamente.'});
+        }else reportError(error,"Queue operation",{queueId:queued.queueId,operationId:queued.operationId});
+        if (errorCode(error) === "resource-exhausted") {
+          quotaBackoff=retryScheduled;
+          if(!quotaBackoff)cloudPaused=true;
+        }
         if (
           [
             "unauthenticated",
@@ -4147,6 +4258,7 @@ async function processSyncQueue(options = {}) {
     return {
       sent,
       reviewHeld,
+      quotaBackoff,
       financialConflicts,
       financialAdjustments,
       pending: counts.pending,
@@ -4164,8 +4276,37 @@ async function processSyncQueue(options = {}) {
   try {
     return await task;
   } finally {
-    if(processingPromise===task)processingPromise = null;
+    if(processingPromise===task){processingPromise=null;scheduleQueueRetry();}
   }
+}
+function scheduleQueueRetry(){
+  if(state.operationalProtocol?.queueRecoveryVersion!==1)return;
+  clearTimeout(queueRetryTimer);
+  queueRetryTimer=null;
+  if(!currentUser||cloudPaused||readOnlyMode||!navigator.onLine)return;
+  const queue=readQueue(),present=new Set(queue.map(item=>item.queueId));
+  for(const id of queueRetryWakes.keys())if(!present.has(id))queueRetryWakes.delete(id);
+  const next=queue.filter(item=>item.status==='pending'&&needsQueuedReceipt(item)&&item.syncProtocolVersion===1&&
+    item.businessId===activeBusinessId()&&item.userId===currentUser.uid&&
+    (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&
+    !classifyQueueOperation(item).replayBlocked&&!favoriteWriteHasPredecessor(item,queue)&&!hasUnconfirmedPredecessor(item,queue)&&
+    queueRetryWakes.get(item.queueId)!==item.lastAttemptAt)
+    .map(item=>({item,at:Date.parse(item.lastAttemptAt)+retryDelay(item.attempts||0,item.lastErrorCode)}))
+    .filter(entry=>Number.isFinite(entry.at)).sort((a,b)=>a.at-b.at)[0];
+  if(!next)return;
+  const scope=captureCloudReadScope(false);
+  queueRetryTimer=setTimeout(async()=>{
+    queueRetryTimer=null;
+    const current=()=>scope===captureCloudReadScope(false)&&navigator.onLine&&!cloudPaused&&!readOnlyMode;
+    if(!current())return;
+    try{await (manualSyncPromise||automaticSyncPromise||processingPromise);}catch{/* The active pass reports its own failures. */}
+    if(!current())return;
+    const live=readQueue().find(item=>item.queueId===next.item.queueId);
+    if(live?.status==='pending'&&live.lastAttemptAt===next.item.lastAttemptAt&&queueRetryWakes.get(live.queueId)!==live.lastAttemptAt){
+      queueRetryWakes.set(live.queueId,live.lastAttemptAt);
+      return automaticSync();
+    }
+  },Math.max(0,next.at-Date.now()));
 }
 function pendingIds(name, confirmedPaymentOperation = null) {
   const ids = new Set();
@@ -6464,7 +6605,7 @@ function synchronizeNow(options = {}) {
     state.syncTrace = [];
     traceSync("manual_sync_started", {authenticated: Boolean(auth.currentUser), online: navigator.onLine});
     try { return await syncStep("manual_sync", () => runManualSync(options)); }
-    catch(error) { if(readScopeToken===captureCloudReadScope())reportError(error, "Manual sync"); throw error; }
+    catch(error) { if(readScopeToken===captureCloudReadScope()&&errorCode(error)!=='sync-session-retired')reportError(error, "Manual sync"); throw error; }
   })().finally(() => { if(manualSyncPromise===task)manualSyncPromise = null; });
   manualSyncPromise=task;
   return task;
@@ -6504,6 +6645,7 @@ async function runManualSync({manualRetry = false} = {}) {
   traceSync("queue_state", queueCounts());
   const push = await syncStep("uploading_changes", () => processSyncQueue({ force: true, manualRetry }), {service: "Firestore"});
   assertCloudReadScope(readScopeToken);
+  if(push.quotaBackoff){updateQueueState();return {...push,complete:false};}
   if (push.paused && push.reason !== "subscription_read_only") {
       const counts = queueCounts(),
       result = {
@@ -6588,10 +6730,11 @@ async function runAutomaticSync() {
   const readScopeToken=captureCloudReadScope();
   window.AppBootDiagnostics?.count?.("initialSyncCount");
   try {
-    if (!state.testPassed) await testFirestoreConnection();
+    if (!state.testPassed) await testFirestoreConnection({reportFailure:false});
     assertCloudReadScope(readScopeToken);
     const push = await syncStep("automatic_upload", () => processSyncQueue());
     assertCloudReadScope(readScopeToken);
+    if(push.quotaBackoff)return;
     const projection =
         document.visibilityState === "visible"
           ? await syncStep("client_projection", () => ensureClientProjection())
@@ -6639,9 +6782,18 @@ async function runAutomaticSync() {
         clientProjection: projection,
       });
     } else updateQueueState();
+    syncConnectionAttempts=0;
   } catch (error) {
-    if(readScopeToken!==captureCloudReadScope())return;
-    if (errorCode(error) === "resource-exhausted") cloudPaused = true;
+    if(readScopeToken!==captureCloudReadScope()||errorCode(error)==='sync-session-retired')return;
+    const code=errorCode(error);
+    if(transientSyncCodes.has(code)&&navigator.onLine&&syncConnectionAttempts<5){
+      syncConnectionAttempts++;
+      traceSync('sync_connection_retry_waiting',{code});
+      emit({status:'waiting',message:'O servidor está indisponível. A VECONI vai tentar a conexão novamente.'});
+      scheduleImmediate(retryDelay(syncConnectionAttempts,code));
+      return;
+    }
+    if(code==='resource-exhausted')cloudPaused=true;
     reportError(error, "Automatic sync");
   }
 }
@@ -6653,11 +6805,11 @@ function automaticSync() {
   automaticSyncPromise=task;
   return task;
 }
-function scheduleImmediate() {
+function scheduleImmediate(delay = 500) {
   clearTimeout(quickTimer);
   quickTimer = null;
   if (!currentUser || cloudPaused) return;
-  quickTimer = setTimeout(automaticSync, 500);
+  quickTimer = setTimeout(automaticSync, delay);
 }
 function startAutoSync() {
   scheduleImmediate();
@@ -6665,6 +6817,10 @@ function startAutoSync() {
 function stopAutoSync() {
   clearInterval(autoTimer);
   clearTimeout(quickTimer);
+  clearTimeout(queueRetryTimer);
+  queueRetryTimer=null;
+  queueRetryWakes.clear();
+  syncConnectionAttempts=0;
   autoTimer = null;
   quickTimer = null;
 }
@@ -6912,6 +7068,10 @@ function setUser(user, profile = null, business = null, {reason = "session_updat
   let pendingBefore = null;
   try { pendingBefore = queueCounts().total; } catch { /* Diagnostic only. Never modify the queue. */ }
   syncSessionGeneration++;
+  clearTimeout(queueRetryTimer);
+  queueRetryTimer=null;
+  queueRetryWakes.clear();
+  syncConnectionAttempts=0;
   state.operationalProtocol={status:'not_verified'};
   state.remoteReadRefresh={pending:0,status:'idle'};
   processingPromise = null; // The retired promise is fenced; it must not own the next identity's queue.
