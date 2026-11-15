@@ -4,6 +4,20 @@ const base='f5e3f1e00f0e602b8478a68e304ad6af1bcdad38';
 test('published V222 already excludes valid resolutions indirectly, but retains stale red status without a new transfer',()=>{const implementation=cp.execFileSync('git',['show',base+':js/firebase/sync.js'],{encoding:'utf8',maxBuffer:2e6}),h=harness({implementation});h.resolve(0);h.resolve(1);assert.equal(h.counts().errors,0);assert.equal(h.counts().archived,2);h.s.state.testPassed=false;h.s.updateQueueState();assert.equal(h.s.state.status,'error');assert.match(h.s.state.message,/2 alteração/);assert.equal(h.snapshots.length,0);});
 test('two confirmed resolutions give 0 sendable / 0 active errors / 0 reviews / 2 preserved and no red state',()=>{const h=harness(),before=JSON.stringify(h.packets);h.resolve(0);h.resolve(1);h.s.updateQueueState();assert.deepEqual([h.counts().pending,h.counts().errors,h.counts().manualReview,h.counts().archived],[0,0,0,2]);assert.equal(h.s.state.status,'success');assert.match(h.s.state.message,/2 ocorrências resolvidas/);assert.equal(JSON.stringify(h.packets),before);});
 test('one resolved and one real error keeps exactly one active error',()=>{const h=harness();h.resolve(0);h.s.updateQueueState();assert.equal(h.counts().errors,1);assert.equal(h.counts().archived,1);assert.equal(h.s.state.status,'error');});
+test('rejected standalone inventory edit gives review guidance and stays blocked from replay',()=>{
+  const h=harness(),packet=h.packets[0];
+  h.resolve(1);
+  Object.assign(packet,{lastErrorStage:'server_operational_commit',lastErrorCode:'permission-denied',lastErrorMessage:'Estoque sem movimento autorizado.',
+    payload:{eventKind:'simple',writes:[{entityType:'products',entityId:'qa-product',operation:'update',data:{estoqueAtual:8}}]}});
+  const before=JSON.stringify(h.packets),d=h.dom();
+  try{
+    d.details();
+    assert.match(d.w.document.querySelector('.sync-error-list').textContent,/Comparar com a nuvem.*estoque físico/);
+    assert.equal(d.w.document.querySelector('[data-retry-all]').disabled,true);
+    assert.equal(h.counts().errors,1);assert.equal(h.counts().archived,1);
+    assert.equal(JSON.stringify(h.packets),before);
+  }finally{d.close();}
+});
 test('54 unverified records stay a separate read-comparison warning, never proof of loss or complete Sync',()=>{const h=harness();h.resolve(0);h.resolve(1);h.s.saleIntegrityDiagnostics=()=>({count:0,verificationPending:Array.from({length:54},(_,n)=>({saleId:'qa-sale-'+n}))});h.s.updateQueueState();assert.equal(h.counts().errors,0);assert.equal(h.s.state.status,'waiting');assert.match(h.s.state.message,/54.*comparação/);assert.doesNotMatch(h.s.state.message,/Todos os dados|perdidos/);});
 test('resolved diagnostics preserve the original error while excluding it from active errors',()=>{const h=harness();h.resolve(0);const d=h.diagnostics()[0];assert.equal(d.status,'resolved');assert.equal(d.activeError,false);assert.equal(d.replayBlocked,true);assert.equal(d.originalStatus,'error');assert.equal(d.errorCode,h.packets[0].lastErrorCode);assert.equal(d.errorMessage,h.packets[0].lastErrorMessage);});
 test('only a failure bound to the resolved operation, actor, business and commit stage can be retired',()=>{for(const bad of ['none','operation','actor','business','stage']){const h=harness(),p=h.packets[0];h.resolve(0);h.resolve(1);h.s.state.syncFailure={stage:'server_operational_commit',operationId:p.operationId,actorUid:p.userId,businessId:p.businessId,code:p.lastErrorCode,message:p.lastErrorMessage};if(bad==='operation')h.s.state.syncFailure.operationId='other';if(bad==='actor')h.s.state.syncFailure.actorUid='other';if(bad==='business')h.s.state.syncFailure.businessId='other';if(bad==='stage')h.s.state.syncFailure.stage='remote_listener';h.s.state.syncFailureHistory=[structuredClone(h.s.state.syncFailure)];const history=JSON.stringify(h.s.state.syncFailureHistory);h.s.updateQueueState();assert.equal(JSON.stringify(h.s.state.syncFailureHistory),history);if(bad==='none'){assert.equal(h.s.state.syncFailure,null);assert.equal(h.s.state.status,'success');}else{assert.ok(h.s.state.syncFailure);assert.equal(h.s.state.status,'error');}}});

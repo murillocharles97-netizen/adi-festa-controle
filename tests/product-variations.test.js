@@ -24,6 +24,21 @@ test('produtos antigos continuam simples',()=>{
   assert.equal(context.getProductStockStatus(product),'disponivel');
 });
 
+test('editar cadastro preserva estoque e rejeita quantidade antiga do formulário',()=>{
+  const {context,data}=runtime();
+  const product=context.Produtos.salvar({nome:'Brownie',preco:8,estoqueAtual:10});
+  const oldFormStock=product.estoqueAtual;
+  context.Produtos.ajustarEstoque(product.id,7,'Ajuste QA');
+  const before=structuredClone(product);
+  assert.throws(()=>context.Produtos.salvar({id:product.id,nome:'Brownie novo',preco:9,estoqueAtual:oldFormStock}),/Ajustar estoque/);
+  assert.deepEqual(structuredClone(product),before);
+  const updated=context.Produtos.salvar({id:product.id,nome:'Brownie novo',preco:9,estoqueMinimo:3});
+  for(const field of ['estoqueAtual','estoque','totalStock','hasAvailableStock'])assert.equal(updated[field],before[field],field);
+  assert.equal(updated.nome,'Brownie novo');
+  assert.equal(updated.estoqueMinimo,3);
+  assert.equal(data.movimentacoesEstoque.length,1);
+});
+
 test('edição de disponibilidade preserva o productId e não duplica o cadastro',()=>{
   const {context,data}=runtime(),product=context.Produtos.salvar({nome:'Coca-Cola',preco:8,estoqueAtual:10});
   const edited=context.Produtos.salvar({...product,spaceAccessMode:'single_space',allowedSpaceIds:['adi'],defaultSpaceId:'adi'});

@@ -28,12 +28,21 @@ window.Produtos=(()=>{
   const status=p=>getProductStockStatus(p);
   const salvar=d=>{if(window.TeamAccess&&!window.TeamAccess.has('products.edit'))throw window.VeconiPermissionPolicy?.denied('products.edit')||Error('Você não tem permissão para editar produtos.');if(!d.id&&window.PlanLimitService)PlanLimitService.assert(PlanLimitService.canCreateProduct(),'criar novos produtos');const existente=d.id?obter(d.id):null,barcode=window.normalizeBarcode?.(d.barcode!==undefined?d.barcode:existente?.barcode)||'',barcodeType=barcode?(d.barcodeType||existente?.barcodeType||window.BarcodeIndex?.inferType?.(barcode)||null):null;window.BarcodeIndex?.assertAvailable?.(barcode,d.id);let salvo;DB.alterar(db=>{
     const atual=db.produtos.find(p=>p.id===d.id),agora=new Date().toISOString();
+    if(atual){
+      const quantidade=Number(atual.estoqueAtual??atual.estoque??0);
+      if([d.estoqueAtual,d.estoque].some(value=>value!=null&&Number(value)!==quantidade))
+        throw Object.assign(Error('Use Ajustar estoque para alterar a quantidade deste produto.'),{code:'stock-adjustment-required'});
+    }
     const v=window.ProductModel.build(d,atual,{agora,barcode,barcodeType,normalizeProductAccess:window.SpaceEngine?.normalizeProductAccess});
     // Validate origin before adding a new positive-stock record. Capture in
     // diffWrites then makes that choice durable; retry never consults the UI.
     if(!atual&&v.productType!=='variable'&&productControlsStock(v)&&Number(v.estoqueAtual)>0)
       window.SpaceContext?.stockMovementOrigin?.(v);
-    if(atual){Object.assign(atual,v);salvo=atual}else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
+    if(atual){
+      // The catalog editor must not overwrite inventory projections.
+      for(const field of ['estoqueAtual','estoque','totalStock','hasAvailableStock'])delete v[field];
+      Object.assign(atual,v);salvo=atual;
+    }else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{if(!window.ProductActions)throw Error('Aguarde o carregamento das ações de produtos.');return window.ProductActions.perform(id,'delete')};
   const entrada=(produtoId,quantidade,custoUnitario,observacao,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw window.VeconiPermissionPolicy?.denied('inventory.adjust')||Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{

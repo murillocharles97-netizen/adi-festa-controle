@@ -119,6 +119,27 @@ test('authorized stock entry and adjustment have one matching movement; catalog 
   if(mode==='editor')await assert.rejects(service.commit(c.request(item)));else{await service.commit(c.request(item));await service.commit(c.request(item));assert.equal((await read(c,'products','qa-product')).estoqueAtual,3+delta);assert.equal((await c.root.collection('stockMovements').get()).size,1);}
  }
 });
+test('standalone stock edit is rejected atomically; metadata-only edit preserves newer stock',async()=>{
+ const c=await setup(),before=await read(c,'products','qa-product');
+ const edit={entityType:'products',entityId:'qa-product',operation:'update',before,data:{nome:'Produto QA revisado',estoqueAtual:10}};
+ const rejected=packetFor(c,c.owner,'simple',[edit]);
+ await assert.rejects(service.commit(c.request(rejected)),/Estoque sem movimento autorizado/);
+ assert.deepEqual(await read(c,'products','qa-product'),before);
+ assert.equal((await c.root.collection('processedOperations').doc(rejected.operationId).get()).exists,false);
+ const adjustment=packetFor(c,c.owner,'stock_adjustment',[]);
+ adjustment.payload.writes=[{...edit,data:{estoqueAtual:2,estoque:2}},
+  {entityType:'stockMovements',entityId:adjustment.operationId,operation:'create',data:{id:adjustment.operationId,businessId:c.bid,spaceId:c.space,
+   operationId:adjustment.operationId,produtoId:'qa-product',tipo:'ajuste',quantidade:-1,estoqueAnterior:3,estoqueNovo:2}}];
+ await service.commit(c.request(adjustment));
+ const metadata=packetFor(c,c.owner,'simple',[{...edit,data:{nome:edit.data.nome,estoqueMinimo:2}}]);
+ await service.commit(c.request(metadata));
+ assert.equal((await service.commit(c.request(metadata))).replayed,true);
+ const product=await read(c,'products','qa-product');
+ assert.equal(product.nome,edit.data.nome);
+ assert.equal(product.estoqueMinimo,2);
+ assert.equal(product.estoqueAtual,2);
+ assert.equal((await c.root.collection('stockMovements').get()).size,1);
+});
 test('legitimate receipt and balance adjustment update debt/event once, without access escalation',async()=>{
  for(const mode of ['payment','adjust']){
   const c=await setup(),before=await read(c,'clients','qa-client'),uid=mode==='payment'?c.receiver:c.owner,item=packetFor(c,uid,mode==='payment'?'payment':'balance_adjustment',[]),source=mode==='payment'?'payments':'balanceAdjustments';

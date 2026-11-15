@@ -152,6 +152,8 @@ function openQueueDetails(filter={}){
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
   root.querySelector('.modal-body')?.insertAdjacentHTML('beforeend',operationConfirmationHtml(details));
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
+  if(errors.some(item=>item.reviewReason==='product_stock_review_required'))
+    errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento. O original está preservado. Use Comparar com a nuvem e confira o estoque físico antes de decidir se é necessário usar Ajustar estoque.</p>');
   if(errors.some(item=>item.reviewState==='verification_failed'))errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="alert">Há confirmação inválida ou divergente. Os erros originais foram preservados e o reenvio permanece bloqueado. É necessário conferir o recibo e a identidade da operação.</p>');
   const resolved=items.filter(item=>item.reviewState==='resolved'),manual=items.filter(item=>item.reviewState==='manual_review');
   const grid=root.querySelector('.firebase-sync-grid');
