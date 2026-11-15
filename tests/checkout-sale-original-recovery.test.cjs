@@ -44,6 +44,7 @@ function localWorkspace({blocked=false,mode='normal'}={}){
     vm.runInContext(fs.readFileSync('js/customer-subscriptions.js','utf8'),c);
     for(const key of ['customerSubscriptions','customerSubscriptionEvents'])c.SOURCES[key]={key};
     Object.assign(product,{productType:'recurring',itemKind:'product',durationValue:1,durationUnit:'months'});
+    if(mode==='service')Object.assign(product,{itemKind:'service',controlaEstoque:false,semControleEstoque:true});
   }
   const id=randomUUID(),operationId=randomUUID();
   const custom=mode==='custom'?{expiresAt:new Date(Date.now()+40*86400000).toISOString(),timeSet:true}:null;
@@ -126,6 +127,44 @@ test('a rejected update on another product does not block the sale',()=>{
   w.register();
   assert.deepEqual(w.queue()[0],unrelated);
   assert.equal(w.queue()[1].status,'pending');
+});
+
+test('a rejected quantity edit does not block a proven non-stock recurring item, but an unconfirmed mode change does',()=>{
+  const w=localWorkspace({mode:'service'}),previous=structuredClone(w.stockIncident);
+  previous.payload.writes[0].before=structuredClone(w.h.data().produtos[0]);
+  w.raw([previous]);
+  const uncertain=structuredClone(previous);
+  uncertain.payload.writes[0].data.controlaEstoque=false;
+  w.raw([uncertain]);
+  assert.throws(()=>w.c.assertSaleQueueDependencies(w.draft),{code:'sale-stock-review-required'});
+  w.raw([previous]);
+  w.register();
+  assert.equal(w.h.data().movimentacoesEstoque.length,0);
+  assert.equal(w.h.data().customerSubscriptions.length,1);
+  assert.deepEqual(w.queue()[0],previous);
+  assert.equal(w.queue()[1].status,'pending');
+});
+
+test('leaving a verified review starts an empty checkout without removing the original sale or queue',async()=>{
+  const w=localWorkspace({mode:'custom'}),sale=w.register(),c=w.c;
+  const original=w.queue()[0],productHold=w.stockIncident;
+  w.raw([productHold,original]);
+  const initial=JSON.stringify(w.h.data()),feedback={append(_gap,button){this.button=button;}};
+  Object.assign(c,{activeAttempt:{saleId:sale.id,operationId:sale.operationId},cart:structuredClone(w.draft.itens),
+    document:{querySelector:()=>feedback,createElement:()=>({})},manual:true,discountKind:'valor',finishing:false,
+    selectedCampaignIds:new Set(['qa']),draftDetails:{},draftKey:()=> 'qa-cart',draftPrincipal:()=> 'qa-owner',
+    selectedSalesSpaceId:()=>sale.spaceId,saveDraft(){},clearDraft(){},applyDraftDetails(){},drawCart(){},
+    setSubmissionState(){},toast(){}});
+  vm.runInContext(checkoutSection('  function holdOriginalSale(', '  const totals ='),c);
+  assert.equal(await c.resumeCheckoutSale(),true);
+  assert.equal(feedback.button.textContent,'Iniciar outra venda');
+  await feedback.button.onclick();
+  assert.equal(c.activeAttempt,null);
+  assert.equal(c.cart.length,0);
+  assert.equal(JSON.stringify(w.h.data()),initial);
+  assert.deepEqual(w.queue(),[productHold,original]);
+  assert.doesNotThrow(()=>c.assertSaleQueueDependencies({...w.draft,itens:[{produtoId:'another-item'}]}));
+  assert.throws(()=>c.assertSaleQueueDependencies(w.draft),{code:'sale-stock-review-required'});
 });
 
 test('checkout displays the stock conflict before confirmation or charging on a terminal',async()=>{

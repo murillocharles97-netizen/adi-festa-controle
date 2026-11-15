@@ -31,6 +31,7 @@ const appendOnly=new Set(['stockMovements','balanceEvents','balanceAdjustments',
 const changed=(patch,before,fields)=>fields.filter(k=>Object.hasOwn(patch,k)&&canonical(patch[k])!==canonical(before?.[k]));
 const numeric=(n,positive=false)=>typeof n==='number'&&Number.isFinite(n)&&(!positive||n>0);
 const same=(a,b)=>Math.abs(Number(a)-Number(b))<0.000001;
+const hasVariants=product=>product.productType==='variable'||product.productType==='recurring'&&product.hasVariations===true;
 const sameValue=(a,b)=>canonical(a?.toDate?.().toISOString()??a)===canonical(b?.toDate?.().toISOString()??b);
 
 // The caller supplies an intent/old offline envelope, NEVER an Admin write plan.
@@ -335,7 +336,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     const unit=i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot,price=cents(unit);if(price<0)fail('Preço negativo.');if(!monetary)total+=Math.round(q*price);
     const p=await old('products',productId);await scopeProduct(c,p,spaceId);
     if(variantId){const v=await old('productVariants',variantId);if(!v||v.parentProductId!==productId||!Model.active(v))fail('Variação inválida.');}
-    if(p.productType==='variable'&&!variantId)fail('Variação obrigatória.');
+    if(hasVariants(p)&&!variantId)fail('Variação obrigatória.');
     if(p.itemKind!=='service'&&!p.semControleEstoque&&p.controlaEstoque!==false)add(productId,variantId,(cancels.length?1:-1)*q);
    }
    if(monetary)total=monetary.totalCents;
@@ -422,11 +423,16 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    const reward=engagement.redemption.rewardSnapshot;
    if(engagement.redemption.stockMovementId)add(reward.productId,reward.variantId,-Number(reward.quantity));
   }
-  const movements=writes.filter(w=>w.entityType==='stockMovements'),byMovement=new Map();
+  const movements=writes.filter(w=>w.entityType==='stockMovements'),byMovement=new Map(),saleMovements=new Map();
   for(const w of movements){const m=planned('stockMovements',w.entityId)||w.data,k=m.produtoId+':'+(m.variantId||'');
    if(w.operation!=='create'||await old('stockMovements',w.entityId)||m.operationId!==item.operationId||!numeric(m.quantidade)||m.quantidade===0||!same(m.estoqueNovo-m.estoqueAnterior,m.quantidade))fail('Movimento de estoque inválido.');
    const movementSpace=await c.space(m.spaceId);if(!createSales.length&&!cancels.length&&movementSpace.capabilities?.inventory!==true)fail('Estoque não habilitado neste espaço.');await scopeProduct(c,await old('products',m.produtoId),m.spaceId);
-   if(createSales.length||cancels.length){if(m.vendaId!==primary.entityId||m.tipo!==(cancels.length?'venda_desfeita':'saida_venda'))fail('Movimento de outra venda.');}
+   if(createSales.length||cancels.length){
+    if(m.vendaId!==primary.entityId||m.spaceId!==spaceId||m.tipo!==(cancels.length?'venda_desfeita':'saida_venda')||
+       (cancels.length?m.quantidade<=0:m.quantidade>=0))fail('Movimento incompatível com a venda.');
+    if(!saleMovements.has(k))saleMovements.set(k,[]);
+    saleMovements.get(k).push(m);
+   }
    else if(engagement.redemption){if(w.entityId!==engagement.redemption.stockMovementId||m.tipo!=='saida_resgate_campanha'||m.redemptionId!==engagement.redemption.id||m.campaignId!==engagement.redemption.campaignId)fail('Movimento não corresponde ao resgate autorizado.');}
    else{if(!c.has('inventory.adjust')||!['entrada','ajuste','saida'].includes(m.tipo))fail('Ajuste de estoque não autorizado.');add(m.produtoId,m.variantId,m.quantidade);}
    byMovement.set(k,(byMovement.get(k)||0)+m.quantidade);
@@ -438,8 +444,16 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(!vid){for(const alias of ['estoque','totalStock'])if(Object.hasOwn(patch,alias)&&!same(patch[alias],value[alias])&&!same(patch[alias],patch[field]))fail('Alias de estoque divergente.');for(const alias of ['estoque','totalStock'])if(Object.hasOwn(value,alias))patch[alias]=patch[field];}
    const held=(await tx.get(ref(c.bid,'onlineStockReservations',stockKey({productId:pid,variantId:vid||null})))).data(),reserved=Number(held?.quantity||0),claim=sale?.onlineOrderId?await old('catalogOrders',sale.onlineOrderId):null,own=Number(claim?.reservedQuantities?.[vid?'v_'+vid:'p_'+pid]||0);
    if(!same(reserved,Number(value.onlineReservedStock||0))||patch[field]<reserved-own&&!value.allowNegativeStock)fail('Estoque insuficiente ou reservado.','failed-precondition');
+   // The request expresses a delta against the device's stock. Record the
+   // before/after values against the same server snapshot used for the write.
+   let running=value[field];
+   for(const movement of saleMovements.get(key)||[]){
+    movement.estoqueAnterior=running;
+    running+=movement.quantidade;
+    movement.estoqueNovo=running;
+   }
    const parent=await old('products',pid);if(vid&&value.parentProductId!==pid)fail('Variação de outro produto.');
-   if(parent.productType==='variable'){
+   if(hasVariants(parent)){
     const sum=await variantTotal(pid),parentPatch=planned('products',pid);
     if(!parentPatch||!same(parentPatch.totalStock??parentPatch.estoqueAtual,sum))fail('Agregado das variações divergente.');
    }
@@ -498,7 +512,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      if(scoped.defaultSpaceId)await c.space(scoped.defaultSpaceId);
     }
     const idKey=col==='products'?id+':':(patch.parentProductId||before?.parentProductId)+':'+id;
-    const variableSummary=col==='products'&&parent.productType==='variable';
+    const variableSummary=col==='products'&&hasVariants(parent);
     if(variableSummary){const total=await variantTotal(id);for(const f of ['estoqueAtual','estoque','totalStock'])if(Object.hasOwn(patch,f)&&!same(patch[f],total))fail('Resumo do produto não corresponde às variações.');
      const controlsStock=parent.itemKind!=='service'&&!parent.semControleEstoque&&parent.controlaEstoque!==false;
      if(changed(patch,before,['hasAvailableStock']).length&&!c.has('products.edit')&&![...deltas.keys()].some(key=>key.startsWith(id+':')))fail('Disponibilidade exige o movimento autorizado do produto.');

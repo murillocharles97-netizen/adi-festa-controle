@@ -20,7 +20,7 @@ const packet = (id, entityType = 'products', entityId = 'qa-product') => ({
 
 function runtime(packets, { onCommit, onReceipt, version = 1 } = {}) {
   let stored = JSON.stringify(packets), clock = Date.parse('2026-11-15T12:00:00Z'), serial = 0;
-  const timers = new Map(), receipts = new Map(), calls = [], marked = [], errors = [];
+  const timers = new Map(), receipts = new Map(), resolutions = new Map(), calls = [], marked = [], errors = [];
   const queue = () => JSON.parse(stored);
   const context = vm.createContext({
     Date: class extends Date { static now() { return clock; } }, navigator: { onLine: true },
@@ -35,7 +35,9 @@ function runtime(packets, { onCommit, onReceipt, version = 1 } = {}) {
     clearTimeout: id => timers.delete(id),
     queueQuarantineReason: () => '', paymentQueueRequiresReview: () => false, paymentQueueDependsOnReview: () => false,
     readPaymentRecoveryReceipt: () => null, readRecoveryResolution: () => null, readQueueArchive: () => null,
-    recoveryResolutionKey: () => 'qa-resolution', localStorage: { getItem: () => null },
+    recoveryResolutionKey: item => 'qa-resolution:'+item.operationId,
+    checksumValue: v => createHash('sha256').update(canonical(v)).digest('hex'),
+    localStorage: { getItem: key => resolutions.get(key)||null, setItem: (key,value) => resolutions.set(key,value) },
     canWriteSharedSettings: () => true, saleQueueRequiresReview: () => false, queuePreflight: () => ({ ok: true }),
     queueErrorBreakdown: () => ({}), validateUser: async () => {}, refreshRecoveryResolutions: async () => {},
     preserveQueueQuarantine: () => {}, retireSettingsPermissionFailure: () => {},
@@ -69,6 +71,7 @@ function runtime(packets, { onCommit, onReceipt, version = 1 } = {}) {
     section('function classifyQueueOperation(', 'async function assertCancellationQueueClear('),
     section('const retryDelay =', 'function paymentQueueRequiresReview('),
     section('function queueManualReviewReason(', 'function preserveQueueQuarantine('),
+    section('function readRecoveryResolution(', 'async function refreshRecoveryResolutions('),
     section('const queuedReceiptReview =', 'async function verifySaleQueueCommit('),
     section('async function processSyncQueue(', 'function pendingIds('),
   ].join('\n'), context);
@@ -82,6 +85,25 @@ function runtime(packets, { onCommit, onReceipt, version = 1 } = {}) {
   };
   return { context, queue, calls, receipts, marked, errors, timers, advance, run: () => context.processSyncQueue() };
 }
+
+test('a stock-held sale with proof is acknowledged without replay and an absent or partial proof leaves it in review',async()=>{
+  const old=packet('qa-old-stock');
+  Object.assign(old,{status:'error',lastErrorCode:'permission-denied',lastErrorStage:'server_operational_commit',lastErrorMessage:'Estoque sem movimento autorizado.'});
+  const held=packet('qa-held-sale','sales','qa-sale');
+  Object.assign(held,{source:'sale-write-ahead',status:'pending',syncConfirmationPending:true,lastAttemptAt:'2026-11-15T11:59:00Z'});
+  held.payload={eventKind:'sale',writes:[{entityType:'sales',entityId:'qa-sale',operation:'create',data:{
+    operationId:held.operationId,spaceId:'qa-space',itens:[{produtoId:'qa-product'}]}}]};
+  for(const proof of ['absent','applied','missing-sale']){
+    const h=runtime([old,held],{onReceipt:()=>proof==='absent'?'absent':'applied'}),confirmed=[];
+    h.context.markLocalSaleConfirmed=item=>confirmed.push(item.operationId);
+    if(proof==='missing-sale')h.context.verifySaleQueueCommit=async()=>{throw Error('missing sale');};
+    await h.run();
+    assert.deepEqual(h.calls.map(call=>call.name),['getOperationalSyncReceipt']);
+    assert.deepEqual(h.queue(),[old,held]);
+    assert.equal(h.context.classifyQueueOperation(held).category,proof==='applied'?'resolved':'manual_review');
+    assert.deepEqual(confirmed,proof==='applied'?[held.operationId]:[]);
+  }
+});
 
 test('a timer reconciles lost responses without a second commit and preserves the payload hash', async () => {
   const original = packet('qa-original');

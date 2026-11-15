@@ -1048,6 +1048,11 @@ function readRecoveryResolution(item){
     return value.status==='client_confirmed'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create'&&writes[0].entityId===value.clientId&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&value.resolvedAt&&value.resolvedByUid?value:null;
   }
   const sale=item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
+  if(value.channel==='queued_sale_receipt')return value.status==='applied'&&value.verifiedAt&&
+    /^[a-f0-9]{64}$/.test(value.payloadHash||'')&&value.payloadChecksum===checksumValue(item.payload)&&
+    value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
+    value.workspaceGeneration===(item.workspaceGeneration??0)&&sale.length===1&&value.saleId===sale[0].entityId&&
+    value.spaceId===sale[0].data?.spaceId?value:null;
   if(item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
     (value.channel!=='monetary_recovery'||value.kind!=='monetary_recovery_v1'||value.commercialReceiptConfirmed!==true||value.monetaryPolicy!=='unit4-total-cent-v1'||sale.length!==1||value.totalCents!==Math.round(Number(sale[0].data.valorFinal??sale[0].data.valorTotal)*100)||value.originalTotalCents!==value.totalCents))return null;
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
@@ -1221,9 +1226,21 @@ function stockQueueDependsOnRejection(item,queue){
     if(item.queueId&&prior.queueId===item.queueId)break;
     if(prior.businessId===item.businessId&&prior.userId===item.userId&&
       (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&rejectedProductStockUpdate(prior)&&
-      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior))return true;
+      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior)){
+      if(!saleIndependentOfRejectedStock(item,prior.payload.writes[0]))return true;
+    }
   }
   return false;
+}
+function saleIndependentOfRejectedStock(item,write){
+  const writes=item.payload.writes;
+  if(!writes.some(w=>w.entityType==='sales'&&w.data?.itens?.some(line=>(line.produtoId||line.productId)===write.entityId))||
+     writes.some(w=>w.entityType==='stockMovements'&&w.data?.produtoId===write.entityId||w.entityType==='products'&&w.entityId===write.entityId))return false;
+  const noStock=product=>product?.itemKind==='service'||product?.semControleEstoque===true||product?.controlaEstoque===false;
+  const stockOnly=['estoqueAtual','estoque','totalStock','stock','hasAvailableStock','atualizadoEm','updatedAt'];
+  // The rejected write must not establish the product's selling mode or change catalog data.
+  return noStock(write.before)&&Object.keys(write.data||{}).every(key=>stockOnly.includes(key))&&
+    noStock(DB.carregar().produtos?.find(product=>product.id===write.entityId));
 }
 function assertSaleQueueDependencies(sale,writes=[{entityType:'sales',data:sale}]){
   const queue=readQueueStrict({readOnly:true}),item={businessId:activeBusinessId(),userId:currentUser?.uid,
@@ -2983,13 +3000,13 @@ async function verifyOperationalProtocol() {
 const queuedReceiptReview = () => Object.assign(
   Error('O servidor encontrou uma confirmação que precisa ser conferida. O original foi preservado e não será reenviado.'),
   {code:'sync-receipt-review-required'});
-async function readQueuedOperationStatus(item){
+async function readQueuedOperationStatus(item,{held=false}={}){
   const scope=captureCloudReadScope(false), payload=JSON.stringify(item.payload),
     workspaceGeneration=item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0;
   const assertOriginal=()=>{
     assertCloudReadScope(scope,false);
     const live=readQueueStrict({readOnly:true}).find(row=>row.queueId===item.queueId);
-    if(live?.operationId!==item.operationId||live.status!=='syncing'||live.lastAttemptAt!==item.lastAttemptAt||JSON.stringify(live.payload)!==payload)
+    if(live?.operationId!==item.operationId||live.status!==(held?item.status:'syncing')||live.lastAttemptAt!==item.lastAttemptAt||JSON.stringify(live.payload)!==payload)
       throw Object.assign(Error('A operação mudou durante a consulta; a confirmação antiga foi ignorada.'),{code:'sync-session-retired'});
   };
   const payloadHash=await paymentHash(JSON.parse(payload));
@@ -3000,7 +3017,26 @@ async function readQueuedOperationStatus(item){
   const receipt=reply.data;
   if(receipt?.version!==1||receipt.operationId!==item.operationId||receipt.businessId!==item.businessId||
     receipt.workspaceGeneration!==workspaceGeneration||!['absent','applied'].includes(receipt.status))throw queuedReceiptReview();
-  return receipt.status;
+  return held?{status:receipt.status,payloadHash,assertOriginal}:receipt.status;
+}
+async function recognizeSaleHeldByStock(item){
+  const writes=item.payload?.writes||[],sale=writes.find(w=>w.entityType==='sales'&&w.operation==='create');
+  if(!sale||item.source!=='sale-write-ahead'||item.syncProtocolVersion!==1||
+     sale.data?.operationId!==item.operationId||!sale.data.spaceId||
+     item.businessId!==activeBusinessId()||item.userId!==currentUser?.uid||
+     (item.workspaceGeneration??0)!==(DB.getWorkspaceGeneration?.()??0)||
+     state.operationalProtocol?.queueRecoveryVersion!==1||
+     writes.some(w=>w.entityType==='payments'||w.entityType==='balanceAdjustments'))return;
+  const receipt=await readQueuedOperationStatus(item,{held:true});
+  if(receipt.status!=='applied')return;
+  await verifySaleQueueCommit(item);
+  receipt.assertOriginal();
+  const verifiedAt=now();
+  markLocalSaleConfirmed(item,verifiedAt);
+  localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({channel:'queued_sale_receipt',status:'applied',verifiedAt,
+    operationId:item.operationId,businessId:item.businessId,actorUid:item.userId,workspaceGeneration:item.workspaceGeneration??0,
+    saleId:sale.entityId,spaceId:sale.data.spaceId,payloadHash:receipt.payloadHash,payloadChecksum:checksumValue(item.payload)}));
+  await DB.flush?.();
 }
 async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
   const generation=syncSessionGeneration,uid=currentUser?.uid;
@@ -4091,6 +4127,11 @@ async function processSyncQueue(options = {}) {
       }
       const classification=classifyQueueOperation(queued);
       if (classification.replayBlocked) {
+        if(classification.reviewReason==='product_stock_dependency'){
+          try{await recognizeSaleHeldByStock(queued);}catch{/* Keep the original held on partial or failed proof. */}
+          assertSession();
+          if(readRecoveryResolution(queued)?.channel==='queued_sale_receipt')continue;
+        }
         if(['quarantined','manual_review'].includes(classification.category))preserveQueueQuarantine(queued);
         if(classification.reviewReason==='settings_permission_required')retireSettingsPermissionFailure(queued);
         reviewHeld++;
@@ -4340,12 +4381,15 @@ function scheduleQueueRetry(){
 }
 function pendingIds(name, confirmedPaymentOperation = null) {
   const ids = new Set();
-  for (const item of readQueue())
-    if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) && !(name==='clients'&&readRecoveryResolution(item)) && !isHistoricalProjectionBatch(item) &&
+  for (const item of readQueue()){
+    const resolution=readRecoveryResolution(item);
+    if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) &&
+        resolution?.channel!=='queued_sale_receipt' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required") &&
         !(name === "products" && favoriteWriteWasRejected(item)))
     for (const write of item.payload?.writes || [])
       if (write.entityType === name) ids.add(String(write.entityId));
+  }
   return ids;
 }
 function markLocalCreditSaleConfirmed(item, confirmedAt = now()) {

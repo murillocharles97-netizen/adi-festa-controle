@@ -756,13 +756,45 @@ window.Checkout = (() => {
     }
     window.lucide?.createIcons();
   }
-  function holdOriginalSale(message='A venda original continua neste aparelho. Abra Sincronização → Ver detalhes para conferir a pendência antes de repetir.') {
+  function holdOriginalSale(message='A venda original continua neste aparelho. Abra Sincronização → Ver detalhes para conferir a pendência antes de repetir.', preservedSale=null) {
     if(activeAttempt)activeAttempt.locked=true;
     setSubmissionState('review',message);
     saveDraft();
+    const feedback=document.querySelector('#sale-submit-feedback');
+    if(!feedback||!preservedSale||preservedSale.paymentIntentId)return;
+    const attempt=activeAttempt,scope=draftKey(),principal=draftPrincipal();
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='btn btn-light';
+    button.textContent='Iniciar outra venda';
+    button.onclick=async()=>{
+      if(finishing||attempt!==activeAttempt||scope!==draftKey()||principal!==draftPrincipal())return;
+      finishing=true;
+      try{
+        await DB.flush?.();
+        if(attempt!==activeAttempt||scope!==draftKey()||principal!==draftPrincipal())return;
+        const current=window.SyncFirebase?.inspectCheckoutSaleAttempt?.({...attempt,spaceId:selectedSalesSpaceId()});
+        if(!current||current.status!=='review'||current.sale.id!==preservedSale.id||current.sale.operationId!==preservedSale.operationId)return;
+        // The original sale and its queue live in IndexedDB. Only reset this checkout draft.
+        cart=[];
+        selectedCampaignIds.clear();
+        manual=false;
+        discountKind=null;
+        activeAttempt=null;
+        activeConflict=null;
+        draftDetails={clientId:'',paymentMethod:'pix',note:'',discountValue:'0',discountPercent:'0'};
+        clearDraft();
+        applyDraftDetails();
+        setSubmissionState('normal');
+        drawCart();
+      }catch{
+        toast('Não foi possível conferir a venda original neste aparelho. Abra Sincronização → Ver detalhes.',true);
+      }finally{finishing=false;}
+    };
+    feedback.append(' ',button);
   }
   function finishSavedSale(sale,{usingExchangeCredit=false,tracking}={}) {
-    if(tracking==='review')return holdOriginalSale();
+    if(tracking==='review')return holdOriginalSale(undefined,sale);
     activeConflict=null;
     cart=[];
     selectedCampaignIds.clear();
@@ -795,7 +827,7 @@ window.Checkout = (() => {
       if(original.status==='review'){
         holdOriginalSale(original.reason==='product_stock_dependency'
           ?'A venda está salva neste aparelho e aguarda revisão do estoque. Abra Sincronização → Ver detalhes para conferir a pendência.'
-          :undefined);
+          :undefined,original.sale);
         return true;
       }
       finishing=true;
