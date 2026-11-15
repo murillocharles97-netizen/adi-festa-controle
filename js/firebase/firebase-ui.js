@@ -1,4 +1,4 @@
-import './sync.js?v=sync-sale-original-1';
+import './sync.js?v=sync-sale-original-2';
 import '../sale-recovery-client.js?v=208';
 import '../sale-recovery-ui.js?v=208';
 import '../sale-monetary-analysis-ui.js?v=215';

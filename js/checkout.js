@@ -793,7 +793,9 @@ window.Checkout = (() => {
         return true;
       }
       if(original.status==='review'){
-        holdOriginalSale();
+        holdOriginalSale(original.reason==='product_stock_dependency'
+          ?'A venda está salva neste aparelho e aguarda revisão do estoque. Abra Sincronização → Ver detalhes para conferir a pendência.'
+          :undefined);
         return true;
       }
       finishing=true;
@@ -1242,6 +1244,9 @@ window.Checkout = (() => {
         catch(error){return validationError(error.message||'Não foi possível conferir a venda. O carrinho foi preservado.');}
         finally{finishing=false;}
       }
+      try {
+        window.SyncFirebase?.assertSaleQueueDependencies?.({clienteId,spaceId,status,formaPagamento:paymentMethod,itens:cart});
+      } catch (error) { return validationError(error.message); }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const spaceScope = window.SpaceContext?.viewScope?.();
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),

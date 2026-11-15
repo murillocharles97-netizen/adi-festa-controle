@@ -1225,6 +1225,35 @@ function stockQueueDependsOnRejection(item,queue){
   }
   return false;
 }
+function assertSaleQueueDependencies(sale,writes=[{entityType:'sales',data:sale}]){
+  const queue=readQueueStrict({readOnly:true}),item={businessId:activeBusinessId(),userId:currentUser?.uid,
+    workspaceGeneration:DB.getWorkspaceGeneration?.()??0,payload:{writes}};
+  if(stockQueueDependsOnRejection(item,queue))
+    throw Object.assign(Error('O produto tem uma pendência de estoque. Abra Sincronização → Ver detalhes antes de concluir a venda.'),
+      {code:'sale-stock-review-required'});
+  if(sale.clienteId&&(sale.status==='fiado'||sale.formaPagamento==='fiado'))assertCustomerPaymentReview(sale.clienteId);
+
+  const products=queuedProductIds(item);
+  const renewalLines=record=>(record.itens||[]).filter(line=>line.productType==='recurring'||line.recurringActivation);
+  const renewals=renewalLines(sale);
+  for(const previous of queue){
+    if(previous.businessId!==item.businessId||previous.userId!==item.userId||
+       (previous.workspaceGeneration??0)!==item.workspaceGeneration)continue;
+    const earlier=(previous.payload?.writes||[]).find(write=>write.entityType==='sales'&&write.operation==='create')?.data;
+    if(!earlier)continue;
+    const stock=(previous.payload.writes||[]).some(write=>write.entityType==='stockMovements'&&
+      write.operation==='create'&&products.has(write.data?.produtoId));
+    const renewal=renewals.length>0&&sale.clienteId&&sale.clienteId===earlier.clienteId&&sale.spaceId===earlier.spaceId&&
+      renewalLines(earlier).some(line=>renewals.some(next=>line.produtoId===next.produtoId&&
+        (!line.recurringActivation?.subscriptionId||!next.recurringActivation?.subscriptionId||
+         line.recurringActivation.subscriptionId===next.recurringActivation.subscriptionId)));
+    if(!stock&&!renewal)continue;
+    const state=classifyQueueOperation(previous);
+    if((state.reviewRequired||state.category==='error'&&state.replayBlocked)&&!['resolved','archived'].includes(state.category))
+      throw Object.assign(Error('Uma venda anterior do mesmo estoque ou vigência aguarda revisão em Sincronização. Confira a operação original antes de concluir outra.'),
+        {code:'sale-dependency-review-required'});
+  }
+}
 function preserveQueueQuarantine(item) {
   if(readRecoveryResolution(item))return false;
   const reason = queueQuarantineReason(item);
@@ -2593,11 +2622,8 @@ function createSaleOperation(before, after, sale) {
       Number(clientWrite.data.financialVersion) !== Number(sale.financialVersionAnterior) + 1)))
     throw Error("Venda e saldo não formam uma operação financeira única. Nenhuma venda foi salva.");
   window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
-  const queue=readQueueStrict(), existing=queue.filter(item=>String(item.operationId)===String(sale.operationId));
-  if(stockQueueDependsOnRejection({businessId:activeBusinessId(),userId:currentUser.uid,
-    workspaceGeneration:DB.getWorkspaceGeneration?.()??0,payload:{writes}},queue))
-    throw Object.assign(Error('Este produto tem uma pendência de estoque em Sincronização. Confira a pendência antes de concluir. Nenhuma nova venda foi salva.'),
-      {code:'sale-stock-review-required'});
+  assertSaleQueueDependencies(sale,writes);
+  const existing=readQueueStrict().filter(item=>String(item.operationId)===String(sale.operationId));
   if (existing.length) {
     const localSale = (DB.carregar().vendas || []).some((entry) =>
       String(entry.operationId) === String(sale.operationId));
@@ -4376,8 +4402,8 @@ function markLocalPaymentConfirmed(item, confirmedAt = now()) {
 }
 function assertSaleTracked(sale) {
   const credit = sale?.status === "fiado" || sale?.formaPagamento === "fiado";
-  if (!credit && Number(sale?.syncPipelineVersion || 0) < 2) return 'confirmed';
-  if (sale.financialAppliedAt || sale.syncConfirmedAt) return 'confirmed';
+  if (!credit && Number(sale?.syncPipelineVersion || 0) < 2) return {status:'confirmed'};
+  if (sale.financialAppliedAt || sale.syncConfirmedAt) return {status:'confirmed'};
   if (typeof resumePreparedSales === "function") resumePreparedSales(sale.operationId);
   const tracked = readQueueStrict().filter((item) =>
     item.businessId===activeBusinessId()&&item.userId===currentUser?.uid&&
@@ -4394,7 +4420,8 @@ function assertSaleTracked(sale) {
       String(write.entityId) === String(sale.clienteId)));
   if(!queued)throw Object.assign(Error('A venda original está neste aparelho, mas sua confirmação precisa de revisão. Abra Sincronização → Ver detalhes e exporte o diagnóstico.'),
     {code:'sale-original-review-required'});
-  return tracked.some(({state})=>!['pending','processing'].includes(state.category))?'review':'pending';
+  const held=tracked.find(({state})=>!['pending','processing'].includes(state.category));
+  return held?{status:'review',reason:held.state.reviewReason}:{status:'pending'};
 }
 function inspectCheckoutSaleAttempt({saleId,operationId,spaceId}) {
   if(!saleId)return null;
@@ -4412,7 +4439,7 @@ function inspectCheckoutSaleAttempt({saleId,operationId,spaceId}) {
      sale.businessId!==activeBusinessId()||sale.spaceId!==spaceId||
      (sale.workspaceGeneration??0)!==(DB.getWorkspaceGeneration?.()??0)||sale.deletedAt||sale.active===false||
      sale.id!==saleId||operationId&&sale.operationId!==operationId)throw review();
-  return {sale,status:assertSaleTracked(sale)};
+  return {sale,...assertSaleTracked(sale)};
 }
 function assertPaymentTracked(payment) {
   if (payment?.applicationStatus === "applied" || payment?.syncConfirmedAt) return;
@@ -7376,6 +7403,7 @@ window.SyncFirebase = {
   migrateQueueCompatibility: migrateScopedQueueCompatibility,
   processSyncQueue,
   createSaleOperation,
+  assertSaleQueueDependencies,
   createPaymentOperation,
   assertSaleTracked,
   inspectCheckoutSaleAttempt,

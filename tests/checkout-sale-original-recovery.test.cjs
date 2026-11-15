@@ -23,7 +23,7 @@ function localWorkspace({blocked=false,mode='normal'}={}){
     queueKey:()=> 'queue',queueSubtype:()=> 'sale',canWriteSharedSettings:()=>false,
     queueQuarantineReason:()=>'',readQueueReview:()=>null,readRecoveryResolution:()=>null,
     readQueueArchive:item=>archives.has(item.operationId),readPaymentRecoveryReceipt:()=>null,
-    paymentQueueRequiresReview:()=>false,paymentQueueDependsOnReview:()=>false,saleQueueRequiresReview:()=>false,
+    archivedFiadoRecord:()=>false,saleQueueRequiresReview:()=>false,
     favoriteWriteWasRejected:()=>false,recoveryResolutionKey:()=> 'resolution',
     updateQueueState(){},scheduleImmediate(){heads++;},dispatchEvent(){},CustomEvent:class {},
     matchMedia:()=>({matches:true}),financialVersionOf:client=>Number(client.financialVersion||0),
@@ -32,6 +32,7 @@ function localWorkspace({blocked=false,mode='normal'}={}){
   c.DB.salvar=h.replace;c.DB.__firebaseSyncWrapped=true;
   vm.runInContext(section('const readQueue =','function monetaryRecoveryRequired('),c);
   vm.runInContext(section('function monetaryRecoveryRequired(','async function assertCancellationQueueClear('),c);
+  vm.runInContext(section('function paymentQueueRequiresReview(','function assertFiadoReceiptQueueClear('),c);
   vm.runInContext(section('function queueManualReviewReason(','function preserveQueueQuarantine('),c);
   vm.runInContext(section('function queueWrites(','function changedFields('),c);
   vm.runInContext(section('function assertSaleTracked(','async function prepareCustomerForSale('),c);
@@ -57,10 +58,64 @@ function localWorkspace({blocked=false,mode='normal'}={}){
 
 test('a rejected stock update on the same product is found before any local sale, cash, renewal or stock change',()=>{
   const w=localWorkspace({blocked:true,mode:'custom'}),before=JSON.stringify(w.h.data());
+  assert.throws(()=>w.c.assertSaleQueueDependencies(w.draft),{code:'sale-stock-review-required'});
   assert.throws(w.register,{code:'sale-stock-review-required'});
   assert.equal(JSON.stringify(w.h.data()),before);
   assert.deepEqual(w.queue(),[w.stockIncident]);
   assert.equal(w.attempts(),0);
+});
+
+test('an earlier sale with an unresolved receipt blocks the same stock even with a fresh draft',()=>{
+  const w=localWorkspace(),previous=localWorkspace(),before=JSON.stringify(w.h.data());
+  previous.register();
+  const [original]=previous.queue();
+  const rejected={...original,status:'error',lastErrorCode:'sync-receipt-review-required'};
+  w.raw([rejected]);
+  assert.throws(()=>w.c.assertSaleQueueDependencies(w.draft),{code:'sale-dependency-review-required'});
+  assert.throws(w.register,{code:'sale-dependency-review-required'});
+  assert.equal(JSON.stringify(w.h.data()),before);
+  assert.deepEqual(w.queue(),[rejected]);
+});
+
+test('a sale with a transient earlier receipt check can still queue offline in order',()=>{
+  const w=localWorkspace(),previous=localWorkspace();
+  previous.register();
+  const [original]=previous.queue();
+  const pending={...original,status:'pending',lastErrorCode:'unavailable',syncConfirmationPending:true};
+  w.raw([pending]);
+  w.register();
+  assert.deepEqual(w.queue()[0],pending);
+  assert.equal(w.queue()[1].status,'pending');
+});
+
+test('a held recurring sale blocks the same renewal without blocking another contract',()=>{
+  const w=localWorkspace({mode:'custom'}),previous=localWorkspace({mode:'custom'});
+  previous.register();
+  const [original]=previous.queue();
+  const retained={...original,status:'error',lastErrorCode:'sync-receipt-review-required',
+    payload:{...original.payload,writes:original.payload.writes.filter(write=>write.entityType!=='stockMovements')}};
+  retained.payload.writes.find(write=>write.entityType==='sales').data.itens[0].recurringActivation.subscriptionId='contract-a';
+  w.raw([retained]);
+  w.draft.itens[0].recurringActivation.subscriptionId='contract-a';
+  assert.throws(()=>w.c.assertSaleQueueDependencies(w.draft),{code:'sale-dependency-review-required'});
+  w.draft.itens[0].recurringActivation.subscriptionId='contract-b';
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies(w.draft));
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies({...w.draft,clienteId:'another-client'}));
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies({...w.draft,spaceId:'another-space'}));
+});
+
+test('payment in review blocks credit for its customer and leaves unrelated payments and cash sales available',()=>{
+  const w=localWorkspace(),{businessId,userId,workspaceGeneration}=w.stockIncident;
+  const blocked={businessId,userId,workspaceGeneration,status:'error',lastErrorCode:'permission-denied',payload:{
+    writes:[{entityType:'payments',operation:'create',entityId:'payment-one',data:{clienteId:w.draft.clienteId}}]
+  }};
+  const credit={...w.draft,status:'fiado',formaPagamento:'fiado'};
+  w.raw([blocked]);
+  assert.throws(()=>w.c.assertSaleQueueDependencies(credit),{code:'payment-review-required'});
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies(w.draft));
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies({...credit,clienteId:'another-client'}));
+  w.raw([{...blocked,businessId:'another-business'}]);
+  assert.doesNotThrow(()=>w.c.assertSaleQueueDependencies(credit));
 });
 
 test('a rejected update on another product does not block the sale',()=>{
@@ -71,6 +126,27 @@ test('a rejected update on another product does not block the sale',()=>{
   w.register();
   assert.deepEqual(w.queue()[0],unrelated);
   assert.equal(w.queue()[1].status,'pending');
+});
+
+test('checkout displays the stock conflict before confirmation or charging on a terminal',async()=>{
+  const w=localWorkspace({blocked:true}),c=w.c,feedback=[],button={onclick:null};
+  let confirmations=0,charges=0;
+  const fields={'#finish-sale':button,'#sale-client':{value:w.draft.clienteId},
+    '#sale-payment-method':{value:'cartao_presencial'},'#sale-status':{value:'pago'}};
+  Object.assign(c,{document:{querySelector:id=>fields[id]},cart:w.draft.itens,cartCount:()=>1,activeConflict:null,finishing:false,
+    traceSale(){},resumeCheckoutSale:async()=>false,restoredDraftKey:'',
+    setSubmissionState:(state,message)=>feedback.push({state,message}),toast(){},
+    confirm:()=>{confirmations++;return true;},TerminalPayments:{getCurrent:()=>null,beginCheckout:()=>{charges++;}}});
+  c.SyncFirebase.assertSaleQueueDependencies=c.assertSaleQueueDependencies;
+  const click=checkoutSection('    document.querySelector("#finish-sale").onclick','    document.querySelector("#desktop-clear-cart")');
+  vm.runInContext(click,c);
+  await button.onclick();
+  assert.match(feedback.at(-1).message,/pendência de estoque/);
+  assert.equal(feedback.at(-1).state,'error');
+  assert.equal(confirmations,0);
+  assert.equal(charges,0);
+  assert.equal(w.h.data().vendas.length,0);
+  assert.deepEqual(w.queue(),[w.stockIncident]);
 });
 
 for(const mode of ['normal','automatic','custom'])test(`the last unit is sold once and the original is reused for ${mode}`,()=>{
@@ -102,6 +178,7 @@ test('an already recorded original held by an older stock incident stays in revi
   w.raw([w.stockIncident,prepared]);
   const read=()=>w.c.inspectCheckoutSaleAttempt({saleId:sale.id,spaceId:sale.spaceId});
   assert.equal(read().status,'review');
+  assert.equal(read().reason,'product_stock_dependency');
   assert.deepEqual(w.queue(),[w.stockIncident,prepared]);
   assert.equal(w.h.data().produtos[0].estoqueAtual,0);
   assert.equal(w.h.data().vendas.length,1);
@@ -131,6 +208,7 @@ test('checkout finds the existing sale before checking stock and retains its IDs
   vm.runInContext(checkoutSection('  function holdOriginalSale(', '  const totals ='),c);
   assert.ok(await c.resumeCheckoutSale());
   assert.equal(states.at(-1).kind,'review');
+  assert.match(states.at(-1).message,/aguarda revisão do estoque/);
   assert.deepEqual(receipts,[]);
   c.cart=[];c.invalidateAttempt();
   assert.equal(c.activeAttempt.saleId,sale.id);
@@ -148,6 +226,8 @@ test('checkout finds the existing sale before checking stock and retains its IDs
   assert.deepEqual(w.queue()[1].payload,packet.payload);
   const click=checkoutSection('    document.querySelector("#finish-sale").onclick', '    document.querySelector("#desktop-clear-cart")');
   assert.ok(click.indexOf('await resumeCheckoutSale()')<click.indexOf('Vendas.estoqueInsuficiente(cart)'));
+  assert.ok(click.indexOf('assertSaleQueueDependencies')<click.indexOf('window.TerminalPayments.beginCheckout'));
+  assert.ok(click.indexOf('assertSaleQueueDependencies')<click.indexOf('Vendas.estoqueInsuficiente(cart)'));
 });
 
 test('checkout refuses attempts with incomplete, mismatched or foreign identity',()=>{
