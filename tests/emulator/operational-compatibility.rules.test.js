@@ -430,3 +430,118 @@ test('legacy orphan product recovery never invents an initial stock origin/movem
  const c=await setup(),p={operationId:crypto.randomUUID(),businessId:c.bid,userId:c.owner,source:'recovery_local_orphan',payload:{eventKind:'recovery_local_orphan',writes:[{entityType:'products',entityId:'old-product',operation:'create',data:{id:'old-product',businessId:c.bid,nome:'Histórico fictício',spaceAccessMode:'single_space',allowedSpaceIds:[c.space],defaultSpaceId:c.space,estoqueAtual:4,estoque:4,totalStock:4}}]}};
  await assert.rejects(c.commit(p),/nenhuma entrada inicial será inventada/);assert.equal((await c.root.collection('stockMovements').get()).size,0);assert.equal((await c.root.collection('products').doc('old-product').get()).exists,false);
 });
+// ---- Apps released before "Personalizar vencimento" (still cached on devices) ----
+const LEGACY_SUBSCRIPTIONS = 'tests/fixtures/customer-subscriptions-pre-custom-expiry.js';
+const useLegacy = c => vm.runInContext(fs.readFileSync(LEGACY_SUBSCRIPTIONS, 'utf8'), c.h.c);
+const useCurrent = c => vm.runInContext(fs.readFileSync('js/customer-subscriptions.js', 'utf8'), c.h.c);
+const DAY = 86400000, plusDays = (iso, days) => new Date(new Date(iso).getTime() + days * DAY).toISOString();
+const civilDay = iso => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', day: 'numeric' }).format(new Date(iso));
+function renewWith(c, sub, extra = {}) {
+ const domain = c.h.c.CustomerSubscriptions, before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
+ const current = c.h.data().customerSubscriptions.find(s => s.id === sub.id);
+ const sale = c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
+  itens: [{ produtoId: 'qa-product', quantidade: 1, precoFinalUnitario: 14, precoOriginal: 14, recurringActivation: { subscriptionId: sub.id, durationValue: 1, durationUnit: 'months',
+   renewalPolicyVersion: domain.renewalPolicyVersion, expectedSubscription: domain.renewalSnapshot(current), ...extra } }] });
+ return { sale, packet: c.packet(before, operationId, 'sale') };
+}
+const subWrite = packet => packet.payload.writes.find(w => w.entityType === 'customerSubscriptions');
+async function recurringProduct(c) {
+ const product = Object.assign(c.h.data().produtos[0], { productType: 'recurring', itemKind: 'service', durationValue: 1, durationUnit: 'months' });
+ await c.set('products', 'qa-product', bridge(product));
+}
+test('pre-release apps keep syncing renewals and cancellations of a personalized due date; markers stay tamper-proof', async () => {
+ const c = await setup();
+ domains(c);
+ await recurringProduct(c);
+ // 1) Updated device: activation with a personalized due date (+1 day over the automatic calculation).
+ const domain = c.h.c.CustomerSubscriptions, before = structuredClone(c.h.data()), operationId = crypto.randomUUID();
+ const custom = plusDays(domain.preview({ durationValue: 1, durationUnit: 'months' }).expiresAt, 1);
+ const activation = c.h.c.Vendas.registrar({ operationId, businessId: c.bid, spaceId: c.space, clienteId: 'qa-client', status: 'pago', formaPagamento: 'pix',
+  itens: [{ produtoId: 'qa-product', quantidade: 1, precoFinalUnitario: 14, precoOriginal: 14, recurringActivation: { durationValue: 1, durationUnit: 'months',
+   renewalPolicyVersion: domain.renewalPolicyVersion, customExpiry: { expiresAt: custom, timeSet: false } } }] });
+ const activationPacket = c.packet(before, operationId, 'sale');
+ await c.commit(activationPacket);
+ await c.commit(activationPacket);
+ const sub = c.h.data().customerSubscriptions[0], stored = await c.read('customerSubscriptions', sub.id);
+ assert.equal(stored.expiresAt, custom);
+ assert.equal(stored.expiryOverride.expiresAt, custom);
+ assert.equal(stored.expiryOverride.saleId, activation.id);
+ assert.ok(await c.read('customerSubscriptionEvents', `${sub.id}:expiry_customized:${activation.id}`));
+ const marker = structuredClone(stored.expiryOverride), events = async () => (await c.root.collection('customerSubscriptionEvents').get()).size;
+ assert.equal(await events(), 2, 'idempotent activation');
+ // 2) Outdated device renews: it copies the marker unchanged. Accepted and idempotent; edits are rejected.
+ useLegacy(c);
+ const legacy = renewWith(c, sub);
+ const edited = structuredClone(legacy.packet);
+ subWrite(edited).data.expiryOverride = { ...marker, expiresAt: '2099-01-01T00:00:00.000Z' };
+ await assert.rejects(c.commit(edited), /Vigência divergente/);
+ const forgedDate = structuredClone(legacy.packet);
+ subWrite(forgedDate).data.expiresAt = plusDays(subWrite(forgedDate).data.expiresAt, 1);
+ await assert.rejects(c.commit(forgedDate), /Vigência divergente/);
+ await c.commit(legacy.packet);
+ await c.commit(legacy.packet);
+ let saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, subWrite(legacy.packet).data.expiresAt);
+ assert.ok(new Date(saved.expiresAt) - new Date(custom) > 27 * DAY, 'renewal continues from the personalized date');
+ assert.equal(civilDay(saved.expiresAt), civilDay(custom), 'monthly renewal keeps the personalized day');
+ assert.deepEqual(saved.expiryOverride, marker, 'carried unchanged');
+ assert.notEqual(saved.expiryOverride.expiresAt, saved.expiresAt, 'no "personalizado" badge after an automatic renewal');
+ assert.equal(saved.renewalCount, 1);
+ assert.equal(await events(), 3);
+ // 3) Outdated device cancels that renewal: the personalized date comes back.
+ await c.commit(c.h.undo(legacy.sale.id).packet);
+ saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, custom);
+ assert.deepEqual(saved.expiryOverride, marker);
+ assert.equal(saved.renewalCount, 0);
+ // 4) Updated device: a personalized renewal cannot keep the old marker; cancel restores; an automatic renewal clears it.
+ useCurrent(c);
+ const second = plusDays(custom, 40);
+ const personalized = renewWith(c, sub, { customExpiry: { expiresAt: second, timeSet: false } });
+ const stale = structuredClone(personalized.packet);
+ subWrite(stale).data.expiryOverride = marker;
+ await assert.rejects(c.commit(stale), /Vigência divergente/);
+ await c.commit(personalized.packet);
+ await c.commit(personalized.packet);
+ saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, second);
+ assert.equal(saved.expiryOverride.saleId, personalized.sale.id);
+ await c.commit(c.h.undo(personalized.sale.id).packet);
+ saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, custom);
+ assert.deepEqual(saved.expiryOverride, marker, 'cancel restores the earlier marker');
+ await c.commit(renewWith(c, sub).packet);
+ saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiryOverride, null);
+ assert.ok(saved.expiresAt > custom);
+});
+// Also run against the rollback server (pre-release source) through VECONI_TEST_FUNCTION_SOURCE.
+test('rollback safety: outdated apps renew and cancel already personalized subscriptions, and pending legacy queues still apply', async () => {
+ const c = await setup();
+ domains(c);
+ useLegacy(c);
+ await recurringProduct(c);
+ // A legacy activation queued before the release (no marker anywhere) still applies, once.
+ const { packet } = c.h.sell({ status: 'pago' });
+ await c.commit(packet);
+ await c.commit(packet);
+ const sub = c.h.data().customerSubscriptions[0];
+ // State left by the new release: personalized date, marker and the chosen day as calendar anchor.
+ const custom = plusDays(sub.expiresAt, 1);
+ const marker = { expiresAt: custom, automaticExpiresAt: sub.expiresAt, saleId: sub.lastSaleId, timeSet: false };
+ const anchor = { day: Number(civilDay(custom)), expiresAt: custom };
+ Object.assign(sub, { expiresAt: custom, expiryOverride: marker, renewalCalendarAnchor: anchor });
+ await c.root.collection('customerSubscriptions').doc(sub.id).update({ expiresAt: custom, expiryOverride: marker, renewalCalendarAnchor: anchor });
+ const renewal = renewWith(c, sub);
+ await c.commit(renewal.packet);
+ await c.commit(renewal.packet);
+ let saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, subWrite(renewal.packet).data.expiresAt);
+ assert.ok(saved.expiresAt > custom);
+ assert.equal(civilDay(saved.expiresAt), civilDay(custom), 'keeps the personalized day');
+ assert.equal(saved.renewalCount, 1);
+ await c.commit(c.h.undo(renewal.sale.id).packet);
+ saved = await c.read('customerSubscriptions', sub.id);
+ assert.equal(saved.expiresAt, custom);
+ assert.equal(saved.renewalCount, 0);
+});

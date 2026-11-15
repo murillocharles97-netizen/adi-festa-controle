@@ -28,6 +28,8 @@ Branch local `claude/vencimento-personalizado`, a partir da `main` febe48d, no c
 - **Compatibilidade:** assinaturas existentes não exigem migração.
   - Versões antigas do app continuam funcionando com o servidor novo.
   - Um app novo diante do servidor antigo só falha, com segurança (rejeição), se usar a personalização.
+  - Apps anteriores a esta versão copiam o `expiryOverride` sem alterá-lo ao renovar ou cancelar. O servidor aceita essa cópia inalterada, mas nunca um marcador novo ou editado, nem a cópia numa venda que personaliza a data. Testes no emulator usam o código do app anterior (`tests/fixtures/customer-subscriptions-pre-custom-expiry.js`).
+  - Rollback: o servidor anterior ignora `expiryOverride`, e apps antigos renovam e cancelam assinaturas já personalizadas mantendo o dia escolhido (teste "rollback safety", aprovado também contra o código ao vivo 00016).
 - **Validações, no app e no servidor:** a data precisa ser posterior à venda, ficar no máximo 1 ano além do cálculo automático (protege contra erro de digitação no ano), estar em formato ISO exato e usar a política de renovação atual. Pacotes legados não podem personalizar.
 
 ## Testes

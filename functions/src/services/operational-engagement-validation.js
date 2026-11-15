@@ -52,6 +52,11 @@ async function validateEngagement({db,tx,c,item,writes,plan,old,effective}){
  const strictItems=policyItems(createsSale?sale:original);
  const strictIds=new Set(strictItems.map(line=>line.subscriptionId));
  const fieldsFor=id=>strictIds.has(id)?versionedFields:subscriptionFields;
+ // Apps released before "Personalizar vencimento" copy the stored expiryOverride
+ // unchanged into renewals and cancellations. Accept that unchanged carry-over
+ // (never a new or edited marker) unless the sale itself customizes the date.
+ const storedOverride=new Map(),carryOver=new Set(strictItems.filter(line=>!createsSale||line.recurringActivation.customExpiry==null).map(line=>line.subscriptionId));
+ const override=(id,record,expected)=>record&&carryOver.has(id)&&storedOverride.has(id)&&canonical(record.expiryOverride??null)===canonical(storedOverride.get(id))?{...record,expiryOverride:expected?.expiryOverride??null}:record;
  const subscriptionEvent=writes.find(w=>w.entityType==='customerSubscriptionEvents');
  const at=subscriptionEvent?.data.createdAt||sale?.data||sale?.createdAt||item.createdAtLocal||new Date().toISOString();
  const engine=domain(data,{businessId:c.bid,uid:c.uid,uuid:()=>subscriptionEvent?.data.sourceId||item.operationId,at});
@@ -73,6 +78,7 @@ async function validateEngagement({db,tx,c,item,writes,plan,old,effective}){
  }
  for(const w of relevant.filter(w=>w.entityType==='customerSubscriptions')){
   const value=await old('customerSubscriptions',w.entityId);
+  storedOverride.set(w.entityId,value?.expiryOverride??null);
   if(!strictIds.has(w.entityId)&&Object.hasOwn(w.data,'renewalCalendarAnchor')&&
      canonical(w.data.renewalCalendarAnchor??null)!==canonical(value?.renewalCalendarAnchor??null))
    fail('Alterar a referência de vencimento exige a política de renovação correspondente.');
@@ -105,8 +111,8 @@ async function validateEngagement({db,tx,c,item,writes,plan,old,effective}){
   if(w.entityType==='campaignEvents'){const expected=data.eventosCampanha.find(e=>e.id===w.entityId);if(!expected||canonical(values(patch,coreEvents))!==canonical(values(expected,coreEvents)))fail('Evento de campanha não corresponde à operação canônica.');}
   if(w.entityType==='campaignProgress'){const expected=data.progressosCampanha.find(e=>e.id===w.entityId);const current=await effective('campaignProgress',w.entityId);if(!expected||canonical(values(current,projections))!==canonical(values(expected,projections)))fail('Projeção de campanha divergente; atualize antes de reenviar.');}
   if(w.entityType==='campaignRedemptions'){if(!redemption||canonical(values(patch,['id','operationId','campaignId','clientId','rewardId','rewardSnapshot','stockMovementId','status']))!==canonical(values(redemption,['id','operationId','campaignId','clientId','rewardId','rewardSnapshot','stockMovementId','status'])))fail('Resgate divergente da recompensa canônica.');}
-  if(w.entityType==='customerSubscriptions'){const expected=data.customerSubscriptions.find(s=>s.id===w.entityId),current=await effective('customerSubscriptions',w.entityId),fields=fieldsFor(w.entityId);if(expected){if(canonical(values(current,fields))!==canonical(values(expected,fields)))fail('Vigência divergente da venda/decisão autorizada.');}else if(!sale||createsSale||current.active!==false||!current.deletedAt)fail('Encerramento de vigência sem reversão canônica.');}
-  if(w.entityType==='customerSubscriptionEvents'){const expected=data.customerSubscriptionEvents.find(s=>s.id===w.entityId),fields=fieldsFor(expected?.subscriptionId);if(!expected||canonical(values(patch,['id','subscriptionId','clientId','productId','variantId','spaceId','transition','sourceType','sourceId','note']))!==canonical(values(expected,['id','subscriptionId','clientId','productId','variantId','spaceId','transition','sourceType','sourceId','note']))||['previous','next'].some(k=>canonical(values(patch[k],fields))!==canonical(values(expected[k],fields))))fail('Evento de renovação não corresponde à transição autorizada.');}
+  if(w.entityType==='customerSubscriptions'){const expected=data.customerSubscriptions.find(s=>s.id===w.entityId),current=await effective('customerSubscriptions',w.entityId),fields=fieldsFor(w.entityId);if(expected){if(canonical(values(override(w.entityId,current,expected),fields))!==canonical(values(expected,fields)))fail('Vigência divergente da venda/decisão autorizada.');}else if(!sale||createsSale||current.active!==false||!current.deletedAt)fail('Encerramento de vigência sem reversão canônica.');}
+  if(w.entityType==='customerSubscriptionEvents'){const expected=data.customerSubscriptionEvents.find(s=>s.id===w.entityId),fields=fieldsFor(expected?.subscriptionId);if(!expected||canonical(values(patch,['id','subscriptionId','clientId','productId','variantId','spaceId','transition','sourceType','sourceId','note']))!==canonical(values(expected,['id','subscriptionId','clientId','productId','variantId','spaceId','transition','sourceType','sourceId','note']))||['previous','next'].some(k=>canonical(values(override(expected.subscriptionId,patch[k],expected[k]),fields))!==canonical(values(expected[k],fields))))fail('Evento de renovação não corresponde à transição autorizada.');}
  }
  // Reject a standalone forged subscription/progress even when no event is sent.
  if(relevant.some(w=>w.entityType==='customerSubscriptions')&&!sale&&!subscriptionEvent)fail('Vigência exige evento de criação/alteração autorizado.');
