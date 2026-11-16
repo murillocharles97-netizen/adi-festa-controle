@@ -306,6 +306,10 @@ const activeBusinessId = () => {
 };
 const errorCode = (error) =>
   String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
+// Fase 1: stable rejection reasons live in functions/src/shared/sync-rejection.js
+// (globalThis.VeconiSyncRejection). The server keeps code and text unchanged and adds
+// details.reason; decisions prefer the stored reason and fall back to the exact
+// legacy text when the packet (or the cached app) predates reasons.
 const friendlyError = (error) =>
   ({
     "local-storage-quota": "Não foi possível atualizar o armazenamento local da VECONI. Veja os detalhes da sincronização.",
@@ -596,12 +600,12 @@ function classifyQueueOperation(item) {
     return result('pending',{sendable:true,canRetry:true,replayBlocked:false});
   } catch {return result('error',{activeError:true,reviewRequired:true,reviewState:'verification_failed',reviewReason:'archive_evidence_invalid'});}
 }
-function monetaryRecoveryRequired(item){return item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
+function monetaryRecoveryRequired(item){return item.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'sale_total_mismatch','Total não corresponde aos itens.')??item.lastErrorMessage==='Total não corresponde aos itens.')&&
   (item.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');}
 function rejectedProductStockUpdate(item) {
   const writes=item.payload?.writes;
   return item.status==='error'&&item.lastErrorStage==='server_operational_commit'&&
-    item.lastErrorCode==='permission-denied'&&item.lastErrorMessage==='Estoque sem movimento autorizado.'&&
+    item.lastErrorCode==='permission-denied'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'stock_without_movement','Estoque sem movimento autorizado.')??item.lastErrorMessage==='Estoque sem movimento autorizado.')&&
     Array.isArray(writes)&&writes.length===1&&writes[0]?.entityType==='products'&&writes[0]?.operation==='update';
 }
 async function assertCancellationQueueClear(quote) {
@@ -791,6 +795,7 @@ const queueErrorBreakdown = () => {
   return {
     permission: errors.filter((item) => item.lastErrorCode === "permission-denied").length,
     invalid: errors.filter((item) => item.lastErrorCode === "invalid-argument").length,
+    ...(globalThis.VeconiSyncRejection ? { byCategory: globalThis.VeconiSyncRejection.countByCategory(errors) } : {}),
     structural: errors.filter((item) =>
       [
         "queue-owner-mismatch",
@@ -820,6 +825,7 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
+    ...globalThis.VeconiSyncRejection?.diagnosticFields?.(item, classification.reviewReason),
     diagnostic: queueSettingsDiagnostic(item),
     originalErrorPath: item.lastErrorPath || null,
     ...classification,
@@ -1053,7 +1059,7 @@ function readRecoveryResolution(item){
     value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
     value.workspaceGeneration===(item.workspaceGeneration??0)&&sale.length===1&&value.saleId===sale[0].entityId&&
     value.spaceId===sale[0].data?.spaceId?value:null;
-  if(item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
+  if(item.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'sale_total_mismatch','Total não corresponde aos itens.')??item.lastErrorMessage==='Total não corresponde aos itens.')&&
     (value.channel!=='monetary_recovery'||value.kind!=='monetary_recovery_v1'||value.commercialReceiptConfirmed!==true||value.monetaryPolicy!=='unit4-total-cent-v1'||sale.length!==1||value.totalCents!==Math.round(Number(sale[0].data.valorFinal??sale[0].data.valorTotal)*100)||value.originalTotalCents!==value.totalCents))return null;
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
@@ -1061,7 +1067,7 @@ function readRecoveryResolution(item){
 async function refreshRecoveryResolutions(isCurrent){
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
   const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
-  const monetary=i=>i.lastErrorCode==='invalid-argument'&&i.lastErrorMessage==='Total não corresponde aos itens.'&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
+  const monetary=i=>i.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(i,'sale_total_mismatch','Total não corresponde aos itens.')??i.lastErrorMessage==='Total não corresponde aos itens.')&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
   const held=readQueue().filter(i=>(saleQueueRequiresReview(i)||clientDependency(i)||monetary(i))&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
   for(let offset=0;offset<held.length;offset+=20){
     const batch=held.slice(offset,offset+20),key=queueKey();
@@ -2503,6 +2509,8 @@ function queueWrites(
       payloadVersion: PAYLOAD_VERSION,
       syncProtocolVersion: 1,
       clientRelease: 202,
+      createdByAppVersion: String(window.AdiFestaBuild?.appVersion || window.AdiFestaBuild?.release || ""),
+      createdByRelease: Number(window.AdiFestaBuild?.release) || null,
       businessId,
       workspaceGeneration:workspaceOrigin.workspaceGeneration,
       userId: currentUser.uid,
@@ -3080,6 +3088,7 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
     try { result = await window.FirebaseCallable('commitOperationalSync', {
       businessId: activeBusinessId(),
       syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release)||202,
+      appVersion:String(window.AdiFestaBuild?.appVersion||""),
       ...(checkingPreviousAttempt?{queueRecoveryVersion:1}:{}),
       item: {...item, operationId:stableLegacyOperationId(item),
         workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0},
@@ -4175,6 +4184,8 @@ async function processSyncQueue(options = {}) {
             lastAttemptAt: now(),
             lastErrorCode: preflight.code,
             lastErrorMessage: preflight.message,
+            lastErrorReason: undefined, lastErrorCategory: undefined, lastErrorReasonSource: undefined,
+            ...globalThis.VeconiSyncRejection?.queueFields?.({code: preflight.code, message: preflight.message}),
           };
           saveQueue(blocked);
         }
@@ -4294,6 +4305,8 @@ async function processSyncQueue(options = {}) {
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
             lastErrorMessage: String(error?.message || friendlyError(error)).slice(0,800),
+            lastErrorReason: undefined, lastErrorCategory: undefined, lastErrorReasonSource: undefined,
+            ...globalThis.VeconiSyncRejection?.queueFields?.({code: errorCode(error), message: error?.message, details: error?.details}),
             lastErrorPath: error.syncDetail?.path ?? (currentPath || null),
             lastErrorStage: error.syncDetail?.stage || null,
             lastErrorRequest: error.syncDetail?.request || null,
@@ -6210,6 +6223,7 @@ function queueOperationDiagnostic(item) {
     lastErrorPath: item.lastErrorPath || null,
     lastErrorCode: String(item.lastErrorCode || ""),
     lastErrorMessage: cleanMessage(item.lastErrorMessage),
+    ...globalThis.VeconiSyncRejection?.diagnosticFields?.(item),
     diagnostic: queueSettingsDiagnostic(item),
     lastErrorStage: item.lastErrorStage || null,
     lastErrorRequest: item.lastErrorRequest || null,

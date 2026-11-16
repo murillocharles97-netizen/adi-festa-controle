@@ -112,6 +112,7 @@
     "functions/src/shared/prior-sale-policy.js",
     "functions/src/shared/product-model.js",
     "functions/src/shared/product-spreadsheet.js",
+    "functions/src/shared/sync-rejection.js",
     "index.html",
     "js/activity-center.js",
     "js/app-intro-tutorial.js",

@@ -17,7 +17,9 @@ const INSTALLMENT_CREATION_ENABLED = true; // Compatible rollback pauses only ne
 const HISTORY_ACTIVATION_ENABLED = true; // Containment retains already activated accounts and receipts.
 const {paymentConfirmationRead}=require('./payment-confirmation-read');
 const {decideReceiptRoute,assertReceiptRoute}=require('./fiado-receipt-route');
-const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message);};
+const Rejection=require('../shared/sync-rejection');
+// Same code and message as always (old PWAs unchanged); details.reason/category are additive.
+const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message,Rejection.details(message,code));};
 const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteger(Math.round(n*100)))fail('Valor inválido.','invalid-argument');return Math.round(n*100);};
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
 const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
