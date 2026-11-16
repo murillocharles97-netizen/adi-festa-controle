@@ -60,8 +60,9 @@ const scenarios = [
 const servers = [];
 test.after(async () => { for (const s of servers) await s.deleteApp(s.app).catch(() => {}); });
 
-test('servidor do repositório: mesmo código e mesma mensagem, com motivo e categoria estáveis', async () => {
-  const server = loadServer('functions', 'demo-veconi-sync-reasons'); servers.push(server);
+for (const [label, dir] of [['repositório', 'functions'], ['candidato sobre o publicado', process.env.VECONI_CANDIDATE_FUNCTIONS_DIR]].filter(([, d]) => d))
+test(`servidor (${label}): mesmo código e mesma mensagem, com motivo e categoria estáveis`, async () => {
+  const server = loadServer(dir, `demo-veconi-sync-reasons-${label.length}`); servers.push(server);
   const client = clientHelpers();
   for (const scenario of scenarios) {
     const s = await seed(server.db), error = await scenario.run(server, s);

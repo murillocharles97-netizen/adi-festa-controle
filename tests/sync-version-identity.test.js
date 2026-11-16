@@ -48,3 +48,18 @@ test('o envio informa a versão do app sem mudar o contrato aceito pelas Functio
   // appVersion is sent ONLY to commitOperationalSync (other callables have strict key lists).
   assert.equal((sync.match(/appVersion:String\(window\.AdiFestaBuild/g) || []).length, 1);
 });
+
+test('verificação de release: bloqueia versão não atualizada e aceita a próxima', () => {
+  const { check, newer } = require('../scripts/release-version-check.cjs');
+  const local = read('js/build-info.js'), worker = read('service-worker.js'), sync = read('js/firebase/sync.js');
+  const published229 = 'window.AdiFestaBuild=Object.freeze({release:"229"});';
+  assert.equal(check({ local, worker, sync, published: published229 }).ok, true, 'atual 231.1 é posterior à 229 publicada');
+  const same = check({ local, worker, sync, published: local });
+  assert.equal(same.ok, false); assert.match(same.problems.join(), /não é posterior à publicada/);
+  const forgotWorker = check({ local, worker: worker.replace("release: '231', appVersion: '231.1'", "release: '231', appVersion: '231.0'"), sync, published: published229 });
+  assert.match(forgotWorker.problems.join(), /Service Worker informa outra versão/);
+  const protocol = check({ local, worker, sync: sync.replace('PAYLOAD_VERSION = 4,', 'PAYLOAD_VERSION = 5,'), published: published229 });
+  assert.match(protocol.problems.join(), /PAYLOAD_VERSION mudou/);
+  assert.equal(check({ local, worker, sync: sync.replace('PAYLOAD_VERSION = 4,', 'PAYLOAD_VERSION = 5,'), published: published229, protocolChange: true }).ok, true);
+  assert.equal(newer('232', '231.1'), true); assert.equal(newer('231.1', '231.1'), false); assert.equal(newer('231.2', '231.10'), false);
+});
