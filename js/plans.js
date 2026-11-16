@@ -238,7 +238,7 @@
                 : chargedPrice,
             }
           : null;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-decline" aria-labelledby="card-decline-title"><header>${icon("circle-x")}<h3 id="card-decline-title">Cobrança automática não aprovada</h3><p>${esc(payment?.message || "O cartão não foi aprovado para a cobrança automática. Nenhum plano foi ativado.")}</p></header>${couponCode ? `<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>` : ""}<div class="plan-card-decline-actions"><button type="button" class="btn btn-primary mobile-button primary" data-card-fallback-monthly>Pagar este mês com cartão</button><button type="button" class="btn btn-light mobile-button" data-retry-card>Tentar cobrança automática novamente</button><button type="button" class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button type="button" class="btn btn-light mobile-button" data-close-card-decline>Agora não</button></div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-card-decline" aria-labelledby="card-decline-title"><header>${icon("circle-x")}<h3 id="card-decline-title">Cobrança automática não aprovada</h3><p>${esc(payment?.message || "O cartão não foi aprovado para a cobrança automática. Nenhum plano foi ativado.")}</p></header>${couponCode ? `<small>O cupom ${esc(couponCode)} não foi consumido e será validado novamente.</small>` : ""}<div class="plan-card-decline-actions"><button type="button" class="btn btn-primary mobile-button primary" data-card-fallback-monthly>Pagar este mês com cartão</button><button type="button" class="btn btn-light mobile-button" data-retry-card hidden style="display:none">Tentar cobrança automática novamente</button><button type="button" class="btn btn-light mobile-button" data-card-fallback-pix>Pagar por Pix</button><button type="button" class="btn btn-light mobile-button" data-close-card-decline>Agora não</button></div></section></div>`;
     const openRetry = (initialPaymentMethod) => {
       root.innerHTML = "";
       openPaymentMethodModal({
@@ -250,7 +250,15 @@
         initialBillingPayerEmail: billingPayerEmail,
       });
     };
-    $("[data-retry-card]", root)?.addEventListener("click", () =>
+    const retryCard = $("[data-retry-card]", root);
+    if (window.SubscriptionService?.getBillingCheckoutConfig) {
+      void window.SubscriptionService.getBillingCheckoutConfig({catalogOnly:true}).then(config => {
+        if (config?.newAutomaticCheckoutEnabled !== true || !retryCard?.isConnected) return;
+        retryCard.hidden = false;
+        retryCard.style.removeProperty("display");
+      }).catch(() => {});
+    }
+    retryCard?.addEventListener("click", () =>
       openRetry("card"),
     );
     $("[data-card-fallback-monthly]", root)?.addEventListener("click", () =>
@@ -902,10 +910,10 @@
       cycleLabel = billingCycle === "yearly" ? "anual" : "mensal",
       payerEmail =
         initialBillingPayerEmail || billingPayerEmailPrefill();
-    let selected = initialPaymentMethod,
+    let selected = initialPaymentMethod === "card" ? "pix_monthly" : initialPaymentMethod,
       checkoutOperationId = newCheckoutOperationId(),
       submittedSignature = null;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote || couponCode ? `<small>Cupom ${esc(quote?.code || couponCode)} aplicado e será validado novamente no servidor.</small>` : ""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" class="active" data-payment-option="card" role="radio" aria-checked="true"><i>${icon("refresh-cw")}</i><span><b>Cartão automático</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button><button type="button" data-payment-option="card_monthly" role="radio" aria-checked="false"><i>${icon("credit-card")}</i><span><b>Cartão mensal</b><small>Pague apenas este período. Autenticação 3DS quando solicitada pelo banco.</small></span><em>${icon("circle")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle === "yearly" ? "Pix por período" : "Pix mensal"}</b><small>Sem cartão nem conta Mercado Pago. Pagamento manual a cada renovação; uma nova cobrança pode exigir confirmação a cada mês.</small></span><em>${icon("circle")}</em></button></div><section class="plan-payer-email" data-card-payer><label for="billing-payer-email"><b>E-mail do pagador</b><span>${selected === "card_monthly" ? "Informe o e-mail de quem fará o pagamento." : "Use o e-mail da conta Mercado Pago que fará o pagamento."}</span></label><input id="billing-payer-email" data-billing-payer-email type="email" inputmode="email" autocomplete="email" maxlength="254" required value="${esc(payerEmail)}" placeholder="email@exemplo.com"><small>Ele pode ser diferente do e-mail da sua empresa na VECONI e não altera o login nem o proprietário da empresa.</small><div class="plan-payer-error" data-payer-error hidden></div></section><p class="plan-payment-disclaimer">${icon("shield-check")} O plano só é ativado após confirmação oficial do Mercado Pago.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-payment-sheet" aria-labelledby="payment-method-title"><header class="modal-head"><div><h3 id="payment-method-title">Como deseja pagar?</h3><small>${esc(plan.name)} · cobrança ${cycleLabel}</small></div><button class="icon-btn mobile-icon-button" data-close-payment aria-label="Fechar">${icon("x")}</button></header><div class="modal-body"><section class="plan-payment-summary"><span>Valor no checkout</span><b>${money(finalPrice)}</b>${quote || couponCode ? `<small>Cupom ${esc(quote?.code || couponCode)} aplicado e será validado novamente no servidor.</small>` : ""}</section><div class="plan-payment-options" role="radiogroup" aria-label="Forma de pagamento"><button type="button" data-payment-option="card_monthly" role="radio" aria-checked="false"><i>${icon("credit-card")}</i><span><b>Cartão mensal</b><small>Pague apenas este período. Autenticação 3DS quando solicitada pelo banco.</small></span><em>${icon("circle")}</em></button><button type="button" data-payment-option="pix_monthly" role="radio" aria-checked="false"><i>${icon("qr-code")}</i><span><b>${billingCycle === "yearly" ? "Pix por período" : "Pix mensal"}</b><small>Sem cartão nem conta Mercado Pago. Pagamento manual a cada renovação; uma nova cobrança pode exigir confirmação a cada mês.</small></span><em>${icon("circle")}</em></button></div><section class="plan-payer-email" data-card-payer><label for="billing-payer-email"><b>E-mail do pagador</b><span>${selected === "card_monthly" ? "Informe o e-mail de quem fará o pagamento." : "Use o e-mail da conta Mercado Pago que fará o pagamento."}</span></label><input id="billing-payer-email" data-billing-payer-email type="email" inputmode="email" autocomplete="email" maxlength="254" required value="${esc(payerEmail)}" placeholder="email@exemplo.com"><small>Ele pode ser diferente do e-mail da sua empresa na VECONI e não altera o login nem o proprietário da empresa.</small><div class="plan-payer-error" data-payer-error hidden></div></section><p class="plan-payment-disclaimer">${icon("shield-check")} O plano só é ativado após confirmação oficial do Mercado Pago.</p></div><footer class="modal-foot"><button class="btn btn-light mobile-button" data-close-payment>Cancelar</button><button class="btn btn-primary mobile-button primary" data-start-checkout>Continuar com cartão</button></footer></section></div>`;
     const emailInput = $("[data-billing-payer-email]", root),
       payerSection = $("[data-card-payer]", root),
       payerError = $("[data-payer-error]", root),
@@ -948,13 +956,21 @@
       emailInput?.focus();
     }
     emailInput?.addEventListener("input", clearPayerError);
-    $$("[data-payment-option]", root).forEach((option) =>
-      option.addEventListener("click", () => {
-        selected = option.dataset.paymentOption;
-        clearPayerError();
+    const bindPaymentOption = (option) => option.addEventListener("click", () => {
+      selected = option.dataset.paymentOption;
+      clearPayerError();
+      syncSelection();
+    });
+    $$("[data-payment-option]", root).forEach(bindPaymentOption);
+    const paymentOptions = $(".plan-payment-options", root);
+    if (window.SubscriptionService?.getBillingCheckoutConfig) {
+      void window.SubscriptionService.getBillingCheckoutConfig({catalogOnly:true}).then(config => {
+        if (config?.newAutomaticCheckoutEnabled !== true || !paymentOptions?.isConnected) return;
+        paymentOptions.insertAdjacentHTML("afterbegin", `<button type="button" data-payment-option="card" role="radio" aria-checked="false"><i>${icon("refresh-cw")}</i><span><b>Cartão automático</b><small>Cobrança automática ${cycleLabel} pelo Mercado Pago.</small></span><em>${icon("circle-check")}</em></button>`);
+        bindPaymentOption(paymentOptions.firstElementChild);
         syncSelection();
-      }),
-    );
+      }).catch(() => {});
+    }
     $$("[data-close-payment]", root).forEach((button) =>
       button.addEventListener("click", () => {
         root.innerHTML = "";

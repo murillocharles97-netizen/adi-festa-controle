@@ -6,6 +6,7 @@ const project='demo-v224-blockers'; // Auth Emulator configured demo project; al
 const path=require('node:path'),runtime=path.resolve(process.env.BILLING_TEST_RUNTIME||'functions'),fromRuntime=p=>require(path.join(runtime,p));
 Object.assign(process.env,{GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIREBASE_CONFIG:JSON.stringify({projectId:project,storageBucket:project+'.appspot.com'}),FIRESTORE_EMULATOR_HOST:'127.0.0.1:8188',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9298',MERCADO_PAGO_ENV:'test',MERCADO_PAGO_ACCESS_TOKEN:'qa-not-a-real-token',MERCADO_PAGO_ACCESS_TOKEN_TEST:'qa-not-a-real-token',MERCADO_PAGO_WEBHOOK_SECRET:'qa-hmac-only',MERCADO_PAGO_PUBLIC_KEY:'TEST-'+'a'.repeat(24)});
 Object.assign(process.env,{ADI_FESTA_APP_URL:'http://127.0.0.1/qa',MERCADO_PAGO_WEBHOOK_URL:'https://example.invalid/qa-webhook'});
+process.env.BILLING_NEW_AUTOMATIC_CHECKOUTS_ENABLED='true';
 const req=require('node:module').createRequire(require('node:path').resolve('functions/package.json')),{getFirestore,Timestamp}=req('firebase-admin/firestore'),{getAuth}=req('firebase-admin/auth');
 const sdk=require('firebase/firestore'),{initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing');
 const {idFor}=fromRuntime('src/services/legacy-checkout-recovery-service'),{billingExternalReference}=fromRuntime('src/services/mercado-pago-service'),{signatureManifest}=fromRuntime('src/services/webhook-service'),{computeAccess}=fromRuntime('src/services/subscription-service');
@@ -55,7 +56,13 @@ global.fetch=async(input,options={})=>{
  }
  throw Error('Unmapped MP contract route '+method+' '+u.pathname);
 };
-const functions=fromRuntime('src/index.js');
+const functions={...fromRuntime('src/index.js')};
+const runtimeOverrides=JSON.parse(process.env.BILLING_QA_FUNCTION_RUNTIMES||'{}');
+for(const [name,folder] of Object.entries(runtimeOverrides)){
+  assert.equal(typeof functions[name],'function',name);
+  functions[name]=require(path.resolve(folder,'src/index.js'))[name];
+  assert.equal(typeof functions[name],'function',name);
+}
 test.before(async()=>{db=getFirestore();env=await initializeTestEnvironment({projectId:project,firestore:{rules:fs.readFileSync('tests/fixtures/billing-v225-published.rules','utf8')}});});
 test.after(async()=>{global.fetch=originalFetch;await env?.cleanup();await Promise.all(req('firebase-admin/app').getApps().map(app=>req('firebase-admin/app').deleteApp(app)));});
 async function identity(role,bid){
@@ -391,4 +398,29 @@ test('release of ambiguous legacy dispatch requires provider evidence and a fres
   assert.equal((await resumeCheckout(c)).closed,true);
   assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).data().status,'attempt_closed');
   assert.ok((await create(c)).orderId);assert.equal(writes(),n+2);assert.equal(prior.cancels,0);
+});
+
+test('partial release blocks old PWA automatic intake and preserves an existing contract, renewal and both manual methods',async()=>{
+  const recurring=await trialCompany(),open=await checkout(recurring,'card'),n=writes();
+  delete process.env.BILLING_NEW_AUTOMATIC_CHECKOUTS_ENABLED;
+  try {
+    const first=await trialCompany();
+    assert.equal((await invoke('getBillingCheckoutConfig',first,{catalogOnly:true})).newAutomaticCheckoutEnabled,false);
+    await assert.rejects(checkout(first,'card'),e=>e.details?.billingCode==='automatic_checkout_unavailable');
+    assert.equal(writes(),n);
+    assert.equal((await reservation(first).get()).exists,false);
+    assert.equal((await resumeCheckout(recurring)).checkoutUrl,open.checkoutUrl);
+    assert.equal(writes(),n);
+    const id=open.checkoutUrl.split('/').at(-1),entry=contracts.get(id),paidAt=new Date().toISOString(),paymentId='qa-partial-renew-'+crypto.randomUUID();
+    entry.value.status='authorized';
+    entry.value.next_payment_date=new Date(Date.now()+30*86_400_000).toISOString();
+    entry.invoices=[{id:'qa-partial-invoice',preapproval_id:id,status:'processed',date_created:paidAt,last_modified:paidAt,payment:{id:paymentId,status:'approved'}}];
+    payments.set(paymentId,{id:paymentId,status:'approved',status_detail:'accredited',transaction_amount:119.90,currency_id:'BRL',date_approved:paidAt,date_created:paidAt,external_reference:entry.value.external_reference,payment_method_id:'visa',payment_type_id:'credit_card'});
+    await invoke('syncSubscription',recurring,{reconcileProvider:true});
+    assert.equal((await recurring.root.get()).data().subscription.status,'active');
+    assert.equal(writes(),n);
+    assert.ok((await checkout(first,'pix_monthly')).pix.orderId);
+    assert.ok((await checkout(await trialCompany(),'card_monthly')).card.orderId);
+    assert.equal(writes(),n+2);
+  } finally {process.env.BILLING_NEW_AUTOMATIC_CHECKOUTS_ENABLED='true';}
 });

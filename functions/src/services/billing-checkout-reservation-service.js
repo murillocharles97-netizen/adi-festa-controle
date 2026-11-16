@@ -36,7 +36,7 @@ function billingCheckoutReservation(db, businessId) {
   const attempts = businessRef.collection('billingCheckoutAttempts');
   const retired = businessRef.collection('billingCheckoutClosures');
 
-  async function claim({ context, operationId, requestHash, terms, migrating, resumeOnly = false, checkedContractId = '' }) {
+  async function claim({ context, operationId, requestHash, terms, migrating, resumeOnly = false, checkedContractId = '', allowNewCheckout = true }) {
     return db.runTransaction(async tx => {
       const [lock, business, profile, member] = await Promise.all([
         tx.get(ref), tx.get(businessRef), tx.get(db.doc(`users/${context.uid}`)),
@@ -62,6 +62,8 @@ function billingCheckoutReservation(db, businessId) {
         }
         return { existingAttempt: stored };
       }
+      if (!allowNewCheckout)
+        throw stopped('Novas contratações com cartão automático estão indisponíveis. Escolha Pix ou cartão mensal.', 'automatic_checkout_unavailable');
       if (scope(subscription) !== scope(context.business.subscription || {})) throw wait();
       if (!migrating && contractId(subscription) && contractId(subscription) !== checkedContractId)
         throw stopped('Já existe uma recorrência. Confira ou encerre o contrato no Mercado Pago antes de contratar outro.', 'recurring_contract_exists');

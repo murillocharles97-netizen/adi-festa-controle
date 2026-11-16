@@ -338,6 +338,7 @@ exports.completeBusinessOnboarding=onCall(ONBOARDING_OPTIONS,async request=>{
 });
 
 async function internalCouponContext(request){const businessId=requestedBusinessId(request)||'adi-festa',context=await permissions().authenticatedContext(request,businessId);coupons().assertInternal(context);return context}
+const newAutomaticCheckoutsEnabled=()=>process.env.BILLING_NEW_AUTOMATIC_CHECKOUTS_ENABLED==='true';
 
 exports.validateCoupon=onCall(FUNCTION_OPTIONS,async request=>{
   try{const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId),result=await coupons().validateAndQuote({context,code:request.data?.couponCode,planId:request.data?.planId,billingCycle:String(request.data?.billingCycle||'monthly')});logger.info('[Coupons] quote created',{businessId,planId:result.planId,billingCycle:result.billingCycle});return result}catch(error){throw callableError(error)}
@@ -348,10 +349,11 @@ exports.getBillingCheckoutConfig=onCall(FUNCTION_OPTIONS,async request=>{
     const businessId=requestedBusinessId(request),context=await permissions().authenticatedContext(request,businessId);
     const migrationReservation=await require('./services/legacy-checkout-recovery-service').legacyCheckoutRecoveryService(db,null).summary({businessId,uid:context.uid});
     const migrationEligibility=request.data?.checkMigrationEligibility===true?await require('./services/billing-migration-status-service').billingMigrationStatus(db,mp(),{businessId,uid:context.uid}):undefined;
-    if(request.data?.catalogOnly===true)return{catalogVersion:2,migrationReservation,...(migrationEligibility?{migrationEligibility}:{})};
+    const newAutomaticCheckoutEnabled=newAutomaticCheckoutsEnabled();
+    if(request.data?.catalogOnly===true)return{catalogVersion:2,newAutomaticCheckoutEnabled,migrationReservation,...(migrationEligibility?{migrationEligibility}:{})};
     const publicKey=String(MP_PUBLIC_KEY.value()||'').trim();
     if(!/^(?:APP_USR|TEST)-[A-Za-z0-9_-]{16,}$/.test(publicKey))throw new HttpsError('failed-precondition','O checkout mensal com cartão ainda não está configurado.');
-    return{catalogVersion:2,publicKey,environment:MP_ENV.value(),deviceIdRequired:true,threeDsMode:'on_fraud_risk',migrationReservation};
+    return{catalogVersion:2,newAutomaticCheckoutEnabled,publicKey,environment:MP_ENV.value(),deviceIdRequired:true,threeDsMode:'on_fraud_risk',migrationReservation};
   }catch(error){throw callableError(error)}
 });
 
@@ -396,7 +398,8 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
       const prior=(await db.doc(`subscriptionIndex/${priorContract}`).get()).data();
       if(prior?.businessId===businessId&&await verifyStoppedContract(mp(),priorContract,prior.expectedExternalReference,stoppedContractProof(businessId,priorContract,subscriptionBefore)))checkedContractId=priorContract;
     }
-    claim=claim||await gate.claim({context,operationId:requestedOp,requestHash:hash,terms,migrating,checkedContractId});
+    claim=claim||await gate.claim({context,operationId:requestedOp,requestHash:hash,terms,migrating,checkedContractId,
+      allowNewCheckout:paymentMethod.id!=='card'||newAutomaticCheckoutsEnabled()});
     if(claim.existingAttempt)return existingCheckoutResponse(claim.existingAttempt);
     if(claim.stage==='linked')return await reconcileReservedCheckout(gate,claim,context);
     const opId=claim.operationId,requestHash=claim.requestHash,recovering=claim.stage==='dispatching';

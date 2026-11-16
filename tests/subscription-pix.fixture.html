@@ -48,6 +48,7 @@
     window.AppPageRuntime={mount:()=>{liveMountCount+=1;const target=document.querySelector("#app");target.innerHTML=PlansUI.render();PlansUI.bind(target)}};
     window.SubscriptionService={
       getPlans:()=>plans,
+      getBillingCheckoutConfig:async()=>({catalogVersion:2,newAutomaticCheckoutEnabled:state!=="payment"}),
       validateCoupon:async()=>({quoteId:"fixture-quote",code:"PARCEIRO20",planId:"professional",billingCycle:"monthly",originalPrice:49.9,discountedPrice:39.92,durationLabel:"Primeiro pagamento"}),
       requestUpgrade:async(_planId,checkoutOptions={})=>{lastCheckoutOptions=checkoutOptions;return checkoutOptions.paymentMethodType==="pix_monthly"?({paymentMethodType:checkoutOptions.paymentMethodType,pix:checkoutOptions.previousCheckoutAttemptId?replacementPix:fixturePix,operationId:checkoutOptions.previousCheckoutAttemptId?replacementPix.id:fixturePix.id}):({checkoutUrl:"https://example.invalid/checkout"})},
       watchPixCheckout:()=>()=>{},
@@ -81,6 +82,8 @@
         await new Promise(resolve=>setTimeout(resolve,30));
       }
       if(["pix","qr","pending","approved","expired","failed","regenerated"].includes(state))document.querySelector('[data-payment-option="pix_monthly"]').click();
+      if(state==="card-payer")document.querySelector('[data-payment-option="card"]')?.click();
+      if(state==="payment"&&(document.querySelector('[data-payment-option="card"]')||document.querySelector('[data-payment-option].active')?.dataset.paymentOption!=="pix_monthly"))throw Error("Novos checkouts automáticos devem ficar ocultos quando o servidor os bloqueia.");
       if(["qr","pending","approved","expired","failed","regenerated"].includes(state)){
         document.querySelector('[data-start-checkout]').click();
         await new Promise(resolve=>setTimeout(resolve,40));
