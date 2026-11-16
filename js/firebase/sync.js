@@ -1073,6 +1073,13 @@ function recoveryResolutionKey(item){return `${queueKey()}:recoveryResolution:${
 function readRecoveryResolution(item){
   let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
   if(!value||!Array.isArray(item.payload?.writes))return null;
+  // D5: a stock edit the server rejected atomically never had an effect. The owner
+  // closes it with server evidence (no processed marker, product read from the cloud).
+  if(value.channel==='rejected_stock_edit')
+    return value.status==='closed_without_effects'&&rejectedProductStockUpdate(item)&&value.version===1&&
+      value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
+      value.productId===item.payload.writes[0].entityId&&value.payloadChecksum===checksumValue(item.payload)&&
+      value.serverProcessed===false&&value.serverProductExists===true&&value.verifiedAt&&value.resolvedByUid===item.userId?value:null;
   if(value.channel==='client_dependency'){
     const writes=item.payload.writes;
     return value.status==='client_confirmed'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create'&&writes[0].entityId===value.clientId&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&value.resolvedAt&&value.resolvedByUid?value:null;
@@ -1256,7 +1263,7 @@ function stockQueueDependsOnRejection(item,queue){
     if(item.queueId&&prior.queueId===item.queueId)break;
     if(prior.businessId===item.businessId&&prior.userId===item.userId&&
       (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&rejectedProductStockUpdate(prior)&&
-      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior)){
+      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior)&&!readRecoveryResolution(prior)){
       if(!saleIndependentOfRejectedStock(item,prior.payload.writes[0]))return true;
     }
   }
@@ -1321,6 +1328,42 @@ function preserveQueueQuarantine(item) {
   return true;
 }
 const incidentArchiveTasks = new Map();
+async function resolveRejectedStockEdit(operationId) {
+  if (!navigator.onLine) throw Error('Conecte-se para conferir a nuvem. Nada foi alterado.');
+  await validateUser();
+  const generation = syncSessionGeneration, uid = currentUser?.uid, bid = activeBusinessId(), key = queueKey();
+  const assertOrigin = () => {
+    if (generation !== syncSessionGeneration || currentUser?.uid !== uid || activeBusinessId() !== bid || queueKey() !== key)
+      throw Object.assign(Error('A sessão mudou. Nada foi alterado.'), {code:'sync-session-obsolete'});
+  };
+  const context = window.BusinessContext?.get?.();
+  if (context?.businessId !== bid || context?.role !== 'owner' || context?.business?.ownerId !== uid)
+    throw Error('Somente o proprietário pode liberar este produto.');
+  const item = readQueueStrict({readOnly:true}).find(entry => entry.operationId === operationId);
+  if (!item || item.userId !== uid || item.businessId !== bid || (item.workspaceGeneration??0) !== (DB.getWorkspaceGeneration?.()??0) ||
+      !rejectedProductStockUpdate(item) || readRecoveryResolution(item) || readQueueArchive(item))
+    throw Error('Esta operação não é uma edição de estoque recusada pendente desta conta.');
+  const original = JSON.stringify(item), productId = item.payload.writes[0].entityId;
+  // Server evidence: the rejected commit never wrote its idempotency marker, and the
+  // product exists in the cloud. Nothing is written to the server.
+  const [marker, product] = await Promise.all([
+    getDocFromServer(doc(db,'businesses',bid,'processedOperations',operationId)),
+    getDocFromServer(doc(db,'businesses',bid,'products',productId))]);
+  assertOrigin();
+  if (marker.exists()) throw Error('A nuvem registra esta operação. Ela exige revisão; nada foi alterado.');
+  if (!product.exists()) throw Error('O produto não existe na nuvem. Nada foi alterado.');
+  if (JSON.stringify(readQueueStrict({readOnly:true}).find(entry => entry.operationId === operationId)) !== original)
+    throw Error('A fila mudou durante a conferência. Nada foi alterado.');
+  const cloud = product.data(), resolution = {version:1, channel:'rejected_stock_edit', status:'closed_without_effects',
+    operationId, businessId:bid, actorUid:uid, resolvedByUid:uid, productId, payloadChecksum:checksumValue(item.payload),
+    serverProcessed:false, serverProductExists:true, serverStock:Number(cloud.estoqueAtual ?? cloud.estoque ?? 0),
+    verifiedAt:now()};
+  localStorage.setItem(recoveryResolutionKey(item), JSON.stringify(resolution));
+  // Bring the cloud product back when no other queued operation still writes it.
+  applyCloudCollection('products', [{id:product.id, ...cloud}], {authoritative:true});
+  await DB.flush?.(); assertOrigin(); updateQueueState();
+  return resolution;
+}
 async function archiveQuarantinedOperation(operationId) {
   if (incidentArchiveTasks.has(operationId)) return incidentArchiveTasks.get(operationId);
   const task = (async () => {
@@ -4441,7 +4484,7 @@ function pendingIds(name, confirmedPaymentOperation = null) {
   for (const item of readQueue()){
     const resolution=readRecoveryResolution(item);
     if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) &&
-        resolution?.channel!=='queued_sale_receipt' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
+        resolution?.channel!=='queued_sale_receipt' && resolution?.channel!=='rejected_stock_edit' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required") &&
         !(name === "products" && favoriteWriteWasRejected(item)))
     for (const write of item.payload?.writes || [])
@@ -7498,6 +7541,7 @@ window.SyncFirebase = {
   recoverPreservedPayment,
   refreshQueueStatus,
   archiveQuarantinedOperation,
+  resolveRejectedStockEdit,
   getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,
   // Read-only recovery source. Never normalize, acknowledge or save this queue.
   recoverySnapshot: () => {

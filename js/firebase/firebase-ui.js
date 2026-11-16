@@ -118,6 +118,17 @@ function incidentArchiveHtml(items){
     return `<article><b>${settings?'Configuração preservada — envio bloqueado neste perfil':item.reviewState==='archived'?'Arquivada / resolvida — reenvio bloqueado':'Preservada para análise — sem tentativa ativa'}</b><p>${settings?'Este perfil não pode alterar configurações da empresa. O registro original permanece para análise, sem reenvio automático ou manual.':'Nenhuma venda, baixa de estoque ou alteração financeira é executada por este arquivamento.'}</p>${settings?`<code>${escape(item.diagnostic?.path||item.firestorePath||'settings/default')}</code>`:''}<code>${escape(item.operationId)}</code><small>Checksum: ${escape(item.payloadChecksum)} · Tentativas preservadas: ${escape(item.retryCount)}</small>${item.archive?`<p>Encerrada em ${escape(formattedTime(item.archive.archivedAt))} · responsável: ${escape(item.archive.archivedBy)}.</p>`:settings||item.canArchive===false?'':`<button class="btn btn-light" type="button" data-archive-incident="${escape(item.operationId)}">Arquivar ocorrência sem reenviar</button>`}</article>`;
   }).join('')}</section>`;
 }
+function confirmRejectedStockRelease(operationId,filter={}){
+  const root=document.querySelector('#modal');
+  root.innerHTML=`<div class="modal-bg"><section class="modal-box" role="dialog" aria-modal="true" aria-label="Liberar produto"><header class="modal-head"><h3>Liberar vendas deste produto?</h3></header><div class="modal-body"><p>A edição de estoque recusada não teve efeito na nuvem. A VECONI vai conferir isso agora, preservar o original e voltar a usar o estoque da nuvem. Nenhuma venda, recebimento ou saldo é alterado.</p><p>Outras operações pendentes deste produto continuam preservadas e seguem o fluxo normal.</p><p data-release-result role="status"></p><div class="modal-actions"><button class="btn-secondary" type="button" data-release-back>Voltar</button><button class="btn-primary" type="button" data-release-confirm>Conferir e liberar</button></div></div></section></div>`;
+  const button=root.querySelector('[data-release-confirm]'),back=root.querySelector('[data-release-back]');
+  back.onclick=()=>openQueueDetails(filter);
+  button.onclick=async()=>{
+    button.disabled=true;back.disabled=true;button.textContent='Conferindo a nuvem…';
+    try{await window.SyncFirebase.resolveRejectedStockEdit(operationId);openQueueDetails(filter);notify('Produto liberado. O original foi preservado e o estoque da nuvem voltou a ser usado.');}
+    catch(error){root.querySelector('[data-release-result]').textContent=error?.message||'Não foi possível conferir a nuvem. Nada foi alterado.';button.disabled=false;back.disabled=false;button.textContent='Conferir e liberar';}
+  };
+}
 function confirmIncidentArchive(operationId,filter={}){
   const item=(window.SyncFirebase.getQueueDiagnostics?.()||[]).find(i=>i.operationId===operationId&&i.reviewState==='quarantined');
   if(!item||item.canArchive===false||item.reviewReason==='settings_permission_required')return;
@@ -152,8 +163,11 @@ function openQueueDetails(filter={}){
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
   root.querySelector('.modal-body')?.insertAdjacentHTML('beforeend',operationConfirmationHtml(details));
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
-  if(errors.some(item=>item.reviewReason==='product_stock_review_required'))
-    errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento. O original está preservado. Use Comparar com a nuvem e confira o estoque físico antes de decidir se é necessário usar Ajustar estoque.</p>');
+  if(errors.some(item=>item.reviewReason==='product_stock_review_required')){
+    const releases=errors.filter(item=>item.reviewReason==='product_stock_review_required').map(item=>`<button class="btn-primary" type="button" data-release-stock="${escape(item.operationId)}">Liberar vendas deste produto</button>`).join('');
+    errorSection?.insertAdjacentHTML('afterbegin',`<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento e foi recusada pela nuvem, sem nenhum efeito. O proprietário pode liberar o produto: a VECONI confere a nuvem, preserva o original e volta a usar o estoque da nuvem. Depois, se necessário, use Ajustar estoque.</p>${window.BusinessContext?.get?.()?.role==='owner'?releases:''}`);
+    root.querySelectorAll('[data-release-stock]').forEach(button=>button.onclick=()=>confirmRejectedStockRelease(button.dataset.releaseStock));
+  }
   if(errors.some(item=>item.reviewReason==='sync_receipt_review_required'))
     errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="status">Confira o resultado desta operação na nuvem antes de registrar outra. A tentativa original continua salva neste aparelho.</p>');
   if(errors.some(item=>item.reviewState==='verification_failed'))errorSection?.insertAdjacentHTML('afterbegin','<p class="backup-warning" role="alert">Há confirmação inválida ou divergente. Os erros originais foram preservados e o reenvio permanece bloqueado. É necessário conferir o recibo e a identidade da operação.</p>');
