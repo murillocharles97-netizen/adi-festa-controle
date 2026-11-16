@@ -35,7 +35,7 @@ test('frontend obtains official global without inventing, truncating or coercing
 });
 test('a business switch during catalog verification prevents a commercial request',async()=>{
  const source=fs.readFileSync('js/firebase/business-context.js','utf8'),a=source.indexOf('requestUpgrade:async('),b=source.indexOf(',watchPixCheckout:',a),state={businessId:'qa-A',userProfile:{uid:'qa-owner'},role:'owner',loading:false,error:null},calls=[];let release;
- const c={state,auth:{currentUser:{uid:'qa-owner'}},JSON,Error,Catalog:{version:2,legacyState:()=>({legacy:true})},window:{FirebaseCallable:async(...v)=>{calls.push(v);return{data:{}}}},SubscriptionService:{getBillingCheckoutConfig:()=>new Promise(r=>release=r)}};vm.createContext(c);const fn=vm.runInContext('({'+source.slice(a,b)+'}).requestUpgrade',c),pending=fn('premium',{});state.businessId='qa-B';release({catalogVersion:2});await assert.rejects(pending,/empresa mudou/);assert.equal(calls.length,0);
+ const c={state,readCheckoutAuth:async()=>({currentUser:{uid:'qa-owner'}}),JSON,Error,Catalog:{version:2,legacyState:()=>({legacy:true})},window:{FirebaseCallable:async(...v)=>{calls.push(v);return{data:{}}}},SubscriptionService:{getBillingCheckoutConfig:()=>new Promise(r=>release=r)}};vm.createContext(c);const fn=vm.runInContext('({'+source.slice(a,b)+'}).requestUpgrade',c),pending=fn('premium',{});await new Promise(setImmediate);state.businessId='qa-B';release({catalogVersion:2});await assert.rejects(pending,/empresa mudou/);assert.equal(calls.length,0);
 });
 function manage(){
  const d=new JSDOM('<div id="modal"></div>',{url:'http://127.0.0.1/qa',runScripts:'outside-only'}),w=d.window,calls=[];let session='qa-A',confirm=true;
