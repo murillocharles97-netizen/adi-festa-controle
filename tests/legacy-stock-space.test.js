@@ -33,8 +33,12 @@ test('modal escolhe automaticamente contexto/único espaço, exige decisão expl
   assert.match(c.SpaceContext.stockMovementFields(recent),/type="hidden" name="stockSpaceId" value="a"/);
   c.SpaceContext.selectHome('b');assert.match(c.SpaceContext.stockMovementFields(old),/type="hidden" name="stockSpaceId" value="b"/);
 });
+// D2 decision (V229.1 global space): a space the user selected explicitly IS a valid destination;
+// the silent first-space fallback is not. The V176 expectation that an explicit sales selection
+// still had to be confirmed again no longer applies.
 test('owner confirma destino explícito, sem escolher primeiro/default/sales quando ambíguo',()=>{
-  const {c,data}=runtime();c.SpaceContext.selectSales('a');assert.throws(()=>c.SpaceContext.stockMovementOrigin(data.produtos[0]),/Selecione/);
+  const {c,data}=runtime();assert.throws(()=>c.SpaceContext.stockMovementOrigin(data.produtos[0]),/Selecione/);
+  c.SpaceContext.selectSales('a');assert.equal(c.SpaceContext.stockMovementOrigin(data.produtos[0]).spaceId,'a');
   assert.equal(c.Produtos.entrada('old',1,'','','b').spaceId,'b');
 });
 test('erro de autorização preserva estoque e histórico, e nunca cruza empresa/espaço',()=>{

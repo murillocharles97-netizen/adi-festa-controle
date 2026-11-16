@@ -35,6 +35,15 @@ global.fetch=async(input,options={})=>{
   const rows=entry.invoices||[{id:'qa-old-invoice',preapproval_id:id,status:entry.invoiceStatus||'processed',retry_attempt:1,...(entry.nextRetryDate!==undefined?{next_retry_date:entry.nextRetryDate}:{}),debit_date:new Date().toISOString(),payment:{id:'qa-old-rejected-payment',status:entry.paymentStatus||'rejected'}}],offset=Number(u.searchParams.get('offset')||0);
   return json({results:rows.slice(offset,offset+10),...(entry.incompleteInvoices?{}:{paging:{offset,limit:10,total:rows.length}})});
  }
+ if(u.pathname.startsWith('/authorized_payments/')){
+  const id=u.pathname.split('/').pop(),invoice=[...contracts.values()].flatMap(entry=>entry.invoices||[]).find(row=>row.id===id);
+  return invoice?json(invoice):json({message:'not found'},404);
+ }
+ if(u.pathname==='/v1/payments/search'){
+  const reference=u.searchParams.get('external_reference'),limit=Number(u.searchParams.get('limit')),offset=Number(u.searchParams.get('offset'));
+  const rows=[...payments.values()].filter(payment=>payment.external_reference===reference);
+  return json({results:rows.slice(offset,offset+limit),paging:{limit,offset,total:rows.length}});
+ }
  if(u.pathname.startsWith('/v1/payments/')){
   const p=payments.get(u.pathname.split('/').pop());return p?json(p):json({message:'not found'},404);
  }
@@ -87,8 +96,8 @@ async function create(c,method='pix_monthly'){
  const result=await invoke('createSubscription',c,{catalogVersion:2,legacyMigration:true,planId:'premium',billingCycle:'monthly',operationId,paymentMethodType:method,...more});return{operationId,result,orderId:result.pix?.orderId||result.card?.orderId};
 }
 async function approved(orderId){const o=orders.get(orderId);o.status='processed';o.status_detail='accredited';o.transactions.payments[0].status='processed';o.last_updated_date=new Date().toISOString();return o;}
-async function webhook(orderId,requestId='qa-request-'+crypto.randomUUID(),{timestamp=String(Math.floor(Date.now()/1000)),expectedStatus=200,signatureOverride=null,bodyDataId=orderId,action='order.updated'}={}){
- const ts=timestamp,signature=crypto.createHmac('sha256','qa-hmac-only').update(`id:${orderId};request-id:${requestId};ts:${ts};`).digest('hex'),headers={'x-request-id':requestId,'x-signature':signatureOverride||`ts=${ts},v1=${signature}`},request={method:'POST',query:{type:'order','data.id':orderId},body:{type:'order',action,data:{id:bodyDataId}},headers,get:k=>headers[k]};let status,body;const response={status:n=>{status=n;return response},send:v=>{body=v;return response}};await functions.receiveWebhook(request,response);assert.equal(status,expectedStatus,String(body));return body;
+async function webhook(orderId,requestId='qa-request-'+crypto.randomUUID(),{timestamp=String(Math.floor(Date.now()/1000)),expectedStatus=200,signatureOverride=null,bodyDataId=orderId,action='order.updated',type='order'}={}){
+ const ts=timestamp,signature=crypto.createHmac('sha256','qa-hmac-only').update(`id:${orderId};request-id:${requestId};ts:${ts};`).digest('hex'),headers={'x-request-id':requestId,'x-signature':signatureOverride||`ts=${ts},v1=${signature}`},request={method:'POST',query:{type,'data.id':orderId},body:{type,action,data:{id:bodyDataId}},headers,get:k=>headers[k]};let status,body;const response={status:n=>{status=n;return response},send:v=>{body=v;return response}};await functions.receiveWebhook(request,response);assert.equal(status,expectedStatus,String(body));return body;
 }
 test('authenticated owner cannot repair a legacy failure without trusted rejection proof',async()=>{const c=await seed({stuck:true});await assert.rejects(recover(c));assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).data().status,'creating');assert.equal(computeAccess((await c.root.get()).data().subscription).canMutate,true);});
 test('seller and client-written repair proof cannot elevate to subscription owner',async()=>{const c=await seed({stuck:true,proof:true});await assert.rejects(invoke('createSubscription',c,{action:'recover_failed_migration',operationId:c.op,confirmed:true},c.seller));await assertFails(sdk.setDoc(sdk.doc(env.authenticatedContext(c.owner.uid).firestore(),'billingMigrationRepairAuthorizations',idFor(c.bid,c.op)),{authority:'platform_admin'}));});
@@ -358,6 +367,75 @@ test('a historical automatic index without terminal proof blocks new checkouts e
   await db.doc('subscriptionIndex/'+id).set({businessId:c.bid,status:'approved',paymentMethodType:'card'});
   await assert.rejects(checkout(c),e=>e.details?.billingCode==='checkout_review_required');
   assert.equal(writes(),n);
+});
+
+async function historicalCard(c, { invoice = true, age = 90, paymentStatus = 'rejected', contractStatus = 'cancelled' } = {}) {
+  const op = crypto.randomUUID(), id = 'qa-history-' + op, reference = billingExternalReference(c.bid, op);
+  const date = new Date(Date.now() - age * 86400_000).toISOString();
+  const index = { businessId:c.bid, internalSubscriptionId:op, expectedExternalReference:reference, status:'rejected' };
+  const entry = { value:{ id, status:contractStatus, external_reference:reference, last_modified:date }, invoices:[] };
+  let charge, payment;
+  if (invoice) {
+    payment = { id:'qa-pay-'+op, status:paymentStatus, external_reference:reference, date_last_updated:date };
+    charge = { id:'qa-invoice-'+op, preapproval_id:id, status:'recycling', debit_date:date, last_modified:date, payment:{id:payment.id,status:paymentStatus} };
+    entry.invoices.push(charge);
+    payments.set(payment.id,payment);
+  }
+  contracts.set(id,entry);
+  await db.doc('subscriptionIndex/'+id).set(index);
+  await c.root.collection('billingCheckoutAttempts').doc(op).set({businessId:c.bid,operationId:op,subscriptionId:id,status:'rejected'});
+  return { id, op, charge, payment, closure:c.root.collection('billingCheckoutClosures').doc(op) };
+}
+
+test('recontracting by Pix closes 3 Lindas-like history and concurrent clicks produce one order',async()=>{
+  const c=await seed(), history=[];
+  for(let i=0;i<6;i++)history.push(await historicalCard(c,{invoice:i<4}));
+  const before=(await c.root.get()).data().subscription,n=writes();
+  const results=await Promise.allSettled([create(c),create(c)]);
+  const valid=results.find(result=>result.status==='fulfilled').value;
+  assert.equal(writes(),n+1);
+  assert.equal(orders.get(valid.orderId).total_amount,'119.90');
+  assert.deepEqual((await c.root.get()).data().subscription.administrativeAccess,before.administrativeAccess);
+  for(const row of history){
+    assert.equal((await row.closure.get()).data().providerId,row.id);
+    assert.equal((await db.doc('subscriptionIndex/'+row.id).get()).data().status,'rejected');
+  }
+  await approved(valid.orderId);
+  await webhook(valid.orderId);
+  const paid=(await c.root.get()).data().subscription;
+  assert.equal(paid.latestPayment.amount,119.9);
+  assert.equal(paid.catalogVersion,2);
+  const late=history[0];
+  late.charge.payment.status=late.payment.status='approved';
+  late.charge.payment.date_approved=new Date().toISOString();
+  for(let i=0;i<2;i++)await webhook(late.charge.id,undefined,{type:'subscription_authorized_payment',action:'updated'});
+  assert.equal((await db.doc('subscriptionPaymentEvents/review_'+late.payment.id).get()).data().reviewRequired,true);
+  assert.equal((await db.doc('subscriptionIndex/'+late.id).get()).data().status,'payment_review_required');
+  assert.deepEqual((await c.root.get()).data().subscription,paid);
+  assert.equal((await db.collection('billingPaymentEvents').where('operationId','==',valid.operationId).get()).size,1);
+});
+
+test('recontracting refuses recent retries, charges in process, unlinked payments and active contracts',async()=>{
+  const cases=[{age:2},{paymentStatus:'in_process'},{paymentStatus:'approved'},{contractStatus:'authorized'},{}];
+  for(const [i,options] of cases.entries()){
+    const c=await seed(),row=await historicalCard(c,options),n=writes();
+    if(i===4)payments.set('qa-unlinked-'+row.op,{...row.payment,id:'qa-unlinked-'+row.op,status:'pending'});
+    await assert.rejects(create(c),{code:'failed-precondition'});
+    assert.equal(writes(),n);
+    assert.equal((await row.closure.get()).exists,false);
+  }
+});
+
+test('a late approval on the original migration contract enters review without advancing the new Pix',async()=>{
+  const c=await seed(),next=await create(c),before=(await c.root.get()).data().subscription;
+  const entry=contracts.get(c.oldId),paymentId='qa-original-pay-'+c.op;
+  payments.set(paymentId,{id:paymentId,status:'approved',external_reference:entry.value.external_reference,date_approved:new Date().toISOString()});
+  const invoice={id:'qa-original-invoice-'+c.op,preapproval_id:c.oldId,status:'processed',payment:{id:paymentId,status:'approved'}};
+  entry.invoices=[invoice];
+  await webhook(invoice.id,undefined,{type:'subscription_authorized_payment',action:'updated'});
+  assert.equal((await db.doc('subscriptionPaymentEvents/review_'+paymentId).get()).data().reviewRequired,true);
+  assert.deepEqual((await c.root.get()).data().subscription,before);
+  assert.equal((await db.collection('billingPaymentEvents').where('operationId','==',next.operationId).get()).size,0);
 });
 
 test('late auto-card approval cannot replace a newer payment or renew access again',async()=>{

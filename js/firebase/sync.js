@@ -17,7 +17,7 @@ import {
   sanitizeForFirestore,
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
-import '../integrity.js?v=157';
+import '../integrity.js?v=233';
 import {prepareProductImportFence} from './product-import-fence.js';
 
 // Compatibility API for synchronous domain code; backed by structured IDB rows.
@@ -306,6 +306,10 @@ const activeBusinessId = () => {
 };
 const errorCode = (error) =>
   String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
+// Fase 1: stable rejection reasons live in functions/src/shared/sync-rejection.js
+// (globalThis.VeconiSyncRejection). The server keeps code and text unchanged and adds
+// details.reason; decisions prefer the stored reason and fall back to the exact
+// legacy text when the packet (or the cached app) predates reasons.
 const friendlyError = (error) =>
   ({
     "local-storage-quota": "Não foi possível atualizar o armazenamento local da VECONI. Veja os detalhes da sincronização.",
@@ -596,12 +600,12 @@ function classifyQueueOperation(item) {
     return result('pending',{sendable:true,canRetry:true,replayBlocked:false});
   } catch {return result('error',{activeError:true,reviewRequired:true,reviewState:'verification_failed',reviewReason:'archive_evidence_invalid'});}
 }
-function monetaryRecoveryRequired(item){return item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
+function monetaryRecoveryRequired(item){return item.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'sale_total_mismatch','Total não corresponde aos itens.')??item.lastErrorMessage==='Total não corresponde aos itens.')&&
   (item.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');}
 function rejectedProductStockUpdate(item) {
   const writes=item.payload?.writes;
   return item.status==='error'&&item.lastErrorStage==='server_operational_commit'&&
-    item.lastErrorCode==='permission-denied'&&item.lastErrorMessage==='Estoque sem movimento autorizado.'&&
+    item.lastErrorCode==='permission-denied'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'stock_without_movement','Estoque sem movimento autorizado.')??item.lastErrorMessage==='Estoque sem movimento autorizado.')&&
     Array.isArray(writes)&&writes.length===1&&writes[0]?.entityType==='products'&&writes[0]?.operation==='update';
 }
 async function assertCancellationQueueClear(quote) {
@@ -791,6 +795,7 @@ const queueErrorBreakdown = () => {
   return {
     permission: errors.filter((item) => item.lastErrorCode === "permission-denied").length,
     invalid: errors.filter((item) => item.lastErrorCode === "invalid-argument").length,
+    ...(globalThis.VeconiSyncRejection ? { byCategory: globalThis.VeconiSyncRejection.countByCategory(errors) } : {}),
     structural: errors.filter((item) =>
       [
         "queue-owner-mismatch",
@@ -820,6 +825,7 @@ const queueDiagnostics = () =>
     retryCount: Number(item.retryCount || item.attempts || 0),
     errorCode: item.lastErrorCode || "",
     errorMessage: item.lastErrorMessage || "",
+    ...globalThis.VeconiSyncRejection?.diagnosticFields?.(item, classification.reviewReason),
     diagnostic: queueSettingsDiagnostic(item),
     originalErrorPath: item.lastErrorPath || null,
     ...classification,
@@ -853,6 +859,31 @@ const retryDelay = (attempts, code = "") =>
     ? ([300000, 900000, 1800000][Math.max(0, attempts - 1)] ?? 3600000)
     : ([5000, 15000, 30000, 60000][Math.max(0, attempts - 1)] ?? 300000);
 const transientSyncCodes = new Set(['unavailable','deadline-exceeded','network-request-failed','aborted','resource-exhausted']);
+// D3: a callable failure is a DEFINITIVE rejection only when the server answered with a
+// business/security code or a typed details.reason. 'internal'/'unknown'/'cancelled'
+// WITHOUT a typed answer is an UNKNOWN OUTCOME (unreachable endpoint, lost response or an
+// unexpected server exception). It is never assumed to be a connection problem: the
+// operation receipt is read before any resend and the six-dispatch budget still applies.
+const unknownOutcomeSyncCodes = new Set(['internal','unknown','cancelled']);
+const unknownSyncOutcome = (error) => transientSyncCodes.has(errorCode(error)) ||
+  unknownOutcomeSyncCodes.has(errorCode(error)) &&
+  !(error?.details && typeof error.details === 'object' && typeof error.details.reason === 'string');
+// While the server cannot even be asked for the receipt, waits grow up to five minutes and
+// do not consume the dispatch budget. A restored connection or a resumed app retries early.
+const CONNECTION_WAIT_DELAYS = [15000, 30000, 60000, 120000, 300000];
+let connectionRestoredAt = 0;
+const queueRetryDelay = (item) => {
+  const base = retryDelay(item.attempts || 0, item.lastErrorCode), waits = Number(item.connectionWaits || 0);
+  if (!waits || Date.parse(item.lastAttemptAt) <= connectionRestoredAt) return base;
+  return Math.max(base, CONNECTION_WAIT_DELAYS[Math.min(waits, CONNECTION_WAIT_DELAYS.length) - 1]);
+};
+// Packets marked as a permanent error by the D3 defect (untyped 'internal' from the commit
+// call) go back to the receipt path. They are NEVER resent directly.
+const untypedUnknownFailure = (item) => item.status === 'error' && item.syncProtocolVersion === 1 &&
+  unknownOutcomeSyncCodes.has(String(item.lastErrorCode || '')) &&
+  (!item.lastErrorReason || item.lastErrorReason === 'unclassified') &&
+  item.lastErrorStage === 'server_operational_commit' && Number(item.attempts || 0) < 6 &&
+  !item.favoriteRejectedWithoutEffect;
 const needsQueuedReceipt = item => item.syncConfirmationPending === true ||
   Number(item.attempts||0)>0 && transientSyncCodes.has(item.lastErrorCode);
 const isFavoriteProductWrite = (write) =>
@@ -912,8 +943,7 @@ const canAttempt = (item, force = false, manualRetry = false) =>
     !canWriteSharedSettings()) &&
   (manualRetry || item.status !== "error") &&
   (force || !item.lastAttemptAt ||
-    Date.now() - new Date(item.lastAttemptAt).getTime() >=
-      retryDelay(item.attempts || 0, item.lastErrorCode));
+    Date.now() - new Date(item.lastAttemptAt).getTime() >= queueRetryDelay(item));
 function paymentQueueRequiresReview(item) {
   return Array.isArray(item.payload?.writes) && !readPaymentRecoveryReceipt(item) && ["permission-denied","failed-precondition","invalid-argument","already-exists"].includes(String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')) &&
     (item.payload?.writes || []).some(write =>
@@ -1043,6 +1073,13 @@ function recoveryResolutionKey(item){return `${queueKey()}:recoveryResolution:${
 function readRecoveryResolution(item){
   let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
   if(!value||!Array.isArray(item.payload?.writes))return null;
+  // D5: a stock edit the server rejected atomically never had an effect. The owner
+  // closes it with server evidence (no processed marker, product read from the cloud).
+  if(value.channel==='rejected_stock_edit')
+    return value.status==='closed_without_effects'&&rejectedProductStockUpdate(item)&&value.version===1&&
+      value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
+      value.productId===item.payload.writes[0].entityId&&value.payloadChecksum===checksumValue(item.payload)&&
+      value.serverProcessed===false&&value.serverProductExists===true&&value.verifiedAt&&value.resolvedByUid===item.userId?value:null;
   if(value.channel==='client_dependency'){
     const writes=item.payload.writes;
     return value.status==='client_confirmed'&&writes.length===1&&writes[0].entityType==='clients'&&writes[0].operation==='create'&&writes[0].entityId===value.clientId&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&value.resolvedAt&&value.resolvedByUid?value:null;
@@ -1053,7 +1090,7 @@ function readRecoveryResolution(item){
     value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
     value.workspaceGeneration===(item.workspaceGeneration??0)&&sale.length===1&&value.saleId===sale[0].entityId&&
     value.spaceId===sale[0].data?.spaceId?value:null;
-  if(item.lastErrorCode==='invalid-argument'&&item.lastErrorMessage==='Total não corresponde aos itens.'&&
+  if(item.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(item,'sale_total_mismatch','Total não corresponde aos itens.')??item.lastErrorMessage==='Total não corresponde aos itens.')&&
     (value.channel!=='monetary_recovery'||value.kind!=='monetary_recovery_v1'||value.commercialReceiptConfirmed!==true||value.monetaryPolicy!=='unit4-total-cent-v1'||sale.length!==1||value.totalCents!==Math.round(Number(sale[0].data.valorFinal??sale[0].data.valorTotal)*100)||value.originalTotalCents!==value.totalCents))return null;
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
@@ -1061,7 +1098,7 @@ function readRecoveryResolution(item){
 async function refreshRecoveryResolutions(isCurrent){
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
   const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
-  const monetary=i=>i.lastErrorCode==='invalid-argument'&&i.lastErrorMessage==='Total não corresponde aos itens.'&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
+  const monetary=i=>i.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(i,'sale_total_mismatch','Total não corresponde aos itens.')??i.lastErrorMessage==='Total não corresponde aos itens.')&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
   const held=readQueue().filter(i=>(saleQueueRequiresReview(i)||clientDependency(i)||monetary(i))&&!readRecoveryResolution(i)&&i.userId===currentUser?.uid&&i.businessId===activeBusinessId());
   for(let offset=0;offset<held.length;offset+=20){
     const batch=held.slice(offset,offset+20),key=queueKey();
@@ -1226,7 +1263,7 @@ function stockQueueDependsOnRejection(item,queue){
     if(item.queueId&&prior.queueId===item.queueId)break;
     if(prior.businessId===item.businessId&&prior.userId===item.userId&&
       (prior.workspaceGeneration??0)===(item.workspaceGeneration??0)&&rejectedProductStockUpdate(prior)&&
-      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior)){
+      products.has(prior.payload.writes[0].entityId)&&!readQueueArchive(prior)&&!readRecoveryResolution(prior)){
       if(!saleIndependentOfRejectedStock(item,prior.payload.writes[0]))return true;
     }
   }
@@ -1291,6 +1328,42 @@ function preserveQueueQuarantine(item) {
   return true;
 }
 const incidentArchiveTasks = new Map();
+async function resolveRejectedStockEdit(operationId) {
+  if (!navigator.onLine) throw Error('Conecte-se para conferir a nuvem. Nada foi alterado.');
+  await validateUser();
+  const generation = syncSessionGeneration, uid = currentUser?.uid, bid = activeBusinessId(), key = queueKey();
+  const assertOrigin = () => {
+    if (generation !== syncSessionGeneration || currentUser?.uid !== uid || activeBusinessId() !== bid || queueKey() !== key)
+      throw Object.assign(Error('A sessão mudou. Nada foi alterado.'), {code:'sync-session-obsolete'});
+  };
+  const context = window.BusinessContext?.get?.();
+  if (context?.businessId !== bid || context?.role !== 'owner' || context?.business?.ownerId !== uid)
+    throw Error('Somente o proprietário pode liberar este produto.');
+  const item = readQueueStrict({readOnly:true}).find(entry => entry.operationId === operationId);
+  if (!item || item.userId !== uid || item.businessId !== bid || (item.workspaceGeneration??0) !== (DB.getWorkspaceGeneration?.()??0) ||
+      !rejectedProductStockUpdate(item) || readRecoveryResolution(item) || readQueueArchive(item))
+    throw Error('Esta operação não é uma edição de estoque recusada pendente desta conta.');
+  const original = JSON.stringify(item), productId = item.payload.writes[0].entityId;
+  // Server evidence: the rejected commit never wrote its idempotency marker, and the
+  // product exists in the cloud. Nothing is written to the server.
+  const [marker, product] = await Promise.all([
+    getDocFromServer(doc(db,'businesses',bid,'processedOperations',operationId)),
+    getDocFromServer(doc(db,'businesses',bid,'products',productId))]);
+  assertOrigin();
+  if (marker.exists()) throw Error('A nuvem registra esta operação. Ela exige revisão; nada foi alterado.');
+  if (!product.exists()) throw Error('O produto não existe na nuvem. Nada foi alterado.');
+  if (JSON.stringify(readQueueStrict({readOnly:true}).find(entry => entry.operationId === operationId)) !== original)
+    throw Error('A fila mudou durante a conferência. Nada foi alterado.');
+  const cloud = product.data(), resolution = {version:1, channel:'rejected_stock_edit', status:'closed_without_effects',
+    operationId, businessId:bid, actorUid:uid, resolvedByUid:uid, productId, payloadChecksum:checksumValue(item.payload),
+    serverProcessed:false, serverProductExists:true, serverStock:Number(cloud.estoqueAtual ?? cloud.estoque ?? 0),
+    verifiedAt:now()};
+  localStorage.setItem(recoveryResolutionKey(item), JSON.stringify(resolution));
+  // Bring the cloud product back when no other queued operation still writes it.
+  applyCloudCollection('products', [{id:product.id, ...cloud}], {authoritative:true});
+  await DB.flush?.(); assertOrigin(); updateQueueState();
+  return resolution;
+}
 async function archiveQuarantinedOperation(operationId) {
   if (incidentArchiveTasks.has(operationId)) return incidentArchiveTasks.get(operationId);
   const task = (async () => {
@@ -2503,6 +2576,8 @@ function queueWrites(
       payloadVersion: PAYLOAD_VERSION,
       syncProtocolVersion: 1,
       clientRelease: 202,
+      createdByAppVersion: String(window.AdiFestaBuild?.appVersion || window.AdiFestaBuild?.release || ""),
+      createdByRelease: Number(window.AdiFestaBuild?.release) || null,
       businessId,
       workspaceGeneration:workspaceOrigin.workspaceGeneration,
       userId: currentUser.uid,
@@ -3070,7 +3145,10 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
   // durable original envelope, IDs and checksum remain in their UID namespace.
   if (window.FirebaseCallable) {
     if(checkingPreviousAttempt){
-      if(await readQueuedOperationStatus(item)==='applied')return null;
+      let previous;
+      try{previous=await readQueuedOperationStatus(item);}
+      catch(error){if(unknownSyncOutcome(error))error.syncReceiptUnreachable=true;throw error;}
+      if(previous==='applied')return null;
       if(item.payload.writes.some(write=>write.entityType==='payments'&&write.operation==='create'))throw queuedReceiptReview();
       if(Number(item.attempts||0)>=6)throw Object.assign(
         Error('O servidor não confirmou esta operação após as tentativas automáticas. Confira os detalhes antes de repetir.'),{code:'sync-retry-exhausted'});
@@ -3080,6 +3158,7 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
     try { result = await window.FirebaseCallable('commitOperationalSync', {
       businessId: activeBusinessId(),
       syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release)||202,
+      appVersion:String(window.AdiFestaBuild?.appVersion||""),
       ...(checkingPreviousAttempt?{queueRecoveryVersion:1}:{}),
       item: {...item, operationId:stableLegacyOperationId(item),
         workspaceGeneration:item.workspaceGeneration??DB.getWorkspaceGeneration?.()??0},
@@ -4175,10 +4254,21 @@ async function processSyncQueue(options = {}) {
             lastAttemptAt: now(),
             lastErrorCode: preflight.code,
             lastErrorMessage: preflight.message,
+            lastErrorReason: undefined, lastErrorCategory: undefined, lastErrorReasonSource: undefined,
+            ...globalThis.VeconiSyncRejection?.queueFields?.({code: preflight.code, message: preflight.message}),
           };
           saveQueue(blocked);
         }
         continue;
+      }
+      if(state.operationalProtocol?.queueRecoveryVersion===1&&untypedUnknownFailure(queued)&&
+        !classifyQueueOperation(queued).replayBlocked&&!queueManualReviewReason(queued)){
+        const reopened=readQueue(),at=reopened.findIndex(item=>item.queueId===queued.queueId);
+        if(at>=0&&JSON.stringify(reopened[at].payload)===JSON.stringify(queued.payload)){
+          reopened[at]={...reopened[at],status:'pending',syncConfirmationPending:true,unknownOutcomeRequalifiedAt:now()};
+          saveQueue(reopened);
+          Object.assign(queued,reopened[at]);
+        }
       }
       const checkingPreviousAttempt=needsQueuedReceipt(queued);
       if(checkingPreviousAttempt&&state.operationalProtocol?.queueRecoveryVersion!==1)continue;
@@ -4280,9 +4370,12 @@ async function processSyncQueue(options = {}) {
             (item) => item.queueId === queued.queueId,
           );
         let retryScheduled=false;
+        const unknownOutcome=unknownSyncOutcome(error),serverUnreachable=unknownOutcome&&error.syncReceiptUnreachable===true;
         if (failedIndex >= 0) {
-          const attempts = Number(failed[failedIndex].attempts || 0) + 1,
-            temporary = transientSyncCodes.has(errorCode(error)),
+          // A receipt check that could not reach the server dispatched nothing: it waits
+          // without consuming the dispatch budget.
+          const attempts = Number(failed[failedIndex].attempts || 0) + (serverUnreachable ? 0 : 1),
+            temporary = unknownOutcome,
             retryable = temporary && (state.operationalProtocol?.queueRecoveryVersion===1?attempts<=6:attempts<6);
           failed[failedIndex] = {
             ...failed[failedIndex],
@@ -4290,10 +4383,14 @@ async function processSyncQueue(options = {}) {
             retryCount: attempts,
             status: retryable ? "pending" : "error",
             ...(checkingPreviousAttempt||retryable?{syncConfirmationPending:true}:{}),
+            connectionWaits: serverUnreachable ? Number(failed[failedIndex].connectionWaits || 0) + 1 : 0,
+            lastErrorOutcome: unknownOutcome ? "unknown" : "rejected",
             ...(favoriteRejectedOnFirstAttempt(beforeAttempt,error) ? {favoriteRejectedWithoutEffect:true} : {}),
             lastAttemptAt: now(),
             lastErrorCode: errorCode(error) || "unknown",
             lastErrorMessage: String(error?.message || friendlyError(error)).slice(0,800),
+            lastErrorReason: undefined, lastErrorCategory: undefined, lastErrorReasonSource: undefined,
+            ...globalThis.VeconiSyncRejection?.queueFields?.({code: errorCode(error), message: error?.message, details: error?.details}),
             lastErrorPath: error.syncDetail?.path ?? (currentPath || null),
             lastErrorStage: error.syncDetail?.stage || null,
             lastErrorRequest: error.syncDetail?.request || null,
@@ -4305,14 +4402,17 @@ async function processSyncQueue(options = {}) {
           catch (restoreError) { console.warn("[Favoritos] Estado anterior indisponível.", {code:errorCode(restoreError)}); }
         }
         if(retryScheduled){
-          traceSync('queue_retry_waiting',{code:errorCode(error)});
-          emit({status:'waiting',message:'A confirmação está pendente. A VECONI vai conferir o servidor automaticamente.'});
+          traceSync('queue_retry_waiting',{code:errorCode(error),serverUnreachable});
+          emit({status:'waiting',message:serverUnreachable
+            ?'Sem resposta do servidor. As operações estão salvas neste aparelho e serão conferidas automaticamente.'
+            :'A confirmação está pendente. A VECONI vai conferir o servidor automaticamente.'});
         }else reportError(error,"Queue operation",{queueId:queued.queueId,operationId:queued.operationId});
         if (errorCode(error) === "resource-exhausted") {
           quotaBackoff=retryScheduled;
           if(!quotaBackoff)cloudPaused=true;
         }
         if (
+          serverUnreachable ||
           [
             "unauthenticated",
             "resource-exhausted",
@@ -4362,7 +4462,7 @@ function scheduleQueueRetry(){
     (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&
     !classifyQueueOperation(item).replayBlocked&&!favoriteWriteHasPredecessor(item,queue)&&!hasUnconfirmedPredecessor(item,queue)&&
     queueRetryWakes.get(item.queueId)!==item.lastAttemptAt)
-    .map(item=>({item,at:Date.parse(item.lastAttemptAt)+retryDelay(item.attempts||0,item.lastErrorCode)}))
+    .map(item=>({item,at:Date.parse(item.lastAttemptAt)+queueRetryDelay(item)}))
     .filter(entry=>Number.isFinite(entry.at)).sort((a,b)=>a.at-b.at)[0];
   if(!next)return;
   const scope=captureCloudReadScope(false);
@@ -4384,7 +4484,7 @@ function pendingIds(name, confirmedPaymentOperation = null) {
   for (const item of readQueue()){
     const resolution=readRecoveryResolution(item);
     if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) &&
-        resolution?.channel!=='queued_sale_receipt' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
+        resolution?.channel!=='queued_sale_receipt' && resolution?.channel!=='rejected_stock_edit' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required") &&
         !(name === "products" && favoriteWriteWasRejected(item)))
     for (const write of item.payload?.writes || [])
@@ -6210,6 +6310,7 @@ function queueOperationDiagnostic(item) {
     lastErrorPath: item.lastErrorPath || null,
     lastErrorCode: String(item.lastErrorCode || ""),
     lastErrorMessage: cleanMessage(item.lastErrorMessage),
+    ...globalThis.VeconiSyncRejection?.diagnosticFields?.(item),
     diagnostic: queueSettingsDiagnostic(item),
     lastErrorStage: item.lastErrorStage || null,
     lastErrorRequest: item.lastErrorRequest || null,
@@ -6884,10 +6985,13 @@ async function runAutomaticSync() {
   } catch (error) {
     if(readScopeToken!==captureCloudReadScope()||errorCode(error)==='sync-session-retired')return;
     const code=errorCode(error);
-    if(transientSyncCodes.has(code)&&navigator.onLine&&syncConnectionAttempts<5){
+    const queuedWork=()=>{try{return readQueue().some(item=>['pending','syncing'].includes(item.status));}catch{return false;}};
+    if(unknownSyncOutcome(error)&&navigator.onLine&&(syncConnectionAttempts<5||queuedWork())){
       syncConnectionAttempts++;
       traceSync('sync_connection_retry_waiting',{code});
-      emit({status:'waiting',message:'O servidor está indisponível. A VECONI vai tentar a conexão novamente.'});
+      emit({status:'waiting',message:transientSyncCodes.has(code)
+        ?'O servidor está indisponível. A VECONI vai tentar a conexão novamente.'
+        :'Sem resposta confirmada do servidor. As operações estão salvas neste aparelho e serão conferidas automaticamente.'});
       scheduleImmediate(retryDelay(syncConnectionAttempts,code));
       return;
     }
@@ -7350,11 +7454,12 @@ addEventListener('veconi-spaces-ready',()=>{
   cloudReadController?.wake();
 });
 addEventListener("online", () => {
+  connectionRestoredAt = Date.now();
   emit({ status: "waiting", message: "Conexão recuperada. Sincronizando…" });
   scheduleImmediate();
 });
 addEventListener("offline", updateQueueState);
-window.AppLifecycle?.onResume?.(() => scheduleImmediate());
+window.AppLifecycle?.onResume?.(() => { connectionRestoredAt = Date.now(); scheduleImmediate(); });
 
 window.FirestoreRepositories = repositories;
 window.dataRepository = repositories;
@@ -7436,6 +7541,7 @@ window.SyncFirebase = {
   recoverPreservedPayment,
   refreshQueueStatus,
   archiveQuarantinedOperation,
+  resolveRejectedStockEdit,
   getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,
   // Read-only recovery source. Never normalize, acknowledge or save this queue.
   recoverySnapshot: () => {

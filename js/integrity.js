@@ -16,6 +16,20 @@
     if(typeof value==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(value)&&/(At|Em)$|^(data|date)$/.test(key)&&Number.isFinite(Date.parse(value)))return new Date(value).toISOString();
     return numberKeys.has(key)?numeric(value):value;
   }
+  // Stock control is compared by its EFFECTIVE meaning under the shared product rule
+  // (functions/src/shared/product-model.js), so the legacy spelling (only
+  // controlaEstoque:false) and the current one (controlaEstoque:false +
+  // semControleEstoque:true) are equivalent. A real difference in control still
+  // shows up as controlaEstoque. Unknown/invalid shapes keep the raw fields.
+  const productModel=()=>root.ProductModel||(typeof require==='function'?(()=>{try{return require('../functions/src/shared/product-model.js');}catch{return null;}})():null);
+  function effectiveStockControl(document){
+    if(!document||typeof document!=='object')return null;
+    if(document.controlaEstoque===undefined&&document.semControleEstoque===undefined)return null;
+    try{
+      const built=productModel()?.build({nome:'x',preco:0,...document});
+      return typeof built?.controlaEstoque==='boolean'&&built.semControleEstoque===!built.controlaEstoque?built.controlaEstoque:null;
+    }catch{return null;}
+  }
   const fill=(doc,defaults)=>{for(const[k,v]of Object.entries(defaults))if(doc[k]===undefined||doc[k]===null)doc[k]=copy(v);return doc;};
   function canonicalizeForIntegrity(entity,document,options={}){
     // Normalize Firestore timestamps before structuredClone erases prototypes.
@@ -36,6 +50,8 @@
       fill(d,{hasVariations:d.productType==='variable',durationValue:recurring?30:null,durationUnit:recurring?'days':null,renewalLabel:recurring?d.nome||'Renovação':'',renewalMessage:'',renewalReminders:[],minPrice:d.preco??0,maxPrice:d.preco??0,totalStock:stock,hasAvailableStock:stock>0});
       fill(d,options.normalizeProductAccess?.(d)||{spaceAccessMode:'all_spaces',allowedSpaceIds:[],defaultSpaceId:null,spaceScopeVersion:1});
       if(d.custo===undefined)d.custo=fin.custo??d.cost??0;
+      const control=effectiveStockControl(document);
+      if(control!==null){d.controlaEstoque=control;delete d.semControleEstoque;}
     }
     if(entity==='productVariants'){
       // Same semantic default as storage.normalize: missing minimum is zero.
