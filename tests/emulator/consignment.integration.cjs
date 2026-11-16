@@ -163,14 +163,28 @@ async function previewServer(f, port = 0) {
   const context = { businessId: f.businessId, business: { ownerId: f.uid }, userProfile: { uid: f.uid }, role:'owner' };
   const markup = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>VECONI Consignados · QA</title><link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/design-system/tokens.css">
-    <link rel="stylesheet" href="css/consignments.css"><script src="assets/lucide.min.js"></script>
+    <link rel="stylesheet" href="css/desktop-sales.css"><link rel="stylesheet" href="css/checkout-mobile.css"><link rel="stylesheet" href="css/consignments.css"><script src="assets/lucide.min.js"></script>
     <style>body{display:block;padding:12px;background:#f0f5f8}main{max-width:1050px;margin:auto}</style>
-    <main id="app"></main><script src="js/consignment-pdf.js"></script><script src="js/consignment-ui.js"></script>
+    <main id="app"></main><nav class="bottom-nav">Navegação</nav>
+    <script src="js/utils.js"></script><script src="js/checkout.js"></script><script src="js/desktop-sales.js"></script>
+    <script src="js/activity-center.js"></script><script src="js/consignment-pdf.js"></script><script src="js/consignment-ui.js"></script>
     <script>
       window.BusinessContext={get:()=>(${JSON.stringify(context)})};
-      window.SpaceContext={activeId:()=>${JSON.stringify(f.spaceId)},renderBar:()=>'<p class="muted">Espaço de teste · dados fictícios</p>'};
+      const spaceId=${JSON.stringify(f.spaceId)}, businessId=${JSON.stringify(f.businessId)};
+      window.SpaceContext={activeId:()=>spaceId,list:()=>[{id:spaceId,name:'PrimeLine 3D'}],
+        renderBar:()=>'<p class="muted">Espaço de teste · dados fictícios</p>',
+        stockMovementOrigin:(row,id)=>row.allowedSpaceIds.includes(id) ? {businessId,spaceId:id} : null};
       window.SpaceEngine={productAllowsSpace:(row,id)=>row.allowedSpaceIds.includes(id)};
-      window.DB={readForView:()=>({produtos:${JSON.stringify(products)},variacoesProdutos:${JSON.stringify(variants)}})};
+      const data={produtos:${JSON.stringify(products)},variacoesProdutos:${JSON.stringify(variants)}};
+      window.qaProducts=data.produtos;
+      window.DB={readForView:()=>data,carregar:()=>data,getBusinessId:()=>businessId,getWorkspaceGeneration:()=>0};
+      window.ProductVariations={isVariable:row=>row.productType==='variable',list:id=>data.variacoesProdutos.filter(v=>v.parentProductId===id)};
+      window.getProductStockStatus=()=> 'disponivel';
+      window.Produtos={mobileFavoriteValue:row=>Boolean(row.favorito),toggleMobileFavorite:id=>{
+        const product=data.produtos.find(row=>row.id===id); product.favorito=!product.favorito;
+        dispatchEvent(new Event('mobile-product-favorites-updated'));
+      }};
+      window.Router={ir:route=>location.hash='#/'+route,atual:()=>location.hash.startsWith('#/historico')?'historico':'consignados'};
       window.SyncFirebase={getFirebaseDiagnostic:()=>({pending:0,syncErrors:0})};
       window.FinancialSpaceService={listFinancialAccounts:async()=>[{id:'cash-test',name:'Conta de teste',accountHomeSpaceId:${JSON.stringify(f.spaceId)}}]};
       window.FirebaseCallable=async(name,input)=>{
@@ -183,11 +197,22 @@ async function previewServer(f, port = 0) {
         }
         return {data:result};
       };
-      document.getElementById('app').innerHTML = window.Consignments.shell();
-      window.Consignments.mount(document.getElementById('app'));
+      function render() {
+        const root = document.getElementById('app');
+        if (location.hash.startsWith('#/historico')) {
+          root.innerHTML = window.ActivityCenter.render();
+          window.ActivityCenter.bind();
+        } else {
+          root.innerHTML = window.Consignments.shell();
+          window.Consignments.mount(root);
+        }
+      }
+      window.addEventListener('hashchange',render);
+      render();
     </script></html>`;
   const staticFiles = new Set(['/css/style.css','/css/design-system/tokens.css','/css/consignments.css','/assets/lucide.min.js',
-    '/js/consignment-pdf.js','/js/consignment-ui.js','/assets/jspdf-4.2.1.umd.min.js']);
+    '/css/desktop-sales.css','/css/checkout-mobile.css','/js/utils.js','/js/checkout.js','/js/desktop-sales.js','/js/activity-center.js',
+    '/js/consignment-pdf.js','/js/consignment-ui.js' ,'/assets/jspdf-4.2.1.umd.min.js']);
   const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/qa-consignments') {
       const chunks = [];
@@ -242,21 +267,57 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   const output = process.env.VECONI_CONSIGNMENT_QA_OUTPUT;
   if (output) await page.screenshot({path:require('node:path').join(output,'consignados-mobile.png'),fullPage:true});
   await page.click('[data-new-delivery]');
-  await page.waitForSelector('[data-delivery-form]');
-  await page.$eval('[name="deliveredOn"]', input => { input.value = '2026-11-10'; input.dispatchEvent(new Event('input',{bubbles:true})); });
+  await page.waitForSelector('[data-delivery-product="anel"]');
+  assert.equal(await page.$eval('[data-delivery-grid]', el => getComputedStyle(el).gridTemplateColumns.split(' ').length),2);
+  assert.equal(await page.$eval('.bottom-nav',el=>getComputedStyle(el).display),'none');
+  assert.equal(await page.$eval('[data-consignment-space]',el=>el.hidden),true);
+  assert.match(await page.$eval('.consignment-heading',el=>el.textContent),/PrimeLine 3D/);
+  assert.equal(await page.$('[data-add]'),null);
+  await page.type('[data-product-search]','Caveira');
+  await page.waitForFunction(() => document.querySelector('[data-delivery-grid]').textContent.includes('Nenhum produto'));
+  await page.evaluate(() => {
+    const [base] = window.qaProducts;
+    const { businessId, workspaceGeneration, ...product } = base;
+    window.qaProducts.push({...product,id:'caveira',nome:'Caveira de clicar',preco:10,estoqueAtual:5});
+    window.qaProducts.push({...product,id:'wrong-business',nome:'Caveira de outra empresa',businessId:'other'});
+    window.qaProducts.push({...product,id:'wrong-space',nome:'Caveira de outro espaço',spaceId:'other',defaultSpaceId:'other',allowedSpaceIds:['other']});
+    dispatchEvent(new CustomEvent('cloud-data-updated',{detail:{collection:'products'}}));
+  });
+  await page.waitForSelector('[data-delivery-product="caveira"]');
+  assert.equal((await page.$$('[data-delivery-product]')).length,1);
+  await page.click('[data-delivery-favorite="caveira"]');
+  await page.select('[data-delivery-filter]','favorite');
+  assert.equal(await page.$eval('[data-bag-count]',el=>el.textContent),'0');
+  assert.equal((await page.$$('[data-delivery-product]')).length,1);
+  if (output) await page.screenshot({path:require('node:path').join(output,'consignados-entrega-mobile.png'),fullPage:true});
+  await page.select('[data-delivery-filter]','');
+  await page.$eval('[data-product-search]',el=> { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); });
   await page.type('[data-product-search]','AZL');
-  await page.waitForSelector('[data-add="azul"]');
-  await page.click('[data-add="azul"]');
-  await page.click('[data-add="azul"]');
+  await page.click('[data-delivery-product="kit"] .pos-product-hit');
+  await page.waitForSelector('[data-delivery-variants][open]');
+  await page.$eval('[data-delivery-variants] [data-variant-quantity]', input => { input.value = '2'; });
+  await page.click('[data-add-variant="azul"]');
+  assert.equal(await page.$eval('[data-bag-count]',el=>el.textContent),'2');
+  await page.click('[data-open-delivery-bag]');
+  await page.waitForSelector('[data-delivery-form]');
+  assert.equal(await page.$eval('[data-quantity="azul"]',input=>input.value),'2');
+  await page.$eval('[name="deliveredOn"]', input => { input.value = '2026-11-10'; input.dispatchEvent(new Event('input',{bubbles:true})); });
+  await page.$eval('[data-price="azul"]', input => { input.value = '23.25'; input.dispatchEvent(new Event('input',{bubbles:true})); });
+  assert.match(await page.$eval('[data-delivery-total]',el=>el.textContent), /46,50/);
+  await page.type('[name="notes"]','Conferência QA');
+  await page.click('[data-delivery-back]');
+  assert.equal(await page.$eval('[data-bag-count]',el=>el.textContent),'2');
+  await page.click('[data-open-delivery-bag]');
+  assert.equal(await page.$eval('[name="notes"]',input=>input.value),'Conferência QA');
+  if (output) await page.screenshot({path:require('node:path').join(output,'consignados-sacola-mobile.png'),fullPage:true});
   await page.evaluate(() => { window.qaLostReply = true; });
   await page.click('[data-delivery-form] button[type=submit]');
   await page.waitForSelector('[data-resume]');
   await page.reload({waitUntil:'domcontentloaded'});
   await page.waitForSelector('[data-resume]');
   await page.click('[data-resume]');
-  await page.waitForSelector('[data-prepare-pdf]');
-  await page.click('[data-prepare-pdf]');
   await page.waitForSelector('[data-download]');
+  assert.deepEqual(browserErrors, []);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   const pdf = await page.evaluate(async () => {
     window.ConsignmentPdf.download = file => { window.qaPdf = file; };
@@ -267,7 +328,7 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   const bytes = Buffer.from(pdf,'base64');
   assert.equal(bytes.subarray(0,4).toString(),'%PDF');
   assert.match(bytes.toString('latin1'), /\/Subtype \/Image/);
-  if (output) await fs.writeFile(require('node:path').join(output,'consignado-estoque.pdf'),bytes);
+  if (output) await fs.writeFile(require('node:path').join(output,'consignado-entrega.pdf'),bytes);
   const shared = await page.evaluate(async () => {
     Object.defineProperties(navigator,{
       share:{configurable:true,value:async ({files})=>{window.qaShare=files[0].type;}},
@@ -281,12 +342,23 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   const desktop = await browser.newPage();
   await desktop.setViewport({width:1366,height:900});
   await desktop.goto(url,{waitUntil:'domcontentloaded'});
-  await desktop.waitForSelector('[data-tab="history"]');
-  await desktop.click('[data-tab="history"]');
-  await desktop.waitForSelector('[data-receipt]');
-  assert.match(await desktop.$eval('#app',x=>x.textContent), /10\/11\/2026/);
-  await desktop.click('[data-receipt]');
+  await desktop.waitForSelector('[data-new-delivery]');
+  await desktop.click('[data-new-delivery]');
+  await desktop.waitForSelector('.desktop-sales-product-grid [data-delivery-product="anel"]');
+  assert.ok(await desktop.$eval('[data-delivery-product="anel"]',el=>el.getBoundingClientRect().height < 190));
+  if (output) await desktop.screenshot({path:require('node:path').join(output,'consignados-entrega-desktop.png'),fullPage:true});
+  await desktop.click('[data-delivery-product="anel"] .desktop-sale-product-main');
+  assert.equal(await desktop.$eval('[data-bag-count]',el=>el.textContent),'1');
+  await desktop.click('[data-delivery-back]');
+  await desktop.click('[data-outlet-view]');
+  await desktop.waitForSelector('a[href*="ponto="]');
+  await desktop.click('a[href*="ponto="]');
+  await desktop.waitForSelector('[data-activity-id^="consignment:"]');
+  assert.ok(await desktop.$('[data-history-quick="consignment_delivery"]'));
+  assert.equal(await desktop.$('[data-history-quick="sale"]'),null);
+  await desktop.goto(url+'/#/consignados?recibo='+(await f.call('history')).items[0].id);
   await desktop.waitForSelector('[data-prepare-pdf]');
+  assert.match(await desktop.$eval('#app',x=>x.textContent), /10\/11\/2026/);
   await desktop.click('[data-tab="home"]');
   await desktop.waitForSelector('[data-count]');
   await desktop.click('[data-count]');

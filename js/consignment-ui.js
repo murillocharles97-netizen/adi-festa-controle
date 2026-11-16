@@ -33,41 +33,60 @@ window.Consignments = (() => {
   }
 
   function shell() {
-    return `<section class="consignment-page"><header class="consignment-heading"><div><h2>Consignados</h2><p>Entregas, reposições e estoque por ponto de venda.</p></div><a href="#/configuracoes" class="btn btn-light">Configurações</a></header>${window.SpaceContext?.renderBar?.('sales') || ''}<div data-consignment-content></div></section>`;
+    return `<section class="consignment-page"><div data-consignment-space>${window.SpaceContext?.renderBar?.('sales') || ''}</div><div data-consignment-content></div></section>`;
   }
 
   function catalog(origin) {
-    const d = DB.readForView?.() || DB.carregar();
-    const variants = new Map();
+    if (DB.getBusinessId?.() !== origin.businessId || DB.getWorkspaceGeneration?.() !== origin.workspaceGeneration) return [];
+    const data = DB.readForView();
     const visible = row => row.ativo !== false && row.active !== false && !row.deleted && !row.deletedAt &&
-      row.businessId === origin.businessId && (row.workspaceGeneration ?? 0) === origin.workspaceGeneration &&
+      (!row.businessId || row.businessId === origin.businessId) &&
+      (row.workspaceGeneration == null || row.workspaceGeneration === origin.workspaceGeneration) &&
       (!row.spaceId || row.spaceId === origin.spaceId);
-    for (const row of d.variacoesProdutos || []) if (visible(row)) {
-      if (!variants.has(row.parentProductId)) variants.set(row.parentProductId, []);
-      variants.get(row.parentProductId).push(row);
+    const variantsByProduct = new Map();
+    for (const variant of data.variacoesProdutos || []) {
+      if (!visible(variant)) continue;
+      if (!variantsByProduct.has(variant.parentProductId)) variantsByProduct.set(variant.parentProductId, []);
+      variantsByProduct.get(variant.parentProductId).push(variant);
     }
-    const items = [];
-    for (const p of d.produtos || []) {
-      if (!visible(p) || !['all_spaces', 'selected_spaces', 'single_space'].includes(p.spaceAccessMode)
-        || !window.SpaceEngine.productAllowsSpace(p, origin.spaceId) || ['service', 'recurring'].includes(p.productType)
-        || p.itemKind === 'service' || p.semControleEstoque || p.controlaEstoque === false || p.controlarEstoque === false) continue;
-      for (const v of p.productType === 'variable' ? variants.get(p.id) || [] : [null]) {
-        const src = v || p, name = p.nome || p.id, value = {
-          productId: p.id, variantId: v?.id || null, name, variantName: v?.displayName || v?.name || '',
-          imageUrl: src.imageThumbUrl || src.imageUrl || src.photoUrl || src.imagemUrl || src.image?.url || src.imagem || p.imageThumbUrl || p.imageUrl || p.imagem || '',
-          unitCents: Math.round(Number(v ? v.price ?? p.preco : p.preco) * 100),
-          sku: src.sku || src.codigo || src.codigoInterno || '', available: Number(v ? v.stock : p.estoqueAtual ?? p.estoque) - Number(src.onlineReservedStock || 0),
-        };
-        value.search = normalize([name, value.variantName, value.sku, p.sku, src.barcode, p.barcode].filter(Boolean).join(' '));
-        items.push(value);
-      }
-    }
-    return items;
+    const products = window.Repositories?.productRepository?.().list() ?? data.produtos ?? [];
+    return products.filter(product => {
+      if (!visible(product) || !['all_spaces','selected_spaces','single_space'].includes(product.spaceAccessMode) ||
+        product.spaceAccessMode === 'single_space' &&
+          (product.defaultSpaceId !== origin.spaceId || product.allowedSpaceIds?.length !== 1 || product.allowedSpaceIds[0] !== origin.spaceId) ||
+        ['service', 'recurring'].includes(product.productType) ||
+        product.itemKind === 'service' || product.semControleEstoque || product.controlaEstoque === false ||
+        product.controlarEstoque === false || !window.SpaceEngine.productAllowsSpace(product, origin.spaceId)) return false;
+      try {
+        const stockOrigin = window.SpaceContext.stockMovementOrigin(product, origin.spaceId);
+        return stockOrigin.businessId === origin.businessId && stockOrigin.spaceId === origin.spaceId;
+      } catch { return false; }
+    }).map(product => {
+      const variable = product.productType === 'variable';
+      const variants = variable ? variantsByProduct.get(product.id) || [] : [];
+      const items = (variable ? variants : [product]).map(row => ({
+        productId: product.id, variantId: variable ? row.id : null, name: product.nome,
+        variantName: variable ? (window.ProductVariations?.displayName?.(row) || row.displayName || row.name) : '',
+        imageUrl: row.imageThumbUrl || row.imageUrl || row.imagem || product.imageThumbUrl || product.imageUrl || product.imagem,
+        unitCents: Math.round(Number(variable ? row.price ?? product.preco : product.preco) * 100),
+        sku: row.sku || row.codigo || row.codigoInterno || '',
+        available: Math.max(0, Number(variable ? row.stock : product.estoqueAtual ?? product.estoque) - Number(row.onlineReservedStock || 0)),
+        search: normalize([row.name, row.displayName, row.sku, row.codigo, row.codigoInterno, row.barcode,
+          ...(row.alternateBarcodes || []), ...Object.values(row.attributeValues || {})].join(' ')),
+      }));
+      return { product, variable, variants, items, search: normalize([product.nome, product.categoria,
+        product.marca, product.codigo, product.codigoInterno, product.sku, product.barcode,
+        ...(product.alternateBarcodes || []), product.palavrasChave, ...(variants.length ? [] : product.variationSearchTokens || []), ...items.map(row => row.search)].join(' ')) };
+    });
   }
+
+  const historyLink = (title, outlet = '') => `<a class="btn btn-light" href="#/historico?consignados=1${outlet ? '&amp;ponto=' + encodeURIComponent(outlet) : ''}">${icon('history')} ${title}</a>`;
+  let refreshCatalog;
 
   function mount(container) {
     const host = container.querySelector('[data-consignment-content]');
     if (!host) return;
+    refreshCatalog = null;
     const origin = scope();
     const running = () => host.isConnected && owner() && sameScope(origin, scope());
     if (!owner() || !origin.businessId || !origin.spaceId) {
@@ -87,9 +106,12 @@ window.Consignments = (() => {
       return result.data;
     };
     let dashboard, tab = 'home', outletId = '', page = { items: [] }, receipt, draft, products, pending, file, feedback = '', busy = false;
-    let outletSearch = '', historyOutlet = '', currentPayment = null, counting = null, paymentAccounts = [], settlement = false;
+    let outletSearch = '', currentPayment = null, counting = null, paymentAccounts = [], settlement = false;
+    let productSearch = '', category = '', filter = '', variantProductId = '', bag = false, logoFile;
+    let catalogLimit = 48;
+    const deliveryMode = () => tab === 'delivery' && !pending;
+    const wide = matchMedia('(min-width: 768px)');
     const query = new URLSearchParams(location.hash.split('?')[1] || '');
-    const tabs = { home: 'Visão geral', history: 'Histórico' };
     const selectOutlets = selected => '<option value="">Selecione</option>' + dashboard.outlets.map(row =>
       `<option value="${esc(row.id)}" ${selected === row.id ? 'selected' : ''}>${esc(row.name)}</option>`).join('');
     const newDraft = () => ({ outletId: '', deliveredOn: today(), notes: '', items: new Map() });
@@ -105,10 +127,10 @@ window.Consignments = (() => {
         <div class="consignment-actions">${button('Nova entrega', `data-new-delivery="${esc(row.id)}"`, true)}
         ${button('Conferência', `data-count="${esc(row.id)}"`)}</div></article>`).join('') || '<p class="muted">Nenhum estabelecimento encontrado.</p>';
     function home() {
-      const summary = [['Pontos de venda', dashboard.outlets.length], ['Unidades consignadas', dashboard.units],
-        ['Valor em consignação', money(dashboard.stockValueCents || 0)], ['Valor a receber', money(dashboard.pendingCents || 0)]];
-      return `<div class="consignment-stats">${summary.map(([name, value]) => `<section class="panel"><span>${name}</span><strong>${value}</strong></section>`).join('')}</div>
-        <div class="consignment-toolbar"><label>Estabelecimentos <input type="search" data-outlet-search placeholder="Buscar estabelecimento" value="${esc(outletSearch)}"></label>
+      const summary = [['store', 'Pontos de venda', dashboard.outlets.length], ['package-open', 'Unidades consignadas', dashboard.units],
+        ['tags', 'Valor em consignação', money(dashboard.stockValueCents || 0)], ['wallet', 'A receber', money(dashboard.pendingCents || 0)]];
+      return `<div class="consignment-stats">${summary.map(([glyph, name, value]) => `<section class="panel"><span class="consignment-stat-icon">${icon(glyph)}</span><div><small>${name}</small><strong>${value}</strong></div></section>`).join('')}</div>
+        <div class="consignment-toolbar"><label aria-label="Buscar estabelecimento">${icon('search')} <input type="search" data-outlet-search placeholder="Buscar estabelecimento" value="${esc(outletSearch)}"></label>
         ${button('Cadastrar loja', 'data-tab="outlets"', true)}</div><div class="consignment-grid" data-outlets>${outletCards()}</div>`;
     }
 
@@ -123,25 +145,37 @@ window.Consignments = (() => {
     }
 
     function delivery() {
-      if (!dashboard.outlets.length) return `<section class="panel consignment-panel"><p>Cadastre um ponto de venda antes de registrar uma entrega.</p>${button('Cadastrar ponto', 'data-tab="outlets"', true)}</section>`;
-      return `<section class="panel consignment-panel"><h3>Entrega ou reposição</h3><form data-delivery-form>
-        <div class="consignment-fields"><label>Ponto de venda <select name="outletId" required>${selectOutlets(draft.outletId)}</select></label>
-        <label>Data da entrega <input name="deliveredOn" type="date" value="${esc(draft.deliveredOn)}" max="${today()}" required></label></div>
-        <p class="muted">Para entregas retroativas, informe a data real. O estoque disponível é validado no momento do registro.</p>
-        <label>Produto ou variação <input type="search" data-product-search placeholder="Buscar por nome, SKU ou código" autocomplete="off"></label>
-        <div data-matches class="consignment-results"></div><div data-delivery-items></div>
-        <label>Observações <textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label>
-        <p class="muted">O registro transfere as unidades para o ponto de venda. Nenhuma cobrança é feita.</p>
-        <p class="consignment-totals" data-delivery-total></p>
-        <button class="btn btn-primary" type="submit">Registrar entrega</button></form></section>`;
+      const outlet = dashboard.outlets.find(row => row.id === draft.outletId);
+      const space = window.SpaceContext.list?.().find(row => row.id === origin.spaceId);
+      return `<section class="consignment-flow">
+        <header class="consignment-heading">${button(icon('arrow-left'), 'data-delivery-back aria-label="Voltar"')}
+          <div><h2>${bag ? 'Sacola da entrega' : 'Nova entrega'} · ${esc(outlet?.name)}</h2><p>${icon('map-pin')} ${esc(space?.name || 'Espaço ativo')}</p></div>
+        </header>
+        ${bag ? `<section class="panel consignment-panel"><form data-delivery-form>
+          <div data-delivery-items></div>
+          <div class="consignment-fields"><label>Data da entrega <input name="deliveredOn" type="date" value="${esc(draft.deliveredOn)}" max="${today()}" required></label>
+          <label>Observações <textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div>
+          <p class="consignment-totals">Total <strong data-delivery-total></strong></p>
+          <button class="btn btn-primary" type="submit" ${draft.items.size ? '' : 'disabled'}>Confirmar entrega e gerar PDF</button></form></section>` : `
+          <div class="consignment-catalog-tools">
+            <label class="consignment-search" aria-label="Buscar produto">${icon('search')}<input type="search" data-product-search placeholder="Buscar produto, variação ou código" autocomplete="off" value="${esc(productSearch)}"></label>
+            <select data-delivery-category aria-label="Categoria"></select>
+            <select data-delivery-filter aria-label="Filtrar produtos">
+              ${[['', 'Todos'], ['favorite', 'Favoritos'], ['stock', 'Em estoque'], ['low', 'Estoque baixo']].map(([value, title]) =>
+                `<option value="${value}" ${filter === value ? 'selected' : ''}>${title}</option>`).join('')}
+            </select>
+          </div>
+          <div class="mobile-sale-page consignment-catalog"><section data-delivery-grid aria-label="Produtos"></section></div>
+          <div data-delivery-more></div>
+          <button class="btn btn-primary consignment-bag" type="button" data-open-delivery-bag>${icon('shopping-bag')} Sacola <b data-bag-count></b></button>
+          <dialog class="consignment-variants" data-delivery-variants aria-labelledby="consignment-variant-title"></dialog>`}
+      </section>`;
     }
 
     function list(kind) {
-      const inventory = kind !== 'history';
-      const rows = page.items.map(row => inventory
-        ? `<div class="consignment-row"><div class="consignment-product">${photo(row)}<div><b>${itemName(row)}</b><small>${money(row.unitCents)} por unidade</small></div></div><strong>${row.quantity} un.</strong></div>`
-        : `<div class="consignment-row"><div><b>${esc(row.outlet.name)}</b><small>${label(row.kind)} · ${date(row.deliveredOn)} · ${row.units} un. · ${money(row.totalCents)}</small></div>${button('Comprovante', `data-receipt="${esc(row.id)}"`)}</div>`);
-      return `<section class="panel consignment-panel"><h3>${inventory ? 'Estoque no estabelecimento' : 'Histórico de entregas'}</h3>
+      const rows = page.items.map(row =>
+        `<div class="consignment-row"><div class="consignment-product">${photo(row)}<div><b>${itemName(row)}</b><small>${money(row.unitCents)} por unidade</small></div></div><strong>${row.quantity} un.</strong></div>`);
+      return `<section class="panel consignment-panel"><h3>Estoque no estabelecimento</h3>
         ${kind === 'inventory' ? `<label>Ponto de venda <select data-inventory-outlet>${selectOutlets(outletId)}</select></label>` : ''}
         ${rows.join('') || '<p class="muted">Nenhum registro para exibir.</p>'}
         ${page.cursor ? button('Carregar mais', 'data-more') : ''}</section>`;
@@ -214,7 +248,7 @@ window.Consignments = (() => {
         <p>${[row.contact,row.phone,row.address].filter(Boolean).map(esc).join(' · ')}</p><p>Comissão ${row.commissionBps / 100}%</p>
         <div class="consignment-actions">${button('Nova entrega', `data-new-delivery="${esc(row.id)}"`, true)}
         ${button('Conferência', `data-count="${esc(row.id)}"`)}
-        ${button('Histórico do ponto', `data-history-outlet="${esc(row.id)}"`)}</div></section>${list('outlet')}`;
+        ${historyLink('Histórico do ponto', row.id)}</div></section>${list('outlet')}`;
     }
     function receiptView() {
       if (!receipt) return '';
@@ -238,11 +272,13 @@ window.Consignments = (() => {
     function renderItems() {
       const items = host.querySelector('[data-delivery-items]');
       if (!items) return;
+      const submit = items.closest('form').querySelector('[type="submit"]');
+      submit.disabled = !draft.items.size;
       items.innerHTML = [...draft.items.values()].map(row => `<div class="consignment-row"><div class="consignment-product">${photo(row)}<div><b>${itemName(row)}</b>
         <small>${Math.max(0, row.available || 0)} un. disponíveis na última leitura</small></div></div>
         <label>Quantidade <input type="number" min="1" max="100000" required data-quantity="${esc(key(row))}" value="${row.quantity}"></label>
         <label>Preço unitário <input type="number" min="0" max="1000000" step="0.01" required data-price="${esc(key(row))}" value="${row.unitCents / 100}"></label>
-        ${button('Remover', `data-remove="${esc(key(row))}"`)}</div>`).join('');
+        ${button('Remover', `data-remove="${esc(key(row))}"`)}</div>`).join('') || '<p class="muted">A sacola está vazia.</p>';
       deliveryTotal();
     }
     function deliveryTotal() {
@@ -252,23 +288,125 @@ window.Consignments = (() => {
       total.textContent = rows.reduce((sum,row)=>sum+row.quantity,0) + ' un. · ' + money(rows.reduce((sum,row)=>sum+row.quantity*row.unitCents,0));
     }
 
+    function renderCatalog() {
+      const grid = host.querySelector('[data-delivery-grid]');
+      if (!grid) return;
+      const select = host.querySelector('[data-delivery-category]');
+      const categories = [...new Set(products.map(row => row.product.categoria).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'pt-BR'));
+      if (!categories.includes(category)) category = '';
+      select.innerHTML = '<option value="">Categorias</option>' + categories.map(name =>
+        `<option value="${esc(name)}">${esc(name)}</option>`).join('');
+      select.value = category;
+      const search = normalize(productSearch).split(/\s+/).filter(Boolean);
+      const rows = products.filter(row => (!category || row.product.categoria === category) &&
+        (filter !== 'favorite' || favorite(row.product)) &&
+        (filter !== 'stock' || row.items.some(item => item.available > 0)) &&
+        (filter !== 'low' || window.getProductStockStatus?.(row.product) === 'baixo' && row.items.some(item => item.available > 0)) &&
+        search.every(token => row.search.includes(token)));
+      grid.className = wide.matches ? 'desktop-sales-product-grid' : 'pos-grid';
+      grid.innerHTML = rows.slice(0, catalogLimit).map(({product, variants, variable, items}) => {
+        const model = { ...product, favorito: favorite(product) };
+        if (variable && variants.length) {
+          const prices = items.map(item => item.unitCents / 100);
+          model.activeVariationCount = items.length;
+          model.minPrice = Math.min(...prices);
+          model.maxPrice = Math.max(...prices);
+          model.totalStock = items.reduce((sum, item) => sum + item.available, 0);
+          model.hasAvailableStock = model.totalStock > 0;
+        }
+        const renderer = wide.matches ? window.DesktopSales.catalogCard : window.Checkout.catalogCard;
+        return renderer(model, { consignment:true, variants });
+      }).join('') || '<p class="muted">Nenhum produto encontrado neste espaço.</p>';
+      if (!wide.matches) {
+        const ids = new Map(rows.map(row => [row.product.id, row.product]));
+        for (const card of grid.children) {
+          const id = card.dataset.deliveryProduct;
+          if (!id) continue;
+          const active = favorite(ids.get(id));
+          card.insertAdjacentHTML('beforeend', `<button class="mobile-sale-favorite mobile-card-favorite ${active ? 'active' : ''}" type="button"
+            data-delivery-favorite="${esc(id)}" aria-label="${active ? 'Remover dos' : 'Adicionar aos'} favoritos" aria-pressed="${active}">${icon('star')}</button>`);
+        }
+      }
+      host.querySelector('[data-delivery-more]').innerHTML = rows.length > catalogLimit ? button('Mostrar mais produtos', 'data-delivery-more-button') : '';
+      paintBagCount();
+      window.lucide?.createIcons();
+    }
+
+    const favorite = product => window.Produtos?.mobileFavoriteValue?.(product) ?? Boolean(product.favorito);
+    function paintBagCount() {
+      const quantities = new Map();
+      for (const item of draft.items.values()) quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
+      for (const badge of host.querySelectorAll('[data-delivery-qty]')) {
+        const qty = quantities.get(badge.dataset.deliveryQty) || 0;
+        badge.textContent = qty;
+        badge.hidden = !qty;
+      }
+      const count = host.querySelector('[data-bag-count]');
+      if (count) count.textContent = [...quantities.values()].reduce((sum, qty) => sum + qty, 0);
+    }
+
+    function addItem(item, quantity = 1) {
+      const id = key(item), previous = draft.items.get(id);
+      const live = products.find(row => row.product.id === item.productId)?.items.find(row => key(row) === id);
+      const total = (previous?.quantity || 0) + quantity;
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || !live || total > live.available || total > 100000) {
+        setFeedback('Quantidade indisponível na última leitura deste espaço.');
+        return false;
+      }
+      if (!previous && draft.items.size >= 40) { setFeedback('Inclua até 40 produtos por entrega.'); return false; }
+      draft.items.set(id, { ...live, unitCents: previous?.unitCents ?? live.unitCents, quantity: total });
+      setFeedback('');
+      paintBagCount();
+      return true;
+    }
+
+    function showVariants(row) {
+      const picker = host.querySelector('[data-delivery-variants]');
+      if (!picker) return;
+      if (!row) { if (picker.open) picker.close(); return; }
+      picker.innerHTML = `<header><h3 id="consignment-variant-title">${esc(row.product.nome)}</h3>
+        ${button(icon('x'), 'data-close-variants aria-label="Fechar variações"')}</header>
+        ${row.items.map(item => `<div class="consignment-row"><div class="consignment-product">${photo(item)}<div><b>${esc(item.variantName)}</b>
+          <small>${item.sku ? esc(item.sku) + ' · ' : ''}${money(item.unitCents)} · ${item.available} un.</small></div></div>
+          <label>Qtd. <input type="number" inputmode="numeric" min="1" max="${item.available}" value="1" data-variant-quantity></label>
+          ${button(icon('plus'), `data-add-variant="${esc(key(item))}" aria-label="Adicionar ${esc(item.variantName)}" ${item.available > 0 ? '' : 'disabled'}`)}</div>`)
+          .join('') || '<p class="muted">Nenhuma variação disponível neste espaço.</p>'}`;
+      if (!picker.open) picker.showModal();
+      window.lucide?.createIcons();
+    }
+
+    function refreshDeliveryCatalog() {
+      if (!running() || !deliveryMode() || bag) return;
+      products = catalog(origin);
+      renderCatalog();
+      const picker = host.querySelector('[data-delivery-variants][open]');
+      if (picker && !products.some(row => row.product.id === variantProductId)) picker.close();
+    }
+    refreshCatalog = () => {
+      if (!running()) { refreshCatalog = null; return; }
+      refreshDeliveryCatalog();
+    };
+
     function paint() {
       if (!running()) return;
+      container.querySelector('[data-consignment-space]').hidden = deliveryMode();
       const message = `<p class="consignment-status" role="status">${esc(feedback)}</p>`;
       if (pending) {
         host.innerHTML = message + `<section class="panel consignment-panel"><h3>Operação ainda sem confirmação</h3>
           <p>Confira a tentativa original. O mesmo identificador será reutilizado.</p>${button('Conferir e concluir', 'data-resume', true)}</section>`;
-      } else if (!dashboard) {
+      } else if (!dashboard && tab !== 'receipt') {
         host.innerHTML = message + button('Carregar painel', 'data-refresh');
-      } else if (!dashboard.enabled && tab !== 'receipt') {
+      } else if (!dashboard?.enabled && tab !== 'receipt') {
         host.innerHTML = message + `<section class="panel consignment-panel"><h3>Ativar Consignados neste espaço</h3><p>Controle o estoque enviado a pontos de venda parceiros.</p>${button('Ativar módulo', 'data-enable', true)}</section>`;
       } else {
-        const contents = { home, outlets, delivery, outlet: outletView, conference, inventory: () => list('inventory'), history: () => list('history'), receipt: receiptView };
-        host.innerHTML = `<nav class="consignment-tabs" aria-label="Consignados">${Object.entries(tabs).map(([id,title]) => button(title,
-          `data-tab="${id}" ${tab === id ? 'aria-current="page"' : ''}`, tab === id)).join('')}</nav>` + message + contents[tab]() + (query.has('config') && dashboard.enabled
+        const contents = { home, outlets, delivery, outlet: outletView, conference, inventory: () => list('inventory'), receipt: receiptView };
+        const nav = deliveryMode() ? '' : `<nav class="consignment-tabs" aria-label="Consignados">
+          ${tab === 'home' ? historyLink('Histórico') : button('Voltar aos consignados', 'data-tab="home"')}</nav>`;
+        host.innerHTML = nav + message + contents[tab]() + (query.has('config') && dashboard?.enabled && !deliveryMode()
           ? button('Desativar neste espaço', 'data-disable') : '');
       }
       renderItems();
+      if (deliveryMode() && !bag) refreshDeliveryCatalog();
       if (tab === 'conference' && counting) countTotals();
       window.lucide?.createIcons();
     }
@@ -319,8 +457,12 @@ window.Consignments = (() => {
       window.dispatchEvent(new Event('consignment-updated'));
       if (result.item?.kind === 'conference' || result.item?.kind === 'settlement')
         window.dispatchEvent(new CustomEvent('financial-data-changed',{ detail:{entity:'entries',spaceId:origin.spaceId} }));
-      dashboard = await api('dashboard');
       feedback = result.item ? label(result.item.kind) + ' registrada.' : 'Ponto de venda cadastrado.';
+      if (payload.action === 'confirm') await prepareDeliveryPdf();
+      if (result.item) {
+        try { dashboard = await api('dashboard'); }
+        catch { feedback += ' O painel será atualizado ao voltar.'; }
+      } else dashboard = await api('dashboard');
     }
 
     async function resume() {
@@ -334,9 +476,11 @@ window.Consignments = (() => {
           receipt = result.item;
           currentPayment = result.currentPayment ?? receipt.paymentAtRecording;
           file = null;
-          dashboard = await api('dashboard');
           tab = 'receipt';
-          feedback = 'Entrega já registrada. Comprovante recuperado.';
+          feedback = 'Operação já registrada. Comprovante recuperado.';
+          try { dashboard = await api('dashboard'); }
+          catch { feedback += ' O painel será atualizado ao voltar.'; }
+          if (['delivery','replenishment'].includes(receipt.kind)) await prepareDeliveryPdf();
           return;
         }
       }
@@ -346,8 +490,7 @@ window.Consignments = (() => {
     async function loadPage(append = false) {
       if (tab === 'inventory' && !outletId) { page = { items: [] }; return; }
       const action = tab === 'outlet' ? 'inventory' : tab;
-      const target = action === 'history' ? historyOutlet : outletId;
-      const next = await api(action, { outletId: target, cursor: append ? page.cursor : null });
+      const next = await api(action, { outletId, cursor: append ? page.cursor : null });
       page = { ...next, items: append ? [...page.items, ...next.items] : next.items };
     }
 
@@ -355,7 +498,8 @@ window.Consignments = (() => {
       if (busy) return;
       busy = true;
       setFeedback('Carregando…');
-      for (const child of host.querySelectorAll('button')) child.disabled = true;
+      const disabled = [...host.querySelectorAll('button:enabled')];
+      for (const child of disabled) child.disabled = true;
       try {
         feedback = '';
         await task();
@@ -367,11 +511,10 @@ window.Consignments = (() => {
         else setFeedback(feedback);
       } finally {
         busy = false;
-        for (const child of host.querySelectorAll('button')) child.disabled = false;
+        for (const child of disabled) if (child.isConnected) child.disabled = false;
       }
     }
 
-    let logoFile;
     host.addEventListener('input', event => {
       const input = event.target, form = input.form;
       if (input.matches('[data-outlet-search]')) {
@@ -384,22 +527,25 @@ window.Consignments = (() => {
         countTotals();
       }
       if (input.matches('[data-product-search]')) {
-        products ||= catalog(origin);
-        const search = normalize(input.value), matches = search ? products.filter(row => row.search.includes(search)).slice(0,25) : [];
-        host.querySelector('[data-matches]').innerHTML = matches.map(row => button(
-          `${photo(row)}<span>${itemName(row)} · ${Math.max(0, row.available || 0)} un.</span>`, `data-add="${esc(key(row))}"`)).join('') ||
-          (search ? '<p class="muted">Nenhum produto encontrado neste espaço.</p>' : '');
+        productSearch = input.value;
+        catalogLimit = 48;
+        renderCatalog();
       }
       if (input.matches('[data-quantity]')) { draft.items.get(input.dataset.quantity).quantity = +input.value; deliveryTotal(); }
       if (input.matches('[data-price]')) { draft.items.get(input.dataset.price).unitCents = Math.round(+input.value * 100); deliveryTotal(); }
       if (form?.matches('[data-delivery-form]')) {
-        draft.outletId = form.elements.outletId.value;
         draft.deliveredOn = form.elements.deliveredOn.value;
         draft.notes = form.elements.notes.value;
       }
     });
     host.addEventListener('change', event => {
       const input = event.target;
+      if (input.matches('[data-delivery-filter],[data-delivery-category]')) {
+        if (input.matches('[data-delivery-filter]')) filter = input.value;
+        else category = input.value;
+        catalogLimit = 48;
+        renderCatalog();
+      }
       if (input.name === 'paymentMode') input.form.querySelector('[data-payment-fields]').hidden = input.value !== 'paid';
       if (input.matches('[data-inventory-outlet]')) {
         outletId = input.value;
@@ -425,7 +571,8 @@ window.Consignments = (() => {
       }
       if (form.matches('[data-delivery-form]')) {
         if (!draft.items.size) { setFeedback('Inclua pelo menos um produto.'); return; }
-        const { outletId, deliveredOn, notes } = Object.fromEntries(new FormData(form));
+        const { outletId } = draft;
+        const { deliveredOn, notes } = Object.fromEntries(new FormData(form));
         const items = [...draft.items.values()].map(({ productId, variantId, quantity, unitCents }) => ({ productId, variantId, quantity, unitCents }));
         run(() => register({ outletId, deliveredOn, notes, items, action: 'confirm', operationId: crypto.randomUUID() }));
       }
@@ -444,13 +591,39 @@ window.Consignments = (() => {
     });
     host.addEventListener('click', event => {
       const target = event.target.closest('button');
-      if (!target || target.type === 'submit' || busy || !running()) return;
-      const d = target.dataset;
-      if (d.add) {
-        const item = products.find(row => key(row) === d.add), previous = draft.items.get(d.add);
-        if (!previous && draft.items.size >= 40) { setFeedback('Inclua até 40 produtos por entrega.'); return; }
-        draft.items.set(d.add, { ...item, quantity: previous ? Math.min(100000, previous.quantity + 1) : 1 });
-        renderItems();
+      if (busy || !running()) return;
+      const d = target?.dataset || {};
+      if ('deliveryFavorite' in d) {
+        window.Produtos?.toggleMobileFavorite?.(d.deliveryFavorite);
+        return;
+      }
+      const card = event.target.closest('[data-delivery-product]');
+      if (card && !target?.disabled) {
+        const row = products.find(item => item.product.id === card.dataset.deliveryProduct);
+        if (!row) return;
+        if (!row.variable) { addItem(row.items[0]); return; }
+        variantProductId = row.product.id;
+        if (row.items.length) showVariants(row);
+        else run(() => window.ProductVariations?.ensure?.(row.product.id)).then(() => {
+          if (running() && deliveryMode() && !bag) showVariants(products.find(item => item.product.id === variantProductId));
+        });
+        return;
+      }
+      if (!target || target.type === 'submit') return;
+      if ('deliveryMoreButton' in d) { catalogLimit += 48; renderCatalog(); return; }
+      if ('closeVariants' in d) { host.querySelector('[data-delivery-variants]').close(); return; }
+      if (d.addVariant) {
+        const item = products.find(row => row.product.id === variantProductId)?.items.find(row => key(row) === d.addVariant);
+        const quantity = target.closest('.consignment-row').querySelector('[data-variant-quantity]');
+        if (item && quantity.reportValidity() && addItem(item, quantity.valueAsNumber))
+          host.querySelector('[data-delivery-variants]').close();
+        return;
+      }
+      if ('openDeliveryBag' in d) { bag = true; paint(); return; }
+      if ('deliveryBack' in d) {
+        if (bag) bag = false;
+        else tab = 'home';
+        paint();
         return;
       }
       if (d.remove) { draft.items.delete(d.remove); renderItems(); return; }
@@ -466,19 +639,24 @@ window.Consignments = (() => {
         return;
       }
       run(async () => {
-        if ('refresh' in d) dashboard = await api('dashboard');
+        if ('refresh' in d || (d.tab === 'home' && tab === 'receipt')) dashboard = await api('dashboard');
         if ('enable' in d) { await api('enable'); dashboard = await api('dashboard'); }
         if ('disable' in d && window.confirm('Desativar Consignados neste espaço? As entregas e os saldos serão preservados.')) {
           await api('disable'); dashboard = await api('dashboard'); tab = 'home';
         }
         if ('resume' in d) await resume();
-        if (d.tab || d.stock || d.outletView || d.historyOutlet) {
-          tab = d.outletView ? 'outlet' : d.stock ? 'inventory' : d.historyOutlet ? 'history' : d.tab;
+        if (d.tab || d.stock || d.outletView) {
+          tab = d.outletView ? 'outlet' : d.stock ? 'inventory' : d.tab;
           if (d.stock || d.outletView) outletId = d.stock || d.outletView;
-          historyOutlet = d.historyOutlet || '';
-          if (['history', 'outlet', 'inventory'].includes(tab)) { page = { items: [] }; await loadPage(); }
+          if (['outlet', 'inventory'].includes(tab)) { page = { items: [] }; await loadPage(); }
         }
-        if (d.newDelivery) { draft = newDraft(); draft.outletId = d.newDelivery; products = null; tab = 'delivery'; }
+        if (d.newDelivery) {
+          draft = newDraft();
+          draft.outletId = d.newDelivery;
+          logoFile = null;
+          bag = false; productSearch = ''; category = ''; filter = ''; catalogLimit = 48;
+          tab = 'delivery';
+        }
         if (d.count) {
           const snapshot = await api('conferenceStock', { outletId: d.count });
           counting = { ...snapshot, review:false, values:new Map(snapshot.items.map(row => [row.id,{found:'',returns:0,loss:0,damaged:0}])) };
@@ -495,6 +673,15 @@ window.Consignments = (() => {
         }
       });
     });
+    async function prepareDeliveryPdf() {
+      try {
+        const result = await window.ConsignmentPdf.generate(receipt, logoFile, 'delivery');
+        file = result.file;
+        if (result.logoUnavailable) feedback += ' Para incluir a logo, selecione uma imagem e gere o PDF novamente.';
+      } catch {
+        feedback += ' Tente gerar o PDF novamente no comprovante.';
+      }
+    }
     async function openReceipt(id) {
       const result = await api('receipt', { operationId:id });
       receipt = result.item; currentPayment = result.currentPayment; settlement = false;
@@ -505,7 +692,7 @@ window.Consignments = (() => {
       pending = readPending();
       dashboard = await api('dashboard');
       if (!pending && query.get('recibo')) await openReceipt(query.get('recibo'));
-      else if (!pending && dashboard.enabled && query.has('historico')) { tab = 'history'; await loadPage(); }
+      else if (!pending && dashboard.enabled && query.has('historico')) window.Router.ir('historico?consignados=1');
     }, true);
   }
 
@@ -516,17 +703,22 @@ window.Consignments = (() => {
     const { uid, ...context } = scope();
     return owner() && uid && context.businessId && context.spaceId ? context : null;
   }
+  const historyOutletId = () => {
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    return params.has('consignados') ? params.get('ponto') || '' : '';
+  };
   const integrationKey = () => getContext() ? JSON.stringify(scope()) : '';
+  const historyKey = () => integrationKey() && JSON.stringify([scope(), historyOutletId()]);
   async function historyPage({more = false} = {}) {
-    const context = getContext(), current = integrationKey();
+    const context = getContext(), current = historyKey(), outletId = historyOutletId();
     if (!current || navigator.onLine === false) return false;
     if (!activity || activity.key !== current) activity = { key:current, rows:[], cursor:null, ready:false, busy:false };
     const view = activity;
     if (view.busy || (!more && view.ready) || more && !view.cursor) return false;
     view.busy = true;
     try {
-      const result = (await window.FirebaseCallable('manageConsignment', { ...context, action:'history', cursor:more ? view.cursor : null })).data;
-      if (activity !== view || integrationKey() !== current) return false;
+      const result = (await window.FirebaseCallable('manageConsignment', { ...context, action:'history', outletId, cursor:more ? view.cursor : null })).data;
+      if (activity !== view || historyKey() !== current) return false;
       const existing = new Map(view.rows.map(row => [row.id,row]));
       for (const row of result.items) existing.set(row.id,row);
       Object.assign(view,{rows:[...existing.values()],ready:true,cursor:result.cursor});
@@ -537,7 +729,7 @@ window.Consignments = (() => {
     } finally { view.busy = false; }
   }
   function historyEvents() {
-    if (!activity || activity.key !== integrationKey()) return [];
+    if (!activity || activity.key !== historyKey()) return [];
     return activity.rows.map(row => ({
       id:'consignment:' + row.id, operationId:row.id, resourceId:row.id, resource:'consignments',
       type:historyTypes[row.kind], title:label(row.kind) + ' · ' + row.outlet.name,
@@ -567,6 +759,13 @@ window.Consignments = (() => {
     });
   }
   for (const event of ['firebase-session-cleared','consignment-updated','online']) window.addEventListener(event, () => { activity = null; daily = null; });
+  window.addEventListener('hashchange', () => { if (window.Router?.atual?.() !== 'consignados') refreshCatalog = null; });
+  window.addEventListener('cloud-data-updated', event => {
+    const collection = event.detail?.collection;
+    if (!collection || ['products','productVariants'].includes(collection)) refreshCatalog?.();
+  });
+  window.addEventListener('mobile-product-favorites-updated', () => refreshCatalog?.());
+  matchMedia('(min-width: 768px)').addEventListener('change', () => refreshCatalog?.());
   return { entry, shell, mount, owner, openRecord, mountHome, historyPage, historyEvents,
-    hasMoreHistory: () => activity?.key === integrationKey() && Boolean(activity.cursor) };
+    hasMoreHistory: () => activity?.key === historyKey() && Boolean(activity.cursor) };
 })();

@@ -98,10 +98,13 @@
     };
   }
 
-  function productCard(product) {
-    const meta = productMeta(product),
+  function productCard(product, options = {}) {
+    const addAttribute = options.consignment ? "data-delivery-product" : "data-add",
+      qtyAttribute = options.consignment ? "data-delivery-qty" : "data-pos-qty",
+      favoriteAttribute = options.consignment ? "data-delivery-favorite" : "data-fav",
+      meta = productMeta(product),
       brand = product.marca || product.brand || "",
-      variants = window.ProductVariations?.list?.(product.id) || [],
+      variants = options.variants ?? (window.ProductVariations?.list?.(product.id) || []),
       search = normalize(
         [
           product.nome,
@@ -118,8 +121,8 @@
           ]),
         ].join(" "),
       );
-    return `<article class="desktop-sale-product pos-product stock-${esc(meta.className)}" data-add="${esc(product.id)}" data-search="${esc(search)}" data-category="${esc(normalize(product.categoria))}" data-brand="${esc(normalize(brand))}" data-price="${number(product.preco || product.minPrice)}" data-stock="${stockValue(product)}" title="${esc(product.nome)}">
-      <button class="desktop-sale-product-main" type="button" data-add="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}">
+    return `<article class="desktop-sale-product pos-product stock-${esc(meta.className)}" ${addAttribute}="${esc(product.id)}" data-search="${esc(search)}" data-category="${esc(normalize(product.categoria))}" data-brand="${esc(normalize(brand))}" data-price="${number(product.preco || product.minPrice)}" data-stock="${stockValue(product)}" title="${esc(product.nome)}">
+      <button class="desktop-sale-product-main" type="button" ${addAttribute}="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}">
         ${productImage(product, "desktop-sale-product-image")}
         <span class="desktop-sale-product-copy">
           <strong>${esc(product.nome)}</strong>
@@ -128,10 +131,10 @@
           <em class="${esc(meta.className)}">${icon(meta.icon)} ${esc(meta.text)}</em>
         </span>
       </button>
-      <button class="desktop-sale-favorite-toggle ${product.favorito ? "active" : ""}" type="button" data-fav="${esc(product.id)}" aria-label="${product.favorito ? "Remover dos" : "Adicionar aos"} favoritos" aria-pressed="${product.favorito ? "true" : "false"}">${icon("star")}</button>
-      <button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button>
-      <button class="desktop-sale-add" type="button" data-add="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}" ${meta.disabled ? "disabled" : ""}>${icon(meta.disabled ? "ban" : "plus")}</button>
-      <span class="desktop-sale-product-qty" data-pos-qty="${esc(product.id)}" hidden>0</span>
+      <button class="desktop-sale-favorite-toggle ${product.favorito ? "active" : ""}" type="button" ${favoriteAttribute}="${esc(product.id)}" aria-label="${product.favorito ? "Remover dos" : "Adicionar aos"} favoritos" aria-pressed="${product.favorito ? "true" : "false"}">${icon("star")}</button>
+      ${options.consignment ? "" : `<button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${esc(product.nome)}">${icon("ellipsis-vertical")}</button>`}
+      <button class="desktop-sale-add" type="button" ${addAttribute}="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}" ${meta.disabled ? "disabled" : ""}>${icon(meta.disabled ? "ban" : "plus")}</button>
+      <span class="desktop-sale-product-qty" ${qtyAttribute}="${esc(product.id)}" hidden>0</span>
     </article>`;
   }
 
@@ -144,7 +147,7 @@
 
   function productsHTML(products) {
     return products.length
-      ? products.map(productCard).join("")
+      ? products.map(product => productCard(product)).join("")
       : `<div class="desktop-sale-empty">${icon("package-open")}<b>Nenhum produto cadastrado</b><small>Cadastre um produto para começar a vender.</small></div>`;
   }
 
@@ -409,6 +412,7 @@
   }
 
   window.DesktopSales = {
+    catalogCard: productCard,
     isDesktop: () => desktopMedia.matches,
     render,
     bind,

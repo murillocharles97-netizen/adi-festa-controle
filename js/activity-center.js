@@ -26,6 +26,9 @@
       types: [],
     },
   };
+  const consignmentView = () => window.Consignments?.owner() &&
+    new URLSearchParams(location.hash.split('?')[1] || '').has('consignados');
+  let consignmentHistoryHash = '';
   let cloudEvents = [],
     cloudHasMore = false,
     cloudLoading = false,
@@ -682,7 +685,8 @@
     );
   }
   function filtered() {
-    const list = events().filter(matches);
+    const focused = consignmentView();
+    const list = events().filter(item => (!focused || item.type.startsWith('consignment_')) && matches(item));
     return state.sort === "antigos" ? list.reverse() : list;
   }
   function dayLabel(value) {
@@ -736,10 +740,18 @@
       0,
     );
   function render() {
+    const hash = consignmentView() ? location.hash : '';
+    if (hash !== consignmentHistoryHash) {
+      consignmentHistoryHash = hash;
+      state.page = 1;
+      state.quick = 'todos';
+      state.query = '';
+      state.filters = { start:"", end:"", min:"", max:"", status:"todos", types:[] };
+    }
     const list = filtered(),
       shown = list.slice(0, state.page * PAGE_SIZE),
       count = activeFilterCount();
-    return `<section class="activity-page" data-activity-root><header class="activity-heading"><h1>Histórico</h1>${window.OperationalReadPolicy?.restricted?.()?'<button class="btn btn-light" type="button" data-operational-case-open>Atendimento de venda</button>':''}<p>Acompanhe vendas, ajustes e ações do sistema.</p></header><div class="activity-search-row"><label>${icon("search")}<input id="activity-search" value="${esc(state.query)}" placeholder="Buscar ação, cliente, produto..." autocomplete="off">${state.query ? `<button type="button" data-history-clear aria-label="Limpar busca">${icon("x")}</button>` : ""}</label><button type="button" data-history-filters>${icon("sliders-horizontal")}<span>Filtrar</span>${count ? `<b>${count}</b>` : ""}</button></div><div class="activity-chips">${[
+    return `<section class="activity-page" data-activity-root><header class="activity-heading"><h1>Histórico</h1>${window.OperationalReadPolicy?.restricted?.()?'<button class="btn btn-light" type="button" data-operational-case-open>Atendimento de venda</button>':''}<p>${consignmentView() ? 'Consignados · <a href="#/historico">Ver todo o histórico</a>' : 'Acompanhe vendas, ajustes e ações do sistema.'}</p></header><div class="activity-search-row"><label>${icon("search")}<input id="activity-search" value="${esc(state.query)}" placeholder="Buscar ação, cliente, produto..." autocomplete="off">${state.query ? `<button type="button" data-history-clear aria-label="Limpar busca">${icon("x")}</button>` : ""}</label><button type="button" data-history-filters>${icon("sliders-horizontal")}<span>Filtrar</span>${count ? `<b>${count}</b>` : ""}</button></div><div class="activity-chips">${[
       ["todos", "Todos"],
       ["sale", "Vendas"],
       ["payment", "Pagamentos"],
@@ -751,13 +763,14 @@
       ...(window.Consignments?.owner() ? [["consignment_delivery","Consignação"],["consignment_replenishment","Reposição"],
         ["consignment_conference","Conferência"],["consignment_settlement","Acerto"]] : []),
     ]
+      .filter(([key]) => !consignmentView() || key === 'todos' || key.startsWith('consignment_'))
       .map(
         ([key, label]) =>
           `<button type="button" class="${state.quick === key ? "active" : ""}" data-history-quick="${key}">${label}</button>`,
       )
       .join(
         "",
-      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || cloudHasMore || window.Consignments?.hasMoreHistory() ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
+      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || (!consignmentView() && cloudHasMore) || window.Consignments?.hasMoreHistory() ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
   }
   function closeCloudSubscription() {
     clearSaleStatuses();
@@ -827,7 +840,7 @@
     const root = $("#modal"),
       f = state.filters;
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-filter-modal" role="dialog" aria-modal="true"><header class="modal-head"><div><h3>Filtros avançados</h3><small>Combine período, tipo, status e valor.</small></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><form id="activity-filter-form"><div class="modal-body"><fieldset><legend>Período</legend><div class="activity-filter-grid"><label>De<input type="date" name="start" value="${esc(f.start)}"></label><label>Até<input type="date" name="end" value="${esc(f.end)}"></label></div></fieldset><fieldset><legend>Tipos de atividade</legend><div class="activity-check-grid">${Object.entries(
-      Object.fromEntries(Object.entries(TYPE_META).filter(([kind]) => !kind.startsWith('consignment_') || window.Consignments?.owner())),
+      Object.fromEntries(Object.entries(TYPE_META).filter(([kind]) => consignmentView() ? kind.startsWith('consignment_') : !kind.startsWith('consignment_') || window.Consignments?.owner())),
     )
       .filter(([key]) => key !== "system")
       .map(
