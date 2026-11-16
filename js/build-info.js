@@ -11,11 +11,21 @@
     shortCommit = validCommit ? rawCommit.slice(0, 7) : "local",
     builtAt = validTime ? rawTime : new Date(document.lastModified).toISOString();
 
+  // Fase 2 — three distinct versions:
+  // - appVersion: the real release shown to people and support ("231.1").
+  // - release: its integer major, sent as clientRelease (the server contract gates
+  //   on >=202 / >=227). It must equal the major of appVersion (enforced by test).
+  // - syncProtocolVersion / operation format: owned by sync.js (protocol 1,
+  //   payloadVersion 4, schemaVersion 3) and never changed retroactively.
+  // Bump APP_VERSION (and the service-worker CACHE/GET_VERSION) in every release;
+  // tests/sync-version-identity.test.js fails when they disagree.
+  const APP_VERSION = "231.1";
   window.AdiFestaBuild = Object.freeze({
     commit,
     shortCommit,
     builtAt,
-    release: "229",
+    appVersion: APP_VERSION,
+    release: "231", // = APP_VERSION major; literal kept for existing release checks
     installmentCreationPaused: false,
     hotfix: "ui-regression-v1",
     billingCheckoutPaused: false,

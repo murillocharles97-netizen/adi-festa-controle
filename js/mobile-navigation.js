@@ -277,7 +277,7 @@
     syncActiveGroup(route);
     updateBusiness();
     updateOrders();
-    const version = window.AdiFestaBuild?.release || "1.0.0";
+    const version = window.AdiFestaBuild?.appVersion || window.AdiFestaBuild?.release || "1.0.0";
     document.querySelectorAll("[data-mobile-app-version]").forEach((item) => (item.textContent = `v${version}`));
     updateSync();
   }
