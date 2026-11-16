@@ -160,10 +160,10 @@ async function previewServer(f, port = 0) {
   const http = require('node:http'), fs = require('node:fs/promises');
   const products = (await f.products.get()).docs.map(row => ({ id: row.id, ...row.data() }));
   const variants = (await f.variants.get()).docs.map(row => ({ id: row.id, ...row.data() }));
-  const context = { businessId: f.businessId, business: { ownerId: f.uid }, userProfile: { uid: f.uid }, role:'owner' };
+  const context = { businessId: f.businessId, business: { ownerId: f.uid, name: 'Ateliê Exemplo' }, userProfile: { uid: f.uid }, role:'owner' };
   const markup = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>VECONI Consignados · QA</title><link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/design-system/tokens.css">
-    <link rel="stylesheet" href="css/desktop-sales.css"><link rel="stylesheet" href="css/checkout-mobile.css"><link rel="stylesheet" href="css/consignments.css"><script src="assets/lucide.min.js"></script>
+    <link rel="stylesheet" href="css/desktop-sales.css"><link rel="stylesheet" href="css/checkout-mobile.css"><link rel="stylesheet" href="css/sale-completion.css"><link rel="stylesheet" href="css/consignments.css"><script src="assets/lucide.min.js"></script>
     <style>body{display:block;padding:12px;background:#f0f5f8}main{max-width:1050px;margin:auto}</style>
     <main id="app"></main><nav class="bottom-nav">Navegação</nav>
     <script src="js/utils.js"></script><script src="js/checkout.js"></script><script src="js/desktop-sales.js"></script>
@@ -211,7 +211,7 @@ async function previewServer(f, port = 0) {
       render();
     </script></html>`;
   const staticFiles = new Set(['/css/style.css','/css/design-system/tokens.css','/css/consignments.css','/assets/lucide.min.js',
-    '/css/desktop-sales.css','/css/checkout-mobile.css','/js/utils.js','/js/checkout.js','/js/desktop-sales.js','/js/activity-center.js',
+    '/css/desktop-sales.css','/css/checkout-mobile.css','/css/sale-completion.css','/js/utils.js','/js/checkout.js','/js/desktop-sales.js','/js/activity-center.js',
     '/js/consignment-pdf.js','/js/consignment-ui.js' ,'/assets/jspdf-4.2.1.umd.min.js']);
   const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/qa-consignments') {
@@ -257,7 +257,8 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   await page.waitForSelector('[data-tab="outlets"]');
   await page.click('[data-tab="outlets"]');
   await page.waitForSelector('[data-outlet-form]');
-  await page.type('[name="name"]','Parceiro Demonstrativo');
+  await page.type('[name="name"]','Loja Horizonte');
+  await page.type('[name="contact"]','Padrasto Davi');
   await page.$eval('[name="commission"]', input => { input.value = '20'; });
   await page.click('[data-outlet-form] button[type=submit]');
   try { await page.waitForFunction(() => document.body.innerText.includes('Ponto de venda cadastrado'),{timeout:5500}); }
@@ -309,7 +310,18 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   assert.equal(await page.$eval('[data-bag-count]',el=>el.textContent),'2');
   await page.click('[data-open-delivery-bag]');
   assert.equal(await page.$eval('[name="notes"]',input=>input.value),'Conferência QA');
+  assert.equal(await page.$eval('[data-delivery-units]',el=>el.textContent),'2');
+  await page.setViewport({width:320,height:800,isMobile:true,hasTouch:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+  await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});
+  await page.click('[data-delivery-back]');
+  await page.$eval('[data-product-search]',el=> { el.value = ''; el.dispatchEvent(new Event('input',{bubbles:true})); });
+  await page.click('[data-delivery-product="anel"] .pos-product-hit');
+  await page.click('[data-open-delivery-bag]');
+  assert.equal(await page.$eval('[data-delivery-units]',el=>el.textContent),'3');
   if (output) await page.screenshot({path:require('node:path').join(output,'consignados-sacola-mobile.png'),fullPage:true});
+  await page.click('[data-remove="anel"]');
+  assert.equal(await page.$eval('[data-delivery-units]',el=>el.textContent),'2');
   await page.evaluate(() => { window.qaLostReply = true; });
   await page.click('[data-delivery-form] button[type=submit]');
   await page.waitForSelector('[data-resume]');
@@ -318,6 +330,10 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   await page.click('[data-resume]');
   await page.waitForSelector('[data-download]');
   assert.deepEqual(browserErrors, []);
+  assert.equal(await page.$eval('[data-delivery-confirmation] h3',el=>el.textContent),'Entrega registrada');
+  assert.equal(await page.$eval('[data-delivery-confirmation] details',el=>el.open),false);
+  assert.match(await page.$eval('.consignment-summary',el=>el.textContent),/46,50/);
+  if (output) await page.screenshot({path:require('node:path').join(output,'consignados-confirmacao.png'),fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   const pdf = await page.evaluate(async () => {
     window.ConsignmentPdf.download = file => { window.qaPdf = file; };
@@ -338,6 +354,12 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
     return window.qaShare;
   });
   assert.equal(shared,'application/pdf');
+  await page.click('[data-prepare-pdf="stock"]');
+  await page.waitForFunction(() => document.querySelector('.consignment-confirmation-actions > p')?.textContent.includes('Estoque atualizado'));
+  await page.click('[data-download]');
+  assert.match(await page.evaluate(() => window.qaPdf.name), /^consignado-stock-/);
+  await page.click('[data-delivery-confirmation] [data-tab="home"]');
+  await page.waitForSelector('[data-new-delivery]');
   assert.equal((await f.call('dashboard')).deliveries,1);
   const desktop = await browser.newPage();
   await desktop.setViewport({width:1366,height:900});

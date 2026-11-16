@@ -130,7 +130,7 @@ window.Consignments = (() => {
       const summary = [['store', 'Pontos de venda', dashboard.outlets.length], ['package-open', 'Unidades consignadas', dashboard.units],
         ['tags', 'Valor em consignação', money(dashboard.stockValueCents || 0)], ['wallet', 'A receber', money(dashboard.pendingCents || 0)]];
       return `<div class="consignment-stats">${summary.map(([glyph, name, value]) => `<section class="panel"><span class="consignment-stat-icon">${icon(glyph)}</span><div><small>${name}</small><strong>${value}</strong></div></section>`).join('')}</div>
-        <div class="consignment-toolbar"><label aria-label="Buscar estabelecimento">${icon('search')} <input type="search" data-outlet-search placeholder="Buscar estabelecimento" value="${esc(outletSearch)}"></label>
+        <div class="consignment-toolbar"><label aria-label="Buscar estabelecimento">${icon('search')} <input type="search" data-outlet-search placeholder="Buscar loja" value="${esc(outletSearch)}"></label>
         ${button('Cadastrar loja', 'data-tab="outlets"', true)}</div><div class="consignment-grid" data-outlets>${outletCards()}</div>`;
     }
 
@@ -151,12 +151,15 @@ window.Consignments = (() => {
         <header class="consignment-heading">${button(icon('arrow-left'), 'data-delivery-back aria-label="Voltar"')}
           <div><h2>${bag ? 'Sacola da entrega' : 'Nova entrega'} · ${esc(outlet?.name)}</h2><p>${icon('map-pin')} ${esc(space?.name || 'Espaço ativo')}</p></div>
         </header>
-        ${bag ? `<section class="panel consignment-panel"><form data-delivery-form>
+        ${bag ? `<section class="panel consignment-panel consignment-bag-panel"><form data-delivery-form>
           <div data-delivery-items></div>
-          <div class="consignment-fields"><label>Data da entrega <input name="deliveredOn" type="date" value="${esc(draft.deliveredOn)}" max="${today()}" required></label>
-          <label>Observações <textarea name="notes" maxlength="500">${esc(draft.notes)}</textarea></label></div>
-          <p class="consignment-totals">Total <strong data-delivery-total></strong></p>
-          <button class="btn btn-primary" type="submit" ${draft.items.size ? '' : 'disabled'}>Confirmar entrega e gerar PDF</button></form></section>` : `
+          <div class="consignment-fields consignment-delivery-fields"><label>Data da entrega <input name="deliveredOn" type="date" value="${esc(draft.deliveredOn)}" max="${today()}" required></label>
+          <label>Observações <textarea name="notes" maxlength="500" rows="2">${esc(draft.notes)}</textarea></label></div>
+          <div class="consignment-summary" aria-live="polite">
+            <div><span>Total de peças</span><strong data-delivery-units></strong></div>
+            <div><span>Valor total</span><strong data-delivery-total></strong></div>
+          </div>
+          <button class="btn btn-primary" type="submit" ${draft.items.size ? '' : 'disabled'}>${icon('check')} Confirmar entrega e gerar PDF</button></form></section>` : `
           <div class="consignment-catalog-tools">
             <label class="consignment-search" aria-label="Buscar produto">${icon('search')}<input type="search" data-product-search placeholder="Buscar produto, variação ou código" autocomplete="off" value="${esc(productSearch)}"></label>
             <select data-delivery-category aria-label="Categoria"></select>
@@ -250,7 +253,39 @@ window.Consignments = (() => {
         ${button('Conferência', `data-count="${esc(row.id)}"`)}
         ${historyLink('Histórico do ponto', row.id)}</div></section>${list('outlet')}`;
     }
+    const deliveryReceipt = () => ['delivery', 'replenishment'].includes(receipt?.kind);
+
+    function deliveryReceiptView() {
+      const hasStock = Array.isArray(receipt.stockAfter);
+      const readyDocument = file ? (file.name.startsWith('consignado-stock-') ? 'Estoque atualizado' : 'Comprovante da entrega') : '';
+      return `<section class="panel consignment-panel consignment-confirmation" data-delivery-confirmation>
+        <header class="sale-completion-head">
+          <span class="sale-success-icon">${icon('check')}</span>
+          <div><h3>${receipt.kind === 'replenishment' ? 'Reposição registrada' : 'Entrega registrada'}</h3><p>${esc(receipt.outlet.name)} · ${date(receipt.deliveredOn)}</p></div>
+        </header>
+        <div class="consignment-summary">
+          <div><span>Peças entregues</span><strong>${receipt.units}</strong></div>
+          <div><span>Valor consignado</span><strong>${money(receipt.totalCents)}</strong></div>
+        </div>
+        <div class="consignment-confirmation-actions">
+          ${hasStock ? button(icon('package-check') + ' Gerar PDF do estoque atualizado', 'data-prepare-pdf="stock"', true) : ''}
+          ${readyDocument ? `<p class="muted">PDF pronto · ${readyDocument}</p>` : ''}
+          ${file ? `<div class="consignment-pdf-actions">${button(icon('download') + ' Baixar PDF', 'data-download')}${button(icon('share-2') + ' Compartilhar PDF', 'data-share')}</div>`
+            : button(icon('file-text') + ' Gerar PDF da entrega', 'data-prepare-pdf="delivery"', !hasStock)}
+          ${button(icon('arrow-left') + ' Voltar aos consignados', 'data-tab="home"')}
+        </div>
+        <details><summary>Itens da entrega</summary>
+          ${(receipt.items || []).map(row => `<div class="consignment-row"><div><b>${itemName(row)}</b><small>${row.quantity} un. · saldo no ponto ${row.outletBefore} → ${row.outletAfter}</small></div><strong>${money(row.totalCents)}</strong></div>`).join('')}
+        </details>
+        <details><summary>Opções do comprovante</summary>
+          <label>Logo para o PDF (opcional) <input type="file" data-pdf-logo accept="image/png,image/jpeg,image/webp"></label>
+          ${button('Gerar PDF da entrega', 'data-prepare-pdf="delivery"')}
+        </details>
+      </section>`;
+    }
+
     function receiptView() {
+      if (deliveryReceipt()) return deliveryReceiptView();
       if (!receipt) return '';
       const count = receipt.kind === 'conference', paid = receipt.kind === 'settlement', hasStock = Array.isArray(receipt.stockAfter);
       return `<section class="panel consignment-panel"><h3>${label(receipt.kind)} · ${esc(receipt.outlet.name)}</h3><p>${date(receipt.deliveredOn)}</p>
@@ -274,18 +309,21 @@ window.Consignments = (() => {
       if (!items) return;
       const submit = items.closest('form').querySelector('[type="submit"]');
       submit.disabled = !draft.items.size;
-      items.innerHTML = [...draft.items.values()].map(row => `<div class="consignment-row"><div class="consignment-product">${photo(row)}<div><b>${itemName(row)}</b>
-        <small>${Math.max(0, row.available || 0)} un. disponíveis na última leitura</small></div></div>
-        <label>Quantidade <input type="number" min="1" max="100000" required data-quantity="${esc(key(row))}" value="${row.quantity}"></label>
-        <label>Preço unitário <input type="number" min="0" max="1000000" step="0.01" required data-price="${esc(key(row))}" value="${row.unitCents / 100}"></label>
-        ${button('Remover', `data-remove="${esc(key(row))}"`)}</div>`).join('') || '<p class="muted">A sacola está vazia.</p>';
+      items.innerHTML = [...draft.items.values()].map(row => `<article class="consignment-bag-item">
+        <div class="consignment-product">${photo(row)}<div><b>${itemName(row)}</b>
+          <small>${Math.max(0, row.available || 0)} un. disponíveis na última leitura</small></div></div>
+        <label>Qtd. <input type="number" inputmode="numeric" min="1" max="100000" required data-quantity="${esc(key(row))}" value="${row.quantity}"></label>
+        <label>Preço unitário <input type="number" inputmode="decimal" min="0" max="1000000" step="0.01" required data-price="${esc(key(row))}" value="${row.unitCents / 100}"></label>
+        ${button(icon('trash-2'), `data-remove="${esc(key(row))}" aria-label="Remover ${esc(row.variantName ? row.name + ' ' + row.variantName : row.name)}"`)}</article>`)
+        .join('') || '<p class="muted">A sacola está vazia.</p>';
       deliveryTotal();
     }
     function deliveryTotal() {
       const total = host.querySelector('[data-delivery-total]');
       if (!total) return;
       const rows = [...draft.items.values()];
-      total.textContent = rows.reduce((sum,row)=>sum+row.quantity,0) + ' un. · ' + money(rows.reduce((sum,row)=>sum+row.quantity*row.unitCents,0));
+      host.querySelector('[data-delivery-units]').textContent = rows.reduce((sum, row) => sum + row.quantity, 0);
+      total.textContent = money(rows.reduce((sum, row) => sum + row.quantity * row.unitCents, 0));
     }
 
     function renderCatalog() {
@@ -400,9 +438,10 @@ window.Consignments = (() => {
         host.innerHTML = message + `<section class="panel consignment-panel"><h3>Ativar Consignados neste espaço</h3><p>Controle o estoque enviado a pontos de venda parceiros.</p>${button('Ativar módulo', 'data-enable', true)}</section>`;
       } else {
         const contents = { home, outlets, delivery, outlet: outletView, conference, inventory: () => list('inventory'), receipt: receiptView };
-        const nav = deliveryMode() ? '' : `<nav class="consignment-tabs" aria-label="Consignados">
+        const completedDelivery = tab === 'receipt' && deliveryReceipt();
+        const nav = deliveryMode() || completedDelivery ? '' : `<nav class="consignment-tabs" aria-label="Consignados">
           ${tab === 'home' ? historyLink('Histórico') : button('Voltar aos consignados', 'data-tab="home"')}</nav>`;
-        host.innerHTML = nav + message + contents[tab]() + (query.has('config') && dashboard?.enabled && !deliveryMode()
+        host.innerHTML = nav + (completedDelivery ? '' : message) + contents[tab]() + (query.has('config') && dashboard?.enabled && !deliveryMode()
           ? button('Desativar neste espaço', 'data-disable') : '');
       }
       renderItems();
@@ -457,7 +496,8 @@ window.Consignments = (() => {
       window.dispatchEvent(new Event('consignment-updated'));
       if (result.item?.kind === 'conference' || result.item?.kind === 'settlement')
         window.dispatchEvent(new CustomEvent('financial-data-changed',{ detail:{entity:'entries',spaceId:origin.spaceId} }));
-      feedback = result.item ? label(result.item.kind) + ' registrada.' : 'Ponto de venda cadastrado.';
+      feedback = payload.action === 'confirm' ? '' :
+        result.item ? label(result.item.kind) + ' registrada.' : 'Ponto de venda cadastrado.';
       if (payload.action === 'confirm') await prepareDeliveryPdf();
       if (result.item) {
         try { dashboard = await api('dashboard'); }
@@ -558,6 +598,7 @@ window.Consignments = (() => {
         if (selected && selected.size > 4_000_000) { input.value = ''; setFeedback('Escolha uma imagem de até 4 MB.'); return; }
         logoFile = selected;
         file = null;
+        host.querySelector('.consignment-confirmation-actions > p.muted')?.remove();
         host.querySelector('[data-download]')?.remove();
         host.querySelector('[data-share]')?.remove();
       }
@@ -626,7 +667,7 @@ window.Consignments = (() => {
         paint();
         return;
       }
-      if (d.remove) { draft.items.delete(d.remove); renderItems(); return; }
+      if (d.remove) { draft.items.delete(d.remove); renderItems(); window.lucide?.createIcons(); return; }
       if ('download' in d && file) { window.ConsignmentPdf.download(file); return; }
       if ('share' in d && file) {
         if (!navigator.share || !navigator.canShare?.({ files: [file] })) {
@@ -667,19 +708,20 @@ window.Consignments = (() => {
         if ('more' in d) await loadPage(true);
         if (d.receipt) await openReceipt(d.receipt);
         if ('preparePdf' in d) {
-          const result = await window.ConsignmentPdf.generate(receipt, logoFile, d.preparePdf);
+          const result = await window.ConsignmentPdf.generate(receipt, logoFile, d.preparePdf, BusinessContext.get().business?.name);
           file = result.file;
-          feedback = result.logoUnavailable ? 'PDF pronto. A logo não pôde ser carregada. Selecione uma imagem para incluir.' : 'PDF pronto para baixar ou compartilhar.';
+          feedback = result.logoUnavailable ? 'A logo não pôde ser carregada. Selecione uma imagem para incluir.' :
+            deliveryReceipt() ? '' : 'PDF pronto para baixar ou compartilhar.';
         }
       });
     });
     async function prepareDeliveryPdf() {
       try {
-        const result = await window.ConsignmentPdf.generate(receipt, logoFile, 'delivery');
+        const result = await window.ConsignmentPdf.generate(receipt, logoFile, 'delivery', BusinessContext.get().business?.name);
         file = result.file;
-        if (result.logoUnavailable) feedback += ' Para incluir a logo, selecione uma imagem e gere o PDF novamente.';
+        if (result.logoUnavailable) feedback = [feedback, 'Para incluir a logo, selecione uma imagem e gere o PDF novamente.'].filter(Boolean).join(' ');
       } catch {
-        feedback += ' Tente gerar o PDF novamente no comprovante.';
+        feedback = [feedback, 'Tente gerar o PDF novamente no comprovante.'].filter(Boolean).join(' ');
       }
     }
     async function openReceipt(id) {
