@@ -1,6 +1,7 @@
 # D3: servidor inacessível vira "erro" em vez de "aguardando conexão"
 
-- **Status:** defeito real, reproduzido na homologação local. **Ainda não corrigido**, por regra (documentar antes de corrigir).
+- **Status:** defeito real, reproduzido na homologação local; documentado antes da correção.
+- **Corrigido na rodada 6:** commit `0ec5e63` em `claude/sync-stability`, também no candidato. Veja a seção "Correção aplicada".
 - **Base:** existe na V231.1 (`557e365`). Não foi introduzido pela Fase 1 nem pela Fase 2.
 
 ## Reprodução (Emulator, dados fictícios)
@@ -35,6 +36,25 @@ Uma venda feita com internet instável aparece como erro e fica parada até algu
   - Emulator com o portão de rede desligado e religado: a venda é enviada automaticamente uma única vez.
   - Uma exceção real do servidor não entra em loop.
   - Recusas tipadas continuam permanentes.
+
+## Correção aplicada (rodada 6)
+- **Resultado desconhecido:** `internal`/`unknown`/`cancelled` **sem** `details.reason` não é recusa definitiva nem é presumido como conexão.
+  - O pacote fica pendente, com o mesmo `operationId` e o mesmo conteúdo.
+  - Antes de qualquer reenvio, o recibo é consultado.
+  - Recebimentos continuam exigindo prova positiva.
+- **Servidor inacessível no recibo:** nada foi enviado. A espera cresce de 15 s até 5 min, não gasta o limite de 6 envios e interrompe a passagem.
+- **Retomada antecipada:** o evento `online` e a reabertura do app retomam na hora. A sincronização automática continua tentando, no máximo a cada 5 min, enquanto houver fila.
+- **Pacotes antigos:** os que ficaram em erro pelo D3 voltam para o caminho do recibo. Nunca são reenviados direto.
+- **O que continua definitivo:**
+  - recusas de negócio, de estoque e de segurança, e qualquer resposta tipada;
+  - uma exceção real e repetida do servidor termina em revisão após 6 envios.
+- **Testes:**
+  - `tests/sync-d3-recovery.test.cjs`: 17 cenários sobre o código real da fila;
+  - `scripts/sync-stability-mutations.cjs`: 9 mutações do D3, todas detectadas.
+- **Homologação no PC (candidato):**
+  - Venda offline como vendedora: ficou "pendente", sem erro ativo.
+  - O servidor voltou e a venda foi aplicada **sozinha** em ~11 s, sem nenhum clique.
+  - Foi aplicada uma vez, com estoque de 10 para 9.
 
 ## O que não fazer
 - Não presumir conexão para todo `internal`: o `internal` vindo do servidor pode esconder um defeito.
