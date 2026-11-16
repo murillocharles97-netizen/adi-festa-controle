@@ -5,7 +5,7 @@
   let opened = false;
   function worker(action, payload) {
     return new Promise((resolve, reject) => {
-      const task = new Worker('./js/product-spreadsheet-worker.js'), timer = setTimeout(() => finish(Error('A planilha demorou demais para processar. Divida o arquivo ou verifique seu formato.')), 20000);
+      const task = new Worker('./js/product-spreadsheet-worker.js?v=235'), timer = setTimeout(() => finish(Error('A planilha demorou demais para processar. Divida o arquivo ou verifique seu formato.')), 20000);
       function finish(error, result) { clearTimeout(timer); task.terminate(); error ? reject(error) : resolve(result); }
       task.onmessage = e => finish(e.data.error ? Error(e.data.error) : null, e.data);
       task.onerror = () => finish(Error('Não foi possível processar a planilha. Atualize o app e tente novamente.'));
@@ -121,7 +121,7 @@
     };
     controls(true);
     try {
-      service = await import('./firebase/product-spreadsheet-service.js'); catalog = await service.loadCatalog();
+      service = await import('./firebase/product-spreadsheet-service.js?v=235'); catalog = await service.loadCatalog();
       q('[data-sheet-context]').textContent = `${window.SpaceContext.selectionLabel()} · ${catalog.products.length} produtos disponíveis`;
       status(catalog.permissions.edit ? 'Escolha exportar ou selecione sua planilha para revisar.' : 'Você pode exportar. Importação exige permissão para editar produtos.');
     } catch (e) { error(e); status('Não foi possível carregar os produtos.'); }
