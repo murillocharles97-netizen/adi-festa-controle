@@ -89,7 +89,7 @@ function service({ queue = [], stock = 10 } = {}) {
   const source = fs.readFileSync('js/firebase/product-spreadsheet-service.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '');
   const calls = [], products = new Map([['1', product('1', { estoqueAtual: stock, estoque: stock })], ['2', product('2')]]);
   let serial = 0;
-  const ctx = { console, navigator: { onLine: true }, crypto: globalThis.crypto, JSON, Map, Set, Object, Array, Error, String, Number, Promise,
+  const ctx = { console, setTimeout, navigator: { onLine: true }, crypto: globalThis.crypto, JSON, Map, Set, Object, Array, Error, String, Number, Promise,
     auth: { currentUser: { uid: 'u1' } }, db: {}, createFirestoreRepository: () => ({ listAllPaged: async () => [] }) };
   const enqueue = (op) => { queue.push({ operationId: `op-${++serial}`, category: 'pending' }); calls.push(op); };
   ctx.window = { ProductSpreadsheet: M, PlanLimitService: null,
@@ -102,7 +102,7 @@ function service({ queue = [], stock = 10 } = {}) {
       salvar: (d) => { assert.equal(d.estoqueAtual, products.get(d.id).estoqueAtual, 'salvar recebe o estoque atual, sem alteração'); enqueue(['salvar', d.id, { preco: d.preco, custo: d.custo, nome: d.nome }]); },
       entrada: (...a) => enqueue(['entrada', ...a]), ajustarEstoque: (...a) => enqueue(['ajuste', ...a]) } };
   vm.createContext(ctx); vm.runInContext(source + '\nthis.api={applyPreview};', ctx);
-  return { apply: (preview) => ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview), calls, queue, products };
+  return { apply: (preview) => ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview), applyWith: (catalog, preview) => ctx.api.applyPreview({ ...catalog, scope: { ...scope, allSpaces: true } }, preview), calls, queue, products };
 }
 const pv = (rows, catalog, options) => M.preview([H9, ...rows], catalog, scope, perms, 'update', options);
 
@@ -163,4 +163,15 @@ test('interrupção e retomada: a mesma planilha não soma a entrada duas vezes'
   const ctxSource = fs.readFileSync('js/firebase/product-spreadsheet-service.js', 'utf8');
   assert.match(ctxSource, /if \(entryApplied\(sheetId, row\.id\)\)/);
   assert.match(ctxSource, /Entrada por planilha VECONI #\$\{sheetId\}/);
+});
+
+test('custo só na nuvem (cópia local ainda sem custo): a linha é aplicada, não descartada como "dados mudaram"', async () => {
+  const s = service(), cloudCatalog = [...s.products.values()];
+  s.products.set('1', { ...product('1'), custo: undefined }); // local copy without productFinancials yet
+  const preview = M.preview([H9, line(cloudCatalog[0], { preco: 30, custo: 11 })], cloudCatalog, scope, perms, 'update');
+  const source = fs.readFileSync('js/firebase/product-spreadsheet-service.js', 'utf8');
+  assert.match(source, /custo: p\.custo \?\? cloud\.get\(row\.id\)\?\.custo \?\? null/);
+  const report = await s.applyWith({ scope, permissions: perms, matchingProducts: cloudCatalog }, preview);
+  assert.equal(report.results[0].ok, true, JSON.stringify(report.results));
+  assert.equal(s.calls[0][0], 'salvar');
 });

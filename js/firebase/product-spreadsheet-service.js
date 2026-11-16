@@ -17,9 +17,10 @@ function capture() {
   return scope;
 }
 const ACTIVE_IGNORED = new Set(['resolved', 'archived']);
-function assertContext(scope, { ownOperations = null } = {}) {
+function assertContext(scope, { ownOperations = null, queue = true } = {}) {
   const live = capture();
   if (JSON.stringify(live) !== JSON.stringify(scope)) throw Error('Empresa, espaço ou acesso mudou. Feche e abra a importação novamente.');
+  if (!queue) return;
   // Only ACTIVE queue items block; resolved/archived history is kept forever for audit.
   const active = (window.SyncFirebase?.getQueueDiagnostics?.() || []).filter(item => !ACTIVE_IGNORED.has(item.category) &&
     !(ownOperations && ownOperations.has(String(item.operationId))));
@@ -70,7 +71,8 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
       });
       results.push(...(response.data || response).results);
     } catch (error) {
-      results.push(...creates.slice(offset).map(row => ({line:row.line, ok:false, message:error.message || 'Não foi possível confirmar a criação. Gere outra prévia; o reenvio é protegido contra duplicidade.'})));
+      const unknown = ['internal', 'unavailable', 'deadline-exceeded', 'unknown'].includes(String(error?.code || '').replace(/^functions\//, '')) && !error?.details?.reason;
+      results.push(...creates.slice(offset).map(row => ({line:row.line, ok:false, message:unknown ? 'Sem resposta confirmada do servidor. Importe a mesma planilha de novo: produtos já criados serão reconhecidos pelo SKU/EAN e não serão duplicados.' : error.message || 'Não foi possível confirmar a criação. Gere outra prévia; o reenvio é protegido contra duplicidade.'})));
       onProgress?.(results.length, creates.length + selected.length); break;
     }
     onProgress?.(results.length, creates.length + selected.length);
@@ -80,15 +82,21 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
   // Catalog fields → Produtos.salvar (never touches stock); goods received →
   // Produtos.entrada (relative, safe with concurrent sales); absolute quantity →
   // Produtos.ajustarEstoque (only when the stock is still the one previewed).
-  const own = new Set(), queueIds = () => new Set((window.SyncFirebase?.getQueueDiagnostics?.() || []).map(item => String(item.operationId)));
-  const track = action => { const before = queueIds(); const value = action(); for (const id of queueIds()) if (!before.has(id)) own.add(id); return value; };
+  // Pending work from BEFORE the import was refused at the start; inside the loop only
+  // business/space/access are re-checked (cheap), so 300 rows stay linear.
+  let own = 0;
+  const track = action => { const value = action(); own++; return value; };
+  // Cost lives in productFinancials (cloud); the local copy may not carry it yet.
+  const cloud = new Map((catalog.matchingProducts || catalog.products || []).map(item => [item.id, item]));
   for (const row of selected) {
+    onProgress?.(results.length, creates.length + selected.length);
+    await new Promise(resolve => setTimeout(resolve, 0)); // keep the screen responsive and the progress painted
     try {
-      assertContext(scope, { ownOperations: own });
+      assertContext(scope, { queue: false });
       if (!/^[^/]{1,200}$/.test(row.id)) throw Error('ID inválido.');
       const p = window.Produtos.obter(row.id);
       if (!Model.inScope(p, scope)) { results.push({ id: row.id, line: row.line, ok: false, message: 'Produto removido ou fora do espaço selecionado.' }); continue; }
-      const current = Model.values(p, window.TeamAccess.has('cost.view'));
+      const current = Model.values({ ...p, custo: p.custo ?? cloud.get(row.id)?.custo ?? null }, window.TeamAccess.has('cost.view'));
       if (row.targetIdentity && (current.codigo !== row.targetIdentity.codigo || current.barcode !== row.targetIdentity.barcode)) {
         results.push({ id: row.id, line: row.line, ok: false, message: 'Os identificadores mudaram desde a prévia. Reimporte para revisar.' }); continue;
       }
@@ -118,20 +126,20 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
     } catch (error) {
       results.push({ id: row.id, line: row.line, ok: false, message: error.message || 'Não foi possível registrar esta linha. Nada foi alterado nela.' });
     }
-    onProgress?.(results.length, creates.length + selected.length);
   }
-  if (own.size) {
-    try { await window.SyncFirebase?.processSyncQueue?.({ force: true }); }
-    catch { /* The operations stay in the offline queue and are sent automatically. */ }
-  }
+  onProgress?.(results.length, creates.length + selected.length);
+  // Sending runs in the background through the normal Sync (offline-safe, retried
+  // automatically); the import report does not wait for the whole queue.
+  if (own) window.SyncFirebase?.processSyncQueue?.({ force: true })?.catch?.(() => {});
   let refreshWarning = '';
   if (results.some(r => r.ok && r.action === 'create')) {
     try {
-      assertContext(scope, { ownOperations: own });
+      assertContext(scope, { queue: false });
       await window.SyncFirebase.pullCloudCollections({ force: true, names: ['products', 'productFinancials', 'stockMovements'] });
       window.BarcodeIndex?.invalidate?.();
       window.SyncFirebase.notifyRemoteChange(['products', 'productFinancials', 'stockMovements']);
     } catch { refreshWarning = 'Gravações confirmadas. Atualize a sincronização para recarregar este aparelho.'; }
   }
-  return { results, refreshWarning };
+  if (own) refreshWarning = `${refreshWarning} As alterações estão salvas neste aparelho e sendo enviadas para a nuvem pela sincronização (${own} operações; acompanhe pelo ícone da nuvem).`.trim();
+  return { results, refreshWarning, queued: own };
 }
