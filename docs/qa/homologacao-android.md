@@ -37,9 +37,11 @@ Ambiente para testar no celular, antes de qualquer publicação, vendas, vendas 
 5. Celular conectado depois de iniciar? Rode `iniciar-homologacao.cmd usb`.
 
 ## Simular perda de conexão
-O modo avião **não** corta o cabo USB, por isso existem dois comandos:
-- `iniciar-homologacao.cmd offline`: o celular perde o servidor (Auth, Firestore e Functions). O app continua aberto e as vendas ficam na fila local.
+O modo avião **não** corta o cabo USB, e o PC não tem modo avião para `localhost`. Por isso o app fala com os emuladores através de um "portão de rede" (portas 19099, 18080, 15001 e 19199), e existem dois comandos:
+- `iniciar-homologacao.cmd offline`: o PC **e** o celular perdem o servidor (Auth, Firestore, Functions e Storage). O app continua aberto e as vendas ficam na fila local.
 - `iniciar-homologacao.cmd online`: o servidor volta. Abra Sincronização ou aguarde o envio automático.
+
+Os comandos funcionam com a homologação em execução, a partir de outra janela.
 
 Para um offline "total", ligue também o modo avião depois que o app já estiver carregado. O SDK vem da internet na primeira abertura.
 

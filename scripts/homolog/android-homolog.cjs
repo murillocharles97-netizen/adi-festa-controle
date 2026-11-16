@@ -2,8 +2,8 @@
 // Isolated VECONI homologation for a physical Android phone over USB.
 //
 //   node scripts/homolog/android-homolog.cjs start [--reset]   Emulators + seed + local app + adb reverse
-//   node scripts/homolog/android-homolog.cjs offline            Phone loses the backend (app stays loaded)
-//   node scripts/homolog/android-homolog.cjs online             Phone gets the backend back
+//   node scripts/homolog/android-homolog.cjs offline            Phone AND PC lose the backend (app stays loaded)
+//   node scripts/homolog/android-homolog.cjs online             Backend comes back
 //   node scripts/homolog/android-homolog.cjs usb                (Re)connect a phone plugged in after start
 //   node scripts/homolog/android-homolog.cjs reset              Erase the local emulator data
 //
@@ -17,6 +17,11 @@ const PROJECT = 'demo-veconi-homolog';
 const APP_PORT = Number(process.env.HOMOLOG_APP_PORT || 5180);
 const PORTS = { auth: 9099, firestore: 8080, functions: 5001, storage: 9199 };
 const BACKEND = Object.values(PORTS);
+// Network gate: the app talks to the emulators through these ports, so "offline"
+// can cut the backend for the PC browser and the phone alike (airplane mode does
+// not cut USB, and a PC has no airplane mode for localhost).
+const GATE = Object.fromEntries(Object.entries(PORTS).map(([name, port]) => [name, port + 10000]));
+const GATE_PORTS = Object.values(GATE);
 const DATA_DIR = path.join(os.tmpdir(), 'veconi-homolog-data');
 const ADB = [process.env.ADB, path.join(process.env.LOCALAPPDATA || '', 'Android/Sdk/platform-tools/adb.exe'),
   path.join(os.homedir(), 'Library/Android/sdk/platform-tools/adb'), path.join(os.homedir(), 'Android/Sdk/platform-tools/adb'), 'adb']
@@ -75,27 +80,51 @@ function rewrite(pathname, source) {
       .replace('getAuth, setPersistence', 'connectAuthEmulator, getAuth, setPersistence')
       .replace('initializeFirestore, memoryLocalCache', 'connectFirestoreEmulator, initializeFirestore, memoryLocalCache')
       .replace('getFunctions, httpsCallable', 'connectFunctionsEmulator, getFunctions, httpsCallable')
-      .replace('export const auth=getAuth(app);', `export const auth=getAuth(app);connectAuthEmulator(auth,'http://${host}:${PORTS.auth}',{disableWarnings:true});`)
-      .replace('export const db=initializeFirestore(app,{localCache:memoryLocalCache()});', `export const db=initializeFirestore(app,{localCache:memoryLocalCache()});connectFirestoreEmulator(db,'${host}',${PORTS.firestore});`)
-      .replace("export const functions=getFunctions(app,'southamerica-east1');", `export const functions=getFunctions(app,'southamerica-east1');connectFunctionsEmulator(functions,'${host}',${PORTS.functions});`);
+      .replace('export const auth=getAuth(app);', `export const auth=getAuth(app);connectAuthEmulator(auth,'http://${host}:${GATE.auth}',{disableWarnings:true});`)
+      .replace('export const db=initializeFirestore(app,{localCache:memoryLocalCache()});', `export const db=initializeFirestore(app,{localCache:memoryLocalCache()});connectFirestoreEmulator(db,'${host}',${GATE.firestore});`)
+      .replace("export const functions=getFunctions(app,'southamerica-east1');", `export const functions=getFunctions(app,'southamerica-east1');connectFunctionsEmulator(functions,'${host}',${GATE.functions});`);
     for (const marker of ['connectAuthEmulator(auth', 'connectFirestoreEmulator(db', 'connectFunctionsEmulator(functions', `projectId:'${PROJECT}'`])
       if (!source.includes(marker)) throw Error(`firebase-config.js mudou: não foi possível aplicar "${marker}". Atualize o script.`);
     return source;
   }
   if (pathname === '/js/firebase/workspace-storage.js')
-    return `${source}\nconst __homologStorage=new WeakSet();export const getStorage=(...args)=>{const storage=sdk.getStorage(...args);if(!__homologStorage.has(storage)){sdk.connectStorageEmulator(storage,'${host}',${PORTS.storage});__homologStorage.add(storage);}return storage;};\n`;
+    return `${source}\nconst __homologStorage=new WeakSet();export const getStorage=(...args)=>{const storage=sdk.getStorage(...args);if(!__homologStorage.has(storage)){sdk.connectStorageEmulator(storage,'${host}',${GATE.storage});__homologStorage.add(storage);}return storage;};\n`;
   if (pathname === '/js/firebase/google-auth.js')
     return source.replace(/https:\/\/[a-z0-9-]+\.cloudfunctions\.net/g, 'http://127.0.0.1:9/homolog-google-disabled');
   if (pathname === '/js/firebase/sync.js') return source; // PROJECT_ID constant stays; only the SDK project changes.
   return source;
 }
 
+const gate = { online: true, sockets: new Set() };
+function startGate() {
+  return Promise.all(Object.keys(PORTS).map((name) => new Promise((resolve, reject) => {
+    const server = net.createServer((client) => {
+      if (!gate.online) return client.destroy();
+      const upstream = net.connect(PORTS[name], '127.0.0.1');
+      for (const socket of [client, upstream]) { gate.sockets.add(socket); socket.on('close', () => gate.sockets.delete(socket)); socket.on('error', () => {}); }
+      client.pipe(upstream).pipe(client);
+      client.on('close', () => upstream.destroy()); upstream.on('close', () => client.destroy());
+    });
+    server.once('error', reject);
+    server.listen(GATE[name], '127.0.0.1', () => resolve(server));
+  })));
+}
+function setNetwork(online) {
+  gate.online = online;
+  if (!online) for (const socket of gate.sockets) socket.destroy();
+  log(online ? 'Rede da homologação: ONLINE (backend acessível).' : 'Rede da homologação: OFFLINE (backend inacessível para o PC e o celular; o app continua aberto).');
+}
 function serve() {
   const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
     '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain' };
   const textual = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.txt']);
   const server = http.createServer((req, res) => {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    if (req.method === 'POST' && /^\/__homolog\/network\/(online|offline)$/.test(pathname) && req.socket.remoteAddress?.replace('::ffff:', '') === '127.0.0.1') {
+      setNetwork(pathname.endsWith('/online'));
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ online: gate.online }));
+    }
+    if (pathname === '/__homolog/network') return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ online: gate.online }));
     const file = path.resolve(ROOT, '.' + (pathname === '/' ? '/index.html' : pathname));
     if (!file.startsWith(ROOT + path.sep) || /[\\/](functions[\\/](\.env|\.secret)|node_modules|\.git)/.test(file) ||
         !fs.existsSync(file) || !fs.statSync(file).isFile()) return res.writeHead(404).end('Not found');
@@ -113,7 +142,7 @@ async function start(reset) {
   if (reset) fs.rmSync(DATA_DIR, { recursive: true, force: true });
   const firstRun = !fs.existsSync(path.join(DATA_DIR, 'firebase-export-metadata.json'));
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  for (const port of [...BACKEND, APP_PORT]) if (await portOpen(port)) throw Error(`A porta ${port} já está em uso. Feche o outro processo e tente de novo.`);
+  for (const port of [...BACKEND, ...GATE_PORTS, APP_PORT]) if (await portOpen(port)) throw Error(`A porta ${port} já está em uso. Feche o outro processo e tente de novo.`);
   ensureEmulatorParams();
   const args = ['emulators:start', '--only', 'auth,firestore,functions,storage', '--project', PROJECT, '--export-on-exit', DATA_DIR,
     ...(firstRun ? [] : ['--import', DATA_DIR])];
@@ -133,20 +162,27 @@ async function start(reset) {
     log(`Dados fictícios criados: ${result.documents} documentos. Contas de teste: ${Object.values(result.users).join(', ')}`);
     log('A senha de teste está em scripts/homolog/seed.cjs (PASSWORD).');
   } else log('Dados anteriores restaurados de ' + DATA_DIR + ' (use --reset para recomeçar).');
+  await startGate();
   await serve();
-  const usb = reverse([APP_PORT, ...BACKEND]);
+  const usb = reverse([APP_PORT, ...GATE_PORTS]);
   log(`Aplicativo local: http://localhost:${APP_PORT}/  (somente emuladores)`);
   log(usb ? `No celular, abra no Chrome: http://localhost:${APP_PORT}/` : 'Conecte o celular por USB e rode: node scripts/homolog/android-homolog.cjs usb');
   log('Para simular perda de conexão: node scripts/homolog/android-homolog.cjs offline   (e "online" para voltar).');
   log('Para encerrar e salvar os dados: Ctrl+C.');
-  const stop = () => { reverse([APP_PORT, ...BACKEND], true); emulators.kill('SIGINT'); };
+  const stop = () => { reverse([APP_PORT, ...GATE_PORTS], true); emulators.kill('SIGINT'); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
 }
 
 const [command = 'start', ...flags] = process.argv.slice(2);
 if (command === 'start') start(flags.includes('--reset')).catch((error) => { console.error('[homolog] ' + error.message); process.exit(1); });
-else if (command === 'offline') { if (reverse(BACKEND, true)) log('Backend desconectado do celular. O app continua aberto; as vendas ficam na fila local.'); }
-else if (command === 'online') { if (reverse(BACKEND)) log('Backend reconectado. Abra Sincronização ou aguarde o envio automático.'); }
-else if (command === 'usb') { if (reverse([APP_PORT, ...BACKEND])) log(`Celular conectado. Abra no Chrome do celular: http://localhost:${APP_PORT}/`); }
+else if (command === 'offline' || command === 'online') {
+  const request = http.request({ host: '127.0.0.1', port: APP_PORT, method: 'POST', path: '/__homolog/network/' + command }, (res) => {
+    let body = ''; res.on('data', (chunk) => { body += chunk; });
+    res.on('end', () => log(JSON.parse(body || '{}').online ? 'Backend ONLINE. Abra Sincronização ou aguarde o envio automático.' : 'Backend OFFLINE para o PC e o celular. O app continua aberto; as vendas ficam na fila local.'));
+  });
+  request.on('error', () => { log('A homologação não está em execução (inicie com "start").'); process.exitCode = 1; });
+  request.end();
+}
+else if (command === 'usb') { if (reverse([APP_PORT, ...GATE_PORTS])) log(`Celular conectado. Abra no Chrome do celular: http://localhost:${APP_PORT}/`); }
 else if (command === 'reset') { fs.rmSync(DATA_DIR, { recursive: true, force: true }); log('Dados locais apagados: ' + DATA_DIR); }
 else { console.log('Uso: node scripts/homolog/android-homolog.cjs start [--reset] | usb | offline | online | reset'); process.exit(1); }
