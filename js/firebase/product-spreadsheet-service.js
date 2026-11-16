@@ -59,14 +59,28 @@ function rejectedOperations() {
     .filter(item => item.category === 'error').map(item => String(item.operationId))) };
   return rejectedCache.ids;
 }
+// Entries confirmed in the CLOUD for this sheet (the device may not keep every movement
+// after a restart). Read before the preview and again before applying; if the check
+// fails the import does not continue.
+const cloudEntries = new Map();
+export async function prefetchSheetEntries(sheetId) {
+  if (!/^[0-9a-f]{16}$/.test(sheetId || '')) return;
+  const rows = await createFirestoreRepository('stockMovements').listWherePaged('observacao', entryNote(sheetId), 200);
+  cloudEntries.set(sheetId, new Set(rows.filter(m => m.tipo === 'entrada').map(m => String(m.produtoId))));
+}
 export function entryApplied(sheetId, productId) {
   if (!/^[0-9a-f]{16}$/.test(sheetId || '')) return false;
+  if (cloudEntries.get(sheetId)?.has(String(productId))) return true;
   const rejected = rejectedOperations();
   return (window.DB?.carregar?.().movimentacoesEstoque || []).some(m => m.produtoId === productId && m.tipo === 'entrada' &&
     m.observacao === entryNote(sheetId) && !rejected.has(String(m.operationId)));
 }
 export async function applyPreview(catalog, preview, onProgress, { sheetId = '' } = {}) {
   assertContext(catalog.scope);
+  if (preview.rows.some(row => row.status === 'update' && Object.hasOwn(row.changes, 'entrada'))) {
+    try { await prefetchSheetEntries(sheetId); }
+    catch { throw Error('Não foi possível conferir na nuvem as entradas já registradas desta planilha. Nada foi alterado; tente novamente.'); }
+  }
   if (!window.TeamAccess.has('products.edit')) throw Error('Você não tem permissão para editar produtos.');
   const scope = catalog.scope, selected = preview.rows.filter(r => r.status === 'update'), creates = preview.rows.filter(r => r.status === 'create'), results = [];
   if (creates.length && preview.mode !== 'create_update') throw Error('Confirme o modo de criação antes de importar.');

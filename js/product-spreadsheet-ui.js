@@ -85,6 +85,8 @@
         parsedTable = parsed.table; parsedBaseline = parsed.baseline || null;
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(parsedTable)));
         sheetId = Array.from(new Uint8Array(digest).slice(0, 8), b => b.toString(16).padStart(2, '0')).join('');
+        try { await service.prefetchSheetEntries?.(sheetId); }
+        catch { throw Error('Não foi possível conferir na nuvem as entradas já registradas desta planilha. Tente novamente com internet.'); }
         prepare();
         status('Prévia pronta. Revise as alterações antes de confirmar. Nenhum dado foi gravado.');
         q('[data-sheet-preview]').scrollIntoView({ block: 'start' });

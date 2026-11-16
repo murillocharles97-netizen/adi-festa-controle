@@ -90,7 +90,7 @@ function service({ queue = [], stock = 10 } = {}) {
   const calls = [], products = new Map([['1', product('1', { estoqueAtual: stock, estoque: stock })], ['2', product('2')]]);
   let serial = 0;
   const ctx = { console, setTimeout, navigator: { onLine: true }, crypto: globalThis.crypto, JSON, Map, Set, Object, Array, Error, String, Number, Promise,
-    auth: { currentUser: { uid: 'u1' } }, db: {}, createFirestoreRepository: () => ({ listAllPaged: async () => [] }) };
+    auth: { currentUser: { uid: 'u1' } }, db: {}, createFirestoreRepository: () => ({ listAllPaged: async () => [], listWherePaged: async (field, value) => { if (ctx.cloudFails) throw Error('offline'); return (ctx.cloudMovements || []).filter((m) => m[field] === value); } }) };
   const enqueue = (op) => { queue.push({ operationId: `op-${++serial}`, category: 'pending' }); calls.push(op); };
   ctx.window = { ProductSpreadsheet: M, PlanLimitService: null,
     BusinessContext: { get: () => ({ businessId: 'b1', spaceAccess: 'all', allowedSpaceIds: ['s1'], business: { workspaceGeneration: 0 } }) },
@@ -218,4 +218,17 @@ test('bloco de entradas: todos os movimentos com o operationId do bloco (regra d
   assert.ok(server.includes("m.operationId!==item.operationId"), 'regra do servidor que exige o mesmo operationId');
   const single = c.Produtos.entrada('1', 1, '', 'y', 's1');
   assert.equal(single.id, single.operationId, 'entrada individual continua igual');
+});
+
+test('retomada após reiniciar o app: entrada confirmada na NUVEM não é repetida; falha na conferência bloqueia', async () => {
+  const sheetId = 'b1b2b3b4b5b6b7b8', note = `Entrada por planilha VECONI #${sheetId}`;
+  const s = service(), cat = [...s.products.values()];
+  s.ctx.cloudMovements = [{ produtoId: '1', tipo: 'entrada', observacao: note }]; // device lost its local copy
+  const preview = pv([line(cat[0], { entrada: 5 }), line(cat[1], { entrada: 7 })], cat);
+  const report = await s.ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview, null, { sheetId });
+  assert.equal(report.results.find((r) => r.id === '1').skipped, 'entrada já registrada por esta planilha');
+  assert.deepEqual(s.calls.filter((c) => c[0] === 'entrada').map((c) => c[1]), ['2']);
+  const offline = service(); offline.ctx.cloudFails = true;
+  await assert.rejects(offline.ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview, null, { sheetId }), /conferir na nuvem/);
+  assert.equal(offline.calls.length, 0);
 });
