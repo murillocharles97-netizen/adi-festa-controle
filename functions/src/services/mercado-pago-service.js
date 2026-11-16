@@ -117,6 +117,7 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
       return request('/preapproval/search?'+query);
     },
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
+    searchPaymentsByExternalReference(externalReference,{limit=50,offset=0}={}){if(typeof externalReference!=='string'||!externalReference||!Number.isSafeInteger(limit)||limit<1||limit>50||!Number.isSafeInteger(offset)||offset<0)throw Object.assign(Error('Busca de pagamentos inválida.'),{code:'invalid-payment-search'});return request('/v1/payments/search?'+new URLSearchParams({external_reference:externalReference,limit:String(limit),offset:String(offset),sort:'date_created',criteria:'desc'}))},
     searchAuthorizedPayments(subscriptionId,{limit=10,offset=0}={}){const safeLimit=Math.max(1,Math.min(10,Number(limit)||10));if(!Number.isSafeInteger(offset)||offset<0)throw Object.assign(Error('Paginação de faturas inválida.'),{code:'invalid-invoice-offset'});const query=new URLSearchParams({preapproval_id:String(subscriptionId),limit:String(safeLimit),offset:String(offset)});return request(`/authorized_payments/search?${query}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'cancelled'}})},
     updateSubscriptionAmount(subscriptionId,amount,currency='BRL'){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{auto_recurring:{transaction_amount:Number(amount),currency_id:String(currency||'BRL')}}})},

@@ -1,6 +1,6 @@
 'use strict';
-// Private administrative evidence only. No client-supplied flag can classify a
-// retained retry date as harmless; live provider reads are still mandatory.
+// Administrative proof or a complete terminal provider observation. No client
+// flag or elapsed retry date alone can authorize another checkout.
 const crypto=require('node:crypto');
 const MAX_EVIDENCE_AGE_MS=86400000,hash=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const proofId=(bid,sid,iid,pid)=>hash([bid,String(sid),String(iid),String(pid)]);
@@ -18,9 +18,10 @@ function validateEvidence({proof,businessId,ownerUid,contract,invoice,payment,ex
   if(proof.invoiceSnapshotHash!==invoiceHash(invoice)||Math.max(millis(contract.last_modified),millis(invoice.last_modified),millis(payment.date_last_updated))>confirmed)unavailable();
   return{version:1,invoiceId:String(invoice.id),invoiceHash:invoiceHash(invoice),expiresAt:new Date(expires).toISOString(),evidenceId:proofId(businessId,contract.id,invoice.id,payment.id)};
 }
-function assertCheck(check,invoice,now){if(!check||check.version!==1||check.invoiceId!==String(invoice.id)||check.invoiceHash!==invoiceHash(invoice)||!Number.isFinite(+now)||!Number.isFinite(millis(check.expiresAt))||millis(check.expiresAt)<=+now)unavailable();}
-async function readEvidence(db,provider,{businessId,ownerUid,contract,invoice,index,now}){
-  const ref=db.doc('billingLegacyCancellationProofs/'+proofId(businessId,contract.id,invoice.id,invoice.payment.id)),proof=(await ref.get()).data();if(!proof)unavailable();
+function assertCheck(check,invoice,now){if(!check||![1,2].includes(check.version)||check.invoiceId!==String(invoice.id)||check.invoiceHash!==invoiceHash(invoice)||!Number.isFinite(+now)||!Number.isFinite(millis(check.expiresAt))||millis(check.expiresAt)<=+now||check.version===2&&millis(check.checkedAt)>+now)unavailable();if(check.version===2)require('./legacy-terminal-billing-proof').assertTerminalCheck(check);}
+async function readEvidence(db,provider,{businessId,ownerUid,contract,invoice,index,subscription,now}){
+  const ref=db.doc('billingLegacyCancellationProofs/'+proofId(businessId,contract.id,invoice.id,invoice.payment.id)),proof=(await ref.get()).data();
+  if(!proof)return require('./legacy-terminal-billing-proof').readTerminalProof(provider,{businessId,ownerUid,contract,invoice,index,subscription,now});
   if(typeof provider.getAuthorizedPayment!=='function'||typeof provider.getPayment!=='function')unavailable();
   const [fresh,payment]=await Promise.all([provider.getAuthorizedPayment(invoice.id),provider.getPayment(invoice.payment.id)]);if(invoiceHash(fresh)!==invoiceHash(invoice))unavailable();
   return validateEvidence({proof,businessId,ownerUid,contract,invoice:fresh,payment,externalReference:index.expectedExternalReference,expectedAmount:index.chargedPrice??index.officialPrice,now});

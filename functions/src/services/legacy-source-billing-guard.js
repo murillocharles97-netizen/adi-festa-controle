@@ -79,7 +79,7 @@ async function verifyLegacySourceBilling(db,provider,{businessId,actorUid,expect
    const page=await provider.searchAuthorizedPayments(id,{limit:PAGE_SIZE,offset}),paging=page?.paging,t=number(paging?.total),limit=number(paging?.limit),start=number(paging?.offset);
    if(!Array.isArray(page?.results)||!Number.isSafeInteger(t)||t<0||t>MAX_INVOICES||limit!==PAGE_SIZE||start!==offset||total!=null&&t!==total||page.results.length!==Math.min(PAGE_SIZE,t-offset))fail();
    total=t;
-   for(const r of page.results){const key=String(r?.id||'');if(!key||ids.has(key))fail();ids.add(key);rows.push(r);if(cancellationEvidence.candidate(r,remote))residualChecks.set(key,await cancellationEvidence.readEvidence(db,provider,{businessId,ownerUid:actorUid,contract:remote,invoice:r,index,now:now()}));}
+   for(const r of page.results){const key=String(r?.id||'');if(!key||ids.has(key))fail();ids.add(key);rows.push(r);if(cancellationEvidence.candidate(r,remote))residualChecks.set(key,await cancellationEvidence.readEvidence(db,provider,{businessId,ownerUid:actorUid,contract:remote,invoice:r,index,subscription:s,now:now()}));}
    inspectInvoices({invoices:rows,subscription:s,contract:remote,now:now(),residualChecks});
    if(rows.length===total)break;
   }
@@ -88,7 +88,7 @@ async function verifyLegacySourceBilling(db,provider,{businessId,actorUid,expect
   if(JSON.stringify(shape(latest))!==JSON.stringify(shape(remote)))fail('legacy-source-state-changed');
   remote=latest;
   // Repeat exact invoice/payment/proof reads at the end of the lookup window.
-  for(const row of rows)if(residualChecks.has(String(row.id)))residualChecks.set(String(row.id),await cancellationEvidence.readEvidence(db,provider,{businessId,ownerUid:actorUid,contract:remote,invoice:row,index,now:now()}));
+  for(const row of rows)if(residualChecks.has(String(row.id)))residualChecks.set(String(row.id),await cancellationEvidence.readEvidence(db,provider,{businessId,ownerUid:actorUid,contract:remote,invoice:row,index,subscription:s,now:now()}));
  }catch(e){if(String(e.code||'').startsWith('legacy-source-'))throw e;fail();}
  const details=inspectInvoices({invoices:rows,subscription:s,contract:remote,now:now(),residualChecks}),current=(await db.doc('businesses/'+businessId).get()).data();
  if(!current||fingerprint(current)!==fingerprint(business))fail('legacy-source-state-changed');
