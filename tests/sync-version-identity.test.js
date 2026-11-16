@@ -56,7 +56,7 @@ test('verificação de release: bloqueia versão não atualizada e aceita a pró
   assert.equal(check({ local, worker, sync, published: published229 }).ok, true, 'atual 231.1 é posterior à 229 publicada');
   const same = check({ local, worker, sync, published: local });
   assert.equal(same.ok, false); assert.match(same.problems.join(), /não é posterior à publicada/);
-  const forgotWorker = check({ local, worker: worker.replace("release: '231', appVersion: '231.1'", "release: '231', appVersion: '231.0'"), sync, published: published229 });
+  const forgotWorker = check({ local, worker: worker.replace(`appVersion: '${build().appVersion}'`, "appVersion: '0.0'"), sync, published: published229 });
   assert.match(forgotWorker.problems.join(), /Service Worker informa outra versão/);
   const protocol = check({ local, worker, sync: sync.replace('PAYLOAD_VERSION = 4,', 'PAYLOAD_VERSION = 5,'), published: published229 });
   assert.match(protocol.problems.join(), /PAYLOAD_VERSION mudou/);

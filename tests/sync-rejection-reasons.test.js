@@ -137,7 +137,7 @@ test('cliente: toda falha gravada na fila limpa o motivo anterior e grava o novo
 });
 
 test('o módulo compartilhado é carregado pelo app, pelo Service Worker e pelo build público', () => {
-  assert.match(fs.readFileSync('index.html', 'utf8'), /<script src="\.\/functions\/src\/shared\/sync-rejection\.js\?v=1"><\/script>/);
+  assert.match(fs.readFileSync('index.html', 'utf8'), /<script src="\.\/functions\/src\/shared\/sync-rejection\.js\?v=[^"]+"><\/script>/);
   assert.match(fs.readFileSync('service-worker.js', 'utf8'), /'\.\/functions\/src\/shared\/sync-rejection\.js'/);
   assert.match(fs.readFileSync('scripts/build-public-site.cjs', 'utf8'), /'sync-rejection\.js'/);
 });

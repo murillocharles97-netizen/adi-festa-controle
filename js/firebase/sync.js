@@ -17,7 +17,7 @@ import {
   sanitizeForFirestore,
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
-import '../integrity.js?v=157';
+import '../integrity.js?v=233';
 import {prepareProductImportFence} from './product-import-fence.js';
 
 // Compatibility API for synchronous domain code; backed by structured IDB rows.
