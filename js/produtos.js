@@ -46,8 +46,9 @@ window.Produtos=(()=>{
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{if(!window.ProductActions)throw Error('Aguarde o carregamento das ações de produtos.');return window.ProductActions.perform(id,'delete')};
   // Shared bodies of entrada/ajustarEstoque, applied inside a caller's DB.alterar.
-  function applyEntry(db,produtoId,quantidade,custoUnitario,observacao,spaceId){
-    const operationId=Utils.uuid();
+  function applyEntry(db,produtoId,quantidade,custoUnitario,observacao,spaceId,blockOperationId=''){
+    // In a block every movement shares the block's operationId (the server requires it); ids stay unique.
+    const operationId=blockOperationId||Utils.uuid(),movementId=blockOperationId?Utils.uuid():operationId;
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const origin=window.SpaceContext?.stockMovementOrigin?.(p,spaceId);
@@ -56,18 +57,18 @@ window.Produtos=(()=>{
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
     if(custoUnitario!==''&&custoUnitario!==null&&custoUnitario!==undefined)p.custo=Number(custoUnitario);
-    const mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
+    const mov={id:movementId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);return mov;
   }
-  function applyAdjust(db,produtoId,novoEstoque,motivo,spaceId){
-    const operationId=Utils.uuid();
+  function applyAdjust(db,produtoId,novoEstoque,motivo,spaceId,blockOperationId=''){
+    const operationId=blockOperationId||Utils.uuid(),movementId=blockOperationId?Utils.uuid():operationId;
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const origin=window.SpaceContext?.stockMovementOrigin?.(p,spaceId);
     const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
-    const mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
+    const mov={id:movementId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);return mov;
   }
   // Bulk (spreadsheet): up to 25 products in ONE DB.alterar → one Sync operation, atomic
@@ -81,7 +82,7 @@ window.Produtos=(()=>{
     if(catalog&&window.TeamAccess&&!window.TeamAccess.has('products.edit'))throw window.VeconiPermissionPolicy?.denied('products.edit')||Error('Você não tem permissão para editar produtos.');
     if(stock&&window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw window.VeconiPermissionPolicy?.denied('inventory.adjust')||Error('Você não tem permissão para ajustar estoque.');
     if(new Set(items.map(i=>i.id)).size!==items.length)throw Error('Produto repetido no mesmo bloco.');
-    const movements=[];
+    const movements=[],blockOperationId=Utils.uuid();
     DB.alterar(db=>{
       const agora=new Date().toISOString();
       for(const item of items){
@@ -92,8 +93,8 @@ window.Produtos=(()=>{
           for(const field of ['estoqueAtual','estoque','totalStock','hasAvailableStock'])delete v[field];
           Object.assign(atual,v);
         }
-        if(item.entrada)movements.push(applyEntry(db,item.id,item.entrada.quantidade,'',item.entrada.observacao,item.entrada.spaceId));
-        if(item.ajuste)movements.push(applyAdjust(db,item.id,item.ajuste.novoEstoque,item.ajuste.motivo,item.ajuste.spaceId));
+        if(item.entrada)movements.push(applyEntry(db,item.id,item.entrada.quantidade,'',item.entrada.observacao,item.entrada.spaceId,blockOperationId));
+        if(item.ajuste)movements.push(applyAdjust(db,item.id,item.ajuste.novoEstoque,item.ajuste.motivo,item.ajuste.spaceId,blockOperationId));
       }
     });
     window.BarcodeIndex?.invalidate?.();

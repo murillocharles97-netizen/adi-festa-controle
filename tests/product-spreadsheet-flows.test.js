@@ -204,3 +204,18 @@ test('Produtos.aplicarLote: um único DB.alterar por bloco, catálogo sem tocar 
   assert.throws(() => c.Produtos.aplicarLote(Array.from({ length: 26 }, (_, i) => ({ id: String(i) }))), /1 a 25/);
   assert.throws(() => c.Produtos.aplicarLote([{ id: '1', catalog: { estoqueAtual: 1 } }]), /Campo não permitido/);
 });
+
+test('bloco de entradas: todos os movimentos com o operationId do bloco (regra do servidor) e ids únicos', () => {
+  const src = fs.readFileSync('js/produtos.js', 'utf8');
+  const data = { produtos: [product('1'), product('2'), product('3')], movimentacoesEstoque: [] };
+  const c = { console, structuredClone, window: {}, Utils: { uuid: (() => { let n = 0; return () => `u-${++n}`; })() }, DB: { carregar: () => data, alterar: (fn) => fn(data) }, document: { addEventListener() {} } };
+  c.window = c; c.ProductModel = { build: (d) => ({ ...d }) }; vm.createContext(c); vm.runInContext(src, c);
+  const movs = c.Produtos.aplicarLote(['1', '2', '3'].map((id) => ({ id, entrada: { quantidade: 2, observacao: 'x', spaceId: 's1' } })));
+  assert.equal(new Set(movs.map((m) => m.operationId)).size, 1);
+  assert.equal(new Set(movs.map((m) => m.id)).size, 3);
+  assert.ok(movs.every((m) => m.id !== m.operationId));
+  const server = fs.readFileSync('functions/src/services/operational-commit-service.js', 'utf8');
+  assert.ok(server.includes("m.operationId!==item.operationId"), 'regra do servidor que exige o mesmo operationId');
+  const single = c.Produtos.entrada('1', 1, '', 'y', 's1');
+  assert.equal(single.id, single.operationId, 'entrada individual continua igual');
+});

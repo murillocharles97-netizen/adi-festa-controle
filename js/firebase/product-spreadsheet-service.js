@@ -51,9 +51,19 @@ export async function loadCatalog() {
 // An entry registered from a sheet carries its id in the movement note; the same
 // sheet (same content) can be re-imported after an interruption without adding twice.
 const entryNote = sheetId => `Entrada por planilha VECONI #${sheetId}`;
+// Entries of a block REJECTED by the server exist only on this device: they do not count
+// as registered, so a re-import can apply them again (the rejected original stays in Sync).
+let rejectedCache = { at: 0, ids: new Set() };
+function rejectedOperations() {
+  if (Date.now() - rejectedCache.at > 1000) rejectedCache = { at: Date.now(), ids: new Set((window.SyncFirebase?.getQueueDiagnostics?.() || [])
+    .filter(item => item.category === 'error').map(item => String(item.operationId))) };
+  return rejectedCache.ids;
+}
 export function entryApplied(sheetId, productId) {
   if (!/^[0-9a-f]{16}$/.test(sheetId || '')) return false;
-  return (window.DB?.carregar?.().movimentacoesEstoque || []).some(m => m.produtoId === productId && m.tipo === 'entrada' && m.observacao === entryNote(sheetId));
+  const rejected = rejectedOperations();
+  return (window.DB?.carregar?.().movimentacoesEstoque || []).some(m => m.produtoId === productId && m.tipo === 'entrada' &&
+    m.observacao === entryNote(sheetId) && !rejected.has(String(m.operationId)));
 }
 export async function applyPreview(catalog, preview, onProgress, { sheetId = '' } = {}) {
   assertContext(catalog.scope);
