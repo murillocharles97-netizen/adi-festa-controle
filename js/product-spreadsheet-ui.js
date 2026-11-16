@@ -18,7 +18,7 @@
     if (opened && document.querySelector('.product-spreadsheet-modal')) return;
     opened = true;
     const root = document.querySelector('#modal');
-    let busy = false, catalog, service, preview, parsedTable, limit = 50, completed = false;
+    let busy = false, catalog, service, preview, parsedTable, parsedBaseline = null, limit = 50, completed = false;
     root.innerHTML = `<div class="modal-bg"><section class="modal-box product-spreadsheet-modal" role="dialog" aria-modal="true" aria-labelledby="product-sheet-title"><header class="modal-head"><h3 id="product-sheet-title">Importar / Exportar produtos</h3><button class="icon-btn" type="button" data-sheet-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body"><p data-sheet-context></p><p class="muted">Use o modelo exportado pela VECONI. A importação atualiza produtos existentes; não cria produtos. Células vazias preservam os valores atuais.</p><details class="muted"><summary>Regras desta importação</summary><p>Produtos compartilhados continuam sendo o mesmo cadastro em todos os seus espaços. SKU/EAN são identificadores; altere-os no cadastro. Totais de variações não são editados nesta V1.</p></details><div class="product-xlsx-actions"><button class="btn btn-light" type="button" data-sheet-export disabled><i data-lucide="download"></i> Exportar produtos</button><label class="btn btn-light"><i data-lucide="upload"></i> Importar planilha<input type="file" accept=".xlsx" aria-label="Selecionar planilha XLSX" data-sheet-file disabled></label></div><p data-sheet-status role="status" aria-live="polite">Confirmando produtos na nuvem…</p><p data-sheet-error role="alert" hidden></p><div data-sheet-preview></div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-sheet-close>Cancelar</button><button class="btn btn-primary" type="button" data-sheet-confirm disabled>Confirmar importação</button></footer></section></div>`;
     const box = root.querySelector('.product-spreadsheet-modal'), q = s => box.querySelector(s), fileInput = q('[data-sheet-file]');
     q('.muted').textContent = 'Use o modelo VECONI. Escolha atualizar ou criar e atualizar. Células vazias preservam os valores existentes; novos produtos usam os padrões do cadastro manual.';
@@ -48,11 +48,11 @@
     function renderPreview() {
       const c = preview.counts, labels = { create:'NOVO PRODUTO — será criado após confirmação', update: 'Será atualizado', invalid: 'Linha inválida / conflito', not_found: 'Não encontrado', unchanged: 'Sem alterações' };
       const format = (key, value) => value === null ? 'não informado' : ['preco', 'custo'].includes(key) ? Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : String(value);
-      q('[data-sheet-preview]').innerHTML = `<div class="product-sheet-counts">${[['Linhas',c.total],['Encontrados',c.found],['A atualizar',c.updates],['Novos a criar',c.creates],['Com erro',c.errors],['Conflitos',c.conflicts],['Não encontrados',c.notFound]].map(([label,n])=>`<span>${label}<b>${n}</b></span>`).join('')}</div><p>${c.updates} produtos serão atualizados e ${c.creates} serão criados após confirmação. Linhas com erro ou conflito não serão gravadas.</p><div class="product-sheet-rows">${preview.rows.slice(0, limit).map(row => `<article class="is-${row.status}"><b>Linha ${row.line} · ${esc(row.name || 'Sem nome')}</b><small>${labels[row.status]}</small>${row.errors.map(e=>`<p>${esc(e)}</p>`).join('')}${['update','create'].includes(row.status) ? Object.entries(row.status === 'create' ? row.create : row.changes).map(([key,value])=>`<p>${esc(Model.columns.find(c=>c[1]===key)[0])}: ${row.status === 'create' ? 'Inicial: ' : esc(format(key,row.before[key]))+' → '}<strong>${esc(format(key,value))}</strong></p>`).join('') : ''}</article>`).join('')}</div>${preview.rows.length > limit ? '<button type="button" class="btn btn-light" data-sheet-more>Mostrar mais linhas</button>' : ''}`;
+      q('[data-sheet-preview]').innerHTML = `<div class="product-sheet-counts">${[['Linhas',c.total],['Encontrados',c.found],['A atualizar',c.updates],['Entradas',c.entries||0],['Ajustes de estoque',c.adjustments||0],['Novos a criar',c.creates],['Com erro',c.errors],['Conflitos',c.conflicts],['Não encontrados',c.notFound]].map(([label,n])=>`<span>${label}<b>${n}</b></span>`).join('')}</div><p>${c.updates} produtos serão atualizados e ${c.creates} serão criados após confirmação. Linhas com erro ou conflito não serão gravadas.</p><div class="product-sheet-rows">${preview.rows.slice(0, limit).map(row => `<article class="is-${row.status}"><b>Linha ${row.line} · ${esc(row.name || 'Sem nome')}</b><small>${labels[row.status]}${row.kinds?.length?` · ${row.kinds.map(k=>({cadastro:'atualização cadastral',entrada:'entrada de mercadorias',ajuste:'ajuste de estoque'})[k]).join(' + ')}`:''}</small>${row.errors.map(e=>`<p>${esc(e)}</p>`).join('')}${['update','create'].includes(row.status) ? Object.entries(row.status === 'create' ? row.create : row.changes).map(([key,value])=>key==='entrada'?`<p>Entrada de mercadorias: +${esc(format(key,value))} (estoque ${esc(format('estoqueAtual',row.before.estoqueAtual))} → <strong>${esc(format('estoqueAtual',Number(row.before.estoqueAtual)+Number(value)))}</strong>)</p>`:`<p>${esc((Model.exportColumns||Model.columns).find(c=>c[1]===key)[0])}: ${row.status === 'create' ? 'Inicial: ' : esc(format(key,row.before[key]))+' → '}<strong>${esc(format(key,value))}</strong></p>`).join('') : ''}</article>`).join('')}</div>${preview.rows.length > limit ? '<button type="button" class="btn btn-light" data-sheet-more>Mostrar mais linhas</button>' : ''}`;
       q('[data-sheet-more]')?.addEventListener('click', () => { limit += 50; renderPreview(); });
     }
     function prepare() {
-      preview = Model.preview(parsedTable, catalog.matchingProducts || catalog.products, catalog.scope, catalog.permissions, modeInput.value);
+      preview = Model.preview(parsedTable, catalog.matchingProducts || catalog.products, catalog.scope, catalog.permissions, modeInput.value, { baseline: parsedBaseline });
       limit = 50; renderPreview(); controls(false);
     }
     modeInput.onchange = () => {
@@ -64,8 +64,10 @@
       try {
         catalog = await service.loadCatalog();
         status('Gerando arquivo .xlsx…');
-        const table = [Model.columns.map(c=>c[0]), ...catalog.products.map(p=>{const values=Model.values(p,catalog.permissions.cost);return Model.columns.map(c=>values[c[1]]);})];
-        const result = await worker('export', { table, context: catalog.scope });
+        const columns = Model.exportColumns || Model.columns;
+        const table = [columns.map(c=>c[0]), ...catalog.products.map(p=>{const values=Model.values(p,catalog.permissions.cost);return columns.map(c=>c[1]==='entrada'?null:values[c[1]]);})];
+        const baseline = catalog.products.map(p=>[p.id, Model.values(p,catalog.permissions.cost).estoqueAtual]).filter(([,stock])=>typeof stock==='number');
+        const result = await worker('export', { table, context: catalog.scope, baseline });
         const url = URL.createObjectURL(new Blob([result.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })), a = document.createElement('a');
         a.href = url; a.download = `produtos-veconi-${catalog.scope.businessId.replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().slice(0,10)}.xlsx`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),30000);
         status(`${catalog.products.length} produtos exportados. Nenhum dado foi alterado.`);
@@ -80,7 +82,7 @@
         const parsed = await worker('import', { bytes: await file.arrayBuffer() });
         catalog = await service.loadCatalog();
         if (parsed.context && (parsed.context[0] !== 'VECONI_PRODUCTS_V1' || parsed.context[1] !== catalog.scope.businessId || parsed.context[2] !== catalog.scope.spaceId)) throw Error('Esta planilha foi exportada de outra empresa ou espaço. Selecione o contexto original.');
-        parsedTable = parsed.table; prepare();
+        parsedTable = parsed.table; parsedBaseline = parsed.baseline || null; prepare();
         status('Prévia pronta. Revise as alterações antes de confirmar. Nenhum dado foi gravado.');
         q('[data-sheet-preview]').scrollIntoView({ block: 'start' });
       } catch (e) { error(e); status('Importação não iniciada.'); } finally { fileInput.value = ''; controls(false); }

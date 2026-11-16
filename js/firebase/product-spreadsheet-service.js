@@ -1,5 +1,4 @@
 import { auth, db } from './firebase-config.js';
-import { doc, runTransaction, serverTimestamp, increment } from './workspace-firestore.js';
 import { createFirestoreRepository } from './firestore-repository.js';
 
 const Model = window.ProductSpreadsheet;
@@ -17,10 +16,14 @@ function capture() {
   if (scope.spaceId !== 'all_spaces' && !scope.allowedSpaceIds.includes(scope.spaceId)) throw Error('O espaço selecionado não permite acesso a produtos.');
   return scope;
 }
-function assertContext(scope) {
+const ACTIVE_IGNORED = new Set(['resolved', 'archived']);
+function assertContext(scope, { ownOperations = null } = {}) {
   const live = capture();
   if (JSON.stringify(live) !== JSON.stringify(scope)) throw Error('Empresa, espaço ou acesso mudou. Feche e abra a importação novamente.');
-  if ((window.SyncFirebase?.getQueueDiagnostics?.() || []).length) throw Error('Sincronize as operações pendentes antes de importar ou exportar.');
+  // Only ACTIVE queue items block; resolved/archived history is kept forever for audit.
+  const active = (window.SyncFirebase?.getQueueDiagnostics?.() || []).filter(item => !ACTIVE_IGNORED.has(item.category) &&
+    !(ownOperations && ownOperations.has(String(item.operationId))));
+  if (active.length) throw Error('Sincronize as operações pendentes antes de importar ou exportar.');
 }
 export async function loadCatalog() {
   const scope = capture(); assertContext(scope);
@@ -65,79 +68,56 @@ export async function applyPreview(catalog, preview, onProgress) {
     }
     onProgress?.(results.length, creates.length + selected.length);
   }
-  // Small atomic groups stay below Rules document-access limits, even with stock/cost writes.
-  for (let offset = 0; offset < selected.length; offset += 5) {
-    const batch = selected.slice(offset, offset + 5);
+  // Updates go through the app's own validated, offline-first flows (Sync queue →
+  // commitOperationalSync). Direct client writes to stock are forbidden by the Rules.
+  // Catalog fields → Produtos.salvar (never touches stock); goods received →
+  // Produtos.entrada (relative, safe with concurrent sales); absolute quantity →
+  // Produtos.ajustarEstoque (only when the stock is still the one previewed).
+  const own = new Set(), queueIds = () => new Set((window.SyncFirebase?.getQueueDiagnostics?.() || []).map(item => String(item.operationId)));
+  const track = action => { const before = queueIds(); const value = action(); for (const id of queueIds()) if (!before.has(id)) own.add(id); return value; };
+  for (const row of selected) {
     try {
-      assertContext(scope);
-      const done = await runTransaction(db, async tx => {
-        assertContext(scope);
-        const loaded = await Promise.all(batch.map(async row => {
-          if (!/^[^/]{1,200}$/.test(row.id)) throw Error('ID inválido.');
-          const ref = doc(db, 'businesses', scope.businessId, 'products', row.id), snap = await tx.get(ref);
-          const costRef = doc(db, 'businesses', scope.businessId, 'productFinancials', row.id);
-          const cost = Object.hasOwn(row.changes, 'custo') ? await tx.get(costRef) : null;
-          return { row, ref, costRef, p: snap.exists() ? { ...snap.data(), id: snap.id } : null, cost: cost?.exists() ? cost.data() : null };
-        }));
-        const outcomes = [];
-        for (const { row, ref, costRef, p, cost } of loaded) {
-          if (!Model.inScope(p, scope)) { outcomes.push({ id: row.id, line: row.line, ok: false, message: 'Produto removido ou fora do espaço selecionado.' }); continue; }
-          const current = Model.values({ ...p, custo: cost?.custo ?? p.custo ?? null });
-          if (row.targetIdentity && (current.codigo !== row.targetIdentity.codigo || current.barcode !== row.targetIdentity.barcode)) {
-            outcomes.push({id:row.id, line:row.line, ok:false, message:'Os identificadores mudaram desde a prévia. Reimporte para revisar.'}); continue;
-          }
-          const changes = { ...row.changes }, keys = Object.keys(changes);
-          const allowed = ['nome', 'categoria', 'custo', 'preco', 'estoqueAtual'];
-          if (keys.some(k => !allowed.includes(k))) throw Error('Campo não permitido nesta importação.');
-          for (const key of keys) {
-            if (['custo', 'preco', 'estoqueAtual'].includes(key)) {
-              changes[key] = Model.number(changes[key]);
-              if (changes[key] === null) throw Error('Uma célula vazia não pode substituir um valor existente.');
-            } else if (typeof changes[key] !== 'string' || !changes[key].trim() || changes[key].length > (key === 'nome' ? 160 : 100)) throw Error('Nome ou categoria inválidos.');
-          }
-          if (keys.includes('custo') && !window.TeamAccess.has('cost.view') || keys.includes('estoqueAtual') && !window.TeamAccess.has('inventory.adjust')) throw Error('Permissão de custo/estoque alterada.');
-          if ((p.productType === 'variable' || p.hasVariations) && keys.some(k => ['custo', 'preco', 'estoqueAtual'].includes(k))) throw Error('Produto passou a usar variações. Gere outra prévia.');
-          if (keys.includes('estoqueAtual') && current.estoqueAtual === null) throw Error('Produto não controla estoque.');
-          if (keys.some(k => current[k] !== row.before[k])) {
-            outcomes.push({ id: row.id, line: row.line, ok: false, message: 'Dados mudaram desde a prévia. Reimporte para revisar os valores atuais.' }); continue;
-          }
-          const patch = {}, timestamp = new Date().toISOString(), operationId = `spreadsheet-${crypto.randomUUID()}`;
-          for (const key of keys) {
-            if (['custo', 'preco', 'estoqueAtual'].includes(key)) Model.number(changes[key]);
-            if (key !== 'custo') patch[key] = changes[key];
-          }
-          if (keys.includes('custo')) tx.set(costRef, { id: row.id, productId: row.id, businessId: scope.businessId, custo: changes.custo,
-            ownerId: scope.uid, updatedByUid: scope.uid, schemaVersion: 1, updatedAt: serverTimestamp() }, { merge: true });
-          if (keys.includes('estoqueAtual')) {
-            patch.estoque = changes.estoqueAtual;
-            tx.set(doc(db, 'businesses', scope.businessId, 'stockMovements', operationId), {
-              id: operationId, operationId, businessId: scope.businessId, ownerId: scope.uid,
-              ...(window.TeamAccess.actor?.() || {}), produtoId: row.id, produtoNome: p.nome, tipo: 'ajuste',
-              quantidade: changes.estoqueAtual - current.estoqueAtual, estoqueAnterior: current.estoqueAtual,
-              estoqueNovo: changes.estoqueAtual, observacao: 'Importação de planilha VECONI',
-              data: timestamp, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), schemaVersion: 3,
-            });
-          }
-          tx.update(ref, { ...patch, spreadsheetImportOperationId:operationId, businessId: scope.businessId, atualizadoEm: timestamp, updatedAt: serverTimestamp(), updatedByUid: scope.uid, version: increment(1) });
-          outcomes.push({ id: row.id, line: row.line, ok: true, action:'update' });
-        }
-        return outcomes;
-      });
-      results.push(...done);
-    } catch (error) {
-      // A failed transaction commits none of this group; previously completed groups remain explicit.
-      results.push(...batch.map(row => ({ id: row.id, line: row.line, ok: false, message: error.message || 'Falha ao confirmar gravação na nuvem.' })));
-      if (!navigator.onLine || ['permission-denied', 'unavailable'].includes(error.code)) {
-        results.push(...selected.slice(offset + 5).map(row => ({ id: row.id, line: row.line, ok: false, message: 'Não processado. Verifique conexão/acesso e gere nova prévia.' })));
-        onProgress?.(results.length, creates.length + selected.length); break;
+      assertContext(scope, { ownOperations: own });
+      if (!/^[^/]{1,200}$/.test(row.id)) throw Error('ID inválido.');
+      const p = window.Produtos.obter(row.id);
+      if (!Model.inScope(p, scope)) { results.push({ id: row.id, line: row.line, ok: false, message: 'Produto removido ou fora do espaço selecionado.' }); continue; }
+      const current = Model.values(p, window.TeamAccess.has('cost.view'));
+      if (row.targetIdentity && (current.codigo !== row.targetIdentity.codigo || current.barcode !== row.targetIdentity.barcode)) {
+        results.push({ id: row.id, line: row.line, ok: false, message: 'Os identificadores mudaram desde a prévia. Reimporte para revisar.' }); continue;
       }
+      const changes = { ...row.changes }, keys = Object.keys(changes);
+      if (keys.some(k => !['nome', 'categoria', 'custo', 'preco', 'estoqueAtual', 'entrada'].includes(k))) throw Error('Campo não permitido nesta importação.');
+      for (const key of keys) {
+        if (['custo', 'preco', 'estoqueAtual', 'entrada'].includes(key)) {
+          changes[key] = Model.number(changes[key]);
+          if (changes[key] === null) throw Error('Uma célula vazia não pode substituir um valor existente.');
+        } else if (typeof changes[key] !== 'string' || !changes[key].trim() || changes[key].length > (key === 'nome' ? 160 : 100)) throw Error('Nome ou categoria inválidos.');
+      }
+      if (keys.includes('custo') && !window.TeamAccess.has('cost.view') || (keys.includes('estoqueAtual') || keys.includes('entrada')) && !window.TeamAccess.has('inventory.adjust')) throw Error('Permissão de custo/estoque alterada.');
+      if ((p.productType === 'variable' || p.hasVariations) && keys.some(k => ['custo', 'preco', 'estoqueAtual', 'entrada'].includes(k))) throw Error('Produto passou a usar variações. Gere outra prévia.');
+      if ((keys.includes('estoqueAtual') || keys.includes('entrada')) && current.estoqueAtual === null) throw Error('Produto não controla estoque.');
+      // Every previewed value must still hold; an entry tolerates sales since the preview, an adjustment does not.
+      if (Object.keys(row.before).some(k => (k !== 'estoqueAtual' || keys.includes('estoqueAtual')) && current[k] !== row.before[k])) {
+        results.push({ id: row.id, line: row.line, ok: false, message: 'Dados mudaram desde a prévia. Reimporte para revisar os valores atuais.' }); continue;
+      }
+      const catalogFields = Object.fromEntries(keys.filter(k => ['nome', 'categoria', 'custo', 'preco'].includes(k)).map(k => [k, changes[k]]));
+      if (Object.keys(catalogFields).length) track(() => window.Produtos.salvar({ ...p, ...catalogFields }));
+      if (keys.includes('entrada')) track(() => window.Produtos.entrada(row.id, changes.entrada, '', 'Entrada por planilha VECONI', scope.spaceId));
+      if (keys.includes('estoqueAtual')) track(() => window.Produtos.ajustarEstoque(row.id, changes.estoqueAtual, 'Ajuste por planilha VECONI', scope.spaceId));
+      results.push({ id: row.id, line: row.line, ok: true, action: 'update', kinds: row.kinds || [] });
+    } catch (error) {
+      results.push({ id: row.id, line: row.line, ok: false, message: error.message || 'Não foi possível registrar esta linha. Nada foi alterado nela.' });
     }
     onProgress?.(results.length, creates.length + selected.length);
   }
+  if (own.size) {
+    try { await window.SyncFirebase?.processSyncQueue?.({ force: true }); }
+    catch { /* The operations stay in the offline queue and are sent automatically. */ }
+  }
   let refreshWarning = '';
-  if (results.some(r => r.ok)) {
+  if (results.some(r => r.ok && r.action === 'create')) {
     try {
-      assertContext(scope);
+      assertContext(scope, { ownOperations: own });
       await window.SyncFirebase.pullCloudCollections({ force: true, names: ['products', 'productFinancials', 'stockMovements'] });
       window.BarcodeIndex?.invalidate?.();
       window.SyncFirebase.notifyRemoteChange(['products', 'productFinancials', 'stockMovements']);

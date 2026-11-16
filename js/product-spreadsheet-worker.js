@@ -2,17 +2,17 @@
 importScripts('../assets/xlsx-0.20.3.full.min.js');
 self.onmessage = event => {
   try {
-    const { action, table, context, bytes } = event.data;
+    const { action, table, context, bytes, baseline } = event.data;
     if (action === 'export') {
       const book = XLSX.utils.book_new(), sheet = XLSX.utils.aoa_to_sheet(table);
-      sheet['!cols'] = [38, 24, 24, 42, 24, 16, 18, 18].map(wch => ({ wch }));
+      sheet['!cols'] = [38, 24, 24, 42, 24, 16, 18, 18, 22].map(wch => ({ wch }));
       sheet['!autofilter'] = { ref: sheet['!ref'] };
-      for (let r = 1; r < table.length; r++) for (let c = 0; c < 8; c++) {
+      for (let r = 1; r < table.length; r++) for (let c = 0; c < 9; c++) {
         const cell = sheet[XLSX.utils.encode_cell({ r, c })];
-        if (cell) cell.z = c < 5 ? '@' : c === 7 ? '0.##' : '"R$" #,##0.00';
+        if (cell) cell.z = c < 5 ? '@' : c >= 7 ? '0.##' : '"R$" #,##0.00';
       }
       XLSX.utils.book_append_sheet(book, sheet, 'Produtos');
-      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['VECONI_PRODUCTS_V1', context.businessId, context.spaceId]]), 'Contexto');
+      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['VECONI_PRODUCTS_V1', context.businessId, context.spaceId], ...(Array.isArray(baseline) ? baseline.map(([id, stock]) => ['VECONI_STOCK_V1', id, stock]) : [])]), 'Contexto');
       const result = XLSX.write(book, { bookType: 'xlsx', type: 'array', compression: true });
       self.postMessage({ bytes: result }, [result]);
     } else {
@@ -22,13 +22,14 @@ self.onmessage = event => {
       const sheet = book.Sheets.Produtos || (book.SheetNames.length === 1 ? book.Sheets[book.SheetNames[0]] : null);
       if (!sheet || !sheet['!ref']) throw Error('A aba Produtos está ausente ou vazia.');
       const range = XLSX.utils.decode_range(sheet['!fullref'] || sheet['!ref']);
-      if (range.e.r > 10000 || range.e.c > 7) throw Error('Use até 10.000 linhas e as 8 colunas do modelo VECONI.');
+      if (range.e.r > 10000 || range.e.c > 8) throw Error('Use até 10.000 linhas e as colunas do modelo VECONI.');
       const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
       for (const [address, cell] of Object.entries(sheet)) if (!address.startsWith('!') && (cell.f || cell.t === 'e' || cell.t === 'b')) {
         const { r, c } = XLSX.utils.decode_cell(address); (table[r] ||= [])[c] = { invalid: true };
       }
-      const metadata = book.Sheets.Contexto ? XLSX.utils.sheet_to_json(book.Sheets.Contexto, { header: 1, raw: true })[0] : null;
-      self.postMessage({ table, context: metadata });
+      const contextRows = book.Sheets.Contexto ? XLSX.utils.sheet_to_json(book.Sheets.Contexto, { header: 1, raw: true }) : [];
+      const stock = Object.fromEntries(contextRows.filter(row => row?.[0] === 'VECONI_STOCK_V1' && typeof row[1] === 'string' && typeof row[2] === 'number').map(row => [row[1], row[2]]));
+      self.postMessage({ table, context: contextRows[0] || null, baseline: Object.keys(stock).length ? stock : null });
     }
   } catch (error) { self.postMessage({ error: error.message || 'Não foi possível ler esta planilha.' }); }
 };

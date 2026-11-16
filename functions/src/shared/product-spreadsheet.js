@@ -10,6 +10,10 @@
     ['Nome do produto', 'nome'], ['Categoria', 'categoria'], ['Custo', 'custo'],
     ['Preço de venda', 'preco'], ['Estoque atual', 'estoqueAtual'],
   ];
+  // Optional column (sheets with the 8 original columns keep working). "Entrada" ADDS
+  // received goods; "Estoque atual" is an ADJUSTMENT to an absolute quantity.
+  const optional = [['Entrada de mercadorias', 'entrada']];
+  const exportColumns = [...columns, ...optional];
   const blank = v => v === undefined || v === null || typeof v === 'string' && !v.trim();
   const text = v => String(v ?? '').trim();
   const header = v => text(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -37,20 +41,23 @@
     const allows = id => mode === 'all_spaces' || ids.includes(id);
     return scope.spaceId === 'all_spaces' ? scope.allSpaces || scope.allowedSpaceIds.some(allows) : scope.allowedSpaceIds.includes(scope.spaceId) && allows(scope.spaceId);
   }
-  function preview(table, products, scope, permissions = {}, mode = 'update') {
+  function preview(table, products, scope, permissions = {}, mode = 'update', options = {}) {
+    // Stock exported with the sheet (Contexto tab). Unchanged cells never overwrite sales made after the export.
+    const baseline = options.baseline && typeof options.baseline === 'object' ? options.baseline : null;
     if (!['update', 'create_update'].includes(mode)) throw Error('Modo de importação inválido.');
     if (!Array.isArray(table) || !table.length) throw Error('A planilha está vazia.');
     if (table.length > 10001) throw Error('Limite de 10.000 linhas por importação.');
     const aliases = {nome:'nome do produto', 'estoque inicial':'estoque atual'};
-    const headers = table[0].map(value => aliases[header(value)] || header(value)), keys = columns.map(([label]) => headers.indexOf(header(label)));
-    if (keys.some(i => i < 0) || new Set(headers).size !== headers.length || headers.length !== columns.length) throw Error('Use as 8 colunas do modelo exportado pela VECONI, sem colunas repetidas.');
+    const headers = table[0].map(value => aliases[header(value)] || header(value));
+    const present = [...columns, ...optional.filter(([label]) => headers.includes(header(label)))], keys = present.map(([label]) => headers.indexOf(header(label)));
+    if (keys.some(i => i < 0) || new Set(headers).size !== headers.length || headers.filter(h => h).length !== present.length) throw Error('Use as colunas do modelo exportado pela VECONI (8 obrigatórias e "Entrada de mercadorias" opcional), sem colunas repetidas.');
     const catalog = products.filter(p => inScope(p, scope, true)), byId = new Map(catalog.map(p => [text(p.id), p]));
     const index = field => { const map = new Map(); for (const p of catalog) { const key = text(p[field]); if (key) map.set(key, [...map.get(key) || [], p]); } return map; };
     const sku = index('codigo'), ean = index('barcode');
     const rows = [];
     for (let i = 1; i < table.length; i++) {
       if (table[i].every(blank)) continue;
-      const input = Object.fromEntries(columns.map(([, key], col) => [key, table[i][keys[col]]])), row = { line: i + 1, name: text(input.nome), status: 'invalid', changes: {}, before: {}, errors: [] };
+      const input = Object.fromEntries(present.map(([, key], col) => [key, table[i][keys[col]]])), row = { line: i + 1, name: text(input.nome), status: 'invalid', changes: {}, before: {}, errors: [] };
       rows.push(row);
       row.codes = ['codigo', 'barcode'].filter(key => !blank(input[key])).map(key => `${key}:${text(input[key])}`);
       row.identity = !blank(input.id) ? `id:${text(input.id)}` : JSON.stringify([text(input.codigo), text(input.barcode), text(input.nome)]);
@@ -80,6 +87,8 @@
           if (typeof input.nome !== 'string' || !text(input.nome) || text(input.nome).length > 160) throw Error('Nome obrigatório, com até 160 caracteres.');
           if (!blank(input.categoria) && (typeof input.categoria !== 'string' || text(input.categoria).length > 100)) throw Error('Categoria inválida.');
           const data = {nome:text(input.nome), codigo:text(input.codigo), barcode:text(input.barcode), categoria:text(input.categoria)};
+          if (blank(input.estoqueAtual) && !blank(input.entrada)) input.estoqueAtual = input.entrada;
+          else if (!blank(input.entrada) && number(input.entrada) !== 0) throw Error('Produto novo: informe a quantidade em "Estoque atual" ou em "Entrada", não nas duas.');
           for (const key of ['custo', 'preco', 'estoqueAtual']) {
             if (blank(input[key])) continue; // The canonical manual builder supplies defaults.
             data[key] = number(input[key]);
@@ -93,8 +102,17 @@
         row.id = p.id; row.name = p.nome; row.matched = true;
         row.targetIdentity = {codigo:text(p.codigo), barcode:text(p.barcode)};
         const current = values(p, permissions.cost), variable = p.productType === 'variable' || p.hasVariations;
-        for (const [, key] of columns) {
+        for (const [, key] of present) {
           if (blank(input[key]) || key === 'id') continue;
+          if (key === 'entrada') {
+            const quantity = number(input.entrada);
+            if (quantity === 0) continue;
+            if (!(quantity > 0)) throw Error('Entrada de mercadorias deve ser uma quantidade positiva.');
+            if (variable) throw Error('Dê entrada nas variações, não no total do produto.');
+            if (current.estoqueAtual === null || !permissions.stock) throw Error('Estoque sem controle ou sem permissão para entrada.');
+            if (scope.spaceId === 'all_spaces') throw Error('Selecione um espaço específico para dar entrada em mercadorias.');
+            row.changes.entrada = quantity; row.before.estoqueAtual = current.estoqueAtual; continue;
+          }
           if (input[key] && typeof input[key] === 'object') throw Error('Célula inválida ou fórmula. Use valores simples.');
           const value = ['custo', 'preco', 'estoqueAtual'].includes(key) ? number(input[key]) : text(input[key]);
           if (key === 'custo' && !permissions.cost) throw Error('Sem permissão para importar custos.');
@@ -102,6 +120,12 @@
           if (['codigo', 'barcode'].includes(key)) conflict('SKU/EAN identificam o produto. Altere códigos pelo cadastro, não pela importação.');
           if (variable && ['custo', 'preco', 'estoqueAtual'].includes(key)) throw Error('Altere custo, preço e estoque nas variações, não no total do produto.');
           if (key === 'estoqueAtual' && (current.estoqueAtual === null || !permissions.stock)) throw Error('Estoque sem controle ou sem permissão de ajuste.');
+          if (key === 'estoqueAtual' && baseline && Object.hasOwn(baseline, p.id)) {
+            const exported = number(baseline[p.id]);
+            if (value === exported) continue; // not edited: sales/entries since the export are preserved
+            if (current.estoqueAtual !== exported) conflict('O estoque mudou desde a exportação (vendas ou entradas). Use "Entrada de mercadorias" ou exporte de novo para ajustar.');
+          }
+          if (key === 'estoqueAtual' && scope.spaceId === 'all_spaces') throw Error('Selecione um espaço específico para ajustar estoque.');
           if (typeof value === 'string' && value.length > (key === 'nome' ? 160 : 100)) throw Error('Nome ou categoria excede o limite de caracteres.');
           row.changes[key] = value; row.before[key] = current[key];
         }
@@ -117,7 +141,13 @@
     const codes = new Map();
     for (const row of rows) for (const code of row.codes) codes.set(code, (codes.get(code) || 0) + 1);
     for (const row of rows) if (duplicateIds.has(row.id) || identities.get(row.identity) > 1 || row.codes.some(code => codes.get(code) > 1)) { row.status = 'invalid'; row.conflict = true; row.errors.push('Produto ou SKU/EAN repetido na planilha. Corrija todas as ocorrências.'); }
-    return { mode, rows, counts: { total: rows.length, found: rows.filter(r => r.matched).length, notFound: rows.filter(r => r.status === 'not_found').length, invalid: rows.filter(r => r.status === 'invalid').length, errors: rows.filter(r => r.status === 'invalid' && !r.conflict).length, conflicts: rows.filter(r => r.conflict).length, creates: rows.filter(r => r.status === 'create').length, updates: rows.filter(r => r.status === 'update').length, unchanged: rows.filter(r => r.status === 'unchanged').length } };
+    for (const row of rows) if (row.status === 'update') row.kinds = [
+      ...(Object.keys(row.changes).some(k => ['nome', 'categoria', 'custo', 'preco'].includes(k)) ? ['cadastro'] : []),
+      ...(Object.hasOwn(row.changes, 'entrada') ? ['entrada'] : []),
+      ...(Object.hasOwn(row.changes, 'estoqueAtual') ? ['ajuste'] : [])];
+    if (rows.some(row => Object.hasOwn(row.changes, 'entrada') && Object.hasOwn(row.changes, 'estoqueAtual')))
+      for (const row of rows) if (Object.hasOwn(row.changes, 'entrada') && Object.hasOwn(row.changes, 'estoqueAtual')) { row.status = 'invalid'; row.errors.push('Use "Entrada" ou altere "Estoque atual", não os dois na mesma linha.'); }
+    return { mode, rows, counts: { total: rows.length, entries: rows.filter(r => r.status === 'update' && r.kinds?.includes('entrada')).length, adjustments: rows.filter(r => r.status === 'update' && r.kinds?.includes('ajuste')).length, found: rows.filter(r => r.matched).length, notFound: rows.filter(r => r.status === 'not_found').length, invalid: rows.filter(r => r.status === 'invalid').length, errors: rows.filter(r => r.status === 'invalid' && !r.conflict).length, conflicts: rows.filter(r => r.conflict).length, creates: rows.filter(r => r.status === 'create').length, updates: rows.filter(r => r.status === 'update').length, unchanged: rows.filter(r => r.status === 'unchanged').length } };
   }
-  return Object.freeze({ columns, blank, number, values, inScope, preview });
+  return Object.freeze({ columns, exportColumns, optional, blank, number, values, inScope, preview });
 });
