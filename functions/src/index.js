@@ -267,7 +267,7 @@ function stoppedContractProof(businessId,subscriptionId,subscription){
     paidThrough:subscription?.currentPeriodEnd||subscription?.expiresAt,
     recordedPayment:async paymentId=>{
       const receipt=(await db.doc(`subscriptionPaymentEvents/payment_${paymentId}`).get()).data();
-      return receipt?.businessId===businessId&&receipt.subscriptionId===subscriptionId&&receipt.paymentId===paymentId&&receipt.successful===true;
+      return receipt?.businessId===businessId&&receipt.subscriptionId===subscriptionId&&receipt.paymentId===paymentId&&receipt.successful===true&&receipt.reviewRequired!==true;
     }
   };
 }
@@ -394,12 +394,18 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
     const requestedOp=operationId(request.data?.operationId,businessId,plan.id,context.uid),hash=sha(JSON.stringify({catalogVersion:2,legacyMigration:migrating,businessId,uid:context.uid,planId:plan.id,billingCycle,quoteId,couponCode,paymentMethodType:paymentMethod.id,billingPayerEmail}));
     let checkedContractId='';
     const priorContract=contractId(subscriptionBefore);
-    if(!migrating&&!claim&&priorContract&&['cancelled','canceled','expired'].includes(String(subscriptionBefore.mercadoPago?.providerStatus||subscriptionBefore.status||'').toLowerCase())){
+    const allowNewCheckout=paymentMethod.id!=='card'||newAutomaticCheckoutsEnabled();
+    const historicalContracts=!claim&&allowNewCheckout?await gate.verifyHistoricalContracts({
+      excludedId:migrating?priorContract:'',
+      verify:(id,index)=>verifyStoppedContract(mp(),id,index.expectedExternalReference,{
+        ...stoppedContractProof(businessId,id,id===priorContract?subscriptionBefore:index),historical:true,
+      }),
+    }):new Map();
+    if(!migrating&&!claim&&allowNewCheckout&&priorContract&&!historicalContracts.has(priorContract)&&['cancelled','canceled','expired'].includes(String(subscriptionBefore.mercadoPago?.providerStatus||subscriptionBefore.status||'').toLowerCase())){
       const prior=(await db.doc(`subscriptionIndex/${priorContract}`).get()).data();
       if(prior?.businessId===businessId&&await verifyStoppedContract(mp(),priorContract,prior.expectedExternalReference,stoppedContractProof(businessId,priorContract,subscriptionBefore)))checkedContractId=priorContract;
     }
-    claim=claim||await gate.claim({context,operationId:requestedOp,requestHash:hash,terms,migrating,checkedContractId,
-      allowNewCheckout:paymentMethod.id!=='card'||newAutomaticCheckoutsEnabled()});
+    claim=claim||await gate.claim({context,operationId:requestedOp,requestHash:hash,terms,migrating,checkedContractId,historicalContracts,allowNewCheckout});
     if(claim.existingAttempt)return existingCheckoutResponse(claim.existingAttempt);
     if(claim.stage==='linked')return await reconcileReservedCheckout(gate,claim,context);
     const opId=claim.operationId,requestHash=claim.requestHash,recovering=claim.stage==='dispatching';
@@ -644,14 +650,25 @@ exports.receiveWebhook=onRequest({region:REGION,memory:'256MiB',timeoutSeconds:3
       subscriptionId=String(await resolveSubscriptionIdFromPayment(db,payment)||'');paymentResult=providerPaymentResult(event.type,payment);
     }
     if(!subscriptionId){logger.info('[BILLING_WEBHOOK_SKIPPED]',{eventType:event.type,reason:'subscription-id-missing'});await eventRef.update({status:'ignored',reason:'subscription-id-missing',updatedAt:FieldValue.serverTimestamp()});res.status(200).send('ignored');return}
-    const reconciliation=await reconcileCardBillingAttempt({subscriptionId,source:'webhook',eventId:id,verifiedProvider:event.type==='subscription_preapproval'?lookup.resource:null}),result=reconciliation.result;
+    let verifiedApproval=paymentResult?.successful&&paymentResult.paymentId
+      ? { ...paymentResult, externalReference:event.type==='payment'?lookup.resource.external_reference:null } : null;
+    if(verifiedApproval&&event.type==='subscription_authorized_payment'&&!verifiedApproval.dateApproved){
+      const exact=await mp().getPayment(verifiedApproval.paymentId);
+      verifiedApproval=String(exact.id)===verifiedApproval.paymentId&&exact.status==='approved'
+        ? {...verifiedApproval,dateApproved:exact.date_approved||null,externalReference:exact.external_reference||null} : null;
+    }
+    const store=providerStore();
+    let historicalReview=verifiedApproval?await store.reviewClosedContractApproval(subscriptionId,verifiedApproval):null;
+    const result=historicalReview||(await reconcileCardBillingAttempt({subscriptionId,source:'webhook',eventId:id,verifiedProvider:event.type==='subscription_preapproval'?lookup.resource:null})).result;
+    if(!historicalReview&&result.closedCheckout&&verifiedApproval)historicalReview=await store.reviewClosedContractApproval(subscriptionId,verifiedApproval);
     if(paymentResult){
       if(paymentResult.successful)logger.info('[Billing] payment_approved',{businessId:result.businessId,subscriptionId,paymentId:paymentResult.paymentId||null});
     }
-    if(result.subscription.status==='active')logger.info('[Billing] subscription_activated',{businessId:result.businessId,subscriptionId,paymentMethodType:result.subscription.paymentMethodType||'card'});
+    if(historicalReview?.requiresReview)logger.warn('[BILLING_LATE_APPROVAL_REVIEW]',{businessId:result.businessId,subscriptionId,paymentId:verifiedApproval.paymentId});
+    if(!result.closedCheckout&&result.subscription.status==='active')logger.info('[Billing] subscription_activated',{businessId:result.businessId,subscriptionId,paymentMethodType:result.subscription.paymentMethodType||'card'});
     if(['cancelled','canceled','expired'].includes(result.subscription.status))logger.info('[Billing] checkout_cancelled',{businessId:result.businessId,subscriptionId,status:result.subscription.status});
     await eventRef.update({status:'processed',businessId:result.businessId,subscriptionStatus:result.subscription.status,paymentStatus:paymentResult?.status||null,paymentSuccessful:paymentResult?.successful??null,processedAt:FieldValue.serverTimestamp(),leaseUntil:FieldValue.delete(),updatedAt:FieldValue.serverTimestamp()});
-    await finishLegacyMigration(result);
+    if(!result.closedCheckout)await finishLegacyMigration(result);
     logger.info('[Webhook] processed',{type:event.type,businessId:result.businessId,status:result.subscription.status});res.status(200).send('ok');
   }catch(error){
     logger.error('[Webhook] failed',{eventId:id,type:event.type,stage,signatureValid:true,httpStatus:500,code:error?.code||'unknown',...providerErrorDiagnostics(error)});

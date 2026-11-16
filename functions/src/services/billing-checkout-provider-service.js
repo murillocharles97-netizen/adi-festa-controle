@@ -8,6 +8,38 @@ const state = value => String(value || '').toLowerCase();
 const unresolved = () => stopped('O Mercado Pago ainda não confirmou o resultado da contratação. Confira esta tentativa antes de pagar novamente.');
 const terminated = new Set(['cancelled', 'canceled', 'expired']);
 const noDebit = new Set(['cancelled', 'canceled', 'expired', 'rejected', 'failed']);
+// Mercado Pago documents a ten-day default retry window, which can be adjusted
+// by the invoice due date. Require a full month past every observed retry date.
+const HISTORICAL_RETRY_AGE_MS = 31 * 86400_000;
+
+function historicalRetry(invoice, cutoff) {
+  const dates = [invoice.debit_date, invoice.last_modified];
+  for (const key of ['next_retry_date', 'expiration_date', 'date_of_expiration', 'due_date'])
+    if (invoice[key]) dates.push(invoice[key]);
+  return ['recycling', 'cancelled', 'canceled'].includes(state(invoice.status))
+    && dates.every(value => Date.parse(value) < cutoff);
+}
+
+async function verifyPaymentReferences(mp, externalReference, verified) {
+  const seen = new Set();
+  let total;
+  for (let offset = 0; offset < 100; offset += 50) {
+    const { paging, results } = await mp.searchPaymentsByExternalReference(externalReference, { limit: 50, offset });
+    const count = Number(paging?.total);
+    if (!Array.isArray(results) || !Number.isInteger(count) || count < 0 || count > 100
+      || Number(paging?.offset) !== offset || Number(paging?.limit) !== 50
+      || total != null && count !== total || results.length !== Math.min(50, count - offset)) return false;
+    total = count;
+    for (const payment of results) {
+      const key = String(payment.id || '');
+      if (!id(key) || seen.has(key) || payment.external_reference !== externalReference
+        || verified.get(key) !== state(payment.status)) return false;
+      seen.add(key);
+    }
+    if (seen.size === total) return seen.size === verified.size;
+  }
+  return false;
+}
 
 async function recoverCheckoutProvider(mp, claim) {
   const { paymentMethodType, billingPayerEmail } = claim.terms;
@@ -59,13 +91,16 @@ function validateCheckoutProvider(provider, terms, dispatchTerms) {
     || recurring.frequency_type !== dispatchTerms.billing.frequencyType) throw unresolved();
 }
 
-async function verifyStoppedContract(mp, subscriptionId, expectedExternalReference, { paidThrough, recordedPayment } = {}) {
+async function verifyStoppedContract(mp, subscriptionId, expectedExternalReference, { paidThrough, recordedPayment, historical = false } = {}) {
   const verified = contract => String(contract?.id) === subscriptionId && Boolean(expectedExternalReference)
     && contract.external_reference === expectedExternalReference && terminated.has(state(contract.status));
   const contract = await mp.getSubscription(subscriptionId);
-  if (!verified(contract)) return false;
+  if (!verified(contract) || historical && !Number.isFinite(Date.parse(contract.last_modified))) return false;
+  const cutoff = Date.now() - HISTORICAL_RETRY_AGE_MS;
+  const cancelled = historical && ['cancelled', 'canceled'].includes(state(contract.status));
   let total;
   const seen = new Set();
+  const payments = new Map();
   for (let offset = 0; offset < 100; offset += 10) {
     const page = await mp.searchAuthorizedPayments(subscriptionId, { limit: 10, offset });
     const size = Number(page.paging?.total);
@@ -74,13 +109,24 @@ async function verifyStoppedContract(mp, subscriptionId, expectedExternalReferen
       || total != null && total !== size || page.results.length !== Math.min(10, size - offset)) return false;
     total = size;
     for (const invoice of page.results) {
-      if (!id(invoice.id) || seen.has(String(invoice.id)) || String(invoice.preapproval_id) !== subscriptionId
-        || !['processed', 'cancelled', 'canceled'].includes(state(invoice.status)) || invoice.next_retry_date) return false;
+      if (!id(invoice.id) || seen.has(String(invoice.id)) || String(invoice.preapproval_id) !== subscriptionId) return false;
+      const residual = state(invoice.status) === 'recycling' || Boolean(invoice.next_retry_date);
+      if (residual) {
+        if (!cancelled || !historicalRetry(invoice, cutoff) || !id(invoice.payment?.id)) return false;
+        const exact = await mp.getAuthorizedPayment(String(invoice.id));
+        if (String(exact.id) !== String(invoice.id) || String(exact.preapproval_id) !== subscriptionId
+          || exact.status !== invoice.status || exact.last_modified !== invoice.last_modified
+          || String(exact.payment?.id) !== String(invoice.payment.id) || !historicalRetry(exact, cutoff)) return false;
+      } else if (!['processed', 'cancelled', 'canceled'].includes(state(invoice.status))) return false;
       seen.add(String(invoice.id));
       if (invoice.payment?.id) {
         const payment = await mp.getPayment(String(invoice.payment.id));
         if (String(payment?.id) !== String(invoice.payment.id) || !noDebit.has(state(payment.status)) && state(payment.status) !== 'approved')
           return false;
+        if (historical && (payment.external_reference !== expectedExternalReference || payments.has(String(payment.id)))) return false;
+        if (residual && (state(payment.status) !== 'rejected' || payment.date_approved
+          || !(Date.parse(payment.date_last_updated) < cutoff))) return false;
+        payments.set(String(payment.id), state(payment.status));
         if (state(payment.status) === 'approved') {
           const approvedAt = Date.parse(payment.date_approved || '');
           const paidUntil = Date.parse(paidThrough || '');
@@ -91,6 +137,7 @@ async function verifyStoppedContract(mp, subscriptionId, expectedExternalReferen
     }
     if (seen.size === total) break;
   }
+  if (historical && !await verifyPaymentReferences(mp, expectedExternalReference, payments)) return false;
   const latest = await mp.getSubscription(subscriptionId);
   return verified(latest) && latest.last_modified === contract.last_modified;
 }

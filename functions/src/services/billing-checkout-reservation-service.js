@@ -26,6 +26,8 @@ const scope = s => JSON.stringify([
 const contractId = s => String(s.mercadoPago?.subscriptionId || s.mercadoPago?.preapprovalId || '');
 const noResource = row => row.creationOutcome === 'rejected_before_creation';
 const operation = row => row.operationId || row.internalSubscriptionId;
+const validOperation = op => /^[a-zA-Z0-9_-]{16,100}$/.test(op || '');
+const closedContract = (proof, providerId) => proof?.outcome === 'provider_closed' && proof.providerId === providerId;
 const ownerAccess = (account, user, membership, businessId) => account?.active === true && Boolean(user) &&
   (membership ? membership.status === 'active' && membership.role === 'owner' :
     account.legacyAccessDisabled !== true && user.active === true && user.role === 'owner' && user.businessId === businessId);
@@ -35,8 +37,27 @@ function billingCheckoutReservation(db, businessId) {
   const businessRef = db.doc(`businesses/${businessId}`);
   const attempts = businessRef.collection('billingCheckoutAttempts');
   const retired = businessRef.collection('billingCheckoutClosures');
+  const contractsQuery = db.collection('subscriptionIndex').where('businessId', '==', businessId).limit(101);
 
-  async function claim({ context, operationId, requestHash, terms, migrating, resumeOnly = false, checkedContractId = '', allowNewCheckout = true }) {
+  async function verifyHistoricalContracts({ excludedId, verify }) {
+    const lock = (await ref.get()).data();
+    if (lock && lock.stage !== 'closed') return new Map();
+    const contracts = await contractsQuery.get();
+    if (contracts.size >= 101) return new Map();
+    const candidates = await Promise.all(contracts.docs.map(async doc => {
+      const row = doc.data(), op = operation(row);
+      if (doc.id === excludedId || row.status === 'payment_review_required'
+        || !row.expectedExternalReference || !validOperation(op) || row.internalSubscriptionId !== op) return null;
+      return closedContract((await retired.doc(op).get()).data(), doc.id) ? null : doc;
+    }));
+    const pending = candidates.filter(Boolean);
+    if (pending.length > 10) return new Map();
+    const results = await Promise.allSettled(pending.map(doc => verify(doc.id, doc.data())));
+    const verified = pending.filter((_, i) => results[i].status === 'fulfilled' && results[i].value === true);
+    return new Map(verified.map(doc => [doc.id, doc.updateTime]));
+  }
+
+  async function claim({ context, operationId, requestHash, terms, migrating, resumeOnly = false, checkedContractId = '', historicalContracts = new Map(), allowNewCheckout = true }) {
     return db.runTransaction(async tx => {
       const [lock, business, profile, member] = await Promise.all([
         tx.get(ref), tx.get(businessRef), tx.get(db.doc(`users/${context.uid}`)),
@@ -65,8 +86,6 @@ function billingCheckoutReservation(db, businessId) {
       if (!allowNewCheckout)
         throw stopped('Novas contratações com cartão automático estão indisponíveis. Escolha Pix ou cartão mensal.', 'automatic_checkout_unavailable');
       if (scope(subscription) !== scope(context.business.subscription || {})) throw wait();
-      if (!migrating && contractId(subscription) && contractId(subscription) !== checkedContractId)
-        throw stopped('Já existe uma recorrência. Confira ou encerre o contrato no Mercado Pago antes de contratar outro.', 'recurring_contract_exists');
       const periodEnd = Date.parse(subscription.currentPeriodEnd || subscription.expiresAt || '');
       if (!migrating && subscription.hasPaidSubscription && (!Number.isFinite(periodEnd) || periodEnd > Date.now()))
         throw stopped('O período pago ainda está vigente. Consulte a assinatura antes de iniciar outra cobrança.', 'paid_period_active');
@@ -74,7 +93,7 @@ function billingCheckoutReservation(db, businessId) {
       const [oldAttempts, orders, contracts] = await Promise.all([
         tx.get(attempts.where('status', 'in', BLOCKING_ATTEMPTS).limit(101)),
         tx.get(db.collection('billingOrderIndex').where('businessId', '==', businessId).limit(101)),
-        tx.get(db.collection('subscriptionIndex').where('businessId', '==', businessId).limit(101)),
+        tx.get(contractsQuery),
       ]);
       if ([oldAttempts, orders, contracts].some(rows => rows.size >= 101))
         throw stopped('Há tentativas anteriores que precisam de conferência.');
@@ -83,21 +102,37 @@ function billingCheckoutReservation(db, businessId) {
         row.id !== prepared && !noResource(row) && !row.reservationGeneration);
       const historicalProofs = await Promise.all(oldUnverified.map(row =>
         /^[a-f0-9]{64}$/.test(row.reservationRecoveryId || '') ? tx.get(db.doc(`billingMigrationReservationHistory/${row.reservationRecoveryId}`)) : null));
+      const suspectOrder = orders.docs.some(doc => BLOCKING_INDEXES.includes(doc.data().status));
+      const otherContracts = contracts.docs.filter(doc => !(migrating && doc.id === contractId(subscription)));
+      const contractProofs = await Promise.all(otherContracts.map(doc => {
+        const op = operation(doc.data());
+        return validOperation(op) ? tx.get(retired.doc(op)) : null;
+      }));
+      const newClosures = [], closedAttempts = new Map();
+      const suspectContract = otherContracts.some((doc, i) => {
+        const row = doc.data(), op = operation(row), proof = contractProofs[i]?.data();
+        if (row.status === 'payment_review_required') return true;
+        if (closedContract(proof, doc.id)) {
+          if (proof.historicalContract === true) closedAttempts.set(op, doc.id);
+          return false;
+        }
+        if (!proof && historicalContracts.get(doc.id)?.isEqual(doc.updateTime)) {
+          newClosures.push({ op, providerId: doc.id, indexVersion: doc.updateTime });
+          closedAttempts.set(op, doc.id);
+          return false;
+        }
+        return doc.id !== checkedContractId;
+      });
       const suspect = oldUnverified.some((row, i) => {
+        if (row.businessId === businessId && row.subscriptionId && closedAttempts.get(row.id) === row.subscriptionId) return false;
         const proof = historicalProofs[i]?.data();
         return proof?.closed !== true || proof?.businessId !== businessId || proof?.operationId !== row.id
           || proof?.requestHash !== row.requestHash;
       });
-      const suspectOrder = orders.docs.some(doc => BLOCKING_INDEXES.includes(doc.data().status));
-      const otherContracts = contracts.docs.filter(doc => doc.id !== checkedContractId && !(migrating && doc.id === contractId(subscription)));
-      const contractProofs = await Promise.all(otherContracts.map(doc => {
-        const op = operation(doc.data());
-        return /^[a-zA-Z0-9_-]{16,100}$/.test(op || '') ? tx.get(retired.doc(op)) : null;
-      }));
-      const suspectContract = otherContracts.some((doc, i) => {
-        const proof = contractProofs[i]?.data(), status = doc.data().status;
-        return status === 'payment_review_required' || proof?.outcome !== 'provider_closed' || proof.providerId !== doc.id;
-      });
+      const closedProviderIds = [...closedAttempts.values()];
+      const currentContract = contractId(subscription);
+      if (!migrating && currentContract && currentContract !== checkedContractId && !closedProviderIds.includes(currentContract))
+        throw stopped('Já existe uma recorrência. Confira ou encerre o contrato no Mercado Pago antes de contratar outro.', 'recurring_contract_exists');
       if (suspect || suspectOrder || suspectContract || (subscription.pendingCheckoutAttemptId && subscription.pendingCheckoutAttemptId !== current?.operationId))
         throw stopped('Uma cobrança anterior precisa ser conferida antes de iniciar outra.');
 
@@ -105,9 +140,13 @@ function billingCheckoutReservation(db, businessId) {
       const state = {
         businessId, operationId, requestHash, requestedBy: context.uid, terms, generation,
         stage: 'preparing', preparationUntil: Date.now() + PREPARATION_LEASE_MS, subscriptionScope: scope(subscription),
+        ...(closedProviderIds.length ? { closedProviderIds } : {}),
       };
       if (prepared && prepared !== operationId)
         tx.set(attempts.doc(prepared), { status: 'failed', creationOutcome: 'rejected_before_creation', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      for (const { op, providerId, indexVersion } of newClosures)
+        tx.create(retired.doc(op), { businessId, operationId: op, providerId, outcome: 'provider_closed',
+          historicalContract: true, indexVersion, verifiedAt: FieldValue.serverTimestamp() });
       tx.set(ref, { ...state, updatedAt: FieldValue.serverTimestamp() });
       tx.set(attemptRef, {
         businessId, operationId, requestHash, requestedBy: context.uid, planId: terms.planId,
@@ -131,6 +170,11 @@ function billingCheckoutReservation(db, businessId) {
         throw new HttpsError('permission-denied', 'O acesso à cobrança mudou durante a contratação.');
       if (row?.generation !== claim.generation || row.stage !== 'preparing' || row.preparationUntil <= Date.now()
         || scope(business.data()?.subscription || {}) !== claim.subscriptionScope) throw wait();
+      if (row.closedProviderIds?.length) {
+        const contracts = await tx.getAll(...row.closedProviderIds.map(id => db.doc(`subscriptionIndex/${id}`)));
+        if (contracts.some(doc => doc.data()?.businessId !== businessId || doc.data().status === 'payment_review_required'))
+          throw stopped('Uma cobrança anterior precisa ser conferida antes de iniciar outra.');
+      }
       tx.update(ref, { stage: 'dispatching', dispatchTerms, dispatchedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     });
   }
@@ -222,7 +266,7 @@ function billingCheckoutReservation(db, businessId) {
     });
   }
 
-  return { claim, dispatch, link, close };
+  return { verifyHistoricalContracts, claim, dispatch, link, close };
 }
 
 module.exports = { billingCheckoutReservation, providerKey, contractId, stopped, wait };

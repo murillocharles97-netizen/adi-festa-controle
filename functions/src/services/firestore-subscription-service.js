@@ -405,6 +405,44 @@ function firestoreSubscriptionService(db) {
       };
     });
   }
+  async function reviewClosedContractApproval(subscriptionId, payment) {
+    const indexRef = db.doc(`subscriptionIndex/${subscriptionId}`);
+    const marker = db.doc(`subscriptionPaymentEvents/payment_${payment.paymentId}`);
+    const reviewRef = db.doc(`subscriptionPaymentEvents/review_${payment.paymentId}`);
+    return db.runTransaction(async transaction => {
+      const index = (await transaction.get(indexRef)).data();
+      if (!index?.businessId) return null;
+      if (payment.externalReference && payment.externalReference !== index.expectedExternalReference) return null;
+      const businessRef = db.doc(`businesses/${index.businessId}`);
+      const [closure, receipt, recordedReview, business] = await Promise.all([
+        index.internalSubscriptionId ? transaction.get(businessRef.collection('billingCheckoutClosures').doc(index.internalSubscriptionId)) : null,
+        transaction.get(marker), transaction.get(reviewRef), transaction.get(businessRef),
+      ]);
+      if (closure?.data()?.outcome !== 'provider_closed' || closure.data().providerId !== subscriptionId) {
+        if (Number(index.catalogVersion || 1) >= 2) return null;
+        const migration = (await transaction.get(db.doc(`legacyPlanTransitions/${index.businessId}`))).data();
+        const paidThrough = Date.parse(migration?.paidThrough || ''), approvedAt = Date.parse(payment.dateApproved || '');
+        if (migration?.subscriptionId !== subscriptionId || !Number.isFinite(paidThrough) || !(approvedAt >= paidThrough)) return null;
+      }
+      const previous = receipt.data();
+      if (previous && (previous.businessId !== index.businessId || previous.subscriptionId !== subscriptionId
+        || previous.paymentId !== payment.paymentId)) throw Object.assign(Error('Comprovante vinculado a outra assinatura.'), { code: 'payment-receipt-conflict' });
+      if (recordedReview.exists && (recordedReview.data().businessId !== index.businessId
+        || recordedReview.data().subscriptionId !== subscriptionId))
+        throw Object.assign(Error('Revisão vinculada a outra assinatura.'), { code: 'payment-receipt-conflict' });
+      if (!previous?.successful && !recordedReview.exists) {
+        const review = { status: 'payment_review_required', reviewReason: 'closed_contract_approved', updatedAt: nowIso() };
+        transaction.set(indexRef, review, { merge: true });
+        if (index.internalSubscriptionId)
+          transaction.set(businessRef.collection('billingCheckoutAttempts').doc(index.internalSubscriptionId), review, { merge: true });
+        transaction.create(reviewRef, { businessId: index.businessId, subscriptionId, paymentId: payment.paymentId,
+          successful: true, status: 'approved', reviewRequired: true, dateApproved: payment.dateApproved || null,
+          createdAt: FieldValue.serverTimestamp() });
+      }
+      return { businessId: index.businessId, subscription: business.data()?.subscription || {},
+        closedCheckout: true, requiresReview: recordedReview.exists || !previous?.successful };
+    });
+  }
   async function recordPaymentEvent(subscriptionId,eventId,result={}){
     const markerRef=db.doc(`subscriptionPaymentEvents/${eventId}`),indexRef=db.doc(`subscriptionIndex/${subscriptionId}`);
     return db.runTransaction(async transaction=>{
@@ -471,6 +509,7 @@ function firestoreSubscriptionService(db) {
     resolveIndex,
     bindSubscriptionFromPlan,
     applyProviderSubscription,
+    reviewClosedContractApproval,
     recordPaymentEvent,
     recordDiscountPayment,
     completeDiscountRestoration,
