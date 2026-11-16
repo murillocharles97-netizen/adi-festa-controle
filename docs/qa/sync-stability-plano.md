@@ -13,7 +13,7 @@
 | `firebase functions:list` | 101 Functions publicadas. Todas as do repositório existem; 4 existem só em produção (`completeGoogleAccountAccess`, `prepareGoogleAccountAccess`, `getDailySalesPerformance`, `reviewFiadoOriginEvidence`). |
 | `firebase functions:log` | Devolve no máximo ~15 linhas por consulta, sem filtro de data. Só aparecem inícios de instância e "auth VALID / app MISSING" (App Check não usado). **Nenhuma recusa aparece.** |
 | Cloud Logging (30 dias) | **Não lido.** O `gcloud` não está instalado e o Console pediu login no navegador da sessão. Precisa da sua entrada; veja 1.4. |
-| Pacote publicado da `commitOperationalSync` (`VECONI-commitOperationalSync-pkg`, revisão 00017) | Comparado arquivo a arquivo com o repositório (`scripts/functions-source-diff.cjs`). |
+| Pacote publicado da `commitOperationalSync` (`VECONI-commitOperationalSync-pkg`) | Comparado arquivo a arquivo com o repositório (`scripts/functions-source-diff.cjs`). **Correção (rodada 6):** a revisão ativa é a **`00019-xol`**, não a 00017; veja 1.5. |
 
 ### 1.2 Incidente de produção confirmado: código publicado ≠ repositório
 A `commitOperationalSync` ao vivo **não contém o servidor da V231/V231.1**:
@@ -23,6 +23,46 @@ A `commitOperationalSync` ao vivo **não contém o servidor da V231/V231.1**:
 - o repositório não conhece 1 recusa do publicado: "Movimento de outra venda.".
 
 **Consequência:** o app V231.1 publicado conversa com um servidor anterior. Os fluxos de recuperação de recebimento da V231 dependem desse servidor e não estão ativos em produção. Isto é um **fato de publicação**, verificável sem logs. Não é uma suposição.
+
+### 1.5 Correção: revisão ativa e origem do pacote (rodada 6)
+- **Revisão ativa:** `commitoperationalsync-00019-xol`.
+  - Fonte enviada em 15/11 às 19:23:30 UTC (`storageSource.generation` de `functions:list --json`).
+  - `DEPLOYMENT_ROLLOUT` às 19:24.
+  - Depois disso, **todas** as requisições nos logs são da 00019, e nenhuma da 00018. Isso é compatível com os 100% de tráfego que o Codex confirmou.
+  - A configuração de tráfego do Cloud Run não foi lida: exige a API do Cloud Run e login.
+- **Linha do tempo das revisões, pelos logs de auditoria `UpdateFunction`:**
+  - 00010–00013: 10–11/11;
+  - 00014–00016: 12/11;
+  - **00017:** 15/11 às 06:48 UTC;
+  - **00018:** 15/11 às 10:15 UTC;
+  - **00019:** 15/11 às 19:23 UTC.
+- **Origem do código:** o hash que o Firebase CLI grava na Function (`firebase-functions-hash = 1ec0e910…`) é **reproduzido exatamente** pelo conteúdo atual de `VECONI-commitOperationalSync-pkg/functions` (`scripts/functions-deploy-hash.cjs`).
+  - Os arquivos desse pacote não mudam desde 15/11 às 06:24 UTC (última alteração: `operational-engagement-validation.js`).
+  - Portanto 00017, 00018 e 00019 publicaram o **mesmo código**. O pacote de rollback (00016) e o repositório (`557e365`) **não** reproduzem esse hash.
+- **Efeito nas conclusões:**
+  - O número da revisão citado antes estava errado (00017 → 00019).
+  - O código comparado era o publicado: as conclusões de 1.2 e 1.3 se mantêm.
+- **Para publicações futuras:**
+  - Nenhum pacote local é base de publicação por si só.
+  - A base precisa reproduzir o hash da revisão ativa naquele momento, com a verificação pré-deploy da Fase 3. Só então recebe as mudanças revisadas.
+
+### 1.6 Logs de produção lidos (rodada 6)
+- `firebase functions:log --json` devolve até 999 entradas por consulta. Isso cobre de 09/11 a 15/11 para a `commitOperationalSync`; 30 dias completos exigem o Logs Explorer.
+- **Correção da rodada anterior:** as recusas **aparecem** no log de requisição, como código HTTP:
+  - 403 = `permission-denied`;
+  - 400 = `failed-precondition`/`invalid-argument`;
+  - 401 = `unauthenticated`.
+- **Resultado em 7 dias, por origem:**
+
+| Origem | 200 | 400 | 401 | 403 | 5xx |
+|---|---|---|---|---|---|
+| Aparelhos (Android e desktop) | 236 | 0 | 0 | **4** (12–13/11, revisão 00016) | 0 |
+| Scripts `node` (testes de publicação) | 32 | 27 | 5 | 0 | 0 |
+
+- Latência p50 0,24 s, p95 1,8 s, máxima 2,8 s, **sem timeouts**.
+- **Leitura:**
+  - A instabilidade relatada **não aparece como recusa no servidor**: há só 4 recusas de aparelho em 7 dias.
+  - Falhas de comunicação (D3) não chegam ao servidor e, por isso, não aparecem nos logs. Isso reforça o D3 como causa principal.
 
 ### 1.3 Defeitos de código × incidentes registrados
 | Item | Tipo | Evidência |
@@ -34,7 +74,7 @@ A `commitOperationalSync` ao vivo **não contém o servidor da V231/V231.1**:
 | D1: `engagement-domain.js` defasado | Defeito de código (área do Codex) | Rodada anterior. |
 | D2: origem do estoque | Corrigido em branch | Rodada anterior. |
 | Divergência publicado × repositório | **Incidente de publicação confirmado** | Seção 1.2. |
-| Recusas de vendas, retenções financeiras e funcionários em produção | **Não medidos** | As Functions `onCall` não registram recusas `HttpsError` como erro, e os logs de 30 dias não foram lidos. A fonte fiel é o diagnóstico exportado dos aparelhos. |
+| Recusas de vendas, retenções financeiras e funcionários em produção | Medidas em 7 dias (1.6) | 4 recusas 403 vindas de aparelhos. A causa de cada uma (motivo) só fica visível depois da Fase 1 publicada. |
 
 ### 1.4 Para completar a parte de logs
 1. Entre na conta Google do projeto no navegador da sessão (Cloud Console). Eu leio o Logs Explorer **somente leitura**, com estes filtros:
