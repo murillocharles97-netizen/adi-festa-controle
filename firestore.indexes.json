@@ -1,6 +1,11 @@
 {
   "indexes": [
     {
+      "collectionGroup": "deliveries",
+      "queryScope": "COLLECTION",
+      "fields": [{"fieldPath":"outlet.id","order":"ASCENDING"},{"fieldPath":"deliveredOn","order":"DESCENDING"}]
+    },
+    {
       "collectionGroup": "activityEvents",
       "queryScope": "COLLECTION",
       "fields": [{"fieldPath":"spaceId","order":"ASCENDING"},{"fieldPath":"type","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]

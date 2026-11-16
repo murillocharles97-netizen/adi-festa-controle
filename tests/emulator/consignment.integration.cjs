@@ -14,7 +14,7 @@ const app = initializeApp({ projectId: 'demo-veconi-consignment' });
 const db = getFirestore(app);
 const date = new Date('2026-11-16T15:00:00Z');
 const service = consignmentService(db, () => date);
-const logo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf9sAAAAASUVORK5CYII=';
+const logo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAUklEQVR4nGPgjA1FQy///ySIMHUxjBo0oAbhMhS/ylGDBo9BcOMIqiFsEPW9ht8sfAYRmaYJGERS/sBpEDXzGnVcRM0womasoZmFXxkdUzaRCADpFvYtFolYxwAAAABJRU5ErkJggg==';
 test.after(() => deleteApp(app));
 
 async function fixture() {
@@ -29,7 +29,11 @@ async function fixture() {
     batch.create(db.doc('users/' + id), { businessId, active: true, uid: id });
     batch.create(root.collection('members').doc(id), { role, status: 'active' });
   }
-  for (const id of s) batch.create(db.doc('financialSpaces/' + id), { businessId, active: true, capabilities: { sales: true } });
+  for (const id of s) {
+    const ref = db.doc('financialSpaces/' + id);
+    batch.create(ref, { businessId, active: true, type:'business', ownerUid:uid, capabilities: { sales: true, finance:true } });
+    batch.create(ref.collection('financialAccounts').doc('cash-test'), {ownerUid:uid, active:true, name:'Conta de teste', currentBalanceCents:1000});
+  }
   batch.create(root.collection('onlineStores').doc(storeId(spaceId)), {
     ...scope, spaceId, catalogSettings: { logoUrl: logo },
   });
@@ -50,7 +54,7 @@ async function fixture() {
 async function enabled() {
   const f = await fixture();
   await f.call('enable');
-  const { id } = await f.call('outlet', { name: 'Ponto Centro', contact: 'Pessoa QA', address: 'Rua Exemplo', operationId: randomUUID() });
+  const { id } = await f.call('outlet', { name: 'Ponto Centro', contact: 'Pessoa QA', address: 'Rua Exemplo', commissionBps:2000, operationId: randomUUID() });
   return { ...f, outletId: id };
 }
 
@@ -160,6 +164,7 @@ async function previewServer(f, port = 0) {
       window.SpaceEngine={productAllowsSpace:(row,id)=>row.allowedSpaceIds.includes(id)};
       window.DB={readForView:()=>({produtos:${JSON.stringify(products)},variacoesProdutos:${JSON.stringify(variants)}})};
       window.SyncFirebase={getFirebaseDiagnostic:()=>({pending:0,syncErrors:0})};
+      window.FinancialSpaceService={listFinancialAccounts:async()=>[{id:'cash-test',name:'Conta de teste',accountHomeSpaceId:${JSON.stringify(f.spaceId)}}]};
       window.FirebaseCallable=async(name,input)=>{
         const response=await fetch('/qa-consignments',{method:'POST',body:JSON.stringify(input)});
         const result=await response.json();
@@ -220,12 +225,16 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   await page.click('[data-tab="outlets"]');
   await page.waitForSelector('[data-outlet-form]');
   await page.type('[name="name"]','Parceiro Demonstrativo');
+  await page.$eval('[name="commission"]', input => { input.value = '20'; });
   await page.click('[data-outlet-form] button[type=submit]');
   try { await page.waitForFunction(() => document.body.innerText.includes('Ponto de venda cadastrado'),{timeout:5500}); }
   catch (error) { assert.fail(JSON.stringify({message:error.message, browserErrors, app:await page.$eval('#app',el=>el.textContent)})); }
-  await page.click('[data-tab="delivery"]');
+  await page.click('[data-tab="home"]');
+  await page.waitForSelector('[data-new-delivery]');
+  const output = process.env.VECONI_CONSIGNMENT_QA_OUTPUT;
+  if (output) await page.screenshot({path:require('node:path').join(output,'consignados-mobile.png'),fullPage:true});
+  await page.click('[data-new-delivery]');
   await page.waitForSelector('[data-delivery-form]');
-  await page.select('[name="outletId"]',(await f.call('dashboard')).outlets[0].id);
   await page.$eval('[name="deliveredOn"]', input => { input.value = '2026-11-10'; input.dispatchEvent(new Event('input',{bubbles:true})); });
   await page.type('[data-product-search]','AZL');
   await page.waitForSelector('[data-add="azul"]');
@@ -250,8 +259,7 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   const bytes = Buffer.from(pdf,'base64');
   assert.equal(bytes.subarray(0,4).toString(),'%PDF');
   assert.match(bytes.toString('latin1'), /\/Subtype \/Image/);
-  const output = process.env.VECONI_CONSIGNMENT_QA_OUTPUT;
-  if (output) await fs.writeFile(require('node:path').join(output,'consignado-exemplo.pdf'),bytes);
+  if (output) await fs.writeFile(require('node:path').join(output,'consignado-estoque.pdf'),bytes);
   const shared = await page.evaluate(async () => {
     Object.defineProperties(navigator,{
       share:{configurable:true,value:async ({files})=>{window.qaShare=files[0].type;}},
@@ -271,12 +279,118 @@ test('browser confirms delivery, recovers lost response and builds branded PDF o
   assert.match(await desktop.$eval('#app',x=>x.textContent), /10\/11\/2026/);
   await desktop.click('[data-receipt]');
   await desktop.waitForSelector('[data-prepare-pdf]');
+  await desktop.click('[data-tab="home"]');
+  await desktop.waitForSelector('[data-count]');
+  await desktop.click('[data-count]');
+  await desktop.waitForSelector('[data-count-field="found"]');
+  await desktop.type('[data-count-field="found"]','1');
+  assert.match(await desktop.$eval('[data-count-result]',node=>node.textContent),/1 un/);
+  await desktop.click('[data-review-count] button[type=submit]');
+  await desktop.waitForSelector('[data-confirm-count]');
+  if (output) await desktop.screenshot({path:require('node:path').join(output,'consignados-conferencia.png'),fullPage:true});
+  await desktop.click('[data-confirm-count] button[type=submit]');
+  await desktop.waitForSelector('[data-prepare-pdf="conference"]');
+  await desktop.click('[data-prepare-pdf="conference"]');
+  await desktop.waitForSelector('[data-download]');
+  const report = await desktop.evaluate(async () => {
+    window.ConsignmentPdf.download = file => { window.qaPdf = file; };
+    document.querySelector('[data-download]').click();
+    return btoa(String.fromCharCode(...new Uint8Array(await window.qaPdf.arrayBuffer())));
+  });
+  const reportBytes = Buffer.from(report,'base64');
+  assert.equal(reportBytes.subarray(0,4).toString(),'%PDF');
+  assert.match(reportBytes.toString('latin1'), /\/Subtype \/Image/);
+  if (output) await fs.writeFile(require('node:path').join(output,'consignado-conferencia.pdf'),reportBytes);
+  await desktop.click('[data-start-settlement]');
+  await desktop.waitForSelector('[data-confirm-settlement]');
+  await desktop.select('[data-confirm-settlement] [name=account]','0');
+  await desktop.click('[data-confirm-settlement] button[type=submit]');
+  await desktop.waitForFunction(() => document.querySelector('[data-consignment-content] h3')?.textContent.startsWith('Acerto'));
   assert.equal(await desktop.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
 });
 
 test('preview local', {skip: !process.env.VECONI_CONSIGNMENT_PREVIEW}, async () => {
-  const f = await fixture();
-  const { url } = await previewServer(f, 8791);
+  const f = await enabled();
+  await f.deliver(f.outletId, [{productId:'anel',quantity:4}, {productId:'kit',variantId:'azul',quantity:3}], {deliveredOn:'2026-11-10'});
+  const { url } = await previewServer(f, Number(process.env.VECONI_CONSIGNMENT_PREVIEW_PORT || 8791));
   console.log('Prévia de Consignados com Firestore Emulator em ' + url);
   await new Promise(resolve => process.once('SIGINT', resolve));
+});
+
+test('conference preserves separate prices, deducts returns, losses and damage from sales, and settles exactly once', async () => {
+  const f = await enabled();
+  const first = await f.deliver(f.outletId,[{ productId:'anel',quantity:5 }]);
+  const restock = await f.deliver(f.outletId,[{ productId:'anel',quantity:2,unitCents:1800 }]);
+  assert.deepEqual(restock.item.stockAfter.map(x=>[x.unitCents,x.quantity]),[[1325,5],[1800,2]]);
+  const stock = await f.call('conferenceStock',{outletId:f.outletId});
+  const items = stock.items.map(row => ({id:row.id, found:1, returns:row.unitCents===1325?1:0,
+    loss:row.unitCents===1325?1:0, damaged:row.unitCents===1325?1:0}));
+  const input = {outletId:f.outletId,operationId:randomUUID(),items,fingerprint:stock.fingerprint,payment:{status:'pending'}};
+  const result = await f.call('conference',input);
+  const bill = result.item, space = db.doc('financialSpaces/'+f.spaceId);
+  const ledger = space.collection('entries').doc('consignment_'+bill.id);
+  const account = space.collection('financialAccounts').doc('cash-test');
+  assert.equal(bill.units,2);
+  assert.equal(bill.grossCents,3125);
+  assert.equal(bill.commissionCents,625);
+  assert.equal(bill.netCents,2500);
+  assert.equal((await ledger.get()).data().status,'pending');
+  assert.equal((await ledger.get()).data().cashFlowEffect,false);
+  assert.equal((await account.get()).data().currentBalanceCents,1000);
+  assert.equal((await f.products.doc('anel').get()).data().estoqueAtual,2);
+  assert.equal((await f.call('dashboard')).pendingCents,2500);
+  assert.deepEqual(await f.call('daily'),{units:2,grossCents:3125});
+  assert.equal((await f.call('conference',input)).replayed,true);
+  await assert.rejects(f.call('conference',{...input,operationId:randomUUID()}),{code:'failed-precondition'});
+  assert.equal((await f.call('dashboard')).outlets[0].month.grossCents,3125);
+  await f.call('enable',{},f.uid,f.otherSpace);
+  assert.deepEqual(await f.call('daily',{},f.uid,f.otherSpace),{units:0,grossCents:0});
+  assert.equal((await f.call('history',{},f.uid,f.otherSpace)).items.length,0);
+  await assert.rejects(f.call('receipt',{operationId:bill.id},f.uid,f.otherSpace),{code:'not-found'});
+  const opts = {conferenceId:bill.id,operationId:randomUUID(),payment:{status:'paid',method:'pix',accountId:'cash-test',homeId:f.otherSpace}};
+  await assert.rejects(f.call('settle',opts),{code:'failed-precondition'});
+  opts.payment.homeId=f.spaceId;
+  const attempt = await Promise.allSettled([f.call('settle',opts),f.call('settle',{...opts,operationId:randomUUID()})]);
+  assert.equal(attempt.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal((await ledger.get()).data().status,'paid');
+  assert.equal((await account.get()).data().currentBalanceCents,3500);
+  assert.equal((await space.collection('entries').get()).size,1);
+  assert.equal((await f.call('dashboard')).pendingCents,0);
+  assert.deepEqual(await f.call('daily'),{units:2,grossCents:3125});
+  assert.equal((await f.call('receipt',{operationId:bill.id})).currentPayment,'paid');
+  assert.equal((await f.call('receipt',{operationId:bill.id})).item.paymentAtRecording,'pending');
+  assert.deepEqual((await f.call('receipt',{operationId:first.item.id})).item.stockAfter,first.item.stockAfter);
+  assert.equal((await f.call('history',{outletId:f.outletId})).items.length,4);
+  assert.equal((await f.root.collection('sales').get()).size,0);
+  assert.equal((await f.root.collection('stockMovements').get()).size,3);
+});
+
+test('cash received with a conference credits only the correct space and retries once', async () => {
+  const f = await enabled();
+  await f.deliver(f.outletId,[{productId:'anel',quantity:2}]);
+  const stock = await f.call('conferenceStock',{outletId:f.outletId}), op = randomUUID();
+  const input = {outletId:f.outletId,operationId:op,fingerprint:stock.fingerprint,
+    items:stock.items.map(row=>({id:row.id,found:0,returns:0,loss:0,damaged:0})),
+    payment:{status:'paid',method:'cash',accountId:'cash-test',homeId:f.spaceId}};
+  const results = await Promise.all([f.call('conference',input),f.call('conference',input)]);
+  assert.equal(results.filter(x=>x.replayed).length,1);
+  assert.equal((await f.products.doc('anel').get()).data().estoqueAtual,6);
+  const accountOf = id => db.doc('financialSpaces/'+id+'/financialAccounts/cash-test');
+  assert.equal((await accountOf(f.spaceId).get()).data().currentBalanceCents,3120);
+  assert.equal((await accountOf(f.otherSpace).get()).data().currentBalanceCents,1000);
+  await assert.rejects(f.call('settle',{conferenceId:op,operationId:randomUUID(),payment:input.payment}),{code:'failed-precondition'});
+  assert.equal((await f.call('dashboard')).pendingCents,0);
+});
+
+
+test('a newer replenishment invalidates a count before any financial or stock write', async () => {
+  const f = await enabled();
+  await f.deliver(f.outletId,[{productId:'anel',quantity:2}]);
+  const stale = await f.call('conferenceStock',{outletId:f.outletId});
+  const updated = await f.deliver(f.outletId,[{productId:'anel',quantity:1}]);
+  assert.equal(updated.item.stockAfter[0].quantity,3);
+  await assert.rejects(f.call('conference',{outletId:f.outletId,operationId:randomUUID(),fingerprint:stale.fingerprint,
+    items:stale.items.map(row=>({id:row.id,found:0,returns:0,loss:0,damaged:0}))}),{code:'failed-precondition'});
+  assert.equal((await f.call('inventory',{outletId:f.outletId})).items[0].quantity,3);
+  assert.equal((await db.doc('financialSpaces/'+f.spaceId).collection('entries').get()).size,0);
 });

@@ -1222,7 +1222,7 @@
     root.dataset.route = route;
     document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
     root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]() +
-      (route === 'configuracoes' ? window.Consignments.entry() : '');
+      (route === 'configuracoes' ? window.Consignments.entry() : route === 'inicio' ? '<section class="panel consignment-entry" data-consignment-daily hidden></section>' : '');
     root.dataset.spaceViewScope = window.SpaceContext?.viewScope?.() || "";
     window.SpaceContext?.bind?.(root);
     const mobileTitle = matchMedia("(max-width:767px)").matches
@@ -1267,6 +1267,7 @@
     aplicarInputModes($("#app"));
     bind(route);
     if (route === "consignados" && !deniedRoute) window.Consignments.mount(root);
+    if (route === "inicio") window.Consignments.mountHome(root.querySelector("[data-consignment-daily]"));
     if (route === "equipe" && !deniedRoute) window.TeamPage?.bind?.();
     if (route === "relatorios" && !deniedRoute) window.PerformanceDashboard?.bind?.();
     if (route === "catalogo") CatalogoUI.bind();
@@ -1425,7 +1426,7 @@
   }
   function refreshSpaceRoute() {
     const root = document.querySelector('#app'), route = Router.atual();
-    if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender','consignados'].includes(route)) return;
+    if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender','consignados','historico'].includes(route)) return;
     const scopeChanged = root.dataset.spaceViewScope !== window.SpaceContext?.viewScope?.();
     if (!scopeChanged) return;
     if (route === 'clientes') {
@@ -1509,7 +1510,7 @@
         financialModulePromise = (async () => {
           if (!window.FinancialEngine) await loadScript("./js/financial-engine.js?v=135");
           if (!window.FinancialAccountsCarousel) await loadScript("./js/financial-accounts-carousel.js?v=163");
-          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=2311-ds2");
+          if (!window.FinanceiroUI) await loadScript("./js/financial-ui.js?v=2311-ds2-consignados");
           if (!window.FinancialSpaceService) await import("./firebase/financial-space-service.js?v=163");
         })().catch((error) => {
           financialModulePromise = null;

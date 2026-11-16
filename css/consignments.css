@@ -45,3 +45,28 @@
   .consignment-tabs .btn { padding: 8px 10px; }
   .consignment-row > div:first-child { flex: 1 1 140px; }
 }
+
+.consignment-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 14px 0 10px; }
+.consignment-toolbar label { flex: 1 1 auto; max-width: 440px; display: grid; gap: 5px; }
+.consignment-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%, 310px),1fr)); gap: 12px; }
+.consignment-store { padding: 14px; }
+.consignment-store-title { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 0; }
+.consignment-store-title b { flex: 1; }
+.consignment-store-title > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; color: var(--primary, #075e58); background: #dbf3ef; }
+.consignment-store-metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%, 100px),1fr)); gap: 8px; margin: 12px 0; }
+.consignment-store-metrics > div { display: grid; gap: 3px; padding: 8px; background: var(--surface-soft, #f1f5f8); border-radius: 8px; }
+.consignment-store-metrics small { color: var(--muted, #42546a); }
+.consignment-product { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.consignment-photo { flex: 0 0 42px; width: 42px; height: 42px; display: grid; place-items: center; object-fit: cover; background: #eaf2f3; border-radius: 8px; }
+.consignment-photo svg { width: 19px; }
+.consignment-results .btn { gap: 8px; }
+.consignment-count-row { border: 1px solid var(--line, #dce4ea); padding: 12px; border-radius: 10px; display: grid; gap: 9px; }
+.consignment-totals { font-weight: 700; }
+.consignment-page [hidden] { display: none !important; }
+@media (max-width: 480px) {
+  .consignment-toolbar { align-items: stretch; flex-direction: column; }
+  .consignment-toolbar label { max-width: none; }
+  .consignment-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .consignment-stats strong { font-size: 1.05rem; }
+  .consignment-count-row .consignment-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}

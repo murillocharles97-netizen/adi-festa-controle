@@ -40,7 +40,12 @@ window.ConsignmentPdf = (() => {
     } catch { return null; }
   }
 
-  async function generate(delivery, logoFile) {
+  async function generate(delivery, logoFile, mode = 'delivery') {
+    const stock = mode === 'stock', conference = mode === 'conference';
+    const rows = stock ? delivery.stockAfter : conference ? delivery.items.filter(row => row.quantity > 0) : delivery.items;
+    if (!Array.isArray(rows)) throw Error('O comprovante não contém o estoque completo desta data.');
+    const title = stock ? 'Estoque consignado atualizado' : conference ? 'Conferência e vendas' :
+      delivery.kind === 'replenishment' ? 'Reposição de consignados' : 'Entrega de consignados';
     const override = logoFile ? URL.createObjectURL(logoFile) : null;
     const source = override || delivery.company.logoUrl;
     let Pdf, logo;
@@ -65,8 +70,9 @@ window.ConsignmentPdf = (() => {
       const companyInfo = [company.document, company.phone, company.address].filter(Boolean).join(' • ');
       if (companyInfo) spacing(companyInfo, 16, logo ? 124 : 175, 9);
       y = Math.max(y + 5, 36);
-      spacing(delivery.kind === 'replenishment' ? 'Reposição de consignados' : 'Entrega de consignados', 16, 178, 14, { bold: true });
-      spacing(outlet.name + ' • ' + displayDate(delivery.deliveredOn), 16, 178, 11, { bold: true });
+      spacing(title, 16, 178, 14, { bold: true });
+      const period = conference ? displayDate(delivery.periodFrom) + ' a ' + displayDate(delivery.deliveredOn) : displayDate(delivery.deliveredOn);
+      spacing(outlet.name + ' • ' + period, 16, 178, 11, { bold: true });
       const outletInfo = [outlet.contact, outlet.phone, outlet.address].filter(Boolean).join(' • ');
       if (outletInfo) spacing(outletInfo, 16, 178, 9);
       spacing('Referência ' + delivery.id, 16, 178, 8);
@@ -81,7 +87,7 @@ window.ConsignmentPdf = (() => {
       pdf.setTextColor('#1e293b');
     }
     header();
-    for (const [index, item] of delivery.items.entries()) {
+    for (const [index, item] of rows.entries()) {
       const name = [item.name, item.variantName, item.sku].filter(Boolean).join(' • ');
       pdf.setFont('helvetica', 'normal').setFontSize(9);
       const lines = pdf.splitTextToSize(name, 101);
@@ -95,16 +101,27 @@ window.ConsignmentPdf = (() => {
       pdf.text(money(item.totalCents), 190, y, { align: 'right' });
       y += height;
     }
-    if (y > 239) { pdf.addPage(); header(); }
+    if (y > (conference ? 226 : 239)) { pdf.addPage(); header(); }
     y += 6;
-    spacing('Total de referência  ' + money(delivery.totalCents) + '  •  ' + delivery.units + ' un.', 16, 178, 13, { bold: true });
-    if (delivery.notes) spacing(delivery.notes, 16, 178, 9);
-    spacing('Comprovante de transferência de estoque em consignação. Não é venda nem documento fiscal.', 16, 178, 9);
+    if (!rows.length) spacing(conference ? 'Nenhum item vendido no período.' : 'Nenhum produto permaneceu neste ponto.', 16, 178, 10);
+    if (conference) {
+      spacing('Vendas brutas  ' + money(delivery.grossCents) + '  •  ' + delivery.units + ' un.', 16, 178, 12, { bold: true });
+      spacing('Comissão (' + (delivery.commissionBps / 100).toLocaleString('pt-BR') + '%)  ' + money(delivery.commissionCents), 16, 178, 10);
+      spacing('Total a receber  ' + money(delivery.netCents), 16, 178, 13, { bold: true });
+      spacing(delivery.paymentAtRecording === 'paid' ? 'Recebimento confirmado no registro.' : 'Situação no registro: ' +
+        (delivery.paymentAtRecording === 'pending' ? 'a receber.' : 'sem saldo a receber.'), 16, 178, 9);
+    } else {
+      const total = rows.reduce((sum, row) => sum + row.totalCents, 0), units = rows.reduce((sum, row) => sum + row.quantity, 0);
+      spacing('Total de referência  ' + money(total) + '  •  ' + units + ' un.', 16, 178, 13, { bold: true });
+      if (delivery.notes) spacing(delivery.notes, 16, 178, 9);
+    }
+    spacing(conference ? 'Comprovante de conferência. Não substitui documento fiscal.' :
+      'Comprovante de estoque consignado. Não é venda nem documento fiscal.', 16, 178, 9);
     for (let i = 1; i <= pdf.getNumberOfPages(); i++) {
       pdf.setPage(i).setFontSize(8).setTextColor('#475569');
       pdf.text(i + ' / ' + pdf.getNumberOfPages(), 194, 285, { align: 'right' });
     }
-    const file = new File([pdf.output('blob')], 'consignado-' + delivery.deliveredOn + '-' + delivery.id.slice(0, 8) + '.pdf', { type: 'application/pdf' });
+    const file = new File([pdf.output('blob')], 'consignado-' + mode + '-' + delivery.deliveredOn + '-' + delivery.id.slice(0, 8) + '.pdf', { type: 'application/pdf' });
     return { file, logoUnavailable: Boolean(source && !logo) };
   }
 

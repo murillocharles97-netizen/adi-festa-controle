@@ -87,6 +87,7 @@
     }
   }
   const canRoute = (route) => {
+    if (route === "consignados") return current().role === "owner" && has("settings.manage");
     if (['relatorios','crm','campanhas'].includes(route) && !has('performance.history')) return false;
     if (route === 'historico') return has('sales.create') || (has('sales.viewAll') && has('performance.history'));
     return !ROUTE_PERMISSIONS[route] || has(ROUTE_PERMISSIONS[route]);

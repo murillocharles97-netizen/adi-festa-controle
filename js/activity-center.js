@@ -145,6 +145,10 @@
     renewal: { label: "Renovação", icon: "calendar-sync", tone: "purple" },
     order: { label: "Pedido", icon: "clipboard-list", tone: "blue" },
     system: { label: "Sistema", icon: "settings-2", tone: "slate" },
+    consignment_delivery: { label: "Consignação", icon: "package-open", tone: "blue" },
+    consignment_replenishment: { label: "Reposição", icon: "package-plus", tone: "blue" },
+    consignment_conference: { label: "Conferência", icon: "clipboard-check", tone: "purple" },
+    consignment_settlement: { label: "Acerto", icon: "wallet-cards", tone: "green" },
   };
   const at = (value) => {
     const date = new Date(value || 0);
@@ -627,7 +631,7 @@
         .map((item) => canonicalEvent(db, item))
         .filter(Boolean),
       cloudIds = new Set(canonical.map((item) => item.id)),
-      merged = [...canonical, ...pendingLocalEvents(db, cloudIds)],
+      merged = [...canonical, ...pendingLocalEvents(db, cloudIds), ...(window.Consignments?.historyEvents() || [])],
       canViewAll = window.TeamAccess?.has?.("sales.viewAll") ?? true,
       operational = window.TeamAccess?.canReadOperationalSales?.() === true,
       actorUid = window.FirebaseSession?.user?.uid || "",
@@ -744,6 +748,8 @@
       ["campaign", "Campanhas"],
       ["renewal", "Renovações"],
       ["order", "Pedidos"],
+      ...(window.Consignments?.owner() ? [["consignment_delivery","Consignação"],["consignment_replenishment","Reposição"],
+        ["consignment_conference","Conferência"],["consignment_settlement","Acerto"]] : []),
     ]
       .map(
         ([key, label]) =>
@@ -751,7 +757,7 @@
       )
       .join(
         "",
-      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || cloudHasMore ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
+      )}</div><div class="activity-sort"><span>${list.length} ${list.length === 1 ? "ação" : "ações"}</span><label>Ordenar por <select id="activity-sort"><option value="recentes" ${state.sort === "recentes" ? "selected" : ""}>Mais recentes</option><option value="antigos" ${state.sort === "antigos" ? "selected" : ""}>Mais antigos</option></select></label></div><div class="activity-list">${shown.length ? groups(shown) : `<div class="activity-empty">${icon("history")}<h2>Nenhuma atividade encontrada</h2><p>Tente mudar a busca ou os filtros. O histórico só mostra registros reais já sincronizados.</p></div>`}</div>${shown.length < list.length || cloudHasMore || window.Consignments?.hasMoreHistory() ? `<button class="activity-load-more" type="button" data-history-more ${cloudLoading ? "disabled" : ""}>${cloudLoading ? "Carregando…" : `Carregar mais ${shown.length < list.length ? `${Math.min(PAGE_SIZE, list.length - shown.length)} ações` : "ações"}`}</button>` : ""}</section>`;
   }
   function closeCloudSubscription() {
     clearSaleStatuses();
@@ -821,7 +827,7 @@
     const root = $("#modal"),
       f = state.filters;
     root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal activity-filter-modal" role="dialog" aria-modal="true"><header class="modal-head"><div><h3>Filtros avançados</h3><small>Combine período, tipo, status e valor.</small></div><button class="icon-btn mobile-icon-button" data-activity-close aria-label="Fechar">${icon("x")}</button></header><form id="activity-filter-form"><div class="modal-body"><fieldset><legend>Período</legend><div class="activity-filter-grid"><label>De<input type="date" name="start" value="${esc(f.start)}"></label><label>Até<input type="date" name="end" value="${esc(f.end)}"></label></div></fieldset><fieldset><legend>Tipos de atividade</legend><div class="activity-check-grid">${Object.entries(
-      TYPE_META,
+      Object.fromEntries(Object.entries(TYPE_META).filter(([kind]) => !kind.startsWith('consignment_') || window.Consignments?.owner())),
     )
       .filter(([key]) => key !== "system")
       .map(
@@ -961,6 +967,11 @@
     root
       .querySelector("[data-history-resource]")
       ?.addEventListener("click", (event) => {
+        if (event.currentTarget.dataset.historyResource === 'consignments') {
+          root.innerHTML = "";
+          window.Consignments?.openRecord(item.raw.spaceId,item.resourceId);
+          return;
+        }
         const route = {
           client: "clientes",
           product: "produtos",
@@ -978,6 +989,7 @@
     if (!root) return;
     ensureCloudSubscription();
     readSaleStatuses();
+    window.Consignments?.historyPage().then(changed => { if (changed && root.isConnected) rerender(); });
     let timer;
     $("#activity-search", root)?.addEventListener("input", (event) => {
       clearTimeout(timer);
@@ -1010,6 +1022,12 @@
       const loaded = filtered(),
         visible = state.page * PAGE_SIZE;
       if (visible < loaded.length) {
+        state.page++;
+        rerender();
+        return;
+      }
+      if (window.Consignments?.hasMoreHistory()) {
+        await window.Consignments.historyPage({more:true});
         state.page++;
         rerender();
         return;

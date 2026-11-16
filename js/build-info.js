@@ -12,14 +12,14 @@
     builtAt = validTime ? rawTime : new Date(document.lastModified).toISOString();
 
   // Fase 2 — three distinct versions:
-  // - appVersion: the real release shown to people and support ("233").
+  // - appVersion: the real release shown to people and support ("233.1").
   // - release: its integer major, sent as clientRelease (the server contract gates
   //   on >=202 / >=227). It must equal the major of appVersion (enforced by test).
   // - syncProtocolVersion / operation format: owned by sync.js (protocol 1,
   //   payloadVersion 4, schemaVersion 3) and never changed retroactively.
   // Bump APP_VERSION (and the service-worker CACHE/GET_VERSION) in every release;
   // tests/sync-version-identity.test.js fails when they disagree.
-  const APP_VERSION = "233";
+  const APP_VERSION = "233.1";
   window.AdiFestaBuild = Object.freeze({
     commit,
     shortCommit,
