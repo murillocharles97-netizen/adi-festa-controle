@@ -67,6 +67,7 @@ test('describe: servidor tipado → cliente → texto legado; nunca presume perm
     { reason: 'unclassified', category: 'unclassified', source: 'unknown' });
   assert.equal(Rejection.describe({ code: 'unavailable', message: 'Failed to fetch' }).category, 'connection');
   assert.equal(Rejection.describe({ code: 'deadline-exceeded' }).category, 'connection');
+  assert.equal(Rejection.describe({ code: 'internal', message: 'internal' }).category, 'unclassified', 'internal não é presumido como conexão');
   assert.equal(Rejection.describe({ code: 'sale-stock-review-required' }).category, 'dependency_pending');
   assert.deepEqual(Rejection.describe({ code: 'permission-denied', message: 'Estoque sem movimento autorizado.' }),
     { reason: 'stock_without_movement', category: 'stock_conflict', source: 'legacy_message' });

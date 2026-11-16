@@ -220,7 +220,9 @@
   const CODE_CATEGORY = {
     unauthenticated: A, 'invalid-argument': M, 'already-exists': U,
     'resource-exhausted': 'connection', unavailable: 'connection', 'deadline-exceeded': 'connection',
-    'network-request-failed': 'connection', aborted: 'connection', internal: 'connection',
+    'network-request-failed': 'connection', aborted: 'connection',
+    // 'internal' is NOT assumed to be a connection failure: the SDK uses it both for an
+    // unreachable endpoint and for an unexpected server exception.
     'sync-update-required': V, 'legacy-payload-unsupported': V,
     'sale-stock-review-required': 'dependency_pending', 'customer-payment-review-required': 'dependency_pending',
     'sale-recovery-review-required': R, 'sync-receipt-review-required': R, 'sync-retry-exhausted': R,
