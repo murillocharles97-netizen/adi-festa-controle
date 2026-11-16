@@ -12,6 +12,9 @@
     businessId: "",
     uid: "",
     activeId: "",
+    // Space the user chose explicitly (selector, picker). The fallback to the first
+    // authorized space is NOT a choice and never authorizes an ambiguous stock movement.
+    explicitActiveId: "",
     generation: 0,
     sessionReady: false,
     viewEpoch: 0,
@@ -200,8 +203,12 @@
       if (Array.isArray(cached)) state.spaces = cached.map(space => normalizeSpace(space, context));
     } catch {}
     state.activeId = read(contextKey('sales'), read(contextKey('home'), ''));
+    state.explicitActiveId = read(contextKey('explicit'), '');
   }
   function activeId() { ensureContext(); return reconcileSelection()?.id || ''; }
+  // The active space only when the user selected it; '' when it is the silent fallback.
+  function explicitActiveId() { const id = activeId(); return id && state.explicitActiveId === id ? id : ''; }
+  function markExplicit(id) { state.explicitActiveId = id; write(contextKey('explicit'), id); }
   function viewScope() {
     const id = activeId(), context = window.BusinessContext?.get?.() || {};
     const identity = JSON.stringify([state.uid, state.businessId, state.generation, id, operationalSpaces().map(space => space.id),
@@ -247,12 +254,13 @@
     ensureContext();
     const space = operationalSpaces().find(item => item.id === String(id || ''));
     if (!space) throw Error('Escolha um espaço autorizado para operar.');
-    if (space.id === activeId()) return clone(space);
+    if (space.id === activeId()) { markExplicit(space.id); return clone(space); }
     const checkout = window.Checkout?.state?.();
     if (checkout?.finishing || checkout?.activeOperationId || window.Checkout?.cartCount?.() || window.PriorSales?.active?.() || window.ExchangeCreditCheckout?.hasPending?.())
       throw Error('Conclua ou feche o atendimento no espaço atual antes de trocar. A fila de sincronização foi preservada.');
     state.activeId = space.id;
     write(contextKey('sales'), space.id);
+    markExplicit(space.id);
     viewScope();
     dispatchEvent(new CustomEvent('veconi-space-context-changed', { detail: { kind: 'global', id: space.id, space: clone(space) } }));
     return clone(space);
@@ -300,8 +308,10 @@
   function stockMovementOrigin(product, requestedId = '') {
     const eligible = stockMovementSpaces(product), businessId = currentContext().businessId;
     const explicit = String(requestedId || '').trim();
-    const selected = explicit || activeId();
-    const space = selected ? eligible.find(s => s.id === selected) : eligible.length === 1 ? eligible[0] : null;
+    // D2: an explicit destination wins; a single eligible space needs no choice; otherwise only a
+    // space the USER selected counts. Never the first space by default when several are possible.
+    const selected = explicit || (eligible.length === 1 ? eligible[0].id : explicitActiveId());
+    const space = selected ? eligible.find(s => s.id === selected) : null;
     if (!space || RESERVED_SPACE_IDS.has(space.id))
       throw Error('Selecione um espaço autorizado para esta movimentação de estoque.');
     return {businessId, spaceId:space.id};

@@ -212,8 +212,10 @@ test('stock movement origin requires an eligible business space; no global or am
   const {window}=loadSpaces(),spaces=fixtures();spaces[1].capabilities.inventory=true;
   window.SpaceContext.setSpaces(spaces);
   const p={businessId:'business-a',spaceAccessMode:'all_spaces'};
-  assert.equal(window.SpaceContext.stockMovementOrigin(p).spaceId,'adi');
+  // D2: several eligible spaces and no explicit choice -> ask; never the default/first space.
+  assert.throws(()=>window.SpaceContext.stockMovementOrigin(p),/Selecione/);
   assert.equal(window.SpaceContext.stockMovementOrigin(p,'adi').spaceId,'adi');
+  window.SpaceContext.selectHome('adi');assert.equal(window.SpaceContext.stockMovementOrigin(p).spaceId,'adi');
   assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'all_spaces'),/Selecione/);
   assert.throws(()=>window.SpaceContext.stockMovementOrigin(p,'casa'),/Selecione/);
   assert.throws(()=>window.SpaceContext.stockMovementOrigin({...p,businessId:'foreign'},'adi'),/empresa/);
