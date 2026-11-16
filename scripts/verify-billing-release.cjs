@@ -3,20 +3,24 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),cp=require('node:child_process'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..'),read=p=>fs.readFileSync(path.join(root,p),'utf8'),json=p=>JSON.parse(read(p)),norm=s=>s.replaceAll('\r\n','\n'),sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 const git=(...args)=>cp.execFileSync('git',args,{cwd:root,encoding:'utf8'}),at=(ref,p)=>norm(git('show',ref+':'+p));
-const m=json('releases/v225/deploy-manifest.json'),original=json(m.originalHashes),correction=json(m.correctiveHashes),authCorrection=json(m.webhookAuthHashes),canonical=json(m.webhookCanonicalHashes),source=norm(read('functions/src/index.js'));
+const candidateFlag=process.argv.indexOf('--candidate');
+const candidate=candidateFlag===-1?null:process.argv[candidateFlag+1];
+if(candidateFlag!==-1)assert.match(candidate||'',/^[a-f0-9]{40}$/);
+const sourceFile=p=>candidate?at(candidate,p):norm(read(p));
+const m=json('releases/v225/deploy-manifest.json'),original=json(m.originalHashes),correction=json(m.correctiveHashes),authCorrection=json(m.webhookAuthHashes),canonical=json(m.webhookCanonicalHashes),source=sourceFile('functions/src/index.js');
 const correctedPaths=new Set(correction.changed.map(x=>x.path)),authPaths=new Set(authCorrection.changed.map(x=>x.path)),canonicalPaths=new Set(canonical.changed.map(x=>x.path));
 const expected=['retryLegacyPlanMigrations','receiveWebhook','getPixCheckoutStatus','getCardCheckoutStatus','syncSubscription','getBillingCheckoutConfig','createSubscription'];
 assert.deepEqual(m.functions.updateInOrder,expected);assert.deepEqual(m.functions.create,[]);assert.equal(m.deploymentAuthorized,false);assert.equal(m.activateV3,false);
 assert.equal(original.files.length,10);assert.equal(m.productionFiles.length,12);assert.equal(correction.baseCandidate,'41d5095e7f4b716e8d0eb559b953ae1e6883898a');assert.equal(authCorrection.baseCandidate,'e07e043f95e42724c2f4b02f72f763b183b53bf7');
 assert.equal(canonical.baseCandidate,'1054294955c81f9b80fba2039ca0f22d944eb44e');assert.deepEqual([...canonicalPaths],['functions/src/index.js','functions/src/services/webhook-service.js']);assert.deepEqual(m.webhookPatch.updateInOrder,['receiveWebhook']);assert.equal(m.webhookPatch.baseCandidate,canonical.baseCandidate);assert.equal(m.webhookPatch.deploymentAuthorized,false);
 // Verify earlier immutable layers at the published parent when a file is changed again.
-const priorContent=p=>canonicalPaths.has(p)?at(canonical.baseCandidate,p):norm(read(p));
-for(const f of original.files){if(f.path==='functions/src/index.js'||correctedPaths.has(f.path))continue;assert.equal(sha(norm(read(f.path))),f.lfSha256,'Original billing file changed: '+f.path);}
+const priorContent=p=>canonicalPaths.has(p)?at(canonical.baseCandidate,p):sourceFile(p);
+for(const f of original.files){if(f.path==='functions/src/index.js'||correctedPaths.has(f.path))continue;assert.equal(sha(sourceFile(f.path)),f.lfSha256,'Original billing file changed: '+f.path);}
 for(const f of correction.changed){assert.equal(sha(at(correction.baseCandidate,f.path)),f.baselineLfSha256);assert.equal(sha(priorContent(f.path)),f.correctedLfSha256);}
-for(const f of correction.added)assert.equal(sha(norm(read(f.path))),f.correctedLfSha256);
+for(const f of correction.added)assert.equal(sha(sourceFile(f.path)),f.correctedLfSha256);
 for(const f of authCorrection.changed){assert.equal(sha(at(authCorrection.baseCandidate,f.path)),f.baselineLfSha256);assert.equal(sha(priorContent(f.path)),f.correctedLfSha256);}
-for(const f of canonical.changed){assert.equal(sha(at(canonical.baseCandidate,f.path)),f.baselineLfSha256);assert.equal(sha(norm(read(f.path))),f.correctedLfSha256);}
-const productionPath=p=>!p.startsWith('tests/')&&!p.startsWith('scripts/')&&!p.startsWith('releases/')&&!p.startsWith('functions/test/'),diff=ref=>git('diff',ref,'--name-only').trim().split('\n').filter(Boolean).filter(productionPath);
+for(const f of canonical.changed){assert.equal(sha(at(canonical.baseCandidate,f.path)),f.baselineLfSha256);assert.equal(sha(sourceFile(f.path)),f.correctedLfSha256);}
+const productionPath=p=>!p.startsWith('tests/')&&!p.startsWith('scripts/')&&!p.startsWith('releases/')&&!p.startsWith('functions/test/'),diff=ref=>git('diff','--name-only',ref,...(candidate?[candidate]:[])).trim().split('\n').filter(Boolean).filter(productionPath);
 assert.ok(diff(correction.baseCandidate).every(p=>correctedPaths.has(p)||correction.added.some(x=>x.path===p)||authPaths.has(p)),'Unexpected cumulative corrective production path');
 assert.deepEqual(diff(authCorrection.baseCandidate),[...new Set([...authPaths,...canonicalPaths])].sort());assert.deepEqual(diff(canonical.baseCandidate),[...canonicalPaths],'Isolated patch must affect exactly two production files');
 const handler=(s,name)=>{const start=s.indexOf('exports.'+name+'='),end=s.indexOf('\n});',start);assert.ok(start>=0&&end>start,name);return s.slice(start,end+4);},published=at(canonical.baseCandidate,'functions/src/index.js');
@@ -24,8 +28,8 @@ for(const name of expected){assert.equal(sha(handler(source,name)),m.functions.h
 const oldImport="const {verifyWebhookSignature,eventId,eventData,readWebhookResource}=require('./services/webhook-service');",newImport="const {validateWebhookSignature,eventId,eventData,webhookReplayReason,readWebhookResource}=require('./services/webhook-service');";
 assert.equal(source.replace(newImport,oldImport).replace(handler(source,'receiveWebhook'),handler(published,'receiveWebhook')),published,'Index changed outside the import and receiveWebhook');
 const servicePath='functions/src/services/webhook-service.js',moduleBlock=(s,name)=>{const re=new RegExp('^(?:async )?function '+name+'\\(','m'),start=s.search(re);assert.ok(start>=0);const tail=s.slice(start),end=tail.slice(1).search(/^(?:(?:async )?function |module\.exports)/m);return end<0?tail:tail.slice(0,end+1);};
-for(const name of ['eventId','readWebhookResource'])assert.equal(moduleBlock(norm(read(servicePath)),name),moduleBlock(at(canonical.baseCandidate,servicePath),name),name+' must preserve identity/provider lookup');
+for(const name of ['eventId','readWebhookResource'])assert.equal(moduleBlock(sourceFile(servicePath),name),moduleBlock(at(canonical.baseCandidate,servicePath),name),name+' must preserve identity/provider lookup');
 const exportsOf=s=>[...s.matchAll(/^exports\.(\w+)\s*=/gm)].map(x=>x[1]).sort();assert.deepEqual(exportsOf(source),exportsOf(at(m.base,'functions/src/index.js')));assert.equal(exportsOf(source).length,92);assert.ok(diff(m.base).every(p=>m.productionFiles.includes(p)),'Unexpected production path');
-assert.match(read('js/build-info.js'),/release:\s*"225"/);assert.match(read('js/build-info.js'),/billingCheckoutPaused:\s*false/);assert.match(read('service-worker.js'),/release:\s*'225'/);
+assert.match(sourceFile('js/build-info.js'),/release:\s*"225"/);assert.match(sourceFile('js/build-info.js'),/billingCheckoutPaused:\s*false/);assert.match(sourceFile('service-worker.js'),/release:\s*'225'/);
 const flag=process.argv.indexOf('--original-package');let originalFilesVerified=0;if(flag>=0){const p=JSON.parse(fs.readFileSync(path.join(process.argv[flag+1],'PACKAGE.json'),'utf8'));assert.equal(p.files.length,10);for(const f of p.files){assert.equal(sha(fs.readFileSync(f.source)),original.files.find(x=>x.path===f.path).sha256);originalFilesVerified++;}}
 console.log(JSON.stringify({release:225,updates:expected,isolatedUpdates:m.webhookPatch.updateInOrder,newFunctions:0,exportsPreserved:92,originalFilesVerified,nonIndexFilesMatchOriginal:6,originalHandlersMatch:5,correctedHandlers:2,correctedSourceFiles:5,webhookAuthSourceFiles:authPaths.size,webhookCanonicalSourceFiles:canonicalPaths.size,otherPublishedHandlersPreserved:6,unexpectedProductionFiles:false,deployExecuted:false},null,2));
