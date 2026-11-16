@@ -144,3 +144,23 @@ test('nenhuma escrita direta no Firestore no caminho de atualização', () => {
   const source = fs.readFileSync('js/firebase/product-spreadsheet-service.js', 'utf8');
   assert.doesNotMatch(source, /runTransaction|tx\.(set|update)|doc\(db/);
 });
+
+test('interrupção e retomada: a mesma planilha não soma a entrada duas vezes', async () => {
+  const cat = [product('1'), product('2')], sheetId = 'a1b2c3d4e5f60718';
+  const first = service(), rows = [line(cat[0], { entrada: 10 }), line(cat[1], { entrada: 20 })];
+  await first.apply(pv(rows, cat), );
+  const entries = [];
+  const s = service();
+  s.calls.length = 0;
+  // movement already registered for product 1 by this same sheet (before the interruption)
+  const moves = [{ produtoId: '1', tipo: 'entrada', observacao: `Entrada por planilha VECONI #${sheetId}` }];
+  const preview = M.preview([H9, ...rows], cat, scope, perms, 'update', { entryApplied: (id) => moves.some((m) => m.produtoId === id) });
+  assert.equal(preview.rows[0].status, 'unchanged'); assert.match(preview.rows[0].notes.join(), /já registrada/);
+  assert.deepEqual(preview.rows[1].changes, { entrada: 20 });
+  entries.push(...preview.rows.filter((r) => r.status === 'update').map((r) => r.id));
+  assert.deepEqual(entries, ['2']);
+  // and at apply time (row previewed before the interruption):
+  const ctxSource = fs.readFileSync('js/firebase/product-spreadsheet-service.js', 'utf8');
+  assert.match(ctxSource, /if \(entryApplied\(sheetId, row\.id\)\)/);
+  assert.match(ctxSource, /Entrada por planilha VECONI #\$\{sheetId\}/);
+});

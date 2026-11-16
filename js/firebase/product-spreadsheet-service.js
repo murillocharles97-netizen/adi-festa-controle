@@ -47,7 +47,14 @@ export async function loadCatalog() {
 
 // Optimistic read/compare/write transactions, not blind full-document overwrites.
 // Existing workspace writer supplies reset generation, existing listeners hydrate IndexedDB.
-export async function applyPreview(catalog, preview, onProgress) {
+// An entry registered from a sheet carries its id in the movement note; the same
+// sheet (same content) can be re-imported after an interruption without adding twice.
+const entryNote = sheetId => `Entrada por planilha VECONI #${sheetId}`;
+export function entryApplied(sheetId, productId) {
+  if (!/^[0-9a-f]{16}$/.test(sheetId || '')) return false;
+  return (window.DB?.carregar?.().movimentacoesEstoque || []).some(m => m.produtoId === productId && m.tipo === 'entrada' && m.observacao === entryNote(sheetId));
+}
+export async function applyPreview(catalog, preview, onProgress, { sheetId = '' } = {}) {
   assertContext(catalog.scope);
   if (!window.TeamAccess.has('products.edit')) throw Error('Você não tem permissão para editar produtos.');
   const scope = catalog.scope, selected = preview.rows.filter(r => r.status === 'update'), creates = preview.rows.filter(r => r.status === 'create'), results = [];
@@ -102,7 +109,10 @@ export async function applyPreview(catalog, preview, onProgress) {
       }
       const catalogFields = Object.fromEntries(keys.filter(k => ['nome', 'categoria', 'custo', 'preco'].includes(k)).map(k => [k, changes[k]]));
       if (Object.keys(catalogFields).length) track(() => window.Produtos.salvar({ ...p, ...catalogFields }));
-      if (keys.includes('entrada')) track(() => window.Produtos.entrada(row.id, changes.entrada, '', 'Entrada por planilha VECONI', scope.spaceId));
+      if (keys.includes('entrada')) {
+        if (entryApplied(sheetId, row.id)) { results.push({ id: row.id, line: row.line, ok: true, action: 'update', skipped: 'entrada já registrada por esta planilha' }); continue; }
+        track(() => window.Produtos.entrada(row.id, changes.entrada, '', /^[0-9a-f]{16}$/.test(sheetId) ? entryNote(sheetId) : 'Entrada por planilha VECONI', scope.spaceId));
+      }
       if (keys.includes('estoqueAtual')) track(() => window.Produtos.ajustarEstoque(row.id, changes.estoqueAtual, 'Ajuste por planilha VECONI', scope.spaceId));
       results.push({ id: row.id, line: row.line, ok: true, action: 'update', kinds: row.kinds || [] });
     } catch (error) {

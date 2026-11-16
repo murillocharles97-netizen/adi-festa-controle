@@ -111,6 +111,7 @@
             if (variable) throw Error('Dê entrada nas variações, não no total do produto.');
             if (current.estoqueAtual === null || !permissions.stock) throw Error('Estoque sem controle ou sem permissão para entrada.');
             if (scope.spaceId === 'all_spaces') throw Error('Selecione um espaço específico para dar entrada em mercadorias.');
+            if (typeof options.entryApplied === 'function' && options.entryApplied(p.id)) { row.notes = [...(row.notes || []), 'Entrada desta planilha já registrada; não será somada de novo.']; continue; }
             row.changes.entrada = quantity; row.before.estoqueAtual = current.estoqueAtual; continue;
           }
           if (input[key] && typeof input[key] === 'object') throw Error('Célula inválida ou fórmula. Use valores simples.');
