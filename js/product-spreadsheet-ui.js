@@ -98,7 +98,20 @@
         completed = true;
         const created = report.results.filter(r=>r.ok && r.action==='create' && !r.replayed).length, updated = report.results.filter(r=>r.ok && r.action!=='create').length, failures = report.results.filter(r=>!r.ok);
         const ignored = preview.counts.total-preview.counts.updates-preview.counts.creates+report.results.filter(r=>r.replayed).length;
-        status(`Concluído: ${created} produtos criados; ${updated} produtos atualizados; ${ignored} ignorados; ${failures.length} erros. ${report.refreshWarning}`);
+        const localSummary = `${created} produtos criados; ${updated} produtos atualizados; ${ignored} ignorados; ${failures.length} erros.`;
+        status(`Processado neste aparelho: ${localSummary} ${report.refreshWarning}`.trim());
+        // Local processing ≠ cloud: follow the import's own Sync operations until they leave the queue.
+        if (report.operationIds?.length) (async () => {
+          const ids = new Set(report.operationIds), total = ids.size;
+          for (let i = 0; i < 900; i++) {
+            const queue = window.SyncFirebase?.getQueueDiagnostics?.() || [], mine = queue.filter(item => ids.has(String(item.operationId)));
+            const errors = mine.filter(item => item.category === 'error' || item.reviewRequired);
+            if (errors.length) { status(`Processado neste aparelho: ${localSummary} Nuvem: ${total - mine.length} de ${total} blocos confirmados; ${errors.length} com erro — abra Sincronização para ver o motivo. Nada foi descartado.`); return; }
+            if (!mine.length) { status(`Concluído na nuvem: ${localSummary} ${total} blocos sincronizados.`); return; }
+            status(`Processado neste aparelho: ${localSummary} Enviando para a nuvem: ${total - mine.length} de ${total} blocos confirmados…`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        })();
         q('[data-sheet-preview]').innerHTML = failures.map(r=>`<article class="product-sheet-failure"><b>Linha ${r.line}</b><p>${esc(r.message)}</p></article>`).join('');
         box.querySelector('footer [data-sheet-close]').textContent = 'Fechar';
       } catch (e) { error(e); status('Nenhuma nova tentativa automática. Gere outra prévia para conferir os dados.'); completed = true; }

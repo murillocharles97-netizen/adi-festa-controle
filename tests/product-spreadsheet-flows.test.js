@@ -102,7 +102,7 @@ function service({ queue = [], stock = 10 } = {}) {
       salvar: (d) => { assert.equal(d.estoqueAtual, products.get(d.id).estoqueAtual, 'salvar recebe o estoque atual, sem alteração'); enqueue(['salvar', d.id, { preco: d.preco, custo: d.custo, nome: d.nome }]); },
       entrada: (...a) => enqueue(['entrada', ...a]), ajustarEstoque: (...a) => enqueue(['ajuste', ...a]) } };
   vm.createContext(ctx); vm.runInContext(source + '\nthis.api={applyPreview};', ctx);
-  return { apply: (preview) => ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview), applyWith: (catalog, preview) => ctx.api.applyPreview({ ...catalog, scope: { ...scope, allSpaces: true } }, preview), calls, queue, products };
+  return { apply: (preview) => ctx.api.applyPreview({ scope: { ...scope, allSpaces: true }, permissions: perms }, preview), ctx, applyWith: (catalog, preview) => ctx.api.applyPreview({ ...catalog, scope: { ...scope, allSpaces: true } }, preview), calls, queue, products };
 }
 const pv = (rows, catalog, options) => M.preview([H9, ...rows], catalog, scope, perms, 'update', options);
 
@@ -174,4 +174,33 @@ test('custo só na nuvem (cópia local ainda sem custo): a linha é aplicada, n�
   const report = await s.applyWith({ scope, permissions: perms, matchingProducts: cloudCatalog }, preview);
   assert.equal(report.results[0].ok, true, JSON.stringify(report.results));
   assert.equal(s.calls[0][0], 'salvar');
+});
+
+test('blocos: até 25 produtos por operação, por tipo; bloco recusado não aplica nenhuma linha dele', async () => {
+  const many = Array.from({ length: 60 }, (_, i) => product(String(i + 1)));
+  const s = service(); for (const p of many) s.products.set(p.id, p);
+  const blocks = []; let call = 0;
+  s.ctx.window.Produtos.LOTE_MAX = 25;
+  s.ctx.window.Produtos.aplicarLote = (items) => { call++; if (call === 2) throw Error('recusado no bloco'); blocks.push(items.map((i) => Object.keys(i).filter((k) => k !== 'id')[0])); s.queue.push({ operationId: `blk-${call}`, category: 'pending' }); };
+  const rows = many.map((p, i) => line(p, i < 50 ? { preco: 40, entrada: 2 } : { preco: 41 }));
+  const report = await s.apply(pv(rows, many, { baseline: baselineOf(many) }));
+  assert.deepEqual(blocks.map((b) => b.length), [25, 10, 25], 'catálogo 25+(25 recusado)+10; entradas só das 25 linhas cujo bloco de catálogo foi aceito');
+  assert.equal(new Set(blocks[2]).size, 1); assert.equal(blocks[2][0], 'entrada');
+  assert.equal(report.results.filter((r) => !r.ok).length, 25);
+  assert.deepEqual(JSON.parse(JSON.stringify(report.operationIds)), ['blk-1', 'blk-3', 'blk-4']);
+});
+
+test('Produtos.aplicarLote: um único DB.alterar por bloco, catálogo sem tocar estoque, entradas com movimento', () => {
+  const src = fs.readFileSync('js/produtos.js', 'utf8');
+  const data = { produtos: [product('1'), product('2')], movimentacoesEstoque: [] }; let alters = 0;
+  const c = { console, structuredClone, window: {}, Utils: { uuid: (() => { let n = 0; return () => `mov-${++n}`; })() },
+    DB: { carregar: () => data, alterar: (fn) => { alters++; fn(data); } }, document: { addEventListener() {} } };
+  c.window = c; c.ProductModel = { build: (d) => ({ ...d }) }; c.window.ProductModel = c.ProductModel;
+  vm.createContext(c); vm.runInContext(src, c);
+  const movs = c.Produtos.aplicarLote([{ id: '1', catalog: { preco: 50 } }, { id: '2', entrada: { quantidade: 4, observacao: 'Entrada por planilha VECONI #aaaaaaaaaaaaaaaa', spaceId: 's1' } }]);
+  assert.equal(alters, 1);
+  assert.equal(data.produtos[0].preco, 50); assert.equal(data.produtos[0].estoqueAtual, 10);
+  assert.equal(data.produtos[1].estoqueAtual, 14); assert.equal(movs.length, 1); assert.equal(movs[0].tipo, 'entrada');
+  assert.throws(() => c.Produtos.aplicarLote(Array.from({ length: 26 }, (_, i) => ({ id: String(i) }))), /1 a 25/);
+  assert.throws(() => c.Produtos.aplicarLote([{ id: '1', catalog: { estoqueAtual: 1 } }]), /Campo não permitido/);
 });

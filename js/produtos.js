@@ -45,7 +45,9 @@ window.Produtos=(()=>{
     }else{salvo={id:d.id||Utils.uuid(),...v,criadoEm:agora};db.produtos.push(salvo)}
   });window.BarcodeIndex?.invalidate?.();return salvo};
   const excluir=id=>{if(!window.ProductActions)throw Error('Aguarde o carregamento das ações de produtos.');return window.ProductActions.perform(id,'delete')};
-  const entrada=(produtoId,quantidade,custoUnitario,observacao,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw window.VeconiPermissionPolicy?.denied('inventory.adjust')||Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{
+  // Shared bodies of entrada/ajustarEstoque, applied inside a caller's DB.alterar.
+  function applyEntry(db,produtoId,quantidade,custoUnitario,observacao,spaceId){
+    const operationId=Utils.uuid();
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const origin=window.SpaceContext?.stockMovementOrigin?.(p,spaceId);
@@ -54,19 +56,51 @@ window.Produtos=(()=>{
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
     if(custoUnitario!==''&&custoUnitario!==null&&custoUnitario!==undefined)p.custo=Number(custoUnitario);
-    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
-    db.movimentacoesEstoque.push(mov);
-  });return mov};
-  const ajustarEstoque=(produtoId,novoEstoque,motivo,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw Error('Você não tem permissão para ajustar estoque.');let mov;const operationId=Utils.uuid();DB.alterar(db=>{
+    const mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
+    db.movimentacoesEstoque.push(mov);return mov;
+  }
+  function applyAdjust(db,produtoId,novoEstoque,motivo,spaceId){
+    const operationId=Utils.uuid();
     const p=db.produtos.find(x=>x.id===produtoId);if(!p)throw Error('Produto nao encontrado');
     if(!productControlsStock(p))throw Error('Este produto não usa controle de estoque');
     const origin=window.SpaceContext?.stockMovementOrigin?.(p,spaceId);
     const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
     if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
-    mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
-    db.movimentacoesEstoque.push(mov);
-  });return mov};
+    const mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
+    db.movimentacoesEstoque.push(mov);return mov;
+  }
+  // Bulk (spreadsheet): up to 25 products in ONE DB.alterar → one Sync operation, atomic
+  // locally and on the server (commitOperationalSync validates every write and delta).
+  // Catalog fields follow salvar's rules (never stock); entries/adjustments follow the
+  // same bodies as entrada/ajustarEstoque.
+  const LOTE_MAX=25;
+  const aplicarLote=items=>{
+    if(!Array.isArray(items)||!items.length||items.length>LOTE_MAX)throw Error(`Informe de 1 a ${LOTE_MAX} produtos por bloco.`);
+    const catalog=items.some(i=>i.catalog&&Object.keys(i.catalog).length),stock=items.some(i=>i.entrada||i.ajuste);
+    if(catalog&&window.TeamAccess&&!window.TeamAccess.has('products.edit'))throw window.VeconiPermissionPolicy?.denied('products.edit')||Error('Você não tem permissão para editar produtos.');
+    if(stock&&window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw window.VeconiPermissionPolicy?.denied('inventory.adjust')||Error('Você não tem permissão para ajustar estoque.');
+    if(new Set(items.map(i=>i.id)).size!==items.length)throw Error('Produto repetido no mesmo bloco.');
+    const movements=[];
+    DB.alterar(db=>{
+      const agora=new Date().toISOString();
+      for(const item of items){
+        const atual=db.produtos.find(p=>p.id===item.id);if(!atual)throw Error('Produto nao encontrado');
+        if(item.catalog&&Object.keys(item.catalog).length){
+          if(Object.keys(item.catalog).some(k=>!['nome','categoria','preco','custo'].includes(k)))throw Error('Campo não permitido no bloco.');
+          const v=window.ProductModel.build({...atual,...item.catalog},atual,{agora,barcode:atual.barcode||'',barcodeType:atual.barcodeType||null,normalizeProductAccess:window.SpaceEngine?.normalizeProductAccess});
+          for(const field of ['estoqueAtual','estoque','totalStock','hasAvailableStock'])delete v[field];
+          Object.assign(atual,v);
+        }
+        if(item.entrada)movements.push(applyEntry(db,item.id,item.entrada.quantidade,'',item.entrada.observacao,item.entrada.spaceId));
+        if(item.ajuste)movements.push(applyAdjust(db,item.id,item.ajuste.novoEstoque,item.ajuste.motivo,item.ajuste.spaceId));
+      }
+    });
+    window.BarcodeIndex?.invalidate?.();
+    return movements;
+  };
+  const entrada=(produtoId,quantidade,custoUnitario,observacao,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw window.VeconiPermissionPolicy?.denied('inventory.adjust')||Error('Você não tem permissão para ajustar estoque.');let mov;DB.alterar(db=>{mov=applyEntry(db,produtoId,quantidade,custoUnitario,observacao,spaceId);});return mov};
+  const ajustarEstoque=(produtoId,novoEstoque,motivo,spaceId='')=>{if(window.TeamAccess&&!window.TeamAccess.has('inventory.adjust'))throw Error('Você não tem permissão para ajustar estoque.');let mov;DB.alterar(db=>{mov=applyAdjust(db,produtoId,novoEstoque,motivo,spaceId);});return mov};
   const historico=produtoId=>DB.carregar().movimentacoesEstoque.filter(m=>m.produtoId===produtoId).sort((a,b)=>new Date(b.data)-new Date(a.data));
   const applyFavorite=(product,value)=>{
     if(!product)throw Error('Produto não encontrado');
@@ -141,5 +175,5 @@ window.Produtos=(()=>{
     paintMobileFavorite(id,value);
   }
   if(window.addEventListener)window.addEventListener('pagehide',()=>{if(favoriteFrame)persistMobileFavorites(favoriteFrame);});
-  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,historico,status,favoritar,toggleMobileFavorite,mobileFavoriteValue,renderMobileFavoriteChanges,disponivelNoEspaco:(product,spaceId)=>window.productAllowsSpace(product,spaceId),isVariable:p=>window.ProductVariations?.isVariable?.(p)??p?.productType==='variable',isRecurring:p=>p?.productType==='recurring',isService:p=>p?.itemKind==='service',variacoes:id=>window.ProductVariations?.list(id)||[]};
+  return{listar,obter,salvar,excluir,entrada,ajustarEstoque,aplicarLote,LOTE_MAX,historico,status,favoritar,toggleMobileFavorite,mobileFavoriteValue,renderMobileFavoriteChanges,disponivelNoEspaco:(product,spaceId)=>window.productAllowsSpace(product,spaceId),isVariable:p=>window.ProductVariations?.isVariable?.(p)??p?.productType==='variable',isRecurring:p=>p?.productType==='recurring',isService:p=>p?.itemKind==='service',variacoes:id=>window.ProductVariations?.list(id)||[]};
 })();

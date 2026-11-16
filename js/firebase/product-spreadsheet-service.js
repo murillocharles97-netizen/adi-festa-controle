@@ -84,13 +84,10 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
   // Produtos.ajustarEstoque (only when the stock is still the one previewed).
   // Pending work from BEFORE the import was refused at the start; inside the loop only
   // business/space/access are re-checked (cheap), so 300 rows stay linear.
-  let own = 0;
-  const track = action => { const value = action(); own++; return value; };
+  const intents = [], operationIds = new Set();
   // Cost lives in productFinancials (cloud); the local copy may not carry it yet.
   const cloud = new Map((catalog.matchingProducts || catalog.products || []).map(item => [item.id, item]));
   for (const row of selected) {
-    onProgress?.(results.length, creates.length + selected.length);
-    await new Promise(resolve => setTimeout(resolve, 0)); // keep the screen responsive and the progress painted
     try {
       assertContext(scope, { queue: false });
       if (!/^[^/]{1,200}$/.test(row.id)) throw Error('ID inválido.');
@@ -116,21 +113,53 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
         results.push({ id: row.id, line: row.line, ok: false, message: 'Dados mudaram desde a prévia. Reimporte para revisar os valores atuais.' }); continue;
       }
       const catalogFields = Object.fromEntries(keys.filter(k => ['nome', 'categoria', 'custo', 'preco'].includes(k)).map(k => [k, changes[k]]));
-      if (Object.keys(catalogFields).length) track(() => window.Produtos.salvar({ ...p, ...catalogFields }));
+      const intent = { row, catalogFields, entrada: null, ajuste: null };
       if (keys.includes('entrada')) {
         if (entryApplied(sheetId, row.id)) { results.push({ id: row.id, line: row.line, ok: true, action: 'update', skipped: 'entrada já registrada por esta planilha' }); continue; }
-        track(() => window.Produtos.entrada(row.id, changes.entrada, '', /^[0-9a-f]{16}$/.test(sheetId) ? entryNote(sheetId) : 'Entrada por planilha VECONI', scope.spaceId));
+        intent.entrada = { quantidade: changes.entrada, observacao: /^[0-9a-f]{16}$/.test(sheetId) ? entryNote(sheetId) : 'Entrada por planilha VECONI', spaceId: scope.spaceId };
       }
-      if (keys.includes('estoqueAtual')) track(() => window.Produtos.ajustarEstoque(row.id, changes.estoqueAtual, 'Ajuste por planilha VECONI', scope.spaceId));
-      results.push({ id: row.id, line: row.line, ok: true, action: 'update', kinds: row.kinds || [] });
+      if (keys.includes('estoqueAtual')) intent.ajuste = { novoEstoque: changes.estoqueAtual, motivo: 'Ajuste por planilha VECONI', spaceId: scope.spaceId };
+      intents.push(intent);
     } catch (error) {
       results.push({ id: row.id, line: row.line, ok: false, message: error.message || 'Não foi possível registrar esta linha. Nada foi alterado nela.' });
     }
   }
+  // Blocks of up to 25 products per kind (catalog, entry, adjustment): each block is ONE
+  // Sync operation validated by commitOperationalSync, atomic on the device and on the
+  // server. A failed block applies none of its rows.
+  const blockSize = Math.min(25, window.Produtos.LOTE_MAX || 25), kinds = [
+    ['catalog', i => Object.keys(i.catalogFields).length ? { id: i.row.id, catalog: i.catalogFields } : null],
+    ['entrada', i => i.entrada ? { id: i.row.id, entrada: i.entrada } : null],
+    ['ajuste', i => i.ajuste ? { id: i.row.id, ajuste: i.ajuste } : null]];
+  const failed = new Map(), queueIds = () => new Set((window.SyncFirebase?.getQueueDiagnostics?.() || []).map(item => String(item.operationId)));
+  for (const [kind, pick] of kinds) {
+    const pending = intents.filter(i => !failed.has(i.row.id)).map(i => [i, pick(i)]).filter(([, item]) => item);
+    for (let offset = 0; offset < pending.length; offset += blockSize) {
+      const block = pending.slice(offset, offset + blockSize);
+      onProgress?.(results.length + Math.min(intents.length, offset), creates.length + selected.length);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      try {
+        assertContext(scope, { queue: false });
+        const before = queueIds();
+        if (typeof window.Produtos.aplicarLote === 'function') window.Produtos.aplicarLote(block.map(([, item]) => item));
+        else for (const [, item] of block) { // older cached app: one operation per product
+          if (item.catalog) window.Produtos.salvar({ ...window.Produtos.obter(item.id), ...item.catalog });
+          if (item.entrada) window.Produtos.entrada(item.id, item.entrada.quantidade, '', item.entrada.observacao, item.entrada.spaceId);
+          if (item.ajuste) window.Produtos.ajustarEstoque(item.id, item.ajuste.novoEstoque, item.ajuste.motivo, item.ajuste.spaceId);
+        }
+        for (const id of queueIds()) if (!before.has(id)) operationIds.add(id);
+      } catch (error) {
+        for (const [intent] of block) failed.set(intent.row.id, error.message || 'Não foi possível registrar este bloco. Nada foi alterado nele.');
+      }
+    }
+  }
+  for (const intent of intents) results.push(failed.has(intent.row.id)
+    ? { id: intent.row.id, line: intent.row.line, ok: false, message: failed.get(intent.row.id) }
+    : { id: intent.row.id, line: intent.row.line, ok: true, action: 'update', kinds: intent.row.kinds || [] });
   onProgress?.(results.length, creates.length + selected.length);
   // Sending runs in the background through the normal Sync (offline-safe, retried
   // automatically); the import report does not wait for the whole queue.
-  if (own) window.SyncFirebase?.processSyncQueue?.({ force: true })?.catch?.(() => {});
+  if (operationIds.size) window.SyncFirebase?.processSyncQueue?.({ force: true })?.catch?.(() => {});
   let refreshWarning = '';
   if (results.some(r => r.ok && r.action === 'create')) {
     try {
@@ -140,6 +169,6 @@ export async function applyPreview(catalog, preview, onProgress, { sheetId = '' 
       window.SyncFirebase.notifyRemoteChange(['products', 'productFinancials', 'stockMovements']);
     } catch { refreshWarning = 'Gravações confirmadas. Atualize a sincronização para recarregar este aparelho.'; }
   }
-  if (own) refreshWarning = `${refreshWarning} As alterações estão salvas neste aparelho e sendo enviadas para a nuvem pela sincronização (${own} operações; acompanhe pelo ícone da nuvem).`.trim();
-  return { results, refreshWarning, queued: own };
+  if (operationIds.size) refreshWarning = `${refreshWarning} Registrado neste aparelho. Enviando para a nuvem em ${operationIds.size} blocos.`.trim();
+  return { results, refreshWarning, queued: operationIds.size, operationIds: [...operationIds] };
 }
