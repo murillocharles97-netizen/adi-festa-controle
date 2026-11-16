@@ -5,9 +5,11 @@ const {JSDOM}=require('jsdom');
 const grants=(...keys)=>({role:'seller',permissionsVersion:2,permissions:Object.fromEntries(keys.map(k=>[k,true]))});
 const access=m=>({has:key=>Policy.has(m,key)});
 const write=(entityType,data={},operation='update',before={})=>({entityType,entityId:'qa',operation,data,before});
-test('22 real keys; policy/frontend/editor/server vocabulary is identical',()=>{
+test('legacy keys stay at 20; V224 grants daily and historical performance separately across client and server',()=>{
  const backend=require('../functions/src/services/team-access-service');
- assert.equal(Policy.LEGACY_KEYS.length,20);assert.equal(Policy.KEYS.length,22);
+ assert.equal(Policy.LEGACY_KEYS.length,20);assert.equal(Policy.KEYS.length,24);
+ assert.ok(Policy.KEYS.includes('performance.daily'));assert.ok(Policy.KEYS.includes('performance.history'));
+ assert.equal(Policy.has(grants('performance.daily'),'performance.history'),false);
  assert.deepEqual([...Model.KEYS].sort(),[...Policy.KEYS].sort());assert.deepEqual(backend.PERMISSIONS,Policy.KEYS);
 });
 test('legacy edit preserves previously authorized create/archive only; no role or truthy fallback',()=>{
@@ -50,7 +52,7 @@ test('naked balance/counters patch is blocked even for owner: typed event requir
 });
 function domain(keys){
  let rows={clientes:[{id:'existing',nome:'Fictício',saldo:-12,financialVersion:2}],vendas:[]},m=grants(...keys),changes=0;
- const c={console,Date,Utils:{uuid:crypto.randomUUID},PhoneUtils:{normalizeBrazilianPhone:String},VeconiPermissionPolicy:Policy,TeamAccess:{has:p=>Policy.has(m,p)},FirebaseSession:{user:{uid:'qa'}},DB:{carregar:()=>rows,alterar:fn=>{const next=structuredClone(rows);fn(next);rows=next;changes++;}}};c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync('js/clientes.js','utf8'),c);
+ const c={console,Date,addEventListener(){},Utils:{uuid:crypto.randomUUID},PhoneUtils:{normalizeBrazilianPhone:String},VeconiPermissionPolicy:Policy,TeamAccess:{has:p=>Policy.has(m,p)},FirebaseSession:{user:{uid:'qa'}},DB:{carregar:()=>rows,alterar:fn=>{const next=structuredClone(rows);fn(next);rows=next;changes++;}}};c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync('js/clientes.js','utf8'),c);
  return{c,rows:()=>rows,changes:()=>changes,revoke:()=>m=grants()};
 }
 test('customer create-only accepts zero-balance creation; editing, importing, archiving denied, draft untouched',()=>{
