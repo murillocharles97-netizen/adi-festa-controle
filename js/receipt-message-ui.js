@@ -13,14 +13,21 @@
       else if(!e.shiftKey&&(document.activeElement===last||document.activeElement===dialog)){e.preventDefault();first.focus();}
     };return dialog;
   }
-  function download(local,receipt){
-    const confirmed=receipt?.confirmed===true,canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=900;canvas.height=830;
-    ctx.fillStyle='#fff';ctx.fillRect(0,0,900,830);ctx.fillStyle='#102e37';ctx.textAlign='center';ctx.font='bold 30px Arial';
-    ctx.fillText(confirmed?receipt.businessName:'REGISTRO PROVISÓRIO',450,65);
-    ctx.font='bold 24px Arial';ctx.fillStyle=confirmed?'#087c71':'#9a5700';ctx.fillText(confirmed?'RECEBIMENTO CONFIRMADO':'AGUARDANDO CONFIRMAÇÃO',450,115);
+  async function download(local,receipt,current){
+    const confirmed=receipt?.confirmed===true,canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+    const brand=confirmed?window.SpaceBranding?.resolve(receipt,receipt.businessName):null;
+    const logo=brand?await window.SpaceBranding.loadLogo(brand.logo):null;
+    if(!current())return;
+    canvas.width=900;canvas.height=830+(brand?220:0);
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,900,canvas.height);
+    let heading=115;
+    if(brand)heading=window.SpaceBranding.drawHeading(ctx,brand,logo,900,24);
+    else{ctx.fillStyle='#102e37';ctx.textAlign='center';ctx.font='bold 30px Arial';
+      ctx.fillText(confirmed?receipt.businessName:'REGISTRO PROVISÓRIO',450,65);}
+    ctx.font='bold 24px Arial';ctx.fillStyle=confirmed?'#087c71':'#9a5700';ctx.fillText(confirmed?'RECEBIMENTO CONFIRMADO':'AGUARDANDO CONFIRMAÇÃO',450,heading);
     const rows=confirmed?[['Cliente',receipt.clientName],['Valor recebido',money(receipt.amount)],['Data do pagamento',new Date(receipt.paymentDate).toLocaleString('pt-BR')],['Saldo em aberto confirmado',money(Math.max(0,-receipt.balance))],['Saldo consultado em',new Date(receipt.checkedAt).toLocaleString('pt-BR')],['Forma de pagamento',ReceiptMessages.variables(receipt).forma_pagamento],['Identificador',receipt.paymentId]]:
       [['Valor informado',typeof local.valor==='number'&&Number.isFinite(local.valor)?money(local.valor):'Não disponível neste dispositivo'],['Identificador',local.id],['Situação','Confirmação não comprovada; não comprova quitação']];
-    ctx.textAlign='left';ctx.fillStyle='#263c44';ctx.font='21px Arial';rows.forEach(([label,value],i)=>{ctx.fillText(label,45,190+i*73);ctx.font='bold 21px Arial';ctx.fillText(String(value).slice(0,65),45,219+i*73);ctx.font='21px Arial';});
+    ctx.textAlign='left';ctx.fillStyle='#263c44';ctx.font='21px Arial';rows.forEach(([label,value],i)=>{ctx.fillText(label,45,heading+75+i*73);ctx.font='bold 21px Arial';ctx.fillText(String(value).slice(0,65),45,heading+104+i*73);ctx.font='21px Arial';});
     if(!confirmed){ctx.fillStyle='#9a5700';ctx.font='bold 23px Arial';ctx.fillText('NÃO COMPROVA PAGAMENTO OU QUITAÇÃO.',45,600);ctx.font='19px Arial';ctx.fillText('Aguarde o recibo remoto autorizado antes de comunicar ao cliente.',45,640);}
     const a=document.createElement('a');a.download=`${confirmed?'recibo-confirmado':'registro-provisorio'}-${local.id}.png`;a.href=canvas.toDataURL('image/png');a.click();
   }
@@ -38,7 +45,7 @@
     function pending(note=''){
       mount('Aguardando confirmação',`<div class="receipt-pending-notice" role="status"><span aria-hidden="true">◷</span><p>Estamos conferindo o recibo deste recebimento. Não registre outro pagamento.</p></div><p class="muted">${esc(note)}</p>`,
         '<button class="btn btn-primary" type="button" data-receipt-check>Consultar novamente</button><button class="btn btn-light" type="button" id="whatsapp-payment" disabled>Enviar pelo WhatsApp</button><div class="receipt-secondary-actions"><button class="btn btn-light" type="button" id="download-payment">Baixar provisório</button><button class="btn btn-light" type="button" data-receipt-done>Concluir</button></div>');
-      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-check]',root).onclick=check;$('#download-payment',root).onclick=()=>{if(current())download(local,null);};
+      $('[data-receipt-done]',root).onclick=close;$('[data-receipt-check]',root).onclick=check;$('#download-payment',root).onclick=()=>{if(current())void download(local,null,current);};
     }
     function ready(note=''){
       if(!current()||!receipt)return;let text;try{text=message();}catch(error){pending('O recebimento foi localizado, mas o modelo precisa de revisão pelo gestor.');feedback(error.message,true);return;}
@@ -80,7 +87,7 @@
         const fresh=await ReceiptMessages.confirm(identity,{signal,isCurrent:()=>current()&&stamp===render});if(!current()){retired();return;}if(stamp!==render)return;
         if(!fresh.confirmed){receipt=null;pending('A confirmação precisa ser consultada novamente. Não registre outro pagamento.');return;}
         receipt=fresh;
-        if(mode==='download'){download(local,fresh);feedback('Recibo confirmado preparado para download.');return;}
+        if(mode==='download'){await download(local,fresh,current);if(current())feedback('Recibo confirmado preparado para download.');return;}
         const localClient=window.Clientes?.obter?.(identity.clientId),normalize=window.PhoneUtils.normalizeBrazilianPhone;
         if(pendingPhone&&normalize(fresh.phone)!==pendingPhone||localClient&&normalize(localClient.telefone)!==normalize(fresh.phone)){feedback('O telefone alterado ainda aguarda confirmação. Aguarde a atualização do cadastro.',true);return;}pendingPhone='';
         if(fingerprint(before)!==fingerprint(fresh)){ready('Os dados mudaram. Revise a mensagem e toque novamente para continuar.');return;}

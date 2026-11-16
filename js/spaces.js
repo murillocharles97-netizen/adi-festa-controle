@@ -230,7 +230,9 @@
     state.spaces = [...byId.values()];
     state.loaded = options.loaded !== false;
     state.migrationReport = options.migrationReport || state.migrationReport;
-    write(spacesKey(), JSON.stringify(state.spaces));
+    write(spacesKey(), JSON.stringify(state.spaces.map(space => space.documentBranding?.logo
+      ? { ...space, documentBranding: { ...space.documentBranding, logo: '' } }
+      : space)));
     if (state.loaded && state.sessionReady && activeId()) {
       state.activeId = activeId();
       write(contextKey("sales"), state.activeId);

@@ -1,0 +1,80 @@
+
+/* Only document samples and receipt previews use the space palette. */
+.document-brand-header {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 13px 10px;
+  border-top: 4px solid var(--document-primary);
+  border-bottom: 3px solid var(--document-secondary);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.document-brand-header strong { font-size: 1.12rem; }
+.document-brand-header img { width: auto; height: auto; max-width: 100px; max-height: 56px; object-fit: contain; }
+.document-brand-header small { color: var(--muted, #526479); }
+
+.space-branding {
+  position: fixed;
+  inset: 0;
+  width: min(760px, calc(100% - 24px));
+  max-height: 90dvh;
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line, #dde5ec);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.space-branding::backdrop { background: #10182788; }
+.space-branding .modal-head { align-items: flex-start; position: sticky; top: 0; z-index: 1; background: var(--surface, #fff); }
+.space-branding .modal-head h2, .space-branding h3, .space-branding h4 { margin: 0; }
+.space-branding .modal-head h2 { font-size: 1.18rem; }
+.space-branding .modal-head p { margin: 3px 0 0; color: var(--muted, #526479); font-size: .88rem; }
+.space-branding [data-brand-content] { display: grid; gap: 12px; }
+.space-branding [data-brand-content] > .btn { justify-self: start; }
+.space-branding-list { display: grid; gap: 8px; }
+.space-branding-list .settings-list-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 60px;
+  padding: 9px 12px;
+  text-align: left;
+  border: 1px solid var(--line, #dde5ec);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.space-branding-list .settings-row-icon {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  background: #eaf6f4;
+  color: var(--veconi-action, #087d64);
+}
+.space-branding-list .settings-row-copy :is(b,small) { display: block; overflow-wrap: anywhere; }
+.space-branding-list .settings-row-copy small { color: var(--muted, #526479); }
+.space-branding-list svg { width: 18px; height: 18px; }
+.space-branding-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .88fr); align-items: start; gap: 16px; }
+.space-branding-editor fieldset { display: grid; min-width: 0; margin: 0; padding: 0; gap: 10px; border: 0; }
+.space-branding-editor .field { margin: 0; }
+.space-branding-editor input { width: 100%; min-width: 0; }
+.space-branding-editor input[type=color] { min-height: 44px; padding: 4px; }
+.space-branding-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.space-branding-preview { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: var(--veconi-surface-subtle, #eff5f7); }
+.space-branding-preview h4 { font-size: .88rem; }
+.document-brand-sample { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: #fff; color: #102e37; }
+.document-brand-sample > span { display: flex; justify-content: space-between; gap: 4px; font-size: .81rem; }
+.document-brand-sample > span:last-child { padding-top: 8px; border-top: 1px solid #dde5ec; }
+.space-branding [data-brand-feedback] { margin: 8px 0 0; color: var(--muted, #526479); }
+.space-branding [data-brand-feedback]:empty { display: none; }
+@media (max-width: 650px) {
+  .space-branding-editor { grid-template-columns: minmax(0, 1fr); }
+  .space-branding-preview { grid-row: 1; }
+}

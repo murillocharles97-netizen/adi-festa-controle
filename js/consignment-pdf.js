@@ -46,8 +46,9 @@ window.ConsignmentPdf = (() => {
     if (!Array.isArray(rows)) throw Error('O comprovante não contém o estoque completo desta data.');
     const title = stock ? 'Estoque consignado atualizado' : conference ? 'Conferência e vendas' :
       delivery.kind === 'replenishment' ? 'Reposição de consignados' : 'Entrega de consignados';
+    const brand = window.SpaceBranding?.resolve(delivery, companyName || delivery.company.name);
     const override = logoFile ? URL.createObjectURL(logoFile) : null;
-    const source = override || delivery.company.logoUrl;
+    const source = override || (brand ? brand.logo : delivery.company.logoUrl);
     let Pdf, logo;
     try { [Pdf, logo] = await Promise.all([library(), image(source)]); }
     finally { if (override) URL.revokeObjectURL(override); }
@@ -63,11 +64,14 @@ window.ConsignmentPdf = (() => {
     };
     function header() {
       y = 19;
+      if (brand) pdf.setFillColor(brand.primary).rect(16, 9, 178, 1.1, 'F');
       pdf.setTextColor('#083e43');
       if (logo) pdf.addImage(logo.jpeg, 'JPEG', 194 - logo.w, 13, logo.w, logo.h);
-      spacing((conference ? company.name : companyName || company.name) || 'VECONI', 16, logo ? 143 : 178, 18, { bold: true });
+      spacing(brand?.name || (conference ? company.name : companyName || company.name) || 'VECONI', 16, logo ? 143 : 178, 18, { bold: true });
       pdf.setTextColor('#334155');
-      if (conference) {
+      if (brand) {
+        for (const line of window.SpaceBranding.contact(brand)) spacing(line, 16, logo ? 143 : 178, 9);
+      } else if (conference) {
         const companyInfo = [company.document, company.phone, company.address].filter(Boolean).join(' • ');
         if (companyInfo) spacing(companyInfo, 16, logo ? 143 : 178, 9);
       }
@@ -84,6 +88,7 @@ window.ConsignmentPdf = (() => {
         spacing('Referência ' + delivery.id, 16, 178, 8);
       }
       y += 4;
+      if (brand) pdf.setFillColor(brand.secondary).rect(16, y + 4, 178, .9, 'F');
       pdf.setFillColor('#eaf6f4');
       pdf.roundedRect(16, y - 4, 178, 8, 1, 1, 'F');
       pdf.setTextColor('#083e43').setFontSize(9).setFont('helvetica', 'bold');

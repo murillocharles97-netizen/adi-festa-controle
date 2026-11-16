@@ -36,12 +36,9 @@
       profile = session.profile || {},
       subscription = session.subscription || business.subscription || {},
       sync = window.SyncFirebaseState || {},
-      data = DB.carregar(),
-      config = data.config || {},
       operation = window.OperationMode?.get?.() || {},
       mode = window.OperationMode?.MODES?.[operation.operationMode] || {},
       credit = window.OperationMode?.CREDIT_MODES?.[operation.creditMode] || {},
-      businessName = business.name || config.nome || "Meu negócio",
       plan = planNames[subscription.planId] || subscription.planId || "Plano atual",
       internal = business.id === "adi-festa" && subscription.planId === "internal" && ["active", "internal"].includes(subscription.status) && profile.role === "owner",
       couponStats = couponSummary();
@@ -49,7 +46,7 @@
     return `<section class="desktop-settings settings" data-desktop-settings>
       <div class="desktop-settings-grid">
         ${internal ? card("ticket-percent", "Cupons de desconto", "Crie condições especiais para familiares, parceiros e campanhas promocionais.", `<dl><dt>Ativos</dt><dd>${Number(couponStats.active||0)}</dd><dt>Utilizações</dt><dd>${Number(couponStats.redemptions||0)}</dd><dt>Assinaturas com desconto</dt><dd>${Number(couponStats.activeSubscriptions||0)}</dd><dt>Desconto concedido</dt><dd>${Number(couponStats.discountGrantedTotal||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</dd></dl><button class="btn btn-primary" type="button" data-go="cupons">Gerenciar cupons</button>`, "internal-coupon-settings") : ""}
-        ${card("building-2", "Empresa", "Informações da sua empresa e dados cadastrais.", `<dl><dt>Nome fantasia</dt><dd>${esc(businessName)}</dd><dt>Documento</dt><dd>${esc(business.document || business.cnpj || config.documento || "Não informado")}</dd><dt>Segmento</dt><dd>${esc(business.businessType || config.segmento || "Não informado")}</dd><dt>Telefone</dt><dd>${esc(business.phone || config.telefone || "Não informado")}</dd></dl><button class="btn btn-light" type="button" data-desktop-edit-business>Editar empresa</button>`)}
+        ${card("palette", "Identidade visual", "Personalize sua marca e seus documentos.", '<button class="btn btn-light" type="button" data-desktop-branding>Configurar espaços</button>')}
         ${card("gem", "Plano e assinatura", "Gerencie seu plano e veja o que está incluso.", `<div class="desktop-settings-highlight"><span>${icon("gem")}</span><div><b>${esc(plan)}</b><small>${subscription.status === "active" ? "Conta ativa" : esc(subscription.status || "Status não informado")}</small></div></div><button class="btn btn-light" type="button" data-go="planos">Ver detalhes do plano</button>`)}
         ${card(mode.icon || "store", "Modelo de operação", "Como sua empresa trabalha no dia a dia.", `<div class="desktop-operation-summary"><small>Modelo atual</small><b>${esc(mode.label || "Não definido")}</b><p>${esc(mode.description || "")}</p>${credit.label ? `<span>${icon("check")} ${esc(credit.label)}</span>` : ""}</div><button class="btn btn-light" type="button" data-edit-operation>Alterar modelo</button>`)}
         ${card("cloud", "Backup e dados", "Backup, restauração e sincronização.", `<dl><dt>Última sincronização</dt><dd id="firebase-last-sync">${esc(formatTime(sync.lastSync))}</dd><dt>Status</dt><dd><span class="desktop-sync-status"><i></i><b id="firebase-status">${esc(sync.message || "Preparando sincronização…")}</b></span></dd><dt>Pendências</dt><dd><span id="firebase-pending">${Number(sync.pending || 0)}</span> · <span id="firebase-errors">${Number(sync.errors || 0)}</span> erro(s)</dd></dl><div class="desktop-settings-actions"><button class="btn btn-light" type="button" id="export">${icon("download")} Fazer backup agora</button><label class="btn btn-light">${icon("upload")} Importar backup<input type="file" id="import" accept="application/json" hidden></label><button class="btn btn-light" type="button" id="firebase-sync">${icon("refresh-cw")} Sincronizar</button></div>`, "desktop-settings-backup")}
@@ -81,7 +78,7 @@
     const business = window.FirebaseSession?.business || {},
       config = DB.carregar().config,
       root = modal(
-        `<header class="modal-head"><h3>Editar empresa</h3><button class="icon-btn" type="button" data-close>${icon("x")}</button></header><form id="desktop-business-form"><div class="modal-body"><div class="field"><label>Nome do negócio</label><input name="name" required value="${esc(business.name || config.nome || "")}"></div><div class="field"><label>Telefone</label><input name="phone" inputmode="tel" value="${esc(business.phone || config.telefone || "")}"></div><div class="field"><label>Tipo do comércio</label><input name="businessType" value="${esc(business.businessType || "")}"></div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-close>Cancelar</button><button class="btn btn-primary">Salvar alterações</button></footer></form>`,
+        `<header class="modal-head"><h3>Editar empresa</h3><button class="icon-btn" type="button" data-close>${icon("x")}</button></header><form id="desktop-business-form"><div class="modal-body"><div class="field"><label>Nome do negócio</label><input name="name" required value="${esc(business.name || config.nome || "")}"></div><div class="field"><label>Telefone</label><input name="phone" inputmode="tel" value="${esc(business.phone || config.telefone || "")}"></div><div class="field"><label>Tipo do comércio</label><input name="businessType" value="${esc(business.businessType || config.segmento || "")}"></div><div class="field"><label>Documento</label><span>${esc(business.document || business.cnpj || config.documento || "Não informado")}</span></div></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-close>Cancelar</button><button class="btn btn-primary">Salvar alterações</button></footer></form>`,
       );
     root
       .querySelectorAll("[data-close]")
@@ -161,8 +158,8 @@
     const root = document.querySelector("[data-desktop-settings]");
     if (!root) return;
     root
-      .querySelector("[data-desktop-edit-business]")
-      ?.addEventListener("click", editBusiness);
+      .querySelector("[data-desktop-branding]")
+      ?.addEventListener("click", () => window.SpaceBranding.open({ general: editBusiness }));
     root
       .querySelector("[data-desktop-edit-profile]")
       ?.addEventListener("click", editProfile);

@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   query,
@@ -462,6 +463,40 @@ async function updateSpace(spaceId, input = {}) {
   return next;
 }
 
+async function brandingTarget(id) {
+  const context = assertContext(), key = contextKey(context);
+  if (!online()) throw Error('Conecte-se para consultar e salvar a identidade.');
+  if (!Context.list().some(space => space.id === id && space.businessId === context.businessId))
+    throw Error('Espaço indisponível nesta empresa.');
+  const target = spaceRef(id), snapshot = await getDocFromServer(target);
+  const space = snapshot.data();
+  const links = [space?.businessId, space?.linkedBusinessId].filter(Boolean);
+  if (contextKey() !== key || !space || space.active === false || !links.length ||
+      links.some(link => link !== context.businessId))
+    throw Error('O espaço ou a sessão mudou. Abra a identidade novamente.');
+  return { target, space, key };
+}
+
+async function readDocumentBranding(id) {
+  const { space } = await brandingTarget(id);
+  return window.SpaceBranding.normalize(space.documentBranding);
+}
+
+async function saveDocumentBranding(id, input) {
+  const session = window.TeamAccess.captureSession();
+  window.TeamAccess.assert('spaces.manage');
+  const { target, space, key } = await brandingTarget(id);
+  window.TeamAccess.assertSession(session);
+  if (contextKey() !== key || window.SpaceBranding?.canManage?.() === false)
+    throw Error('O acesso ao espaço mudou.');
+  const documentBranding = window.SpaceBranding.normalize(input);
+  if (!same(documentBranding, window.SpaceBranding.normalize(space.documentBranding)))
+    await updateDoc(target, { documentBranding, updatedAt: serverTimestamp() });
+  if (contextKey() !== key) return;
+  const current = Context.list().find(space => space.id === id);
+  if (current) optimisticReplace(id, { ...current, documentBranding });
+}
+
 const adapter = Object.freeze({
   list: () => Context.list(),
   refresh: () => scheduleLoad({ force: true }),
@@ -473,6 +508,8 @@ const adapter = Object.freeze({
 const SpaceService = Object.freeze({
   ...adapter,
   load: scheduleLoad,
+  readDocumentBranding,
+  saveDocumentBranding,
   getReadStats: () => state.lastReadStats ? clone(state.lastReadStats) : null,
   getMigrationReport: () => state.lastMigrationReport ? clone(state.lastMigrationReport) : null,
 });

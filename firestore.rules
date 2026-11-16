@@ -1543,6 +1543,41 @@ service cloud.firestore {
       }
     }
 
+    function validSpaceDocumentBranding(brand) {
+      return brand is map
+        && brand.keys().hasOnly(['name','logo','primary','secondary','phone','instagram','address'])
+        && brand.name is string && brand.name.size() <= 80
+        && brand.logo is string && brand.logo.size() <= 24576
+        && (brand.logo == '' || brand.logo.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$'))
+        && brand.primary is string && brand.primary.matches('^#[a-fA-F0-9]{6}$')
+        && brand.secondary is string && brand.secondary.matches('^#[a-fA-F0-9]{6}$')
+        && brand.phone is string && brand.phone.size() <= 32
+        && brand.instagram is string && brand.instagram.size() <= 40
+        && brand.address is string && brand.address.size() <= 180;
+    }
+    function canUpdateSpaceDocumentBranding(spaceId) {
+      let space = resource.data;
+      let businessId = space.get('businessId', null) != null ? space.businessId : space.get('linkedBusinessId', null);
+      let changes = request.resource.data.diff(space).affectedKeys();
+      return activeUser() && space.active != false && businessId is string
+        && changes.hasOnly(['documentBranding','updatedAt','workspaceGeneration','workspaceWriteId'])
+        && (!changes.hasAny(['updatedAt']) || request.resource.data.updatedAt == request.time)
+        && (!changes.hasAny(['workspaceGeneration','workspaceWriteId'])
+          || get(/databases/$(database)/documents/businesses/$(businessId)).data.get('workspaceGeneration',0) > 0)
+        && validSpaceDocumentBranding(request.resource.data.documentBranding)
+        && financialWorkspaceWritable(space)
+        && subscriptionAllowsWrites(businessId)
+        && (
+          (space.type == 'business' && space.linkedBusinessId == businessId
+            && (ownsActiveBusiness(businessId)
+              || (canAccessSpace(businessId, spaceId)
+                && permissionGranted(businessId, 'financial.view')
+                && permissionGranted(businessId, 'spaces.manage'))))
+          || (space.type in ['personal', 'other'] && space.ownerUid == request.auth.uid
+            && (ownsActiveBusiness(businessId) || belongsToBusiness(businessId)))
+        );
+    }
+
     match /financialSpaces/{spaceId} {
       allow read: if signedIn() && resource.data.active != false && (
         (
@@ -1587,8 +1622,11 @@ service cloud.firestore {
               || belongsToBusiness(request.resource.data.businessId))
           )
         )
-        && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId));
-      allow update: if canManageFinancialSpaceMetadata(spaceId)
+        && (!('globalSpaceSchemaVersion' in request.resource.data) || validGlobalSpaceFields(request.resource.data, spaceId))
+        && (!('documentBranding' in request.resource.data) || validSpaceDocumentBranding(request.resource.data.documentBranding));
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['documentBranding'])
+        ? canUpdateSpaceDocumentBranding(spaceId)
+        : canManageFinancialSpaceMetadata(spaceId)
         && (
           resource.data.type in ['personal', 'other']
           || ownsActiveBusiness(resource.data.linkedBusinessId)

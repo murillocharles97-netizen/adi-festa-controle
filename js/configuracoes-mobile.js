@@ -53,10 +53,10 @@
     return `<section class="mobile-settings-page settings-mobile-v2" data-settings-root><button type="button" class="settings-sync-hero" data-settings-sync data-settings-action="sync" data-sync-state="${sync.state}"><span class="settings-sync-icon" aria-hidden="true">${icon("cloud")}<i></i></span><span class="settings-sync-copy"><b data-settings-sync-title>${esc(sync.title)}</b><small data-settings-sync-subtitle>${esc(sync.subtitle)}</small></span>${icon("chevron-right")}</button>
       ${group("Conta e operação", "Gerencie as informações do seu negócio.", [
         row({
-          iconName: "building-2",
-          title: "Dados da empresa",
-          subtitle: "Nome, telefone e documento",
-          action: "business",
+          iconName: "palette",
+          title: "Identidade visual",
+          subtitle: "Personalize sua marca e seus documentos.",
+          action: "branding",
         }),
         row({
           iconName: "gem",
@@ -254,7 +254,7 @@
       (button) =>
         (button.onclick = () => {
           const action = button.dataset.settingsAction;
-          if (action === "business") editBusiness();
+          if (action === "branding") window.SpaceBranding.open({ general: () => editBusiness() });
           if (action === "whatsapp") editBusiness(true);
           if (action === "account") account();
           if (action === "backup") backup();

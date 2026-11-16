@@ -48,8 +48,11 @@ window.Modais=(()=>{
   const recurringItems=sale=>(sale?.itens||[]).filter(item=>item.productType==='recurring'&&item.subscriptionExpiresAt);
   let active=null;
 
-  function currentBusiness(){
+  function currentBusiness(sale){
     const local=DB.carregar().config||{},cloud=window.FirebaseSession?.business||{};
+    const legacyName=cloud.receiptName||cloud.name||local.receiptName||local.nome||'Seu negócio';
+    const brand=window.SpaceBranding?.resolve(sale,legacyName);
+    if(brand)return {...brand,receiptName:brand.name,primaryColor:brand.primary,branded:true};
     return{
       name:cloud.receiptName||cloud.name||local.receiptName||local.nome||'Seu negócio',
       receiptName:cloud.receiptName||local.receiptName||'',
@@ -106,19 +109,25 @@ window.Modais=(()=>{
     words.forEach(word=>{const candidate=line?`${line} ${word}`:word;if(line&&context.measureText(candidate).width>maxWidth){lines.push(line);line=word}else line=candidate});
     if(line)lines.push(line);return lines.length?lines:[''];
   }
-  function createSaleReceiptCanvas({sale,customer,business}){
+  function createSaleReceiptCanvas({sale,customer,business,logo}){
     const scale=2,width=450,probe=document.createElement('canvas').getContext('2d');probe.font='bold 15px Arial';
     const itemLines=(sale.itens||[]).map(item=>wrapText(probe,item.nome,285));
     const extraLines=itemLines.reduce((sum,lines)=>sum+Math.max(0,lines.length-1),0);
     const campaignLines=(sale.campaignReceiptSummary||[]).length;
     const renewalLines=recurringItems(sale).length;
     const installmentLines=sale.installmentPlan?window.InstallmentCredit.text(sale).split('\n'):[];
-    const height=installmentLines.length*42+520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.source==='exchange_credit_checkout'?70:0)+(sale.observacao?70:0)+campaignLines*48;
+    const height=(business.branded?110:0)+installmentLines.length*42+520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.source==='exchange_credit_checkout'?70:0)+(sale.observacao?70:0)+campaignLines*48;
     const canvas=document.createElement('canvas');canvas.width=width*scale;canvas.height=height*scale;
     const context=canvas.getContext('2d');context.scale(scale,scale);context.fillStyle='#fff';context.fillRect(0,0,width,height);context.textBaseline='alphabetic';
-    context.fillStyle='#344052';context.textAlign='center';context.font='bold 27px Arial';context.fillText(business.receiptName||business.name,width/2,43);
-    context.font='13px Arial';context.fillStyle='#6f7b8d';context.fillText(`RECIBO · PEDIDO #${publicSaleNumber(sale)}`,width/2,68);
-    context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';let y=105;
+    let headingBottom=68;
+    if(business.branded)headingBottom=window.SpaceBranding.drawHeading(context,business,logo,width);
+    else{
+      context.fillStyle='#344052';context.textAlign='center';context.font='bold 27px Arial';
+      context.fillText(business.receiptName||business.name,width/2,43);
+    }
+    context.textAlign='center';context.font='13px Arial';context.fillStyle='#6f7b8d';
+    context.fillText(`RECIBO · PEDIDO #${publicSaleNumber(sale)}`,width/2,headingBottom);
+    context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';let y=headingBottom+37;
     context.fillText(`Data: ${new Date(sale.data).toLocaleString('pt-BR')}`,25,y);y+=27;
     wrapText(context,`Cliente: ${customer?.nome||sale.clienteNome||'Venda avulsa'}`,400).forEach(line=>{context.fillText(line,25,y);y+=20});y+=12;
     context.strokeStyle='#cbd1d9';context.setLineDash([5,5]);context.beginPath();context.moveTo(25,y);context.lineTo(width-25,y);context.stroke();y+=28;
@@ -140,8 +149,9 @@ window.Modais=(()=>{
     if(sale.observacao){y+=38;context.textAlign='left';context.fillStyle='#697586';context.font='13px Arial';wrapText(context,`Observação: ${sale.observacao}`,390).slice(0,3).forEach(line=>{context.fillText(line,25,y);y+=18})}
     return canvas;
   }
-  function generateSaleReceiptBlob(saleData){
-    const canvas=createSaleReceiptCanvas(saleData);
+  async function generateSaleReceiptBlob(saleData){
+    const logo=await window.SpaceBranding?.loadLogo(saleData.business?.logo);
+    const canvas=createSaleReceiptCanvas({...saleData,logo});
     return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(Error('Não foi possível gerar o recibo.')),'image/png',0.92));
   }
   async function copyText(text){
@@ -164,7 +174,7 @@ window.Modais=(()=>{
     const financed=sale.status==='fiado'?`<div class="receipt-debt"><div><span>Saldo anterior</span><strong>${dinheiro(debt(sale.saldoAnterior))}</strong></div><div><span>Valor fiado nesta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>${sale.installmentPlan?"Total contratado em aberto (inclui futuras)":"Total em aberto agora"}</span><strong>${dinheiro(debt(sale.saldoAtual))}</strong></div></div>`:'';
     const paid=sale.status!=='fiado'?`<div class="sale-payment-confirmed"><i data-lucide="badge-check"></i><span><b>${paymentLabel(sale)}</b><small>Pagamento confirmado</small>${Number(sale.valorRecebido)>0?`<small>Recebido: ${dinheiro(sale.valorRecebido)}</small>`:''}${Number(sale.troco)>0?`<small>Troco: ${dinheiro(sale.troco)}</small>`:''}</span></div>${terminalPaymentMarkup(sale)}`:'';
     const campaigns=(sale.campaignReceiptSummary||[]).length?`<div class="sale-receipt-campaigns"><b>Benefícios da compra</b>${sale.campaignReceiptSummary.map(item=>`<span><i data-lucide="gift"></i><span><strong>${escapar(item.campaignName)}</strong><small>${escapar(item.text)}${item.rewardUnlocked?` · ${Number(item.rewardUnlocked)} recompensa disponível`:''}</small></span></span>`).join('')}</div>`:'';
-    return`<section class="receipt-paper sale-receipt-paper"><header><h2>${escapar(business.receiptName||business.name)}</h2><span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${window.InstallmentCredit?.summary(sale)||''}${window.InstallmentCredit?.button(sale.clienteId)||''}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
+    return`<section class="receipt-paper sale-receipt-paper"><header>${business.branded?window.SpaceBranding.heading(business):'<h2>'+escapar(business.receiptName||business.name)+'</h2>'}<span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${window.InstallmentCredit?.summary(sale)||''}${window.InstallmentCredit?.button(sale.clienteId)||''}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
   }
   function closeCompletion(goHome=true){
     document.removeEventListener('keydown',active?.escapeHandler);const trigger=active?.trigger;active=null;Modais.fechar();
@@ -195,15 +205,24 @@ window.Modais=(()=>{
     fallback.innerHTML='<p>Seu navegador não permite enviar o recibo visual diretamente.</p><button data-fallback-text>Enviar apenas o resumo em texto</button><button data-fallback-copy>Copiar mensagem</button><button data-fallback-download>Baixar recibo manualmente</button>';
     fallback.querySelector('[data-fallback-text]').onclick=()=>shareText(message);fallback.querySelector('[data-fallback-copy]').onclick=()=>copyText(message);fallback.querySelector('[data-fallback-download]').onclick=downloadReceipt;
   }
+  function isCurrentDocument(original){
+    try{
+      if(original?.session)window.TeamAccess.assertSession(original.session);
+      return active===original;
+    }catch{return false;}
+  }
   async function shareVisual(message){
-    active.receiptStatus='preparing';feedback('Preparando recibo…');const blob=await generateSaleReceiptBlob(active);
+    const original=active;
+    active.receiptStatus='preparing';feedback('Preparando recibo…');const blob=await generateSaleReceiptBlob(original);
+    if(!isCurrentDocument(original))return;
     if(typeof File!=='function'){visualFallback(message);feedback('Compartilhamento de arquivos indisponível neste navegador.',true);return}
     const file=new File([blob],`recibo-${publicSaleNumber(active.sale)}.png`,{type:'image/png',lastModified:Date.now()});
-    if(navigator.share&&navigator.canShare?.({files:[file]}))try{active.receiptStatus='ready';feedback('Abrindo compartilhamento…');await navigator.share({files:[file],title:`Recibo #${publicSaleNumber(active.sale)}`,text:message});active.shareStatus='started';active.lastAction='visual_share';feedback('Compartilhamento iniciado.')}catch(error){if(error.name!=='AbortError'){visualFallback(message);feedback('Não foi possível abrir o compartilhamento visual.',true)}}else{visualFallback(message);feedback('Compartilhamento de arquivos indisponível neste navegador.',true)}
+    if(navigator.share&&navigator.canShare?.({files:[file]}))try{active.receiptStatus='ready';feedback('Abrindo compartilhamento…');await navigator.share({files:[file],title:`Recibo #${publicSaleNumber(active.sale)}`,text:message});if(!isCurrentDocument(original))return;active.shareStatus='started';active.lastAction='visual_share';feedback('Compartilhamento iniciado.')}catch(error){if(error.name!=='AbortError'){visualFallback(message);feedback('Não foi possível abrir o compartilhamento visual.',true)}}else{visualFallback(message);feedback('Compartilhamento de arquivos indisponível neste navegador.',true)}
   }
   async function downloadReceipt(){
     if(!active||active.busy)return;active.busy=true;feedback('Preparando recibo…');
-    try{const blob=await generateSaleReceiptBlob(active),url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`recibo-${publicSaleNumber(active.sale)}.png`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);active.receiptStatus='downloaded';active.lastAction='manual_download';feedback('Download manual iniciado.')}catch(error){feedback(error.message||'Não foi possível gerar o recibo.',true)}finally{active.busy=false}
+    const original=active;
+    try{const blob=await generateSaleReceiptBlob(original);if(!isCurrentDocument(original))return;const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`recibo-${publicSaleNumber(active.sale)}.png`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);active.receiptStatus='downloaded';active.lastAction='manual_download';feedback('Download manual iniciado.')}catch(error){feedback(error.message||'Não foi possível gerar o recibo.',true)}finally{if(active===original)active.busy=false}
   }
   async function shareText(message){
     const phone=normalizeSalePhone(active.customer?.telefone);
@@ -217,7 +236,7 @@ window.Modais=(()=>{
     root.querySelectorAll('[data-share-mode]').forEach(button=>button.onclick=()=>{active.shareMode=button.dataset.shareMode;root.querySelectorAll('[data-share-mode]').forEach(item=>item.classList.toggle('active',item===button));root.querySelector('[data-share-submit]').innerHTML=active.shareMode==='visual'?'<i data-lucide="image"></i>Compartilhar recibo':'<i data-lucide="send"></i>Compartilhar';root.querySelector('.sale-share-fallback').hidden=true;window.lucide?.createIcons()});
     root.querySelector('[data-share-edit]').onclick=event=>{const area=root.querySelector('#sale-share-message'),editing=area.hasAttribute('readonly');if(editing){area.removeAttribute('readonly');area.focus();area.setSelectionRange(area.value.length,area.value.length);event.currentTarget.innerHTML='<i data-lucide="check"></i>Concluir edição'}else{area.setAttribute('readonly','');event.currentTarget.innerHTML='<i data-lucide="pencil"></i>Editar mensagem'}window.lucide?.createIcons()};
     root.querySelector('[data-share-copy]').onclick=()=>copyText(message());root.querySelector('[data-share-system]').onclick=()=>systemTextShare(message());
-    root.querySelector('[data-share-submit]').onclick=async event=>{if(active.busy)return;const button=event.currentTarget;active.busy=true;button.disabled=true;try{if(active.shareMode==='visual')await shareVisual(message());else await shareText(message())}catch(error){feedback(error.message||'Não foi possível compartilhar.',true)}finally{active.busy=false;button.disabled=false}};
+    root.querySelector('[data-share-submit]').onclick=async event=>{if(!active||active.busy)return;const button=event.currentTarget,original=active;original.busy=true;button.disabled=true;try{if(original.shareMode==='visual')await shareVisual(message());else await shareText(message())}catch(error){if(isCurrentDocument(original))feedback(error.message||'Não foi possível compartilhar.',true)}finally{original.busy=false;button.disabled=false}};
     root.focus();window.lucide?.createIcons();
   }
   function bindCompletion(){
@@ -231,7 +250,7 @@ window.Modais=(()=>{
   }
   function show(sale,customer){
     if(!sale?.id)throw Error('A venda precisa estar concluída antes de exibir o recibo.');
-    active={saleCompleted:true,saleId:sale.id,sale,customer:customer||null,business:currentBusiness(),balanceBefore:sale.saldoAnterior,balanceAfter:sale.saldoAtual,shareStatus:'idle',receiptStatus:'idle',lastAction:'opened',busy:false,trigger:document.activeElement};
+    active={saleCompleted:true,saleId:sale.id,sale,session:window.TeamAccess?.captureSession?.(),customer:customer||null,business:currentBusiness(sale),balanceBefore:sale.saldoAnterior,balanceAfter:sale.saldoAtual,shareStatus:'idle',receiptStatus:'idle',lastAction:'opened',busy:false,trigger:document.activeElement};
     active.escapeHandler=event=>{
       if(event.key==='Escape')closeCompletion(true);
       if(event.key==='Tab'){
@@ -242,5 +261,5 @@ window.Modais=(()=>{
       }
     };document.addEventListener('keydown',active.escapeHandler);restoreCompletion();
   }
-  window.Recibos={mostrar:show,criarCanvas:(sale,customer)=>createSaleReceiptCanvas({sale,customer,business:currentBusiness()}),buildSaleShareMessage,generateSaleReceiptBlob,normalizeSalePhone,publicSaleNumber,estado:()=>active?{saleCompleted:active.saleCompleted,saleId:active.saleId,shareStatus:active.shareStatus,receiptStatus:active.receiptStatus,lastAction:active.lastAction,busy:active.busy}:null};
+  window.Recibos={mostrar:show,criarCanvas:(sale,customer)=>createSaleReceiptCanvas({sale,customer,business:currentBusiness(sale)}),buildSaleShareMessage,generateSaleReceiptBlob,normalizeSalePhone,publicSaleNumber,estado:()=>active?{saleCompleted:active.saleCompleted,saleId:active.saleId,shareStatus:active.shareStatus,receiptStatus:active.receiptStatus,lastAction:active.lastAction,busy:active.busy}:null};
 })();
