@@ -1,0 +1,47 @@
+.consignment-page { display: grid; gap: 14px; }
+.consignment-heading, .consignment-entry, .consignment-row, .consignment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.consignment-heading h2, .consignment-panel h3 { margin: 0 0 4px; }
+.consignment-heading p, .consignment-entry p { margin: 0; color: var(--muted, #526479); }
+.consignment-entry, .consignment-panel { padding: clamp(14px, 3vw, 22px); }
+.consignment-entry { margin-top: 14px; }
+.consignment-stats, .consignment-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 10px;
+}
+.consignment-stats section { display: grid; gap: 4px; padding: 13px; }
+.consignment-stats strong { font-size: 1.42rem; }
+.consignment-stats + .consignment-panel, .consignment-panel + .consignment-panel { margin-top: 10px; }
+.consignment-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.consignment-status { margin: 5px 0; font-size: .9rem; }
+.consignment-status:empty { display: none; }
+.consignment-page form, .consignment-panel label { display: grid; gap: 6px; }
+.consignment-page form { gap: 12px; margin-top: 8px; }
+.consignment-page input, .consignment-page select, .consignment-page textarea {
+  width: 100%;
+  min-width: 0;
+  padding: .55rem .65rem;
+  color: inherit;
+  font: inherit;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #cbd5e1);
+  border-radius: 9px;
+}
+.consignment-row { padding: 9px 0; border-bottom: 1px solid var(--line, #dce4ea); }
+.consignment-row :where(b, small) { overflow-wrap: anywhere; }
+.consignment-row small { display: block; color: var(--muted, #526479); }
+.consignment-row input { max-width: 110px; }
+.consignment-results { display: grid; max-height: 200px; overflow-y: auto; gap: 4px; }
+.consignment-results:empty { display: none; }
+.consignment-results button { justify-content: flex-start; text-align: left; white-space: normal; }
+.consignment-actions { justify-content: flex-start; margin-top: 12px; }
+@media (max-width: 480px) {
+  .consignment-tabs .btn { padding: 8px 10px; }
+  .consignment-row > div:first-child { flex: 1 1 140px; }
+}

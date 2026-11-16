@@ -478,6 +478,7 @@
       historico,
       relatorios,
       configuracoes,
+      consignados: () => window.Consignments.shell(),
       planos,
       cupons,
     },
@@ -498,6 +499,7 @@
       historico: "Histórico",
       relatorios: "Desempenho",
       configuracoes: "Configurações",
+      consignados: "Consignados",
       planos: "Planos e assinatura",
       cupons: "Cupons de desconto",
     };
@@ -1219,7 +1221,8 @@
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
     document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
-    root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]();
+    root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]() +
+      (route === 'configuracoes' ? window.Consignments.entry() : '');
     root.dataset.spaceViewScope = window.SpaceContext?.viewScope?.() || "";
     window.SpaceContext?.bind?.(root);
     const mobileTitle = matchMedia("(max-width:767px)").matches
@@ -1263,6 +1266,7 @@
     fecharMenu();
     aplicarInputModes($("#app"));
     bind(route);
+    if (route === "consignados" && !deniedRoute) window.Consignments.mount(root);
     if (route === "equipe" && !deniedRoute) window.TeamPage?.bind?.();
     if (route === "relatorios" && !deniedRoute) window.PerformanceDashboard?.bind?.();
     if (route === "catalogo") CatalogoUI.bind();
@@ -1359,9 +1363,8 @@
     window.AppBootDiagnostics?.count?.("dataChangedCount", {
       route: Router.atual(),
     });
-    // Clientes possui controller próprio. Eventos de nuvem atualizam o estado
-    // paginado sem destruir a página, o input ativo ou o modal de pagamento.
-    if (Router.atual() === "clientes") return;
+    // Clientes e Consignados atualizam seus próprios dados sem remontar formulários.
+    if (["clientes", "consignados"].includes(Router.atual())) return;
     cloudRenderPending = true;
     clearTimeout(cloudRenderTimer);
     cloudRenderTimer = setTimeout(() => {
@@ -1422,7 +1425,7 @@
   }
   function refreshSpaceRoute() {
     const root = document.querySelector('#app'), route = Router.atual();
-    if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender'].includes(route)) return;
+    if (!root || root.dataset.route !== route || !['inicio','clientes','produtos','vender','consignados'].includes(route)) return;
     const scopeChanged = root.dataset.spaceViewScope !== window.SpaceContext?.viewScope?.();
     if (!scopeChanged) return;
     if (route === 'clientes') {

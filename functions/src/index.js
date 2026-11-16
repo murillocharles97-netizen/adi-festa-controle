@@ -61,6 +61,8 @@ exports.commitFinancialMaintenance=onCall(RECOVERY_OPTIONS,request=>financialMai
 const saleCancellations=require('./services/sale-cancellation-service').saleCancellationService(db,{allowNewCancellations:true,projectFinancial:(businessId,saleId,sale)=>financialIncomeService(db).projectSale(businessId,saleId,sale)});
 exports.previewSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.preview(request));
 exports.confirmSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.confirm(request));
+const manageConsignment = require('./services/consignment-service').consignmentService(db);
+exports.manageConsignment = onCall(RECOVERY_OPTIONS, manageConsignment);
 const exchanges=require('./services/sale-exchange-service').saleExchangeService(db);
 exports.quoteSaleExchange=onCall(RECOVERY_OPTIONS,request=>exchanges.quote(request));
 exports.confirmSaleExchange=onCall(RECOVERY_OPTIONS,request=>exchanges.confirm(request));
