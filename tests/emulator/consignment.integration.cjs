@@ -9,7 +9,7 @@ const { consignmentService } = require('../../functions/src/services/consignment
 const { stockKey } = require('../../functions/src/services/online-stock-reservation');
 const { storeId } = require('../../functions/src/services/online-store-service');
 
-assert.ok(process.env.FIRESTORE_EMULATOR_HOST, 'Run only with Firestore Emulator');
+assert.match(process.env.FIRESTORE_EMULATOR_HOST || '', /^127\.0\.0\.1:\d+$/, 'Run only with loopback Firestore Emulator');
 const app = initializeApp({ projectId: 'demo-veconi-consignment' });
 const db = getFirestore(app);
 const date = new Date('2026-11-16T15:00:00Z');
@@ -31,7 +31,7 @@ async function fixture() {
   }
   for (const id of s) {
     const ref = db.doc('financialSpaces/' + id);
-    batch.create(ref, { businessId, active: true, type:'business', ownerUid:uid, capabilities: { sales: true, finance:true } });
+    batch.create(ref, { businessId, linkedBusinessId: businessId, active: true, type:'business', ownerUid:uid, capabilities: { sales: true, finance:true } });
     batch.create(ref.collection('financialAccounts').doc('cash-test'), {ownerUid:uid, active:true, name:'Conta de teste', currentBalanceCents:1000});
   }
   batch.create(root.collection('onlineStores').doc(storeId(spaceId)), {
@@ -138,13 +138,21 @@ test('direct Firestore reads and writes to consignments are denied even to the o
   const { doc, getDoc, setDoc } = require('firebase/firestore');
   const f = await enabled();
   const env = await initializeTestEnvironment({ projectId: 'demo-veconi-consignment', firestore: {
-    rules: require('node:fs').readFileSync('firestore.rules','utf8'),
+    rules: require('node:fs').readFileSync(process.env.VECONI_CONSIGNMENT_RULES || 'firestore.rules','utf8'),
   } });
   try {
     const ownerDb = env.authenticatedContext(f.uid).firestore();
     const record = doc(ownerDb, 'businesses', f.businessId, 'consignmentSpaces', '0_'+f.spaceId, 'outlets', f.outletId);
     await assertFails(getDoc(record));
     await assertFails(setDoc(record, { name: 'Alteração indevida' }, { merge: true }));
+    const stock = await f.deliver(f.outletId,[{productId:'anel',quantity:1}]);
+    const snapshot = await f.call('conferenceStock',{outletId:f.outletId});
+    const conference = await f.call('conference',{outletId:f.outletId,operationId:randomUUID(),fingerprint:snapshot.fingerprint,
+      items:snapshot.items.map(row=>({id:row.id,found:0,returns:0,loss:0,damaged:0}))});
+    assert.ok(stock.item.id);
+    const entry = doc(ownerDb,'financialSpaces',f.spaceId,'entries','consignment_'+conference.item.id);
+    assert.equal((await getDoc(entry)).data().status,'pending');
+    await assertFails(setDoc(entry,{status:'paid'},{merge:true}));
   } finally { await env.cleanup(); }
 });
 
@@ -393,4 +401,33 @@ test('a newer replenishment invalidates a count before any financial or stock wr
     items:stale.items.map(row=>({id:row.id,found:0,returns:0,loss:0,damaged:0}))}),{code:'failed-precondition'});
   assert.equal((await f.call('inventory',{outletId:f.outletId})).items[0].quantity,3);
   assert.equal((await db.doc('financialSpaces/'+f.spaceId).collection('entries').get()).size,0);
+});
+
+
+test('a queued normal sale from another device uses live stock after consigning and remains idempotent', async () => {
+  const f = await enabled(), { harness } = require('../helpers/fiado-cancellation-harness.cjs');
+  const path = require('node:path');
+  const base = process.env.VECONI_LIVE_FUNCTIONS_DIR || path.resolve('functions');
+  const { operationalCommitService } = require(path.join(base,'src/services/operational-commit-service.js'));
+  const makeDevice = () => harness({businessId:f.businessId,spaceId:f.spaceId,uid:f.uid});
+  const first = makeDevice(), second = makeDevice(), third = makeDevice();
+  await f.root.collection('products').doc('qa-product').set(first.data().produtos[0]);
+  await f.root.collection('clients').doc('qa-client').set(first.data().clientes[0]);
+  const normal = first.sell({status:'pago',formaPagamento:'pix'});
+  const cash = second.sell({status:'pago',formaPagamento:'dinheiro'});
+  const rejected = third.sell({status:'pago',formaPagamento:'pix'});
+  const run = ({packet}) => operationalCommitService(db).commit({auth:{uid:f.uid},data:{businessId:f.businessId,
+    syncProtocolVersion:1,clientRelease:233,item:{...packet,syncProtocolVersion:1,clientRelease:202}}});
+  const transfer = await f.deliver(f.outletId,[{productId:'qa-product',quantity:1}]);
+  assert.equal(transfer.item.stockAfter[0].quantity,1);
+  await run(normal);
+  await run(normal);
+  await run(cash);
+  await assert.rejects(run(rejected));
+  const product = (await f.products.doc('qa-product').get()).data();
+  assert.equal(product.estoqueAtual,0);
+  assert.equal((await f.root.collection('sales').get()).size,2);
+  assert.equal((await f.root.collection('stockMovements').get()).size,3);
+  assert.equal((await f.call('inventory',{outletId:f.outletId})).items[0].quantity,1);
+  assert.equal((await f.call('daily')).units,0);
 });
