@@ -165,7 +165,7 @@ function openQueueDetails(filter={}){
   const errorSection=root.querySelector('.sync-error-list');if(errorSection&&errors.length)errorSection.innerHTML=`<h4>Erros recentes</h4>${errors.slice(0,50).map(renderQueueError).join('')}`;
   if(errors.some(item=>item.reviewReason==='product_stock_review_required')){
     const releases=errors.filter(item=>item.reviewReason==='product_stock_review_required').map(item=>`<button class="btn-primary" type="button" data-release-stock="${escape(item.operationId)}">Liberar vendas deste produto</button>`).join('');
-    errorSection?.insertAdjacentHTML('afterbegin',`<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento e foi recusada pela nuvem, sem nenhum efeito. O proprietário pode liberar o produto: a VECONI confere a nuvem, preserva o original e volta a usar o estoque da nuvem. Depois, se necessário, use Ajustar estoque.</p>${window.BusinessContext?.get?.()?.role==='owner'?releases:''}`);
+    errorSection?.insertAdjacentHTML('afterbegin',`<p class="backup-warning" role="status">Uma edição tentou alterar o estoque sem registrar um movimento e foi recusada pela nuvem, sem nenhum efeito. O proprietário pode liberar o produto: a VECONI confere a nuvem, preserva o original e volta a usar o estoque da nuvem. Depois, use Comparar com a nuvem e confira o estoque físico; se necessário, use Ajustar estoque.</p>${window.BusinessContext?.get?.()?.role==='owner'?releases:''}`);
     root.querySelectorAll('[data-release-stock]').forEach(button=>button.onclick=()=>confirmRejectedStockRelease(button.dataset.releaseStock));
   }
   if(errors.some(item=>item.reviewReason==='sync_receipt_review_required'))
