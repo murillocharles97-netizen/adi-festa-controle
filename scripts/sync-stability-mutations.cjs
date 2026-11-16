@@ -4,7 +4,7 @@
 // source file, the tests run, and the file is restored. Every mutation MUST fail.
 // Usage: node scripts/sync-stability-mutations.cjs
 const fs = require('fs'), { spawnSync } = require('child_process');
-const TESTS = ['tests/sync-rejection-reasons.test.js', 'tests/sync-version-identity.test.js'];
+const TESTS = ['tests/sync-rejection-reasons.test.js', 'tests/sync-version-identity.test.js', 'tests/sync-d3-recovery.test.cjs', 'tests/sync-automatic-recovery.test.cjs'];
 const MUTATIONS = [
   ['M1 servidor não envia motivo', 'functions/src/services/operational-commit-service.js', 'throw new HttpsError(code,message,Rejection.details(message,code));', 'throw new HttpsError(code,message);'],
   ['M2 servidor muda o código padrão (quebra PWAs antigos)', 'functions/src/services/operational-commit-service.js', "const fail=(message,code='permission-denied')=>", "const fail=(message,code='failed-precondition')=>"],
@@ -20,6 +20,15 @@ const MUTATIONS = [
   ['M12 app mostra a versão inteira antiga', 'js/mobile-navigation.js', 'window.AdiFestaBuild?.appVersion || window.AdiFestaBuild?.release', 'window.AdiFestaBuild?.release'],
   ['M14 app sem o módulo deixa de reconhecer pacotes antigos', 'js/firebase/sync.js', "??item.lastErrorMessage==='Estoque sem movimento autorizado.')", '??false)'],
   ['M13 módulo fora do build público', 'scripts/build-public-site.cjs', ", 'sync-rejection.js']", ']'],
+  ["D1 internal sem resposta volta a ser erro definitivo", "js/firebase/sync.js", "const unknownOutcomeSyncCodes = new Set(['internal','unknown','cancelled']);", "const unknownOutcomeSyncCodes = new Set([]);"],
+  ["D2 internal com motivo tipado tratado como desconhecido", "js/firebase/sync.js", "  !(error?.details && typeof error.details === 'object' && typeof error.details.reason === 'string');", "  true;"],
+  ["D3 servidor inacessível consome o limite de envios", "js/firebase/sync.js", "(serverUnreachable ? 0 : 1)", "1"],
+  ["D4 pacote requalificado reenviado sem conferir o recibo", "js/firebase/sync.js", "reopened[at]={...reopened[at],status:'pending',syncConfirmationPending:true,", "reopened[at]={...reopened[at],status:'pending',attempts:0,"],
+  ["D5 passagem não para quando o servidor está inacessível", "js/firebase/sync.js", "          serverUnreachable ||\n", "          false ||\n"],
+  ["D6 espera sem teto de 5 minutos", "js/firebase/sync.js", "const CONNECTION_WAIT_DELAYS = [15000, 30000, 60000, 120000, 300000];", "const CONNECTION_WAIT_DELAYS = [15000, 30000, 60000, 120000, 300000, 900000, 3600000];"],
+  ["D7 retorno da conexão não antecipa a retomada", "js/firebase/sync.js", "if (!waits || Date.parse(item.lastAttemptAt) <= connectionRestoredAt) return base;", "if (!waits) return base;"],
+  ["D8 sincronização automática desiste após 5 tentativas com fila", "js/firebase/sync.js", "(syncConnectionAttempts<5||queuedWork())", "syncConnectionAttempts<5"],
+  ["D9 pacotes antigos do D3 não são requalificados", "js/firebase/sync.js", "if(state.operationalProtocol?.queueRecoveryVersion===1&&untypedUnknownFailure(queued)&&", "if(false&&untypedUnknownFailure(queued)&&"],
 ];
 let undetected = 0;
 for (const [name, file, from, to] of MUTATIONS) {
