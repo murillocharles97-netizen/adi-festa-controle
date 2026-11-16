@@ -150,7 +150,7 @@ function billingCheckoutReservation(db, businessId) {
     });
   }
 
-  async function close(claim, { outcome, providerId = null, errorCode = null }) {
+  async function close(claim, { outcome, providerId = null, errorCode = null, legacyProof = null }) {
     return db.runTransaction(async tx => {
       const row = (await tx.get(ref)).data();
       if (row?.generation !== claim.generation || row.stage === 'closed') return false;
@@ -163,7 +163,6 @@ function billingCheckoutReservation(db, businessId) {
       const attemptRef = attempts.doc(claim.operationId);
       let evidence;
       if (verifiedAbsence) {
-        if (row.terms.legacyMigration) return false;
         const reference = row.dispatchTerms.externalReference;
         const [receipt, orders, contracts] = await Promise.all([
           tx.get(db.doc(`billingCheckoutProviderResolutions/${reference}`)),
@@ -181,6 +180,20 @@ function billingCheckoutReservation(db, businessId) {
           || !Number.isFinite(verifiedAt) || verifiedAt < row.dispatchedAt.toMillis() + 10 * 60_000
           || verifiedAt > Date.now() || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
           || expiresAt - verifiedAt > 60 * 60_000) return false;
+        if (row.terms.legacyMigration) {
+          const [job, business] = await Promise.all([
+            tx.get(db.doc(`legacyPlanTransitions/${businessId}`)), tx.get(businessRef),
+          ]);
+          const source = job.data();
+          if (source?.status !== 'creating' || source.operationId !== row.operationId || source.requestHash !== row.requestHash ||
+            source.actorUid !== row.requestedBy || source.replacementId || source.approvedPaymentId || source.activatedAt ||
+            legacyProof?.contractStatus === 'authorized') return false;
+          require('./legacy-source-billing-guard').assertSourceBillingCheck({
+            check: legacyProof, business: business.data(), businessId, actorUid: row.requestedBy,
+            expectedSubscriptionId: source.subscriptionId,
+          });
+          legacy = job;
+        }
       } else if (!noDispatch && !rejected) {
         const old = (await tx.get(attemptRef)).data();
         if (!['cancelled','canceled','expired','failed','rejected','abandoned','approved'].includes(old?.status)) return false;

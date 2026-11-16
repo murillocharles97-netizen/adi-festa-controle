@@ -370,3 +370,25 @@ test('late auto-card approval cannot replace a newer payment or renew access aga
   assert.deepEqual((await c.root.get()).data().subscription,before);
   assert.equal((await db.doc('subscriptionIndex/'+id).get()).data().status,'payment_review_required');
 });
+
+test('release of ambiguous legacy dispatch requires provider evidence and a fresh stopped-source check',async()=>{
+  const c=await seed(),n=writes();loseNextOrderReply=true;
+  await assert.rejects(create(c),{code:'unavailable'});
+  const lock=(await reservation(c).get()).data(),reference=lock.dispatchTerms.externalReference;
+  const candidate=[...orders].find(([,o])=>o.external_reference===reference);
+  orders.delete(candidate[0]);
+  await reservation(c).update({dispatchedAt:Timestamp.fromMillis(Date.now()-20*60_000)});
+  await db.doc('billingCheckoutProviderResolutions/'+reference).set({
+    authority:'platform_admin',businessId:c.bid,operationId:lock.operationId,generation:lock.generation,requestHash:lock.requestHash,
+    externalReference:reference,outcome:'provider_confirmed_no_resource',providerSupportCaseId:'qa-legacy-001',providerEvidenceSha256:'c'.repeat(64),
+    verifiedAt:Timestamp.fromMillis(Date.now()-6000),expiresAt:Timestamp.fromMillis(Date.now()+60_000),
+  });
+  const prior=contracts.get(c.oldId);
+  prior.value.status='authorized';
+  await assert.rejects(resumeCheckout(c),e=>e.details?.billingCode==='checkout_review_required');
+  assert.equal((await reservation(c).get()).data().stage,'dispatching');
+  prior.value.status='cancelled';
+  assert.equal((await resumeCheckout(c)).closed,true);
+  assert.equal((await db.doc('legacyPlanTransitions/'+c.bid).get()).data().status,'attempt_closed');
+  assert.ok((await create(c)).orderId);assert.equal(writes(),n+2);assert.equal(prior.cancels,0);
+});

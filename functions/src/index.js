@@ -445,7 +445,11 @@ exports.createSubscription=onCall(FUNCTION_OPTIONS,async request=>{
           &&resolution.generation===claim.generation&&/^[a-zA-Z0-9_-]{1,128}$/.test(resolution.providerId||'')){
           recoveredProvider=paymentMethod.id==='card'?await mp().getSubscription(resolution.providerId):await mp().getOrder(resolution.providerId);
         }
-        if(!recoveredProvider&&await gate.close(claim,{outcome:'provider_confirmed_no_resource'})){
+        const verifiedAbsence=resolution?.outcome==='provider_confirmed_no_resource';
+        const legacyProof=!recoveredProvider&&verifiedAbsence&&migration
+          ?await legacyPlanTransitionService(db,mp()).verifySourceForCheckout({businessId,actorUid:context.uid,expectedSubscriptionId:migration.subscriptionId})
+          :null;
+        if(!recoveredProvider&&verifiedAbsence&&await gate.close(claim,{outcome:'provider_confirmed_no_resource',legacyProof})){
           if(redemption)await coupons().releaseReservation(redemption.id,'provider_confirmed_no_resource').catch(()=>{});
           return{paymentMethodType:paymentMethod.id,closed:true,operationId:opId};
         }
