@@ -25,19 +25,18 @@ test("Pix não recebe identidade de pagador do cartão", () => {
   assert.match(backend, /usesPayerEmail\?normalizeBillingPayerEmail/);
 });
 
-test("tentativa inclui pagador no hash e checkout antigo não é reutilizado", () => {
-  const backend = read("functions/src/index.js");
-  assert.match(backend, /requestHash=sha\(JSON\.stringify\(\{[^}]*billingPayerEmail/);
-  assert.match(backend, /String\(intentData\.billingPayerEmail\|\|''\)===billingPayerEmail/);
-  assert.match(backend, /supersedePendingCardCheckout/);
-  assert.match(backend, /cancelSubscription\(subscriptionId\)/);
-  assert.match(backend, /status:'superseded'/);
+test("tentativa inclui pagador no hash e mudar o pagador exige encerrar o checkout anterior", () => {
+  const backend = read("functions/src/index.js"), gate = read("functions/src/services/billing-checkout-reservation-service.js");
+  assert.match(backend, /hash=sha\(JSON\.stringify\(\{[^}]*billingPayerEmail/);
+  assert.match(gate, /current\.requestHash === requestHash/);
+  assert.match(gate, /!resumeOnly && !sameRequest\)\) throw wait\(\)/);
+  assert.match(backend, /exports\.cancelPendingBillingAttempt=/);
 });
 
 test("cupom é revalidado na nova tentativa e não vira autorização", () => {
   const backend = read("functions/src/index.js");
-  assert.match(backend, /effectiveCouponCode=couponCode\|\|cardReplacement\?\.couponCode/);
-  assert.match(backend, /reserveCheckoutCoupon\(\{quoteId,couponCode:effectiveCouponCode/);
+  assert.match(backend, /redemption=recovering\?claim\.dispatchTerms\.redemption/);
+  assert.match(backend, /reserveCheckoutCoupon\(\{quoteId,couponCode,context/);
   assert.doesNotMatch(backend, /findBusinessByEmail/);
 });
 
@@ -92,8 +91,8 @@ test("retorno do cartão reconcilia a cobrança e traduz a recusa real", () => {
 test("retry não reutiliza preapproval cancelada e preserva o cupom", () => {
   const backend = read("functions/src/index.js"),
     plans = read("js/plans.js");
-  assert.match(backend, /providerStatus==='pending'/);
-  assert.match(backend, /supersedePendingCardCheckout/);
+  assert.match(backend, /verifyStoppedContract\(mp\(\),providerId/);
+  assert.match(backend, /gate\.close\(claim,\{outcome:'provider_closed',providerId\}\)/);
   assert.match(backend, /couponCode:index\?\.discountSnapshot\?\.couponCodeSnapshot/);
   assert.match(plans, /CARD_CHECKOUT_RETURN_KEY/);
   assert.match(plans, /pendingCardCheckoutContext/);

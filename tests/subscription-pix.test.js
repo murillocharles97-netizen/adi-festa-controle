@@ -34,7 +34,7 @@ test('frontend envia somente identificadores e backend calcula o valor',()=>{
   assert.match(context,/operationId:checkoutOperationId/);
   assert.doesNotMatch(context,/transaction_amount|chargedPrice/);
   assert.match(backend,/planBilling\(plan,billingCycle\)/);
-  assert.match(backend,/requirePaymentMethod\(request\.data\?\.paymentMethodType\)/);
+  assert.match(backend,/requirePaymentMethod\(input\.paymentMethodType\)/);
   assert.doesNotMatch(backend,/request\.data\?\.(?:amount|price|transaction_amount)/);
 });
 
@@ -64,13 +64,12 @@ test('fallback verifica o provider e atualiza o contexto sem logout ou reload',(
   assert.match(pix,/markerSnapshot\.exists/);
 });
 
-test('clique repetido possui lease e tentativa lógica idempotente',()=>{
-  const backend=read('functions/src/index.js');
-  assert.match(backend,/billingCheckoutAttempts/);
-  assert.match(backend,/CHECKOUT_LEASE_MS/);
-  assert.match(backend,/requestHash/);
-  assert.match(backend,/status==='pending_payment'/);
-  assert.match(backend,/status==='payment_pending'/);
+test('só a preparação tem lease; tentativa enviada fica vinculada à empresa',()=>{
+  const backend=read('functions/src/index.js'),gate=read('functions/src/services/billing-checkout-reservation-service.js');
+  assert.match(gate,/billingCheckoutReservations\/\$\{businessId\}/);
+  assert.match(gate,/current\?\.stage === 'preparing' && current\.preparationUntil > Date\.now\(\)/);
+  assert.match(gate,/\['dispatching', 'linked'\]\.includes\(current\.stage\)/);
+  assert.match(backend,/await gate\.dispatch\(claim,dispatchTerms\);\s*providerDispatched=true;\s*return create\(\)/);
 });
 
 test('interface exibe QR, copia e cola e estados sem exigir conta Mercado Pago',()=>{
@@ -103,9 +102,9 @@ test('falha Pix registra somente diagnóstico público no navegador',()=>{
   assert.match(backend,/\[BILLING_PIX_ERROR\]/);assert.doesNotMatch(backend,/accessToken.*logger|logger.*accessToken/i);
 });
 
-test('Pix com cupom grava resgate no mesmo batch e nunca exige subscriptionId',()=>{
+test('Pix com cupom grava resgate na transação da reserva e nunca exige subscriptionId',()=>{
   const backend=read('functions/src/index.js'),coupons=read('functions/src/services/coupon-firestore-service.js');
-  assert.match(backend,/markCheckout\(\{redemptionId:redemption\.id,internalSubscriptionId:opId,providerOrderId:details\.orderId,providerPaymentId:details\.paymentId,writer:batch\}\);\s*await batch\.commit\(\)/);
+  assert.match(backend,/gate\.link\(claim,details\.orderId,async\(batch,freshBusiness\)=>\{[\s\S]*?markCheckout\(\{redemptionId:redemption\.id,internalSubscriptionId:opId,providerOrderId:details\.orderId,providerPaymentId:details\.paymentId,writer:batch\}\);\s*\}\)/);
   assert.match(coupons,/mercadoPagoSubscriptionId:\s*subscriptionId\s*\|\|\s*null/);
   assert.match(coupons,/internalSubscriptionId:\s*internalSubscriptionId\s*\|\|\s*null/);
 });

@@ -101,6 +101,19 @@ function firestoreSubscriptionService(db) {
         businessSnapshot = await transaction.get(businessRef);
       if (!businessSnapshot.exists)
         throw Error("Empresa da assinatura não encontrada.");
+      const closure = index.internalSubscriptionId
+        ? (await transaction.get(businessRef.collection('billingCheckoutClosures').doc(index.internalSubscriptionId))).data()
+        : null;
+      if (closure?.outcome === 'provider_closed' && closure.providerId === subscriptionId) {
+        const lateApproval = activation?.active === true || String(provider.status || '') === 'authorized';
+        if (lateApproval) {
+          const review = { status: 'payment_review_required', reviewReason: 'closed_contract_approved', updatedAt: now };
+          transaction.set(indexRef, review, { merge: true });
+          transaction.set(businessRef.collection('billingCheckoutAttempts').doc(index.internalSubscriptionId), review, { merge: true });
+        }
+        return { businessId: index.businessId, subscription: businessSnapshot.data().subscription || {},
+          ignored: true, closedCheckout: true, requiresReview: lateApproval, reason: 'closed-checkout' };
+      }
       if (index.status === "superseded") {
         transaction.set(
           indexRef,
@@ -400,6 +413,10 @@ function firestoreSubscriptionService(db) {
       const indexSnapshot=await transaction.get(indexRef),index=indexSnapshot.data()||{};
       if(!indexSnapshot.exists||!index.businessId)return{processed:false};
       const businessRef=db.doc(`businesses/${index.businessId}`),businessSnapshot=await transaction.get(businessRef),subscription=businessSnapshot.data()?.subscription||{},successful=result.successful===true,paymentMethodType=index.paymentMethodType||subscription.paymentMethodType||'card',patch={'subscription.lastPaymentStatus':String(result.status||'unknown'),'subscription.lastPaymentStatusDetail':String(result.statusDetail||'')||null,'subscription.lastPaymentEventId':eventId,'subscription.lastPaymentProviderId':result.paymentId||null,'subscription.updatedAt':nowIso(),updatedAt:FieldValue.serverTimestamp()};
+      if(index.internalSubscriptionId){
+        const closure=(await transaction.get(businessRef.collection('billingCheckoutClosures').doc(index.internalSubscriptionId))).data();
+        if(closure?.outcome==='provider_closed'&&closure.providerId===subscriptionId)return{processed:false,reason:'closed-checkout'};
+      }
       if(Number(index.catalogVersion||1)<2&&(subscription.legacyTransition||subscription.catalogVersion===2))return{processed:false,reason:'legacy-transition-frozen'};
       if(successful)patch['subscription.lastPaymentDate']=result.dateApproved||nowIso();
       else if(paymentMethodType==='pix_monthly'&&subscription.status==='active')patch['subscription.status']='payment_pending';

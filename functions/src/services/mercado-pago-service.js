@@ -52,14 +52,14 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
   if(!accessToken)throw Error('Token do Mercado Pago indisponível no Secret Manager.');
   if(typeof fetchImpl!=='function')throw Error('Cliente HTTP indisponível.');
-  async function request(path,{method='GET',body,idempotencyKey,deviceSessionId=null}={}){
+  async function request(path,{method='GET',body,idempotencyKey,deviceSessionId=null,retryCreation=true}={}){
     const headers={Authorization:`Bearer ${accessToken}`,'Content-Type':'application/json'};
     if(idempotencyKey)headers['X-Idempotency-Key']=idempotencyKey;
     const safeDeviceSessionId=normalizeDeviceSessionId(deviceSessionId);if(safeDeviceSessionId)headers['X-meli-session-id']=safeDeviceSessionId;
-    const options={method,headers,body:body===undefined?undefined:JSON.stringify(body)},mayRetry=method==='GET'||Boolean(idempotencyKey);
+    const options={method,headers,body:body===undefined?undefined:JSON.stringify(body)},mayRetry=method==='GET'||Boolean(idempotencyKey&&retryCreation);
     for(let attempt=0;attempt<2;attempt+=1){
       let response;
-      try{response=await fetchImpl(`${API}${path}`,options)}catch(cause){
+      try{response=await fetchImpl(`${API}${path}`,{...options,signal:AbortSignal.timeout(8000)})}catch(cause){
         const error=providerRequestError({code:'mercado-pago-network-error',message:'Falha de rede ao consultar o Mercado Pago.',endpoint:path,cause});
         if(mayRetry&&attempt===0){await wait(120);continue}throw error;
       }
@@ -83,28 +83,28 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
     throw providerRequestError({code:'mercado-pago-invalid-response',message:'O Mercado Pago não devolveu uma resposta válida.',endpoint:path});
   }
   return{
-    createSubscription({businessId,userId,billingPayerEmail,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card',notificationUrl=null,deviceSessionId=null}){
+    createSubscription({businessId,userId,billingPayerEmail,plan,billing,backUrl,operationId,coupon=null,preapprovalPlanId=null,paymentMethodType='card',notificationUrl=null,deviceSessionId=null,providerKey=null}){
       const price=Number(billing?.amount??plan.amount),frequency=Number(billing?.frequency??plan.frequency),frequencyType=String(billing?.frequencyType??plan.frequencyType);
       const body={reason:`VECONI - ${plan.name}`,external_reference:billingExternalReference(businessId,operationId),payer_email:billingPayerEmail,back_url:backUrl,status:'pending',metadata:{business_id:businessId,user_id:userId,plan_id:plan.id,billing_cycle:billing?.billingCycle||'monthly',operation_id:operationId,internal_subscription_id:operationId,payment_method_type:paymentMethodType,coupon_id:coupon?.couponId||null,coupon_redemption_id:coupon?.redemptionId||null,quote_id:coupon?.quoteId||null}};
       if(preapprovalPlanId)body.preapproval_plan_id=String(preapprovalPlanId);
       else body.auto_recurring={frequency,frequency_type:frequencyType,transaction_amount:price,currency_id:plan.currency};
       const webhookUrl=validNotificationUrl(notificationUrl);if(webhookUrl)body.notification_url=webhookUrl;
-      return request('/preapproval',{method:'POST',idempotencyKey:operationId,body,deviceSessionId});
+      return request('/preapproval',{method:'POST',idempotencyKey:providerKey||operationId,body,deviceSessionId,retryCreation:!providerKey});
     },
-    createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null}){
+    createPixOrder({businessId,email,plan,billing,operationId,notificationUrl=null,providerKey=null}){
       const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=billingExternalReference(businessId,operationId);
       // Orders notifications are configured in the merchant integration.
       // Unlike /preapproval, /v1/orders does not accept notification_url.
       const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'}}]},payer:{email}};
-      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body});
+      return request('/v1/orders',{method:'POST',idempotencyKey:providerKey||operationId,body,retryCreation:!providerKey});
     },
-    createCardOrder({businessId,email,plan,billing,operationId,payment,notificationUrl=null,deviceSessionId=null}){
+    createCardOrder({businessId,email,plan,billing,operationId,payment,notificationUrl=null,deviceSessionId=null,providerKey=null}){
       if(!normalizeDeviceSessionId(deviceSessionId))throw Object.assign(Error('A verificação segura do dispositivo é necessária para pagar com cartão. Tente novamente ou escolha Pix.'),{code:'device-session-required'});
       const amount=Number(billing?.amount??plan.amount).toFixed(2),externalReference=billingExternalReference(businessId,operationId),identification=payment?.payer?.identification,method={id:String(payment.paymentMethodId),type:'credit_card',token:String(payment.token),installments:Number(payment.installments)};
       const body={type:'online',total_amount:amount,external_reference:externalReference,processing_mode:'automatic',capture_mode:'automatic',config:{online:{transaction_security:{validation:'on_fraud_risk',liability_shift:'required'}}},payer:{email},transactions:{payments:[{amount,payment_method:method}]}};
       if(payment.issuerId)method.issuer_id=String(payment.issuerId);
       if(identification?.type&&identification?.number)body.payer.identification={type:String(identification.type),number:String(identification.number)};
-      return request('/v1/orders',{method:'POST',idempotencyKey:operationId,body,deviceSessionId});
+      return request('/v1/orders',{method:'POST',idempotencyKey:providerKey||operationId,body,deviceSessionId,retryCreation:!providerKey});
     },
     searchOrders({externalReference,beginDate,endDate,page=1}){
       if(!/^billing_[a-f0-9]{56}$/.test(externalReference)||!Number.isFinite(Date.parse(beginDate))||!Number.isFinite(Date.parse(endDate)))throw Object.assign(Error('Consulta de verificação inválida.'),{code:'invalid-order-search'});
@@ -112,6 +112,10 @@ function mercadoPagoService({accessToken,fetchImpl=global.fetch}){
       return request('/v1/orders?'+query);
     },
     getOrder(orderId){return request(`/v1/orders/${encodeURIComponent(orderId)}`)},
+    searchSubscriptions(payerEmail,offset=0){
+      const query=new URLSearchParams({payer_email:payerEmail,offset:String(offset),limit:'20'});
+      return request('/preapproval/search?'+query);
+    },
     getSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`)},
     searchAuthorizedPayments(subscriptionId,{limit=10,offset=0}={}){const safeLimit=Math.max(1,Math.min(10,Number(limit)||10));if(!Number.isSafeInteger(offset)||offset<0)throw Object.assign(Error('Paginação de faturas inválida.'),{code:'invalid-invoice-offset'});const query=new URLSearchParams({preapproval_id:String(subscriptionId),limit:String(safeLimit),offset:String(offset)});return request(`/authorized_payments/search?${query}`)},
     cancelSubscription(subscriptionId){return request(`/preapproval/${encodeURIComponent(subscriptionId)}`,{method:'PUT',body:{status:'cancelled'}})},

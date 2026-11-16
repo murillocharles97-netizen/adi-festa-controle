@@ -18,6 +18,11 @@ function orderState(order={}){
   if(status==='failed')return'failed';
   return'pending';
 }
+function orderCanClose(order){
+  const payments=order.transactions?.payments;
+  const final=state=>['cancelled','canceled','expired','rejected','failed'].includes(String(state||'').toLowerCase());
+  return final(order.status)&&Array.isArray(payments)&&payments.every(payment=>final(payment.status));
+}
 function absoluteExpiration(value){
   if(!value)return null;
   const date=new Date(String(value));
@@ -105,10 +110,24 @@ function pixBillingService(db){
     if(!indexSnapshot.exists||!index.businessId)throw Object.assign(Error('Order sem empresa vinculada.'),{code:'billing-order-index-not-found'});
     const details=validateOrder(order,index),paymentMethodType=String(index.paymentMethodType||'pix_monthly'),businessRef=db.doc(`businesses/${index.businessId}`),attemptRef=businessRef.collection('billingCheckoutAttempts').doc(index.operationId),markerRef=db.doc(`billingPaymentEvents/${paymentMethodType==='pix_monthly'?'pix':'card'}_${orderId}`),now=new Date().toISOString();
     return db.runTransaction(async transaction=>{
-      const [businessSnapshot,attemptSnapshot,markerSnapshot]=await Promise.all([transaction.get(businessRef),transaction.get(attemptRef),transaction.get(markerRef)]);
+      const [businessSnapshot,attemptSnapshot,markerSnapshot,indexInTransaction,closure]=await Promise.all([
+        transaction.get(businessRef),transaction.get(attemptRef),transaction.get(markerRef),transaction.get(indexRef),
+        transaction.get(businessRef.collection('billingCheckoutClosures').doc(index.operationId)),
+      ]);
       if(!businessSnapshot.exists||!attemptSnapshot.exists)throw Object.assign(Error('Tentativa de pagamento não encontrada.'),{code:'billing-attempt-not-found'});
       const business=businessSnapshot.data()||{},attempt=attemptSnapshot.data()||{};
       if(attempt.businessId!==index.businessId||attempt.providerOrderId!==orderId)throw Object.assign(Error('Tentativa Pix diverge do índice seguro.'),{code:'billing-attempt-mismatch'});
+      const reservationRef=attempt.reservationGeneration?db.doc(`billingCheckoutReservations/${index.businessId}`):null;
+      const reservation=reservationRef?(await transaction.get(reservationRef)).data():null;
+      const settle=outcome=>{
+        if(reservation?.stage!=='linked'||reservation.generation!==attempt.reservationGeneration||reservation.providerId!==orderId)return;
+        transaction.update(reservationRef,{stage:'closed',outcome,updatedAt:FieldValue.serverTimestamp()});
+        transaction.create(closure.ref,{generation:reservation.generation,providerId:orderId,outcome,closedAt:FieldValue.serverTimestamp()});
+      };
+      if(markerSnapshot.exists&&details.status!=='approved')return{businessId:index.businessId,status:'payment_approved',subscription:business.subscription||{},attempt:publicAttempt({...attempt,status:'payment_approved'}),idempotent:true};
+      const retired=closure.data()?.outcome==='provider_closed',alreadyTerminal=Boolean(attempt.reservationGeneration&&attempt.terminalAt);
+      if((retired||alreadyTerminal)&&['pending','challenge'].includes(details.status))
+        return{businessId:index.businessId,status:attempt.status,subscription:business.subscription||{},attempt:publicAttempt(attempt),idempotent:true};
       const migration=await readMigration(db,transaction,index,business.subscription||{},orderId);
       if(details.status==='approved'&&migration?.blocked){
         const review={status:'payment_review_required',reviewReason:'closed_or_superseded_migration_approved',providerStatus:details.providerStatus,providerPaymentId:details.paymentId,updatedAt:now};
@@ -119,10 +138,13 @@ function pixBillingService(db){
       const ownerProof=details.status==='approved'&&migration&&!migration.activated&&source==='owner_reconciliation'?await prepareOwnerReconciliation(db,transaction,{authorization,business,index,orderId,paymentId:details.paymentId,amount:details.amount,approvedAt:providerApprovedAt}):null;
       if(details.status==='approved'&&migration&&!migration.activated&&!ownerProof&&(source!=='webhook'||!eventId))return{businessId:index.businessId,status:'payment_pending',subscription:business.subscription||{},attempt:publicAttempt(attempt),awaitingWebhook:true};
       const terminal=!['pending','challenge','approved'].includes(details.status),attemptPatch={providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId||attempt.providerPaymentId||null,challengeUrl:details.challengeUrl||FieldValue.delete(),transactionSecurityStatus:details.transactionSecurityStatus||null,lastProviderSource:source,lastProviderEventId:eventId||null,lastProviderCheckAt:now,updatedAt:FieldValue.serverTimestamp()};
+      if(terminal&&attempt.reservationGeneration&&!orderCanClose(order))
+        return{businessId:index.businessId,status:attempt.status,subscription:business.subscription||{},attempt:publicAttempt(attempt),requiresReview:true};
       if(['pending','challenge'].includes(details.status)){attemptPatch.status=details.status==='challenge'?'payment_challenge':'payment_pending';transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:attemptPatch.status,providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId||null,updatedAt:now},{merge:true});return{businessId:index.businessId,status:attemptPatch.status,subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch})}}
       attemptPatch.qrCode=FieldValue.delete();attemptPatch.qrCodeBase64=FieldValue.delete();attemptPatch.ticketUrl=FieldValue.delete();
       const redemptionRef=index.couponRedemptionId?db.doc(`couponRedemptions/${index.couponRedemptionId}`):null,redemptionSnapshot=redemptionRef?await transaction.get(redemptionRef):null,redemption=redemptionSnapshot?.data()||null;
       if(terminal){
+        settle('provider_closed');
         if(migration&&!migration.activated&&!migration.blocked)transaction.update(migration.ref,{status:'attempt_closed',closedAt:now,nextAttemptAt:null});
         attemptPatch.status=details.status;attemptPatch.terminalAt=now;transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:details.status,providerStatus:details.providerStatus,statusDetail:details.statusDetail,updatedAt:now},{merge:true});
         if(redemption&&['reserved','pending_payment'].includes(redemption.status))changeCouponReservation(transaction,redemptionRef,redemption,'release');
@@ -130,6 +152,7 @@ function pixBillingService(db){
         return{businessId:index.businessId,status:details.status,subscription,attempt:publicAttempt({...attempt,...attemptPatch})};
       }
       if(markerSnapshot.exists){
+        settle('paid');
         attemptPatch.status='payment_approved';attemptPatch.approvedAt=attempt.approvedAt||markerSnapshot.data()?.approvedAt||now;transaction.set(attemptRef,attemptPatch,{merge:true});
         let subscription=business.subscription||{};
         if(String(subscription.status||'').toLowerCase()==='active'&&String(subscription.subscriptionStatus||'').toLowerCase()!=='active'){
@@ -143,12 +166,13 @@ function pixBillingService(db){
         transaction.set(attemptRef,{status:'payment_review_required',reviewReason:'legacy-transition-payment',updatedAt:now},{merge:true});
         return{businessId:index.businessId,status:'payment_review_required',subscription:business.subscription||{},requiresReview:true};
       }
-      if(index.supersededByOperationId){
-        attemptPatch.status='payment_review_required';attemptPatch.reviewReason='superseded_order_approved';attemptPatch.approvedAt=order.date_last_updated||order.date_created||now;
-        transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:'payment_review_required',providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId,reviewReason:'superseded_order_approved',updatedAt:now},{merge:true});
+      if(indexInTransaction.data()?.supersededByOperationId||retired||alreadyTerminal){
+        attemptPatch.status='payment_review_required';attemptPatch.reviewReason=retired||alreadyTerminal?'closed_order_approved':'superseded_order_approved';attemptPatch.approvedAt=order.date_last_updated||order.date_created||now;
+        transaction.set(attemptRef,attemptPatch,{merge:true});transaction.set(indexRef,{status:'payment_review_required',providerStatus:details.providerStatus,statusDetail:details.statusDetail,providerPaymentId:details.paymentId,reviewReason:attemptPatch.reviewReason,updatedAt:now},{merge:true});
         return{businessId:index.businessId,status:'payment_review_required',subscription:business.subscription||{},attempt:publicAttempt({...attempt,...attemptPatch}),requiresReview:true};
       }
       if(migration&&!Number.isFinite(Date.parse(providerApprovedAt||'')))throw Object.assign(Error('A data oficial do pagamento precisa ser confirmada.'),{code:'legacy-payment-proof-required'});
+      settle('paid');
       const existing=business.subscription||{},currentEnd=new Date(existing.currentPeriodEnd||existing.expiresAt||0),paidAt=new Date(providerApprovedAt||now),periodStart=!migration&&currentEnd>paidAt?currentEnd:paidAt,periodStartIso=periodStart.toISOString(),periodEnd=addBillingPeriod(periodStartIso,index.billingCycle),plan=getPlan(index.planId);
       const subscription={...existing,status:'active',subscriptionStatus:'active',planId:index.planId,billingCycle:index.billingCycle,paymentMethodType,billingStrategy:paymentMethodType==='card_monthly'?'manual_card':'guest_pix_manual',provider:'mercado_pago',pendingPlanId:null,pendingBillingCycle:null,pendingPaymentMethodType:null,pendingCheckoutAttemptId:null,hasPaidSubscription:true,startedAt:existing.startedAt||periodStartIso,currentPeriodStart:periodStartIso,currentPeriodEnd:periodEnd,expiresAt:periodEnd,nextBillingDate:periodEnd,lastPaymentDate:periodStartIso,lastPaymentStatus:'approved',lastPaymentProviderId:details.paymentId,lastPaymentEventId:eventId||`order:${orderId}`,cancelAtPeriodEnd:false,updatedAt:now,mercadoPago:{...(existing.mercadoPago||{}),pendingOrderId:null,pendingPaymentId:null,lastOrderId:orderId,lastPaymentId:details.paymentId,providerStatus:details.providerStatus,lastWebhook:eventId?now:existing.mercadoPago?.lastWebhook||null},latestPayment:{provider:'mercado_pago',paymentMethod:paymentMethodType==='card_monthly'?'card':'pix',orderId,paymentId:details.paymentId,amount:details.amount,currency:'BRL',paidAt:periodStartIso,couponSnapshot:index.discountSnapshot||null}};
       if(index.catalogVersion===2){subscription.catalogVersion=2;subscription.legacyPlan=false;subscription.legacyTransition=null;}
@@ -170,4 +194,4 @@ function pixBillingService(db){
   return{resolveIndex,resolvePaymentOrder,applyOrder};
 }
 
-module.exports={TERMINAL_STATUSES,firstOrderPayment,firstPixPayment,orderState,absoluteExpiration,orderDetails,pixDetails,validateOrder,validatePixOrder,addBillingPeriod,pendingManualSubscription,pendingPixSubscription,publicAttempt,pixBillingService};
+module.exports={TERMINAL_STATUSES,firstOrderPayment,firstPixPayment,orderState,orderCanClose,absoluteExpiration,orderDetails,pixDetails,validateOrder,validatePixOrder,addBillingPeriod,pendingManualSubscription,pendingPixSubscription,publicAttempt,pixBillingService};

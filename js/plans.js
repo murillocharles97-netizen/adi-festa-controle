@@ -526,10 +526,29 @@
       pendingPixId=subscription.pendingPaymentMethodType==="pix_monthly"?subscription.pendingCheckoutAttemptId:null,
       root = $("#modal");
     if (!root) return;
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body">${pendingPixId?`<button type="button" data-view-pending-pix>${icon("qr-code")} Ver Pix aguardando pagamento</button>`:""}${subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" data-manage-change-payer>${icon("mail")} Alterar e-mail do pagador</button><button type="button" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa de cartão</button>`:""}${pixActive?`<button type="button" data-renew-pix>${icon("refresh-cw")} Renovar agora por Pix</button>`:""}<button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active"&&subscription.paymentMethodType==="card" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box mobile-modal plan-manage-sheet"><header class="modal-head"><div><h3>Gerenciar assinatura</h3><small>Status: ${esc(ctx.status)}</small></div><button class="icon-btn mobile-icon-button" data-close-billing>${icon("x")}</button></header><div class="modal-body">${pendingPixId?`<button type="button" data-view-pending-pix>${icon("qr-code")} Ver Pix aguardando pagamento</button>`:""}${subscription.pendingPaymentMethodType==="card"&&subscription.pendingPlanId?`<button type="button" data-manage-change-payer>${icon("mail")} Alterar e-mail do pagador</button><button type="button" data-cancel-pending-card>${icon("x-circle")} Cancelar tentativa de cartão</button>`:""}${pixActive?`<button type="button" data-renew-pix>${icon("refresh-cw")} Renovar agora por Pix</button>`:""}<button type="button" data-resume-checkout>${icon("credit-card")} Retomar pagamento</button><button type="button" data-refresh-subscription>${icon("refresh-cw")} Atualizar do Firebase</button><button type="button" data-reconcile-subscription>${icon("cloud-cog")} Conferir com Mercado Pago</button>${!ctx.internal && ctx.status === "active"&&subscription.paymentMethodType==="card" ? `<button type="button" class="danger" data-cancel-subscription>${icon("calendar-x")} Solicitar cancelamento</button>` : ""}</div></section></div>`;
     $$("[data-close-billing]", root).forEach(
       (button) => (button.onclick = () => (root.innerHTML = "")),
     );
+    $("[data-resume-checkout]", root).onclick = async (event) => {
+      const button=event.currentTarget;
+      button.disabled=true;
+      try {
+        const result=await window.SubscriptionService.resumeCheckout();
+        if(!button.isConnected)return;
+        const payment=result?.pix||result?.card;
+        const plan=payment&&window.SubscriptionService.getPlans().find(item=>item.id===payment.planId);
+        if(plan&&result.pix)return openPixModal({pix:result.pix,plan,billingCycle:payment.billingCycle,quote:null});
+        if(plan&&result.card)return openCardStatusModal({card:result.card,plan,billingCycle:payment.billingCycle,quote:null});
+        if(result?.checkoutUrl)return location.assign(result.checkoutUrl);
+        if(result?.closed)return window.Utils?.toast?.("O pagamento anterior foi encerrado. Você pode escolher como pagar novamente.");
+        throw Error("Nenhum pagamento disponível para retomar.");
+      } catch(error) {
+        if(button.isConnected)window.Utils?.toast?.(error.message||"Não foi possível retomar o pagamento agora.",true);
+      } finally {
+        if(button.isConnected)button.disabled=false;
+      }
+    };
     $("[data-refresh-subscription]", root).onclick = (event) =>
       runSubscriptionAction(
         event.currentTarget,
