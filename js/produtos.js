@@ -52,6 +52,7 @@ window.Produtos=(()=>{
     const q=Number(quantidade||0);if(q<=0)throw Error('Informe uma quantidade valida');
     const anterior=Number(p.estoqueAtual||0),novo=anterior+q,agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
+    if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
     if(custoUnitario!==''&&custoUnitario!==null&&custoUnitario!==undefined)p.custo=Number(custoUnitario);
     mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'entrada',quantidade:q,estoqueAnterior:anterior,estoqueNovo:novo,custoUnitario:custoUnitario===''||custoUnitario===null||custoUnitario===undefined?null:Number(custoUnitario),observacao:observacao||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);
@@ -62,6 +63,7 @@ window.Produtos=(()=>{
     const origin=window.SpaceContext?.stockMovementOrigin?.(p,spaceId);
     const anterior=Number(p.estoqueAtual||0),novo=Number(novoEstoque||0),agora=new Date().toISOString();
     p.estoqueAtual=novo;p.estoque=novo;p.atualizadoEm=agora;
+    if(Object.hasOwn(p,'totalStock')&&p.productType!=='variable'&&p.hasVariations!==true)p.totalStock=novo; // D4
     mov={id:operationId,operationId,produtoId:p.id,produtoNome:p.nome,tipo:'ajuste',quantidade:novo-anterior,estoqueAnterior:anterior,estoqueNovo:novo,observacao:motivo||'',data:agora,...(origin||{}),...(window.TeamAccess?.actor?.()||{})};
     db.movimentacoesEstoque.push(mov);
   });return mov};

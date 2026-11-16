@@ -841,6 +841,7 @@
       } else {
         product.estoqueAtual = before - quantity;
         product.estoque = product.estoqueAtual;
+        if (Object.hasOwn(product, "totalStock")) product.totalStock = product.estoqueAtual; // D4
         stockMovementId = `${redemptionId}:stock`;
         db.movimentacoesEstoque.push({ id: stockMovementId, operationId, produtoId: product.id, tipo: "saida_resgate_campanha", quantidade: -quantity, estoqueAnterior: before, estoqueNovo: product.estoqueAtual, campaignId, redemptionId, data: at });
       }

@@ -352,6 +352,7 @@ window.Vendas = (() => {
           novo = anterior - Number(i.quantidade);
         p.estoqueAtual = novo;
         p.estoque = novo;
+        if (Object.hasOwn(p, "totalStock")) p.totalStock = novo; // D4: alias of a product without variations
         p.updatedAt = data;
         db.movimentacoesEstoque.push({
           id: Utils.uuid(),
@@ -525,6 +526,7 @@ window.Vendas = (() => {
           novo = anterior + Number(i.quantidade);
         p.estoqueAtual = novo;
         p.estoque = novo;
+        if (Object.hasOwn(p, "totalStock")) p.totalStock = novo; // D4: alias of a product without variations
         p.updatedAt = agora;
         db.movimentacoesEstoque.push({
           id: Utils.uuid(),
