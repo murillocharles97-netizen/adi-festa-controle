@@ -1281,6 +1281,21 @@ window.Checkout = (() => {
       try {
         window.SyncFirebase?.assertSaleQueueDependencies?.({clienteId,spaceId,status,formaPagamento:paymentMethod,itens:cart});
       } catch (error) { return validationError(error.message); }
+      if(paymentMethod==='fiado'&&clienteId&&!activeAttempt?.locked&&window.FiadoConditions?.canView()){
+        const advisoryScope=window.SpaceContext?.viewScope?.();
+        const advisoryFields=()=>JSON.stringify([DB.getBusinessId(),selectedSalesSpaceId(),cart,
+          document.querySelector('#sale-client')?.value,document.querySelector('#manual-total')?.value,
+          document.querySelector('#sale-payment-method')?.value]);
+        const expected=advisoryFields();
+        finishing=true;
+        try{
+          const proceedWithLimit=await window.FiadoConditions.checkout(clienteId,
+            Math.round(Number(document.querySelector('#manual-total')?.value||0)*100),spaceId);
+          if(advisoryScope!==window.SpaceContext?.viewScope?.()||expected!==advisoryFields())
+            return validationError('O carrinho ou espaço mudou. Revise antes de concluir.');
+          if(!proceedWithLimit)return validationError('Revise o limite de Fiado antes de concluir.');
+        }finally{finishing=false;}
+      }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const spaceScope = window.SpaceContext?.viewScope?.();
       const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),

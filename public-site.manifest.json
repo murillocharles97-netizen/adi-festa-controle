@@ -167,6 +167,7 @@
     "js/exchange-credit-checkout.js",
     "js/exchange-economics.js",
     "js/fiados.js",
+    "js/fiado-conditions.js",
     "js/financial-accounts-carousel.js",
     "js/financial-concurrency.js",
     "js/financial-engine.js",
