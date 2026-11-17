@@ -5,7 +5,7 @@ const when=value=>value?new Date(value).toLocaleString('pt-BR'):'Horário não r
 const notice='Registro preservado para análise. Nenhum efeito comercial foi aplicado por esta recuperação.';
 const context=()=>window.BusinessContext?.get?.()||{};
 const identity=()=>{const c=context();return `${c.uid||window.FirebaseSession?.user?.uid||''}:${c.businessId||''}:${c.business?.workspaceGeneration??0}`;};
-let count=0,customerCount=0,busy=false,unsubscribe=null,lastIdentity='',message='',refreshSequence=0,scanError='';
+let count=0,customerCount=0,busy=false,unsubscribe=null,lastIdentity='',message='',refreshSequence=0,scanError='',intakeScope='';
 let reviewSummary={key:'',state:'unknown',pending:0,checkedAt:0},summaryFlight=null,summaryTimer=null;
 const summaryKey=()=>`${identity()}:${context().role||''}:${selectedSpace()||'all'}`;
 function confirmedHistorical(packet,initial,diagnostics){
@@ -73,7 +73,7 @@ async function readIntakeReviews({identity:origin,packets}){
     let cursor=null;const seen=new Set();
     for(let page=0;page<50;page++){
       const active=recoveryIdentity();if(!active||active.uid!==origin.uid||active.businessId!==origin.businessId||active.workspaceGeneration!==origin.workspaceGeneration)throw Error('A sessão mudou.');
-      const response=await call('listSaleRecoveryReviews',{spaceId,cursor}),result=response.data??response;
+      const response=await sendEvidence('listSaleRecoveryReviews',{spaceId,cursor}),result=response.data??response;
       if(!Array.isArray(result.items))throw Error('Consulta de recebimento incompleta.');
       rows.push(...result.items.filter(r=>packets.some(p=>p.saleId===r.saleId&&p.spaceId===spaceId)));
       if(!result.nextCursor)break;if(seen.has(result.nextCursor)||page===49)throw Error('Consulta de recebimento incompleta.');seen.add(result.nextCursor);cursor=result.nextCursor;
@@ -81,9 +81,35 @@ async function readIntakeReviews({identity:origin,packets}){
   }
   return rows;
 }
-const sender=window.SaleRecoveryClient.create({snapshot:capture,call,readReviews:readIntakeReviews,onProgress:({sent,total})=>{message=`Enviando dados… ${sent} de ${total}`;mount();}});
+function showRecoveryFailure(text){
+  message=text;
+  const panel=document.querySelector('.sale-recovery-modal [data-recovery-result]');
+  let feedback=panel||document.querySelector('[data-sale-recovery-bar] [data-recovery-feedback]')||document.querySelector('[data-sale-recovery-notice]');
+  if(!feedback){
+    feedback=document.createElement('p');feedback.dataset.saleRecoveryNotice='';
+    feedback.className='sale-recovery-warning';document.body.append(feedback);
+  }
+  feedback.setAttribute('role','alert');feedback.tabIndex=-1;
+  if(feedback.textContent!==text)feedback.textContent=text;
+  feedback.focus({preventScroll:true});feedback.scrollIntoView?.({block:'nearest'});
+}
+async function sendEvidence(name,data){
+  let timeout;
+  try{
+    return await Promise.race([call(name,data),new Promise((_,reject)=>{
+      timeout=setTimeout(()=>reject(Object.assign(Error('A resposta do envio ainda não foi confirmada. Consulte a situação antes de repetir.'),{code:'deadline-exceeded'})),30000);
+    })]);
+  }finally{clearTimeout(timeout);}
+}
+const sender=window.SaleRecoveryClient.create({snapshot:capture,call:sendEvidence,readReviews:readIntakeReviews,onProgress:({sent,total})=>{
+  if(summaryKey()!==intakeScope||!recoveryIdentity())return;
+  message='Enviando dados… '+sent+' de '+total;mount();
+  const feedback=document.querySelector('.sale-recovery-modal [data-recovery-result]');
+  if(feedback){feedback.setAttribute('role','status');feedback.textContent=message;}
+}});
 function modal(title,body,footer=''){
-  const root=document.querySelector('#modal');if(!root)return null;
+  let root=document.querySelector('#modal');
+  if(!root){root=document.createElement('div');root.id='modal';document.body.append(root);}
   const prior=document.activeElement;
   root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg viewport-modal"><section class="modal-box sale-recovery-modal viewport-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body viewport-scroll">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
   const panel=root.querySelector('section');
@@ -102,15 +128,26 @@ function modal(title,body,footer=''){
   panel.focus();return panel;
 }
 function confirmSend(){
-  if(busy||!recoveryIdentity()||scanError)return;
-  if(!navigator.onLine){message='Conecte-se à internet para enviar. Seus dados continuam preservados.';mount();return;}
+  if(busy)return showRecoveryFailure('O envio de evidências já está em andamento. Aguarde a conferência do recebimento.');
+  if(!recoveryIdentity())return showRecoveryFailure('Sua sessão precisa ser atualizada. Entre na conta que registrou estas vendas. Os originais estão preservados.');
+  if(scanError)return showRecoveryFailure('Não foi possível conferir os registros preservados. '+scanError);
+  document.querySelector('[data-sale-recovery-notice]')?.remove();
+  const sendScope=summaryKey();
+  if(!navigator.onLine)return showRecoveryFailure('Conecte-se à internet para enviar. Seus dados continuam preservados.');
   const panel=modal(customerCount?'Complementar dados para recuperação?':'Enviar dados para recuperação?',`<p>Serão conferidos ${count} pacotes de vendas e enviados ${customerCount} cadastros originais retidos, quando presentes. Pacotes já recebidos não são novas vendas. O resultado informará separadamente os complementos confirmados e os dados ainda ausentes.</p><p><strong>Isso não refaz vendas, não movimenta estoque e não altera o Financeiro.</strong> Os dados originais continuarão preservados neste aparelho.</p><p data-recovery-result role="status" aria-live="polite"></p>`,`<button class="btn btn-light" type="button" data-recovery-close>Cancelar</button><button class="btn btn-primary" type="button" data-recovery-confirm>${customerCount?'Confirmar complemento':'Confirmar envio'}</button>`);
-  if(!panel)return;
+  if(!panel)throw Error('Não foi possível abrir a confirmação. Os originais estão preservados.');
+  panel.dataset.recoveryIntake='true';
   panel.querySelector('[data-recovery-confirm]').onclick=async()=>{
-    if(busy)return;const session=identity();busy=true;message='Enviando dados…';mount();panel.querySelector('[data-recovery-confirm]').disabled=true;
+    if(busy)return showRecoveryFailure('O envio de evidências já está em andamento. Aguarde a conferência do recebimento.');
+    if(!recoveryIdentity()||summaryKey()!==sendScope)return showRecoveryFailure('A sessão ou o espaço mudou. Abra a confirmação na conta de origem.');
+    const session=identity();busy=true;intakeScope=sendScope;message='Enviando dados…';
+    const button=panel.querySelector('[data-recovery-confirm]');
     try{
+      button.disabled=true;
+      const initialFeedback=panel.querySelector('[data-recovery-result]');initialFeedback.textContent=message;initialFeedback.setAttribute('role','status');
+      mount();
       const result=await sender.send();
-      if(identity()!==session)throw Error('A sessão mudou. Confira o recebimento na conta original.');
+      if(identity()!==session||summaryKey()!==sendScope||!recoveryIdentity())throw Error('A sessão mudou. Confira o recebimento na conta original.');
       message=window.SaleRecoveryClient.describe(result);
       panel.querySelector('[data-recovery-result]').textContent=message;
       panel.querySelector('[data-recovery-result]').setAttribute('role',result.evidence?.verification==='verified'&&!result.evidence.missingCustomers?'status':'alert');
@@ -120,9 +157,19 @@ function confirmSend(){
     }catch(error){
       // Backend responses never include raw payload or credentials.
       const code=String(error.code||'').replace(/^functions\//,'');
-      message=code==='permission-denied'?'O acesso não permitiu o envio. Avise o responsável. Seus dados continuam preservados.':code==='unavailable'||code==='deadline-exceeded'?'Não foi possível confirmar o envio. Seus dados continuam preservados. Tente novamente.':error.message||'Não foi possível enviar. Seus dados continuam preservados.';
-      if(identity()===session){panel.querySelector('[data-recovery-result]').textContent=message;panel.querySelector('[data-recovery-confirm]').disabled=false;}
-    }finally{busy=false;mount();}
+      message=code==='permission-denied'?'O acesso não permitiu o envio. Avise o responsável. Seus dados continuam preservados.':code==='unavailable'||code==='deadline-exceeded'?'Não foi possível confirmar a resposta. Consulte o recebimento remoto antes de repetir; os originais estão preservados.':error.message||'Não foi possível enviar. Seus dados continuam preservados.';
+      if(identity()!==session||summaryKey()!==sendScope||!recoveryIdentity()||!panel.isConnected||!panel.querySelector('[data-recovery-result]')){
+        showRecoveryFailure('O contexto mudou durante o envio. Consulte a situação na conta de origem antes de repetir.');
+      }else{
+        const feedback=panel.querySelector('[data-recovery-result]');
+        feedback.textContent=message;feedback.setAttribute('role','alert');feedback.tabIndex=-1;feedback.focus({preventScroll:true});
+        button.disabled=false;
+        if(['unavailable','deadline-exceeded','internal'].includes(code)){
+          button.textContent='Consultar recebimento';
+          button.onclick=()=>openReviews().catch(error=>showRecoveryFailure(error.message||'Não foi possível consultar o recebimento.'));
+        }
+      }
+    }finally{busy=false;intakeScope='';mount();}
   };
 }
 function selectedSpace(){
@@ -244,7 +291,11 @@ function mount(){
   // Outside commercial content: retained evidence remains accessible when modules are blocked.
   const app=document.querySelector('#app'),root=app?.parentElement;if(!root)return;
   const c=context(),key=identity(),route=location.hash.replace('#/','').split('?')[0]||'inicio';
-  const openPanel=document.querySelector('.sale-recovery-modal');if(openPanel&&openPanel.dataset.recoveryContext!==summaryKey())openPanel.parentElement.remove();
+  const openPanel=document.querySelector('.sale-recovery-modal');
+  if(openPanel&&(openPanel.dataset.recoveryContext!==summaryKey()||openPanel.dataset.recoveryIntake&&!recoveryIdentity())){
+    const intake=openPanel.dataset.recoveryIntake;openPanel.parentElement.remove();
+    if(intake)showRecoveryFailure('A sessão ou o espaço mudou. Os originais estão preservados; consulte o envio na conta de origem.');
+  }
   if(lastIdentity!==key){message='';lastIdentity=key;document.querySelector('.sale-recovery-modal-bg')?.remove();}
   let bar=root.querySelector('[data-sale-recovery-bar]'),link=app.querySelector('[data-recovery-entry]');
   const ownerArea=c.role==='owner'&&['inicio','historico'].includes(route),authorized=Boolean(recoveryIdentity());
@@ -257,8 +308,21 @@ function mount(){
   if(!bar){bar=document.createElement('section');bar.className='sale-recovery-banner is-compact';bar.dataset.saleRecoveryBar='';bar.setAttribute('aria-label','Situação das revisões de vendas');app.before(bar);}
   const title=scanError?'Conferência dos registros preservados pendente':count?(count===1?'Há 1 venda aguardando análise':`Há ${count} vendas aguardando análise`):summary.state==='pending'?'Há vendas aguardando revisão':summary.state==='unknown'?'Revisões: confirmação pendente':'Conferindo revisões de vendas…';
   const detail=scanError||message||(count?'Envie os dados preservados para análise, sem refazer a venda.':summary.state==='unknown'?'Não foi possível confirmar a situação. Consulte as revisões; nenhum registro foi reenviado.':summary.state==='pending'?'Confira os registros antes de decidir. Nenhuma recuperação é automática.':'Consulta segura, sem alterar vendas ou estoque.');
-  const html=`<div><strong>${esc(title)}</strong><p role="status" aria-live="polite">${esc(detail)}</p></div><div class="sale-recovery-actions">${count&&!scanError?`<button type="button" class="btn btn-primary" data-send-recovery ${busy?'disabled':''}>${busy?'Enviando…':customerCount?'Complementar dados para recuperação':'Enviar dados para recuperação'}</button>`:''}<button type="button" class="btn btn-light" data-view-recovery>${c.role==='owner'?'Revisar vendas':'Ver situação do envio'}</button></div>`;
-  if(bar.recoveryMarkup!==html){bar.recoveryMarkup=html;bar.innerHTML=html;bar.querySelector('[data-send-recovery]')?.addEventListener('click',confirmSend);bar.querySelector('[data-view-recovery]').onclick=()=>openReviews();}
+  // Keep action nodes stable while Sync refreshes counts/progress. The click
+  // handler is delegated once, including when another renderer replaces markup.
+  if(!bar.querySelector('[data-recovery-title]')||!bar.querySelector('[data-send-recovery]')||!bar.querySelector('[data-view-recovery]')){
+    bar.innerHTML='<div><strong data-recovery-title></strong><p role="status" aria-live="polite" data-recovery-feedback></p></div>'+
+      '<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-send-recovery></button>'+
+      '<button type="button" class="btn btn-light" data-view-recovery></button></div>';
+  }
+  const text=(selector,value)=>{const node=bar.querySelector(selector);if(node.textContent!==value)node.textContent=value;};
+  text('[data-recovery-title]',title);text('[data-recovery-feedback]',detail);
+  text('[data-send-recovery]',busy?'Enviando…':customerCount?'Complementar dados para recuperação':'Enviar dados para recuperação');
+  text('[data-view-recovery]',c.role==='owner'?'Revisar vendas':'Ver situação do envio');
+  const send=bar.querySelector('[data-send-recovery]');
+  send.hidden=!count||Boolean(scanError);send.disabled=busy;
+  bar.querySelector('[data-view-recovery]').disabled=busy;
+
 }
 async function refresh(){
   const sequence=++refreshSequence,session=identity();
@@ -272,6 +336,13 @@ async function refresh(){
   clearTimeout(summaryTimer);
   if(context().role==='owner'&&recoveryIdentity()&&document.visibilityState!=='hidden'&&['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio'))summaryTimer=setTimeout(()=>{void refresh();},60000);
 }
+document.addEventListener('click',event=>{
+  const button=event.target.closest?.('[data-sale-recovery-bar] [data-send-recovery], [data-sale-recovery-bar] [data-view-recovery]');
+  if(!button)return;
+  event.preventDefault();
+  Promise.resolve().then(()=>button.hasAttribute('data-send-recovery')?confirmSend():openReviews())
+    .catch(error=>showRecoveryFailure(error.message||'Não foi possível abrir a recuperação. Os originais estão preservados.'));
+},true);
 function start(){unsubscribe?.();unsubscribe=window.SyncFirebase?.subscribe?.(()=>{void refresh();});void refresh();}
 addEventListener('firebase-auth-ready',start);
 addEventListener('hashchange',refresh);
