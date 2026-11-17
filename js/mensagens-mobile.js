@@ -7,16 +7,19 @@
   const SEQUENCE_TYPES=['charge','campaign','notice','custom','renewal'];
   // Renewal reminders exist only with the subscriptions frozen by Renovações (center.renewal).
   const renewalMode=()=>center.type==='renewal'&&Boolean(center.renewal?.items);
-  let returnShown=false,sequenceStarting=false;
+  let section='dashboard', segment='', returnShown=false,sequenceStarting=false;
   function client(id){return Clientes.obter(id)}
   function typeLabel(type){return TYPE_LABELS[type]||TYPE_LABELS.custom}
   function close(){document.querySelector('#modal').innerHTML=''}
   function refreshClients(){if(document.querySelector('.message-center-page'))return;window.ClientesMobile?.refresh?.()}
-  function setPending(value){try{if(value)sessionStorage.setItem(PENDING_KEY,JSON.stringify(value));else sessionStorage.removeItem(PENDING_KEY)}catch(error){console.error('[WHATSAPP] pending state failed',error)}}
+  const messageReturnScope=()=>JSON.stringify([DB.getBusinessId(),window.TeamAccess?.actor?.()?.actorUid,
+    window.SpaceContext?.homeId?.()]);
+  function setPending(value){try{if(value)sessionStorage.setItem(PENDING_KEY,JSON.stringify({...value,scope:messageReturnScope()}));else sessionStorage.removeItem(PENDING_KEY)}catch(error){console.error('[WHATSAPP] pending state failed',error)}}
   function getPending(){try{return JSON.parse(sessionStorage.getItem(PENDING_KEY)||'null')}catch{return null}}
   function persistCenter(){return MessageSequence.draft({...center,selected:[...center.selected]}).catch(error=>Utils.toast(MessageSequence.friendly(error),true))}
   async function restoreCenter(){const saved=await MessageSequence.draft();if(!saved){Object.assign(center,{type:'charge',audience:'debt',selected:new Set(),sort:'maior',days:'todos',min:'',max:'',phone:true,initialized:false});return false}Object.assign(center,saved,{selected:new Set(saved.selected||[]),initialized:Boolean(saved.initialized)});if(!['debt','all'].includes(center.audience))center.audience=center.type==='charge'?'debt':'all';if(center.type==='receipt')center.type='charge';return true}
-  function templateOptions(type,selected){return Mensagens.templates(type).map(item=>`<option value="${esc(item.id)}" ${item.id===selected?'selected':''}>${esc(item.name)}${item.isDefault?' · padrão':''}</option>`).join('')}
+  const messageModels=type=>window.MessageSequenceUI?.templates(type)||Mensagens.templates(type);
+  function templateOptions(type,selected){return messageModels(type).map(item=>`<option value="${esc(item.id)}" ${item.id===selected?'selected':''}>${esc(item.name)}${item.isDefault?' · padrão':''}</option>`).join('')}
   function variableButtons(){return['nome','primeiro_nome','saldo','ultima_cobranca','nome_negocio','pix','data_atual'].map(name=>`<button type="button" data-message-variable="${name}">{{${name}}}</button>`).join('')}
   function duplicateWarning(clientId,continuation){const c=client(clientId),root=$('#modal');root.innerHTML=`<div class="message-overlay"><section class="message-confirm-sheet" role="dialog" aria-modal="true" aria-labelledby="charge-repeat-title"><div class="sheet-handle"></div>${icon('message-circle-warning')}<h3 id="charge-repeat-title">Cliente já cobrado hoje</h3><p>${esc(c.nome)} já possui uma cobrança registrada hoje. Deseja cobrar novamente?</p><div><button class="btn btn-light" data-repeat-cancel>Cancelar</button><button class="btn btn-primary" data-repeat-confirm>Cobrar novamente</button></div></section></div>`;$('[data-repeat-cancel]',root).onclick=close;$('[data-repeat-confirm]',root).onclick=()=>continuation();window.lucide?.createIcons()}
   async function openComposer(clientId,options={}){
@@ -28,30 +31,33 @@
     let c=client(clientId);const type=options.type||'charge';if(!c)return Utils.toast('Cliente não encontrado',true);
     try{c=await Mensagens.refreshCanonicalClient(clientId)}catch(error){Utils.toast(error.message||'Não foi possível atualizar o cliente.',true);return}
     if(type==='charge'&&Number(c.saldo)>=0)return Utils.toast('Este cliente não possui saldo em aberto para cobrança.',true);
-    if(type==='charge'&&Mensagens.wasChargedToday(c)&&!options.allowRepeat)return duplicateWarning(clientId,()=>openComposer(clientId,{...options,allowRepeat:true}));
-    const chosen=Mensagens.templates(type).find(item=>item.id===options.templateId)||Mensagens.defaultTemplate(type),base=options.baseMessage??chosen?.content??'',last=Mensagens.latestCharge(c),root=$('#modal'),position=options.sequenceId?`Enviando para ${Number(options.index||0)+1} de ${options.total||1}`:'Cobrança individual';
-    root.innerHTML=`<div class="message-overlay"><section class="individual-message-sheet" role="dialog" aria-modal="true" aria-labelledby="message-sheet-title"><div class="sheet-handle"></div><header><div><small>${esc(position)}</small><h2 id="message-sheet-title">${esc(typeLabel(type))}</h2></div><button type="button" data-message-close aria-label="Fechar">${icon('x')}</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><span>${esc(String(c.nome||'?').split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase())}</span><div><h3>${esc(c.nome)}</h3><p>${esc(c.telefone)||'Sem telefone'}</p><small>Última cobrança: ${esc(Mensagens.formatLastChargeDate(last?.date))}</small></div>${type==='charge'?`<strong>${money(Math.abs(Number(c.saldo||0)))}<small>em aberto</small></strong>`:''}</section><label class="message-model-field">Modelo<select id="message-template">${templateOptions(type,chosen?.id)}</select></label><div class="message-template-actions"><button type="button" data-template-restore>${icon('rotate-ccw')} Restaurar</button><button type="button" data-template-duplicate>${icon('copy-plus')} Duplicar</button><button type="button" data-template-save>${icon('save')} Salvar novo</button><button type="button" data-template-default>${icon('star')} Usar como padrão</button></div><label class="message-text-field">Mensagem<textarea id="message-text" rows="9" maxlength="4000">${esc(base)}</textarea><span><b id="message-count">${base.length}</b>/4000 caracteres</span></label><div class="message-variables"><small>Inserir variável</small><div>${variableButtons()}</div></div><section class="message-preview"><header>${icon('eye')} Pré-visualização</header><p id="message-preview">${esc(Mensagens.resolve(base,c))}</p></section>${!Mensagens.validPhone(c)?`<p class="message-phone-error">${icon('phone-off')} Cadastre um telefone válido antes de enviar.</p>`:''}</div><footer>${options.sequenceId?`<button class="btn btn-light" type="button" data-sequence-skip>Pular</button><button class="btn btn-light" type="button" data-sequence-end>Encerrar</button>`:''}<button class="btn btn-whatsapp" type="button" id="message-send" ${Mensagens.validPhone(c)?'':'disabled'}>${icon('message-circle')} Enviar no WhatsApp</button></footer></section></div>`;
+    if(type==='charge'&&new Date(Mensagens.latestCharges(Clientes.viewData?.()||DB.carregar(),window.MessageCenterV2?.activeSpace())(c)?.date).toDateString()===new Date().toDateString()&&!options.allowRepeat)return duplicateWarning(clientId,()=>openComposer(clientId,{...options,allowRepeat:true}));
+    const chosen=messageModels(type).find(item=>item.id===options.templateId)||Mensagens.defaultTemplate(type),base=options.baseMessage??chosen?.content??'',last=Mensagens.latestCharge(c),root=$('#modal'),position=options.sequenceId?`Enviando para ${Number(options.index||0)+1} de ${options.total||1}`:'Cobrança individual';
+    root.innerHTML=`<div class="message-overlay"><section class="individual-message-sheet" role="dialog" aria-modal="true" aria-labelledby="message-sheet-title"><div class="sheet-handle"></div><header><div><small>${esc(position)}</small><h2 id="message-sheet-title">${esc(typeLabel(type))}</h2></div><button type="button" data-message-close aria-label="Fechar">${icon('x')}</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><span>${esc(String(c.nome||'?').split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase())}</span><div><h3>${esc(c.nome)}</h3><p>${esc(c.telefone)||'Sem telefone'}</p><small>Última cobrança: ${esc(Mensagens.formatLastChargeDate(last?.date))}</small></div>${type==='charge'?`<strong>${money(Math.abs(Number(c.saldo||0)))}<small>em aberto</small></strong>`:''}</section><label class="message-model-field">Modelo<select id="message-template">${templateOptions(type,chosen?.id)}</select></label><details><summary>Ajustar esta mensagem</summary><label class="message-text-field">Mensagem<textarea id="message-text" rows="9" maxlength="4000">${esc(base)}</textarea><span><b id="message-count">${base.length}</b>/4000 caracteres</span></label><div class="message-variables"><small>Inserir variável</small><div>${variableButtons()}</div></div></details><section class="message-preview"><header>${icon('eye')} Pré-visualização</header><p id="message-preview">${esc(Mensagens.resolve(base,c))}</p></section>${!Mensagens.validPhone(c)?`<p class="message-phone-error">${icon('phone-off')} Cadastre um telefone válido antes de enviar.</p>`:''}</div><footer>${options.sequenceId?`<button class="btn btn-light" type="button" data-sequence-skip>Pular</button><button class="btn btn-light" type="button" data-sequence-end>Encerrar</button>`:''}<button class="btn btn-whatsapp" type="button" id="message-send" ${Mensagens.validPhone(c)?'':'disabled'}>${icon('message-circle')} Enviar no WhatsApp</button></footer></section></div>`;
     const textarea=$('#message-text',root),select=$('#message-template',root),preview=()=>{$('#message-count',root).textContent=textarea.value.length;$('#message-preview',root).textContent=Mensagens.resolve(textarea.value,c)};
-    textarea.addEventListener('input',()=>{preview();});select.addEventListener('change',()=>{const item=Mensagens.templates(type).find(entry=>entry.id===select.value);textarea.value=item?.content||'';preview()});
+    textarea.addEventListener('input',()=>{preview();});select.addEventListener('change',()=>{const item=messageModels(type).find(entry=>entry.id===select.value);textarea.value=item?.content||'';preview()});
     $$('[data-message-variable]',root).forEach(button=>button.onclick=()=>{const token=`{{${button.dataset.messageVariable}}}`,start=textarea.selectionStart??textarea.value.length,end=textarea.selectionEnd??start;textarea.setRangeText(token,start,end,'end');textarea.focus();preview()});
-    $('[data-template-restore]',root).onclick=()=>{const item=Mensagens.restoreTemplate(select.value);textarea.value=item?.content||'';preview();Utils.toast('Modelo restaurado')};
-    $('[data-template-duplicate]',root).onclick=()=>{const item=Mensagens.duplicateTemplate(select.value);select.innerHTML=templateOptions(type,item?.id);textarea.value=item?.content||textarea.value;preview();Utils.toast('Modelo duplicado')};
-    $('[data-template-save]',root).onclick=()=>{const name=prompt('Nome do novo modelo:');if(!name)return;const item=Mensagens.saveTemplate({name,type,content:textarea.value});select.innerHTML=templateOptions(type,item.id);Utils.toast('Modelo salvo')};
-    $('[data-template-default]',root).onclick=()=>{const item=Mensagens.saveTemplate({id:select.value,name:select.options[select.selectedIndex]?.text.replace(' · padrão',''),type,content:textarea.value,isDefault:true});select.innerHTML=templateOptions(type,item.id);Utils.toast('Modelo definido como padrão')};
     $('[data-message-close]',root).onclick=close;
+    const scope=window.SpaceContext?.viewScope?.();
     const operationId=Utils.uuid();let sendInFlight=false,externalOpened=false;
-    const executeSend=(layer)=>{if(sendInFlight)return;sendInFlight=true;const sendButton=$('#message-send',root),finalMessage=Mensagens.resolve(textarea.value,c);console.info('[WHATSAPP] charge confirmation accepted');let url;try{console.info('[WHATSAPP] customer validated');if(!client(c.id))throw Error('Cliente não encontrado.');console.info('[WHATSAPP] phone validated');if(!Mensagens.validPhone(c))throw Error('Telefone inválido. Revise o DDD e o número do cliente.');console.info('[WHATSAPP] message generated');if(!finalMessage)throw Error('Digite uma mensagem.');url=Mensagens.whatsappUrl(c,finalMessage);if(!externalOpened){const opened=Mensagens.openWhatsApp(url,{mobile:true});if(!opened.opened)throw Error('O navegador bloqueou a abertura do WhatsApp. Permita pop-ups e tente novamente.');externalOpened=true;if(options.sequenceId)console.info('[SEQUENCE] whatsapp opened')}const record=Mensagens.registerOpened({clientId:c.id,type,source:options.source||'individual',templateId:select.value||null,finalMessage,sequenceId:options.sequenceId||null,operationId});setPending({messageId:record.id,operationId,clientId:c.id,clientName:c.nome,type,finalMessage,url,sequenceId:options.sequenceId||null});close();Utils.toast(type==='charge'?'Abertura do WhatsApp registrada.':'Mensagem preparada.');refreshClients()}catch(error){console.error('[WHATSAPP] send failed',error);sendInFlight=false;layer?.remove();if(sendButton){sendButton.disabled=false;sendButton.textContent=externalOpened?'Concluir registro':'Enviar no WhatsApp'}Utils.toast(error.message||'Não foi possível abrir o WhatsApp.',true)}};
-    $('#message-send',root).onclick=()=>{console.info('[WHATSAPP] action clicked');const finalMessage=Mensagens.resolve(textarea.value,c);if(!finalMessage)return Utils.toast('Digite uma mensagem',true);if(!Mensagens.validPhone(c))return Utils.toast('Telefone inválido. Revise o DDD e o número do cliente.',true);if(type!=='charge')return executeSend(null);if(root.querySelector('[data-charge-confirm-layer]'))return;const layer=document.createElement('div');layer.className='message-overlay message-confirm-layer';layer.dataset.chargeConfirmLayer='true';layer.innerHTML=`<section class="message-confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="charge-send-title"><div class="sheet-handle"></div>${icon('message-circle')}<h3 id="charge-send-title">Enviar cobrança?</h3><p>Esta cobrança será registrada como enviada hoje.</p><div><button class="btn btn-light" type="button" data-charge-send-cancel>Cancelar</button><button class="btn btn-primary" type="button" data-charge-send-continue>Continuar para WhatsApp</button></div></section>`;root.append(layer);$('[data-charge-send-cancel]',layer).onclick=()=>layer.remove();$('[data-charge-send-continue]',layer).onclick=()=>executeSend(layer);window.lucide?.createIcons()};
-    preview();setTimeout(()=>textarea.focus(),80);window.lucide?.createIcons();
+    const executeSend=(layer)=>{if(sendInFlight)return;if(scope!==window.SpaceContext?.viewScope?.()||!Mensagens.canSend()){close();return Utils.toast('O acesso ou espaço mudou. Abra a mensagem novamente.',true);}sendInFlight=true;const sendButton=$('#message-send',root),finalMessage=Mensagens.resolve(textarea.value,c);console.info('[WHATSAPP] charge confirmation accepted');let url;try{console.info('[WHATSAPP] customer validated');if(!client(c.id))throw Error('Cliente não encontrado.');console.info('[WHATSAPP] phone validated');if(!Mensagens.validPhone(c))throw Error('Telefone inválido. Revise o DDD e o número do cliente.');console.info('[WHATSAPP] message generated');if(!finalMessage)throw Error('Digite uma mensagem.');url=Mensagens.whatsappUrl(c,finalMessage);if(!externalOpened){const opened=Mensagens.openWhatsApp(url,{mobile:true});if(!opened.opened)throw Error('O navegador bloqueou a abertura do WhatsApp. Permita pop-ups e tente novamente.');externalOpened=true;if(options.sequenceId)console.info('[SEQUENCE] whatsapp opened')}const record=Mensagens.registerOpened({clientId:c.id,type,source:options.source||'individual',templateId:select.value||null,finalMessage,sequenceId:options.sequenceId||null,operationId,scopedBalance:c.saldo});setPending({messageId:record.id,operationId,clientId:c.id,clientName:c.nome,type,finalMessage,url,sequenceId:options.sequenceId||null});close();Utils.toast(type==='charge'?'Abertura do WhatsApp registrada.':'Mensagem preparada.');refreshClients()}catch(error){console.error('[WHATSAPP] send failed',error);sendInFlight=false;layer?.remove();if(sendButton){sendButton.disabled=false;sendButton.textContent=externalOpened?'Concluir registro':'Enviar no WhatsApp'}Utils.toast(error.message||'Não foi possível abrir o WhatsApp.',true)}};
+    $('#message-send',root).onclick=()=>{console.info('[WHATSAPP] action clicked');const finalMessage=Mensagens.resolve(textarea.value,c);if(!finalMessage)return Utils.toast('Digite uma mensagem',true);if(!Mensagens.validPhone(c))return Utils.toast('Telefone inválido. Revise o DDD e o número do cliente.',true);if(type!=='charge')return executeSend(null);if(root.querySelector('[data-charge-confirm-layer]'))return;const layer=document.createElement('div');layer.className='message-overlay message-confirm-layer';layer.dataset.chargeConfirmLayer='true';layer.innerHTML=`<section class="message-confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="charge-send-title"><div class="sheet-handle"></div>${icon('message-circle')}<h3 id="charge-send-title">Enviar cobrança?</h3><p>A abertura do WhatsApp será registrada. Você decide se quer enviar.</p><div><button class="btn btn-light" type="button" data-charge-send-cancel>Cancelar</button><button class="btn btn-primary" type="button" data-charge-send-continue>Continuar para WhatsApp</button></div></section>`;root.append(layer);$('[data-charge-send-cancel]',layer).onclick=()=>layer.remove();$('[data-charge-send-continue]',layer).onclick=()=>executeSend(layer);window.lucide?.createIcons()};
+    preview();$('[data-message-close]',root)?.focus();window.lucide?.createIcons();
   }
   function centerClients() {
     // The list only decides WHO; the message type is chosen on the next screen.
     const charge = center.audience === 'debt' && !renewalMode();
     const data = Clientes.viewData?.() || DB.readForView?.() || DB.carregar();
     const reminder = renewalMode() ? new Set(Object.keys(center.renewal.items)) : null;
-    const candidates = (data.clientes || []).filter(item =>
-      item.ativo !== false && item.active !== false && !item.deletedAt && (!charge || Number(item.saldo) < 0) && (!reminder || reminder.has(String(item.id))));
-    const latest = charge ? Mensagens.latestCharges(data) : () => null;
+    const scoped=charge&&window.MessageCenterV2?.canUse()&&window.SpaceContext?.scopesCustomers?.();
+    const rows=scoped?(data.clientes||[]).flatMap(item=>{
+      const status=window.Router?.atual?.()==='clientes'&&Clientes.localListBalances?.()
+        ?Clientes.listFinancialStatus?.(item):Clientes.financialStatus?.(item,true);
+      return status?.status==='debt'?[{...item,saldo:status.saldo,partial:status.partial,displayOnly:status.displayOnly}]:[];
+    }):data.clientes||[];
+    const candidates = rows.filter(item =>
+      item.ativo !== false && item.active !== false && !item.deletedAt && (!segment||window.MessageCenterV2?.matches(item,segment)) && (!charge || Number(item.saldo) < 0) && (!reminder || reminder.has(String(item.id))));
+    const latest = charge ? Mensagens.latestCharges(data, window.MessageCenterV2?.activeSpace()) : () => null;
     const lastCharges = new Map();
     const today = new Date().toDateString();
     let chargedToday = 0;
@@ -123,6 +129,7 @@
         <article><strong data-center-selected-count>${count}</strong><span>Selecionados</span></article>
       </div>
       ${exclusions ? `<p class="message-center-note">${exclusions}</p>` : ''}
+      ${window.MessageCenterV2?.canUse()?'<button class="btn btn-light" type="button" data-v2-back>Voltar ao painel</button>':''}
       ${renewalMode() ? '' : '<p class="message-center-note" data-center-selected-total></p>'}
       <div class="message-center-controls">
         <button type="button" data-center-toggle-all ${available.length ? '' : 'disabled'}>${count === available.length && count > 0 ? 'Desmarcar todos' : 'Selecionar todos'}</button>
@@ -141,7 +148,7 @@
               <b>${esc(item.nome)}</b>
               <small>${esc(detail)}${charge ? ' · ' + esc(Mensagens.formatLastChargeDate(last?.date)) : ''}${renewalMode() ? ' · ' + esc((center.renewal.items[item.id] || []).map(plan => plan.label).join(' + ')) : ''}</small>
             </span>
-            ${charge ? `<strong>${money(Math.abs(Number(item.saldo)))}</strong>` : renewalMode() ? `<strong class="message-renewal-count">${(center.renewal.items[item.id] || []).length}<small> ${(center.renewal.items[item.id] || []).length === 1 ? 'plano' : 'planos'}</small></strong>` : ''}
+            ${charge ? `<strong>${money(Math.abs(Number(item.saldo)))}${item.displayOnly?'<small> · Conferir saldo</small>':''}</strong>` : renewalMode() ? `<strong class="message-renewal-count">${(center.renewal.items[item.id] || []).length}<small> ${(center.renewal.items[item.id] || []).length === 1 ? 'plano' : 'planos'}</small></strong>` : ''}
           </label>`;
         }).join('') || '<div class="message-center-empty"><h3>Nenhum cliente neste filtro</h3><p>Altere os filtros para consultar outros clientes.</p></div>'}
       </div>
@@ -183,12 +190,14 @@
         center.renewal = null;
         if (center.type === 'renewal') Object.assign(center, { type: 'charge', audience: 'debt', initialized: false });
       }
+      section=(!options.type&&!options.clientIds&&window.MessageCenterV2?.canUse())?'dashboard':'send';
+      segment='';
       refreshCenter();
       $('#title').textContent = 'Mensagens';
       $('#date').textContent = '';
       scrollTo({ top: 0 });
       $('.message-center-header h2', app)?.focus({ preventScroll: true });
-      if (center.type !== 'receipt') await MessageSequenceUI.resume({ explicit: true });
+      if(section==='dashboard'){void window.MessageCenterV2.enter();void window.FiadoConditions?.refresh();}
     } catch (error) {
       Utils.toast(MessageSequence.friendly(error), true);
     }
@@ -217,11 +226,46 @@
   function refreshCenter() {
     const app = $('#app');
     if (!app) return;
+    if(section!=='send'&&window.MessageCenterV2?.canUse()){
+      const panel=window.MessageCenterV2, title=section==='history'?'Histórico de comunicações':'Modelos de mensagens';
+      app.innerHTML='<section class="message-center-page">'+centerHeader()+
+        (section==='dashboard'?panel.home():'<button class="btn btn-light" type="button" data-v2-back>Voltar ao painel</button><h3>'+title+'</h3>'+
+          (section==='history'?panel.history():'<div data-v2-models role="status">Consultando modelos…</div>'))+'</section>';
+      const page=app.firstElementChild;
+      $('[data-message-center-back]',page).onclick=backToClients;
+      $('[data-open-receipt-center]',page)?.addEventListener('click',()=>openCenter({type:'receipt'}));
+      $('[data-v2-back]',page)?.addEventListener('click',dashboard);
+      $$('[data-v2-section]',page).forEach(button=>button.onclick=()=>shortcut(button.dataset.v2Section));
+      if(section==='dashboard')void panel.progress(page);
+      if(section==='models')void panel.models(page,refreshCenter);
+      window.lucide?.createIcons();
+      return;
+    }
     const roster = center.type === 'receipt' ? null : centerClients();
     app.innerHTML = renderCenter(roster);
     bindCenter(roster);
     window.lucide?.createIcons();
   }
+  function dashboard(){
+    if(!$('.message-center-page'))return;
+    section='dashboard';segment='';refreshCenter();
+  }
+  function shortcut(id){
+    if(id==='renewal')return Router.ir('renovacoes');
+    if(id==='models'||id==='history'){section=id;return refreshCenter();}
+    const financial=['charge','fiado-atrasado','fiado-hoje'].includes(id);
+    const type=SEQUENCE_TYPES.includes(id)?id:financial?'charge':'custom';
+    segment=SEQUENCE_TYPES.includes(id)?'':id;
+    Object.assign(center,{type,audience:financial?'debt':'all',days:'todos',min:'',max:'',initialized:false});
+    section='send';refreshCenter();
+  }
+  window.addEventListener('fiado-conditions-updated',()=>{if(section==='dashboard'&&$('.message-v2-dashboard'))refreshCenter();});
+  window.addEventListener('veconi-space-context-changed',()=>{
+    if(!$('.message-center-page'))return;
+    if($('#modal .individual-message-sheet, #modal .message-return-sheet, #modal .message-center-filter'))close();
+    if(center.type==='renewal')return backToClients();
+    section='dashboard';segment='';refreshCenter();void window.MessageCenterV2?.enter();void window.FiadoConditions?.refresh();
+  });
   function filterSheet() {
     const root = $('#modal');
     root.innerHTML = `<div class="message-overlay message-center-filter">
@@ -318,6 +362,7 @@
       };
     });
     $('[data-message-center-back]', page).onclick = backToClients;
+    $('[data-v2-back]',page)?.addEventListener('click',dashboard);
     if (center.type === 'receipt') return;
 
     const checkboxes = $$('[data-center-client]', page);
@@ -379,8 +424,8 @@
       }
     }
   }
-  function showReturn(){if($('#modal .receipt-message-dialog'))return;const pending=getPending();if(pending?.sequenceId)return MessageSequenceUI.resume({explicit:true});if($('#modal [data-sequence-layer]'))return;if(!pending||returnShown||document.visibilityState!=='visible')return;returnShown=true;console.info('[SEQUENCE] waiting for next');const root=$('#modal'),c=client(pending.clientId);root.innerHTML=`<div class="message-overlay"><section class="message-return-sheet" role="dialog" aria-modal="true"><div class="message-success-icon">${icon('check')}</div><h2>Mensagem preparada</h2><p>A conversa de <b>${esc(pending.clientName||c?.nome)}</b> foi aberta no WhatsApp.</p><small>O app não consegue confirmar o envio dentro do WhatsApp.</small><button class="btn btn-primary" type="button" data-return-next>${pending.sequenceId?'Marcar enviado e próximo':'Concluir'}</button><button class="btn btn-light" type="button" data-return-reopen>Reabrir mensagem</button><button class="btn btn-light" type="button" data-return-not-sent>Marcar como não enviado</button></section></div>`;$('[data-return-reopen]',root).onclick=()=>{const opened=Mensagens.openWhatsApp(pending.url,{mobile:true});if(!opened.opened)Utils.toast('O navegador bloqueou o WhatsApp.',true)};$('[data-return-next]',root).onclick=()=>{setPending(null);returnShown=false;close();refreshClients()};$('[data-return-not-sent]',root).onclick=()=>{Mensagens.markNotSent(pending.messageId);setPending(null);returnShown=false;close();refreshClients()};window.lucide?.createIcons()}
+  function showReturn(){if($('#modal .receipt-message-dialog'))return;const pending=getPending();if(pending?.sequenceId)return MessageSequenceUI.resume({explicit:true});if($('#modal [data-sequence-layer]'))return;if(!pending||pending.scope!==messageReturnScope()||returnShown||document.visibilityState!=='visible')return;returnShown=true;console.info('[SEQUENCE] waiting for next');const root=$('#modal'),c=client(pending.clientId);root.innerHTML=`<div class="message-overlay"><section class="message-return-sheet" role="dialog" aria-modal="true"><div class="message-success-icon">${icon('check')}</div><h2>Mensagem preparada</h2><p>A conversa de <b>${esc(pending.clientName||c?.nome)}</b> foi aberta no WhatsApp.</p><small>O app não consegue confirmar o envio dentro do WhatsApp.</small><button class="btn btn-primary" type="button" data-return-next>${pending.sequenceId?'Marcar enviado e próximo':'Concluir'}</button><button class="btn btn-light" type="button" data-return-reopen>Reabrir mensagem</button><button class="btn btn-light" type="button" data-return-not-sent>Marcar como não enviado</button></section></div>`;$('[data-return-reopen]',root).onclick=()=>{const opened=Mensagens.openWhatsApp(pending.url,{mobile:true});if(!opened.opened)Utils.toast('O navegador bloqueou o WhatsApp.',true)};$('[data-return-next]',root).onclick=()=>{setPending(null);returnShown=false;close();refreshClients()};$('[data-return-not-sent]',root).onclick=()=>{Mensagens.markNotSent(pending.messageId);setPending(null);returnShown=false;close();refreshClients()};window.lucide?.createIcons()}
   window.AppLifecycle?.onResume?.(()=>new Promise(resolve=>setTimeout(()=>{showReturn();resolve()},180)));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(showReturn,180)});addEventListener('focus',()=>setTimeout(showReturn,180));setTimeout(showReturn,0);document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#modal .individual-message-sheet'))close()});
   function rememberType(type){if(SEQUENCE_TYPES.includes(type)){center.type=type;persistCenter();}}
-  window.MobileMessages={openComposer,openCenter,refreshCenter,showReturn,startSequence,rememberType,formatLastChargeDate:Mensagens.formatLastChargeDate};
+  window.MobileMessages={dashboard,openComposer,openCenter,refreshCenter,showReturn,startSequence,rememberType,formatLastChargeDate:Mensagens.formatLastChargeDate};
 })();

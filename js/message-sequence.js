@@ -161,6 +161,7 @@
     return DB.localRecords.transaction('readwrite', (store, done) => { assertContext(ctx); write(store, { key, scope: ctx.scope, kind: 'draft', value, updatedAt: stamp() }); done(value); });
   }
   async function prepare(seq, input) {
+    if(seq.paused)throw fault('Retome a sequência antes de preparar o envio.');
     return change(seq, current => {
       if (current.status !== 'PREPARED') throw fault('Confirme o contato atual antes de abrir outro.');
       if (input.clientId !== current.currentCustomerId || !Mensagens.validPhone({ telefone: input.phone })) throw fault('Telefone inválido. Revise o cadastro ou pule este cliente.');
@@ -180,6 +181,7 @@
     if (current.status !== 'AWAITING_CONFIRMATION' || !current.current) throw fault('Prepare a mensagem antes de abrir o WhatsApp.');
     current.current.openedAt ||= stamp(); current.current.openCount = (current.current.openCount || 0) + 1;
   }, true, { keepRevision: true });
+  const pause=(seq,paused=true)=>change(seq,current=>{current.paused=paused;},true);
   const unprepare = seq => change(seq, current => { current.status = 'PREPARED'; current.current = null; }, true);
   const edit = (seq, input) => change(seq, current => {
     if (current.status !== 'PREPARED') throw fault('Confirme o contato atual antes de editar a mensagem.');
@@ -245,5 +247,5 @@
   }
   addEventListener('online', flush);
   addEventListener('firebase-auth-ready', () => { if (Mensagens.canSend()) ready().then(flush).catch(error => console.error('[SEQUENCE INIT]', error)); });
-  window.MessageSequence = Object.freeze({ ready, active, start, draft, edit, prepare, markOpened, unprepare, advance, cancel, history, flush, friendly, tabId });
+  window.MessageSequence = Object.freeze({ ready, active, start, draft, edit, prepare, markOpened, unprepare, advance, cancel, pause, history, flush, friendly, tabId });
 })();

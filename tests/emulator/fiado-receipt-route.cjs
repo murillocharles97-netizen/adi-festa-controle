@@ -721,6 +721,30 @@ async function newCreditSale(qa,spaceId=qa.spaceId,sellOptions){
  return {sale,request,h};
 }
 
+test('concurrent Fiado checkouts keep one applied operation and the verified due date',async()=>{
+ const qa=await setup({link:true});
+ await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ const args={businessId:qa.businessId,workspaceGeneration:0,clientId,spaceId:qa.spaceId,kind:'fiado_conditions',
+   clientRelease:235,syncProtocolVersion:1};
+ await callCommit({auth:qa.auth,data:{...args,revision:0,mode:'weekly',limitCents:null,promise:null}});
+ const first=await newCreditSale(qa),second=await newCreditSale(qa);
+ try{
+  const outcomes=await Promise.allSettled([callCommit(first.request),callCommit(second.request)]);
+  const winner=outcomes.findIndex(item=>item.status==='fulfilled');
+  assert.notEqual(winner,-1);
+  assert.equal(outcomes.filter(item=>item.status==='fulfilled').length,1);
+  assert.equal((await callCommit([first,second][winner].request)).replayed,true);
+  assert.equal((await qa.root.collection('sales').get()).size,1);
+  assert.equal((await qa.root.collection('balanceEvents').get()).size,1);
+  assert.equal((await qa.clientRef.get()).data().saldo,-14);
+  const terms=await service.receipt({auth:qa.auth,data:args});
+  assert.equal(terms.confirmed,true);
+  assert.equal(terms.usedCents,1400);
+  const commercialDay=require('../../functions/src/shared/fiado-account').commercialDay([first,second][winner].sale);
+  assert.equal(terms.dueDate,require('../../functions/src/services/fiado-conditions-service').dueDate(commercialDay,{mode:'weekly'}));
+ }finally{first.h.close?.();second.h.close?.();}
+});
+
 test('normal Pix and cash sales commit once, with and without a confirmed opening, and never move the balance',async()=>{
  const qa=await setup(),api=openingApi(qa);
  const sell=async method=>{

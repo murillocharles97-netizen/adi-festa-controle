@@ -316,6 +316,11 @@ window.Fiados = (() => {
     return route;
   }
 
+  function readCardReceiptRoute(clientId) {
+    assertCanReceive();
+    return readReceiptRoute(clientId,window.SpaceContext.viewScope(),window.TeamAccess.captureSession());
+  }
+
   async function openCardReceive(clientId,{onRecorded}={}) {
     const request=++receiptRouteRequest;
     try{
@@ -645,6 +650,7 @@ window.Fiados = (() => {
   );
 
   return {
+    readCardReceiptRoute,
     spaceField, assertCanReceive, receiptAttempt, openReceive, openCardReceive, canOpenOriginal, openOriginalDirectory,
     listar,
     receber,

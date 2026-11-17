@@ -325,3 +325,28 @@
 }
 .sequence-type-chips button:disabled:not(.active) { opacity: .45; }
 .sequence-type-chips + .message-model-field { margin-top: 10px; }
+.message-v2-dashboard { display: grid; gap: .85rem; }
+.message-v2-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: .65rem; }
+.message-v2-grid button, .message-v2-progress article, .message-v2-history article {
+  border: 1px solid var(--border,#d9e4ea); border-radius: .9rem; background: var(--surface,#fff); color: var(--text,#18283d);
+}
+.message-v2-grid button { display: flex; min-height: 57px; align-items: center; gap: .55rem; text-align: left; padding: .65rem; font: inherit; font-size: .875rem; cursor: pointer; }
+.message-v2-grid button:focus-visible { outline: 2px solid var(--primary,#009f91); outline-offset: 2px; }
+.message-v2-grid button svg { color: var(--primary,#008d83); flex: none; width: 1.15rem; height: 1.15rem; }
+.message-v2-grid button strong { margin-inline-start: auto; }
+.message-v2-progress:empty { display: none; }
+.message-v2-progress article, .message-v2-history article, .message-center-page [data-v2-model-form] form { display: grid; gap: .6rem; padding: .75rem; }
+.message-v2-progress small { display: block; }
+.message-v2-progress progress { width: 100%; accent-color: var(--primary,#008d83); }
+.message-v2-progress article > div:last-child { display: flex; flex-wrap: wrap; gap: .5rem; }
+.message-v2-history { display: grid; gap: .5rem; margin-block: .65rem; }
+.message-v2-history small { white-space: pre-wrap; overflow-wrap: anywhere; }
+.individual-message-sheet details > summary { cursor: pointer; padding-block: .55rem; }
+@media (max-width: 520px) {
+  .message-v2-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .5rem; }
+  .message-v2-grid button { font-size: .8rem; }
+}
+.message-v2-progress progress { appearance: none; border: 0; border-radius: 999px; overflow: hidden; height: .5rem; background: var(--border,#d9e4ea); }
+.message-v2-progress progress::-webkit-progress-bar { background: var(--border,#d9e4ea); }
+.message-v2-progress progress::-webkit-progress-value { background: var(--primary,#008d83); }
+.message-v2-progress progress::-moz-progress-bar { background: var(--primary,#008d83); }

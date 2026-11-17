@@ -78,6 +78,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   return p;
  }
  async function commit(request,{priorSale=null,paymentRecovery=null}={}){
+  if(request.data?.kind==='message_space_template_save')return db.runTransaction(async tx=>{
+   const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0});
+   return require('./message-space-template-service').handle({tx,c,ref,d,now:now(),write:true});
+  });
   if(request.data?.kind==='fiado_conditions')return db.runTransaction(async tx=>{
    const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0});
    return require('./fiado-conditions-service').handler({tx,c,ref,d,now:now(),write:true});
@@ -597,6 +601,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     }
     return result(applied?'applied':'review');
    }
+   if(d.kind==='message_space_templates')return require('./message-space-template-service').handle({tx,c,ref,d,now:now()});
    if(['fiado_conditions','fiado_conditions_list'].includes(d.kind))
     return require('./fiado-conditions-service').handler({tx,c,ref,d,now:now()});
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
@@ -610,7 +615,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    await c.space(s.spaceId);
    const marker=(await tx.get(ref(c.bid,'processedOperations',op))).data(),e=(await tx.get(ref(c.bid,'balanceEvents',(reversal?'credit_sale_reversal:':'credit_sale:')+sid))).data();
    return{confirmed:!!marker&&!!e&&(reversal?s.active===false&&s.financialReversalEventId:s.financialAppliedAt)!=null&&e.operationId===op&&e.customerId===(s.clienteId||s.customerId)&&e.sourceDocumentId===sid&&cents(e.balanceDelta)===(reversal?1:-1)*cents(s.valorFinal??s.valorTotal)};
-  },['fiado_receipt_route','payment_confirmation','queued_operation_status','fiado_conditions','fiado_conditions_list'].includes(request.data?.kind)?{readOnly:true}:undefined);
+  },['fiado_receipt_route','payment_confirmation','queued_operation_status','message_space_templates','fiado_conditions','fiado_conditions_list'].includes(request.data?.kind)?{readOnly:true}:undefined);
  }
  async function recognizePreservedPayment(request) {
   const d=request.data||{};

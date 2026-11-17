@@ -17,7 +17,8 @@
     if (window.Router?.atual?.() === 'renovacoes') return window.AppPageRuntime?.mount?.('renovacoes');
     return window.Router?.ir?.('renovacoes');
   }
-  const scopeMatches = seq => DB.getBusinessId() === seq.businessId && (window.TeamAccess?.actor?.().actorUid || window.FirebaseSession?.user?.uid) === seq.actorUid;
+  const sameSpace=seq=>seq.type==='renewal'||!window.SpaceContext?.homeId||seq.spaceId===(window.SpaceContext.homeId()||null);
+  const scopeMatches = seq => sameSpace(seq)&&DB.getBusinessId() === seq.businessId && (window.TeamAccess?.actor?.().actorUid || window.FirebaseSession?.user?.uid) === seq.actorUid;
   function sheet(html, className = 'message-confirm-sheet') {
     root().innerHTML = `<div class="message-overlay" data-sequence-layer><section class="${className}" role="dialog" aria-modal="true">${html}</section></div>`;
     if (!root().querySelector('[data-sequence-sync-note]')) root().querySelector('section').insertAdjacentHTML('beforeend', '<p data-sequence-sync-note role="status"></p>');
@@ -40,6 +41,7 @@
     if (opening) return; opening = true;
     try {
       const result = await engine().start(input);
+      if (result.resumed&&window.MessageCenterV2?.canUse())return MobileMessages.dashboard();
       if (result.resumed) return offer(result.sequence);
       Utils.toast(`Sequência preparada · 1 de ${result.sequence.selectedCustomerIds.length}`);
       await composer(result.sequence);
@@ -57,7 +59,8 @@
     checking = true;
     try {
       const seq = await engine().active();
-      if (!seq) return false;
+      if (!seq||!scopeMatches(seq)||seq.paused) return false;
+      if (!explicit && document.querySelector('.message-v2-dashboard') && !root().querySelector('[data-sequence-layer]')) return false;
       if (!explicit && !root().querySelector('[data-sequence-layer]') && root().children.length) return false;
       if (explicit) offer(seq);
       else if (seq.status === 'AWAITING_CONFIRMATION' && !root().querySelector('[data-sequence-open]')) returned(seq);
@@ -67,13 +70,18 @@
   }
   const templates = type => {
     // Reading templates must not create defaults through DB.alterar (full DB save).
-    const saved = (DB.carregar().messageTemplates || []).filter(item => item.active !== false && item.type === type);
+    const isolated=window.MessageCenterV2?.canUse()&&window.SpaceContext?.scopesCustomers?.();
+    const spaceId=isolated?window.MessageCenterV2.activeSpace():null;
+    const saved = (DB.carregar().messageTemplates || []).filter(item => item.active !== false && item.type === type &&
+      (!isolated || item.spaceId === spaceId));
     const defaults = Mensagens.DEFAULTS.some(item => item.type === type) ? Mensagens.DEFAULTS : [...Mensagens.DEFAULTS, ...(type === 'renewal' && renewals() ? [renewals().DEFAULT_TEMPLATE] : [])];
-    return [...saved, ...defaults.filter(item => item.type === type && !saved.some(savedItem => savedItem.id === item.id))];
+    return [...(window.MessageCenterV2?.templates(type)||[]),...saved, ...defaults.filter(item => item.type === type && !saved.some(savedItem => savedItem.id === item.id))];
   };
   const defaultTemplate = type => templates(type).find(item => item.isDefault) || templates(type)[0];
   async function currentClient(seq, baseMessage, force = false) {
     const local = Clientes.obter(seq.currentCustomerId);
+    if (window.SpaceContext?.scopesCustomers?.()&&Clientes.viewData&&
+        !(Clientes.viewData().clientes||[]).some(row=>row.id===seq.currentCustomerId))throw Error('Cliente fora do espaço da sequência.');
     if (!local) throw Error('Cliente não encontrado. Pule este contato para continuar.');
     if (seq.type === 'charge' || /{{\s*saldo\s*}}/i.test(baseMessage)) {
       const result = await Mensagens.refreshCanonicalClient(seq.currentCustomerId, { persistProjection: false, force });
@@ -165,6 +173,7 @@
   }
   async function composer(seq) {
     if (!scopeMatches(seq)) return;
+    if(seq.paused)return window.MobileMessages?.dashboard?.();
     if (terminal(seq)) return finished(seq);
     if (seq.status === 'AWAITING_CONFIRMATION') return returned(seq);
     if (seq.type === 'renewal') {
@@ -182,7 +191,7 @@
     const typeChips = `<nav class="sequence-type-chips" aria-label="Tipo da mensagem">${TYPES.map(([key, label]) =>
       `<button type="button" data-sequence-type="${key}" aria-pressed="${seq.type === key}" class="${seq.type === key ? 'active' : ''}" ${pristine || seq.type === key ? '' : 'disabled'}>${label}</button>`).join('')}</nav>`;
     const valid = client && Mensagens.validPhone(client);
-    sheet(`<header><div><small>Enviando para ${seq.currentIndex + 1} de ${seq.selectedCustomerIds.length}</small><h2>${esc(TYPE_TITLES[seq.type] || TYPE_TITLES.custom)}</h2></div><button type="button" data-sequence-close aria-label="Fechar">×</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><div><h3>${esc(local?.nome || 'Cliente indisponível')}</h3><p>${esc(local?.telefone)}</p></div>${seq.type === 'charge' && client ? `<strong>${Utils.dinheiro(Math.abs(client.saldo))}<small>em aberto</small></strong>` : ''}</section><p>${seq.confirmedCount} enviados · ${seq.skippedCount} pulados</p>${typeChips}<label class="message-model-field">Modelo<select id="sequence-template">${choices.map(item => `<option value="${esc(item.id)}" ${item.id === seq.templateId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><label class="message-text-field">Mensagem<textarea id="sequence-text" rows="9" maxlength="4000">${esc(seq.baseMessage)}</textarea></label><div class="message-variables">${['nome', 'primeiro_nome', 'saldo', 'nome_negocio', 'pix', 'data_atual'].map(name => `<button type="button" data-sequence-variable="${name}">{{${name}}}</button>`).join('')}</div><section class="message-preview"><header>Pré-visualização</header><p id="sequence-preview">${client ? esc(Mensagens.resolve(seq.baseMessage, client)) : ''}</p></section>${problem || !valid ? `<p class="message-phone-error">${esc(problem || 'Telefone inválido — Pular')}</p>` : ''}<p data-sequence-sync-note></p></div><footer><button class="btn btn-light" data-sequence-skip>Pular</button><button class="btn btn-light" data-sequence-end>Encerrar</button><button class="btn btn-whatsapp" id="sequence-send" ${valid && !problem ? '' : 'disabled'}>Enviar no WhatsApp</button></footer>`, 'individual-message-sheet');
+    sheet(`<header><div><small>Enviando para ${seq.currentIndex + 1} de ${seq.selectedCustomerIds.length}</small><h2>${esc(TYPE_TITLES[seq.type] || TYPE_TITLES.custom)}</h2></div><button type="button" data-sequence-close aria-label="Fechar">×</button></header><div class="message-sheet-scroll"><section class="message-client-summary"><div><h3>${esc(local?.nome || 'Cliente indisponível')}</h3><p>${esc(local?.telefone)}</p></div>${seq.type === 'charge' && client ? `<strong>${Utils.dinheiro(Math.abs(client.saldo))}<small>em aberto</small></strong>` : ''}</section><p>${seq.confirmedCount} enviados · ${seq.skippedCount} pulados</p>${typeChips}<label class="message-model-field">Modelo<select id="sequence-template">${choices.map(item => `<option value="${esc(item.id)}" ${item.id === seq.templateId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><details><summary>Ajustar esta mensagem</summary><label class="message-text-field">Mensagem<textarea id="sequence-text" rows="5" maxlength="4000">${esc(seq.baseMessage)}</textarea></label><div class="message-variables">${['nome', 'primeiro_nome', 'saldo', 'nome_negocio', 'pix', 'data_atual'].map(name => `<button type="button" data-sequence-variable="${name}">{{${name}}}</button>`).join('')}</div></details><section class="message-preview"><header>Mensagem para revisar</header><p id="sequence-preview">${client ? esc(Mensagens.resolve(seq.baseMessage, client)) : ''}</p></section>${problem || !valid ? `<p class="message-phone-error">${esc(problem || 'Telefone inválido — Pular')}</p>` : ''}<p data-sequence-sync-note></p></div><footer><button class="btn btn-light" data-sequence-skip>Pular</button><button class="btn btn-light" data-sequence-pause>Pausar</button><button class="btn btn-whatsapp" id="sequence-send" ${valid && !problem ? '' : 'disabled'}>Abrir no WhatsApp</button></footer>`, 'individual-message-sheet');
     let current = seq, editing = Promise.resolve();
     const textarea = $('#sequence-text'), select = $('#sequence-template');
     const saveDraft = () => {
@@ -213,7 +222,7 @@
     });
     action('[data-sequence-close]', async () => { await saveDraft(); close(); });
     action('[data-sequence-skip]', async () => { await saveDraft(); await composer(await engine().advance(current, 'SKIPPED')); });
-    action('[data-sequence-end]', async () => { await saveDraft(); finished(await engine().cancel(current)); });
+    action('[data-sequence-pause]', async () => { await saveDraft(); await engine().pause(current); close(); MobileMessages.dashboard(); });
     action('#sequence-send', async () => {
       await saveDraft();
       const latest = await currentClient(current, textarea.value, true);
