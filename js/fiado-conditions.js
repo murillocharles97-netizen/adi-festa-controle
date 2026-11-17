@@ -151,18 +151,16 @@ window.FiadoConditions = (() => {
       };
     }catch(error){if(current())body.textContent=error.message||'Não foi possível consultar.';}
   }
-  async function checkout(clientId,totalCents,spaceId){
-    if(!scope()||navigator.onLine===false||!window.FirebaseCallable)return true;
-    let row;
-    try{row=await Promise.race([call('fiado_conditions',{clientId,spaceId}),new Promise(resolve=>setTimeout(()=>resolve(null),1800))]);}
-    catch{return true;} // Advisory only: leave the existing sale/queue contract intact.
-    if(!row?.confirmed||row.limitCents===null||row.usedCents+totalCents<=row.limitCents)return true;
-    const role=window.TeamAccess?.actor?.()?.actorRoleSnapshot;
-    if(!['owner','admin','manager'].includes(role)){
-      Utils.toast('Compra acima do limite de Fiado. Peça ao gestor para concluir.',true);
-      return false;
-    }
-    return window.confirm('A compra ultrapassa o limite de Fiado em '+cash(row.usedCents+totalCents-row.limitCents)+'. Continuar a venda?');
+  async function checkoutWarning(clientId,totalCents,spaceId){
+    if(!scope()||navigator.onLine===false||!window.FirebaseCallable)return '';
+    let row, timeout;
+    try{
+      const budget=new Promise(resolve=>{timeout=setTimeout(()=>resolve(null),1800);});
+      row=await Promise.race([call('fiado_conditions',{clientId,spaceId}),budget]);
+    }catch{return '';}
+    finally{clearTimeout(timeout);}
+    if(!row?.confirmed||row.limitCents===null||row.usedCents+totalCents<=row.limitCents)return '';
+    return 'Limite de Fiado ultrapassado em '+cash(row.usedCents+totalCents-row.limitCents)+'.';
   }
   function invalidate(){
     view=null;
@@ -184,5 +182,5 @@ window.FiadoConditions = (() => {
     else if(document.querySelector('.clients-page'))window.ClientesPage?.refresh?.();
   });
   const action=id=>canEdit()?'<button class="fiado-conditions-action" type="button" data-fiado-terms="'+esc(id)+'">Condições de Fiado</button>':'';
-  return Object.freeze({action,incomplete,canView:()=>!!scope(),edit,get,refresh,note,checkout,badge,matches,sort,isConditionFilter,canEdit});
+  return Object.freeze({action,incomplete,canView:()=>!!scope(),edit,get,refresh,note,checkoutWarning,badge,matches,sort,isConditionFilter,canEdit});
 })();

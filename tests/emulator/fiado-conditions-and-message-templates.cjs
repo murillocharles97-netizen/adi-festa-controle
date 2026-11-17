@@ -6,8 +6,12 @@ const {initializeApp,deleteApp}=require('firebase-admin/app');
 const {getFirestore}=require('firebase-admin/firestore');
 const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing');
 const localFirestore=require('firebase/firestore');
-const {operationalCommitService}=require('../../functions/src/services/operational-commit-service');
-const {operationalCallable}=require('../../functions/src/shared/operational-callable');
+const path=require('node:path');
+const writerRoot=path.resolve(process.env.VECONI_QA_RECEIPT_WRITER||'functions');
+const readerRoot=path.resolve(process.env.VECONI_QA_RECEIPT_READER||'functions');
+const {operationalCommitService:writerService}=require(path.join(writerRoot,'src/services/operational-commit-service'));
+const {operationalCommitService:readerService}=require(path.join(readerRoot,'src/services/operational-commit-service'));
+const {operationalCallable}=require(path.join(writerRoot,'src/shared/operational-callable'));
 
 const project='demo-veconi-condicoes';
 assert.equal(process.env.GCLOUD_PROJECT,project);
@@ -15,8 +19,9 @@ assert.match(process.env.FIRESTORE_EMULATOR_HOST||'',/^127\.0\.0\.1:\d+$/);
 const app=initializeApp({projectId:project},randomUUID()),db=getFirestore(app);
 test.after(()=>deleteApp(app));
 let day='2026-01-31';
-const service=operationalCommitService(db,{now:()=>new Date(day+'T15:00:00Z')});
-const commit=operationalCallable(service.commit,{requireProtocol:true});
+const clock={now:()=>new Date(day+'T15:00:00Z')};
+const service=readerService(db,clock);
+const commit=operationalCallable(writerService(db,clock).commit,{requireProtocol:true});
 
 test('Firebase Emulator: condições, lançamentos concorrentes, permissões e modelos',async()=>{
  const businessId=randomUUID(),id='cliente-qa',owner=randomUUID(),seller=randomUUID(),foreign=randomUUID();
@@ -83,7 +88,10 @@ test('Firebase Emulator: condições, lançamentos concorrentes, permissões e m
  const renegotiated=await save({revision:2,renegotiatedDueDate:'2026-03-18',promise:{status:'pending',date:'2026-03-03',amountCents:8000,note:'QA'}});
  assert.equal(renegotiated.dueDate,'2026-03-18');
  day='2026-03-04';
- assert.equal((await read()).promise.state,'missed');
+ const restartedReader=readerService(db,clock);
+ const promise=(await call(restartedReader.receipt,'fiado_conditions')).promise;
+ assert.deepEqual(promise,{status:'pending',date:'2026-03-03',amountCents:8000,note:'QA',state:'missed'});
+ assert.equal((await read({spaceId:b})).promise,null);
  await apply(a,'pix-final',80);
  assert.equal((await read()).dueDate,null);
  assert.equal((await read()).usedCents,0);

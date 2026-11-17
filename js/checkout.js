@@ -1289,11 +1289,11 @@ window.Checkout = (() => {
         const expected=advisoryFields();
         finishing=true;
         try{
-          const proceedWithLimit=await window.FiadoConditions.checkout(clienteId,
+          const limitWarning=await window.FiadoConditions.checkoutWarning(clienteId,
             Math.round(Number(document.querySelector('#manual-total')?.value||0)*100),spaceId);
           if(advisoryScope!==window.SpaceContext?.viewScope?.()||expected!==advisoryFields())
             return validationError('O carrinho ou espaço mudou. Revise antes de concluir.');
-          if(!proceedWithLimit)return validationError('Revise o limite de Fiado antes de concluir.');
+          if(limitWarning)Utils.toast(limitWarning,true);
         }finally{finishing=false;}
       }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });

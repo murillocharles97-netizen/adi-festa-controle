@@ -244,13 +244,24 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     openingHash=client.fiadoOpeningBalance.hash;
     const sale=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.formaPagamento==='fiado');
     const change=attemptWrites.find(w=>w.entityType==='clients'&&w.entityId===id);
-    if(sale&&Number(change?.before?.financialVersion)!==Number(client.financialVersion))
-     fail('A venda pertence a uma versão anterior da conta. Atualize antes de criar novo Fiado.','failed-precondition');
     if(sale){
      const opening=(await tx.get(ref(c.bid,'fiadoOpeningBalances',id))).data();
      const occurredAt=Date.parse(sale.data.occurredAt||sale.data.data||''),cutAt=Date.parse(opening?.at||'');
      if(opening?.hash!==openingHash||!Number.isFinite(cutAt)||!Number.isFinite(occurredAt)||occurredAt<cutAt)
       fail('Venda anterior ao corte não pode ser lançada na conta nova.','failed-precondition');
+     const previous=change?.before, version=previous?.financialVersion;
+     if(Number(version)!==Number(client.financialVersion)){
+      // The commit engine has already recalculated the sale delta and stock on
+      // this transaction's snapshots. Rebase only traditional sales from the
+      // same opening epoch. Old queues and installment sales keep their fence.
+      const openingVersion=opening.plan?.financialVersion;
+      const sameEpoch=!sale.data.installmentPlan&&previous?.fiadoOpeningBalance?.version===1&&
+       previous.fiadoOpeningBalance.hash===openingHash&&opening.clientId===id&&opening.businessId===c.bid&&
+       opening.workspaceGeneration===gen(c.business)&&opening.type==='fiado_confirmed_opening'&&
+       Number.isSafeInteger(openingVersion)&&Number.isSafeInteger(version)&&Number.isSafeInteger(client.financialVersion)&&
+       version>=openingVersion+1&&version<client.financialVersion;
+      if(!sameEpoch)fail('A venda pertence a uma versão anterior da conta. Atualize antes de criar novo Fiado.','failed-precondition');
+     }
     }
    }
    if(paymentRecovery){

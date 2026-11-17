@@ -530,6 +530,23 @@ test('confirmed opening fences historical cancellation and maintenance atomicall
  assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,3000);
 });
 
+test('PWA V235.1 settles the selected space with the candidate Functions',async()=>{
+ const qa=await setup({history:'split'}),view=await qa.ui(qa.spaceId,{pwaRef:'0e08bc2'});
+ try{
+  const originalOther=await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1});
+  assert.ok(originalOther.dueCents>0);
+  await view.open();
+  assert.ok(view.modal());
+  await view.submit(25);
+  const request=view.request();
+  assert.equal(request.data.item.payload.fiadoReceiptRoute.scopedReceiptVersion,1);
+  assert.equal((await callCommit(request)).replayed,false);
+  assert.equal((await callCommit(request)).replayed,true);
+  assert.equal((await qa.root.collection('payments').get()).size,1);
+  assert.equal((await qa.route({spaceId:qa.otherId,scopedReceiptVersion:1})).dueCents,originalOther.dueCents);
+ }finally{view.h.close();}
+});
+
 function openingApi(qa,{enabled=true}={}){
  const {createOriginEvidenceHandler}=require(path.join(centralSource,'src/fiado-origin-evidence-handler'));
  const handler=createOriginEvidenceHandler(db,{access:{enabled:true,openingEnabled:enabled,
@@ -721,26 +738,38 @@ async function newCreditSale(qa,spaceId=qa.spaceId,sellOptions){
  return {sale,request,h};
 }
 
-test('concurrent Fiado checkouts keep one applied operation and the verified due date',async()=>{
+for(const opening of [false,true])test('two concurrent Fiado sales commit once'+(opening?' after opening':' on a new account'),async()=>{
  const qa=await setup({link:true});
- await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ const openingAmount=opening?150:0;
+ if(!opening)await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ if(opening){
+  const api=openingApi(qa),reason='QA: saldo de abertura conferido pelo proprietário.';
+  await confirmOpening(api,await api('openingPreview',{balances:[{spaceId:qa.spaceId,totalCents:openingAmount*100},
+    {spaceId:qa.otherId,totalCents:0}],reason}),{reason});
+ }
+ const startVersion=(await qa.clientRef.get()).data().financialVersion;
+ // Both devices start with the same consistent canonical stock aliases.
+ await qa.root.collection('products').doc('qa-product').update({estoqueAtual:7,estoque:7,totalStock:7});
  const args={businessId:qa.businessId,workspaceGeneration:0,clientId,spaceId:qa.spaceId,kind:'fiado_conditions',
    clientRelease:235,syncProtocolVersion:1};
  await callCommit({auth:qa.auth,data:{...args,revision:0,mode:'weekly',limitCents:null,promise:null}});
  const first=await newCreditSale(qa),second=await newCreditSale(qa);
  try{
-  const outcomes=await Promise.allSettled([callCommit(first.request),callCommit(second.request)]);
-  const winner=outcomes.findIndex(item=>item.status==='fulfilled');
-  assert.notEqual(winner,-1);
-  assert.equal(outcomes.filter(item=>item.status==='fulfilled').length,1);
-  assert.equal((await callCommit([first,second][winner].request)).replayed,true);
-  assert.equal((await qa.root.collection('sales').get()).size,1);
-  assert.equal((await qa.root.collection('balanceEvents').get()).size,1);
-  assert.equal((await qa.clientRef.get()).data().saldo,-14);
+  const sales=[first,second];
+  assert.notEqual(first.sale.operationId,second.sale.operationId);
+  const outcomes=await Promise.all(sales.map(item=>callCommit(item.request)));
+  assert.deepEqual(outcomes.map(row=>row.replayed),[false,false]);
+  for(const item of sales)assert.equal((await callCommit(item.request)).replayed,true);
+  for(const collection of ['sales','balanceEvents','stockMovements'])
+   assert.equal((await qa.root.collection(collection).get()).size,2,collection);
+  assert.equal((await qa.root.collection('products').doc('qa-product').get()).data().estoqueAtual,5);
+  const client=(await qa.clientRef.get()).data();
+  assert.equal(client.saldo,-(openingAmount+28));
+  assert.equal(client.financialVersion,startVersion+2);
   const terms=await service.receipt({auth:qa.auth,data:args});
   assert.equal(terms.confirmed,true);
-  assert.equal(terms.usedCents,1400);
-  const commercialDay=require('../../functions/src/shared/fiado-account').commercialDay([first,second][winner].sale);
+  assert.equal(terms.usedCents,(openingAmount+28)*100);
+  const commercialDay=require('../../functions/src/shared/fiado-account').commercialDay(first.sale);
   assert.equal(terms.dueDate,require('../../functions/src/services/fiado-conditions-service').dueDate(commercialDay,{mode:'weekly'}));
  }finally{first.h.close?.();second.h.close?.();}
 });
