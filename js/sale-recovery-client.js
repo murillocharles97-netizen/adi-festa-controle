@@ -123,5 +123,66 @@
     }
     return{send};
   }
-  return Object.freeze({canonical,held,eligible,envelope,entries,create,describe});
+  const hex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+  function unhex(text){if(typeof text!=='string'||!text.length||text.length%2||!/^[a-f0-9]+$/i.test(text))throw Error('Arquivo ou código de proteção inválido.');return Uint8Array.from(text.match(/../g),x=>parseInt(x,16));}
+  function noSecrets(value,depth=0){
+    if(depth>35)throw Error('O original precisa de revisão técnica.');
+    if(!value||typeof value!=='object')return;
+    for(const [name,child]of Object.entries(value)){
+      if(/^(password|senha|authorization|auth_?token|api_?key|access_?token|refresh_?token|id_?token|secret|credential)$/i.test(name))throw Error('O original contém um campo protegido. Nenhum arquivo foi gerado.');
+      noSecrets(child,depth+1);
+    }
+  }
+  async function validateExport(data,cryptoApi=globalThis.crypto){
+    if(data?.format!=='veconi-sale-recovery'||data.version!==1||data.purpose!=='authorized-review-only'||!data.identity?.uid||!data.identity?.businessId||!Number.isSafeInteger(data.identity.workspaceGeneration)||!Array.isArray(data.records)||!data.records.length||data.records.length>20)throw Error('Arquivo de recuperação inválido.');
+    const seen=new Set(),sales=new Set();
+    for(const record of data.records){
+      if(typeof record.originalJson!=='string'||new TextEncoder().encode(record.originalJson).length>500*1024)throw Error('Original ausente ou acima do limite seguro.');
+      const original=JSON.parse(record.originalJson);noSecrets(original);
+      const p=original.packet,writes=p?.payload?.writes||[],s=writes.filter(w=>w.entityType==='sales'&&w.operation==='create');
+      if(s.length!==1||!eligible([p],data.identity).length||p.operationId!==record.operationId||s[0].entityId!==record.saleId||s[0].data?.spaceId!==record.spaceId||s[0].data?.businessId!==data.identity.businessId||s[0].data?.actorUid!==data.identity.uid||s[0].data?.operationId!==p.operationId||seen.has(record.operationId)||sales.has(record.saleId))throw Error('Identidade ou seleção dos originais divergente.');
+      if(hex(await cryptoApi.subtle.digest('SHA-256',new TextEncoder().encode(record.originalJson)))!==record.contentHash||await sha(p.payload,cryptoApi)!==record.payloadHash)throw Error('Hash do original divergente.');
+      seen.add(record.operationId);sales.add(record.saleId);
+    }
+    return data;
+  }
+  function selectedExportRows(snapshot,ids){
+    const sources=snapshot.sources||[{packets:snapshot.packets,local:snapshot.local}],clients=new Set();
+    for(const source of sources)for(const p of eligible(source.packets||[],snapshot.identity))if(ids.has(p.operationId)){
+      const sale=p.payload.writes.find(w=>w.entityType==='sales').data;clients.add(sale.clienteId||sale.clientId||sale.customerId);
+    }
+    return entries({...snapshot,sources:sources.map(source=>({...source,packets:(source.packets||[]).filter(p=>ids.has(p.operationId)||p.payload?.writes?.length===1&&p.payload.writes[0].entityType==='clients'&&p.payload.writes[0].operation==='create'&&clients.has(p.payload.writes[0].entityId))}))});
+  }
+  function exportCandidates(snapshot){
+    const ids=new Set((snapshot.sources||[{packets:snapshot.packets}]).flatMap(s=>eligible(s.packets||[],snapshot.identity).map(p=>p.operationId))),rows=[],blocked=[];
+    for(const operationId of ids)try{rows.push(...selectedExportRows(snapshot,new Set([operationId])));}catch(error){blocked.push({operationId,message:error.message});}
+    return{rows,blocked};
+  }
+  async function prepareExport(snapshot,operationIds,cryptoApi=globalThis.crypto){
+    if(!cryptoApi?.subtle||!cryptoApi?.getRandomValues)throw Error('Não foi possível proteger o arquivo. Abra a VECONI atualizada em uma conexão segura.');
+    if(!Array.isArray(operationIds)||!operationIds.length||operationIds.length>20||new Set(operationIds).size!==operationIds.length)throw Error('Selecione de 1 a 20 vendas diferentes.');
+    const selected=new Set(operationIds),rows=selectedExportRows(snapshot,selected);
+    if(rows.length!==selected.size)throw Error('Uma venda selecionada não está disponível nesta sessão. Nenhum arquivo foi gerado.');
+    const records=[];
+    for(const row of rows){
+      const sale=row.packet.payload.writes.find(w=>w.entityType==='sales').data,clientId=sale.clienteId||sale.clientId||sale.customerId;
+      // Preserve every original write. Export only customer-create dependencies
+      // of this selected sale, never unrelated clients from the same namespace.
+      const local={...row.local,clientDependencies:(row.local.clientDependencies||[]).filter(d=>d.packet.payload.writes[0].entityId===clientId)};
+      const value=await envelope(row.packet,local,snapshot.identity,cryptoApi);
+      records.push({operationId:row.packet.operationId,saleId:row.packet.payload.writes.find(w=>w.entityType==='sales').entityId,spaceId:sale.spaceId,payloadHash:await sha(row.packet.payload,cryptoApi),contentHash:value.contentHash,originalJson:value.originalJson});
+    }
+    const data={format:'veconi-sale-recovery',version:1,purpose:'authorized-review-only',createdAt:new Date().toISOString(),identity:{...snapshot.identity},records};await validateExport(data,cryptoApi);
+    const secret=cryptoApi.getRandomValues(new Uint8Array(16)),iv=cryptoApi.getRandomValues(new Uint8Array(12)),key=await cryptoApi.subtle.importKey('raw',secret,'AES-GCM',false,['encrypt']);
+    const ciphertext=await cryptoApi.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(canonical(data)));
+    return{file:{format:'veconi-sale-recovery-encrypted',version:1,algorithm:'AES-GCM-128',iv:hex(iv),ciphertext:hex(ciphertext),sha256:hex(await cryptoApi.subtle.digest('SHA-256',ciphertext))},unlockCode:hex(secret),count:records.length};
+  }
+  async function openExport(file,unlockCode,cryptoApi=globalThis.crypto){
+    if(file?.format!=='veconi-sale-recovery-encrypted'||file.version!==1||file.algorithm!=='AES-GCM-128'||typeof file.ciphertext!=='string'||file.ciphertext.length>24*1024*1024)throw Error('Arquivo de recuperação inválido.');
+    const encrypted=unhex(file.ciphertext),iv=unhex(file.iv),secret=unhex(String(unlockCode||'').replace(/[\s-]/g,''));
+    if(iv.length!==12||secret.length!==16||hex(await cryptoApi.subtle.digest('SHA-256',encrypted))!==file.sha256)throw Error('Arquivo ou código de proteção inválido.');
+    let plain;try{const key=await cryptoApi.subtle.importKey('raw',secret,'AES-GCM',false,['decrypt']);plain=await cryptoApi.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);}catch{throw Error('Código incorreto ou arquivo alterado.');}
+    return validateExport(JSON.parse(new TextDecoder().decode(plain)),cryptoApi);
+  }
+  return Object.freeze({canonical,held,eligible,envelope,entries,create,describe,exportCandidates,prepareExport,openExport,validateExport});
 });

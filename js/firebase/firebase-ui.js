@@ -1,6 +1,6 @@
 import './sync.js?v=233';
-import '../sale-recovery-client.js?v=208';
-import '../sale-recovery-ui.js?v=236.1';
+import '../sale-recovery-client.js?v=236.2';
+import '../sale-recovery-ui.js?v=236.2';
 import '../sale-monetary-analysis-ui.js?v=215';
 
 let unsubscribe=null,lastState=null;
@@ -194,7 +194,7 @@ function openQueueDetails(filter={}){
   if(dataAudit?.collections?.sales?.onlyLocal?.length)
     errorSection?.insertAdjacentHTML('beforebegin',onlyLocalSalesHtml(filter));
   const footer=root.querySelector('.modal-foot');
-  footer.insertAdjacentHTML('afterbegin','<button class="btn btn-light" type="button" data-export-diagnostic>Exportar diagnóstico</button><button class="btn btn-light" type="button" data-compare-cloud>Comparar com a nuvem</button>');
+  footer.insertAdjacentHTML('afterbegin','<button class="btn btn-light" type="button" data-export-recovery>Exportar arquivo de recuperação</button><button class="btn btn-light" type="button" data-export-diagnostic>Exportar diagnóstico</button><button class="btn btn-light" type="button" data-compare-cloud>Comparar com a nuvem</button>');
   if(dataAudit?.products?.onlyLocal||dataAudit?.clients?.onlyLocal)footer.insertAdjacentHTML('afterbegin','<button class="btn btn-primary" type="button" data-recover-local>Recuperar dados locais ausentes</button>');
   if(dataAudit?.collections?.sales?.onlyLocal?.length)footer.insertAdjacentHTML('afterbegin','<button class="btn btn-light" type="button" data-export-only-local>Exportar auditoria das vendas</button>');
   // V157 audit is read-only. No bulk financial repair CTA for historical effects.

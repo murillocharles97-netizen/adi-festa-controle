@@ -2,6 +2,9 @@
 .shell>.sale-recovery-banner{width:min(1364px,calc(100% - 28px));margin:16px auto 0}
 .sale-recovery-banner p{margin:5px 0 0;font-size:.88rem;line-height:1.5}
 .sale-recovery-actions{display:flex;gap:8px;flex-wrap:wrap}
+#modal .sale-recovery-export .modal-body label.sale-recovery-export-choice{display:flex;flex-direction:row;align-items:flex-start;gap:10px;min-height:44px;padding:12px 0;line-height:1.5;font-size:.9rem;font-weight:400;overflow-wrap:anywhere;cursor:pointer}
+.sale-recovery-export-choice input[type="checkbox"]{flex:0 0 20px;width:20px;height:20px;margin:2px 0;accent-color:var(--primary,#008c83)}
+#modal .sale-recovery-export [hidden]{display:none!important}
 .sale-recovery-modal{width:min(740px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}
 .sale-recovery-modal-bg{z-index:6001}
 .sale-recovery-evidence{display:grid;gap:12px;min-width:0;margin:16px 0;padding:14px;border:1px solid #c9dedb;border-radius:12px}

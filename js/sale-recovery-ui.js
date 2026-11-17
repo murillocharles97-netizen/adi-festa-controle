@@ -53,11 +53,14 @@ function recoveryIdentity(){
     bootstrap&&!['authorized','ready','subscription_warning','subscription_blocked'].includes(bootstrap)||window.WorkspaceRuntime?.isBlocked?.())return null;
   return{uid,businessId:c.businessId,workspaceGeneration:c.business.workspaceGeneration??0};
 }
-async function capture(){
+async function capture({raw=false}={}){
   const initial=recoveryIdentity(),session=identity();
   if(!initial)throw Error('Entre na conta de origem para enviar os dados.');
   const sources=await window.DB.businessCache.recoverySources(initial);
   if(identity()!==session||!recoveryIdentity())throw Error('A sessão mudou. Seus dados continuam preservados.');
+  // File extraction must not invoke Sync's Storage adapter: its legacy getter
+  // can lazily import a queue. Preserve raw evidence without touching that path.
+  if(raw)return{identity:initial,sources};
   const diagnostics=window.SyncFirebase?.getQueueDiagnostics?.()||[];
   // Read verified metadata only. Original packets, queue and evidence are never modified.
   return{identity:initial,sources:sources.map(source=>({...source,packets:(source.packets||[]).filter(packet=>!confirmedHistorical(packet,initial,diagnostics))}))};
@@ -107,14 +110,14 @@ const sender=window.SaleRecoveryClient.create({snapshot:capture,call:sendEvidenc
   const feedback=document.querySelector('.sale-recovery-modal [data-recovery-result]');
   if(feedback){feedback.setAttribute('role','status');feedback.textContent=message;}
 }});
-function modal(title,body,footer=''){
+function modal(title,body,footer='',blocked=()=>busy){
   let root=document.querySelector('#modal');
   if(!root){root=document.createElement('div');root.id='modal';document.body.append(root);}
   const prior=document.activeElement;
   root.innerHTML=`<div class="modal-bg sale-recovery-modal-bg viewport-modal"><section class="modal-box sale-recovery-modal viewport-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1"><header class="modal-head"><h2>${esc(title)}</h2><button class="btn btn-light" type="button" data-recovery-close aria-label="Fechar">Fechar</button></header><div class="modal-body viewport-scroll">${body}</div><footer class="modal-foot">${footer}</footer></section></div>`;
   const panel=root.querySelector('section');
   panel.dataset.recoveryContext=summaryKey();
-  const close=()=>{if(busy)return;root.replaceChildren();prior?.isConnected&&prior.focus();};
+  const close=()=>{if(blocked())return;root.replaceChildren();prior?.isConnected&&prior.focus();};
   root.querySelectorAll('[data-recovery-close]').forEach(b=>b.onclick=close);
   panel.onkeydown=e=>{
     if(e.key==='Escape'){e.preventDefault();close();}
@@ -176,6 +179,46 @@ function selectedSpace(){
   const c=context(),id=window.SpaceContext?.homeId?.();
   if(id&&!['all','all_spaces','todos'].includes(id))return id;
   return c.role!=='owner'&&c.spaceAccess!=='all'&&c.allowedSpaceIds?.length===1?c.allowedSpaceIds[0]:null;
+}
+async function openRecoveryExport(){
+  if(!recoveryIdentity())return showRecoveryFailure('Entre na conta que registrou as vendas, no aparelho original, para exportar os originais.');
+  const access=()=>{const c=context();return JSON.stringify([c.member?.spaceAccess||c.spaceAccess,c.member?.allowedSpaceIds||c.allowedSpaceIds||[]]);};
+  const scope=summaryKey(),accessScope=access();let working=false,archive=null,selection=[];
+  const panel=modal('Exportar arquivo de recuperação','<p>Consulta local, disponível sem internet. Use o aparelho e a conta que registraram as vendas. Selecione somente as vendas solicitadas pelo suporte.</p><div data-export-list role="status">Lendo originais preservados…</div><label class="sale-recovery-export-choice"><input type="checkbox" data-export-consent> Autorizo exportar os originais selecionados, que podem conter dados pessoais, para recuperação pelo suporte autorizado.</label><div data-export-key hidden><p>Guarde este código e entregue-o ao suporte separadamente do arquivo. Ele não fica salvo na VECONI.</p><input class="search" readonly aria-label="Código de proteção" data-export-code><button type="button" class="btn btn-light" data-export-copy>Copiar código</button><label class="sale-recovery-export-choice"><input type="checkbox" data-export-key-saved> Guardei o código de proteção.</label></div><p data-export-result role="status" aria-live="polite"></p>','<button class="btn btn-light" type="button" data-recovery-close>Cancelar</button><button class="btn btn-primary" type="button" data-export-prepare disabled>Preparar arquivo</button><button class="btn btn-primary" type="button" data-export-save hidden>Salvar arquivo</button>',()=>working);
+  panel.dataset.recoveryIntake='true';panel.classList.add('sale-recovery-export');
+  const allowed=row=>{const c=context(),space=row.packet.payload.writes.find(w=>w.entityType==='sales').data.spaceId;return c.role==='owner'||(c.member?.spaceAccess||c.spaceAccess)==='all'||(c.member?.allowedSpaceIds||c.allowedSpaceIds||[]).includes(space);};
+  const feedback=panel.querySelector('[data-export-result]'),prepare=panel.querySelector('[data-export-prepare]'),save=panel.querySelector('[data-export-save]');
+  const current=()=>{if(!panel.isConnected||scope!==summaryKey()||accessScope!==access()||!recoveryIdentity())throw Error('A sessão ou o acesso ao espaço mudou. Reabra a exportação na conta de origem.');};
+  const fail=error=>{feedback.textContent=error.message||'Não foi possível exportar. Os originais continuam preservados.';feedback.setAttribute('role','alert');feedback.tabIndex=-1;feedback.focus({preventScroll:true});};
+  const enable=()=>{prepare.disabled=working||!panel.querySelector('[data-export-consent]').checked||!panel.querySelector('[data-export-operation]:checked');save.disabled=working||!panel.querySelector('[data-export-key-saved]').checked;};
+  try{
+    const snapshot=await capture({raw:true});current();const candidates=window.SaleRecoveryClient.exportCandidates(snapshot),rows=candidates.rows.filter(allowed),list=panel.querySelector('[data-export-list]');
+    list.innerHTML=rows.length?rows.map(row=>{const sale=row.packet.payload.writes.find(w=>w.entityType==='sales'),data=sale.data;return `<label class="sale-recovery-export-choice"><input type="checkbox" data-export-operation="${esc(row.packet.operationId)}"><span><strong>${esc(when(data.data||data.createdAt))} · ${money(data.valorFinal??data.total)}</strong><br>Venda ${esc(sale.entityId)}<br><small>Operação ${esc(row.packet.operationId)}</small></span></label>`;}).join(''):'<p>Nenhuma venda original retida foi encontrada nesta conta e aparelho. Alterações de produtos não são vendas. Use a sessão da funcionária no aparelho original; o diagnóstico de outro usuário não contém esses envelopes.</p>';
+    if(candidates.blocked.length)list.insertAdjacentHTML('beforeend','<p role="alert">Algumas vendas têm cópias locais divergentes e precisam de revisão específica. Seus originais foram preservados; as demais vendas podem ser selecionadas.</p>');
+    panel.querySelectorAll('input[type="checkbox"]').forEach(input=>input.onchange=enable);enable();
+  }catch(error){if(panel.isConnected)fail(error);return;}
+  prepare.onclick=async()=>{
+    if(working)return;working=true;enable();
+    try{
+      current();selection=[...panel.querySelectorAll('[data-export-operation]:checked')].map(input=>input.dataset.exportOperation);if(!panel.querySelector('[data-export-consent]').checked)throw Error('Confirme a autorização de exportação.');
+      feedback.textContent='Preparando arquivo protegido…';feedback.setAttribute('role','status');const snapshot=await capture({raw:true});current();
+      const permitted=new Set(window.SaleRecoveryClient.exportCandidates(snapshot).rows.filter(allowed).map(row=>row.packet.operationId));if(selection.some(id=>!permitted.has(id)))throw Error('O acesso ou os originais selecionados mudaram. Nenhum arquivo foi gerado.');
+      archive=await window.SaleRecoveryClient.prepareExport(snapshot,selection);current();
+      panel.querySelector('[data-export-code]').value=archive.unlockCode;panel.querySelector('[data-export-key]').hidden=false;
+      panel.querySelectorAll('[data-export-operation], [data-export-consent]').forEach(input=>input.disabled=true);prepare.hidden=true;save.hidden=false;
+      feedback.textContent=`${archive.count} venda(s) preparadas. Guarde o código e toque em Salvar arquivo. Nada foi enviado ou reexecutado.`;
+    }catch(error){archive=null;if(panel.isConnected)fail(error);}finally{working=false;enable();}
+  };
+  panel.querySelector('[data-export-copy]').onclick=async()=>{try{current();const code=panel.querySelector('[data-export-code]');if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(code.value);else{code.focus();code.select();throw Error('Selecione e copie o código exibido.');}feedback.textContent='Código copiado. Guarde-o separadamente do arquivo.';}catch(error){fail(error);}};
+  save.onclick=()=>{
+    try{
+      current();if(!archive||!panel.querySelector('[data-export-key-saved]').checked)throw Error('Guarde o código de proteção antes de salvar.');
+      const filename=`veconi-recuperacao-${Date.now()}.json`;
+      if(typeof window.SyncFirebase?.downloadJsonFile==='function')window.SyncFirebase.downloadJsonFile(archive.file,filename);
+      else{const url=URL.createObjectURL(new Blob([JSON.stringify(archive.file,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      feedback.setAttribute('role','status');feedback.textContent='Download solicitado. Confira o arquivo em Downloads. Envie-o somente ao suporte autorizado e entregue o código separadamente. Os originais continuam no aparelho; nenhuma venda foi recuperada.';save.textContent='Salvar novamente';
+    }catch(error){fail(error);}
+  };
 }
 const recoveryStatus=value=>({awaiting_review:'Aguardando revisão',already_recreated:'Já recriada pelo gestor',recovered:'Recuperada',closed_without_effects:'Encerrada sem efeitos'}[value]||'Aguardando revisão');
 function confirmDecision(item,action,match,view,returnState={}){
@@ -310,10 +353,10 @@ function mount(){
   const detail=scanError||message||(count?'Envie os dados preservados para análise, sem refazer a venda.':summary.state==='unknown'?'Não foi possível confirmar a situação. Consulte as revisões; nenhum registro foi reenviado.':summary.state==='pending'?'Confira os registros antes de decidir. Nenhuma recuperação é automática.':'Consulta segura, sem alterar vendas ou estoque.');
   // Keep action nodes stable while Sync refreshes counts/progress. The click
   // handler is delegated once, including when another renderer replaces markup.
-  if(!bar.querySelector('[data-recovery-title]')||!bar.querySelector('[data-send-recovery]')||!bar.querySelector('[data-view-recovery]')){
+  if(!bar.querySelector('[data-recovery-title]')||!bar.querySelector('[data-send-recovery]')||!bar.querySelector('[data-view-recovery]')||!bar.querySelector('[data-export-recovery]')){
     bar.innerHTML='<div><strong data-recovery-title></strong><p role="status" aria-live="polite" data-recovery-feedback></p></div>'+
       '<div class="sale-recovery-actions"><button type="button" class="btn btn-primary" data-send-recovery></button>'+
-      '<button type="button" class="btn btn-light" data-view-recovery></button></div>';
+      '<button type="button" class="btn btn-light" data-view-recovery></button><button type="button" class="btn btn-light" data-export-recovery>Exportar arquivo de recuperação</button></div>';
   }
   const text=(selector,value)=>{const node=bar.querySelector(selector);if(node.textContent!==value)node.textContent=value;};
   text('[data-recovery-title]',title);text('[data-recovery-feedback]',detail);
@@ -337,6 +380,7 @@ async function refresh(){
   if(context().role==='owner'&&recoveryIdentity()&&document.visibilityState!=='hidden'&&['inicio','historico'].includes(location.hash.replace('#/','').split('?')[0]||'inicio'))summaryTimer=setTimeout(()=>{void refresh();},60000);
 }
 document.addEventListener('click',event=>{
+  if(event.target.closest?.('[data-export-recovery]')){event.preventDefault();void openRecoveryExport().catch(error=>showRecoveryFailure(error.message));return;}
   const button=event.target.closest?.('[data-sale-recovery-bar] [data-send-recovery], [data-sale-recovery-bar] [data-view-recovery]');
   if(!button)return;
   event.preventDefault();
