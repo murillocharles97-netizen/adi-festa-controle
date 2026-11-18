@@ -212,9 +212,15 @@ window.Vendas = (() => {
           campaignDiscounts: i.campaignDiscounts || [],
           productType: i.productType || produto?.productType || "simple",
           itemKind: i.itemKind || produto?.itemKind || "product",
+          ...(i.serviceExecution?{serviceExecution:window.FlexibleService.execution(i.serviceExecution),
+            ...(i.serviceCostSnapshot?{serviceCostSnapshot:window.FlexibleService.estimate(i.serviceCostSnapshot.configuration,i.serviceExecution,precoFinalUnitario,i.serviceCostSnapshot.additionalCosts)}:{})}:{}),
           recurringActivation: i.recurringActivation ? structuredClone(i.recurringActivation) : null,
         };
       });
+      for(const item of itens)if(item.serviceExecution){
+        if(item.quantidade!==1)throw Error('Cada execução de serviço deve ter quantidade 1.');
+        if(item.serviceCostSnapshot){item.custoUnitario=item.costSnapshot=item.serviceCostSnapshot.estimatedCost;item.custoTotal=item.custoUnitario;item.lucro=item.subtotalFinal-item.custoTotal;}
+      }
       const monetary = d.onlineOrderId ? null : window.SaleMoney.summarize(itens);
       if (FOUR_DECIMAL_INTAKE_PAUSED && monetary?.lines.some(line=>line.unit4%100!==0))
         throw Error('Novas vendas com preço fracionado estão temporariamente pausadas. Revise os preços em centavos; seu carrinho foi preservado.');

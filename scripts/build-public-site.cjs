@@ -9,7 +9,7 @@ const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const ROOT_FILES = new Set(['.nojekyll', '404.html', 'catalogo.html', 'index.html', 'manifest.json', 'service-worker.js']);
-const SHARED_FILES = new Set(['fiado-account.js', 'installment-plan.js', 'online-order.js', 'online-store.js', 'plan-catalog.js', 'product-model.js', 'product-spreadsheet.js', 'permission-policy.js', 'operational-privacy-policy.js', 'prior-sale-policy.js', 'sync-rejection.js'].map(name => 'functions/src/shared/' + name));
+const SHARED_FILES = new Set(['fiado-account.js', 'installment-plan.js', 'online-order.js', 'online-store.js', 'plan-catalog.js', 'product-model.js', 'flexible-service.js', 'product-spreadsheet.js', 'permission-policy.js', 'operational-privacy-policy.js', 'prior-sale-policy.js', 'sync-rejection.js'].map(name => 'functions/src/shared/' + name));
 const RETIRED_FILES = new Set(['kyteData.js', 'kyteBalances.js', 'kyteBootstrap.js', 'saldoCorrecoes.js', 'cleanupDemo.js', 'financeMigration.js',
   'central-fiado.html', 'fiado-central.css', 'fiado-central-entry.js', 'fiado-central.js'].map(name => name.toLowerCase()));
 const HISTORICAL_HASHES = new Set([

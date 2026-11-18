@@ -42,7 +42,7 @@
     const key=s.formaPagamento||(s.status==='fiado'?'fiado':'outros');
     return{key,name:({pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão manual',fiado:'Fiado'})[key]||'Outras formas',form:key};
   }
-  const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,missingCost:0});
+  const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,services:0,serviceKm:0,serviceMinutes:0,missingCost:0});
   function compare(current,previous,hasPrevious){return !hasPrevious||previous===0?null:(current-previous)/Math.abs(previous)*100;}
   function build({sales=[],exchanges=[],exchangeAdjustmentsReady=true,workspaceGeneration,range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
     const current=empty(),previous=empty(),points=new Map(),payments=new Map(),categories=new Map(),products=new Map(),bySpace=new Map(),seen=new Set();
@@ -59,7 +59,8 @@
       seen.add(String(s.id));const active=key>=r.start,total=active?current:previous,revenue=cents(value(s));
       const hasCost=s.custoTotal!==null&&s.custoTotal!==undefined,hasProfit=s.lucro!==null&&s.lucro!==undefined;
       const cost=hasCost?cents(s.custoTotal):0,profit=hasProfit?cents(s.lucro):hasCost?revenue-cost:0,items=s.itens||s.items||[],quantity=items.reduce((n,i)=>n+number(i.quantidade??i.quantity),0);
-      const amounts={revenue,cost,profit,count:1,quantity,missingCost:((canCost&&!hasCost)||(canProfit&&!hasProfit&&!hasCost)||s.costResolution==='partial')?1:0};
+      const executions=items.filter(i=>i.serviceExecution),serviceKm=executions.reduce((n,i)=>n+number(i.serviceExecution.km),0),serviceMinutes=executions.reduce((n,i)=>n+number(i.serviceExecution.minutes),0);
+      const amounts={revenue,cost,profit,count:1,quantity,services:executions.length,serviceKm,serviceMinutes,missingCost:((canCost&&!hasCost)||(canProfit&&!hasProfit&&!hasCost)||s.costResolution==='partial')?1:0};
       Object.keys(amounts).forEach(k=>total[k]+=amounts[k]);if(!active)continue;
       const p=parts(s.data||s.createdAt,r.zone),bucket=r.granularity==='hour'?`${key}T${p.hour}`:r.granularity==='month'?key.slice(0,7):key,point=points.get(bucket);
       Object.keys(amounts).forEach(k=>point[k]+=amounts[k]);

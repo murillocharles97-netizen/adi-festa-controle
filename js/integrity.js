@@ -50,6 +50,8 @@
       fill(d,{hasVariations:d.productType==='variable',durationValue:recurring?30:null,durationUnit:recurring?'days':null,renewalLabel:recurring?d.nome||'Renovação':'',renewalMessage:'',renewalReminders:[],minPrice:d.preco??0,maxPrice:d.preco??0,totalStock:stock,hasAvailableStock:stock>0});
       fill(d,options.normalizeProductAccess?.(d)||{spaceAccessMode:'all_spaces',allowedSpaceIds:[],defaultSpaceId:null,spaceScopeVersion:1});
       if(d.custo===undefined)d.custo=fin.custo??d.cost??0;
+      const serviceCost=d.serviceCostConfig||fin.serviceCostConfigs?.[d.serviceConfig?.id];
+      if(serviceCost)d.serviceCostConfig={model:serviceCost.model,rate:serviceCost.rate,feePercent:serviceCost.feePercent};
       const control=effectiveStockControl(document);
       if(control!==null){d.controlaEstoque=control;delete d.semControleEstoque;}
     }
@@ -67,6 +69,7 @@
       d.itens=(d.itens||[]).map((item,index)=>{
         const cost=(fin.itemCosts||[]).find(x=>Number(x.index)===index),v={...item};
         if(cost)for(const[k,value]of Object.entries({custoUnitario:cost.custoUnitario,costSnapshot:cost.custoUnitario,custoTotal:cost.custoTotal,lucro:cost.lucro}))if(v[k]===undefined&&value!==undefined)v[k]=value;
+        if(v.serviceExecution&&!v.serviceCostSnapshot&&cost?.serviceCostSnapshot)v.serviceCostSnapshot=cost.serviceCostSnapshot;
         return v;
       });
     }

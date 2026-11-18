@@ -13,11 +13,11 @@
         .toLowerCase()
         .replace(/\s+/g, " ")
         .trim(),
-    itemKey = (item) =>
-      item?.productType === "recurring"
+    itemKey = (item) => window.FlexibleService?.itemKey(item) ||
+      (item?.productType === "recurring"
         ? `${item.produtoId}::${item.variantId || "base"}::${item.recurringActivation?.subscriptionId || item.recurringActivation?.draftId || "new"}`
         : window.ProductVariations?.itemKey?.(item) ||
-          String(item?.produtoId || ""),
+          String(item?.produtoId || "")),
     controlsStock = (product) =>
       window.productControlsStock?.(product) ??
       (!product?.semControleEstoque && product?.controlaEstoque !== false),
@@ -37,6 +37,7 @@
     filteredListener = null;
 
   function priceLabel(product) {
+    const serviceLabel=window.FlexibleServiceUI?.priceLabel(product);if(serviceLabel)return serviceLabel;
     if (window.ProductVariations?.isVariable?.(product)) {
       const minimum = number(product.minPrice),
         maximum = number(product.maxPrice);
@@ -170,8 +171,8 @@
             (item.productType === "recurring"
               ? item.recurringActivation?.label || "Venda com renovação"
               : item.categoria || "");
-        return `<article class="desktop-cart-item editable-cart">
-          <div class="desktop-cart-product">${productImage(product, "desktop-cart-product-image", variant)}<div><b>${esc(item.nome)}</b><small>${esc(variation)}</small></div></div>
+        return `<article class="desktop-cart-item editable-cart ${item.serviceExecution?"service-cart-item":""}">
+          <div class="desktop-cart-product">${productImage(product, "desktop-cart-product-image", variant)}<div><b>${esc(item.nome)}</b><small>${esc(variation)}</small>${window.FlexibleServiceUI?.summary(item)||""}</div></div>
           <div class="desktop-cart-quantity" aria-label="Quantidade de ${esc(item.nome)}"><button type="button" data-cart-step="-1" data-cart-key="${esc(key)}" aria-label="Diminuir quantidade">−</button><input data-item-qty="${esc(key)}" type="number" min="1" step="1" value="${number(item.quantidade)}" aria-label="Quantidade"><button type="button" data-cart-step="1" data-cart-key="${esc(key)}" aria-label="Aumentar quantidade">+</button></div>
           <label class="desktop-cart-unit"><span>Valor unitário</span><input data-item-price="${esc(key)}" type="number" inputmode="decimal" min="0" step=".0001" value="${Number(number(item.precoFinalUnitario).toFixed(4))}" aria-label="Valor unitário de ${esc(item.nome)}"></label>
           <b class="desktop-cart-total">${money(total)}</b>

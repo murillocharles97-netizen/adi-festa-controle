@@ -12,9 +12,10 @@
   const uuid = () => window.Utils?.uuid?.() || crypto.randomUUID();
   const isVariable = (product) => product?.productType === "variable" || (product?.productType === "recurring" && product?.hasVariations === true);
   const itemKey = (item) =>
-    item?.variantId
+    window.FlexibleService?.itemKey(item) ||
+    (item?.variantId
       ? `${item.produtoId}::${item.variantId}`
-      : String(item?.produtoId || "");
+      : String(item?.produtoId || ""));
   const list = (parentProductId, data = DB.carregar()) =>
     (data.variacoesProdutos || []).filter(
       (item) => !parentProductId || item.parentProductId === parentProductId,

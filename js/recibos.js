@@ -167,7 +167,7 @@ window.Modais=(()=>{
     return`<section class="sale-operation-status">${checks.map(([icon,label])=>`<span><i data-lucide="${icon}"></i>${label}</span>`).join('')}${pending?'<p><i data-lucide="cloud-off"></i> Venda salva neste aparelho e aguardando sincronização.</p>':''}</section>`;
   }
   function itemsMarkup(sale){
-    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${unitLabel(sale,item)}</small>${item.productType==='recurring'&&item.subscriptionExpiresAt?`<small class="receipt-renewal-validity"><b>${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}</b> · ${durationLabel(item)}</small>`:''}</span><strong>${dinheiro(lineValue(sale,item))}</strong></div>`).join('');
+    return(sale.itens||[]).map(item=>`<div class="receipt-line sale-receipt-item"><span><b>${escapar(item.nome)}</b><small>${Number(item.quantidade||0)} × ${unitLabel(sale,item)}</small>${window.FlexibleServiceUI?.summary(item)||""}${item.productType==='recurring'&&item.subscriptionExpiresAt?`<small class="receipt-renewal-validity"><b>${item.subscriptionAction==='renewal'?'Renovado':'Ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}</b> · ${durationLabel(item)}</small>`:''}</span><strong>${dinheiro(lineValue(sale,item))}</strong></div>`).join('');
   }
   function receiptMarkup(sale,customer,business){
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';

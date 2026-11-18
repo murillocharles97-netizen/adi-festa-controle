@@ -611,7 +611,8 @@
       root = $("#modal"),
       initialBarcode = defaults.barcode ?? product.barcode ?? "";
     root.innerHTML = `<div class="modal-bg"><section class="modal-box product-form-modal"><header class="modal-head"><div><small>Produtos e serviços</small><h3>${id ? "Editar item" : itemKind === "service" ? "Novo serviço" : "Novo produto"}</h3></div><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><form><div class="modal-body product-form-sections">
-      <section class="product-form-section"><header><i data-lucide="${itemKind === "service" ? "briefcase-business" : "package"}"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${itemKind === "product" ? "selected" : ""}>Produto</option><option value="service" ${itemKind === "service" ? "selected" : ""}>Serviço</option></select><small>Serviços não movimentam estoque.</small></div><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
+      <section class="product-form-section"><header><i data-lucide="${itemKind === "service" ? "briefcase-business" : "package"}"></i><div><b>Informações</b><small>Dados usados nas vendas e no catálogo.</small></div></header><div class="form-grid"><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${itemKind === "product" ? "selected" : ""}>Produto</option><option value="service" ${itemKind === "service" ? "selected" : ""}>Serviço</option></select><small>Serviços não movimentam estoque.</small></div><div class="field full"><label>Nome *</label><input name="nome" required value="${esc(product.nome || "")}"></div><div class="field"><label>Código interno</label><input name="codigo" value="${esc(product.codigo || "")}"></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(product.categoria || "")}"></div><div class="field full"><label>Código de barras</label><div class="barcode-field-row"><input name="barcode" inputmode="text" autocomplete="off" value="${esc(initialBarcode)}" placeholder="EAN, UPC ou código interno"><button type="button" data-scan-form-barcode aria-label="Ler código pela câmera"><i data-lucide="scan-barcode"></i></button></div><input type="hidden" name="barcodeType" value="${esc(defaults.barcodeType ?? product.barcodeType ?? "")}"><small class="barcode-field-status">Não informado</small></div><div class="field"><label>Preço de venda *</label><input name="preco" type="number" required inputmode="decimal" min="0" step=".01" value="${esc(product.preco ?? "")}"></div><div class="field"><label>Custo unitário</label><input name="custo" type="number" inputmode="decimal" min="0" step=".01" value="${esc(product.serviceCostConfig?.rate ?? product.custo ?? "")}"></div><div class="field full"><label>Observação</label><textarea name="observacao">${esc(product.observacao || product.observacoes || "")}</textarea></div></div></section>
+      ${!recurring?window.FlexibleServiceUI?.fields(product)||'':''}
       ${window.SpaceContext?.availabilityFields?.(accessSubject) || ""}
       <section class="product-form-section image-section">${editorMarkup(imageDraft)}</section>
       ${recurring ? `<section class="product-form-section recurring-product-fields"><header><i data-lucide="calendar-clock"></i><div><b>Renovação</b><small>Defina a vigência sugerida. Ela poderá ser alterada na venda.</small></div></header><div class="form-grid"><div class="field"><label>Período padrão *</label><input name="durationValue" type="number" inputmode="numeric" min="1" required value="${esc(product.durationValue ?? 30)}"></div><div class="field"><label>Unidade</label><select name="durationUnit"><option value="days" ${product.durationUnit === "days" || !product.durationUnit ? "selected" : ""}>Dias</option><option value="weeks" ${product.durationUnit === "weeks" ? "selected" : ""}>Semanas</option><option value="months" ${product.durationUnit === "months" ? "selected" : ""}>Meses</option><option value="years" ${product.durationUnit === "years" ? "selected" : ""}>Anos</option></select></div><div class="field full"><label>Nome para renovação</label><input name="renewalLabel" value="${esc(product.renewalLabel || product.nome || "")}" placeholder="Ex.: Plano IPTV Premium"></div><div class="field full"><label>Mensagem sugerida</label><textarea name="renewalMessage" placeholder="Mensagem opcional para o WhatsApp">${esc(product.renewalMessage || "")}</textarea></div></div><label class="product-stock-control"><input type="checkbox" name="hasVariations" ${product.hasVariations ? "checked" : ""}><span><b>Este produto possui variações</b><small>Ex.: 1 tela, 2 telas e Premium.</small></span></label></section>` : ""}
@@ -635,6 +636,9 @@
     }
     const updateStockFields = () => {
       const isService = itemKindSelect.value === "service";
+      const serviceFields=form.querySelector('[data-service-config]');
+      if(serviceFields){serviceFields.hidden=!isService;serviceFields.querySelectorAll('input,select').forEach(input=>input.disabled=!isService);}
+      if(isService&&form.elements.servicePricingModel?.value==='sale'&&!form.elements.preco.value)form.elements.preco.value='0';
       if (isService) controlsStock.checked = false;
       controlsStock.disabled = isService;
       stockFields.hidden = isService || !controlsStock.checked;
@@ -735,6 +739,7 @@
     root.querySelectorAll(".close,.cancel").forEach((button) => (button.onclick = close));
     controlsStock.onchange = updateStockFields;
     itemKindSelect.onchange = updateStockFields;
+    form.elements.servicePricingModel?.addEventListener("change",updateStockFields);
     barcodeInput.addEventListener("input", validateBarcode);
     barcodeInput.addEventListener("blur", validateBarcode);
     $("[data-scan-form-barcode]", root).onclick = () =>
@@ -757,6 +762,7 @@
         formData = new FormData(form),
         data = Object.fromEntries(formData);
       if (existing) delete data.estoqueAtual;
+      if(window.TeamAccess?.has?.("cost.view")!==true)delete data.custo;
       button.disabled = true;
       try {
         const imageData = await commit(imageDraft, {
@@ -774,6 +780,7 @@
           productType,
           itemKind: formData.get("itemKind") || itemKind,
           ...readSpaceAccess(),
+          ...(!recurring?window.FlexibleServiceUI?.readConfig(form,product)||{}:{}),
           hasVariations: recurring && formData.has("hasVariations"),
           renewalReminders: recurring ? formData.getAll("renewalReminders").map(Number) : [],
           semControleEstoque: !formData.has("controlaEstoque"),

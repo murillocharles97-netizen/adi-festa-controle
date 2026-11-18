@@ -11,11 +11,11 @@ function buildSaleFinancialSnapshot(sale={},costs=new Map()){
   let custoTotal=0,missingCosts=0;
   const itemCosts=items.map((item,index)=>{
     const productId=text(item.produtoId||item.productId),variantId=text(item.variantId),key=variantId?`variant:${variantId}`:`product:${productId}`,
-      resolved=costs.get(key),custoUnitario=number(resolved?.cost,0),quantidade=Math.max(0,number(item.quantidade??item.quantity,0)),
+      resolved=costs.get(item.serviceExecution?`service:${item.serviceExecution.id}`:key),custoUnitario=number(resolved?.cost,0),quantidade=Math.max(0,number(item.quantidade??item.quantity,0)),
       lineCost=Number((quantidade*custoUnitario).toFixed(2)),lineRevenue=number(item.subtotalFinal,quantidade*number(item.precoFinalUnitario??item.precoUnitario??item.unitPriceSnapshot,0));
     if(!resolved)missingCosts++;
     custoTotal+=lineCost;
-    return{index,productId:productId||null,variantId:variantId||null,custoUnitario,custoTotal:lineCost,lucro:Number((lineRevenue-lineCost).toFixed(2))};
+    return{index,productId:productId||null,variantId:variantId||null,custoUnitario,...(resolved?.serviceCostSnapshot?{serviceCostSnapshot:resolved.serviceCostSnapshot}:{}),custoTotal:lineCost,lucro:Number((lineRevenue-lineCost).toFixed(2))};
   });
   custoTotal=Number(custoTotal.toFixed(2));
   const revenue=number(sale.valorFinal??sale.valorTotal??sale.total??sale.amount,itemCosts.reduce((sum,item)=>sum+item.custoTotal+item.lucro,0));
@@ -31,6 +31,7 @@ function saleCostService(db,{FieldValue}){
     if(existing.exists)return{created:false,skipped:'financial-snapshot-exists'};
     const items=Array.isArray(sale.itens)?sale.itens:Array.isArray(sale.items)?sale.items:[];
     if(!items.length)return{created:false,skipped:'sale-without-items'};
+    if(items.some(i=>i.serviceExecution))return{created:false,skipped:'requires-atomic-service-snapshot'};
     const descriptors=new Map();
     for(const item of items){
       const productId=text(item.produtoId||item.productId),variantId=text(item.variantId);

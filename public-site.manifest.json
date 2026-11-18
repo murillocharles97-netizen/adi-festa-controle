@@ -273,6 +273,9 @@
     "functions/src/shared/fiado-account.js",
     "js/renewal-messages.js",
     "js/renovacoes.js",
-    "css/renovacoes.css"
+    "css/renovacoes.css",
+    "functions/src/shared/flexible-service.js",
+    "js/flexible-service-ui.js",
+    "css/flexible-service.css"
   ]
 }

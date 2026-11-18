@@ -1277,7 +1277,7 @@ service cloud.firestore {
         allow read: if hasPermission(businessId, 'products.view')
           && (resource == null || canAccessProduct(businessId,resource.data))
           && (resource == null || !resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId) || permissionGranted(businessId, 'cost.view'));
-        allow create: if zeroInitialStock() && canWriteCollection(businessId, 'products')
+        allow create: if !request.resource.data.keys().hasAny(['serviceCostConfig']) && zeroInitialStock() && canWriteCollection(businessId, 'products')
           && canAssignProductScope(businessId,request.resource.data)
           && request.resource.data.get('onlineReservedStock',0) == 0 && request.resource.data.get('onlineOrderFinalizationId',null) == null
           && joinsProductImportFence(businessId)
@@ -1286,7 +1286,7 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductSpaceScope(request.resource.data, businessId);
-        allow update: if unchangedStock() && canAccessProduct(businessId,resource.data)
+        allow update: if !request.resource.data.keys().hasAny(['serviceCostConfig']) && unchangedStock() && canAccessProduct(businessId,resource.data)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
           && (preservesProductSpaceScope(request.resource.data,resource.data) || canAssignProductScope(businessId,request.resource.data))
           && preservesOnlineStock(businessId,request.resource.data,resource.data,'estoqueAtual','p_'+productId)

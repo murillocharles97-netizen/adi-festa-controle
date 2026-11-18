@@ -3782,10 +3782,12 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
           transaction.set(doc(db, "businesses", businessId, "productFinancials", String(write.entityId)),
             sanitizeForFirestore({
               id: String(write.entityId), productId: String(write.entityId), businessId,
-              custo: Number.isFinite(cost) ? cost : 0, ownerId: currentUser.uid,
+              custo: Number.isFinite(cost) ? cost : 0,
+              ...(data.serviceConfig&&data.serviceCostConfig?{serviceCostConfigs:{[data.serviceConfig.id]:{...data.serviceCostConfig,pricingModel:data.serviceConfig.pricingModel,priceRate:Number(data.preco||0)}}}:{}), ownerId: currentUser.uid,
               updatedByUid: currentUser.uid, updatedAt: serverTimestamp(), schemaVersion: 1,
             }), { merge: true });
         }
+        if(Object.prototype.hasOwnProperty.call(data||{},"serviceCostConfig"))payload.serviceCostConfig = deleteField();
         payload.custo = deleteField();
         payload.cost = deleteField();
       }
@@ -3811,6 +3813,7 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
             productId: saleItem.produtoId || saleItem.productId || null,
             variantId: saleItem.variantId || null,
             custoUnitario: Number(saleItem.custoUnitario ?? saleItem.costSnapshot ?? 0) || 0,
+            ...(saleItem.serviceCostSnapshot?{serviceCostSnapshot:saleItem.serviceCostSnapshot}:{}),
           })),
           hasItemCosts = (items || []).some((saleItem) =>
             Object.prototype.hasOwnProperty.call(saleItem || {}, "custoUnitario") ||
@@ -3832,7 +3835,7 @@ async function commitQueueItem(item, { checkingPreviousAttempt = false } = {}) {
         }
         if (items) payload.itens = items.map((saleItem) => {
           const operationalItem = { ...saleItem };
-          for (const field of ["custoUnitario", "costSnapshot", "custo", "cost", "custoTotal", "lucro"])
+          for (const field of ["custoUnitario", "costSnapshot", "custo", "cost", "custoTotal", "lucro", "serviceCostSnapshot"])
             delete operationalItem[field];
           return operationalItem;
         });
@@ -4858,10 +4861,10 @@ function applyProtectedMetadata(data) {
   if(!canCost&&!canProfit)return;
   const productFinancials=new Map((data.productFinancials||[]).map(item=>[String(item.productId||item.id),item]));
   const variantFinancials=new Map((data.variantFinancials||[]).map(item=>[String(item.variantId||item.id),item]));
-  if(canCost)for(const product of data.produtos||[]){const metadata=productFinancials.get(String(product.id));if(metadata&&'custo' in metadata)product.custo=metadata.custo}
+  if(canCost)for(const product of data.produtos||[]){const metadata=productFinancials.get(String(product.id));if(metadata&&'custo' in metadata)product.custo=metadata.custo;if(metadata?.serviceCostConfigs?.[product.serviceConfig?.id])product.serviceCostConfig=window.FlexibleService.costConfig(metadata.serviceCostConfigs[product.serviceConfig.id])}
   if(canCost)for(const variant of data.variacoesProdutos||[]){const metadata=variantFinancials.get(String(variant.id));if(metadata&&'cost' in metadata)variant.cost=metadata.cost}
   const saleFinancials=new Map((data.saleFinancials||[]).map(item=>[String(item.saleId||item.id),item]));
-  for(const sale of data.vendas||[]){const metadata=saleFinancials.get(String(sale.id));if(!metadata)continue;if(canCost&&'custoTotal' in metadata)sale.custoTotal=metadata.custoTotal;if(canProfit&&'lucro' in metadata)sale.lucro=metadata.lucro;const costs=new Map((metadata.itemCosts||[]).map(item=>[Number(item.index),item]));(sale.itens||[]).forEach((item,index)=>{const cost=costs.get(index);if(!cost)return;if(canCost){item.custoUnitario=cost.custoUnitario;item.costSnapshot=cost.custoUnitario;item.custoTotal=cost.custoTotal}if(canProfit)item.lucro=cost.lucro})}
+  for(const sale of data.vendas||[]){const metadata=saleFinancials.get(String(sale.id));if(!metadata)continue;if(canCost&&'custoTotal' in metadata)sale.custoTotal=metadata.custoTotal;if(canProfit&&'lucro' in metadata)sale.lucro=metadata.lucro;const costs=new Map((metadata.itemCosts||[]).map(item=>[Number(item.index),item]));(sale.itens||[]).forEach((item,index)=>{const cost=costs.get(index);if(!cost)return;if(canCost){item.custoUnitario=cost.custoUnitario;item.costSnapshot=cost.custoUnitario;item.custoTotal=cost.custoTotal;if(cost.serviceCostSnapshot)item.serviceCostSnapshot=cost.serviceCostSnapshot}if(canProfit)item.lucro=cost.lucro})}
   const stockFinancials=new Map((data.stockMovementFinancials||[]).map(item=>[String(item.stockMovementId||item.id),item]));
   if(canCost)for(const movement of data.movimentacoesEstoque||[]){const metadata=stockFinancials.get(String(movement.id));if(metadata&&'custoUnitario' in metadata)movement.custoUnitario=metadata.custoUnitario}
 }

@@ -11,3 +11,6 @@ ui-debug.log
 functions/.env.*
 functions/.secret.local
 artifacts/permissions-v210/
+
+# Local synthetic V238 browser evidence
+qa-artifacts/

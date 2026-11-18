@@ -48,15 +48,15 @@ window.Checkout = (() => {
       .join("")
       .toUpperCase();
   const cartKey = (item) =>
-    item?.productType === "recurring"
+    window.FlexibleService?.itemKey(item) || (item?.productType === "recurring"
       ? `${item.produtoId}::${item.variantId || "base"}::${item.recurringActivation?.subscriptionId || item.recurringActivation?.draftId || "new"}`
-      : window.ProductVariations?.itemKey(item) || String(item?.produtoId || "");
-  const priceLabel = (p) =>
+      : window.ProductVariations?.itemKey(item) || String(item?.produtoId || ""));
+  const priceLabel = (p) => window.FlexibleServiceUI?.priceLabel(p) || (
     window.ProductVariations?.isVariable?.(p)
       ? Number(p.minPrice) === Number(p.maxPrice)
         ? dinheiro(p.minPrice)
         : `${dinheiro(p.minPrice)} – ${dinheiro(p.maxPrice)}`
-      : dinheiro(p.preco);
+      : dinheiro(p.preco));
   const balance = (c) => {
     const s = Number(c.saldo || 0);
     return s < 0
@@ -869,6 +869,7 @@ window.Checkout = (() => {
           status: document.querySelector("#sale-status")?.value || "pago",
         }) || cart)
       : cart;
+    for(const item of cart)if(item.serviceCostSnapshot&&item.serviceExecution){const snapshot=item.serviceCostSnapshot;item.serviceCostSnapshot=FlexibleService.estimate(snapshot.configuration,item.serviceExecution,item.precoFinalUnitario,snapshot.additionalCosts);item.custoUnitario=item.serviceCostSnapshot.estimatedCost;}
     const t = totals(displayItems);
     host.innerHTML = window.DesktopSales?.isDesktop?.()
       ? window.DesktopSales.cartHTML(cart)
@@ -877,7 +878,7 @@ window.Checkout = (() => {
           .map((i) => {
             const key = cartKey(i), product = products().getById(i.produtoId), variant = i.variantId ? window.ProductVariations?.get?.(i.variantId) : null,
               image = window.ProductImages?.markup?.(product, { variant, className: "sale-cart-photo" }) || `<span class="sale-cart-photo placeholder">${initials(i.nome)}</span>`;
-            return `<div class="cart-item editable-cart">${image}<div><b>${escapar(i.nome)}</b><br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".0001" value="${Number(i.precoFinalUnitario.toFixed(4))}"></label><button class="icon-btn" data-remove="${escapar(key)}" aria-label="Remover ${escapar(i.nome)}"><i data-lucide="trash-2"></i></button></div>`;
+            return `<div class="cart-item editable-cart ${i.serviceExecution?"service-cart-item":""}">${image}<div><b>${escapar(i.nome)}</b>${window.FlexibleServiceUI?.summary(i)||""}<br><small>Original: ${dinheiro(i.precoOriginal)} · Custo: ${dinheiro(i.custoUnitario)}</small></div><label>Qtd.<input data-item-qty="${escapar(key)}" type="number" min="1" step="1" value="${i.quantidade}"></label><label>Preço final<input data-item-price="${escapar(key)}" type="number" inputmode="decimal" min="0" step=".0001" value="${Number(i.precoFinalUnitario.toFixed(4))}"></label><button class="icon-btn" data-remove="${escapar(key)}" aria-label="Remover ${escapar(i.nome)}"><i data-lucide="trash-2"></i></button></div>`;
           })
           .join("")
         : '<div class="empty">Adicione produtos</div>';
@@ -956,6 +957,10 @@ window.Checkout = (() => {
       toast("Este item não está disponível no espaço de venda atual.", true);
       dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: item?.produtoId || item?.productId || null, reason: "space-unavailable", source: options.source || null } }));
       return false;
+    }
+    if(window.FlexibleService?.enabled(product)&&!item.serviceExecution){
+      if(window.PriorSales?.active?.()){toast('Registre execuções de serviço na venda atual.',true);return false;}
+      window.FlexibleServiceUI.open(product,item,next=>addSaleItem(next,options));return false;
     }
     const key = cartKey(item),
       current = cart.find((entry) => cartKey(entry) === key),
@@ -1138,7 +1143,7 @@ window.Checkout = (() => {
         price = e.target.closest("[data-item-price]");
       if (q) {
         const i = cart.find((x) => cartKey(x) === q.dataset.itemQty);
-        i.quantidade = Math.max(1, Number(q.value) || 1);
+        i.quantidade = i.serviceExecution?1:Math.max(1, Number(q.value) || 1);
       }
       if (price) {
         const i = cart.find((x) => cartKey(x) === price.dataset.itemPrice);
@@ -1158,6 +1163,7 @@ window.Checkout = (() => {
           (entry) => cartKey(entry) === step.dataset.cartKey,
         );
         if (item) {
+          if(item.serviceExecution&&Number(step.dataset.cartStep)>0){toast("Adicione outra execução pelo catálogo.");return;}
           item.quantidade += Number(step.dataset.cartStep || 0);
           if (item.quantidade <= 0)
             cart = cart.filter((entry) => entry !== item);

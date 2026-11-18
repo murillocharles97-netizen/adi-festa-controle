@@ -13,6 +13,7 @@ const {manageCustomerDirectory,validateCustomerDirectoryWrites,updateSharedCusto
 const {operationalId}=require('../shared/operational-id');
 const Policy=require('../shared/permission-policy');
 const SaleMoney=require('../shared/sale-money');
+const {validateFlexibleServices}=require('./flexible-service-validation');
 const INSTALLMENT_CREATION_ENABLED = true; // Compatible rollback pauses only new plans.
 const HISTORY_ACTIVATION_ENABLED = true; // Containment retains already activated accounts and receipts.
 const {paymentConfirmationRead}=require('./payment-confirmation-read');
@@ -220,6 +221,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    }};
    const outcome=await execute({db,item,transaction:buffer,currentUser:{uid:c.uid},FieldValue,has:c.has,actor:{actorUid:c.uid,actorRoleSnapshot:c.role,actorNameSnapshot:c.member?.name||c.user.name||null}});
    await validate(tx,c,item,attemptWrites,plan,get,writes,historyAccount);
+   await validateFlexibleServices({c,writes:attemptWrites,plan,get,ref,FieldValue});
    await validateCustomerDirectoryWrites({db,tx,c,writes:attemptWrites,plan,old:async reference=>(await get(reference)).data()});
    await updateSharedCustomerSaleCounters({tx,c,root,writes:attemptWrites,plan,old:async reference=>(await get(reference)).data()});
    const newPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);if(newPlan){const entry=plan.get(ref(c.bid,'clients',newPlan.data.clienteId).path);if(entry){entry.data.hasInstallmentFiado=true;if(historyAccount?.version===2)entry.data.fiadoHistoryVersion=1;}}

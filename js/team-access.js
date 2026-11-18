@@ -167,13 +167,13 @@
     if(current().role!=='owner'&&Array.isArray(data.catalogOrders))data.catalogOrders=data.catalogOrders.filter(o=>has('sales.viewAll')&&o.spaceId&&window.BusinessContext?.canAccessSpace?.(o.spaceId));
     if (!has("cost.view")) {
       delete data.productFinancials; delete data.variantFinancials; delete data.stockMovementFinancials;
-      (data.produtos || []).forEach((item) => { delete item.custo; delete item.cost; });
+      (data.produtos || []).forEach((item) => { delete item.custo; delete item.cost; delete item.serviceCostConfig; });
       (data.variacoesProdutos || []).forEach((item) => { delete item.cost; delete item.custo; });
       (data.movimentacoesEstoque || []).forEach((item) => { delete item.custoUnitario; delete item.costUnit; });
       (data.vendas || []).forEach((sale) => {
         delete sale.custoTotal;
         (sale.itens || []).forEach((item) => {
-          delete item.custoUnitario; delete item.custoTotal; delete item.costSnapshot;
+          delete item.custoUnitario; delete item.custoTotal; delete item.costSnapshot; delete item.serviceCostSnapshot;
         });
       });
     }
