@@ -26,7 +26,8 @@ test('produto sem alias não ganha campo novo; regra do servidor aceita o alias 
   assert.equal(Object.hasOwn(h.data().produtos[0], 'totalStock'), false);
   assert.equal(packet.payload.writes.find((w) => w.entityType === 'products').data.totalStock, undefined);
   const server = fs.readFileSync('functions/src/services/operational-commit-service.js', 'utf8');
-  assert.ok(server.includes("if(Object.hasOwn(patch,alias)&&!same(patch[alias],value[alias])&&!same(patch[alias],patch[field]))fail('Alias de estoque divergente.')"));
+  assert.ok(server.includes('const original=writes.find(w=>w.entityType===col&&w.entityId===id)'));
+  assert.match(server,/if\(!numeric\(declared\)\|\|!same\(declared,unchanged\)&&!same\(declared,localEnd\)\)\s*fail\('Alias de estoque divergente\.'\)/);
 });
 
 test('normalização local: alias derivado em produto simples, preservado em produto com variações', () => {

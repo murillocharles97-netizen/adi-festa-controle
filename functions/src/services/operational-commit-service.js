@@ -464,7 +464,23 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   for(const [key,delta]of deltas){
    const [pid,vid]=key.split(':'),col=vid?'productVariants':'products',id=vid||pid,value=await old(col,id),patch=planned(col,id),field=vid?'stock':'estoqueAtual';
    if(!value||!patch||!numeric(value[field])||!numeric(patch[field])||!same(patch[field]-value[field],delta))fail('Estoque deve ser alterado pelo delta autorizado.');
-   if(!vid){for(const alias of ['estoque','totalStock'])if(Object.hasOwn(patch,alias)&&!same(patch[alias],value[alias])&&!same(patch[alias],patch[field]))fail('Alias de estoque divergente.');for(const alias of ['estoque','totalStock'])if(Object.hasOwn(value,alias))patch[alias]=patch[field];}
+   if(!vid){
+    const original=writes.find(w=>w.entityType===col&&w.entityId===id);
+    for(const alias of ['estoque','totalStock']){
+     // Validate a declared alias in the device snapshot that produced it. The
+     // engine rebases each field separately, so an old derived alias in the
+     // server document must not become another independent stock delta.
+     if(Object.hasOwn(original.data,alias)){
+      const declared=original.data[alias],unchanged=original.before?.[alias]??value[alias],
+       localEnd=original.data[field]??patch[field];
+      if(!numeric(declared)||!same(declared,unchanged)&&!same(declared,localEnd))
+       fail('Alias de estoque divergente.');
+     }
+     // The authoritative stock delta was verified above against the sale and
+     // its movements. Derived aliases may never change that quantity.
+     if(Object.hasOwn(value,alias)||Object.hasOwn(patch,alias))patch[alias]=patch[field];
+    }
+   }
    const held=(await tx.get(ref(c.bid,'onlineStockReservations',stockKey({productId:pid,variantId:vid||null})))).data(),reserved=Number(held?.quantity||0),claim=sale?.onlineOrderId?await old('catalogOrders',sale.onlineOrderId):null,own=Number(claim?.reservedQuantities?.[vid?'v_'+vid:'p_'+pid]||0);
    if(!same(reserved,Number(value.onlineReservedStock||0))||patch[field]<reserved-own&&!value.allowNegativeStock)fail('Estoque insuficiente ou reservado.','failed-precondition');
    // The request expresses a delta against the device's stock. Record the

@@ -47,7 +47,17 @@
   // A sale is cash at checkout unless it opened credit (fiado/crediário). Credit
   // is received later through `pagamentos`; counting both would double the cash.
   const deferred=s=>method(s).key==='fiado'||Boolean(s.installmentPlan)||String(s.status||'').toLowerCase()==='fiado';
-  function validPayment(p){return p&&p.deleted!==true&&!p.deletedAt&&p.ativo!==false&&p.active!==false&&String(p.tipo||'pagamento')==='pagamento'&&!p.reversedAt&&!p.estornadoEm&&!invalid.has(String(p.status||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase());}
+  function validPayment(p){return p&&p.deleted!==true&&!p.deletedAt&&p.ativo!==false&&p.active!==false&&String(p.tipo||'pagamento')==='pagamento'&&!p.reversedAt&&!p.estornadoEm&&!['pending','pendente','conflict','rejected','error','cancelled','superseded'].includes(String(p.status||'').toLowerCase())&&!invalid.has(String(p.status||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase());}
+  // Devices first download only the most recent N payments (sync INITIAL_RECENT_LIMITS).
+  const LOCAL_RECEIPT_LIMIT=200;
+  // Count/oldest date are diagnostic only. This cache has no server proof of
+  // full coverage: bootstrap, role changes, rejected records and gaps can all
+  // leave fewer than N rows. Keep the received view explicitly partial.
+  function receiptCoverage(rows,businessId,start,zone){
+    let count=0,oldest=null;
+    for(const p of rows||[]){if(!validPayment(p)||(p.businessId&&p.businessId!==businessId))continue;count++;const k=day(p.data||p.createdAt,zone);if(k&&(!oldest||k<oldest))oldest=k;}
+    return{localCount:count,oldestDay:oldest,complete:false,reason:'local-receipts-coverage-unverified'};
+  }
   const emptyCash=()=>({upfront:0,credit:0,total:0,creditCount:0});
   function compare(current,previous,hasPrevious){return !hasPrevious||previous===0?null:(current-previous)/Math.abs(previous)*100;}
   function build({sales=[],payments:receipts=null,exchanges=[],exchangeAdjustmentsReady=true,workspaceGeneration,range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
@@ -86,10 +96,10 @@
       });
     }
     for(const p of receipts||[]){
-      if(!validPayment(p)||(p.businessId&&p.businessId!==businessId)||paid.has(String(p.id)))continue;
+      if(!validPayment(p)||(p.businessId&&p.businessId!==businessId)||paid.has('id:'+String(p.id))||p.operationId&&paid.has('op:'+String(p.operationId)))continue;
       const sid=String(p.spaceId||p.financialSpaceId||''),key=day(p.data||p.createdAt,r.zone);
       if(allowedSpaceIds&&!allowedSpaceIds.includes(sid)||spaceId!=='all'&&sid!==spaceId||!key||key<r.previousStart||key>r.end)continue;
-      paid.add(String(p.id));const amount=cents(p.effectiveAmount??p.valor),bucket=cash[key>=r.start?'current':'previous'];
+      paid.add('id:'+String(p.id));if(p.operationId)paid.add('op:'+String(p.operationId));const amount=cents(p.effectiveAmount??p.valor),bucket=cash[key>=r.start?'current':'previous'];
       if(amount<=0)continue;bucket.credit+=amount;bucket.creditCount++;
       if(key<r.start)continue;
       const space=bySpace.get(sid)||{id:sid,name:names.get(sid)||(sid?'Espaço arquivado / indisponível':'Sem espaço histórico'),revenue:0,quantity:0,count:0,profit:0};
@@ -129,9 +139,9 @@
     // Received = upfront sales + credit receipts. It is a cash view, never added
     // to revenue; `payments:null` means receipts were not supplied (unknown).
     const money=c=>({upfront:c.upfront/100,credit:c.credit/100,total:(c.upfront+c.credit)/100,creditCount:c.creditCount});
-    result.cash=receipts?{current:money(cash.current),previous:money(cash.previous)}:null;
+    result.cash=receipts?{current:money(cash.current),previous:money(cash.previous),coverage:receiptCoverage(receipts,businessId,r.start,r.zone)}:null;
     result.comparison={};for(const key of ['revenue','profit','ticket','count'])if(key in result.current)result.comparison[key]=compare(result.current[key],result.previous[key],result.previous.count>0&&(key!=='profit'||exchangeAdjustmentsReady===true&&!current.missingCost&&!previous.missingCost));
     return result;
   }
-  return{range,build,validSale,validPayment,deferred,value,method,day,midnight,shift,compare};
+  return{LOCAL_RECEIPT_LIMIT,receiptCoverage,range,build,validSale,validPayment,deferred,value,method,day,midnight,shift,compare};
 });

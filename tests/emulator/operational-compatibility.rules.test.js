@@ -11,11 +11,11 @@ const {operationalCommitService}=operationalSource
 const {financialMaintenanceService}=require('../../functions/src/services/financial-maintenance-service');
 const {harness,bridge}=require('../helpers/fiado-cancellation-harness.cjs');
 if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Loopback Emulator required, never production');
-let env,app,db,svc,maintenance,seq=0;
-test.before(async()=>{env=await initializeTestEnvironment({projectId:'demo-veconi-compatibility-v202',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});app=initializeApp({projectId:'demo-veconi-compatibility-v202'},'operational-compatibility');db=getFirestore(app);svc=operationalCommitService(db);maintenance=financialMaintenanceService(db);});
+const runId=crypto.randomUUID().slice(0,8);let env,app,db,svc,maintenance,seq=0;
+test.before(async()=>{env=await initializeTestEnvironment({projectId:'demo-veconi-compatibility-v202',firestore:{rules:fs.readFileSync(process.env.VECONI_TEST_RULES||'firestore.rules','utf8')}});app=initializeApp({projectId:'demo-veconi-compatibility-v202'},'operational-compatibility');db=getFirestore(app);svc=operationalCommitService(db);maintenance=financialMaintenanceService(db);});
 test.after(async()=>{await env?.cleanup();if(app)await deleteApp(app);});
 async function setup(){
- const bid='compat-'+(++seq),space='space-'+bid,other='other-'+bid,owner='owner-'+bid,seller='seller-'+bid,root=db.doc('businesses/'+bid),permissions={'sales.create':true,'sales.cancel':true,'customers.view':true,'customers.receiveDebt':true,'products.view':true,'inventory.view':true};
+ const bid='compat-'+runId+'-'+(++seq),space='space-'+bid,other='other-'+bid,owner='owner-'+bid,seller='seller-'+bid,root=db.doc('businesses/'+bid),permissions={'sales.create':true,'sales.cancel':true,'customers.view':true,'customers.receiveDebt':true,'products.view':true,'inventory.view':true};
  await root.set({businessId:bid,ownerId:owner,active:true,workspaceGeneration:0,legacyAccessDisabled:true,subscription:{planId:'internal',status:'active'}});
  for(const uid of [owner,seller]){await db.doc('users/'+uid).set({uid,businessId:bid,active:true,role:uid===owner?'owner':'cashier'});await root.collection('members').doc(uid).set({uid,status:'active',role:uid===owner?'owner':'seller',spaceAccess:uid===owner?'all':'selected',allowedSpaceIds:uid===owner?[]:[space],permissions});}
  for(const id of [space,other])await db.doc('financialSpaces/'+id).set({id,businessId:bid,linkedBusinessId:bid,active:true,type:'business',ownerUid:owner,capabilities:{sales:true,inventory:true,products:true,finance:true}});

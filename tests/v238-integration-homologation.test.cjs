@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const {sanitizeSale}=require('../functions/src/services/performance-read-service');
+const {sanitizeSale}=require(require('node:path').resolve(process.env.VECONI_TEST_PERFORMANCE_SOURCE||'functions','src/services/performance-read-service'));
 const M=require('../js/performance-model'),S=require('../functions/src/shared/flexible-service');
 const execution={version:1,id:crypto.randomUUID(),configurationId:'config-qa-integration',pricingSnapshot:{model:'sale',rate:0},km:10,minutes:0,source:'particular'};
 const sale={businessId:'qa-company',spaceId:'qa-space',status:'pago',formaPagamento:'pix',data:'2026-11-18T15:00:00Z',valorFinal:30,itens:[{produtoId:'qa-service',quantidade:1,precoFinalUnitario:30,serviceExecution:execution,serviceCostSnapshot:{estimatedCost:15},custoUnitario:15}]};
@@ -24,4 +24,10 @@ test('consolidated cash and service estimated margin stay separate; foreign comp
  const projected=sanitizeSale('sale-qa',sale,{custoTotal:15,lucro:15},{cost:true,profit:true});
  const result=M.build({sales:[projected,{...projected,id:'foreign',businessId:'other-company'}],payments:[],range:M.range('today',new Date(sale.data)),businessId:'qa-company',canCost:true,canProfit:true});
  assert.equal(result.current.revenue,30);assert.equal(result.cash.current.total,30);assert.equal(result.current.profit,15);assert.equal(result.current.services,1);
+});
+test('projected installment marker prevents upfront cash from being inferred from an installment sale',()=>{
+ const projected=sanitizeSale('sale-installment',{...sale,installmentPlan:{version:1,count:3,privateField:'never public'}},null,{cost:false,profit:false});
+ assert.deepEqual(projected.installmentPlan,{version:1});
+ const result=M.build({sales:[projected],payments:[],range:M.range('today',new Date(sale.data)),businessId:'qa-company'});
+ assert.equal(result.current.revenue,30);assert.equal(result.cash.current.upfront,0);
 });

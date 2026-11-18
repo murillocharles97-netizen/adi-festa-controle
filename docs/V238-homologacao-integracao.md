@@ -1,100 +1,93 @@
-# V238 — homologação local e preparação da integração
+# V238 — integração final e publicação seletiva preparada
 
-## Resultado
+Preparação local em 18/11/2026. Sem push, merge, deploy ou escrita comercial em produção. A homologação funcional no Android será feita pelo proprietário após publicação; depuração no aparelho não é um gate.
 
-**GO para o fluxo local de serviços. NO-GO para publicar a integração exata com `a34c4bf` até corrigir a sinalização de recebido parcial.** Nenhum push, merge na main, deploy ou escrita de produção foi executado.
+## Integração e correção do Consolidado
 
-- Base: main V237 `c94f60ac341745f952630948efd97342a5ed6072`.
-- MVP original preservado: `6f066d1cfb02fb8f198b64af14b570435b3f6a1f`, branch `codex/v238-flexible-services`.
-- Trabalho do Claude solicitado: `a34c4bfd0ee489e5d3873ec2bec74dc8795b83b4`.
-- Candidata local: `codex/v238-local-integration`, worktree `C:/Users/Murillo/Documents/VECONI-V238-Integration`.
-- Preparação por cherry-picks locais sobre V237: `b492d2d` (cópia do MVP) e `d24199a` (cópia de `a34c4bf`). Conflitos apenas em `js/performance-model.js` e `js/performance-dashboard.js`: preservados Ontem, recebido separado e contribuição por espaço do Claude, mais contadores de execução/km/minutos da V238.
-- A branch do Claude já avançou para `5303cd2`. Esse commit foi apenas consultado, não aplicado, pois a solicitação nomeou `a34c4bf`. Nenhum arquivo do worktree do Claude foi modificado.
+Main remota conferida: `c94f60ac341745f952630948efd97342a5ed6072` (V237). Preservados `6f066d1` e `f190e72`, a entrega do Claude `a34c4bf` e sua correção `5303cd2`. Branch: `codex/v238-local-integration`.
 
-## Homologação ponta a ponta
+De `5303cd2` foram incorporados modelo, apresentação e testes do recebido parcial, preservando os contadores V238 de serviços, km e duração. A cobertura dos pagamentos não é inferida da quantidade local, de um pagamento antigo ou da conclusão da consulta de vendas. O Consolidado mostra **Recebido na base consultada (parcial)** mesmo com cache vazio. Não apresenta esse valor como caixa total nem mínimo garantido.
 
-Chrome com toque emulado, 360 e 390 px, componentes reais de cadastro/PDV/recibo/Histórico/Desempenho. HTTP local ligado aos serviços transacionais reais no **Firestore Emulator**, projeto `demo-veconi-v238-homologation`. Autenticação de transporte, persistência e worker são adaptadores exclusivos de QA; a autorização da empresa e as transações passam pelos serviços reais. Não substitui teste de teclado/navegador no Android físico.
+Pagamentos repetidos por ID/operação, pendentes, rejeitados ou estornados não inflam o recebido. Fiado/parcelamento não é recebido à vista; a projeção preserva um marcador público mínimo de parcelamento. Custos/margens de serviço continuam estimativas, sem gerar despesa nem descontar combustível real novamente. Alterar configuração não recalcula snapshots históricos.
 
-Criado pela interface um serviço de preço livre, custo R$ 1,20/km e taxa estimada de 10%. Cada execução tem quantidade 1 e IDs próprios:
+## Pacotes das fontes realmente ativas
 
-| Execução | Pagamento | Distância | Cobrado | Extra estimado | Custo estimado | Margem estimada | Toques |
-|---|---|---:|---:|---:|---:|---:|---:|
-| 1 | Pix | 10 km | R$ 30,00 | R$ 0,00 | R$ 15,00 | R$ 15,00 | 6 |
-| 2 | Dinheiro | 17,5 km | R$ 47,50 | R$ 0,00 | R$ 25,75 | R$ 21,75 | 7 |
-| 3 | Cartão manual, offline | 6 km | R$ 22,00 | R$ 2,00 | R$ 11,40 | R$ 10,60 | 8 |
-| **Total por ambiente** | | **33,5 km** | **R$ 99,50** | | **R$ 52,15** | **R$ 47,35** | |
+Projeto `adi-festa-controle`, região `southamerica-east1`, Node.js 22. Fontes obtidas por leitura das revisões ativas. **Não publicar functions da raiz:** existem diferenças não autorizadas nela em relação à produção.
 
-Custo = km × R$ 1,20 + 10% do valor final + extra. Margem estimada = valor cobrado − custo estimado. O custo não gera despesa de caixa; as entradas financeiras somaram os R$ 99,50 efetivamente registrados como pagos no cenário fictício.
+| Function | Revisão de origem | Delta seletivo |
+|---|---|---|
+| commitOperationalSync | `commitoperationalsync-00022-jim` | Validação/snapshot transacional, configuração privada e engine V238; 6 arquivos novos/modificados, 96 idênticos |
+| readOperationalWorkspace | `readoperationalworkspace-00003-xiw` | Somente serviceExecution na projeção pública de itens; 1 arquivo modificado, 80 idênticos |
+| getPerformancePage | `getperformancepage-00003-dad` | Execução sanitizada e marcador de parcelamento; 2 arquivos novos/modificados, 80 idênticos |
 
-Os toques incluem card, campos obrigatórios, adicionar, sacola e concluir. Trocar pagamento acrescenta um toque; preencher extra acrescenta outro. Não incluem teclas digitadas, rolagem, cadastro inicial nem fechar recibo. Não foi acrescentada outra etapa à venda de produtos físicos.
+SHA-256 dos ZIPs ativos, na mesma ordem:
 
-Comprovações em **cada largura**:
+- `732d758d4aa00820adc44c10413759803144d20a6339ee3c02f7ae18b484f569`
+- `bfcb8685640613cce62a1dd6698bde277400d69f15d0b41eb56c05e64861ee87`
+- `8cfde88fdae680dd3f809fe59ee7fb0a24a68c75e9a78812ecf09cbc89c65e3b`
 
-- Cadastro salvo, preço livre sem tarifa fictícia obrigatória, custos e snapshots corretos nas três execuções.
-- Recibos reais da interface conferidos; Histórico carregou **três eventos projetados pelo serviço existente**, com valores corretos. Aberto detalhe da corrida de 6 km e reaberto seu recibo pelo Histórico.
-- Desempenho consultado pelo endpoint real: receita R$ 99,50, custo R$ 52,15, margem R$ 47,35, três serviços, 33,5 km. Valores locais e confirmados no servidor coincidiram.
-- **Zero** movimentos de estoque; produto físico de controle permaneceu com os três aliases em 5 unidades.
-- Primeira venda aplicada no servidor com resposta deliberadamente perdida: `processSyncQueue` original consultou `getOperationalSyncReceipt`, reconheceu o comprovante e não criou outra venda.
-- Terceira venda feita offline; reabertura ainda offline pelo worker de QA, IndexedDB e envelopes originais preservados. Reconexão acionou a fila automaticamente, sem botão de sincronizar.
-- Por ambiente: exatamente três vendas, três snapshots privados, três entradas financeiras e três operationIds de venda distintos. Envelope/hash mantido durante as tentativas.
-- Recibo do gateway e projeção de custos carregados também do código V237 `c94f60a`: o recibo anterior reconheceu a confirmação nova; o projetor anterior não recalculou o snapshot já criado atomicamente.
+`scripts/package-v238-selective.cjs` gera pacotes forward/rollback independentes e manifesto de hashes. Entrypoints, dependências, Fiado, vencimento personalizado, recuperação e demais fontes ativas ficam preservados. O bloco de aliases 00022-jim permanece literalmente igual. Não habilita payment_recovery_review/apply existentes na árvore do repositório. Nenhuma outra Function ou trigger financeiro será publicado.
 
-Evidências locais, somente fictícias: `qa-artifacts/v238-homologation/results.json`, `http.log`, capturas `historico-360/390.png`, `recibo-*`, `execucao-*`, `desempenho-360/390.png`.
+Backups/configuração e pacotes privados: `qa-artifacts/v238-final`, ignorados pelo Git e Pages. Não compartilhar esses diretórios.
 
-## Correção necessária encontrada na homologação
+## Rules e índices
 
-O MVP guardava a execução na venda, mas `performance-read-service.js` retirava `serviceExecution` da resposta de `getPerformancePage`. Após consultar a nuvem, receita/custo/margem permaneciam, porém os indicadores de serviços/km desapareciam.
+Obtida a política ativa, diferente da main. `scripts/prepare-v238-rules.cjs` adiciona exclusivamente duas condições restritivas em create/update de products, proibindo serviceCostConfig no documento público. Os demais bytes e permissões permanecem iguais. Não publicar as Rules inteiras da raiz.
 
-A candidata local acrescenta somente a projeção pública sanitizada dessa execução, reutilizando `FlexibleService.execution`. Custos detalhados e campos arbitrários continuam excluídos; custo e margem totais respeitam as permissões existentes. Snapshot opcional malformado não impede ler o valor da venda histórica. Quatro testes novos cobrem projeção, privacidade, compatibilidade e separação entre recebido e margem.
+- SHA ativo: `016d78efa26bc7a248738c28e9912d874f6d819243a6849264ad4af58090540d`.
+- SHA preparado: `b7a53cfb1317c62c46a0d3ffa3862b2a813211666a26298a28237d840fb550df`.
+- Nenhum índice, fieldOverride, IAM ou Storage Rule precisa mudar.
 
-## Bloqueio da integração solicitada
+Essas duas condições integram o pacote proposto para o próximo GO, ainda não aplicado. Evitam custo gravado acidentalmente no cadastro público por escrita direta.
 
-No `a34c4bf`, a seção de recebido exibe **Total recebido** mesmo sem confirmação da nuvem e com 200 pagamentos locais, que podem ser apenas o lote recente do sync. A ressalva genérica sobre base local não identifica esse total como incompleto. O caso foi reproduzido isoladamente; evidência: `consolidated-risk.json`.
+## Testes e evidências
 
-Isso não alterou saldos nem impediu os testes de serviços, mas impede recomendar essa integração para publicação comercial. O commit posterior `5303cd2` trata a sinalização parcial e o contrato V238; sua inclusão precisa ser aprovada ou substituída por correção equivalente, seguida do teste direcionado. Não foi incluído silenciosamente.
+Backend testado nos próprios pacotes preparados, somente com empresas fictícias e Emulator em loopback.
 
-## Backend seletivo para futura publicação
+- **55 testes críticos no Emulator aprovados:** serviços, pagamentos existentes, snapshots privados, duas execuções simultâneas, cesta mista, isolamento, V224, perda de resposta, idempotência, vendas/renovações legadas, vencimento personalizado/cancelamento e rollback.
+- Aliases legados com venda posterior: quantidade/aliases consistentes; alias forjado recusado; replay preserva marcador. Concorrência na última unidade: uma confirmação e uma recusa, sem estoque negativo.
+- **HTTP + Chrome 360/390 px aprovados:** formulário real → PDV → gateway transacional → recibo → Histórico → Desempenho. Resposta perdida conciliada pelo recibo. Venda offline sobreviveu ao reinício e sincronizou com IDs/envelope originais.
+- Por largura: três corridas de R$30, R$47,50 e R$22; receita R$99,50, custo estimado R$52,15, margem R$47,35, 33,5 km. Exatamente três vendas/receitas, zero movimento de estoque; produto físico de controle permaneceu em 5 unidades. Fluxo de 6–8 toques conforme campos adicionais.
+- **137 testes aprovados** de modelos/UI, sync/recuperação, versão e contenção/SW: `unit-verified.log`. Build aprovado: `build.log` (1.652 arquivos JS, incluindo fontes isoladas privadas). Manifesto público: **276 recursos incluindo CNAME**.
+- Capturas sintéticas e resultados HTTP: `qa-artifacts/v238-homologation/` e `qa-artifacts/v238-final/http-verified.log`.
+- Preflight final às 19:10 UTC: main, revisões e gerações das três fontes e hash das Rules permaneceram iguais; domínio oficial continuava com cache V237. Os três entrypoints dos pacotes importaram corretamente. Evidência privada: `fresh-preflight.json`.
 
-| Function | Necessidade |
-|---|---|
-| `commitOperationalSync` | **Alterar.** Validação da execução, configuração histórica imutável, autorização e snapshot privado na mesma transação da venda. |
-| `readOperationalWorkspace` | **Alterar.** Nova allowlist pública preserva a execução no leitor operacional autorizado, sem liberar custos. |
-| `getPerformancePage` | **Alterar.** Preserva medidas da execução; continua juntando snapshots privados apenas para os perfis autorizados. |
-| `getOperationalSyncReceipt` | **Manter**, se a comparação com a fonte ativa confirmar o contrato testado. Comprovantes e idempotência são os existentes; compatibilidade com o código V237 demonstrada no HTTP. |
-| `projectSaleFinancialIncome` | **Manter**, se a fonte ativa mantiver a verificação de snapshot existente. O gateway cria o custo antes do trigger; código V237 testado retornou `financial-snapshot-exists`. Receita continua sendo projetada uma vez, sem despesa estimada. |
-| `projectSaleActivity` e demais Functions | **Manter.** O projetor existente gerou os eventos corretos do Histórico. Não há motivo para publicar billing, renovação, estoque ou outras Functions. |
+### Asserções herdadas classificadas, sem ocultação
 
-Pacotes seletivos ainda devem ser reconstruídos das fontes **efetivamente ativas** quando houver GO. Comparar hashes e dependências comuns, incluindo `engagement-domain.js`, antes de qualquer deploy. Não inferir equivalência da revisão ativa apenas pelo frontend V237.
+Duas expectativas da suíte herdada não correspondem às Rules ativas: negar leitura de balanceEvents a perfil legado e negar absolutamente escrita direta de campanhas/projeções. Ambas falham também com fontes e Rules já publicadas, sem V238 (`baseline-contract.log`). Não foram contadas como aprovadas nem alteradas silenciosamente. A rodada crítica exclui nominalmente essas duas expectativas; os efeitos de estoque/financeiro e recusas dos perfis V3 foram testados. Não ampliar/alterar a política legada neste deploy.
 
-Rules: apenas duas condições adicionais em `products` proíbem gravar `serviceCostConfig` no documento público. Configuração privada permanece em `productFinancials`; não criar coleções/índices novos. Aplicar esse delta sobre as Rules ativas, sem substituir outras políticas pela cópia do repositório.
+Uma transação fechada sob contenção do Emulator passou na repetição isolada e rodada final. Fixtures usam empresas demo únicas, evitando dados de rodadas anteriores. Nenhum retry comercial foi modificado para fazer testes passarem.
 
-## PWAs antigos e dados existentes
+Não foi demonstrado bloqueador novo da V238. Os dois desvios de política legada permanecem registrados como risco já ativo, fora deste pacote; este GO não os considera corrigidos nem autoriza endurecimento adicional.
 
-- Produtos físicos, serviços antigos sem `serviceConfig`, variações, recebimentos, parcelas e renovações mantêm o contrato anterior. Nenhuma migração ou conversão automática.
-- Um PWA antigo não deve interpretar uma tarifa por km/hora como preço fixo: o backend recusa **novas execuções de serviços configurados** sem os dados V238, com orientação de atualização. Não descarta a fila.
-- Conferir pendências antes de converter um serviço antigo para o modelo flexível. Durante a atualização, preferir cadastrar o novo serviço após os aparelhos atualizarem, em vez de modificar um item ainda referenciado por fila antiga.
-- A fila nova mantém operação, payload e configuração original. Configurações anteriores continuam disponíveis para sincronização posterior; não recalcular usando custo atual.
-- “Todos os espaços” permanece dentro da empresa ativa e dos espaços autorizados. Não consolida empresas independentes.
-- O teste usa o runner original de retries com relógio controlado e HTTP real para os serviços no Emulator; não comprova a entrega de atualização pelo PWA Windows/Android instalado nem autenticação real Firebase no aparelho.
+## Compatibilidade e atualização dos PWAs
 
-## Plano de publicação — somente após novo GO
+- Backend primeiro. Produtos físicos, serviços antigos sem serviceConfig e filas legadas mantêm o contrato anterior. Nenhuma conversão automática.
+- Execução V238 exige atualização. O servidor verifica a configuração real do produto e recusa execução/snapshot ausente antes de efeitos; não confia em marcador de versão manipulável.
+- Atualizar os aparelhos antes de cadastrar/usar serviço flexível. Não converter item com fila antiga ainda não resolvida. Um PWA antigo que tente serviço já convertido recebe bloqueio seguro; a operação é preservada, não reconstruída nem descartada.
+- A atualização não limpa IndexedDB/filas e não força recarga no meio de venda. Após deploy, aceitar atualização/reabrir e confirmar V238 antes das corridas reais; não exige depuração ou exportação do Android.
+- SW final: **veconi-v238-services-consolidated-v1**, app/release 238.
+- Todos os espaços consolida apenas espaços autorizados da mesma empresa, nunca empresas independentes.
 
-1. Resolver o bloqueio do recebido parcial; validar o commit final do Claude aprovado. Conferir novamente main e revisões ativas, sem incluir outras branches.
-2. Salvar frontend estável, fontes/revisões individuais das três Functions, Rules ativas e hashes dos pacotes. Preparar contenção compatível antes de abrir a V238.
-3. Publicar seletivamente `commitOperationalSync`; conferir protocolo/saúde e compatibilidade. Publicar os leitores `readOperationalWorkspace` e `getPerformancePage`, verificando cada etapa. Não publicar o frontend se houver divergência.
-4. Publicar somente o delta de Rules conferido; testar leitura pública de produto, negação de custo e isolamento. Nenhuma alteração comercial de teste em produção.
-5. Publicar o frontend integrado: 276 recursos, versões de assets e SW preparados como `veconi-v238-services-consolidated-qa-v1` (definir identificador final ao publicar). Conferir SHA-256 dos bytes Git/Linux e build do workflow.
-6. Smoke autenticado somente leitura em produção; gravações fictícias ficam no Emulator. Homologação no Android físico para teclado, abertura/fechamento, atualização de PWA e reconexão.
+## Sequência exata após GO definitivo
 
-## Rollback e riscos
+1. Reconfirmar main, três revisões/ZIPs e hash das Rules acima. Mudança exige comparar/reconstruir antes de executar. Validar manifesto final e backups; dependências pelo lock.
+2. Do diretório `commitOperationalSync/forward`, publicar somente `functions:commitOperationalSync` no projeto adi-festa-controle. Confirmar nova revisão ACTIVE, runtime/entrypoint e saúde antes de avançar; não executar replay real.
+3. Do pacote próprio, publicar somente `functions:readOperationalWorkspace`; confirmar revisão e leitura autorizada/recusa indevida, sem gravação comercial.
+4. Do pacote próprio, publicar somente `functions:getPerformancePage`; confirmar consulta por espaço e privacidade de custos. Nunca deploy geral de Functions.
+5. Publicar somente `firestore:rules` com firebase.json isolado apontando para firestore.selective.rules, depois de repetir comparação da origem. Confirmar hash publicado; não incluir índices/IAM/Storage.
+6. Integrar candidata por branch/PR autorizado respeitando proteções, conferir árvore e publicar pelo workflow Deploy GitHub Pages. Acompanhar uma execução até sucesso; não incorporar outras branches.
+7. Conferir os 276 recursos no domínio oficial por SHA-256 dos bytes Git/Linux, descontando somente carimbo commit/data do workflow no index. Confirmar SW final e smoke autenticado somente leitura de V237, Produtos, PDV, Histórico/Desempenho e permissões. Escritas fictícias ficam no Emulator.
+8. Proprietário atualiza o PWA e homologa corridas reais: valor, km, custo estimado, recibo/Histórico e Desempenho. Não registrar venda ou pagamento fictício em produção.
 
-- Frontend: retornar ao pacote estável ou conter apenas entrada de novas configurações/execuções V238. Preservar documentos, IDs, snapshots, evidências e filas; nenhum ajuste de saldo/estoque para reverter software.
-- Backend: depois de existir venda/fila V238, **não restaurar cegamente o gateway antigo**. Manter validação de serviço, recibos e snapshots ou preparar pacote de contenção da fonte ativa que recuse apenas novos envelopes flexíveis, mantendo consultas e operações já processadas. Operações normais não devem ser pausadas junto.
-- Rules: conservar a proibição de custo no documento público; não restaurar permissões mais amplas.
-- Pacotes de rollback/revisões reais só podem ser fixados após a comparação das fontes ativas no preflight autorizado; o plano não deve ser confundido com rollback já executável em produção.
-- Custos continuam **estimados**, separados de combustível/despesas reais em Finanças. Campo adicional não cria pagamento, despesa ou cobrança externa.
-- Risco pendente conhecido: total recebido parcial em `a34c4bf`. Demais pendências para produção: fonte ativa, pacotes/rollback, autorização e Android físico. Nenhuma escrita real ocorreu.
+## Rollback compatível
 
-## Verificações finais
+- Frontend V237 c94f60a exportado em bytes Git/Linux, com hashes. Restaurar somente software; preservar dados/filas.
+- Gateway: pacote de contenção derivado da V238, preservando snapshots e reconhecimento de operações processadas. Pausa apenas novas configurações/execuções flexíveis; vendas físicas/legadas continuam. Testados replay confirmado, bloqueio atômico de nova execução e venda física normal.
+- Leitores: backups/pacotes independentes das revisões acima; voltar junto com frontend compatível ou manter projeções V238 aditivas.
+- Rules: conservar as duas proibições de custo público após rollback da interface. Backup anterior é evidência, não restauração automática de acesso mais amplo.
+- Nunca restaurar cegamente o gateway antigo depois de existirem filas V238. Preservar IDs/envelopes até retomada; não compensar estoque/saldo nem reenviar rejeições.
 
-32 testes unitários/de integração de modelo aprovados; duas homologações HTTP completas (360/390 px); 56 testes de contenção/worker aprovados; build e verificação do engine gerado aprovados. O engine permaneceu semanticamente idêntico ao commit preservado (normalização local de CRLF, sem diff funcional).
+Nenhuma venda recuperada da 3 Lindas, estoque, assinatura, saldo, pagamento, caixa ou evidência real foi alterado. A preparação não executa novamente a recuperação.
+
+**GO técnico para solicitar publicação seletiva, com recebido explicitamente parcial e política legada preservada. Execução aguardando autorização definitiva.**

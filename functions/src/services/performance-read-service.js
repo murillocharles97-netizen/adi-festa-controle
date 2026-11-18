@@ -2,9 +2,10 @@
 const {HttpsError}=require('firebase-functions/v2/https');
 const {FieldPath,Timestamp}=require('firebase-admin/firestore');
 const {permissionService}=require('./permission-service');
+const Policy=require('../shared/permission-policy');
 const FlexibleService=require('../shared/flexible-service');
-const PAGE_SIZE=250;
 const serviceExecution=i=>{try{return i.serviceExecution?FlexibleService.execution(i.serviceExecution):null;}catch{return null;}};
+const PAGE_SIZE=250;
 const text=v=>String(v??'').slice(0,200);
 const numeric=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
 function sanitizeSale(id,s,financial,permissions){
@@ -12,6 +13,7 @@ function sanitizeSale(id,s,financial,permissions){
     data:s.data?.toDate?s.data.toDate().toISOString():s.data,
     valorFinal:numeric(s.valorFinal??s.valorTotal),status:text(s.status||s.saleStatus||s.tipo),active:s.active!==false&&s.ativo!==false,
     deleted:s.deleted===true||Boolean(s.deletedAt)||s.desfeita===true,formaPagamento:text(s.formaPagamento),paymentIntentId:s.paymentIntentId?text(s.paymentIntentId):null,
+    installmentPlan:s.installmentPlan?{version:1}:null,
     paymentMetadata:{provider:text(s.paymentMetadata?.provider||s.provider)},
     itens:(s.itens||s.items||[]).map(i=>({produtoId:text(i.produtoId||i.productId),nome:text(i.nome||i.productNameSnapshot),quantidade:numeric(i.quantidade??i.quantity),
       ...(serviceExecution(i)?{serviceExecution:serviceExecution(i)}:{}),
@@ -27,8 +29,11 @@ function performanceReadService(db){
     const input=request.data||{},bid=input.businessId;
     if(!/^[-a-zA-Z0-9_]{3,128}$/.test(bid||''))throw new HttpsError('invalid-argument','Empresa inválida.');
     const context=await permissionService(db).authenticatedContext(request,bid,{ownerOnly:false});
-    const member=context.member||context.profile,has=key=>member.role==='owner'||member.permissions?.[key]===true||member.permissions?.includes?.(key);
-    if(!has('reports.view'))throw new HttpsError('permission-denied','Seu perfil não pode consultar Desempenho.');
+    if (context.profile.active !== true || context.profile.businessId !== bid || context.member?.role === 'owner' && context.business.ownerId !== context.uid) throw new HttpsError('permission-denied','Identidade empresarial não confirmada.');
+    const profileSnapshot=await db.doc(`users/${context.uid}`).get();
+    if(profileSnapshot.data()?.active!==true||profileSnapshot.data()?.businessId!==bid)throw new HttpsError('permission-denied','Perfil empresarial inativo.');
+    const storedMember=context.member||context.profile,legacyOwner=!context.member&&context.business.ownerId===context.uid&&['owner','admin'].includes(context.profile.role),member=legacyOwner?{...storedMember,role:'owner'}:storedMember,has=key=>Policy.has(member,key);
+    if(!has('reports.view')||!has('performance.history'))throw new HttpsError('permission-denied','Seu perfil não pode consultar Desempenho.');
     if(context.business.workspaceReset&&context.business.workspaceReset.status!=='COMPLETED')throw new HttpsError('failed-precondition','A empresa está em restauração.');
     if((input.workspaceGeneration??0)!==(context.business.workspaceGeneration??0))throw new HttpsError('failed-precondition','Reabra a VECONI para atualizar o ambiente.');
     const from=new Date(input.from),to=new Date(input.to);
@@ -50,7 +55,7 @@ function performanceReadService(db){
     }
     const permissions={cost:has('cost.view'),profit:has('profit.view')};
     const fields=['businessId','spaceId','financialSpaceId','data','valorFinal','valorTotal','status','saleStatus','tipo','active','ativo','deleted','deletedAt','desfeita','formaPagamento','paymentIntentId','paymentMetadata.provider','provider',
-      'itens','items'];
+      'itens','items','installmentPlan'];
     // Admin queries are projected and the response is allowlisted; no customer PII,
     // payment secrets, receipt text, product images or item costs leave this endpoint.
     if(permissions.cost)fields.push('custoTotal');if(permissions.profit)fields.push('lucro','custoTotal');
@@ -62,8 +67,8 @@ function performanceReadService(db){
     const refs=(permissions.cost||permissions.profit)?visible.map(r=>db.doc(`businesses/${bid}/saleFinancials/${r.id}`)):[];
     const financials=refs.length?await db.getAll(...refs):[];
     // Recheck identity/permissions after IO; never serve a snapshot from a retired generation.
-    const [latest,latestMember]=await Promise.all([context.businessRef.get(),db.doc(`businesses/${bid}/members/${context.uid}`).get()]);
-    if(latest.data()?.active!==true||(latest.data()?.workspaceGeneration??0)!==(context.business.workspaceGeneration??0)||latest.data()?.workspaceReset&&latest.data().workspaceReset.status!=='COMPLETED'||JSON.stringify(latestMember.data()||null)!==JSON.stringify(context.member||null))throw new HttpsError('aborted','Seu acesso ou os dados mudaram. Atualize a análise.');
+    const [latest,latestMember,latestProfile]=await Promise.all([context.businessRef.get(),db.doc(`businesses/${bid}/members/${context.uid}`).get(),profileSnapshot.ref.get()]);
+    if(JSON.stringify(latestProfile.data())!==JSON.stringify(profileSnapshot.data())||latest.data()?.ownerId!==context.business.ownerId||latest.data()?.active!==true||(latest.data()?.workspaceGeneration??0)!==(context.business.workspaceGeneration??0)||latest.data()?.workspaceReset&&latest.data().workspaceReset.status!=='COMPLETED'||JSON.stringify(latestMember.data()||null)!==JSON.stringify(context.member||null))throw new HttpsError('aborted','Seu acesso ou os dados mudaram. Atualize a análise.');
     const last=rows.docs.at(-1),lastDate=last?.data()?.data;
     const next=rows.size===PAGE_SIZE?{kind,field,id:last.id,at:lastDate?.toDate?lastDate.toDate().toISOString():lastDate}:kind==='string'?{kind:'timestamp',field}:spaceIds&&field==='spaceId'?{kind:'string',field:'financialSpaceId'}:null;
     return{businessId:bid,workspaceGeneration:context.business.workspaceGeneration??0,permissions,rows:visible.map((r,i)=>sanitizeSale(r.id,r.data(),financials[i]?.data(),permissions)),next,complete:!next,asOf:new Date().toISOString(),pageSize:PAGE_SIZE};

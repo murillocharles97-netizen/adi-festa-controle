@@ -2,15 +2,16 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto');
 if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Loopback Firestore Emulator required; never production');
 const {initializeApp,deleteApp}=require('firebase-admin/app'),{getFirestore,FieldValue}=require('firebase-admin/firestore');
-const {operationalCommitService}=require('../../functions/src/services/operational-commit-service');
+const path=require('node:path'),functionSource=process.env.VECONI_TEST_FUNCTION_SOURCE||path.resolve('functions');
+const {operationalCommitService}=require(path.resolve(functionSource,'src/services/operational-commit-service'));
 const {financialIncomeService}=require('../../functions/src/services/financial-income-service');
 const {harness,bridge}=require('../helpers/fiado-cancellation-harness.cjs'),M=require('../../functions/src/shared/flexible-service');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
-const projectId='demo-veconi-v238';let app,db,svc,env,seq=0;
-test.before(async()=>{env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});app=initializeApp({projectId},'v238-services');db=getFirestore(app);svc=operationalCommitService(db);});
+const projectId='demo-veconi-v238',runId=crypto.randomUUID().slice(0,8);let app,db,svc,env,seq=0;
+test.before(async()=>{env=await initializeTestEnvironment({projectId,firestore:{rules:fs.readFileSync(process.env.VECONI_TEST_RULES||'firestore.rules','utf8')}});app=initializeApp({projectId},'v238-services');db=getFirestore(app);svc=operationalCommitService(db);});
 test.after(async()=>{await env?.cleanup();await db?.terminate();if(app)await deleteApp(app);});
 async function setup(){
- const bid='services-'+(++seq),space='space-'+bid,other='other-'+bid,owner='owner-'+bid,seller='seller-'+bid,root=db.doc('businesses/'+bid);
+ const bid='services-'+runId+'-'+(++seq),space='space-'+bid,other='other-'+bid,owner='owner-'+bid,seller='seller-'+bid,root=db.doc('businesses/'+bid);
  await root.set({businessId:bid,ownerId:owner,active:true,workspaceGeneration:0,legacyAccessDisabled:true,subscription:{planId:'internal',status:'active'}});
  for(const uid of [owner,seller]){await db.doc('users/'+uid).set({uid,businessId:bid,active:true,role:uid===owner?'owner':'seller'});await root.collection('members').doc(uid).set({uid,status:'active',role:uid===owner?'owner':'seller',spaceAccess:uid===owner?'all':'selected',allowedSpaceIds:uid===owner?[]:[space],permissions:{'sales.create':true,'customers.view':true,'products.view':true,'inventory.view':true,'cost.view':false}});}
  for(const id of [space,other])await db.doc('financialSpaces/'+id).set({id,businessId:bid,linkedBusinessId:bid,active:true,type:'business',ownerUid:owner,automation:{enabled:true,activatedAt:'2026-01-01T00:00:00Z'},capabilities:{sales:true,inventory:true,products:true,finance:true}});
@@ -103,4 +104,42 @@ test('mixed basket keeps physical stock movement and service estimate independen
  await c.commit(packet);assert.equal((await c.commit(packet)).replayed,true);
  assert.equal((await c.read('products',physical.id)).estoqueAtual,2);assert.equal((await c.read('products',c.p.id)).estoqueAtual,3);
  assert.equal((await c.root.collection('stockMovements').get()).size,1);assert.equal((await c.read('saleFinancials',sale.id)).custoTotal,17);
+});
+async function physicalCase(){const c=await setup(),p={...c.p,itemKind:'product',controlaEstoque:true,semControleEstoque:false};delete p.serviceConfig;await c.root.collection('products').doc(p.id).set(p);return{...c,physicalHarness:()=>harness({businessId:c.bid,spaceId:c.space,uid:c.owner})};}
+test('00022-jim aliases: original legacy aliases survive later sales, forged aliases stay blocked and retry is immutable',async()=>{
+ const c=await physicalCase(),a=c.physicalHarness().sell({status:'pago'}),w=a.packet.payload.writes.find(w=>w.entityType==='products');
+ w.data.totalStock=w.before.totalStock;w.data.estoque=w.before.estoque;
+ await c.root.collection('products').doc(c.p.id).update({estoqueAtual:2,estoque:2,totalStock:2});
+ await c.commit(a.packet);const snapshot=await c.read('processedOperations',a.packet.operationId);
+ assert.deepEqual([...(await Promise.all(['estoqueAtual','estoque','totalStock'].map(async k=>(await c.read('products',c.p.id))[k])))],[1,1,1]);
+ assert.equal((await c.commit(a.packet)).replayed,true);assert.deepEqual(await c.read('processedOperations',a.packet.operationId),snapshot);
+ const b=c.physicalHarness().sell({status:'pago'});b.packet.payload.writes.find(w=>w.entityType==='products').data.totalStock=99;
+ await assert.rejects(c.commit(b.packet),/Alias de estoque divergente/);assert.equal((await c.root.collection('sales').get()).size,1);
+});
+test('00022-jim physical stock concurrency never oversells the last unit',async()=>{
+ const c=await physicalCase();await c.root.collection('products').doc(c.p.id).update({estoqueAtual:1,estoque:1,totalStock:1});
+ const a=c.physicalHarness().sell({status:'pago'}),b=c.physicalHarness().sell({status:'pago'}),results=await Promise.allSettled([c.commit(a.packet),c.commit(b.packet)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await c.read('products',c.p.id)).estoqueAtual,0);assert.equal((await c.root.collection('stockMovements').get()).size,1);
+});
+test('prepared containment rollback keeps receipts, normal sales and snapshots, but fences new flexible executions',{skip:!process.env.VECONI_TEST_ROLLBACK_SOURCE},async()=>{
+ const rollback=operational=>require(path.resolve(process.env.VECONI_TEST_ROLLBACK_SOURCE,'src/services/operational-commit-service')).operationalCommitService(operational),svc=rollback(db),c=await setup(),a=c.sell();
+ await c.commit(a.packet);const marker=await c.read('processedOperations',a.packet.operationId);
+ assert.equal((await svc.commit({auth:{uid:c.owner},data:{businessId:c.bid,item:a.packet}})).replayed,true);assert.deepEqual(await c.read('processedOperations',a.packet.operationId),marker);
+ const b=c.sell();await assert.rejects(svc.commit({auth:{uid:c.owner},data:{businessId:c.bid,item:b.packet}}),/temporariamente pausadas/);assert.equal((await c.root.collection('sales').get()).size,1);
+ const normal=await physicalCase(),p=normal.physicalHarness().sell({status:'pago'});await svc.commit({auth:{uid:normal.owner},data:{businessId:normal.bid,item:p.packet}});assert.equal((await normal.read('products',normal.p.id)).estoqueAtual,2);
+});
+test('active-source readers keep V224, private costs and company/space isolation for service projections',{skip:!process.env.VECONI_TEST_PERFORMANCE_SOURCE||!process.env.VECONI_TEST_READER_SOURCE},async()=>{
+ const c=await setup(),a=c.sell();await c.commit(a.packet);
+ const performance=require(path.resolve(process.env.VECONI_TEST_PERFORMANCE_SOURCE,'src/services/performance-read-service')).performanceReadService(db),reader=require(path.resolve(process.env.VECONI_TEST_READER_SOURCE,'src/services/operational-read-service')).operationalReadService(db);
+ const range={businessId:c.bid,workspaceGeneration:0,from:'2020-01-01T00:00:00Z',to:'2021-01-01T00:00:00Z',spaceId:c.space},readInput={businessId:c.bid,spaceId:c.space,collection:'sales',mode:'get',id:a.sale.id};
+ await c.root.collection('sales').doc(a.sale.id).update({data:'2020-05-01T12:00:00Z'});
+ const page=await performance.page({auth:{uid:c.owner},data:range});assert.equal(page.rows.length,1);assert.equal(page.rows[0].itens[0].serviceExecution.km,12);
+ const projected=await reader.read({auth:{uid:c.owner},data:readInput});assert.equal(projected.record.itens[0].serviceExecution.km,12);assert.equal(projected.record.itens[0].serviceCostSnapshot,undefined);
+ await c.root.collection('members').doc(c.seller).update({permissionsVersion:3,permissions:{'sales.create':true,'sales.viewAll':true,'performance.daily':true,'performance.history':false,'reports.view':true,'products.view':true,'inventory.view':true}});
+ await assert.rejects(performance.page({auth:{uid:c.seller},data:range}),{code:'permission-denied'});await assert.rejects(reader.read({auth:{uid:c.seller},data:readInput}),{code:'permission-denied'});
+ await c.root.collection('members').doc(c.seller).update({permissions:{'sales.create':true,'sales.viewAll':true,'performance.daily':true,'performance.history':true,'reports.view':true,'products.view':true,'inventory.view':true}});
+ const seller=await performance.page({auth:{uid:c.seller},data:{...range,spaceId:'all'}});assert.equal(seller.rows.length,1);assert.equal(seller.rows[0].custoTotal,undefined);assert.equal(seller.rows[0].lucro,undefined);
+ await assert.rejects(performance.page({auth:{uid:c.seller},data:{...range,spaceId:c.other}}),{code:'permission-denied'});
+ await assert.rejects(reader.read({auth:{uid:c.seller},data:{...readInput,spaceId:c.other}}),{code:'permission-denied'});
+ await assert.rejects(performance.page({auth:{uid:'foreign-user'},data:range}),{code:'permission-denied'});
 });

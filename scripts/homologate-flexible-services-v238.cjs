@@ -3,8 +3,9 @@
 if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||''))throw Error('Loopback Emulator required; never production');
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto'),assert=require('node:assert/strict');
 const {initializeApp,deleteApp}=require('firebase-admin/app'),{getFirestore,FieldValue,Timestamp}=require('firebase-admin/firestore');
-const {operationalCommitService}=require('../functions/src/services/operational-commit-service');
-const {performanceReadService}=require('../functions/src/services/performance-read-service');
+const functionSource=process.env.VECONI_TEST_FUNCTION_SOURCE||path.resolve(__dirname,'../functions'),performanceSource=process.env.VECONI_TEST_PERFORMANCE_SOURCE||path.resolve(__dirname,'../functions');
+const {operationalCommitService}=require(path.resolve(functionSource,'src/services/operational-commit-service'));
+const {performanceReadService}=require(path.resolve(performanceSource,'src/services/performance-read-service'));
 const {financialIncomeService}=require('../functions/src/services/financial-income-service');
 const {activityEventService}=require('../functions/src/services/activity-event-service');
 const {queueRuntime}=require('../tests/helpers/sync-queue-runtime.cjs');

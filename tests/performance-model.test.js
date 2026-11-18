@@ -88,3 +88,30 @@ test('receipt-only space rows never expose profit or cost to denied profiles',()
  const v=build([],{payments:[{id:'r',businessId:'biz',spaceId:'z',tipo:'pagamento',valor:10,data:'2026-10-04T16:00:00Z'}],canCost:false,canProfit:false});
  for(const row of v.spaces)for(const f of ['cost','profit','margin'])assert.equal(f in row,false);
 });
+test('receipt coverage never infers completeness from row count or an old payment',()=>{
+ const rows=(n,from)=>Array.from({length:n},(_,i)=>({id:'p'+i,businessId:'biz',tipo:'pagamento',valor:1,data:new Date(Date.parse(from)+i*60000).toISOString()}));
+ assert.equal(M.receiptCoverage(rows(10,'2026-10-04T12:00:00Z'),'biz','2026-09-28').complete,false);
+ assert.equal(M.receiptCoverage(rows(200,'2026-10-04T12:00:00Z'),'biz','2026-09-28').complete,false);
+ assert.equal(M.receiptCoverage([...rows(199,'2026-10-04T12:00:00Z'),{id:'old',businessId:'biz',tipo:'pagamento',valor:1,data:'2026-09-01T12:00:00Z'}],'biz','2026-09-28').complete,false);
+ assert.equal(M.receiptCoverage(rows(250,'2026-10-04T12:00:00Z').map(p=>({...p,businessId:'other'})),'biz','2026-09-28').localCount,0);
+});
+test('duplicate receipt operation IDs and unresolved/rejected rows never inflate cash',()=>{
+ const pay=(id,status,operationId)=>({id,businessId:'biz',spaceId:'a',tipo:'pagamento',valor:70,data:'2026-10-04T16:00:00Z',status,operationId});
+ const rows=[pay('original','applied','op-1'),pay('duplicate','applied','op-1'),...['pending','pendente','conflict','rejected','error','cancelled','superseded'].map((s,i)=>pay('bad-'+i,s,'bad-op-'+i))];
+ const v=build([],{payments:rows});assert.equal(v.cash.current.credit,70);assert.equal(v.cash.current.creditCount,1);assert.equal(v.cash.coverage.complete,false);
+});
+test('fiado, partial receipt, crediário entry, renewal and reversals keep revenue, received and estimated cost apart',()=>{
+ const pay=(id,valor,extra={})=>({id,businessId:'biz',spaceId:'a',tipo:'pagamento',valor,data:'2026-10-04T16:00:00Z',...extra});
+ const sales=[
+  sale('fiado',200,50,{status:'fiado',formaPagamento:'fiado'}),
+  sale('cred',300,90,{formaPagamento:'crediario',installmentPlan:{version:1,downPaymentCents:5000,count:2}}),
+  sale('renov',80,0,{formaPagamento:'pix',subscriptionId:'sub-1'}),
+  sale('cancel',999,1,{status:'cancelada',formaPagamento:'pix'}),
+ ];
+ const receipts=[pay('parcial',70,{effectiveAmount:70,requestedAmount:200}),pay('entrada',50,{installmentSaleId:'cred'}),pay('estorno',90,{status:'estornado'}),pay('ajuste',30,{tipo:'ajuste_saldo'})];
+ const v=build(sales,{payments:receipts});
+ assert.equal(v.current.revenue,580);assert.equal(v.current.count,3);
+ assert.equal(v.current.cost,140);assert.equal(v.current.profit,440);
+ assert.deepEqual([v.cash.current.upfront,v.cash.current.credit,v.cash.current.total],[80,120,200]);
+ assert.ok(!('expenses' in v.current),'estimated sale cost is never presented as a financial expense');
+});
