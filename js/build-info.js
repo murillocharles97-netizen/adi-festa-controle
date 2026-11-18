@@ -27,7 +27,7 @@
     appVersion: APP_VERSION,
     release: "238", // = APP_VERSION major; literal kept for existing release checks
     installmentCreationPaused: false,
-    hotfix: "flexible-services-qa-v1",
+    hotfix: "services-consolidated-qa-v1",
     billingCheckoutPaused: false,
     priorSalesPaused: false,
     performanceViewsPaused: false,

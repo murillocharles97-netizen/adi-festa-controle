@@ -73,4 +73,5 @@ async function main(){
   fs.writeFileSync(path.join(out,'browser-results.json'),JSON.stringify({synthetic:true,realFinancialWrites:0,results,sellerCostPrivacy:true,productFormSave:true},null,2));console.log(JSON.stringify(results));
  }catch(e){if(activePage&&!activePage.isClosed()){console.error(await activePage.evaluate(()=>({errors:qaErrors,status:document.querySelector('#qa-status')?.textContent,serviceError:document.querySelector('[data-service-error]')?.textContent,feedback:document.querySelector('#sale-submit-feedback')?.textContent,count:Checkout.state(),invalid:[...document.querySelectorAll(':invalid')].map(x=>[x.name,x.validationMessage])})));await activePage.screenshot({path:path.join(out,'failure.png')});}throw e;}finally{await browser.close();await new Promise(r=>server.close(r));}
 }
-main().catch(e=>{console.error(e);process.exitCode=1;});
+module.exports={html,fixture,styles,scripts,root};
+if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -2,7 +2,9 @@
 const {HttpsError}=require('firebase-functions/v2/https');
 const {FieldPath,Timestamp}=require('firebase-admin/firestore');
 const {permissionService}=require('./permission-service');
+const FlexibleService=require('../shared/flexible-service');
 const PAGE_SIZE=250;
+const serviceExecution=i=>{try{return i.serviceExecution?FlexibleService.execution(i.serviceExecution):null;}catch{return null;}};
 const text=v=>String(v??'').slice(0,200);
 const numeric=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
 function sanitizeSale(id,s,financial,permissions){
@@ -12,6 +14,7 @@ function sanitizeSale(id,s,financial,permissions){
     deleted:s.deleted===true||Boolean(s.deletedAt)||s.desfeita===true,formaPagamento:text(s.formaPagamento),paymentIntentId:s.paymentIntentId?text(s.paymentIntentId):null,
     paymentMetadata:{provider:text(s.paymentMetadata?.provider||s.provider)},
     itens:(s.itens||s.items||[]).map(i=>({produtoId:text(i.produtoId||i.productId),nome:text(i.nome||i.productNameSnapshot),quantidade:numeric(i.quantidade??i.quantity),
+      ...(serviceExecution(i)?{serviceExecution:serviceExecution(i)}:{}),
       categoryNameSnapshot:text(i.categoryNameSnapshot||i.categoria),subtotalFinal:numeric(i.subtotalFinal??i.valorTotal??Number(i.quantidade??i.quantity)*Number(i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot))}))};
   if(permissions.cost)out.custoTotal=numeric(financial?.custoTotal??s.custoTotal);
   const historicalCost=numeric(financial?.custoTotal??s.custoTotal);
