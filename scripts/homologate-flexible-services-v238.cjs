@@ -19,17 +19,19 @@ function referenceModule(name){const Module=require('node:module'),filename=path
 const referenceReceipt=referenceModule('operational-commit-service.js').operationalCommitService(db),referenceCosts=referenceModule('sale-cost-service.js').saleCostService(db,{FieldValue});
 const hash=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const readBody=req=>new Promise((resolve,reject)=>{let text='';req.on('data',x=>{text+=x;if(text.length>2000000)reject(Error('QA packet too large'));});req.on('end',()=>{try{resolve(JSON.parse(text||'{}'));}catch(e){reject(e);}});});
-async function caseServer(width){
+async function caseServer(width,{catalog=false}={}){
  const suffix=crypto.randomUUID().slice(0,8),bid=`qa-v238-http-${width}-${suffix}`,uid=`qa-owner-${suffix}`,space=`qa-space-${suffix}`,token=crypto.randomUUID(),business=db.doc('businesses/'+bid);
  await business.set({businessId:bid,ownerId:uid,active:true,workspaceGeneration:0,legacyAccessDisabled:true,subscription:{planId:'internal',status:'active'}});
  await db.doc('users/'+uid).set({uid,businessId:bid,active:true,role:'owner'});
  await business.collection('members').doc(uid).set({uid,role:'owner',status:'active',spaceAccess:'all',permissionsVersion:3});
- await db.doc('financialSpaces/'+space).set({id:space,businessId:bid,linkedBusinessId:bid,ownerUid:uid,type:'business',active:true,automation:{enabled:true,activatedAt:'2026-01-01T00:00:00Z'},capabilities:{sales:true,products:true,inventory:true,finance:true}});
+ const qaSpace={id:space,name:catalog?'Táxi':'Corridas QA',businessId:bid,linkedBusinessId:catalog?null:bid,ownerUid:uid,type:catalog?'other':'business',active:true,automation:{enabled:true,activatedAt:'2026-01-01T00:00:00Z'},capabilities:{sales:true,products:!catalog,inventory:!catalog,finance:true}};
+ await db.doc('financialSpaces/'+space).set(qaSpace);
  await business.collection('products').doc('physical-sentinel').set({id:'physical-sentinel',businessId:bid,nome:'Produto físico de controle QA',preco:5,estoqueAtual:5,estoque:5,totalStock:5,ativo:true,spaceAccessMode:'single_space',allowedSpaceIds:[space],defaultSpaceId:space});
  let lostResponse=false;const requests=[],drains=[],payloads=new Map();
  const snapshot=async()=>{
   const [sales,financial,markers,movements,entries,sentinel]=await Promise.all(['sales','saleFinancials','processedOperations','stockMovements'].map(n=>business.collection(n).get()).concat([db.collection(`financialSpaces/${space}/entries`).get(),business.collection('products').doc('physical-sentinel').get()]));
-  return{sales:sales.docs.map(d=>({id:d.id,...d.data()})),financial:financial.docs.map(d=>({id:d.id,...d.data()})),markers:markers.docs.map(d=>({id:d.id,...d.data()})),movements:movements.size,entries:entries.docs.map(d=>({id:d.id,...d.data()})),sentinel:sentinel.data(),requests,drains};
+  const products=catalog?await business.collection('products').get():null,configs=catalog?await business.collection('productFinancials').get():null;
+  return{sales:sales.docs.map(d=>({id:d.id,...d.data()})),financial:financial.docs.map(d=>({id:d.id,...d.data()})),markers:markers.docs.map(d=>({id:d.id,...d.data()})),movements:movements.size,entries:entries.docs.map(d=>({id:d.id,...d.data()})),sentinel:sentinel.data(),requests,drains,...(catalog?{products:products.docs.map(d=>({id:d.id,...d.data()})),configs:configs.docs.map(d=>({id:d.id,...d.data()}))}:{})};
  };
  const diff=section('function changedFields(','function captureChanges(');
  const adapter=String.raw`
@@ -42,28 +44,30 @@ let queue=[],evidence=[],confirmed=[],draining=null;
 const persist=()=>{const data=structuredClone(state),q=structuredClone(queue),e=structuredClone(evidence),c=structuredClone(confirmed);pending=new Promise((resolve,reject)=>{const t=qaIdb.transaction('state','readwrite'),s=t.objectStore('state');s.put(data,'data');s.put(q,'queue');s.put(e,'evidence');s.put(c,'confirmed');t.oncomplete=resolve;t.onerror=()=>reject(t.error);});return pending;};
 const api=async(name,data={})=>{const r=await fetch('/qa-api/'+name,{method:'POST',headers:{'Content-Type':'application/json','X-QA-Token':${JSON.stringify(token)}},body:JSON.stringify(data)});const value=await r.json();if(!r.ok)throw Object.assign(Error(value.message),{code:value.code});return value;};
 const makePacket=(before,next,sale)=>{const writes=diffWrites(before,next);if(!writes.length)return;const operationId=sale?.operationId||crypto.randomUUID(),item={queueId:crypto.randomUUID(),operationId,businessId:${JSON.stringify(bid)},userId:${JSON.stringify(uid)},workspaceGeneration:0,syncProtocolVersion:1,payloadVersion:4,status:'pending',createdAt:new Date().toISOString(),payload:{eventKind:sale?'sale':'simple',writes}};queue.push(item);evidence.push(structuredClone(item));};
-const publish=(before,next,sale)=>{makePacket(before,next,sale);state=next;persist();if(navigator.onLine)setTimeout(()=>qaDrain().catch(e=>qaErrors.push(e.message)),60);};
+window.qaAutoDrain=true;
+const publish=(before,next,sale)=>{makePacket(before,next,sale);state=next;persist();if(navigator.onLine&&qaAutoDrain)setTimeout(()=>qaDrain().catch(e=>qaErrors.push(e.message)),60);};
 DB.alterar=fn=>{const before=structuredClone(state),next=structuredClone(state);fn(next);publish(before,next);};
 SyncFirebase.createSaleOperation=(before,next,sale)=>publish(before,next,sale);
 SyncFirebase.isSalePending=s=>!confirmed.includes(s.operationId);
 SyncFirebase.inspectCheckoutSaleAttempt=attempt=>{const sale=state.vendas.find(s=>s.operationId===attempt.operationId);return sale?{sale,status:confirmed.includes(sale.operationId)?'confirmed':'pending'}:null;};
-window.qaDrain=async()=>{if(!navigator.onLine)return;if(draining)return draining;draining=(async()=>{await DB.flush();if(!queue.length)return;const batch=queue.slice(),ids=new Set(batch.map(x=>x.operationId)),response=await api('drain',{queue:batch});queue=[...queue.filter(x=>!ids.has(x.operationId)),...response.queue];confirmed=[...new Set([...confirmed,...response.confirmed])];await persist();})().finally(()=>{draining=null;});return draining;};
+window.qaDrain=async()=>{if(!navigator.onLine)return;if(draining)return draining;draining=(async()=>{await DB.flush();if(!queue.length)return;const batch=queue.slice(),ids=new Set(batch.map(x=>x.operationId));dispatchEvent(new Event('firebase-sync-status'));const response=await api('drain',{queue:batch});queue=[...queue.filter(x=>!ids.has(x.operationId)),...response.queue];confirmed=[...new Set([...confirmed,...response.confirmed])];await persist();dispatchEvent(new Event('firebase-sync-status'));})().finally(()=>{draining=null;});return draining;};
 addEventListener('online',()=>qaDrain().catch(e=>qaErrors.push(e.message)));
 window.FirebaseCallable=async(name,input)=>{if(name!=='getPerformancePage')throw Error('QA callable not allowed');return{data:await api('performance',input)};};
-BusinessContext.get=()=>({businessId:${JSON.stringify(bid)},role:'owner',spaceAccess:'all',business:{workspaceGeneration:0,timezone:'America/Sao_Paulo'},permissionSignature:'qa-owner'});
+BusinessContext.get=()=>({businessId:${JSON.stringify(bid)},role:'owner',spaceAccess:'all',business:{ownerId:${JSON.stringify(uid)},active:true,workspaceGeneration:0,timezone:'America/Sao_Paulo'},permissionSignature:'qa-owner'});
 TeamAccess.current=()=>({role:'owner'});DB.isHydrated=()=>true;
-SpaceContext.contextualData=d=>d;SpaceContext.list=()=>[{id:${JSON.stringify(space)},name:'Corridas QA',businessId:${JSON.stringify(bid)}}];
+${catalog?`SpaceContext.setSpaces([${JSON.stringify(qaSpace)}]);SpaceContext.selectActive(${JSON.stringify(space)});`:`SpaceContext.contextualData=d=>d;SpaceContext.list=()=>[{id:${JSON.stringify(space)},name:'Corridas QA',businessId:${JSON.stringify(bid)}}];`}
 let qaRoute='vender';Router.atual=()=>qaRoute;Router.ir=route=>qaShow(route==='inicio'?'vender':route);
-window.qaShow=route=>{qaRoute=route;Modais.fechar();const host=document.querySelector('#app');if(route==='historico'){host.innerHTML=ActivityCenter.render();ActivityCenter.bind();}else if(route==='desempenho'){host.innerHTML=PerformanceDashboard.render();PerformanceDashboard.bind();}else{qaRoute='vender';host.innerHTML=Checkout.view();Checkout.bind();if(DesktopSales.isDesktop())DesktopSales.bind();else CheckoutMobile.enhance();}lucide.createIcons();};
+window.qaShow=route=>{qaRoute=route;Modais.fechar();const host=document.querySelector('#app');if(route==='produtos'){host.innerHTML=ProdutosMobile.render();ProdutosMobile.bind();}else if(route==='historico'){host.innerHTML=ActivityCenter.render();ActivityCenter.bind();}else if(route==='desempenho'){host.innerHTML=PerformanceDashboard.render();PerformanceDashboard.bind();}else{qaRoute='vender';host.innerHTML=Checkout.view();Checkout.bind();if(DesktopSales.isDesktop())DesktopSales.bind();else CheckoutMobile.enhance();}lucide.createIcons();};
 SyncFirebase.subscribeRecentActivityEvents=(callback,onError)=>{let stopped=false;api('activities').then(items=>{if(!stopped)callback(items,{}, {hasMore:false});}).catch(onError);return()=>{stopped=true;};};
-window.FirestoreRepositories={sales:{getSaleStatusFromServer:id=>api('sale',{id})}};
+window.FirestoreRepositories={sales:{getSaleStatusFromServer:id=>api('sale',{id})},products:{getProductStatusFromServer:id=>api('product-status',{id})}};
+SyncFirebase.getQueueDiagnostics=()=>queue.map(q=>({businessId:q.businessId,originalStatus:q.status,category:q.status==='error'?'manual_review':'pending',errorMessage:q.lastErrorMessage,paths:q.payload.writes.map(w=>'businesses/'+q.businessId+'/'+w.entityType+'/'+w.entityId)}));
 window.qaSnapshot=()=>api('snapshot');window.qaOriginals=()=>structuredClone(evidence);
 qaReady.then(async()=>{const get=key=>new Promise(resolve=>{const r=qaIdb.transaction('state').objectStore('state').get(key);r.onsuccess=()=>resolve(r.result||[]);});[queue,evidence,confirmed]=await Promise.all(['queue','evidence','confirmed'].map(get));document.querySelector('#qa-history').onclick=()=>qaShow('historico');document.querySelector('#qa-performance').onclick=()=>qaShow('desempenho');document.querySelector('#qa-selling').onclick=()=>qaShow('vender');qaShow('vender');if(navigator.onLine){await qaDrain();if('serviceWorker'in navigator){await navigator.serviceWorker.register('/qa-worker.js');await navigator.serviceWorker.ready;if(!navigator.serviceWorker.controller)await new Promise(resolve=>navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true}));const resources=['/',...Array.from(document.querySelectorAll('script[src],link[rel="stylesheet"]'),e=>e.src||e.href)];await Promise.all(resources.map(url=>fetch(url).catch(()=>{})));}}window.qaHomologReady=true;});
 `;
  let html=fixture.html.replaceAll("'qa-business'",JSON.stringify(bid)).replaceAll("'qa-owner'",JSON.stringify(uid)).replaceAll("'qa-space'",JSON.stringify(space));
  html=html.replace(/const initial=\(\)=>\([\s\S]*?\);\nlet state=initial\(\)/,"const initial=()=>({config:{nome:'Corridas QA'},clientes:[],produtos:[],variacoesProdutos:[],vendas:[],pagamentos:[],movimentacoes:[],movimentacoesEstoque:[]});\nlet state=initial()");
  html=html.replace('</header><p id="qa-status"','</header><nav class="qa-nav"><button id="qa-selling" class="btn btn-light">Vender</button><button id="qa-history" class="btn btn-light">Histórico</button><button id="qa-performance" class="btn btn-light">Desempenho</button></nav><p id="qa-status"');
- const extra=['js/recibos.js','js/activity-center.js','js/performance-model.js','js/performance-dashboard.js'].map(x=>`<script src="/${x}"></script>`).join('');
+ const extra=[...(catalog?['js/spaces.js','js/produtos-mobile.js']:[]),'js/recibos.js','js/activity-center.js','js/performance-model.js','js/performance-dashboard.js'].map(x=>`<script src="/${x}"></script>`).join('');
  html=html.replace('<script>qaReady.then(()=>{',extra+`<script>${adapter}</script><script>qaReady.then(()=>{`);
  const worker=`self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('activate',e=>e.waitUntil(clients.claim()));self.addEventListener('fetch',e=>{if(e.request.method!=='GET'||new URL(e.request.url).pathname.startsWith('/qa-api/'))return;e.respondWith(fetch(e.request).then(async r=>{if(r.ok)(await caches.open('qa-v238')).put(e.request,r.clone());return r;}).catch(async()=>{const cached=await caches.match(e.request);if(cached)return cached;throw Error('Offline QA cache miss');}));});`;
  const server=http.createServer(async(req,res)=>{try{
@@ -87,6 +91,7 @@ qaReady.then(async()=>{const get=key=>new Promise(resolve=>{const r=qaIdb.transa
    }else if(req.url==='/qa-api/performance'){assert.equal(data.businessId,bid);result=await performance.page({auth:{uid},data});}
    else if(req.url==='/qa-api/activities'){const rows=await business.collection('activityEvents').get();result=rows.docs.map(d=>({...d.data(),createdAt:d.data().createdAt.toDate().toISOString(),updatedAt:d.data().updatedAt.toDate().toISOString(),sourceUpdatedAt:d.data().sourceUpdatedAt.toDate().toISOString()}));}
    else if(req.url==='/qa-api/sale'){assert.ok(/^[a-z0-9-]{36}$/.test(data.id));result={id:data.id,...(await business.collection('sales').doc(data.id).get()).data()};}
+   else if(req.url==='/qa-api/product-status'){assert.ok(/^[a-z0-9-]{36}$/.test(data.id));const doc=await business.collection('products').doc(data.id).get(),value=doc.data();result=doc.exists?Object.fromEntries(['businessId','workspaceGeneration','nome','itemKind','productType','preco','atualizadoEm','spaceAccessMode','allowedSpaceIds','defaultSpaceId','serviceConfig','ativo','active'].filter(k=>k in value).map(k=>[k,value[k]])):null;}
    else if(req.url==='/qa-api/snapshot')result=await snapshot();
    else{res.statusCode=404;return res.end('{}');}
    res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(result));
@@ -124,4 +129,5 @@ async function main(){
  }}finally{await browser.close();await db.terminate();await deleteApp(app);}
  fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({synthetic:true,projectId,productionWrites:0,results},null,2));
 }
-if(process.argv.includes('--preview'))caseServer('preview').then(c=>console.log('V238 integração QA — só dados fictícios: '+c.url)).catch(e=>{console.error(e);process.exitCode=1;});else main().catch(e=>{console.error(e);process.exitCode=1;});
+module.exports={caseServer,cleanup:async()=>{await db.terminate();await deleteApp(app);}};
+if(require.main===module){if(process.argv.includes('--preview'))caseServer('preview').then(c=>console.log('V238 integração QA — só dados fictícios: '+c.url)).catch(e=>{console.error(e);process.exitCode=1;});else main().catch(e=>{console.error(e);process.exitCode=1;});}

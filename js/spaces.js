@@ -404,8 +404,9 @@
   }
   function productsForView(products = []) {
     const space = selectedHome();
-    if (!space?.capabilities.products) return [];
-    return products.filter(product => ownRow(product) && productAllowsSpace(product, space.id));
+    if (!space) return [];
+    return products.filter(product => ownRow(product) && productAllowsSpace(product, space.id) &&
+      (space.capabilities.products || space.capabilities.sales && product.itemKind === 'service'));
   }
   function customerRelations(db) {
     const relations = new Map();

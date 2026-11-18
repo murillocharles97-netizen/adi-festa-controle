@@ -321,6 +321,7 @@ function createRawFirestoreRepository(collectionName) {
       const status = Object.fromEntries([
         "id", "businessId", "workspaceGeneration", "spaceAccessMode", "allowedSpaceIds", "defaultSpaceId",
         "spaceId", "financialSpaceId", "spaceScopeVersion", "active", "ativo", "deletedAt", "archivedAt", "catalogAction",
+        "nome", "itemKind", "productType", "preco", "serviceConfig", "atualizadoEm",
       ].filter(key => key in product).map(key => [key, product[key]]));
       if (product.availability && typeof product.availability === 'object')
         status.availability = Object.fromEntries(['spaceAccessMode','allowedSpaceIds','defaultSpaceId','spaceScopeVersion'].filter(k => k in product.availability).map(k => [k,product.availability[k]]));

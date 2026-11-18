@@ -41,6 +41,67 @@
     if (typeof value?.toDate === "function") return value.toDate().getTime();
     return new Date(value).getTime() || String(value);
   };
+  // Status of the last catalog save in this session only. Queue/receipts remain owned by Sync.
+  // No replay, queue mutation or automatic product creation is performed here.
+  let saveNotice = null;
+  const saveScope = () => JSON.stringify([window.DB?.getBusinessId?.(), window.DB?.getPrincipal?.(),
+    window.DB?.getWorkspaceGeneration?.(), window.FirebaseSession?.user?.uid,
+    window.BusinessContext?.get?.().businessId, window.BusinessContext?.get?.().permissionSignature,
+    Boolean(window.BusinessContext?.get?.().loading), window.TeamAccess?.has?.('products.view'), window.SpaceContext?.activeId?.()]);
+  const currentNotice = () => saveNotice?.scope === saveScope() ? saveNotice : null;
+  function renderSaveNotice() {
+    const host = document.querySelector('#app .products-mobile-page,#app .desktop-products-page'), notice = currentNotice();
+    const old = document.querySelector('[data-product-save-status]');
+    if (!host || !notice) { old?.remove(); return; }
+    const node = old || document.createElement('p');
+    if (!old) { node.dataset.productSaveStatus = ''; node.className = 'product-save-status'; node.setAttribute('role','status'); host.prepend(node); }
+    const labels = {
+      saving: 'Salvando neste aparelho…',
+      saved: 'Salvo neste aparelho. A confirmação na nuvem está pendente. Não cadastre novamente.',
+      syncing: 'Salvo neste aparelho · sincronizando… Não cadastre novamente.',
+      confirmed: 'Cadastro confirmado na nuvem.',
+      error: 'Cadastro preservado neste aparelho, mas há um erro. Abra Sincronização para conferir. Não cadastre novamente.',
+    };
+    const text = labels[notice.status] + (notice.message ? ' ' + notice.message : '');
+    if (node.textContent !== text) node.textContent = text;
+    if (node.dataset.state !== notice.status) node.dataset.state = notice.status;
+  }
+  async function checkSaveNotice() {
+    const notice = currentNotice();
+    if (!notice || notice.checking || notice.status === 'saving' || notice.status === 'confirmed') return;
+    try {
+      const bid = window.DB?.getBusinessId?.(), path = `businesses/${bid}/products/${notice.product.id}`;
+      const queue = window.SyncFirebase?.getQueueDiagnostics?.().filter(q => q.businessId === bid &&
+        (q.paths?.includes(path) || q.firestorePath === path)) || [];
+      const failed = queue.find(q => q.originalStatus === 'error' || ['manual_review','quarantined'].includes(q.category));
+      if (failed) { notice.status = 'error'; notice.message = failed.errorMessage || 'A sincronização precisa de conferência.'; return; }
+      notice.message = '';
+      if (queue.some(q => !['archived','resolved'].includes(q.category))) {
+        notice.status = navigator.onLine ? 'syncing' : 'saved'; return;
+      }
+      notice.status = 'saved';
+      const repository = window.FirestoreRepositories?.products;
+      if (!navigator.onLine || !repository?.getProductStatusFromServer || Date.now() - notice.checkedAt < 3000) return;
+      notice.checkedAt = Date.now(); notice.checking = true;
+      const remote = await repository.getProductStatusFromServer(notice.product.id);
+      if (currentNotice() !== notice) return;
+      const p = notice.product, keys = ['nome','itemKind','productType','preco','atualizadoEm','spaceAccessMode','defaultSpaceId'];
+      if (remote?.businessId === bid && (remote.workspaceGeneration ?? 0) === (window.DB?.getWorkspaceGeneration?.() ?? 0) &&
+        remote.active !== false && remote.ativo !== false && !remote.deletedAt &&
+        keys.every(key => JSON.stringify(remote[key] ?? null) === JSON.stringify(p[key] ?? null)) &&
+        JSON.stringify(remote.allowedSpaceIds || []) === JSON.stringify(p.allowedSpaceIds || []) &&
+        ['id','version','pricingModel','requiresKm','requiresMinutes'].every(key =>
+          JSON.stringify(remote.serviceConfig?.[key] ?? null) === JSON.stringify(p.serviceConfig?.[key] ?? null))) notice.status = 'confirmed';
+    } catch (error) {
+      if (currentNotice() === notice && String(error.code || '').includes('permission-denied')) {
+        notice.status = 'error'; notice.message = 'Seu perfil não pôde confirmar este cadastro na nuvem.';
+      }
+    } finally { notice.checking = false; renderSaveNotice(); }
+  }
+  for (const event of ['firebase-sync-status','cloud-data-updated','online'])
+    addEventListener(event, () => { void checkSaveNotice(); });
+  addEventListener('business-context-changed', renderSaveNotice);
+  addEventListener('veconi-space-context-changed', renderSaveNotice);
   function versionedUrl(url, updatedAt) {
     if (!url || !updatedAt) return url || "";
     if (/^(?:blob:|data:)/i.test(String(url))) return url;
@@ -764,6 +825,7 @@
       if (existing) delete data.estoqueAtual;
       if(window.TeamAccess?.has?.("cost.view")!==true)delete data.custo;
       button.disabled = true;
+      button.textContent = 'Salvando…';
       try {
         const imageData = await commit(imageDraft, {
           productId,
@@ -788,11 +850,14 @@
           ativo: true,
           ...imageData,
         });
+        saveNotice = { scope: saveScope(), product: structuredClone(saved), status: 'saving', checkedAt: 0 };
+        await window.DB?.flush?.();
+        saveNotice.status = 'saved';
         cleanupViewport();
         cleanupSpaceLifecycle();
         cleanupDraft(imageDraft);
         window.Modais.fechar();
-        window.Utils.toast("Produto salvo");
+        window.Utils.toast(saved.itemKind === 'service' ? 'Serviço salvo neste aparelho' : 'Produto salvo neste aparelho');
         defaults.onSaved?.(saved);
         if (saved.productType === "recurring" && saved.hasVariations && matchMedia("(max-width:767px)").matches)
           setTimeout(() => window.ProdutosMobile?.variableDetails?.(saved.id), 0);
@@ -804,9 +869,16 @@
               detail: { source: "product-form", collection: "products" },
             }),
           );
+        renderSaveNotice();
+        void checkSaveNotice();
       } catch (error) {
+        if (currentNotice()?.status === 'saving') {
+          saveNotice.status = 'error'; saveNotice.message = 'Não foi possível confirmar a gravação local. Mantenha esta aba aberta e não cadastre novamente.';
+          renderSaveNotice();
+        }
         window.Utils.toast(error.message || "Não foi possível salvar o produto.", true);
         button.disabled = false;
+        button.textContent = 'Salvar produto';
         progress.hidden = true;
       }
     };
@@ -818,6 +890,7 @@
   }
   function enhance(root = document) {
     if (!window.Produtos) return;
+    renderSaveNotice();
     root
       .querySelectorAll(
         ".pick-product,.editable-cart,.product-detail-modal,.product-select-list [data-entry-variant]",

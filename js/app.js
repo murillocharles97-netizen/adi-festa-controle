@@ -336,7 +336,7 @@
     return (
       cabecalho(
         "Produtos",
-        window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.",
+        window.TeamAccess?.has?.("cost.view") ? "Produtos, serviços, preços e custos do espaço ativo." : "Produtos, serviços e preços do espaço ativo.",
         `<button class="btn btn-primary" id="new-product">${icon("plus")} Novo produto</button><button class="btn btn-light" data-product-spreadsheet>${icon("file-spreadsheet")} Importar / Exportar produtos</button>`,
       ) +
       (window.SpaceContext?.renderBar?.("products") || "") +
@@ -1235,7 +1235,7 @@
         : route === "clientes"
         ? "Contas, compras e contato em um só lugar."
         : route === "produtos" && matchMedia("(max-width:767px)").matches
-          ? (window.TeamAccess?.has?.("cost.view") ? "Preços, custos e estoque dos seus doces." : "Preços e estoque dos seus produtos.")
+          ? (window.TeamAccess?.has?.("cost.view") ? "Produtos, serviços, preços e custos do espaço ativo." : "Produtos, serviços e preços do espaço ativo.")
           : route === "campanhas"
             ? "Fidelização, pontos e recompensas."
             : route === "financeiro"
