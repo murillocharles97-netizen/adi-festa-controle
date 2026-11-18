@@ -23,6 +23,7 @@
   function range(period='30d',now=new Date(),custom={},zone=DEFAULT_ZONE){
     const today=day(now,zone);let end=today,start=today;
     if(/^\d+d$/.test(period))start=shift(today,1-Number(period.slice(0,-1)));
+    if(period==='yesterday')start=end=shift(today,-1);
     if(period==='month')start=today.slice(0,7)+'-01';
     if(period==='previous'){end=shift(today.slice(0,7)+'-01',-1);start=end.slice(0,7)+'-01';}
     if(period==='year')start=today.slice(0,4)+'-01-01';
@@ -43,9 +44,14 @@
     return{key,name:({pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão manual',fiado:'Fiado'})[key]||'Outras formas',form:key};
   }
   const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,services:0,serviceKm:0,serviceMinutes:0,missingCost:0});
+  // A sale is cash at checkout unless it opened credit (fiado/crediário). Credit
+  // is received later through `pagamentos`; counting both would double the cash.
+  const deferred=s=>method(s).key==='fiado'||Boolean(s.installmentPlan)||String(s.status||'').toLowerCase()==='fiado';
+  function validPayment(p){return p&&p.deleted!==true&&!p.deletedAt&&p.ativo!==false&&p.active!==false&&String(p.tipo||'pagamento')==='pagamento'&&!p.reversedAt&&!p.estornadoEm&&!invalid.has(String(p.status||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase());}
+  const emptyCash=()=>({upfront:0,credit:0,total:0,creditCount:0});
   function compare(current,previous,hasPrevious){return !hasPrevious||previous===0?null:(current-previous)/Math.abs(previous)*100;}
-  function build({sales=[],exchanges=[],exchangeAdjustmentsReady=true,workspaceGeneration,range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
-    const current=empty(),previous=empty(),points=new Map(),payments=new Map(),categories=new Map(),products=new Map(),bySpace=new Map(),seen=new Set();
+  function build({sales=[],payments:receipts=null,exchanges=[],exchangeAdjustmentsReady=true,workspaceGeneration,range:r,spaceId='all',allowedSpaceIds=null,businessId,canCost=false,canProfit=false,spaces=[]}){
+    const current=empty(),previous=empty(),cash={current:emptyCash(),previous:emptyCash()},paid=new Set(),points=new Map(),payments=new Map(),categories=new Map(),products=new Map(),bySpace=new Map(),seen=new Set();
     const names=new Map(spaces.map(s=>[String(s.id),s.name]));
     for(let key=r.start;key<=r.end;key=shift(key,1)){
       if(r.granularity==='hour'){for(let h=0;h<24;h++)points.set(`${key}T${String(h).padStart(2,'0')}`,{key:`${key}T${String(h).padStart(2,'0')}`, ...empty()});}
@@ -61,11 +67,13 @@
       const cost=hasCost?cents(s.custoTotal):0,profit=hasProfit?cents(s.lucro):hasCost?revenue-cost:0,items=s.itens||s.items||[],quantity=items.reduce((n,i)=>n+number(i.quantidade??i.quantity),0);
       const executions=items.filter(i=>i.serviceExecution),serviceKm=executions.reduce((n,i)=>n+number(i.serviceExecution.km),0),serviceMinutes=executions.reduce((n,i)=>n+number(i.serviceExecution.minutes),0);
       const amounts={revenue,cost,profit,count:1,quantity,services:executions.length,serviceKm,serviceMinutes,missingCost:((canCost&&!hasCost)||(canProfit&&!hasProfit&&!hasCost)||s.costResolution==='partial')?1:0};
-      Object.keys(amounts).forEach(k=>total[k]+=amounts[k]);if(!active)continue;
+      Object.keys(amounts).forEach(k=>total[k]+=amounts[k]);
+      const upfront=deferred(s)?0:revenue;cash[active?'current':'previous'].upfront+=upfront;
+      if(!active)continue;
       const p=parts(s.data||s.createdAt,r.zone),bucket=r.granularity==='hour'?`${key}T${p.hour}`:r.granularity==='month'?key.slice(0,7):key,point=points.get(bucket);
       Object.keys(amounts).forEach(k=>point[k]+=amounts[k]);
       const m=method(s);add(payments,m.key,{...m},revenue,1);
-      const space=add(bySpace,sid,{id:sid,name:names.get(sid)||(sid?'Espaço arquivado / indisponível':'Sem espaço histórico'),count:0,profit:0},revenue);space.count++;space.profit+=profit;
+      const space=add(bySpace,sid,{id:sid,name:names.get(sid)||(sid?'Espaço arquivado / indisponível':'Sem espaço histórico'),count:0,profit:0},revenue);space.count++;space.profit+=profit;space.upfront=(space.upfront||0)+upfront;
       // Allocate sale-level discount/rounding to item weights; rankings reconcile to sale revenue.
       const weights=items.map(i=>Math.max(0,cents(i.subtotalFinal??i.valorTotal??number(i.quantidade??i.quantity)*number(i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot)))),sum=weights.reduce((a,b)=>a+b,0);
       let assigned=0;
@@ -76,6 +84,16 @@
         add(categories,category,{name:category},amount);
         add(products,String(i.produtoId||i.productId||i.nome||'unknown'),{name:String(i.nome||i.productNameSnapshot||'Produto histórico')},amount,number(i.quantidade??i.quantity));
       });
+    }
+    for(const p of receipts||[]){
+      if(!validPayment(p)||(p.businessId&&p.businessId!==businessId)||paid.has(String(p.id)))continue;
+      const sid=String(p.spaceId||p.financialSpaceId||''),key=day(p.data||p.createdAt,r.zone);
+      if(allowedSpaceIds&&!allowedSpaceIds.includes(sid)||spaceId!=='all'&&sid!==spaceId||!key||key<r.previousStart||key>r.end)continue;
+      paid.add(String(p.id));const amount=cents(p.effectiveAmount??p.valor),bucket=cash[key>=r.start?'current':'previous'];
+      if(amount<=0)continue;bucket.credit+=amount;bucket.creditCount++;
+      if(key<r.start)continue;
+      const space=bySpace.get(sid)||{id:sid,name:names.get(sid)||(sid?'Espaço arquivado / indisponível':'Sem espaço histórico'),revenue:0,quantity:0,count:0,profit:0};
+      space.credit=(space.credit||0)+amount;bySpace.set(sid,space);
     }
     for(const row of ExchangeEconomics?.select(exchanges,{businessId,spaceId,allowedSpaceIds,workspaceGeneration})||[]){
       const key=day(row.createdAt,r.zone);if(!key||key<r.previousStart||key>r.end)continue;
@@ -98,6 +116,8 @@
       if('exchangeAdjustment' in row)result.exchangeAdjustment=row.exchangeAdjustment/100;
       if('cost' in row){if(canCost)result.cost=row.cost/100;else delete result.cost;}
       if('profit' in row){if(canProfit)result.profit=row.profit/100;else delete result.profit;}
+      for(const k of ['upfront','credit'])if(k in row)result[k]=row[k]/100;
+      if(receipts&&('upfront' in row||'credit' in row))result.received=(row.upfront||0)/100+(row.credit||0)/100;
       if('count' in row)result.ticket=row.count?result.revenue/row.count:0;
       if(canProfit&&'profit' in result)result.margin=result.revenue?result.profit/result.revenue*100:0;
       if(exchangeAdjustmentsReady!==true){result.exchangeProjectionPending=true;result.missingCost=(result.missingCost||0)+1;}
@@ -105,8 +125,13 @@
       return result;
     };
     const result={current:finish(current),previous:finish(previous),points:[...points.values()].map(finish),payments:[...payments.values()].map(finish).sort((a,b)=>b.revenue-a.revenue),categories:[...categories.values()].map(finish).sort((a,b)=>b.revenue-a.revenue),products:[...products.values()].map(finish).sort((a,b)=>b.quantity-a.quantity||b.revenue-a.revenue),spaces:[...bySpace.values()].map(finish).sort((a,b)=>b.revenue-a.revenue)};
+    const total=result.current.revenue;result.spaces.forEach(row=>{row.share=total>0?row.revenue/total*100:0;});
+    // Received = upfront sales + credit receipts. It is a cash view, never added
+    // to revenue; `payments:null` means receipts were not supplied (unknown).
+    const money=c=>({upfront:c.upfront/100,credit:c.credit/100,total:(c.upfront+c.credit)/100,creditCount:c.creditCount});
+    result.cash=receipts?{current:money(cash.current),previous:money(cash.previous)}:null;
     result.comparison={};for(const key of ['revenue','profit','ticket','count'])if(key in result.current)result.comparison[key]=compare(result.current[key],result.previous[key],result.previous.count>0&&(key!=='profit'||exchangeAdjustmentsReady===true&&!current.missingCost&&!previous.missingCost));
     return result;
   }
-  return{range,build,validSale,value,method,day,midnight,shift,compare};
+  return{range,build,validSale,validPayment,deferred,value,method,day,midnight,shift,compare};
 });

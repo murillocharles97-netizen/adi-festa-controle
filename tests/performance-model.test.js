@@ -53,7 +53,7 @@ test('integrated versus manual card; variants group under product and snapshot c
  assert.deepEqual(v.payments.map(p=>p.name),['Cartão manual','Maquininha integrada']);assert.equal(v.products.length,1);assert.equal(v.products[0].quantity,3);assert.ok(v.categories.some(c=>c.name==='Histórica'));
 });
 test('all presets and leap year remain bounded; invalid custom intervals rejected',()=>{
- for(const p of ['today','7d','30d','90d','month','previous','year'])assert.ok(M.range(p,new Date('2024-12-31T15:00:00Z')).days<=366);
+ for(const p of ['today','yesterday','7d','30d','90d','month','previous','year'])assert.ok(M.range(p,new Date('2024-12-31T15:00:00Z')).days<=366);
  assert.equal(M.range('year',new Date('2024-12-31T15:00:00Z')).granularity,'month');
  assert.throws(()=>M.range('custom',new Date(),{start:'2026-02-30',end:'2026-03-04'}));
  assert.throws(()=>M.range('custom',new Date(),{start:'2020-01-01',end:'2026-03-04'}));
@@ -61,4 +61,30 @@ test('all presets and leap year remain bounded; invalid custom intervals rejecte
 test('50k already-loaded thin rows aggregate without cloud access and reconcile',()=>{
  const rows=Array.from({length:50000},(_,i)=>sale(String(i),1,.4));const before=performance.now(),v=build(rows);
  assert.equal(v.current.revenue,50000);assert.equal(v.points.reduce((s,p)=>s+p.revenue,0),50000);assert.ok(performance.now()-before<15000);
+});
+test('yesterday is one Brazil day before today and compares with the day before',()=>{
+ const r=M.range('yesterday',new Date('2026-10-04T15:00:00Z'));
+ assert.deepEqual([r.start,r.end,r.days,r.previousStart,r.granularity],['2026-10-03','2026-10-03',1,'2026-10-02','hour']);
+});
+test('received cash separates upfront sales and fiado receipts without touching revenue',()=>{
+ const pay=(id,valor,extra={})=>({id,businessId:'biz',spaceId:'a',tipo:'pagamento',valor,data:'2026-10-04T16:00:00Z',...extra});
+ const fiado=sale('f',200,50,{status:'fiado',formaPagamento:'fiado'}),parcelado=sale('p',90,10,{installmentPlan:{version:1}});
+ const receipts=[pay('r1',80),pay('r1',80),pay('r2',30,{status:'estornado'}),pay('r3',40,{deleted:true}),pay('r4',25,{businessId:'other'}),pay('r5',60,{spaceId:'b'}),pay('r6',15,{tipo:'ajuste_saldo'})];
+ const v=build([sale('a',100,40),fiado,parcelado],{payments:receipts});
+ assert.equal(v.current.revenue,390);
+ assert.deepEqual([v.cash.current.upfront,v.cash.current.credit,v.cash.current.total,v.cash.current.creditCount],[100,140,240,2]);
+ const a=v.spaces.find(s=>s.id==='a'),b=v.spaces.find(s=>s.id==='b');
+ assert.deepEqual([a.upfront,a.credit,a.received],[100,80,180]);assert.deepEqual([b.revenue,b.credit,b.received,b.count],[0,60,60,0]);
+ assert.equal(build([sale('a',100,40)],{payments:receipts,allowedSpaceIds:['a']}).cash.current.credit,80);
+ assert.equal(build([sale('a',100,40)],{payments:receipts,spaceId:'b'}).cash.current.total,60);
+ assert.equal(build([sale('a',100,40)]).cash,null);
+});
+test('space contribution shares add up to the consolidated revenue',()=>{
+ const v=build([sale('a',300,1),sale('b',100,1,{spaceId:'b'})],{spaces:[{id:'a',name:'Táxi'},{id:'b',name:'Doces'}]});
+ assert.deepEqual(v.spaces.map(s=>[s.name,s.revenue,s.share]),[['Táxi',300,75],['Doces',100,25]]);
+ assert.equal(v.spaces.reduce((n,s)=>n+s.revenue,0),v.current.revenue);
+});
+test('receipt-only space rows never expose profit or cost to denied profiles',()=>{
+ const v=build([],{payments:[{id:'r',businessId:'biz',spaceId:'z',tipo:'pagamento',valor:10,data:'2026-10-04T16:00:00Z'}],canCost:false,canProfit:false});
+ for(const row of v.spaces)for(const f of ['cost','profit','margin'])assert.equal(f in row,false);
 });
