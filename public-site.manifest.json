@@ -168,6 +168,7 @@
     "js/exchange-economics.js",
     "js/fiados.js",
     "js/fiado-conditions.js",
+    "js/fiado-space-regularization.js",
     "js/financial-accounts-carousel.js",
     "js/financial-concurrency.js",
     "js/financial-engine.js",

@@ -24,6 +24,7 @@ window.InstallmentCredit = (() => {
     // Closed legacy Fiado: only installments created after the opening need the
     // server calendar; the archived history and its flags no longer do.
     const opening = client?.fiadoOpeningBalance;
+    if (client?.fiadoHistoryActivation?.spaceRegularization?.version === 1) return true;
     if (opening?.version === 1 && window.Clientes?.legacyFiadoClosed?.())
       return Boolean(client.hasInstallmentFiado || newInstallments.get(id)?.has(opening.hash));
     return Boolean(client?.hasInstallmentFiado || client?.fiadoHistoryVersion === 1 || withInstallments.has(id));
@@ -179,13 +180,15 @@ window.InstallmentCredit = (() => {
     }
   }
   function visibleIds(){return [...new Set([...(window.document?.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]') || [])].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>needsProof(id));}
+  const regularizedOwnerList = () => window.Clientes?.localListBalances?.() && visibleIds().some(id=>clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
+  const hydrateList = () => window.Clientes?.localListBalances?.() ? regularizedOwnerList() : !window.Clientes?.scopedScreen?.();
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
     const route=window.Router?.atual?.();
-    if((route&&route!=='clientes')||window.Clientes?.localListBalances?.()||window.Clientes?.scopedScreen?.()||!available())return;
+    if((route&&route!=='clientes')||!hydrateList()||!available())return;
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
-      const origin=scope(), queue=visibleIds();queue.forEach(paint);
+      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);queue.forEach(paint);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
         while(queue.length&&scope()===origin&&window.Router?.atual?.()===route){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
@@ -210,7 +213,7 @@ window.InstallmentCredit = (() => {
       summariesForScope().delete(id);
       confirmedAt.delete(id);
       paint(id);
-      if(!scoped)scheduleHydration();
+      if(!scoped||regularizedOwnerList())scheduleHydration();
       return;
     }
     const displayed = scoped ? [...summariesForScope().keys()] : visibleIds();
@@ -220,10 +223,10 @@ window.InstallmentCredit = (() => {
     failedAt.clear();
     clientEpochs.clear();
     displayed.forEach(paint);
-    if(!scoped)scheduleHydration();
+    if(!scoped||regularizedOwnerList())scheduleHydration();
   }
   function revisit() {
-    if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+    if(window.Clientes?.scopedScreen?.()){expireDisplayedProofs();if(regularizedOwnerList())scheduleHydration();}
     else recheck();
   }
   function lookupButton(id, financial) {
@@ -267,20 +270,20 @@ window.InstallmentCredit = (() => {
     });
     for(const name of ['online','offline'])window.addEventListener(name,()=>recheck());
     for(const name of ['veconi-spaces-ready','firebase-sync-status'])window.addEventListener(name,()=>{
-      if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+      if(window.Clientes?.scopedScreen?.()){expireDisplayedProofs();if(regularizedOwnerList())scheduleHydration();}
       else{failedAt.clear();scheduleHydration();}
     });
     window.AppLifecycle?.onResume?.(revisit);
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')revisit();});
     function observeList(){
       const app=document.querySelector('#app');
-      if(app)new MutationObserver(()=>{if(!window.Clientes?.scopedScreen?.())scheduleHydration();}).observe(app,{childList:true,subtree:true});
+      if(app)new MutationObserver(()=>{if(hydrateList())scheduleHydration();}).observe(app,{childList:true,subtree:true});
       scheduleHydration();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeList,{once:true});else observeList();
     setInterval(()=>{
       if(document.visibilityState==='hidden')return;
-      if(window.Clientes?.scopedScreen?.())expireDisplayedProofs();
+      if(window.Clientes?.scopedScreen?.()){expireDisplayedProofs();if(regularizedOwnerList())scheduleHydration();}
       else if(visibleIds().length)scheduleHydration();
     },30000);
   }

@@ -41,6 +41,24 @@ function fixture({mobile=true, single=false, businessId='adi-festa', size=0}={})
   const summary=()=>JSON.parse(JSON.stringify(w.Clientes.listSummary()));
   return {h,w,db,render,summary,calls:()=>requests,setRead:fn=>read=fn,close:async()=>{await sleep();h.close();}};
 }
+test('regularized debt never falls back to the default space; visible owner list loads the confirmed per-space proof',async()=>{
+ const f=fixture();try{
+  f.db.vendas=[];
+  f.db.clientes=[{id:'regularized',businessId:'adi-festa',nome:'Pessoa QA',ativo:true,saldo:-1959,financialVersion:2,
+    customerSpaceIds:[ADI,IPTV],fiadoHistoryVersion:1,fiadoHistoryActivation:{spaceRegularization:{version:1,operationId:'synthetic'}}}];
+  f.w.SpaceContext.selectActive(IPTV);
+  const account={version:2,historyProofVersion:1,clientId:'regularized',asOf:f.w.InstallmentPlan.today(),financialVersion:2,
+    dueCents:195900,futureCents:0,totalCents:195900,creditCents:0,hasInstallments:false,
+    entries:[{spaceId:IPTV,remainingCents:188900,dueDate:f.w.InstallmentPlan.today(),historyEventId:'balance_adjustment:qa-taxi',number:null,saleId:null},
+      {spaceId:ADI,remainingCents:7000,dueDate:f.w.InstallmentPlan.today(),historyEventId:'balance_adjustment:qa-store',number:null,saleId:null}]};
+  assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).status,'unverified');
+  f.setRead(async()=>({data:{businessId:'adi-festa',workspaceGeneration:0,account}}));f.render();
+  await f.w.InstallmentCredit.hydrateVisible();await sleep();
+  assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).debt,1889);
+  f.w.SpaceContext.selectActive(ADI);f.render();await f.w.InstallmentCredit.hydrateVisible();await sleep();
+  assert.equal(f.w.Clientes.listFinancialStatus(f.db.clientes[0]).debt,70);
+ }finally{await f.close();}
+});
 for(const mobile of [true,false])test('loaded register balances split legacy and future installments in '+(mobile?'390px layout':'desktop layout'),async()=>{
   const f=fixture({mobile});try{
     f.render();await f.w.InstallmentCredit.hydrateVisible();await sleep();

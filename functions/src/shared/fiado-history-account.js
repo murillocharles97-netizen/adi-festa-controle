@@ -5,6 +5,7 @@ const origin=row=>row.spaceId||row.financialSpaceId||null;
 function project(input,day=Plan.today(),{scoped=false}={}){
  const proof=prove(input,day);if(!proof.financialProof)throw Error('Histórico financeiro sem prova suficiente: '+proof.reason+(proof.details?.length?' ('+proof.details.join(', ')+')':''));
  const {client,collections,opening}=input,own=r=>[r.clienteId,r.clientId,r.customerId].includes(client.id),sales=collections.sales.filter(own),payments=collections.payments.filter(own),adjustments=collections.balanceAdjustments.filter(own),entries=[];
+ if(client.fiadoHistoryActivation?.spaceRegularization?.version===1)scoped=true;
  if(opening){
   scoped=true;
   for(const part of opening.parts)if(part.traditionalCents)entries.push({saleId:null,number:null,

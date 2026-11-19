@@ -24,7 +24,7 @@ window.Clientes=(()=>{
   function closedOpeningStatus(client) {
     const opening = client?.fiadoOpeningBalance, adi = 'business_adi-festa';
     if (!legacyFiadoClosed() || opening?.version !== 1 || typeof opening.hash !== 'string' || client.customerDirectoryOnly) return null;
-    if (window.InstallmentCredit?.has?.(client.id)) return null;
+    if (client.fiadoHistoryActivation?.spaceRegularization?.version === 1 || window.InstallmentCredit?.has?.(client.id)) return null;
     const foreign = (baseView().vendas || []).some(s => (s.clienteId || s.clientId) === client.id && s.fiadoOpeningHash === opening.hash &&
       s.formaPagamento === 'fiado' && !s.deletedAt && s.active !== false && (s.spaceId || s.financialSpaceId || adi) !== adi);
     const space = window.SpaceContext?.activeId?.();
@@ -80,6 +80,9 @@ window.Clientes=(()=>{
         for (const e of confirmed.entries) add(e.spaceId || accountDefault,
           e.dueDate <= day ? e.remainingCents : 0, e.dueDate > day ? e.remainingCents : 0);
         accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book}); continue;
+      }
+      if (client.fiadoHistoryActivation?.spaceRegularization?.version === 1) {
+        accounts.set(client.id, {parts, unknownCents: debt, calendarUnknown: true, bookCents: book}); continue;
       }
       for (const sale of clientSales) {
         const conflictingSpace = sale.spaceId && sale.financialSpaceId && sale.spaceId !== sale.financialSpaceId;

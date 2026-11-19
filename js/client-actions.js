@@ -8,7 +8,7 @@
     { id: "sale", group: "main", label: "Nova venda", icon: "shopping-bag" },
     { id: "contact", group: "main", label: "Registrar contato", description: "Registrar ligação, visita ou mensagem", icon: "phone-call" },
     { id: "receive", group: "financial", label: "Receber pagamento", icon: "circle-dollar-sign", requiresDebt: true },
-    { id: "adjust", group: "financial", label: "Ajustar saldo", description: "Adicionar ou remover valores", icon: "scale" },
+    { id: "adjust", group: "financial", label: "Regularizar saldo", description: "Conferir o total devedor deste espaço", icon: "scale" },
     { id: "charge", group: "financial", label: "Registrar cobrança", icon: "send", requiresPhone: true },
     { id: "promise", group: "financial", label: "Promessa de pagamento", icon: "calendar-check" },
     { id: "history", group: "registration", label: "Histórico", description: "Compras, pagamentos e contatos", icon: "history" },
@@ -30,7 +30,7 @@
 
   function flatMenu(client) {
     return actions
-      .filter((action) => action.id !== "profile")
+      .filter((action) => action.id !== "profile" && (action.id !== "adjust" || window.FiadoSpaceRegularization?.available()))
       .map(
         (action) =>
           `<button ${action.danger ? 'class="danger"' : ""} type="button" data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)} ${actionLabel(action,client)}</button>`,
@@ -50,7 +50,7 @@
         <div class="client-action-scroll ${financialPrimary ? "credit-mode" : "simple-mode"}">
           ${Object.keys(groupLabels)
             .map((group) => {
-              const items = actions.filter((action) => action.group === group);
+              const items = actions.filter((action) => action.group === group && (action.id !== "adjust" || window.FiadoSpaceRegularization?.available()));
               return `<section class="client-action-group group-${group}"><h3>${groupLabels[group]}</h3>${items
                 .map(
                   (action) =>

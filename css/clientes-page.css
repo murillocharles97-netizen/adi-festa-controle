@@ -80,3 +80,6 @@
 .fiado-conditions-dialog .modal-body { overflow-y: auto; min-height: 0; }
 .fiado-conditions-dialog .modal-foot { flex: none; }
 .fiado-conditions-dialog .modal-foot[hidden] { display: none; }
+
+/* Keep scoped financial form states hidden despite shared button display rules. */
+#modal .fiado-space-regularization [hidden]{display:none!important}
