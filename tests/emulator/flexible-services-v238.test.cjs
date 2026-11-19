@@ -5,6 +5,7 @@ const {initializeApp,deleteApp}=require('firebase-admin/app'),{getFirestore,Fiel
 const path=require('node:path'),functionSource=process.env.VECONI_TEST_FUNCTION_SOURCE||path.resolve('functions');
 const {operationalCommitService}=require(path.resolve(functionSource,'src/services/operational-commit-service'));
 const {financialIncomeService}=require('../../functions/src/services/financial-income-service');
+
 const {harness,bridge}=require('../helpers/fiado-cancellation-harness.cjs'),M=require('../../functions/src/shared/flexible-service');
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing'),sdk=require('firebase/firestore');
 const projectId='demo-veconi-v238',runId=crypto.randomUUID().slice(0,8);let app,db,svc,env,seq=0;
@@ -173,3 +174,5 @@ test('fuel containment rollback preserves confirmed receipt and pauses only new 
  const c=await fuelCase(),a=c.fuelSale(),rollback=require(path.resolve(process.env.VECONI_TEST_FUEL_ROLLBACK_SOURCE,'src/services/operational-commit-service')).operationalCommitService(db);await c.commit(a.packet);assert.equal((await rollback.commit({auth:{uid:c.owner},data:{businessId:c.bid,item:a.packet}})).replayed,true);const b=c.fuelSale();await assert.rejects(rollback.commit({auth:{uid:c.owner},data:{businessId:c.bid,item:b.packet}}),/temporariamente pausadas/);assert.equal((await c.root.collection('sales').get()).size,1);
  const legacy=await setup(),normal=legacy.sell();await rollback.commit({auth:{uid:legacy.owner},data:{businessId:legacy.bid,item:normal.packet}});assert.equal((await legacy.root.collection('sales').get()).size,1);
 });
+
+require('../helpers/service-beneficiary-emulator-cases.cjs')({test,setup,getService:()=>svc,getDb:()=>db,bridge});

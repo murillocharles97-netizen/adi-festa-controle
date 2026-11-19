@@ -104,6 +104,9 @@ window.Vendas = (() => {
       window.InstallmentCredit.assertAccount(client,account);
       if(account.creditCents)throw Error('Cliente com crédito exige apuração específica.');
     }
+    const serviceBeneficiaryName = d.serviceBeneficiaryName == null || d.serviceBeneficiaryName === '' ? '' : window.FlexibleService.beneficiaryName(d.serviceBeneficiaryName);
+    if (serviceBeneficiaryName && !(d.itens || []).some(item => item.serviceExecution))
+      throw Error('Cliente atendido separado exige uma execução de serviço.');
     const customerBalance = d.status === "fiado"
       ? getCurrentCustomerBalance(d.clienteId, currentData) : null;
     if (requestedFinancialSpaceId && requestedFinancialSpaceId !== spaceId)
@@ -255,6 +258,7 @@ window.Vendas = (() => {
         clienteId: d.clienteId || null,
         clientId: d.clienteId || null,
         customerId: d.clienteId || null,
+        ...(serviceBeneficiaryName ? {serviceBeneficiaryName} : {}),
         businessId,
         spaceId,
         financialSpaceId,

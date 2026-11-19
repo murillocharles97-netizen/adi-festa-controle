@@ -173,7 +173,7 @@ test('checkout displays the stock conflict before confirmation or charging on a 
   const fields={'#finish-sale':button,'#sale-client':{value:w.draft.clienteId},
     '#sale-payment-method':{value:'cartao_presencial'},'#sale-status':{value:'pago'}};
   Object.assign(c,{document:{querySelector:id=>fields[id]},cart:w.draft.itens,cartCount:()=>1,activeConflict:null,finishing:false,
-    traceSale(){},resumeCheckoutSale:async()=>false,restoredDraftKey:'',
+    traceSale(){},resumeCheckoutSale:async()=>false,restoredDraftKey:'',availableCustomers:()=>c.DB.carregar().clientes,
     setSubmissionState:(state,message)=>feedback.push({state,message}),toast(){},
     confirm:()=>{confirmations++;return true;},TerminalPayments:{getCurrent:()=>null,beginCheckout:()=>{charges++;}}});
   c.SyncFirebase.assertSaleQueueDependencies=c.assertSaleQueueDependencies;

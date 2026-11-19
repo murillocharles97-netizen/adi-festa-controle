@@ -10,6 +10,10 @@ async function validateFlexibleServices({c,writes,plan,get,ref,FieldValue}){
   const pending=(col,id)=>plan.get(ref(c.bid,col,id).path);
   const effective=async(col,id)=>{const a=await old(col,id),b=pending(col,id)?.data;return{...a,...b,serviceCostConfigs:{...a?.serviceCostConfigs,...b?.serviceCostConfigs}};};
   const fail=message=>{throw new HttpsError('failed-precondition',message);};
+  for(const w of writes.filter(w=>w.entityType==='sales'&&w.operation!=='create'&&Object.hasOwn(w.data||{},'serviceBeneficiaryName'))){
+    const previous=await old('sales',w.entityId);
+    if(w.data.serviceBeneficiaryName!==previous?.serviceBeneficiaryName)fail('O cliente atendido original da venda não pode ser reescrito.');
+  }
   for(const w of writes.filter(w=>w.entityType==='products'&&w.operation!=='delete')){
     const previous=await old('products',w.entityId),product={...previous,...w.data};
     if(previous?.serviceConfig&&!M.enabled(product))fail('Este item já usa execuções de serviço. Cadastre outro item para produto físico, variação ou renovação.');
@@ -34,6 +38,10 @@ async function validateFlexibleServices({c,writes,plan,get,ref,FieldValue}){
   }
   for(const w of writes.filter(w=>w.entityType==='sales'&&w.operation==='create')){
     const items=w.data.itens||[],serviceItems=items.filter(i=>i.serviceExecution);
+    if(Object.hasOwn(w.data,'serviceBeneficiaryName')){
+      let name;try{name=M.beneficiaryName(w.data.serviceBeneficiaryName);}catch(error){fail(error.message);}
+      if(!name||name!==w.data.serviceBeneficiaryName||!serviceItems.length)fail('O atendido deve ser um nome válido de uma execução de serviço; o cliente financeiro não será substituído.');
+    }
     for(const i of items){
       const p=await effective('products',i.produtoId||i.productId);
       if(M.enabled(p)&&!i.serviceExecution)fail('Atualize o aplicativo para registrar a execução deste serviço. A venda original foi preservada.');

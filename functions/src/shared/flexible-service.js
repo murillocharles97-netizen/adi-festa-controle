@@ -50,7 +50,14 @@
     if((c.requiresKm||c.pricingModel==='km'||cost?.model==='km')&&e.km<=0)throw Error('Informe os quilômetros percorridos.');
     if((c.requiresMinutes||c.pricingModel==='hour'||cost?.model==='hour')&&e.minutes<=0)throw Error('Informe a duração em minutos.');
   }
+  function beneficiaryName(value){
+    if(value===undefined||value===null)return '';
+    if(typeof value!=='string')throw Error('Informe somente o nome do cliente atendido.');
+    const name=value.normalize('NFC').replace(/\s+/g,' ').trim();
+    if(name.length>160||/[\u0000-\u001f\u007f]/.test(name))throw Error('Cliente atendido: use um nome com até 160 caracteres.');
+    return name;
+  }
   function itemKey(i){return i?.serviceExecution?`${i.produtoId}::service::${i.serviceExecution.id}`:null;}
   function metrics(sales){let services=0,km=0,minutes=0;for(const s of sales||[]){if(s.deletedAt||s.active===false||['cancelado','cancelled'].includes(s.status))continue;for(const i of s.itens||[]){if(!i.serviceExecution)continue;services+=Number(i.quantidade||1);km+=Number(i.serviceExecution.km||0);minutes+=Number(i.serviceExecution.minutes||0);}}return{services,km,minutes};}
-  return Object.freeze({enabled,config,costConfig,execution,suggestedPrice,estimate,assertUsage,itemKey,metrics,money});
+  return Object.freeze({enabled,config,costConfig,execution,suggestedPrice,estimate,assertUsage,beneficiaryName,itemKey,metrics,money});
 });

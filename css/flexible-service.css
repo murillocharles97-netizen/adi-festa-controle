@@ -4,3 +4,8 @@
 
 .mobile-sale-page .service-cart-item .mobile-qty-label{font-size:0}.mobile-sale-page .service-cart-item .mobile-qty-label:after{content:"1 serviço";font-size:11px;color:var(--muted,#64748b);white-space:nowrap}
 .service-estimate dl{margin:10px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.service-estimate dl>div{min-width:0;padding:9px;border-radius:var(--radius-sm,12px);background:var(--primary-soft,#e3f8f3)}.service-estimate dt{font-size:11px;line-height:1.35;color:var(--muted,#64748b)}.service-estimate dd{margin:3px 0 0;font-size:14px;font-weight:750;overflow-wrap:anywhere}.service-estimate>small{display:block;font-size:11px;line-height:1.4;color:var(--muted,#64748b)}[data-service-fuel-field][hidden],[data-service-fuel-rate][hidden]{display:none!important}
+
+.service-beneficiary-field[hidden]{display:none!important}.service-beneficiary-field details{padding:11px 12px;border:1px solid var(--line);border-radius:12px}.service-beneficiary-field summary{font-size:13px;font-weight:700;cursor:pointer}.service-beneficiary-field label{display:block;margin-top:12px}.service-beneficiary-field small{display:block;margin-top:6px;color:var(--muted);line-height:1.4}
+
+
+.pos-client-card.has-service-beneficiary>div:first-child{display:grid;gap:4px;min-width:0}.pos-client-card.has-service-beneficiary>div:first-child p{margin:2px 0}.pos-client-card.has-service-beneficiary>div:first-child>b{overflow-wrap:anywhere}

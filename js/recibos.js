@@ -85,11 +85,14 @@ window.Modais=(()=>{
     if(!digits.startsWith('55')&&(digits.length===10||digits.length===11))digits=`55${digits}`;
     return /^55[1-9]{2}\d{8,9}$/.test(digits)?digits:'';
   }
+  const saleOnlyDebt=(sale,customer)=>Boolean(sale.serviceBeneficiaryName||((sale.spaceId||sale.financialSpaceId)&&customer?.customerSpaceIds?.length>1));
   function buildSaleShareMessage({business={},customer={},sale={},balanceBefore,balanceAfter}={}){
     const businessName=business.receiptName||business.name||'Seu negócio';
     const customerName=customer.nome||sale.clienteNome||'',guest=!customerName||customerName.toLowerCase()==='venda avulsa';
     const lines=[guest?'Olá! 😊':`Olá, ${customerName}! 😊`,''],amount=dinheiro(value(sale));
-    if(sale.status==='fiado'){
+    if(sale.status==='fiado'&&saleOnlyDebt(sale,customer)){
+      lines.push(`Segue o resumo da venda na ${businessName}:`,'',...(sale.serviceBeneficiaryName?['Cliente atendido:',sale.serviceBeneficiaryName,'Responsável pelo pagamento:',customerName||'Não informado','']:[]),'Valor fiado desta venda:',amount,'Recebido no momento da venda:',dinheiro(0),'','Este resumo refere-se somente a esta venda.');
+    }else if(sale.status==='fiado'){
       lines.push(`Segue o resumo da sua compra na ${businessName}:`,'','🛒 Valor da compra:',amount,'','💳 Forma de pagamento:','Fiado','','📄 Saldo anterior:',dinheiro(debt(balanceBefore??sale.saldoAnterior)),'','➕ Valor fiado nesta compra:',amount,'','💰 Total em aberto:',dinheiro(debt(balanceAfter??sale.saldoAtual)),'','Obrigado pela preferência! 💚','Qualquer dúvida, é só chamar.');
     }else{
       lines.push(guest?`A compra na ${businessName} foi registrada com sucesso.`:'Sua compra foi registrada com sucesso.','','🛒 Valor da compra:',amount,'','💳 Forma de pagamento:',paymentLabel(sale));
@@ -99,6 +102,7 @@ window.Modais=(()=>{
       lines.push('','✅ Pagamento confirmado','','Obrigado pela preferência! 💚','Até a próxima.');
     }
     const campaignLines=(sale.campaignReceiptSummary||[]).map(item=>`🎁 ${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`);
+    if(sale.serviceBeneficiaryName&&sale.status!=='fiado')lines.push('','Cliente atendido:',sale.serviceBeneficiaryName,'Responsável pelo pagamento:',customerName||'Venda avulsa');
     if(campaignLines.length)lines.push('','Benefícios da compra:',...campaignLines);
     const renewalLines=recurringItems(sale).map(item=>`📅 ${item.renewalLabel||item.nome}: ${item.subscriptionAction==='renewal'?'renovado':'ativo'} até ${new Date(item.subscriptionExpiresAt).toLocaleDateString('pt-BR')}.`);
     if(renewalLines.length)lines.push('','Vigência da renovação:',...renewalLines);
@@ -116,7 +120,8 @@ window.Modais=(()=>{
     const campaignLines=(sale.campaignReceiptSummary||[]).length;
     const renewalLines=recurringItems(sale).length;
     const installmentLines=sale.installmentPlan?window.InstallmentCredit.text(sale).split('\n'):[];
-    const height=(business.branded?110:0)+installmentLines.length*42+520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.source==='exchange_credit_checkout'?70:0)+(sale.observacao?70:0)+campaignLines*48;
+    const beneficiaryLines=sale.serviceBeneficiaryName?wrapText(probe,`Cliente atendido: ${sale.serviceBeneficiaryName}`,400):[];
+    const height=(business.branded?110:0)+installmentLines.length*42+520+(sale.itens||[]).length*70+extraLines*20+renewalLines*42+(sale.status==='fiado'?125:0)+(sale.source==='exchange_credit_checkout'?70:0)+(sale.observacao?70:0)+campaignLines*48+beneficiaryLines.length*20;
     const canvas=document.createElement('canvas');canvas.width=width*scale;canvas.height=height*scale;
     const context=canvas.getContext('2d');context.scale(scale,scale);context.fillStyle='#fff';context.fillRect(0,0,width,height);context.textBaseline='alphabetic';
     let headingBottom=68;
@@ -129,7 +134,8 @@ window.Modais=(()=>{
     context.fillText(`RECIBO · PEDIDO #${publicSaleNumber(sale)}`,width/2,headingBottom);
     context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';let y=headingBottom+37;
     context.fillText(`Data: ${new Date(sale.data).toLocaleString('pt-BR')}`,25,y);y+=27;
-    wrapText(context,`Cliente: ${customer?.nome||sale.clienteNome||'Venda avulsa'}`,400).forEach(line=>{context.fillText(line,25,y);y+=20});y+=12;
+    wrapText(context,`${sale.serviceBeneficiaryName?'Responsável pelo pagamento':'Cliente'}: ${customer?.nome||sale.clienteNome||'Venda avulsa'}`,400).forEach(line=>{context.fillText(line,25,y);y+=20});
+    beneficiaryLines.forEach(line=>{context.fillText(line,25,y);y+=20});y+=12;
     context.strokeStyle='#cbd1d9';context.setLineDash([5,5]);context.beginPath();context.moveTo(25,y);context.lineTo(width-25,y);context.stroke();y+=28;
     (sale.itens||[]).forEach((item,index)=>{
       context.fillStyle='#344052';context.font='bold 15px Arial';context.textAlign='left';
@@ -143,7 +149,7 @@ window.Modais=(()=>{
     y+=36;context.fillStyle='#344052';context.font='bold 19px Arial';context.fillText('VALOR FINAL',25,y);context.textAlign='right';context.fillText(dinheiro(value(sale)),width-25,y);
     y+=38;context.textAlign='center';context.fillStyle=sale.status==='fiado'?'#a86600':'#087d64';context.font='bold 15px Arial';context.fillText(`FORMA DE PAGAMENTO: ${paymentLabel(sale).toUpperCase()}`,width/2,y);
     if(sale.source==='exchange_credit_checkout'){y+=30;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';context.fillText(`Crédito de troca: ${dinheiro(Number(sale.exchangeCreditUsedCents||0)/100)}`,35,y);y+=25;context.fillText(`Complemento recebido: ${dinheiro(Number(sale.cashReceivedCents||0)/100)}`,35,y)}
-    if(sale.status==='fiado'){y+=36;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';context.fillText(`Saldo anterior: ${dinheiro(debt(sale.saldoAnterior))}`,35,y);y+=25;context.fillText(`Valor fiado nesta venda: ${dinheiro(value(sale))}`,35,y);y+=28;context.font='bold 16px Arial';context.fillText(`${sale.installmentPlan?"Total contratado em aberto (inclui futuras)":"Total em aberto agora"}: ${dinheiro(debt(sale.saldoAtual))}`,35,y)}
+    if(sale.status==='fiado'){y+=36;context.textAlign='left';context.fillStyle='#344052';context.font='14px Arial';if(saleOnlyDebt(sale,customer)){context.fillText(`Valor fiado desta venda: ${dinheiro(value(sale))}`,35,y);y+=25;context.fillText(`Recebido no momento da venda: ${dinheiro(0)}`,35,y);y+=28;context.fillText('Comprovante referente somente a esta venda.',35,y);}else{context.fillText(`Saldo anterior: ${dinheiro(debt(sale.saldoAnterior))}`,35,y);y+=25;context.fillText(`Valor fiado nesta venda: ${dinheiro(value(sale))}`,35,y);y+=28;context.font='bold 16px Arial';context.fillText(`${sale.installmentPlan?"Total contratado em aberto (inclui futuras)":"Total em aberto agora"}: ${dinheiro(debt(sale.saldoAtual))}`,35,y)}}
     if(installmentLines.length){y+=25;context.textAlign='left';context.font='12px Arial';for(const line of installmentLines)wrapText(context,line,390).forEach(part=>{context.fillText(part,25,y);y+=18});}
     if((sale.campaignReceiptSummary||[]).length){y+=38;context.textAlign='left';context.fillStyle='#087d64';context.font='bold 14px Arial';context.fillText('BENEFÍCIOS DA COMPRA',25,y);for(const item of sale.campaignReceiptSummary){y+=23;context.fillStyle='#344052';context.font='13px Arial';wrapText(context,`${item.campaignName}: ${item.text}${item.rewardUnlocked?` · ${item.rewardUnlocked} recompensa disponível`:''}`,390).slice(0,2).forEach(line=>{context.fillText(line,25,y);y+=17})}}
     if(sale.observacao){y+=38;context.textAlign='left';context.fillStyle='#697586';context.font='13px Arial';wrapText(context,`Observação: ${sale.observacao}`,390).slice(0,3).forEach(line=>{context.fillText(line,25,y);y+=18})}
@@ -171,10 +177,10 @@ window.Modais=(()=>{
   }
   function receiptMarkup(sale,customer,business){
     const discount=Number(sale.descontoTotal)>0?`<div class="receipt-line"><span>Desconto</span><strong>-${dinheiro(sale.descontoTotal)}</strong></div>`:'';
-    const financed=sale.status==='fiado'?`<div class="receipt-debt"><div><span>Saldo anterior</span><strong>${dinheiro(debt(sale.saldoAnterior))}</strong></div><div><span>Valor fiado nesta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>${sale.installmentPlan?"Total contratado em aberto (inclui futuras)":"Total em aberto agora"}</span><strong>${dinheiro(debt(sale.saldoAtual))}</strong></div></div>`:'';
+    const financed=sale.status==='fiado'?(saleOnlyDebt(sale,customer)?`<div class="receipt-debt"><div><span>Valor fiado desta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>Recebido no momento da venda</span><strong>${dinheiro(0)}</strong></div><small>Comprovante referente somente a esta venda.</small></div>`:`<div class="receipt-debt"><div><span>Saldo anterior</span><strong>${dinheiro(debt(sale.saldoAnterior))}</strong></div><div><span>Valor fiado nesta venda</span><strong>${dinheiro(value(sale))}</strong></div><div><span>${sale.installmentPlan?"Total contratado em aberto (inclui futuras)":"Total em aberto agora"}</span><strong>${dinheiro(debt(sale.saldoAtual))}</strong></div></div>`):'';
     const paid=sale.status!=='fiado'?`<div class="sale-payment-confirmed"><i data-lucide="badge-check"></i><span><b>${paymentLabel(sale)}</b><small>Pagamento confirmado</small>${Number(sale.valorRecebido)>0?`<small>Recebido: ${dinheiro(sale.valorRecebido)}</small>`:''}${Number(sale.troco)>0?`<small>Troco: ${dinheiro(sale.troco)}</small>`:''}</span></div>${terminalPaymentMarkup(sale)}`:'';
     const campaigns=(sale.campaignReceiptSummary||[]).length?`<div class="sale-receipt-campaigns"><b>Benefícios da compra</b>${sale.campaignReceiptSummary.map(item=>`<span><i data-lucide="gift"></i><span><strong>${escapar(item.campaignName)}</strong><small>${escapar(item.text)}${item.rewardUnlocked?` · ${Number(item.rewardUnlocked)} recompensa disponível`:''}</small></span></span>`).join('')}</div>`:'';
-    return`<section class="receipt-paper sale-receipt-paper"><header>${business.branded?window.SpaceBranding.heading(business):'<h2>'+escapar(business.receiptName||business.name)+'</h2>'}<span>${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span></header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${window.InstallmentCredit?.summary(sale)||''}${window.InstallmentCredit?.button(sale.clienteId)||''}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
+    return`<section class="receipt-paper sale-receipt-paper"><header>${business.branded?window.SpaceBranding.heading(business):'<h2>'+escapar(business.receiptName||business.name)+'</h2>'}<span>${sale.serviceBeneficiaryName?'Responsável pelo pagamento: ':''}${escapar(customer?.nome||sale.clienteNome||'Venda avulsa')}</span>${sale.serviceBeneficiaryName?'<span>Cliente atendido: '+escapar(sale.serviceBeneficiaryName)+'</span>':''}</header><div class="sale-receipt-items">${itemsMarkup(sale)}</div><div class="receipt-line"><span>Subtotal</span><strong>${dinheiro(sale.subtotalOriginal??value(sale))}</strong></div>${discount}<div class="receipt-line total"><span>Valor final</span><strong>${dinheiro(value(sale))}</strong></div>${paid}${financed}${window.InstallmentCredit?.summary(sale)||''}${window.InstallmentCredit?.button(sale.clienteId)||''}${campaigns}${sale.observacao?`<div class="sale-receipt-note"><b>Observação</b><span>${escapar(sale.observacao)}</span></div>`:''}</section>`;
   }
   function closeCompletion(goHome=true){
     document.removeEventListener('keydown',active?.escapeHandler);const trigger=active?.trigger;active=null;Modais.fechar();

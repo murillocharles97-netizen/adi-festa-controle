@@ -210,6 +210,7 @@ window.Checkout = (() => {
       label = document.querySelector(".pos-client-select span"),
       c = sel?.value ? clients().getById(sel.value) : null;
     if (!sel || !box || !label) return;
+    box.classList.toggle('has-service-beneficiary', Boolean(document.querySelector('#sale-beneficiary')?.value.trim()));
     if (!c) {
       label.textContent = "Selecionar cliente ou venda avulsa";
       box.innerHTML = '<span class="muted">Venda avulsa selecionada</span>';
@@ -223,7 +224,7 @@ window.Checkout = (() => {
       ? '<div data-installment-checkout-preview aria-live="polite">Consultando o saldo no servidor…</div>'
       : `<p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">${window.SpaceContext?.scopesCustomers?.() ? `Fiado desta venda: <b>${dinheiro(total)}</b>. Consulte o saldo na conta deste espaço.` : `Após esta venda: <b>${dinheiro(deve + total)} em aberto</b>`}</p>` : ""}`;
     label.textContent = c.nome;
-    box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b>${preview}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
+    box.innerHTML = `<div><small>${document.querySelector('#sale-beneficiary')?.value.trim() ? 'Responsável pelo pagamento' : 'Cliente'}</small><b>${escapar(c.nome)}</b>${preview}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
     if(parcelado)window.InstallmentCredit.mountCheckoutPreview(box.querySelector('[data-installment-checkout-preview]'),c,total);
     window.lucide?.createIcons();
   }
@@ -655,6 +656,7 @@ window.Checkout = (() => {
       paymentMethod: document.querySelector("#sale-payment-method")?.value || draftDetails.paymentMethod || "pix",
       installmentTerms: window.InstallmentCredit?.read(),
       note: document.querySelector("#sale-note")?.value ?? draftDetails.note ?? "",
+      beneficiaryName: document.querySelector('#sale-beneficiary')?.value ?? draftDetails.beneficiaryName ?? '',
       discountValue: document.querySelector("#discount-value")?.value ?? draftDetails.discountValue ?? "0",
       discountPercent: document.querySelector("#discount-percent")?.value ?? draftDetails.discountPercent ?? "0",
     };
@@ -738,6 +740,8 @@ window.Checkout = (() => {
     if (status) status.value = ["fiado","crediario"].includes(payment?.value) ? "fiado" : "pago";
     window.InstallmentCredit?.restore(draftDetails.installmentTerms);
     if (note) note.value = draftDetails.note || "";
+    const beneficiary = document.querySelector('#sale-beneficiary');
+    if (beneficiary) { beneficiary.value = draftDetails.beneficiaryName || ''; beneficiary.closest('details').open = Boolean(beneficiary.value); }
     if (discountValue) discountValue.value = draftDetails.discountValue || "0";
     if (discountPercent) discountPercent.value = draftDetails.discountPercent || "0";
     window.CheckoutPaymentMethod = payment?.value || "pix";
@@ -872,9 +876,22 @@ window.Checkout = (() => {
     };
   };
   const cartCount = () => cart.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
+  function updateBeneficiaryField() {
+    let field = document.querySelector('.service-beneficiary-field');
+    if (!field) {
+      const anchor = document.querySelector('#sale-note')?.closest('.field');
+      if (!anchor) return;
+      anchor.insertAdjacentHTML('beforebegin', '<div class="field service-beneficiary-field" hidden><details><summary>Atendido diferente do pagador</summary><label for="sale-beneficiary">Cliente atendido (opcional)</label><input id="sale-beneficiary" maxlength="160" autocomplete="off" placeholder="Ex.: Restaurante Maremont"><small>Somente identificação do atendimento. O cliente selecionado é o responsável pelo pagamento e pelo Fiado.</small></details></div>');
+      field = document.querySelector('.service-beneficiary-field');
+      field.querySelector('input').addEventListener('input', () => { invalidateAttempt(); selectedClient(); saveDraft(); });
+    }
+    field.hidden = Boolean(window.PriorSales?.active?.()) || !cart.some(item => item.serviceExecution);
+    if (field.hidden) { field.querySelector('input').value = ''; field.querySelector('details').open = false; }
+  }
   function drawCart() {
     const host = document.querySelector("#cart");
     if (!host) return;
+    updateBeneficiaryField();
     const clientId = document.querySelector("#sale-client")?.value || null;
     const displayItems = !window.PriorSales?.active?.() && !manual && clientId
       ? (window.Campanhas?.aplicarBeneficios?.(cart, clientId, {
@@ -1261,6 +1278,9 @@ window.Checkout = (() => {
       } catch (error) {
         return validationError(error.message || "Selecione o espaço desta venda.");
       }
+      let serviceBeneficiaryName;
+      try { const name = document.querySelector('#sale-beneficiary')?.value || ''; serviceBeneficiaryName = name ? window.FlexibleService.beneficiaryName(name) : ''; }
+      catch (error) { return validationError(error.message); }
       const businessId = String(DB.getBusinessId?.() || window.FirebaseSession?.businessId || "").trim(),
         clienteId = document.querySelector("#sale-client").value || null,
         paymentMethod = document.querySelector("#sale-payment-method")?.value || window.CheckoutPaymentMethod || "pix",
@@ -1283,6 +1303,7 @@ window.Checkout = (() => {
           document.querySelector('#sale-client')?.value || null,
           document.querySelector('#sale-payment-method')?.value || window.CheckoutPaymentMethod || 'pix',
           document.querySelector('#sale-status')?.value, cart,
+          document.querySelector('#sale-beneficiary')?.value || '',
         ]);
         const origin = customerCheckOrigin();
         finishing=true;setSubmissionState('processing','Conferindo o cliente na nuvem…');
@@ -1319,11 +1340,13 @@ window.Checkout = (() => {
       }
       traceSale("[SALE] validation passed", { businessId, spaceId, clientId: clienteId, paymentMethod });
       const spaceScope = window.SpaceContext?.viewScope?.();
-      const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
+      const fingerprint = JSON.stringify({ businessId, spaceId, clienteId, serviceBeneficiaryName, paymentMethod, status, installmentTerms:paymentMethod==='crediario'?window.InstallmentCredit.read():null, note: document.querySelector("#sale-note").value, cart, manual, discountKind, campaigns: [...selectedCampaignIds] }),
         attempt = activeAttempt?.fingerprint === fingerprint || activeAttempt?.restored ? { ...activeAttempt, fingerprint, operationId: activeAttempt.operationId || crypto.randomUUID() } : { fingerprint, operationId: crypto.randomUUID(), saleId: crypto.randomUUID() },
         proceed = async () => {
           if (spaceScope !== window.SpaceContext?.viewScope?.() || spaceId !== selectedSalesSpaceId())
             return validationError('O espaço da venda mudou. Revise o carrinho antes de confirmar.');
+          if (serviceBeneficiaryName !== (document.querySelector('#sale-beneficiary')?.value ? window.FlexibleService.beneficiaryName(document.querySelector('#sale-beneficiary').value) : ''))
+            return validationError('O cliente atendido mudou. Revise a venda antes de confirmar.');
           if (finishing) return setSubmissionState("processing", "A venda já está sendo processada.");
           if(activeAttempt?.operationId&&activeAttempt.operationId!==attempt.operationId&&(DB.carregar().vendas||[]).some(s=>s.operationId===activeAttempt.operationId))return validationError("A tentativa anterior já gerou uma venda. Consulte sua confirmação antes de alterar ou repetir o carrinho.");
           try {
@@ -1349,6 +1372,7 @@ window.Checkout = (() => {
             spaceId,
             financialSpaceId: spaceId,
             clienteId,
+            ...(serviceBeneficiaryName ? {serviceBeneficiaryName} : {}),
             status,
             operationId: attempt.operationId,
             formaPagamento: paymentMethod === "crediario" ? "fiado" : paymentMethod,
@@ -1447,6 +1471,7 @@ window.Checkout = (() => {
         drawCart();
       },
     );
+    updateBeneficiaryField();
     applyDraftDetails();
     drawCart();
     if (pendingClient) {
@@ -1608,7 +1633,7 @@ window.Checkout = (() => {
     discountKind = draft.descontoTipo || null;
     selectedCampaignIds = new Set(draft.appliedCampaignIds || []);
     activeAttempt = { saleId: intent.saleId || draft.id, operationId: intent.finalizationOperationId, restored: true };
-    draftDetails = { ...draftDetails, clientId: draft.clienteId || "", paymentMethod: "cartao_presencial", note: draft.observacao || "" };
+    draftDetails = { ...draftDetails, clientId: draft.clienteId || "", paymentMethod: "cartao_presencial", note: draft.observacao || "", beneficiaryName: draft.serviceBeneficiaryName || '' };
     saveDraft();
   }
   function openSelectedRenewal(request) {
