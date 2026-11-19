@@ -180,3 +180,45 @@ test('revocation: retries, lost responses and other spaces never return data aft
  else{const r=await as({spaceId:spaceB,operationId:op3,rows:rows3});assert.equal(r.results[0].ok,false);assert.equal(r.results[0].before,undefined);assert.equal(r.results[0].id,undefined);}
  const stock=await get('rev-3');assert.equal(stock.estoqueAtual,5);
 });
+
+// ---- V239.1 final: createSpreadsheetProducts replay re-authorization (Codex NO-GO) ----
+test('createSpreadsheetProducts replay re-authorizes the product; idempotency and regular import preserved',async()=>{
+ const emp='emp-'+suffix,spaceC='spacec-'+suffix,hidden='hidden-'+suffix;
+ for(const id of [spaceC,hidden])await db.doc(`financialSpaces/${id}`).set({type:'business',businessId:bid,linkedBusinessId:bid,active:true,capabilities:{products:true,inventory:true}});
+ await db.doc(`businesses/${bid}/members/${emp}`).set({status:'active',role:'seller',spaceAccess:'selected',allowedSpaceIds:[spaceC],permissions:{'products.view':true,'products.edit':true,'inventory.adjust':true}});
+ const create=(rows,patch={})=>service.createProducts({auth:{uid:emp},data:{businessId:bid,spaceId:spaceC,workspaceGeneration:0,rows:rows.map((data,i)=>({line:i+2,data})),...patch}});
+ const count=async(col,field,value)=>(await db.collection(`businesses/${bid}/${col}`).where(field,'==',value).get()).size;
+ const leaks=(r,id)=>JSON.stringify(r).includes(id)||/Segredo|hidden-|spacec-/.test(JSON.stringify(r));
+ // 1) import + replay with access kept: same product, no second product or movement.
+ const data={nome:'Repetível QA',codigo:`REP-${suffix}`,estoqueAtual:3};
+ const first=await create([data]);assert.equal(first.results[0].ok,true);const id=first.results[0].id;
+ const again=await create([data]);assert.deepEqual([again.results[0].ok,again.results[0].id,again.results[0].replayed],[true,id,true]);
+ // 5) replay never duplicates product or stock.
+ assert.equal(await count('products','codigo',`REP-${suffix}`),1);assert.equal(await count('stockMovements','produtoId',id),1);
+ // 4) lost response then authorized retry: replay returns the same id once more, nothing new.
+ assert.equal((await create([data])).results[0].id,id);assert.equal(await count('stockMovements','produtoId',id),1);
+ // 2) product moved to a space the employee cannot access: replay discloses nothing.
+ await db.doc(`businesses/${bid}/products/${id}`).update({nome:'Segredo',allowedSpaceIds:[hidden],defaultSpaceId:hidden});
+ const moved=await create([data]);
+ assert.equal(moved.results[0].ok,false);assert.equal(moved.results[0].id,undefined);assert.ok(!leaks(moved,id),JSON.stringify(moved));
+ assert.equal(await count('products','codigo',`REP-${suffix}`),1);assert.equal(await count('stockMovements','produtoId',id),1);
+ const marker=(await db.collection(`businesses/${bid}/productImportOperations`).where('productId','==',id).get());assert.equal(marker.size,1,'original marker preserved');
+ // Moving it back restores the replay for the authorized employee.
+ await db.doc(`businesses/${bid}/products/${id}`).update({allowedSpaceIds:[spaceC],defaultSpaceId:spaceC});
+ assert.equal((await create([data])).results[0].id,id);
+ // Concurrent move during the replay: either the old access (product in C) or nothing is returned, never a hidden product.
+ const [race]=await Promise.all([create([data]),db.doc(`businesses/${bid}/products/${id}`).update({allowedSpaceIds:[hidden],defaultSpaceId:hidden})]);
+ const after=(await db.doc(`businesses/${bid}/products/${id}`).get()).data();
+ if(race.results[0].ok)assert.equal(race.results[0].id,id);else assert.ok(!leaks(race,id));
+ assert.deepEqual(after.allowedSpaceIds,[hidden]);
+ assert.equal((await create([data])).results[0].ok,false);
+ // 3) access revoked: retry denied without data.
+ await db.doc(`businesses/${bid}/members/${emp}`).update({allowedSpaceIds:[]});
+ await assert.rejects(create([data]),e=>e.code==='permission-denied'&&!e.message.includes(id));
+ await db.doc(`businesses/${bid}/members/${emp}`).update({allowedSpaceIds:[spaceC],permissions:{'products.view':true}});
+ await assert.rejects(create([data]),e=>e.code==='permission-denied');
+ assert.equal(await count('products','codigo',`REP-${suffix}`),1);assert.equal(await count('stockMovements','produtoId',id),1);
+ // 6) regular import keeps working for an authorized user.
+ await db.doc(`businesses/${bid}/members/${emp}`).update({permissions:{'products.view':true,'products.edit':true,'inventory.adjust':true}});
+ const fresh=await create([{nome:'Comum QA',codigo:`COM-${suffix}`}]);assert.equal(fresh.results[0].ok,true);assert.equal(fresh.results[0].replayed,false);
+});

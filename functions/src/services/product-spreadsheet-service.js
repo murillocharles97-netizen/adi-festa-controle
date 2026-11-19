@@ -65,7 +65,13 @@ function productSpreadsheetService(db, {FieldValue}) {
         const {row, input, key, id, marker} = prepared[index];
         const fail = message => results.push({line:input.line, ok:false, message});
         if (row.status !== 'create') { fail(row.errors.join(' ')); continue; }
-        if (markers[index]?.exists) { results.push({line:input.line, id, ok:true, action:'create', replayed:true}); continue; }
+        if (markers[index]?.exists) {
+          // Re-authorize NOW against the catalog read in this transaction (a concurrent move
+          // serializes with it): a product outside the current access is never disclosed.
+          const created = catalog.find(p => p.id === (markers[index].data()?.productId || id));
+          if (!created || created.deleted || created.deletedAt || !Sheet.inScope(created, scope, true)) { fail('Esta linha já foi processada antes e não está disponível no seu acesso atual. Nenhum produto novo foi criado.'); continue; }
+          results.push({line:input.line, id:created.id, ok:true, action:'create', replayed:true}); continue;
+        }
         const data = row.create;
         const sku = Sheet.canonical('codigo', data.codigo), ean = Sheet.canonical('barcode', data.barcode), sameSku = v => !!sku && Sheet.canonical('codigo', v) === sku, sameEan = v => !!ean && Sheet.canonical('barcode', v) === ean;
         if (scoped.some(p => sameSku(p.codigo) || sameEan(p.barcode) || (p.alternateBarcodes || []).some(sameEan)) || variants.some(v => sameSku(v.sku || v.codigo) || sameEan(v.barcode))) {
