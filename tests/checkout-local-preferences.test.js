@@ -9,15 +9,15 @@ const seed=()=>({config:{nome:'QA business',recentClientIds:['shared-preference-
 function runtime(shared={values:new Map(),records:new Map()}){
   let origin={businessId:'qa-business',workspaceGeneration:0},staged=0,failPreferenceWrites=false,changes=0;
   let markup='',pickerDom=null,nextTimer=0;
-  const timers=new Map(),modal={get innerHTML(){return markup;},set innerHTML(value){markup=value;pickerDom=value.includes('client-picker')?{search:{value:''},results:{innerHTML:''},more:{textContent:''},close:{onclick:null}}:null;},onclick:null},select={value:'',dispatchEvent(){changes++;}};
+  const timers=new Map(),modal={get innerHTML(){return markup;},set innerHTML(value){markup=value;pickerDom=value.includes('client-picker')?{search:{value:'',focus(){}},results:{innerHTML:''},more:{textContent:''},close:{onclick:null},background:{},dialog:{}}:null;},querySelector:selector=>({'#client-picker-search':pickerDom?.search,'.checkout-customer-bg':pickerDom?.background,'.client-picker':pickerDom?.dialog}[selector]),onclick:null},select={value:'',dispatchEvent(){changes++;}};
   const c={console,structuredClone,crypto:webcrypto,Date,Map,Set,Math,Number,String,Boolean,Array,Object,JSON,Error,Promise,
     localStorage:{getItem:key=>shared.values.get(key)??null,setItem:(key,value)=>{if(failPreferenceWrites&&key.includes(':localPreferences:'))throw Error('QA blocked preference storage');shared.values.set(key,String(value));},removeItem:key=>shared.values.delete(key)},
     Utils:{uuid:()=>webcrypto.randomUUID(),escapar:String,dinheiro:String,somenteNumeros:value=>String(value||'').replace(/\D/g,''),toast(){}},PhoneUtils:{normalizeBrazilianPhone:value=>value},
     WorkspaceRuntime:{capture:()=>origin},BusinessContext:{hasPermission:permission=>permissions.includes(permission)},FirebaseSession:null,
-    CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},Event:class{constructor(type){this.type=type;}},addEventListener(){},dispatchEvent(){},
+    CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},Event:class{constructor(type){this.type=type;}},addEventListener(){},removeEventListener(){},dispatchEvent(){},
     setTimeout:callback=>{const id=++nextTimer;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id),
     document:{querySelector:selector=>({'#modal':modal,'#sale-client':select,'#client-picker-search':pickerDom?.search,'#client-result-list':pickerDom?.results,'#client-result-more':pickerDom?.more}[selector]),querySelectorAll:selector=>selector==='#modal .close'&&pickerDom?[pickerDom.close]:[]},
-    clients:()=>({list:()=>c.DB.carregar().clientes,getById:id=>c.DB.carregar().clientes.find(client=>client.id===id)}),refresh(){},quickClient(){throw Error('Unexpected new-client action');},escapar:String,balance:()=>'',norm:String,
+    clients:()=>({list:()=>c.DB.carregar().clientes,getById:id=>c.DB.carregar().clientes.find(client=>client.id===id)}),availableCustomers:()=>c.DB.carregar().clientes,selectedSalesSpaceId:()=> 'qa-space',refresh(){},quickClient(){throw Error('Unexpected new-client action');},escapar:String,balance:()=>'',norm:String,
   };c.window=c;vm.createContext(c);vm.runInContext(storageSource,c);
   c.DB.businessCache={open:async key=>structuredClone(shared.records.get(key)||seed()),stage:(data,key)=>{staged++;shared.records.set(key,structuredClone(data));},release:async()=>{}};
   c.DB.flush=async()=>{};

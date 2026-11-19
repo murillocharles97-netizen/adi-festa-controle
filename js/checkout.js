@@ -27,6 +27,13 @@ window.Checkout = (() => {
       );
       return window.SpaceEngine.saleBelongsTo(sale, spaceId, knownIds);
     };
+  function availableCustomers() {
+    const data = DB.carregar(), businessId = DB.getBusinessId?.();
+    const scoped = window.SpaceContext?.customersForView?.(data);
+    return (scoped ? scoped.clients : clients().list()).filter(client =>
+      client.ativo !== false && client.active !== false && !client.deletedAt &&
+      (!client.businessId || client.businessId === businessId));
+  }
   let soldByProduct = new Map();
   function rebuildSoldIndex() {
     const next = new Map();
@@ -58,6 +65,7 @@ window.Checkout = (() => {
         : `${dinheiro(p.minPrice)} – ${dinheiro(p.maxPrice)}`
       : dinheiro(p.preco));
   const balance = (c) => {
+    if (window.SpaceContext?.scopesCustomers?.()) return '<span class="badge balance-badge zero">Saldo por espaço</span>';
     const s = Number(c.saldo || 0);
     return s < 0
       ? `<span class="badge balance-badge debit">Deve ${dinheiro(Math.abs(s))}</span>`
@@ -120,9 +128,7 @@ window.Checkout = (() => {
     const ps = products()
         .list()
         .filter((p) => p.ativo !== false && productAvailableHere(p)),
-      cs = clients()
-        .list()
-        .filter((c) => c.ativo !== false),
+      cs = availableCustomers(),
       cats = [...new Set(ps.map((p) => p.categoria).filter(Boolean))].sort(),
       spaceBar = window.SpaceContext?.renderBar?.("sales") || "";
     if (window.DesktopSales?.isDesktop?.()) {
@@ -215,7 +221,7 @@ window.Checkout = (() => {
       deve = Math.abs(Math.min(0, Number(c.saldo || 0)));
     const preview = parcelado
       ? '<div data-installment-checkout-preview aria-live="polite">Consultando o saldo no servidor…</div>'
-      : `<p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">Após esta venda: <b>${dinheiro(deve + total)} em aberto</b></p>` : ""}`;
+      : `<p>${balance(c)}</p>${fiado ? `<p class="pos-fiado-preview">${window.SpaceContext?.scopesCustomers?.() ? `Fiado desta venda: <b>${dinheiro(total)}</b>. Consulte o saldo na conta deste espaço.` : `Após esta venda: <b>${dinheiro(deve + total)} em aberto</b>`}</p>` : ""}`;
     label.textContent = c.nome;
     box.innerHTML = `<div><small>Cliente</small><b>${escapar(c.nome)}</b>${preview}</div><div><button class="icon-btn" data-change-client><i data-lucide="repeat-2"></i></button>${somenteNumeros(c.telefone).length >= 10 ? `<button class="icon-btn" data-client-wa="${c.id}"><i data-lucide="message-circle"></i></button>` : ""}</div>`;
     if(parcelado)window.InstallmentCredit.mountCheckoutPreview(box.querySelector('[data-installment-checkout-preview]'),c,total);
@@ -304,9 +310,7 @@ window.Checkout = (() => {
     const select = document.querySelector("#sale-client");
     if (!select) return false;
     const selected = select.value;
-    select.innerHTML = `<option value="">Venda avulsa</option>${clients()
-      .list()
-      .filter((client) => client.ativo !== false)
+    select.innerHTML = `<option value="">Venda avulsa</option>${availableCustomers()
       .map(
         (client) =>
           `<option value="${escapar(client.id)}">${escapar(client.nome)}</option>`,
@@ -324,10 +328,9 @@ window.Checkout = (() => {
       businessId: DB.getBusinessId(),
       principal: DB.getPrincipal(),
       generation: DB.getWorkspaceGeneration(),
+      spaceId: selectedSalesSpaceId(),
     };
-    const all = clients()
-        .list()
-        .filter((c) => c.ativo !== false)
+    const all = availableCustomers()
         .sort((a, b) => a.nome.localeCompare(b.nome)),
       recent = DB.getRecentClientIds()
         .map((id) => all.find((c) => c.id === id))
@@ -337,7 +340,7 @@ window.Checkout = (() => {
       ? '<p class="muted" role="note">Seu perfil pode selecionar clientes existentes. Novos cadastros precisam do responsável.</p>'
       : '<button class="btn btn-primary" id="quick-new-client"><i data-lucide="user-plus"></i> Novo cliente</button>';
     modal.innerHTML =
-      `<div class="modal-bg"><section class="modal-box client-picker"><header class="modal-head"><h3>${options.title || "Selecionar cliente"}</h3><button class="icon-btn close"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}${customerAction}<div id="client-results">${recent.length ? `<h4>Clientes recentes</h4>${recent.map(row).join("")}` : ""}<h4>Todos os clientes</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("")}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
+      `<div class="modal-bg checkout-customer-bg"><section class="modal-box client-picker" role="dialog" aria-modal="true" aria-label="Selecionar cliente"><header class="modal-head"><h3>${escapar(options.title || "Selecionar cliente")}</h3><button class="icon-btn close" aria-label="Fechar seleção"><i data-lucide="x"></i></button></header><div class="client-search"><i data-lucide="search"></i><input id="client-picker-search" autofocus autocomplete="off" placeholder="Buscar por nome ou telefone"></div><div class="client-picker-body">${options.requireClient ? "" : '<button class="client-choice guest" data-choose-client=""><div><b>Venda avulsa</b><small>Sem cliente vinculado</small></div><i data-lucide="user-round"></i></button>'}${customerAction}<div id="client-results">${recent.length ? `<h4>Clientes recentes deste espaço</h4>${recent.map(row).join("")}` : ""}<h4>Clientes deste espaço</h4><div id="client-result-list">${all.slice(0, 30).map(row).join("") || '<p class="empty">Nenhum cliente vinculado a este espaço.</p>'}</div><p class="muted" id="client-result-more">${all.length > 30 ? "Digite para filtrar a lista completa." : ""}</p></div></div></section></div>`;
     const input = document.querySelector("#client-picker-search"),
       results = document.querySelector("#client-result-list"),
       more = document.querySelector("#client-result-more");
@@ -346,16 +349,24 @@ window.Checkout = (() => {
       pickerOrigin.businessId === DB.getBusinessId() &&
       pickerOrigin.principal === DB.getPrincipal() &&
       pickerOrigin.generation === DB.getWorkspaceGeneration() &&
+      pickerOrigin.spaceId === selectedSalesSpaceId() &&
       document.querySelector("#modal") === modal &&
       document.querySelector("#client-picker-search") === input &&
       document.querySelector("#client-result-list") === results &&
       document.querySelector("#client-result-more") === more;
     const close = () => {
-      const ownsModal = currentPicker();
+      const ownsModal = modal.querySelector('#client-picker-search') === input;
       closed = true;
       clearTimeout(timer);
+      window.removeEventListener('veconi-space-context-changed', close);
+      window.removeEventListener('business-context-changed', close);
+      window.removeEventListener('firebase-session-cleared', close);
       if (ownsModal) modal.innerHTML = "";
+      if (ownsModal) document.querySelector('#open-client-picker')?.focus({preventScroll:true});
     };
+    ['veconi-space-context-changed','business-context-changed','firebase-session-cleared'].forEach(event => window.addEventListener(event, close));
+    modal.querySelector('.checkout-customer-bg').onclick = event => { if (event.target === event.currentTarget) close(); };
+    modal.querySelector('.client-picker').onkeydown = event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } };
     document
       .querySelectorAll("#modal .close")
       .forEach((x) => (x.onclick = close));
@@ -386,6 +397,7 @@ window.Checkout = (() => {
       if (!currentPicker()) return;
       const b = e.target.closest("[data-choose-client]");
       if (b) {
+        if (b.dataset.chooseClient && !availableCustomers().some(c => c.id === b.dataset.chooseClient)) { toast('O cliente não está mais disponível neste espaço.', true); close(); return; }
         const sel = document.querySelector("#sale-client");
         sel.value = b.dataset.chooseClient;
         sel.dispatchEvent(new Event("change"));
@@ -394,9 +406,10 @@ window.Checkout = (() => {
         refresh();
         if (onSelected && sel.value) onSelected(clients().getById(sel.value));
       }
-      if (e.target.closest("#quick-new-client")) quickClient();
+      if (e.target.closest("#quick-new-client")) { close(); quickClient(); }
     };
     window.lucide?.createIcons();
+    input.focus({preventScroll:true});
   }
   const dateLabel = (value) => {
     if (!value) return "—";
@@ -541,7 +554,7 @@ window.Checkout = (() => {
     try { context=directory.registrationContext(); }
     catch (error) { toast(error.message, true); return; }
     document.querySelector("#modal").innerHTML =
-      `<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div>${directory.registrationFields(context)}</div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
+      `<div class="modal-bg checkout-customer-bg"><section class="modal-box"><header class="modal-head"><h3>Novo cliente</h3></header><form id="quick-client-form"><div class="modal-body"><div class="field"><label>Nome *</label><input name="nome" required autofocus></div><div class="field"><label>Telefone / WhatsApp</label><input name="telefone" inputmode="tel"></div><div class="field"><label>Observação</label><textarea name="observacoes"></textarea></div>${directory.registrationFields(context)}</div><footer class="modal-foot"><button type="button" class="btn btn-light cancel">Cancelar</button><button class="btn btn-primary">Salvar e selecionar</button></footer></form></section></div>`;
     document.querySelector(".cancel").onclick = () => picker();
     document.querySelector("#quick-client-form").onsubmit = async (event) => {
       event.preventDefault();
@@ -551,7 +564,7 @@ window.Checkout = (() => {
       try {
         await directory.registerFromForm(form,context,id=>{
           const client=clients().getById(id),select=document.querySelector("#sale-client");
-          if(!client||!select)return;
+          if(!client||!select||!availableCustomers().some(c=>c.id===id))return;
           if(![...select.options].some(option=>option.value===id))select.add(new Option(client.nome,id));
           select.value=id;
           select.dispatchEvent(new Event("change",{bubbles:true}));
@@ -1253,6 +1266,8 @@ window.Checkout = (() => {
         paymentMethod = document.querySelector("#sale-payment-method")?.value || window.CheckoutPaymentMethod || "pix",
         status = ["fiado","crediario"].includes(paymentMethod) ? "fiado" : document.querySelector("#sale-status").value;
       if (!businessId) return validationError("Não foi possível identificar a empresa desta venda. Entre novamente e tente de novo.");
+      if (clienteId && !availableCustomers().some(client => client.id === clienteId))
+        return validationError('Vincule o cliente ao espaço desta venda antes de selecioná-lo. O carrinho foi preservado.');
       if (status === "fiado" && !clienteId)
         return validationError("Selecione um cliente para vender fiado.");
       if (cart.some((item) => item.productType === "recurring") && !clienteId)
@@ -1451,8 +1466,8 @@ window.Checkout = (() => {
     window.lucide?.createIcons();
   }
   function prepareClientSale(clientId, source = "client_swipe") {
-    const client = clients().getById(clientId);
-    if (!client) return (toast("Cliente não encontrado", true), false);
+    const client = availableCustomers().find(client => client.id === clientId);
+    if (!client) return (toast("Cliente não disponível neste espaço. Confira o vínculo no cadastro.", true), false);
     if (
       cart.length &&
       !confirm(
@@ -1667,6 +1682,7 @@ window.Checkout = (() => {
     filterProducts: filter,
     refreshProducts,
     refreshClients,
+    availableCustomers,
     retireSpaceDraft,
     resumeAfterReconciliation,
     finalizeTerminalPayment,

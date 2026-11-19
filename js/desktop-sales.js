@@ -400,7 +400,7 @@
     const select = document.querySelector("#sale-client"),
       selected = select?.value || "";
     if (!select) return false;
-    select.innerHTML = `<option value="">Venda avulsa</option>${Clientes.listar()
+    select.innerHTML = `<option value="">Venda avulsa</option>${(window.Checkout?.availableCustomers?.() || [])
       .filter((client) => client.ativo !== false)
       .map(
         (client) =>

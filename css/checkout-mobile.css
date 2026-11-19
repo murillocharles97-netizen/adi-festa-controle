@@ -255,3 +255,7 @@
 .recurring-custom-note.is-error{color:#c0262d}
 @media(max-width:359px){.recurring-custom-fields{grid-template-columns:1fr}}
 #modal .modal-box .modal-body .recurring-custom-fields label.recurring-custom-label,#modal .modal-box .modal-body .recurring-custom-fields .field>label{display:block}
+
+/* Keep customer selection above the cart (72), without changing other modals. */
+#modal .checkout-customer-bg{z-index:80}
+
