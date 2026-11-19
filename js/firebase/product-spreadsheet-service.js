@@ -43,7 +43,53 @@ export async function loadCatalog() {
   const byId = new Map([...visible, ...inactive].map(p => [p.id, p]));
   const reservations = variants.filter(v => byId.has(v.parentProductId) && !v.deleted && !v.deletedAt).map(v => ({...byId.get(v.parentProductId), id:`variant:${v.id}`, codigo:v.sku || v.codigo || '', barcode:v.barcode || '', identifierReservation:true}));
   for (const p of byId.values()) for (const barcode of p.alternateBarcodes || []) reservations.push({...p, id:`alternate:${p.id}:${barcode}`, codigo:'', barcode, identifierReservation:true});
-  return {scope, permissions, products:visible, matchingProducts:[...visible, ...inactive, ...reservations]};
+  // Whole company (all spaces, inactive, variations): codes must be unique across it.
+  const identifierCatalog = { products: products.map(p => ({ ...p, businessId: p.businessId || scope.businessId })), variants };
+  return {scope, permissions, products:visible, matchingProducts:[...visible, ...inactive, ...reservations], identifierCatalog};
+}
+
+// "Corrigir SKU/EAN": sent ONLY to the trusted callable (never through the Sync queue),
+// in blocks of 25. Each block has a stable operationId: an unanswered call is repeated
+// with the SAME id, and the server replays its receipt instead of applying twice.
+const UNKNOWN = ['internal', 'unavailable', 'deadline-exceeded', 'unknown', 'aborted'];
+const newOperationId = () => (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+export async function applyIdentifierCorrections(catalog, preview, onProgress) {
+  assertContext(catalog.scope);
+  if (preview?.mode !== 'identifiers') throw Error('Prévia de correção de códigos inválida.');
+  if (!window.TeamAccess.has('products.edit')) throw Error('Você não tem permissão para editar produtos.');
+  const scope = catalog.scope, selected = preview.rows.filter(row => row.status === 'update'), results = [];
+  for (let offset = 0; offset < selected.length; offset += 25) {
+    const block = selected.slice(offset, offset + 25), operationId = newOperationId();
+    const payload = { businessId: scope.businessId, spaceId: scope.spaceId, workspaceGeneration: scope.generation, operationId,
+      rows: block.map(row => ({ line: row.line, id: row.id, before: row.before, next: row.next })) };
+    let response = null, failure = null;
+    for (let attempt = 0; attempt < 3 && !response; attempt++) {
+      try { assertContext(scope, { queue: false }); response = await window.FirebaseCallable('correctSpreadsheetIdentifiers', payload); }
+      catch (error) {
+        failure = error;
+        const unknown = UNKNOWN.includes(String(error?.code || '').replace(/^functions\//, '')) && !error?.details?.reason;
+        if (!unknown || !navigator.onLine) break;
+        await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+      }
+    }
+    if (response) results.push(...(response.data || response).results);
+    else {
+      const unknown = UNKNOWN.includes(String(failure?.code || '').replace(/^functions\//, ''));
+      results.push(...block.map(row => ({ line: row.line, id: row.id, before: row.before, next: row.next, ok: false, state: unknown ? 'pending' : 'failed',
+        message: unknown ? 'Sem confirmação do servidor. Importe a mesma planilha de novo: o que já foi corrigido aparecerá como "sem alteração".' : failure?.message || 'Não foi possível corrigir este bloco. Nada foi alterado nele.' })));
+    }
+    onProgress?.(Math.min(offset + 25, selected.length), selected.length);
+  }
+  // The server is the source of truth; refresh this device before reporting success.
+  let refreshed = true;
+  if (results.some(r => r.ok && r.state === 'corrected')) {
+    try {
+      await window.SyncFirebase.pullCloudCollections({ force: true, names: ['products'] });
+      window.BarcodeIndex?.invalidate?.();
+      window.SyncFirebase.notifyRemoteChange?.(['products']);
+    } catch { refreshed = false; }
+  }
+  return { results, refreshed };
 }
 
 // Optimistic read/compare/write transactions, not blind full-document overwrites.

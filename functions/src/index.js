@@ -85,6 +85,7 @@ const syncIncidents=require('./services/sync-incident-service').syncIncidentServ
 exports.archiveSyncIncident=onCall(RECOVERY_OPTIONS,request=>syncIncidents.archive(request));
 exports.getSyncIncidentArchive=onCall(RECOVERY_OPTIONS,request=>syncIncidents.get(request));
 exports.createSpreadsheetProducts=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5},request=>productSpreadsheetService(db,{FieldValue}).createProducts(request));
+exports.correctSpreadsheetIdentifiers=onCall({region:REGION,memory:'512MiB',timeoutSeconds:120,maxInstances:5},request=>productSpreadsheetService(db,{FieldValue}).correctIdentifiers(request));
 const MP_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN');
 const MP_TEST_TOKEN=defineSecret('MERCADO_PAGO_ACCESS_TOKEN_TEST');
 const MP_WEBHOOK_SECRET=defineSecret('MERCADO_PAGO_WEBHOOK_SECRET');

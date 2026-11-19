@@ -93,6 +93,82 @@ function productSpreadsheetService(db, {FieldValue}) {
       return {results};
     });
   }
-  return {createProducts};
+  // "Corrigir SKU/EAN": changes ONLY codigo/barcode of existing products, identified by
+  // their immutable ID. Never touches stock, cost, price, sales or movements (so it can
+  // not produce stock_alias_mismatch for pending offline sales, which validate only the
+  // stock fields). The old code goes to identifierHistory, never to alternateBarcodes.
+  // Idempotent per operationId: a lost response replays the stored results.
+  async function correctIdentifiers(request) {
+    const uid = request.auth?.uid, {businessId, spaceId, workspaceGeneration = 0, operationId, rows} = request.data || {};
+    if (!uid) throw new HttpsError('unauthenticated', 'Entre novamente.');
+    validId(businessId, 'Empresa');
+    if (spaceId !== 'all_spaces') validId(spaceId, 'Espaço');
+    if (typeof operationId !== 'string' || !/^[A-Za-z0-9_-]{16,80}$/.test(operationId)) throw new HttpsError('invalid-argument', 'Operação inválida.');
+    if (!Array.isArray(rows) || !rows.length || rows.length > 25) throw new HttpsError('invalid-argument', 'Lote inválido (máximo 25 linhas).');
+    const code = value => typeof value === 'string' && value.length <= 100;
+    for (const row of rows) if (!row || typeof row !== 'object' || !Number.isInteger(row.line) || row.line < 2 || typeof row.id !== 'string' || !/^[^/]{1,200}$/.test(row.id)
+      || !row.before || !row.next || !['codigo','barcode'].every(k => code(row.before[k]) && code(row.next[k]) && (row.next[k] !== '' || row.before[k] === ''))) throw new HttpsError('invalid-argument', 'Linha inválida.');
+    if (new Set(rows.map(r => r.id)).size !== rows.length) throw new HttpsError('invalid-argument', 'Produto repetido no lote.');
+    const base = db.doc(`businesses/${businessId}`), requestDigest = digest(rows.map(r => [r.line, r.id, r.before.codigo, r.before.barcode, r.next.codigo, r.next.barcode]));
+    const markerKey = digest(['identifiers', businessId, workspaceGeneration, operationId]), markerRef = base.collection('productImportOperations').doc(markerKey);
+    return db.runTransaction(async tx => {
+      const revisionRef = base.collection('productImportIdentifiers').doc('catalog-revision');
+      const [businessSnap, memberSnap, profileSnap, spaceSnap, , markerSnap] = await Promise.all([
+        tx.get(base), tx.get(base.collection('members').doc(uid)), tx.get(db.doc(`users/${uid}`)), spaceId === 'all_spaces' ? null : tx.get(db.doc(`financialSpaces/${spaceId}`)), tx.get(revisionRef), tx.get(markerRef),
+      ]);
+      const business = businessSnap.data(), member = memberSnap.data(), profile = profileSnap.data(), space = spaceSnap?.data();
+      assertWritable(business, workspaceGeneration);
+      const legacy = !member && business.legacyAccessDisabled !== true && profile?.active === true && profile.businessId === businessId;
+      const actor = member || (legacy ? {...profile, status:'active', spaceAccess:'all'} : null);
+      const permitted = key => actor?.role === 'owner' || actor?.permissions?.[key] === true;
+      if (business.active !== true || actor?.status !== 'active' || !permitted('products.edit') || !permitted('products.view')) throw new HttpsError('permission-denied', 'Sem permissão para corrigir códigos de produtos.');
+      const access = computeAccess(business.subscription || {});
+      if (!access.canMutate || !access.unlimited && !access.features.spreadsheetImport) throw new HttpsError('permission-denied', 'Importação disponível a partir do plano Gestão ativo.');
+      if (spaceId === 'all_spaces' ? actor.spaceAccess !== 'all' : !space || space.active === false || space.businessId !== businessId || space.linkedBusinessId && space.linkedBusinessId !== businessId || space.capabilities?.products !== true || actor.spaceAccess !== 'all' && !(actor.allowedSpaceIds || []).includes(spaceId)) throw new HttpsError('permission-denied', 'Espaço não autorizado para produtos.');
+      if (markerSnap.exists) {
+        const marker = markerSnap.data();
+        if (marker.requestDigest !== requestDigest || marker.actorUid !== uid) throw new HttpsError('failed-precondition', 'Esta operação já foi usada com outros dados. Gere outra prévia.');
+        return {results:(marker.results || []).map(r => ({...r, replayed:true}))};
+      }
+      const scope = {businessId, spaceId, allowedSpaceIds:spaceId === 'all_spaces' ? [] : [spaceId], allSpaces:actor.spaceAccess === 'all'};
+      // Whole company, including inactive products, other spaces, variations and alternates.
+      const [catalogSnap, variantsSnap] = await Promise.all([
+        tx.get(base.collection('products').select('codigo','barcode','alternateBarcodes','nome','ativo','active','deleted','deletedAt','spaceAccessMode','allowedSpaceIds')),
+        tx.get(base.collection('productVariants').select('parentProductId','sku','codigo','barcode','displayName','active','deleted','deletedAt')),
+      ]);
+      const catalog = {products:catalogSnap.docs.map(doc => ({...doc.data(), id:doc.id, businessId})), variants:variantsSnap.docs.map(doc => ({...doc.data(), id:doc.id}))};
+      const table = [Sheet.columns.slice(0, 3).map(c => c[0]), ...rows.map(r => [r.id, r.next.codigo, r.next.barcode])];
+      const preview = Sheet.previewIdentifiers(table, catalog, scope);
+      const targets = await Promise.all(rows.map(r => tx.get(base.collection('products').doc(r.id))));
+      const claimRefs = new Map();
+      for (const r of rows) for (const [kind, value] of [['sku', r.next.codigo], ['ean', r.next.barcode]]) if (value) { const key = digest([kind, value.trim()]); if (!claimRefs.has(key)) claimRefs.set(key, base.collection('productImportIdentifiers').doc(key)); }
+      const claimSnaps = new Map(await Promise.all([...claimRefs].map(async ([key, ref]) => [key, await tx.get(ref)])));
+      const results = [], timestamp = new Date().toISOString(), writes = [];
+      rows.forEach((r, index) => {
+        const row = preview.rows[index], doc = targets[index].data(), current = {codigo:String(doc?.codigo ?? '').trim(), barcode:String(doc?.barcode ?? '').trim()};
+        const result = {line:r.line, id:r.id, before:current, next:r.next};
+        if (!doc || row.status === 'invalid') return results.push({...result, ok:false, state:row.conflict ? 'conflict' : 'failed', message:row.errors.join(' ') || 'Produto não encontrado.'});
+        if (current.codigo === r.next.codigo && current.barcode === r.next.barcode) return results.push({...result, ok:true, state:'unchanged'});
+        if (current.codigo !== r.before.codigo || current.barcode !== r.before.barcode) return results.push({...result, ok:false, state:'conflict', message:'Os códigos deste produto mudaram desde a prévia. Exporte de novo e revise.'});
+        const changedBarcode = current.barcode !== r.next.barcode, barcode = r.next.barcode;
+        const history = (Array.isArray(doc.identifierHistory) ? doc.identifierHistory : []).slice(-19);
+        history.push({at:timestamp, actorUid:uid, operationId:markerKey, source:'spreadsheet_identifier_correction', before:current, after:{codigo:r.next.codigo, barcode}, previousCodesActive:false});
+        writes.push({id:r.id, patch:{codigo:r.next.codigo, barcode, ...(changedBarcode ? {barcodeType:/^\d{13}$/.test(barcode) ? 'ean_13' : /^\d{8}$/.test(barcode) ? 'ean_8' : /^\d{12}$/.test(barcode) ? 'upc_a' : null, barcodeUpdatedAt:timestamp} : {}),
+          identifierHistory:history, identifierCorrectionOperationId:markerKey, atualizadoEm:timestamp, updatedByUid:uid, actorUid:uid, updatedAt:FieldValue.serverTimestamp(), version:FieldValue.increment(1)}});
+        results.push({...result, ok:true, state:'corrected'});
+      });
+      // All reads are done: write products, identifier claims, the shared fence and the receipt.
+      for (const {id, patch} of writes) tx.update(base.collection('products').doc(id), patch);
+      for (const {id, patch} of writes) for (const [kind, value] of [['sku', patch.codigo], ['ean', patch.barcode]]) if (value) {
+        const key = digest([kind, value.trim()]), snap = claimSnaps.get(key), productIds = [...new Set([...(snap?.data()?.productIds || []), id])];
+        claimSnaps.set(key, {data:() => ({productIds})});
+        tx.set(claimRefs.get(key), {businessId, workspaceGeneration, productIds, updatedAt:FieldValue.serverTimestamp()});
+      }
+      if (writes.length) tx.set(revisionRef, {businessId, workspaceGeneration, revision:FieldValue.increment(1), commitToken:randomUUID(), updatedAt:FieldValue.serverTimestamp()}, {merge:true});
+      tx.create(markerRef, {businessId, workspaceGeneration, actorUid:uid, operationId:markerKey, kind:'identifier_correction', requestDigest, results, createdAt:FieldValue.serverTimestamp()});
+      return {results};
+    });
+  }
+  return {createProducts, correctIdentifiers};
 }
 module.exports = {productSpreadsheetService};
