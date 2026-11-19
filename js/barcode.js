@@ -9,10 +9,17 @@
     "code_39",
     "itf",
   ];
+  // Canonical EAN used by the reader, the cadastro and the spreadsheet import: NFKC,
+  // no invisible/format/control characters and no whitespace. Leading zeros are kept.
   const normalizeBarcode = (value) =>
     String(value ?? "")
-      .replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, "")
-      .trim();
+      .normalize("NFKC")
+      .replace(/[\p{Cf}\p{Cc}\p{Zl}\p{Zp}\s]/gu, "");
+  const duplicateEntry = (current, next) => ({
+    barcodeConflict: true,
+    code: current.code || next.code,
+    matches: [...(current.barcodeConflict ? current.matches : [current]), next],
+  });
   const inferType = (value) => {
     const code = normalizeBarcode(value);
     if (/^\d{13}$/.test(code)) return "ean_13";
@@ -34,8 +41,8 @@
     const next = new Map();
     products.forEach((product) => {
       const code = normalizeBarcode(product.barcode);
-      if (code && product.ativo !== false && !next.has(code))
-        next.set(code, product);
+      if (!code || product.ativo === false) return;
+      next.set(code, next.has(code) ? duplicateEntry(next.get(code), product) : product);
     });
     variants.forEach((variant) => {
       const code = normalizeBarcode(variant.barcode),
@@ -781,6 +788,12 @@
         }),
       onDetected: async ({ value }) => {
         const product = await findAsync(value);
+        if (product?.barcodeConflict)
+          return {
+            unknown: true,
+            persistent: true,
+            message: "Código duplicado em mais de um produto. Corrija o cadastro pelo ID antes de continuar.",
+          };
         if (!product)
           return {
             unknown: true,
@@ -967,6 +980,12 @@
         }),
       onDetected: async ({ value }) => {
         const product = await findAsync(value);
+        if (product?.barcodeConflict)
+          return {
+            unknown: true,
+            persistent: true,
+            message: "Código duplicado em mais de um produto. Corrija o cadastro pelo ID antes de continuar.",
+          };
         if (!product)
           return {
             unknown: true,
@@ -990,6 +1009,12 @@
       title: "Buscar por código",
       onDetected: async ({ value }) => {
         const product = await findAsync(value);
+        if (product?.barcodeConflict)
+          return {
+            unknown: true,
+            persistent: true,
+            message: "Código duplicado em mais de um produto. Corrija o cadastro pelo ID antes de continuar.",
+          };
         if (!product) return { unknown: true, persistent: true };
         window.ProdutosMobile?.search?.(value);
         setTimeout(() => window.ProdutosMobile?.details?.(product.id), 100);

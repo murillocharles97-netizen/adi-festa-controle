@@ -97,6 +97,14 @@ async function main(){
   assert.equal(await page.$$eval('.product-sheet-rows .is-update',e=>e.length),0,'base vs pó still compete; the rest is unchanged');
   assert.equal(await page.$$eval('.product-sheet-rows .is-unchanged',e=>e.length),4);
   assert.ok(await page.$eval('.product-spreadsheet-modal',e=>e.scrollWidth<=e.clientWidth+1));await page.screenshot({path:path.join(output,'1366-reimport.png')});await page.$eval('.product-sheet-ack',e=>e.scrollIntoView({block:'start'}));await page.screenshot({path:path.join(output,'1366-reimport-rows.png')});
+  // Regular import still works after the correction: price update through the Sync queue.
+  await page.click('footer [data-sheet-close]');await page.evaluate(()=>ProductSpreadsheetUI.open());await page.waitForFunction(()=>!document.querySelector('[data-sheet-file]')?.disabled);
+  const regular=[table[0],['qa-batom',null,null,null,null,null,21,null]],rbook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(rbook,XLSX.utils.aoa_to_sheet(regular),'Produtos');
+  const rpath=path.join(output,'qa-regular.xlsx');fs.writeFileSync(rpath,XLSX.write(rbook,{type:'buffer',bookType:'xlsx'}));
+  await (await page.$('[data-sheet-file]')).uploadFile(rpath);await page.waitForSelector('.product-sheet-rows .is-update');
+  await page.$eval('[data-sheet-confirm]',b=>b.click());await page.waitForFunction(()=>document.querySelector('[data-sheet-status]').textContent.includes('Concluído'),{timeout:60000});
+  for(let i=0;i<30&&(await db.doc(`businesses/${bid}/products/qa-batom`).get()).data().preco!==21;i++)await pause(500);
+  const batom=(await db.doc(`businesses/${bid}/products/qa-batom`).get()).data();assert.equal(batom.preco,21);assert.equal(batom.codigo,'BAT-001');assert.equal(batom.estoqueAtual,5);
   assert.deepEqual(errors,[]);console.log('OK identifier correction audit',output);
  }catch(e){console.error('DIAG',await page.evaluate(()=>({status:document.querySelector('[data-sheet-status]')?.textContent,error:document.querySelector('[data-sheet-error]')?.textContent,queue:(window.SyncFirebase?.getQueueDiagnostics?.()||[]).map(i=>[i.category,i.subtype,i.status])})).catch(x=>x.message),errors);await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});throw e;}
  finally{await browser.close();server.close();}

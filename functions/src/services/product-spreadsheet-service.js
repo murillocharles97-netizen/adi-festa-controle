@@ -67,7 +67,8 @@ function productSpreadsheetService(db, {FieldValue}) {
         if (row.status !== 'create') { fail(row.errors.join(' ')); continue; }
         if (markers[index]?.exists) { results.push({line:input.line, id, ok:true, action:'create', replayed:true}); continue; }
         const data = row.create;
-        if (scoped.some(p => data.codigo && String(p.codigo ?? '').trim() === data.codigo || data.barcode && (p.barcode === data.barcode || (p.alternateBarcodes || []).includes(data.barcode))) || variants.some(v => data.codigo && (v.sku || v.codigo) === data.codigo || data.barcode && v.barcode === data.barcode)) {
+        const sku = Sheet.canonical('codigo', data.codigo), ean = Sheet.canonical('barcode', data.barcode), sameSku = v => !!sku && Sheet.canonical('codigo', v) === sku, sameEan = v => !!ean && Sheet.canonical('barcode', v) === ean;
+        if (scoped.some(p => sameSku(p.codigo) || sameEan(p.barcode) || (p.alternateBarcodes || []).some(sameEan)) || variants.some(v => sameSku(v.sku || v.codigo) || sameEan(v.barcode))) {
           fail('SKU/EAN já existe na nuvem. Gere outra prévia; nenhum produto foi criado.'); continue;
         }
         if (catalog.some(p => p.id === id)) { fail('Identificador já utilizado. Confira o cadastro antes de continuar.'); continue; }
@@ -109,7 +110,7 @@ function productSpreadsheetService(db, {FieldValue}) {
     for (const row of rows) if (!row || typeof row !== 'object' || !Number.isInteger(row.line) || row.line < 2 || typeof row.id !== 'string' || !/^[^/]{1,200}$/.test(row.id)
       || !row.before || !row.next || !['codigo','barcode'].every(k => code(row.before[k]) && code(row.next[k]) && (row.next[k] !== '' || row.before[k] === ''))) throw new HttpsError('invalid-argument', 'Linha inválida.');
     if (new Set(rows.map(r => r.id)).size !== rows.length) throw new HttpsError('invalid-argument', 'Produto repetido no lote.');
-    const base = db.doc(`businesses/${businessId}`), requestDigest = digest(rows.map(r => [r.line, r.id, r.before.codigo, r.before.barcode, r.next.codigo, r.next.barcode]));
+    const base = db.doc(`businesses/${businessId}`), requestDigest = digest([spaceId, rows.map(r => [r.line, r.id, r.before.codigo, r.before.barcode, r.next.codigo, r.next.barcode])]);
     const markerKey = digest(['identifiers', businessId, workspaceGeneration, operationId]), markerRef = base.collection('productImportOperations').doc(markerKey);
     return db.runTransaction(async tx => {
       const revisionRef = base.collection('productImportIdentifiers').doc('catalog-revision');
@@ -125,12 +126,19 @@ function productSpreadsheetService(db, {FieldValue}) {
       const access = computeAccess(business.subscription || {});
       if (!access.canMutate || !access.unlimited && !access.features.spreadsheetImport) throw new HttpsError('permission-denied', 'Importação disponível a partir do plano Gestão ativo.');
       if (spaceId === 'all_spaces' ? actor.spaceAccess !== 'all' : !space || space.active === false || space.businessId !== businessId || space.linkedBusinessId && space.linkedBusinessId !== businessId || space.capabilities?.products !== true || actor.spaceAccess !== 'all' && !(actor.allowedSpaceIds || []).includes(spaceId)) throw new HttpsError('permission-denied', 'Espaço não autorizado para produtos.');
-      if (markerSnap.exists) {
-        const marker = markerSnap.data();
-        if (marker.requestDigest !== requestDigest || marker.actorUid !== uid) throw new HttpsError('failed-precondition', 'Esta operação já foi usada com outros dados. Gere outra prévia.');
-        return {results:(marker.results || []).map(r => ({...r, replayed:true}))};
-      }
+      if (markerSnap.exists && (markerSnap.data().requestDigest !== requestDigest || markerSnap.data().actorUid !== uid)) throw new HttpsError('failed-precondition', 'Esta operação já foi usada com outros dados. Gere outra prévia.');
       const scope = {businessId, spaceId, allowedSpaceIds:spaceId === 'all_spaces' ? [] : [spaceId], allSpaces:actor.spaceAccess === 'all'};
+      if (markerSnap.exists) {
+        // Access is evaluated NOW (inside this transaction), not when the operation started:
+        // a revoked product/space returns nothing about it, and stored messages (which may
+        // name products seen under the old access) are never replayed.
+        const current = await Promise.all((markerSnap.data().results || []).map(r => typeof r.id === 'string' && /^[^/]{1,200}$/.test(r.id) ? tx.get(base.collection('products').doc(r.id)) : null));
+        return {results:(markerSnap.data().results || []).map((r, i) => {
+          const p = current[i]?.data();
+          if (!p || p.deleted || p.deletedAt || !Sheet.inScope({...p, businessId}, scope, true)) return {line:r.line, ok:false, state:'failed', replayed:true, message:'Sem acesso a este produto.'};
+          return {line:r.line, id:r.id, before:r.before, next:r.next, ok:r.ok, state:r.state, replayed:true, ...(r.ok ? {} : {message:'Esta linha não foi aplicada. Gere outra prévia para ver o motivo atual.'})};
+        })};
+      }
       // Whole company, including inactive products, other spaces, variations and alternates.
       const [catalogSnap, variantsSnap] = await Promise.all([
         tx.get(base.collection('products').select('codigo','barcode','alternateBarcodes','nome','ativo','active','deleted','deletedAt','spaceAccessMode','allowedSpaceIds')),
@@ -146,7 +154,7 @@ function productSpreadsheetService(db, {FieldValue}) {
       const results = [], timestamp = new Date().toISOString(), writes = [];
       rows.forEach((r, index) => {
         const row = preview.rows[index], doc = targets[index].data(), current = {codigo:String(doc?.codigo ?? '').trim(), barcode:String(doc?.barcode ?? '').trim()};
-        const result = {line:r.line, id:r.id, before:current, next:r.next};
+        const result = row.matched ? {line:r.line, id:r.id, before:current, next:r.next} : {line:r.line};
         if (!doc || row.status === 'invalid') return results.push({...result, ok:false, state:row.conflict ? 'conflict' : 'failed', message:row.errors.join(' ') || 'Produto não encontrado.'});
         if (current.codigo === r.next.codigo && current.barcode === r.next.barcode) return results.push({...result, ok:true, state:'unchanged'});
         if (current.codigo !== r.before.codigo || current.barcode !== r.before.barcode) return results.push({...result, ok:false, state:'conflict', message:'Os códigos deste produto mudaram desde a prévia. Exporte de novo e revise.'});

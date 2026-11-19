@@ -16,6 +16,12 @@
   const exportColumns = [...columns, ...optional];
   const blank = v => v === undefined || v === null || typeof v === 'string' && !v.trim();
   const text = v => String(v ?? '').trim();
+  // Canonical identifier, the SAME rule as the barcode reader (js/barcode.js): NFKC,
+  // no invisible/format/control characters; EAN also without any whitespace. Only used
+  // to COMPARE; stored codes are never rewritten. Leading zeros are kept.
+  const INVISIBLE = /[\p{Cf}\p{Cc}\p{Zl}\p{Zp}]/gu;
+  const canonical = (kind, v) => { const c = String(v ?? '').normalize('NFKC').replace(INVISIBLE, ''); return kind === 'barcode' ? c.replace(/\s+/g, '') : c.replace(/\s+/g, ' ').trim(); };
+  const assertCleanCode = (kind, v) => { if (text(v).length > 100 || canonical(kind, v) !== text(v)) throw Error(kind === 'barcode' ? 'EAN inválido: use até 100 caracteres, sem espaços nem caracteres invisíveis. Digite o código novamente.' : 'SKU inválido: use até 100 caracteres, sem caracteres invisíveis nem espaços repetidos. Digite o código novamente.'); };
   const header = v => text(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   function number(value) {
     if (blank(value)) return null;
@@ -52,18 +58,18 @@
     const present = [...columns, ...optional.filter(([label]) => headers.includes(header(label)))], keys = present.map(([label]) => headers.indexOf(header(label)));
     if (keys.some(i => i < 0) || new Set(headers).size !== headers.length || headers.filter(h => h).length !== present.length) throw Error('Use as colunas do modelo exportado pela VECONI (8 obrigatórias e "Entrada de mercadorias" opcional), sem colunas repetidas.');
     const catalog = products.filter(p => inScope(p, scope, true)), byId = new Map(catalog.map(p => [text(p.id), p]));
-    const index = field => { const map = new Map(); for (const p of catalog) { const key = text(p[field]); if (key) map.set(key, [...map.get(key) || [], p]); } return map; };
+    const index = field => { const map = new Map(); for (const p of catalog) { const key = canonical(field, p[field]); if (key) map.set(key, [...map.get(key) || [], p]); } return map; };
     const sku = index('codigo'), ean = index('barcode');
     const rows = [];
     for (let i = 1; i < table.length; i++) {
       if (table[i].every(blank)) continue;
       const input = Object.fromEntries(present.map(([, key], col) => [key, table[i][keys[col]]])), row = { line: i + 1, name: text(input.nome), status: 'invalid', changes: {}, before: {}, errors: [] };
       rows.push(row);
-      row.codes = ['codigo', 'barcode'].filter(key => !blank(input[key])).map(key => `${key}:${text(input[key])}`);
+      row.codes = ['codigo', 'barcode'].filter(key => !blank(input[key])).map(key => `${key}:${canonical(key, input[key])}`);
       row.identity = !blank(input.id) ? `id:${text(input.id)}` : JSON.stringify([text(input.codigo), text(input.barcode), text(input.nome)]);
       try {
         for (const key of ['id', 'codigo', 'barcode']) if (!blank(input[key]) && typeof input[key] !== 'string') throw Error('ID, SKU e EAN devem ser células de texto para preservar zeros à esquerda.');
-        for (const key of ['codigo', 'barcode']) if (!blank(input[key]) && (text(input[key]).length > 100 || /[\u0000-\u001f\u007f]/.test(input[key]))) throw Error('SKU/EAN inválido: use até 100 caracteres, sem caracteres de controle.');
+        for (const key of ['codigo', 'barcode']) if (!blank(input[key]) && (text(input[key]).length > 100 || canonical(key, input[key]) !== text(input[key]) && !catalog.some(p => text(p[key]) === text(input[key])))) throw Error('SKU/EAN inválido: use até 100 caracteres, sem caracteres de controle.');
         if (!blank(input.barcode) && /\s/.test(input.barcode)) throw Error('Código de barras não pode conter espaços.');
         const conflict = message => { row.conflict = true; throw Error(message); };
         const id = text(input.id); let p;
@@ -73,7 +79,7 @@
           if (!p && mode === 'create_update') conflict('ID VECONI desconhecido ou fora do espaço. Não será criado outro produto.');
         }
         else {
-          const candidates = [!blank(input.codigo) ? sku.get(text(input.codigo)) || [] : null, !blank(input.barcode) ? ean.get(text(input.barcode)) || [] : null].filter(Boolean);
+          const candidates = [!blank(input.codigo) ? sku.get(canonical('codigo', input.codigo)) || [] : null, !blank(input.barcode) ? ean.get(canonical('barcode', input.barcode)) || [] : null].filter(Boolean);
           if (!candidates.length && mode === 'update') throw Error('Informe ID VECONI, SKU ou EAN. O nome não identifica o produto.');
           if (candidates.some(list => list.length > 1)) conflict('Correspondência ambígua de SKU/EAN.');
           if (candidates.some(list => !list.length) && candidates.some(list => list.length)) conflict('SKU e EAN não correspondem ao mesmo produto.');
@@ -156,22 +162,24 @@
   // Only SKU/EAN are read; price, cost, stock and name columns are ignored here.
   const identifierKeys = ['codigo', 'barcode'];
   const identifierLabels = { codigo: 'SKU', barcode: 'EAN' };
-  function identifierOwners(kind, value, selfId, catalog) {
-    const owners = [], label = p => `“${text(p.nome) || 'Sem nome'}” (ID ${text(p.id)})`;
+  function identifierOwners(kind, value, selfId, catalog, visible = () => true) {
+    const owners = [], target = canonical(kind, value), same = code => !!target && canonical(kind, code) === target;
+    const label = p => visible(p) ? `“${text(p.nome) || 'Sem nome'}” (ID ${text(p.id)})` : 'um produto de outro espaço';
     for (const p of catalog.products || []) {
       if (!p || p.deleted || p.deletedAt || text(p.id) === selfId) continue;
       const inactive = p.ativo === false || p.active === false ? ' (inativo)' : '';
-      if (text(kind === 'codigo' ? p.codigo : p.barcode) === value) owners.push(label(p) + inactive);
-      if (kind === 'barcode' && (Array.isArray(p.alternateBarcodes) ? p.alternateBarcodes : []).some(code => text(code) === value)) owners.push(`código alternativo de ${label(p)}`);
+      if (same(kind === 'codigo' ? p.codigo : p.barcode)) owners.push(label(p) + (visible(p) ? inactive : ''));
+      if (kind === 'barcode' && (Array.isArray(p.alternateBarcodes) ? p.alternateBarcodes : []).some(same)) owners.push(`código alternativo de ${label(p)}`);
     }
+    const parents = new Map((catalog.products || []).map(p => [text(p?.id), p]));
     for (const v of catalog.variants || []) {
       if (!v || v.deleted || v.deletedAt) continue;
-      const own = text(v.parentProductId) === selfId ? ' deste produto' : '';
-      if (text(kind === 'codigo' ? v.sku || v.codigo : v.barcode) === value) owners.push(`variação${own} ${text(v.displayName) || text(v.id)}`);
+      const own = text(v.parentProductId) === selfId ? ' deste produto' : '', parent = parents.get(text(v.parentProductId));
+      if (same(kind === 'codigo' ? v.sku || v.codigo : v.barcode)) owners.push(parent && visible(parent) ? `variação${own} ${text(v.displayName) || text(v.id)}` : 'uma variação de produto de outro espaço');
     }
     return owners;
   }
-  function previewIdentifiers(table, catalog, scope) {
+  function previewIdentifiers(table, catalog, scope, { visible = p => inScope(p, scope, true) } = {}) {
     if (!Array.isArray(table) || !table.length) throw Error('A planilha está vazia.');
     if (table.length > 10001) throw Error('Limite de 10.000 linhas por importação.');
     const headers = table[0].map(header), need = columns.slice(0, 3);
@@ -200,15 +208,14 @@
         for (const key of identifierKeys) {
           if (blank(input[key])) { row.next[key] = row.before[key]; continue; } // blank keeps the current code
           const value = text(input[key]);
-          if (value.length > 100 || /[\u0000-\u001f\u007f]/.test(value)) throw Error('SKU/EAN inválido: use até 100 caracteres, sem caracteres de controle.');
-          if (key === 'barcode' && /\s/.test(input[key])) throw Error('Código de barras não pode conter espaços.');
+          if (value !== row.before[key]) assertCleanCode(key, input[key]); // existing codes are never rewritten automatically
           row.next[key] = value;
         }
         row.changed = identifierKeys.filter(key => row.next[key] !== row.before[key]);
         for (const key of identifierKeys) {
           const value = row.next[key];
           if (!value) continue;
-          const owners = identifierOwners(key, value, id, catalog);
+          const owners = identifierOwners(key, value, id, catalog, visible);
           if (!owners.length) continue;
           if (row.changed.includes(key)) conflict(`Novo ${identifierLabels[key]} ${value} já é usado por ${owners.join(', ')}. Corrija o outro cadastro primeiro (uma troca entre produtos exige duas importações).`);
           row.notes.push(`Atenção: o ${identifierLabels[key]} atual também está em ${owners.join(', ')}. Corrija o outro produto pelo ID dele.`);
@@ -220,10 +227,10 @@
     const ids = count(rows, row => row.id);
     for (const row of rows) if (row.id && ids.get(row.id) > 1) { row.status = 'invalid'; row.conflict = true; row.errors.push('O mesmo ID VECONI aparece em mais de uma linha. Deixe uma única linha por produto.'); }
     for (const key of identifierKeys) {
-      const finals = count(rows.filter(row => row.id && ids.get(row.id) === 1), row => row.next[key] || '');
-      for (const row of rows) if (row.status === 'update' && row.changed.includes(key) && finals.get(row.next[key]) > 1) { row.status = 'invalid'; row.conflict = true; row.errors.push(`O novo ${identifierLabels[key]} ${row.next[key]} foi informado para mais de um produto nesta planilha.`); }
+      const finals = count(rows.filter(row => row.id && ids.get(row.id) === 1), row => canonical(key, row.next[key]));
+      for (const row of rows) if (row.status === 'update' && row.changed.includes(key) && finals.get(canonical(key, row.next[key])) > 1) { row.status = 'invalid'; row.conflict = true; row.errors.push(`O novo ${identifierLabels[key]} ${row.next[key]} foi informado para mais de um produto nesta planilha.`); }
     }
     return { mode: 'identifiers', rows, counts: { total: rows.length, found: rows.filter(r => r.matched).length, updates: rows.filter(r => r.status === 'update').length, unchanged: rows.filter(r => r.status === 'unchanged').length, conflicts: rows.filter(r => r.conflict).length, errors: rows.filter(r => r.status === 'invalid' && !r.conflict).length, invalid: rows.filter(r => r.status === 'invalid').length, notFound: 0, creates: 0 } };
   }
-  return Object.freeze({ columns, exportColumns, optional, blank, number, values, inScope, preview, previewIdentifiers, identifierOwners });
+  return Object.freeze({ columns, exportColumns, optional, blank, number, values, inScope, preview, previewIdentifiers, identifierOwners, canonical, assertCleanCode });
 });

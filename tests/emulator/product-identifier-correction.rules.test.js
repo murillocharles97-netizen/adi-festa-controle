@@ -118,3 +118,65 @@ test('missing, invalid or unknown IDs never create products; permissions and iso
  await assert.rejects(call([ok],{workspaceGeneration:3}),e=>e.code==='failed-precondition');
  assert.equal((await get('race')).codigo,'R1');
 });
+
+// ---- V239.1 regressions (Codex NO-GO #2 and #3) ----
+const ZW='\u200B';
+test('server compares canonical codes: invisible-character twins collide (active, inactive, other space, variation, alternate)',async()=>{
+ await db.doc(`financialSpaces/other-${suffix}`).set({type:'business',businessId:bid,linkedBusinessId:bid,active:true,capabilities:{products:true}});
+ await product('canon-a',{codigo:'CA',barcode:`790${ZW}0001`});
+ await product('canon-off',{codigo:'COFF',barcode:`790000${ZW}2`,ativo:false});
+ await product('canon-far',{nome:'Produto Secreto',codigo:'CFAR',barcode:'7900003',allowedSpaceIds:[`other-${suffix}`],defaultSpaceId:`other-${suffix}`});
+ await product('canon-alt',{codigo:'CALT',barcode:'CALTE',alternateBarcodes:[`79${ZW}00004`]});
+ await db.doc(`businesses/${bid}/productVariants/canon-var`).set({parentProductId:'canon-alt',sku:`S${ZW}KUVAR`,barcode:'7900005',active:true});
+ await product('canon-t',{codigo:'CT',barcode:'CTE'});
+ for(const next of [{codigo:'CT',barcode:'7900001'},{codigo:'CT',barcode:'7900002'},{codigo:'CT',barcode:'7900003'},{codigo:'CT',barcode:'7900004'},{codigo:'CT',barcode:'7900005'},{codigo:'SKUVAR',barcode:'CTE'}]){
+  const r=await call([row('canon-t',{codigo:'CT',barcode:'CTE'},next)]);
+  assert.equal(r.results[0].state,'conflict',JSON.stringify(next));assert.doesNotMatch(r.results[0].message,/Produto Secreto|canon-far/,'no names from other spaces');
+ }
+ await assert.rejects(call([row('canon-t',{codigo:'CT',barcode:'CTE'},{codigo:'CT',barcode:`79${ZW}99`})]).then(r=>{if(!r.results[0].ok)throw Object.assign(Error(r.results[0].message),{code:'refused'});}),/invisíveis/);
+ const kept=await get('canon-a');assert.equal(kept.barcode,`790${ZW}0001`,'existing real codes are never rewritten');
+ // Normal spreadsheet creation also refuses canonical twins.
+ const created=await service.createProducts({auth:{uid},data:{businessId:bid,spaceId:space,workspaceGeneration:0,rows:[{line:2,data:{nome:'Gêmeo',codigo:'GEMEO',barcode:'7900001'}}]}});
+ assert.equal(created.results[0].ok,false);
+ // Leading zeros are different codes.
+ const zeros=await call([row('canon-t',{codigo:'CT',barcode:'CTE'},{codigo:'CT',barcode:'07900001'})]);assert.equal(zeros.results[0].state,'corrected');
+});
+
+test('revocation: retries, lost responses and other spaces never return data after access is removed',async()=>{
+ const staff='staff-'+suffix,spaceB='spaceb-'+suffix;
+ await db.doc(`financialSpaces/${spaceB}`).set({type:'business',businessId:bid,linkedBusinessId:bid,active:true,capabilities:{products:true}});
+ await db.doc(`businesses/${bid}/members/${staff}`).set({status:'active',role:'seller',spaceAccess:'selected',allowedSpaceIds:[space,spaceB],permissions:{'products.view':true,'products.edit':true}});
+ await product('rev-1',{codigo:'R1',barcode:'RV1'});await product('rev-2',{codigo:'R2',barcode:'RV2'});
+ const as=(data)=>service.correctIdentifiers({auth:{uid:staff},data:{businessId:bid,workspaceGeneration:0,...data}});
+ const op1=opId(),rows1=[row('rev-1',{codigo:'R1',barcode:'RV1'},{codigo:'R1B',barcode:'RV1'})];
+ assert.equal((await as({spaceId:space,operationId:op1,rows:rows1})).results[0].state,'corrected'); // response "lost"
+ // 1) Space A revoked: the same retry is denied in A and cannot be replayed through B.
+ await db.doc(`businesses/${bid}/members/${staff}`).update({allowedSpaceIds:[spaceB]});
+ await assert.rejects(as({spaceId:space,operationId:op1,rows:rows1}),e=>e.code==='permission-denied');
+ await assert.rejects(as({spaceId:spaceB,operationId:op1,rows:rows1}),e=>e.code==='failed-precondition'&&!/R1B|rev-1/.test(e.message));
+ // 2) Fresh call from B naming a product of A: no codes echoed back.
+ const probe=await as({spaceId:spaceB,operationId:opId(),rows:[row('rev-2',{codigo:'',barcode:''},{codigo:'X',barcode:''})]});
+ assert.equal(probe.results[0].ok,false);assert.equal(probe.results[0].before,undefined);assert.equal(probe.results[0].id,undefined);
+ // 3) Space kept, but the product left the space after the operation: replay is redacted.
+ await db.doc(`businesses/${bid}/members/${staff}`).update({allowedSpaceIds:[space,spaceB]});
+ const op2=opId(),rows2=[row('rev-2',{codigo:'R2',barcode:'RV2'},{codigo:'R2B',barcode:'RV2'})];
+ assert.equal((await as({spaceId:space,operationId:op2,rows:rows2})).results[0].state,'corrected');
+ await db.doc(`businesses/${bid}/products/rev-2`).update({allowedSpaceIds:[spaceB],defaultSpaceId:spaceB});
+ const replay=await as({spaceId:space,operationId:op2,rows:rows2});
+ assert.deepEqual(Object.keys(replay.results[0]).sort(),['line','message','ok','replayed','state']);assert.equal(replay.results[0].ok,false);
+ // 4) products.edit revoked: retry denied; inactive member denied.
+ await db.doc(`businesses/${bid}/members/${staff}`).update({permissions:{'products.view':true}});
+ await assert.rejects(as({spaceId:spaceB,operationId:op2,rows:rows2}),e=>e.code==='permission-denied');
+ await db.doc(`businesses/${bid}/members/${staff}`).update({permissions:{'products.view':true,'products.edit':true},status:'disabled'});
+ await assert.rejects(as({spaceId:spaceB,operationId:opId(),rows:rows2}),e=>e.code==='permission-denied');
+ // 5) Revocation concurrent with execution: afterwards nothing is returned, whatever the race outcome.
+ await db.doc(`businesses/${bid}/members/${staff}`).update({status:'active',allowedSpaceIds:[space]});
+ await product('rev-3',{codigo:'R3',barcode:'RV3'});
+ const op3=opId(),rows3=[row('rev-3',{codigo:'R3',barcode:'RV3'},{codigo:'R3B',barcode:'RV3'})];
+ const [race]=await Promise.allSettled([as({spaceId:space,operationId:op3,rows:rows3}),db.doc(`businesses/${bid}/members/${staff}`).update({allowedSpaceIds:[spaceB]})]);
+ if(race.status==='fulfilled')assert.ok(['corrected','unchanged'].includes(race.value.results[0].state));
+ await assert.rejects(as({spaceId:space,operationId:op3,rows:rows3}),e=>e.code==='permission-denied');
+ if(race.status==='fulfilled')await assert.rejects(as({spaceId:spaceB,operationId:op3,rows:rows3}),e=>e.code==='failed-precondition');
+ else{const r=await as({spaceId:spaceB,operationId:op3,rows:rows3});assert.equal(r.results[0].ok,false);assert.equal(r.results[0].before,undefined);assert.equal(r.results[0].id,undefined);}
+ const stock=await get('rev-3');assert.equal(stock.estoqueAtual,5);
+});
