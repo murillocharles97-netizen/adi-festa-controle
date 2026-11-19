@@ -43,7 +43,7 @@
     const key=s.formaPagamento||(s.status==='fiado'?'fiado':'outros');
     return{key,name:({pix:'Pix',dinheiro:'Dinheiro',cartao:'Cartão manual',fiado:'Fiado'})[key]||'Outras formas',form:key};
   }
-  const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,services:0,serviceKm:0,serviceMinutes:0,missingCost:0});
+  const empty=()=>({revenue:0,cost:0,profit:0,count:0,quantity:0,services:0,serviceKm:0,serviceMinutes:0,fuelExecutions:0,fuelLiters:0,fuelCost:0,missingCost:0});
   // A sale is cash at checkout unless it opened credit (fiado/crediário). Credit
   // is received later through `pagamentos`; counting both would double the cash.
   const deferred=s=>method(s).key==='fiado'||Boolean(s.installmentPlan)||String(s.status||'').toLowerCase()==='fiado';
@@ -76,7 +76,8 @@
       const hasCost=s.custoTotal!==null&&s.custoTotal!==undefined,hasProfit=s.lucro!==null&&s.lucro!==undefined;
       const cost=hasCost?cents(s.custoTotal):0,profit=hasProfit?cents(s.lucro):hasCost?revenue-cost:0,items=s.itens||s.items||[],quantity=items.reduce((n,i)=>n+number(i.quantidade??i.quantity),0);
       const executions=items.filter(i=>i.serviceExecution),serviceKm=executions.reduce((n,i)=>n+number(i.serviceExecution.km),0),serviceMinutes=executions.reduce((n,i)=>n+number(i.serviceExecution.minutes),0);
-      const amounts={revenue,cost,profit,count:1,quantity,services:executions.length,serviceKm,serviceMinutes,missingCost:((canCost&&!hasCost)||(canProfit&&!hasProfit&&!hasCost)||s.costResolution==='partial')?1:0};
+      const fuels=canCost?executions.map(i=>i.serviceFuelEstimate||i.serviceCostSnapshot?.fuel).filter(f=>f?.version===1&&Number.isFinite(Number(f.litersEstimated))&&Number(f.litersEstimated)>=0&&Number.isFinite(Number(f.estimatedCost))&&Number(f.estimatedCost)>=0):[];
+      const amounts={revenue,cost,profit,count:1,quantity,services:executions.length,serviceKm,serviceMinutes,fuelExecutions:fuels.length,fuelLiters:fuels.reduce((n,f)=>n+Number(f.litersEstimated),0),fuelCost:fuels.reduce((n,f)=>n+cents(f.estimatedCost),0),missingCost:((canCost&&!hasCost)||(canProfit&&!hasProfit&&!hasCost)||s.costResolution==='partial')?1:0};
       Object.keys(amounts).forEach(k=>total[k]+=amounts[k]);
       const upfront=deferred(s)?0:revenue;cash[active?'current':'previous'].upfront+=upfront;
       if(!active)continue;
@@ -125,6 +126,7 @@
       const result={...row,revenue:row.revenue/100};
       if('exchangeAdjustment' in row)result.exchangeAdjustment=row.exchangeAdjustment/100;
       if('cost' in row){if(canCost)result.cost=row.cost/100;else delete result.cost;}
+      if('fuelCost' in row){if(canCost)result.fuelCost=row.fuelCost/100;else{delete result.fuelCost;delete result.fuelLiters;delete result.fuelExecutions;}}
       if('profit' in row){if(canProfit)result.profit=row.profit/100;else delete result.profit;}
       for(const k of ['upfront','credit'])if(k in row)result[k]=row[k]/100;
       if(receipts&&('upfront' in row||'credit' in row))result.received=(row.upfront||0)/100+(row.credit||0)/100;

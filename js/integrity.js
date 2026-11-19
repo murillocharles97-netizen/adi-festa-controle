@@ -51,7 +51,7 @@
       fill(d,options.normalizeProductAccess?.(d)||{spaceAccessMode:'all_spaces',allowedSpaceIds:[],defaultSpaceId:null,spaceScopeVersion:1});
       if(d.custo===undefined)d.custo=fin.custo??d.cost??0;
       const serviceCost=d.serviceCostConfig||fin.serviceCostConfigs?.[d.serviceConfig?.id];
-      if(serviceCost)d.serviceCostConfig={model:serviceCost.model,rate:serviceCost.rate,feePercent:serviceCost.feePercent};
+      if(serviceCost)d.serviceCostConfig={model:serviceCost.model,rate:serviceCost.rate,feePercent:serviceCost.feePercent,...(serviceCost.fuel?{fuel:stable(serviceCost.fuel)}:{})};
       const control=effectiveStockControl(document);
       if(control!==null){d.controlaEstoque=control;delete d.semControleEstoque;}
     }

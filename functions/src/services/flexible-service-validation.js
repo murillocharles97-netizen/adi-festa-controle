@@ -20,6 +20,7 @@ async function validateFlexibleServices({c,writes,plan,get,ref,FieldValue}){
     if(w.data.serviceCostConfig){
       if(!c.has('cost.view'))fail('Configuração de custos exige autorização.');
       const config=M.costConfig(w.data.serviceCostConfig),financial=await old('productFinancials',w.entityId),saved=financial?.serviceCostConfigs?.[product.serviceConfig.id];
+      if((config.fuel||previous?.serviceConfig?.calculationVersion===2)&&w.data.serviceConfig?.calculationVersion!==2)fail('Atualize a VECONI para alterar a configuração deste serviço com segurança.');
       if(saved&&(JSON.stringify(M.costConfig(saved))!==JSON.stringify(config)||saved.pricingModel&&saved.pricingModel!==product.serviceConfig.pricingModel||saved.priceRate!==undefined&&Number(saved.priceRate)!==Number(product.preco)))fail('Uma configuração já utilizada não pode ser reescrita. Salve uma nova versão.');
     }else if(product.serviceConfig.id!==previous?.serviceConfig?.id)fail('A nova configuração precisa de seu snapshot de custo autorizado.');
   }
@@ -53,7 +54,7 @@ async function validateFlexibleServices({c,writes,plan,get,ref,FieldValue}){
       try{M.assertUsage({pricingModel:config.pricingModel||p.serviceConfig.pricingModel},config,e);}catch(error){fail(error.message);}
       const input=i.serviceCostSnapshot;
       if(input&&!c.has('cost.view'))fail('Custos adicionais exigem autorização.');
-      const snapshot=M.estimate(config,e,i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot,input?.additionalCosts||0);
+      const charge=Number(i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot),snapshot=M.estimate(config,e,charge,input?.additionalCosts||0);
       if(input&&JSON.stringify(M.costConfig(input.configuration))!==JSON.stringify(M.costConfig(config)))fail('O custo original da execução diverge da configuração autorizada.');
       costs.set(`service:${e.id}`,{cost:snapshot.estimatedCost,serviceCostSnapshot:snapshot});
     }

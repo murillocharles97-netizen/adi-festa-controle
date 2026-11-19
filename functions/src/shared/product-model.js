@@ -15,7 +15,7 @@
         v.serviceConfig=model.config(c);
         if(d.serviceCostConfig!==undefined||atual?.serviceCostConfig)v.serviceCostConfig=model.costConfig(d.serviceCostConfig??atual.serviceCostConfig);
         if(!d.serviceCostConfig&&v.serviceCostConfig&&d.custo!==undefined)v.serviceCostConfig=model.costConfig({...v.serviceCostConfig,rate:v.custo??0});
-        if(v.serviceCostConfig)v.serviceConfig=model.config({...v.serviceConfig,requiresKm:v.serviceConfig.pricingModel==='km'||v.serviceCostConfig.model==='km',requiresMinutes:v.serviceConfig.pricingModel==='hour'||v.serviceCostConfig.model==='hour'});
+        if(v.serviceCostConfig)v.serviceConfig=model.config({...v.serviceConfig,requiresKm:v.serviceConfig.pricingModel==='km'||v.serviceCostConfig.model==='km',requiresMinutes:v.serviceConfig.pricingModel==='hour'||v.serviceCostConfig.model==='hour',...(v.serviceCostConfig.fuel?{calculationVersion:2}:{})});
         const previousCost=atual?.serviceCostConfig&&model.costConfig(atual.serviceCostConfig);
         if(atual?.serviceConfig?.id===v.serviceConfig.id&&v.serviceCostConfig&&
           (Number(v.preco)!==Number(atual.preco)||JSON.stringify(v.serviceCostConfig)!==JSON.stringify(previousCost))){

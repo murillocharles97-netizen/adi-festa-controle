@@ -706,6 +706,7 @@
       stockFields.querySelectorAll("input").forEach((input) => {
         input.disabled = isService || !controlsStock.checked;
       });
+      window.FlexibleServiceUI?.updateConfigFields?.(form);
     };
     const validateBarcode = () => {
       const code = window.normalizeBarcode?.(barcodeInput.value) || barcodeInput.value.trim();
@@ -801,6 +802,8 @@
     controlsStock.onchange = updateStockFields;
     itemKindSelect.onchange = updateStockFields;
     form.elements.servicePricingModel?.addEventListener("change",updateStockFields);
+    form.elements.serviceCostModel?.addEventListener('change',updateStockFields);
+    for(const name of ['serviceFuelEfficiency','serviceFuelPrice'])form.elements[name]?.addEventListener('input',()=>window.FlexibleServiceUI?.updateConfigFields?.(form));
     barcodeInput.addEventListener("input", validateBarcode);
     barcodeInput.addEventListener("blur", validateBarcode);
     $("[data-scan-form-barcode]", root).onclick = () =>

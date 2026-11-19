@@ -9,14 +9,17 @@ const PAGE_SIZE=250;
 const text=v=>String(v??'').slice(0,200);
 const numeric=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
 function sanitizeSale(id,s,financial,permissions){
+  const costItems=new Map((financial?.itemCosts||[]).map(i=>[Number(i.index),i]));
+  const fuelEstimate=index=>{const f=costItems.get(index)?.serviceCostSnapshot?.fuel;return permissions.cost&&f?.version===1&&numeric(f.litersEstimated)!==null&&Number(f.litersEstimated)>=0&&numeric(f.estimatedCost)!==null&&Number(f.estimatedCost)>=0?{version:1,litersEstimated:Number(f.litersEstimated),estimatedCost:Number(f.estimatedCost)}:null;};
   const out={id,businessId:s.businessId||null,spaceId:s.spaceId||s.financialSpaceId||null,
     data:s.data?.toDate?s.data.toDate().toISOString():s.data,
     valorFinal:numeric(s.valorFinal??s.valorTotal),status:text(s.status||s.saleStatus||s.tipo),active:s.active!==false&&s.ativo!==false,
     deleted:s.deleted===true||Boolean(s.deletedAt)||s.desfeita===true,formaPagamento:text(s.formaPagamento),paymentIntentId:s.paymentIntentId?text(s.paymentIntentId):null,
     installmentPlan:s.installmentPlan?{version:1}:null,
     paymentMetadata:{provider:text(s.paymentMetadata?.provider||s.provider)},
-    itens:(s.itens||s.items||[]).map(i=>({produtoId:text(i.produtoId||i.productId),nome:text(i.nome||i.productNameSnapshot),quantidade:numeric(i.quantidade??i.quantity),
+    itens:(s.itens||s.items||[]).map((i,index)=>({produtoId:text(i.produtoId||i.productId),nome:text(i.nome||i.productNameSnapshot),quantidade:numeric(i.quantidade??i.quantity),
       ...(serviceExecution(i)?{serviceExecution:serviceExecution(i)}:{}),
+      ...(fuelEstimate(index)?{serviceFuelEstimate:fuelEstimate(index)}:{}),
       categoryNameSnapshot:text(i.categoryNameSnapshot||i.categoria),subtotalFinal:numeric(i.subtotalFinal??i.valorTotal??Number(i.quantidade??i.quantity)*Number(i.precoFinalUnitario??i.precoUnitario??i.unitPriceSnapshot))}))};
   if(permissions.cost)out.custoTotal=numeric(financial?.custoTotal??s.custoTotal);
   const historicalCost=numeric(financial?.custoTotal??s.custoTotal);
