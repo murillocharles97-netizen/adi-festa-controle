@@ -7,6 +7,7 @@ const source=path.resolve(process.env.VECONI_TEST_FUNCTION_SOURCE||'functions'),
 const {operationalCommitService}=require(source+'/src/services/operational-commit-service');
 const root=path.resolve(__dirname,'..'),out=path.join(root,'qa-artifacts/fiado-space-regularization');fs.mkdirSync(out,{recursive:true});
 const app=initializeApp({projectId:'demo-veconi-regularization-browser'},'regularization-browser'),db=getFirestore(app),write=operationalCommitService(db),read=require(readerSource+'/src/services/operational-commit-service').operationalCommitService(db);
+const commit=require(source+'/src/shared/operational-callable').operationalCallable(write.commit,{requireProtocol:true});
 const css=[...fs.readFileSync('index.html','utf8').matchAll(/<link[^>]+href="\.\/(css\/[^"?]+)[^"]*"[^>]*>/g)].map(m=>'<link rel="stylesheet" href="/'+m[1]+'">').join('');
 const html=c=>`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${css}</head><body><main><h2>Clientes · Táxi QA</h2><article class="card" style="padding:20px"><b>Pessoa fictícia</b><p>Saldo do espaço: <strong id="debt">Consultando</strong></p><button class="btn btn-light" onclick="FiadoSpaceRegularization.open('qa-client')">Regularizar saldo</button></article></main><div id="modal"></div><div id="toasts"></div><script>
 const session=${JSON.stringify(c)};let client,queueBlocked=false,mode='normal';window.errors=[];
@@ -36,7 +37,7 @@ window.ready=SyncFirebase.readCanonicalClient().then(()=>InstallmentCredit.refre
   if(url.pathname==='/api'){
    const data=JSON.parse(await new Promise(resolve=>{let text='';req.on('data',b=>text+=b);req.on('end',()=>resolve(text));}));
    assert.ok([...cases.values()].some(c=>c.businessId===data.data.businessId&&c.uid===data.uid),'Synthetic fixtures only');
-   const result=await (data.name==='commitOperationalSync'?write.commit:read.receipt)({auth:{uid:data.uid},data:data.data});
+   const result=await (data.name==='commitOperationalSync'?commit:read.receipt)({auth:{uid:data.uid},data:data.data});
    if(data.mode==='lost'&&data.name==='commitOperationalSync'){res.statusCode=503;return res.end('Simulated response lost after commit');}
    res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(result));
   }

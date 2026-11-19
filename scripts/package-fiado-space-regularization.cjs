@@ -50,7 +50,7 @@ function prepareFrontend(out){
  const built=require('./build-public-site.cjs').buildPublicSite({root,outDir:forward});fs.cpSync(forward,rollback,{recursive:true});
  const module=path.join(rollback,'js/fiado-space-regularization.js'),s=read(module);assert.ok(s.includes('const ENABLED=true;'));
  fs.writeFileSync(module,s.replace('const ENABLED=true;','const ENABLED=false;'));
- const worker=path.join(rollback,'service-worker.js');fs.writeFileSync(worker,read(worker).replace('veconi-v2385-space-regularization-v1','veconi-v2385-space-regularization-paused-v1'));
+ const worker=path.join(rollback,'service-worker.js');fs.writeFileSync(worker,read(worker).replace('veconi-v2385-space-regularization-v2','veconi-v2385-space-regularization-paused-v2'));
  const manifest={files:built.fileCount,forward:tree(forward),rollback:tree(rollback),rollbackBehavior:'Hide new regularizations; preserve per-space proof display, receipts and all published features.',deployExecuted:false};
  assert.equal(Object.keys(manifest.forward).length,277);assert.equal(Object.keys(manifest.rollback).length,277);
  fs.writeFileSync(path.join(out,'MANIFEST.json'),JSON.stringify(manifest,null,2));console.log(JSON.stringify({files:277,forward:true,compatibleRollback:true,deployExecuted:false}));return manifest;

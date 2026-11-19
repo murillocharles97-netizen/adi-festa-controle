@@ -32,7 +32,7 @@ window.FiadoSpaceRegularization = (() => {
     const report=e=>{if(present())status.textContent=e.message||'Não foi possível obter confirmação. A operação original foi preservada.';};
     const call=async(kind,input={},write=false)=>{
       guard(s,clientId);
-      const {uid,...context}=s,result=await window.FirebaseCallable(write?'commitOperationalSync':'getOperationalSyncReceipt',{...context,clientId,...input,kind,clientRelease:Number(window.AdiFestaBuild?.release||238)});
+      const {uid,...context}=s,result=await window.FirebaseCallable(write?'commitOperationalSync':'getOperationalSyncReceipt',{...context,clientId,...input,kind,syncProtocolVersion:1,clientRelease:Number(window.AdiFestaBuild?.release||238)});
       if(JSON.stringify(scope())!==JSON.stringify(s))throw Error('A sessão mudou. Consulte a confirmação na conta original.');
       return result.data??result;
     };
