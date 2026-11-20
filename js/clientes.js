@@ -142,6 +142,29 @@ window.Clientes=(()=>{
     }
     return {dueCents, futureCents, debtors, unknown, partial: unknown > 0};
   }
+  // V240: the dashboard of ONE space uses the same canonical receivable as the
+  // Clientes screen (server-confirmed accounts, regularizations and installments),
+  // not only Fiado sales. Presentation only; it never authorizes a write.
+  const receivableAccess = () => Boolean(window.SpaceContext?.homeSpaces) &&
+    window.BusinessContext?.get?.().role === 'owner' &&
+    window.TeamAccess?.has?.('customers.view') === true && window.TeamAccess?.has?.('customers.receiveDebt') === true &&
+    !window.OperationalReadPolicy?.restricted?.();
+  function spaceReceivable(spaceId) {
+    if (!spaceId || !receivableAccess() || !window.InstallmentPlan?.today) return null;
+    const state = listBalances(); let dueCents = 0, futureCents = 0, debtors = 0;
+    const unknownIds = [];
+    for (const client of baseView().clientes || []) {
+      if (client.ativo === false || client.active === false || client.deletedAt) continue;
+      const linked = (client.customerSpaceIds || [client.spaceId]).includes(spaceId);
+      const closed = closedOpeningStatus(client);
+      if (closed) { if (spaceId === 'business_adi-festa') { dueCents += Math.round(closed.debt * 100); debtors += Number(closed.debt > 0); } continue; }
+      const a = state.accounts.get(client.id); if (!a) continue;
+      const p = a.parts.get(spaceId);
+      if (p) { dueCents += p.dueCents; futureCents += p.futureCents; debtors += Number(p.dueCents > 0); }
+      if ((a.unknownCents || a.calendarUnknown) && (linked || p)) unknownIds.push(client.id);
+    }
+    return {spaceId, dueCents, futureCents, debtors, unknown: unknownIds.length, unknownIds, partial: unknownIds.length > 0};
+  }
   function viewData() {
     const data = baseView(), context = window.SpaceContext;
     if (!context?.scopesCustomers?.()) return data;
@@ -252,5 +275,5 @@ window.Clientes=(()=>{
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
     });
-  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,spaceReceivable,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

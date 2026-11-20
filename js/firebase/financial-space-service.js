@@ -93,7 +93,11 @@ const automationState = (space = {}) => {
     automation = space.automation || {}, autoIncome = automation.autoIncome || {};
   return {
     enabled: automation.enabled === true || (automation.enabled === undefined && Boolean(legacyActivation)),
-    linkedBusinessId: space.type === "business" ? space.linkedBusinessId || null : null,
+    linkedBusinessId: space.type === "business" ? space.linkedBusinessId || null
+      : automation.linkedSalesSpaceId === space.id ? automation.linkedBusinessId || null : null,
+    linkedSalesSpaceId: space.type === "business" ? space.id || null : automation.linkedSalesSpaceId === space.id ? space.id : null,
+    revision: Number.isSafeInteger(space.automationRevision) ? space.automationRevision : 0,
+    lastOperationId: String(space.automationLastOperationId || "").trim() || null,
     activatedAt: automation.activatedAt || legacyActivation,
     defaultIncomeFinancialAccountId: String(automation.defaultIncomeFinancialAccountId || "").trim() || null,
     defaultIncomeFinancialAccountHomeSpaceId: String(automation.defaultIncomeFinancialAccountHomeSpaceId || "").trim() || null,
@@ -478,6 +482,48 @@ async function updateAutomation(spaceId, input = {}) {
   state.reconciliation.delete(space.id);
   emit("financial-data-changed", { entity: "space", id: space.id, action: "automation-updated" });
   return structuredClone(automation);
+}
+
+// V240: a non-business space that also sells (e.g. Táxi) can link its own
+// financial records to its own sales. The server validates owner, business,
+// capabilities and the default account; the sales space is this same document.
+const salesLinkable = (space = {}) => space.type !== "business" && space.active !== false &&
+  (!space.status || space.status === "active") && space.capabilities?.sales === true && space.capabilities?.finance === true &&
+  Boolean(businessId()) && space.businessId === businessId() && !space.linkedBusinessId &&
+  window.BusinessContext?.get?.()?.role === "owner" && Boolean(auth.currentUser?.uid) && space.ownerUid === auth.currentUser.uid;
+
+function rememberAutomation(spaceId, patch) {
+  rememberSpaces(state.spaces.map((item) => item.id === spaceId ? { ...item, ...patch, updatedAt: now() } : item));
+  if (window.SpaceContext?.setSpaces) {
+    const snapshot = window.SpaceContext.snapshot();
+    window.SpaceContext.setSpaces(snapshot.spaces.map((item) => item.id === spaceId ? { ...item, ...patch, updatedAt: now() } : item),
+      { loaded: snapshot.loaded, migrationReport: snapshot.migrationReport });
+  }
+  state.reconciliation.delete(spaceId);
+  emit("financial-data-changed", { entity: "space", id: spaceId, action: "automation-updated" });
+}
+
+async function configureAutomation(spaceId, input = {}) {
+  const space = assertSpace(spaceId);
+  if (space.type === "business" || !salesLinkable(space))
+    throw new Error("Somente o proprietário pode vincular o financeiro às vendas deste espaço.");
+  if (typeof window.FirebaseCallable !== "function" || navigator.onLine === false)
+    throw new Error("Conecte-se para alterar a automação. Nada foi modificado.");
+  const opId = String(input.operationId || operationId("space_automation"));
+  const payload = { businessId: businessId(), spaceId: space.id, operationId: opId, expectedRevision: automationState(space).revision };
+  if (input.revertOperationId) payload.revertOperationId = String(input.revertOperationId);
+  else Object.assign(payload, {
+    enabled: input.enabled === true, sales: input.sales === true, customerPayments: input.customerPayments === true,
+    onlineOrders: input.onlineOrders === true,
+    defaultIncomeFinancialAccountId: input.defaultIncomeFinancialAccountId || null,
+    defaultIncomeFinancialAccountHomeSpaceId: input.defaultIncomeFinancialAccountId ? input.defaultIncomeFinancialAccountHomeSpaceId || null : null,
+  });
+  const response = await window.FirebaseCallable("configureFinancialSpaceAutomation", payload), result = response?.data ?? response;
+  if (result?.status !== "confirmed" || result.spaceId !== space.id || result.businessId !== businessId())
+    throw new Error("O servidor não confirmou a alteração. Nada foi alterado neste aparelho.");
+  const automation = result.automation && result.automation.enabled !== undefined ? { ...result.automation } : null;
+  rememberAutomation(space.id, { automation: automation || undefined, automationRevision: result.revision, automationLastOperationId: opId });
+  return structuredClone({ ...result, operationId: opId });
 }
 
 async function reconcileBusinessIncome() {
@@ -2838,6 +2884,8 @@ const FinancialSpaceService = {
   rememberFinancialView,
   createSpace,
   updateAutomation,
+  configureAutomation,
+  salesLinkable,
   automationState,
   reconcileBusinessIncome,
   archiveSpace,

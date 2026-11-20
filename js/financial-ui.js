@@ -83,7 +83,8 @@ window.FinanceiroUI = (() => {
   const cardLast4Label = (card = {}) => String(card.last4 || "").trim() ? `•••• ${String(card.last4).trim()}` : "Final não informado";
   const cardNameLabel = (card = {}) => `${String(card.name || "Cartão")}${card.last4 ? ` · ${cardLast4Label(card)}` : ""}`;
   const automation = (space) => window.FinancialSpaceService?.automationState?.(space) || { enabled: false, autoIncome: {} };
-  const automationLabel = (space) => space?.type === "business" && automation(space).enabled ? "Automático" : "Manual";
+  const automationLinked = (space) => space?.type === "business" || Boolean(space?.id && automation(space).linkedSalesSpaceId === space.id);
+  const automationLabel = (space) => automationLinked(space) && automation(space).enabled ? "Automático" : "Manual";
   const invoiceStatusLabel = { open: "Aberta", closed: "Fechada", paid: "Paga", overdue: "Vencida", cancelled: "Cancelada" };
   const FINANCE_INIT_TIMEOUT_MS = 12_000;
   const financeTrace = (marker, detail = {}) => console.info(`[${marker}]`, detail);
@@ -812,21 +813,33 @@ window.FinanceiroUI = (() => {
   async function openManageSpace(spaceId) {
     const space = spaces().find((item) => item.id === spaceId);
     if (!space) return;
-    const current = automation(space), businessLinked = space.type === "business" && Boolean(space.linkedBusinessId),
-      activated = current.activatedAt ? fullDateLabel(current.activatedAt) : "Ao ativar",
+    const current = automation(space), salesLink = space.type !== "business" && window.FinancialSpaceService.salesLinkable?.(space) === true,
+      businessLinked = space.type === "business" && Boolean(space.linkedBusinessId) || salesLink,
+      activated = current.activatedAt && current.enabled ? fullDateLabel(current.activatedAt) : "Ao salvar com a automação ativa",
       accounts = businessLinked ? await window.FinancialSpaceService.listFinancialAccounts(space.id) : [],
       currentAccountValue = current.defaultIncomeFinancialAccountId
         ? `${current.defaultIncomeFinancialAccountHomeSpaceId || space.id}::${current.defaultIncomeFinancialAccountId}` : "";
     sheet(`${sheetHeader("Gerenciar espaço financeiro", space.name)}
-      <form data-financial-automation-form><div class="modal-body"><section class="financial-automation-card"><header><span>${icon(businessLinked ? "cloud-cog" : "pencil-line")}</span><div><h4>Automação financeira</h4><p>${businessLinked ? `Negócio vinculado: ${esc(space.name)}` : "Este espaço recebe lançamentos manuais."}</p></div><b class="financial-origin-badge ${current.enabled ? "is-automatic" : ""}">${current.enabled ? "Ativa" : "Manual"}</b></header>${businessLinked ? `<label class="financial-field"><span>Conta padrão para recebimentos</span><select name="defaultIncomeFinancialAccountKey"><option value="">Não alocar automaticamente</option>${accounts.map((account) => `<option value="${esc(accountChoiceValue(account))}" ${accountChoiceValue(account) === currentAccountValue ? "selected" : ""}>${esc(account.name)} · ${esc(accountScopeLabel(account))}</option>`).join("")}</select><small>Somente novos recebimentos serão destinados automaticamente.</small></label><label class="financial-automation-option"><span><b>Automação ativa</b><small>Receitas confirmadas entram sem lançamento manual.</small></span><input type="checkbox" name="enabled" ${current.enabled ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Vendas pagas</b><small>PIX, dinheiro e cartão já confirmados.</small></span><input type="checkbox" name="sales" ${current.autoIncome.sales ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pagamentos de clientes</b><small>Inclui recebimentos parciais de fiado e saldo legado.</small></span><input type="checkbox" name="customerPayments" ${current.autoIncome.customerPayments ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pedidos online pagos</b><small>Somente quando convertidos em uma venda paga confirmada.</small></span><input type="checkbox" name="onlineOrders" ${current.autoIncome.onlineOrders ? "checked" : ""}></label><p class="financial-activation-note">${icon("calendar-check")} Início da automação: <b>${esc(activated)}</b>. Movimentos anteriores não são importados.</p>` : `<div class="financial-wizard-info">${icon("info")} Casa, Carro e outros espaços permanecem manuais por padrão.</div>`}</section></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button>${businessLinked ? '<button class="btn btn-primary" type="submit">Salvar automação</button>' : ""}</footer></form>`);
+      <form data-financial-automation-form><div class="modal-body"><section class="financial-automation-card"><header><span>${icon(businessLinked ? "cloud-cog" : "pencil-line")}</span><div><h4>Automação financeira</h4><p>${salesLink ? (current.enabled ? `Vinculado às vendas do espaço ${esc(space.name)} (mesmo espaço).` : `Este espaço recebe lançamentos manuais. Você pode vincular ao espaço de vendas ${esc(space.name)}.`) : businessLinked ? `Negócio vinculado: ${esc(space.name)}` : "Este espaço recebe lançamentos manuais."}</p></div><b class="financial-origin-badge ${current.enabled ? "is-automatic" : ""}">${current.enabled ? "Ativa" : "Manual"}</b></header>${businessLinked ? `<label class="financial-field"><span>Conta padrão para recebimentos</span><select name="defaultIncomeFinancialAccountKey"><option value="">Não alocar automaticamente</option>${accounts.map((account) => `<option value="${esc(accountChoiceValue(account))}" ${accountChoiceValue(account) === currentAccountValue ? "selected" : ""}>${esc(account.name)} · ${esc(accountScopeLabel(account))}</option>`).join("")}</select><small>Somente novos recebimentos serão destinados automaticamente.</small></label><label class="financial-automation-option"><span><b>Automação ativa</b><small>Receitas confirmadas entram sem lançamento manual.</small></span><input type="checkbox" name="enabled" ${current.enabled ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Vendas pagas</b><small>PIX, dinheiro e cartão já confirmados.</small></span><input type="checkbox" name="sales" ${current.autoIncome.sales ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pagamentos de clientes</b><small>Inclui recebimentos parciais de fiado e saldo legado.</small></span><input type="checkbox" name="customerPayments" ${current.autoIncome.customerPayments ? "checked" : ""}></label><label class="financial-automation-option"><span><b>Pedidos online pagos</b><small>Somente quando convertidos em uma venda paga confirmada.</small></span><input type="checkbox" name="onlineOrders" ${current.autoIncome.onlineOrders ? "checked" : ""}></label><p class="financial-activation-note">${icon("calendar-check")} Início da automação: <b>${esc(activated)}</b>. Movimentos anteriores não são importados.</p>${salesLink ? `<p class="financial-activation-note">${icon("info")} Vendas Fiado entram somente quando recebidas, pelo valor efetivamente pago. Despesas (combustível, manutenção, pedágio) continuam manuais; estimativas das corridas não viram despesa.</p>${current.lastOperationId ? '<button class="btn btn-light" type="button" data-financial-automation-revert>Desfazer a última alteração</button>' : ""}` : ""}` : `<div class="financial-wizard-info">${icon("info")} Casa, Carro e outros espaços permanecem manuais por padrão.</div>`}</section></div><footer class="modal-foot"><button class="btn btn-light" type="button" data-financial-close>Voltar</button>${businessLinked ? `<button class="btn btn-primary" type="submit">${salesLink ? "Salvar vínculo" : "Salvar automação"}</button>` : ""}</footer></form>`);
     const form = modal().querySelector("[data-financial-automation-form]");
+    // One operation id per opened sheet: a retry after a lost reply replays it.
+    const linkOperationId = `space_automation_${crypto.randomUUID()}`, revertOperationId = `space_automation_${crypto.randomUUID()}`;
+    const revert = form.querySelector("[data-financial-automation-revert]");
+    if (revert) revert.onclick = async () => {
+      revert.disabled = true;
+      try {
+        await window.FinancialSpaceService.configureAutomation(space.id, { operationId: revertOperationId, revertOperationId: current.lastOperationId });
+        closeModal(); Utils.toast("Última alteração desfeita."); await refresh();
+      } catch (error) { Utils.toast(error.message, true); revert.disabled = false; }
+    };
     if (businessLinked) form.onsubmit = async (event) => {
       event.preventDefault();
       const values = new FormData(form), submit = form.querySelector("[type=submit]");
       submit.disabled = true;
       try {
         const selectedAccount = accountFromChoice(accounts, values.get("defaultIncomeFinancialAccountKey"));
-        await window.FinancialSpaceService.updateAutomation(space.id, {
+        await window.FinancialSpaceService[salesLink ? "configureAutomation" : "updateAutomation"](space.id, {
+          ...(salesLink ? { operationId: linkOperationId } : {}),
           enabled: values.get("enabled") === "on",
           sales: values.get("sales") === "on",
           customerPayments: values.get("customerPayments") === "on",
