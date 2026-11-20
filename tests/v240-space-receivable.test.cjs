@@ -50,7 +50,7 @@ test('regularized balance is "a conferir" until the server confirms it, then cou
       return {data: {businessId: 'adi-festa', workspaceGeneration: 0, account: account(f.w, [
         {spaceId: TAXI, remainingCents: 188900, dueDate: today, historyEventId: 'balance_adjustment:qa-op', number: null, saleId: null}])}};
     });
-    await f.w.InstallmentCredit.refresh('pai'); f.w.Clientes.prepareList();
+    await f.w.InstallmentCredit.refresh('pai');
     const after = f.w.Clientes.spaceReceivable(TAXI);
     assert.equal(after.dueCents, 188900); assert.equal(after.futureCents, 0); assert.equal(after.partial, false);
     assert.equal(f.w.Clientes.spaceReceivable(ADI).dueCents, 0, 'never redirected to another space');
@@ -65,7 +65,7 @@ test('future installments are kept apart from the exigível amount', async () =>
     f.setRead(async () => ({data: {businessId: 'adi-festa', workspaceGeneration: 0, account: account(f.w, [
       {spaceId: TAXI, remainingCents: 10000, dueDate: today, historyEventId: 'e1', number: null, saleId: null},
       {spaceId: TAXI, remainingCents: 20000, dueDate: next, historyEventId: null, number: 2, saleId: 's1'}])}}));
-    await f.w.InstallmentCredit.refresh('pai'); f.w.Clientes.prepareList();
+    await f.w.InstallmentCredit.refresh('pai');
     const r = f.w.Clientes.spaceReceivable(TAXI);
     assert.equal(r.dueCents, 10000); assert.equal(r.futureCents, 20000);
   } finally { await f.close(); }
@@ -104,10 +104,42 @@ test('dashboard of one space shows the canonical receivable, never the Fiado-sal
 
 test('dashboard says "a conferir" when an account of the space is not proven', () => {
   const d = dashboard({receivable: {dueCents: 0, futureCents: 0, partial: true, unknown: 1, unknownIds: ['pai']}});
+  assert.equal(d.render().includes('A receber</small><b class="negative">R$ 0.00'), false);
   assert.match(d.render(), /1 conta\(s\) a conferir no servidor/);
 });
 
 test('without canonical proof the previous Fiado-sales fallback is unchanged', () => {
   const fiado = {id: 'v1', spaceId: TAXI, status: 'fiado', formaPagamento: 'fiado', valorFinal: 180, data: '2026-11-19T12:00:00.000Z'};
   assert.equal(dashboard({receivable: null, sales: [fiado]}).aggregate().openBalance, 180);
+});
+
+
+test('real space filter includes confirmed rides on Nov 18/19 and excludes store, old and unassigned sales', async () => {
+  const f = fixture();
+  try {
+    const NativeDate = f.w.Date;
+    f.w.Date = class extends NativeDate { constructor(...args) { super(...(args.length ? args : ['2026-11-20T15:00:00-03:00'])); } static now() { return Date.parse('2026-11-20T15:00:00-03:00'); } };
+    f.w.Utils.hoje = () => false; f.db.produtos = []; f.db.pagamentos = [];
+    f.db.vendas = [
+      {id:'ride18',spaceId:TAXI,valorFinal:180,data:'2026-11-18T23:50:00-03:00'},
+      {id:'ride19',spaceId:TAXI,valorFinal:140,data:'2026-11-19T12:00:00-03:00'},
+      {id:'store',spaceId:ADI,valorFinal:900,data:'2026-11-19T12:00:00-03:00'},
+      {id:'old',spaceId:TAXI,valorFinal:700,data:'2026-11-01T12:00:00-03:00'},
+      {id:'unassigned',valorFinal:800,data:'2026-11-19T12:00:00-03:00'},
+    ].map(s=>({...s,businessId:'adi-festa',status:'pago',financialStatus:'confirmed'}));
+    f.w.eval(fs.readFileSync('js/desktop-dashboard.js','utf8'));
+    const view = f.w.DesktopDashboard.aggregate(f.db, '7d');
+    assert.equal(view.revenue,320);
+    assert.equal(view.daily.reduce((sum,d)=>sum+d.value,0),320);
+    assert.equal(f.db.vendas.length,5);
+  } finally { await f.close(); }
+});
+
+test('dashboard aggregation of 10000 scoped sales performs no remote reads', () => {
+  const sales=Array.from({length:10000},(_,i)=>({id:'s'+i,spaceId:TAXI,status:'pago',valorFinal:10,data:new Date().toISOString()}));
+  const d=dashboard({receivable:{dueCents:0,futureCents:0,partial:false,unknown:0,unknownIds:[]},sales});
+  const start=performance.now(); const view=d.aggregate(); const elapsed=performance.now()-start;
+  assert.equal(view.revenue,100000);
+  assert.ok(elapsed<2000,'aggregation took '+elapsed+'ms');
+  console.log('V240 aggregate 10000 sales: '+elapsed.toFixed(1)+'ms');
 });

@@ -11,7 +11,7 @@ test("Financeiro está no router, shell e usa um único renderer responsivo", ()
   assert.match(app, /financeiro:\s*\(\) => FinanceiroUI\.render\(\)/);
   assert.doesNotMatch(app, /FinanceiroDesktop|FinanceiroMobile/);
   assert.doesNotMatch(html, /<script[^>]+financial-space-service\.js/);
-  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=163"\)/);
+  assert.match(app, /import\("\.\/firebase\/financial-space-service\.js\?v=240"\)/);
   assert.match(read("js/financial-ui.js"), /financial-service-ready/);
 });
 

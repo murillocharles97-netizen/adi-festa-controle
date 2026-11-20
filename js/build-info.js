@@ -19,15 +19,15 @@
   //   payloadVersion 4, schemaVersion 3) and never changed retroactively.
   // Bump APP_VERSION (and the service-worker CACHE/GET_VERSION) in every release;
   // tests/sync-version-identity.test.js fails when they disagree.
-  const APP_VERSION = "239";
+  const APP_VERSION = "240";
   window.AdiFestaBuild = Object.freeze({
     commit,
     shortCommit,
     builtAt,
     appVersion: APP_VERSION,
-    release: "239", // = APP_VERSION major; literal kept for existing release checks
+    release: "240", // = APP_VERSION major; literal kept for existing release checks
     installmentCreationPaused: false,
-    hotfix: "services-consolidated-qa-v1",
+    hotfix: "taxi-financeiro-v240",
     billingCheckoutPaused: false,
     priorSalesPaused: false,
     performanceViewsPaused: false,

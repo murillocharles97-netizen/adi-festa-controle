@@ -201,7 +201,7 @@ window.Consignments = (() => {
     }
     async function loadAccounts() {
       try {
-        const gateway = window.FinancialSpaceService || (await import('./firebase/financial-space-service.js?v=consignados-v2')).FinancialSpaceService;
+        const gateway = window.FinancialSpaceService || (await import('./firebase/financial-space-service.js?v=240')).FinancialSpaceService;
         const spaces = window.SpaceContext?.list?.() || [];
         paymentAccounts = (await gateway.listFinancialAccounts(origin.spaceId)).map(row => ({ id: row.id, name: row.name,
           homeId: row.accountHomeSpaceId || row.financialAccountHomeSpaceId || row.financialSpaceId || origin.spaceId }))

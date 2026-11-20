@@ -522,7 +522,7 @@ async function configureAutomation(spaceId, input = {}) {
   if (result?.status !== "confirmed" || result.spaceId !== space.id || result.businessId !== businessId())
     throw new Error("O servidor não confirmou a alteração. Nada foi alterado neste aparelho.");
   const automation = result.automation && result.automation.enabled !== undefined ? { ...result.automation } : null;
-  rememberAutomation(space.id, { automation: automation || undefined, automationRevision: result.revision, automationLastOperationId: opId });
+  rememberAutomation(space.id, { automation: automation || undefined, automationRevision: result.revision, automationLastOperationId: input.revertOperationId ? undefined : opId });
   return structuredClone({ ...result, operationId: opId });
 }
 

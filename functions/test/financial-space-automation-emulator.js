@@ -85,13 +85,21 @@ async function main(){
     const fiado=await sale('ride-fiado',TAXI,{status:'fiado',formaPagamento:'fiado'});
     assert.equal((await fiado.project()).skipped,'credit-sale-not-realized');
     assert.equal((await payment('partial-50',TAXI,50)).created,true);
-    const paid=await sale('ride-paid',TAXI,{valorFinal:90});
+    const fuel=require('../src/shared/flexible-service');
+    const estimate=fuel.estimate({model:'fuel',kmPerLiter:8,pricePerLiter:3.7,feePercent:0},{version:1,id:'qa-execution-240',configurationId:'qa-config-240',km:20,minutes:0,source:'particular',calculationVersion:2},90);
+    const paid=await sale('ride-paid',TAXI,{valorFinal:90,itens:[{produtoId:'qa-ride',quantidade:1,serviceCostSnapshot:estimate}]});
     const delivered=await Promise.all([paid.project(),paid.project(),paid.project()]);
     assert.equal(delivered.filter(r=>r.created).length,1);
     const auto1=(await entries(TAXI)).filter(e=>!['manual-in','fuel'].includes(e.id));
     assert.deepEqual(auto1.map(e=>e.amountCents).sort((a,b)=>a-b),[5000,9000]);
     assert.ok(auto1.every(e=>e.direction==='in'&&e.financialSpaceId===TAXI));
     assert.equal((await entries(TAXI)).filter(e=>e.direction==='out').length,1,'expenses stay manual');
+    assert.equal(estimate.fuel.estimatedCost,9.25);
+    assert.equal((await entries(TAXI)).some(e=>e.direction==='out'&&e.sourceId==='ride-paid'),false,'fuel estimate is not a cash expense');
+    for(const [id,amount] of [['manual-maintenance',12000],['manual-toll',750]])
+      await db.doc(`financialSpaces/${TAXI}/entries/${id}`).set({id,financialSpaceId:TAXI,direction:'out',sourceType:'manual_expense',status:'paid',amountCents:amount});
+    assert.equal((await entries(TAXI)).filter(e=>e.direction==='out').length,3);
+    scenarios.push('fuel estimate R$9.25 does not create an expense; maintenance and toll remain manual');
     scenarios.push('after activation: old ride not imported, Fiado skipped, partial receipt R$50, paid ride once under 3 deliveries');
 
     // No redirection between spaces; changing a projected sale's space is refused.
