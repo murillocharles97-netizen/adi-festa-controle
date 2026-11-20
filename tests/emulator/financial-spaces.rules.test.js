@@ -509,3 +509,11 @@ test("transferência entre contas do mesmo espaço exige contas distintas e auto
     toFinancialAccountId: "missing",
   }));
 });
+
+test("V240: espaço outro/pessoal não altera automação pelo cliente; nome continua editável", async () => {
+  const owner = env.authenticatedContext("owner-a").firestore();
+  await assertSucceeds(setDoc(doc(owner, "financialSpaces", "taxi-a"), { id: "taxi-a", name: "Táxi", type: "other", linkedBusinessId: null, ownerUid: "owner-a", createdBy: "owner-a", active: true }));
+  await assertFails(updateDoc(doc(owner, "financialSpaces", "taxi-a"), { automation: { enabled: true, autoIncome: { sales: true } } }));
+  await assertFails(updateDoc(doc(owner, "financialSpaces", "taxi-a"), { automationRevision: 5 }));
+  await assertSucceeds(updateDoc(doc(owner, "financialSpaces", "taxi-a"), { name: "Táxi QA" }));
+});

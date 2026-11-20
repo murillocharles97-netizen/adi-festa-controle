@@ -1636,6 +1636,9 @@ service cloud.firestore {
         && request.resource.data.type == resource.data.type
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.linkedBusinessId == resource.data.linkedBusinessId
+        // V240: a non-business space links its income only through configureFinancialSpaceAutomation.
+        && (resource.data.type == 'business'
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['automation', 'automationRevision', 'automationLastOperationId']))
         && (resource.data.get('businessId', null) == null
           || request.resource.data.get('businessId', null) == resource.data.businessId)
         && (
