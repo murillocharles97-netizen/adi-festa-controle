@@ -30,6 +30,7 @@
     // O cabeçalho mobile é escuro nos dois temas; a barra do sistema acompanha só no desktop.
     if (meta && !(window.matchMedia && matchMedia('(max-width: 767px)').matches)) meta.content = META[theme];
     syncToggles(theme);
+    syncArea();
     return theme;
   }
   function set(theme) {
@@ -43,6 +44,15 @@
     return result;
   }
   const toggle = () => set(current() === 'dark' ? 'light' : 'dark');
+  // 1C: telas migradas ao design system. Marcadores curtos no <html> escopam o CSS:
+  // vf-area-1c (tela migrada, qualquer tema), vf-dark-1c (+ tema escuro) e data-vf-route.
+  const DARK_AREAS = new Set(['vender', 'clientes', 'produtos', 'financeiro']);
+  function syncArea() {
+    const route = document.getElementById('app')?.dataset.route || '', inArea = DARK_AREAS.has(route);
+    root.classList.toggle('vf-area-1c', inArea);
+    root.classList.toggle('vf-dark-1c', inArea && root.dataset.theme === 'dark');
+    if (inArea) root.dataset.vfRoute = route; else delete root.dataset.vfRoute;
+  }
   media.addEventListener?.('change', () => { if (!stored()) apply(); });
   window.addEventListener?.('storage', event => { if (event.key === KEY) apply(); });
   apply();
@@ -55,8 +65,13 @@
     });
     syncToggles(current());
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => bindToggles());
-  else bindToggles();
+  function watchRoute() {
+    const app = document.getElementById('app');
+    if (app && window.MutationObserver) new MutationObserver(syncArea).observe(app, { attributes: true, attributeFilter: ['data-route'] });
+    syncArea();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { bindToggles(); watchRoute(); });
+  else { bindToggles(); watchRoute(); }
 
   /* ---------- Assinatura 1B: geometria em camadas ----------
    * Cubos isométricos de alturas diferentes, faces foscas em tons próximos ao fundo,

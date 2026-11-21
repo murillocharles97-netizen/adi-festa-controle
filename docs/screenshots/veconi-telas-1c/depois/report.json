@@ -1,0 +1,313 @@
+{
+  "mode": "after",
+  "shots": [
+    {
+      "name": "depois-clientes-light-390",
+      "route": "clientes",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-light-1440",
+      "route": "clientes",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-dark-390",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-dark-1440",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-light-390",
+      "route": "produtos",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-light-1440",
+      "route": "produtos",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-dark-390",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-dark-1440",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-financeiro-light-390",
+      "route": "financeiro",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-financeiro-light-1440",
+      "route": "financeiro",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-financeiro-dark-390",
+      "route": "financeiro",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-financeiro-dark-1440",
+      "route": "financeiro",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-vender-light-390",
+      "route": "vender",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Tentar novamente",
+        "cartStepLeak": false,
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-vender-light-1440",
+      "route": "vender",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Continuar venda • R$ 30,00",
+        "cartStepLeak": false,
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-vender-dark-390",
+      "route": "vender",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Tentar novamente",
+        "cartStepLeak": false,
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    },
+    {
+      "name": "depois-vender-dark-1440",
+      "route": "vender",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": {
+        "opened": true,
+        "via": "Continuar venda • R$ 30,00",
+        "cartStepLeak": false,
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "errors": []
+    }
+  ]
+}

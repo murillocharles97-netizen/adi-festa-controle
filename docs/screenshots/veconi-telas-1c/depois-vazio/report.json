@@ -1,0 +1,161 @@
+{
+  "mode": "after",
+  "shots": [
+    {
+      "name": "depois-vender-vazio-light-390",
+      "route": "vender",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-vender-vazio-light-1440",
+      "route": "vender",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-vender-vazio-dark-390",
+      "route": "vender",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-vender-vazio-dark-1440",
+      "route": "vender",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-vazio-light-390",
+      "route": "clientes",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-vazio-light-1440",
+      "route": "clientes",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-vazio-dark-390",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-clientes-vazio-dark-1440",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-vazio-light-390",
+      "route": "produtos",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-vazio-light-1440",
+      "route": "produtos",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-vazio-dark-390",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    },
+    {
+      "name": "depois-produtos-vazio-dark-1440",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": []
+      },
+      "modal": null,
+      "errors": []
+    }
+  ]
+}

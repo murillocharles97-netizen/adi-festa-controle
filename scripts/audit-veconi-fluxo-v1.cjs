@@ -196,7 +196,7 @@ async function main() {
       for (const theme of THEMES) for (const width of [1440, 390]) {
         const { page } = await boot(browser, base, width, theme);
         const ratios = await page.evaluate(() => {
-          const parse = c => (c.match(/[\d.]+/g) || []).map(Number);
+          const parse = c => { const n = (c.match(/[\d.]+/g) || []).map(Number); return /^color\(srgb/.test(c) ? [n[0] * 255, n[1] * 255, n[2] * 255, ...(n.length > 3 ? [n[3]] : [])] : n; };
           const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
           // Fundos em gradiente: usa o tom mais claro (pior caso para texto claro).
           const bgOf = el => { if (el.closest('.sidebar')) return [8, 28, 35]; if (el.closest('.home-goal-card')) return document.documentElement.dataset.theme === 'dark' ? [18, 58, 63] : [16, 52, 59]; for (let n = el; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c.length === 3 || (c.length === 4 && c[3] > .9)) return c.slice(0, 3); } return [255, 255, 255]; };

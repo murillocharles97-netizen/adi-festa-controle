@@ -1,0 +1,3069 @@
+{
+  "mode": "before",
+  "shots": [
+    {
+      "name": "antes-vender-light-390",
+      "route": "vender",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "button.active «Rápidos»",
+            3.4
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Tentar novamente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "button.active «Rápidos»",
+            3.4
+          ],
+          [
+            "span.pos-qty «1»",
+            2.83
+          ],
+          [
+            "span.mobile-cart-swipe.duplicate «Duplicar»",
+            2.51
+          ],
+          [
+            "span.mobile-cart-swipe.remove «Remover»",
+            3.7
+          ],
+          [
+            "label.mobile-qty-label «Qtd.−1+»",
+            3.63
+          ],
+          [
+            "b «1»",
+            3.32
+          ],
+          [
+            "button.active «Pix»",
+            4.27
+          ],
+          [
+            "small «Valor será recebid»",
+            4.27
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-vender-light-1440",
+      "route": "vender",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "p «Adicione produtos »",
+            3.85
+          ],
+          [
+            "span «Categoria»",
+            3.85
+          ],
+          [
+            "span «Marca»",
+            3.85
+          ],
+          [
+            "span «Ordenar por»",
+            3.85
+          ],
+          [
+            "small «Categoria B»",
+            3.65
+          ],
+          [
+            "b «R$ 30,00»",
+            3.52
+          ],
+          [
+            "span#desktop-sale-count «8 itens»",
+            3.17
+          ],
+          [
+            "span «Grade»",
+            4
+          ],
+          [
+            "b «R$ 15,00»",
+            3.17
+          ],
+          [
+            "em.out «Esgotado»",
+            4.24
+          ],
+          [
+            "small «Categoria A»",
+            3.7
+          ],
+          [
+            "b «R$ 22,50»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 1 »",
+            3.35
+          ],
+          [
+            "b «R$ 37,50»",
+            3.17
+          ],
+          [
+            "b «R$ 45,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 3 »",
+            3.35
+          ],
+          [
+            "b «R$ 52,50»",
+            3.17
+          ],
+          [
+            "b «R$ 60,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 2 »",
+            3.35
+          ],
+          [
+            "b «R$ 67,50»",
+            3.17
+          ],
+          [
+            "em «0»",
+            2.54
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Continuar venda • R$ 30,00",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "p «Adicione produtos »",
+            3.85
+          ],
+          [
+            "span «Categoria»",
+            3.85
+          ],
+          [
+            "span «Marca»",
+            3.85
+          ],
+          [
+            "span «Ordenar por»",
+            3.85
+          ],
+          [
+            "small «Categoria B»",
+            3.65
+          ],
+          [
+            "b «R$ 30,00»",
+            3.52
+          ],
+          [
+            "span#desktop-sale-count «8 itens»",
+            3.17
+          ],
+          [
+            "span «Grade»",
+            4
+          ],
+          [
+            "b «R$ 15,00»",
+            3.17
+          ],
+          [
+            "em.out «Esgotado»",
+            4.24
+          ],
+          [
+            "small «Categoria A»",
+            3.7
+          ],
+          [
+            "b «R$ 22,50»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 1 »",
+            3.35
+          ],
+          [
+            "b «R$ 37,50»",
+            3.17
+          ],
+          [
+            "b «R$ 45,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 3 »",
+            3.35
+          ],
+          [
+            "b «R$ 52,50»",
+            3.17
+          ],
+          [
+            "b «R$ 60,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 2 »",
+            3.35
+          ],
+          [
+            "b «R$ 67,50»",
+            3.17
+          ],
+          [
+            "span#desktop-cart-count «1 item»",
+            3.17
+          ],
+          [
+            "small «Revise a venda e c»",
+            3.89
+          ],
+          [
+            "button#desktop-clear-cart «Limpar»",
+            3.99
+          ],
+          [
+            "span «Selecionar cliente»",
+            3.64
+          ],
+          [
+            "b «R$ 0,00»",
+            4.11
+          ],
+          [
+            "em «1»",
+            2.54
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-vender-dark-390",
+      "route": "vender",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "article.pos-product.mobile-catalog-card.mobile-sale-product",
+            8
+          ],
+          [
+            "div.mobile-card-media",
+            8
+          ],
+          [
+            "button.mobile-sale-favorite.mobile-card-favorite",
+            8
+          ],
+          [
+            "button",
+            4
+          ],
+          [
+            "input#product-search.search",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "button.active «Rápidos»",
+            3.4
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Tentar novamente",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button",
+            12
+          ],
+          [
+            "article.pos-product.mobile-catalog-card.mobile-sale-product",
+            8
+          ],
+          [
+            "div.mobile-card-media",
+            8
+          ],
+          [
+            "button.mobile-sale-favorite.mobile-card-favorite",
+            8
+          ],
+          [
+            "div.summary-row.private-value",
+            2
+          ],
+          [
+            "input#product-search.search",
+            1
+          ],
+          [
+            "section#pos-summary.pos-summary.mobile-open",
+            1
+          ],
+          [
+            "div.pos-summary-head",
+            1
+          ],
+          [
+            "div.cart-item.editable-cart",
+            1
+          ],
+          [
+            "span.sale-cart-photo.product-photo-shell.is-fallback",
+            1
+          ],
+          [
+            "span.mobile-qty-control",
+            1
+          ],
+          [
+            "button.mobile-discount-toggle",
+            1
+          ],
+          [
+            "div#sale-totals",
+            1
+          ],
+          [
+            "div#selected-client-card.pos-client-card",
+            1
+          ],
+          [
+            "button#open-client-picker.btn.btn-light.pos-client-select",
+            1
+          ],
+          [
+            "button.active",
+            1
+          ],
+          [
+            "div.mobile-payment-note",
+            1
+          ],
+          [
+            "div#sale-submit-feedback.sale-submit-feedback.error",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "button.active «Rápidos»",
+            3.4
+          ],
+          [
+            "span.pos-qty «1»",
+            2.83
+          ],
+          [
+            "span.mobile-cart-swipe.duplicate «Duplicar»",
+            2.51
+          ],
+          [
+            "span.mobile-cart-swipe.remove «Remover»",
+            3.7
+          ],
+          [
+            "label.mobile-qty-label «Qtd.−1+»",
+            3.63
+          ],
+          [
+            "button «−»",
+            1.09
+          ],
+          [
+            "b «1»",
+            3.32
+          ],
+          [
+            "button «+»",
+            1.09
+          ],
+          [
+            "button.active «Pix»",
+            4.27
+          ],
+          [
+            "button «Dinheiro»",
+            1
+          ],
+          [
+            "button «Cartão»",
+            1
+          ],
+          [
+            "button «Fiado»",
+            1
+          ],
+          [
+            "button «Parcelado»",
+            1
+          ],
+          [
+            "small «Valor será recebid»",
+            4.27
+          ],
+          [
+            "span «Desconto»",
+            1
+          ],
+          [
+            "span «Cliente»",
+            1
+          ],
+          [
+            "span «Novo produto»",
+            1
+          ],
+          [
+            "span «Observação»",
+            1
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-vender-dark-1440",
+      "route": "vender",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button.desktop-sale-favorite-toggle",
+            8
+          ],
+          [
+            "button.sale-product-actions",
+            8
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-available",
+            4
+          ],
+          [
+            "label.desktop-sales-select",
+            3
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-low",
+            3
+          ],
+          [
+            "select",
+            1
+          ],
+          [
+            "button",
+            1
+          ],
+          [
+            "label.desktop-sales-search",
+            1
+          ],
+          [
+            "button.desktop-barcode-button",
+            1
+          ],
+          [
+            "button#desktop-sale-favorites.desktop-sales-favorite",
+            1
+          ],
+          [
+            "section.desktop-recent-products",
+            1
+          ],
+          [
+            "button.desktop-recent-product",
+            1
+          ],
+          [
+            "section.desktop-sales-catalog",
+            1
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-out",
+            1
+          ],
+          [
+            "button.desktop-sale-add",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "p «Adicione produtos »",
+            3.85
+          ],
+          [
+            "span «Categoria»",
+            3.85
+          ],
+          [
+            "span «Marca»",
+            3.85
+          ],
+          [
+            "span «Ordenar por»",
+            3.85
+          ],
+          [
+            "small «Categoria B»",
+            3.65
+          ],
+          [
+            "b «R$ 30,00»",
+            3.52
+          ],
+          [
+            "span#desktop-sale-count «8 itens»",
+            3.17
+          ],
+          [
+            "span «Grade»",
+            4
+          ],
+          [
+            "b «R$ 15,00»",
+            3.17
+          ],
+          [
+            "em.out «Esgotado»",
+            4.24
+          ],
+          [
+            "small «Categoria A»",
+            3.7
+          ],
+          [
+            "b «R$ 22,50»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 1 »",
+            3.35
+          ],
+          [
+            "b «R$ 37,50»",
+            3.17
+          ],
+          [
+            "b «R$ 45,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 3 »",
+            3.35
+          ],
+          [
+            "b «R$ 52,50»",
+            3.17
+          ],
+          [
+            "b «R$ 60,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 2 »",
+            3.35
+          ],
+          [
+            "b «R$ 67,50»",
+            3.17
+          ],
+          [
+            "em «0»",
+            2.54
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Continuar venda • R$ 30,00",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button.desktop-sale-favorite-toggle",
+            8
+          ],
+          [
+            "button.sale-product-actions",
+            8
+          ],
+          [
+            "label.desktop-sales-select",
+            3
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-low",
+            3
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-available",
+            3
+          ],
+          [
+            "select",
+            1
+          ],
+          [
+            "button",
+            1
+          ],
+          [
+            "label.desktop-sales-search",
+            1
+          ],
+          [
+            "button.desktop-barcode-button",
+            1
+          ],
+          [
+            "button#desktop-sale-favorites.desktop-sales-favorite",
+            1
+          ],
+          [
+            "section.desktop-recent-products",
+            1
+          ],
+          [
+            "button.desktop-recent-product",
+            1
+          ],
+          [
+            "section.desktop-sales-catalog",
+            1
+          ],
+          [
+            "article.desktop-sale-product.pos-product.stock-out",
+            1
+          ],
+          [
+            "button.desktop-sale-add",
+            1
+          ],
+          [
+            "aside#pos-summary.desktop-sales-cart.sale-summary.is-open",
+            1
+          ],
+          [
+            "button#close-sale-summary.desktop-close-cart",
+            1
+          ],
+          [
+            "button#open-client-picker.desktop-client-select.pos-client-select",
+            1
+          ],
+          [
+            "select#sale-payment-method",
+            1
+          ],
+          [
+            "textarea#sale-note",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "p «Adicione produtos »",
+            3.85
+          ],
+          [
+            "span «Categoria»",
+            3.85
+          ],
+          [
+            "span «Marca»",
+            3.85
+          ],
+          [
+            "span «Ordenar por»",
+            3.85
+          ],
+          [
+            "small «Categoria B»",
+            3.65
+          ],
+          [
+            "b «R$ 30,00»",
+            3.52
+          ],
+          [
+            "span#desktop-sale-count «8 itens»",
+            3.17
+          ],
+          [
+            "span «Grade»",
+            4
+          ],
+          [
+            "b «R$ 15,00»",
+            3.17
+          ],
+          [
+            "em.out «Esgotado»",
+            4.24
+          ],
+          [
+            "small «Categoria A»",
+            3.7
+          ],
+          [
+            "b «R$ 22,50»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 1 »",
+            3.35
+          ],
+          [
+            "b «R$ 37,50»",
+            3.17
+          ],
+          [
+            "b «R$ 45,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 3 »",
+            3.35
+          ],
+          [
+            "b «R$ 52,50»",
+            3.17
+          ],
+          [
+            "b «R$ 60,00»",
+            3.17
+          ],
+          [
+            "em.low «Estoque baixo · 2 »",
+            3.35
+          ],
+          [
+            "b «R$ 67,50»",
+            3.17
+          ],
+          [
+            "span#desktop-cart-count «1 item»",
+            3.17
+          ],
+          [
+            "small «Revise a venda e c»",
+            3.89
+          ],
+          [
+            "button#desktop-clear-cart «Limpar»",
+            3.99
+          ],
+          [
+            "span «Selecionar cliente»",
+            3.64
+          ],
+          [
+            "b «R$ 0,00»",
+            4.11
+          ],
+          [
+            "em «1»",
+            2.54
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-clientes-light-390",
+      "route": "clientes",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "em «Parte identificada»",
+            3.82
+          ],
+          [
+            "em «Contagem parcial ·»",
+            3.82
+          ],
+          [
+            "strong «0»",
+            2.52
+          ],
+          [
+            "em «registradas»",
+            3.82
+          ],
+          [
+            "span «Ordenar por»",
+            3.77
+          ],
+          [
+            "span «Nova venda paraest»",
+            3
+          ],
+          [
+            "span «Cobrar viaWhatsApp»",
+            3
+          ],
+          [
+            "span.mobile-client-status.zero «Sem saldo»",
+            4.41
+          ],
+          [
+            "small «conta zerada»",
+            4.02
+          ],
+          [
+            "small «Última compra»",
+            3.24
+          ],
+          [
+            "small «Última cobrança»",
+            3.24
+          ],
+          [
+            "button.mobile-receive «Receber»",
+            2.32
+          ],
+          [
+            "button.mobile-whatsapp «WhatsApp»",
+            3.09
+          ],
+          [
+            "small «exigível a conferi»",
+            4.02
+          ],
+          [
+            "p «Encontre rapidamen»",
+            3.93
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "em «Parte identificada»",
+            3.82
+          ],
+          [
+            "em «Contagem parcial ·»",
+            3.82
+          ],
+          [
+            "strong «0»",
+            2.52
+          ],
+          [
+            "em «registradas»",
+            3.82
+          ],
+          [
+            "span «Ordenar por»",
+            3.77
+          ],
+          [
+            "span «Nova venda paraest»",
+            3
+          ],
+          [
+            "span «Cobrar viaWhatsApp»",
+            3
+          ],
+          [
+            "span.mobile-client-status.zero «Sem saldo»",
+            4.41
+          ],
+          [
+            "small «conta zerada»",
+            4.02
+          ],
+          [
+            "small «Última compra»",
+            3.24
+          ],
+          [
+            "small «Última cobrança»",
+            3.24
+          ],
+          [
+            "button.mobile-receive «Receber»",
+            2.32
+          ],
+          [
+            "button.mobile-whatsapp «WhatsApp»",
+            3.09
+          ],
+          [
+            "small «exigível a conferi»",
+            4.02
+          ],
+          [
+            "p «Encontre rapidamen»",
+            3.93
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-clientes-light-1440",
+      "route": "clientes",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "b «4»",
+            4.08
+          ],
+          [
+            "b «0»",
+            4.4
+          ],
+          [
+            "b «3»",
+            4.4
+          ],
+          [
+            "span.client-status.zero «SEM SALDO»",
+            4.17
+          ],
+          [
+            "small «Última compra»",
+            3.59
+          ],
+          [
+            "small «Última cobrança»",
+            3.59
+          ],
+          [
+            "small «Total comprado»",
+            3.59
+          ],
+          [
+            "button.btn.btn-primary «Receber»",
+            1.88
+          ],
+          [
+            "button.btn.btn-outline-whatsapp «WhatsApp»",
+            3.44
+          ],
+          [
+            "span.client-status.zero «A CONFERIR»",
+            4.17
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "b «4»",
+            4.08
+          ],
+          [
+            "b «0»",
+            4.4
+          ],
+          [
+            "b «3»",
+            4.4
+          ],
+          [
+            "span.client-status.zero «SEM SALDO»",
+            4.17
+          ],
+          [
+            "small «Última compra»",
+            3.59
+          ],
+          [
+            "small «Última cobrança»",
+            3.59
+          ],
+          [
+            "small «Total comprado»",
+            3.59
+          ],
+          [
+            "button.btn.btn-primary «Receber»",
+            1.88
+          ],
+          [
+            "button.btn.btn-outline-whatsapp «WhatsApp»",
+            3.44
+          ],
+          [
+            "span.client-status.zero «A CONFERIR»",
+            4.17
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-clientes-dark-390",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button.mobile-filter-chip",
+            6
+          ],
+          [
+            "button",
+            6
+          ],
+          [
+            "article.mobile-client-card",
+            4
+          ],
+          [
+            "button.mobile-whatsapp",
+            4
+          ],
+          [
+            "button.mobile-more",
+            4
+          ],
+          [
+            "span.mobile-client-status.zero",
+            3
+          ],
+          [
+            "button.mobile-receive",
+            3
+          ],
+          [
+            "article.danger",
+            2
+          ],
+          [
+            "label",
+            2
+          ],
+          [
+            "article.warning",
+            1
+          ],
+          [
+            "button#mobile-open-filters",
+            1
+          ],
+          [
+            "button#mobile-message-center",
+            1
+          ],
+          [
+            "button#mobile-open-crm",
+            1
+          ],
+          [
+            "div.mobile-swipe-hint",
+            1
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            1
+          ],
+          [
+            "section.mobile-filter-sheet",
+            1
+          ],
+          [
+            "button.mobile-sheet-clear",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "em «Parte identificada»",
+            3.82
+          ],
+          [
+            "em «Contagem parcial ·»",
+            3.82
+          ],
+          [
+            "strong «0»",
+            2.52
+          ],
+          [
+            "em «registradas»",
+            3.82
+          ],
+          [
+            "span «Ordenar por»",
+            3.77
+          ],
+          [
+            "span «Nova venda paraest»",
+            3
+          ],
+          [
+            "span «Cobrar viaWhatsApp»",
+            3
+          ],
+          [
+            "span.mobile-client-status.zero «Sem saldo»",
+            4.41
+          ],
+          [
+            "small «conta zerada»",
+            4.02
+          ],
+          [
+            "small «Última compra»",
+            3.24
+          ],
+          [
+            "small «Última cobrança»",
+            3.24
+          ],
+          [
+            "button.mobile-receive «Receber»",
+            2.32
+          ],
+          [
+            "button.mobile-whatsapp «WhatsApp»",
+            3.09
+          ],
+          [
+            "small «exigível a conferi»",
+            4.02
+          ],
+          [
+            "p «Encontre rapidamen»",
+            3.93
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "input",
+            8
+          ],
+          [
+            "button.mobile-filter-chip",
+            6
+          ],
+          [
+            "button",
+            6
+          ],
+          [
+            "article.mobile-client-card",
+            4
+          ],
+          [
+            "button.mobile-whatsapp",
+            4
+          ],
+          [
+            "button.mobile-more",
+            4
+          ],
+          [
+            "span.mobile-client-status.zero",
+            3
+          ],
+          [
+            "button.mobile-receive",
+            3
+          ],
+          [
+            "article.danger",
+            2
+          ],
+          [
+            "label",
+            2
+          ],
+          [
+            "article.warning",
+            1
+          ],
+          [
+            "button#mobile-open-filters",
+            1
+          ],
+          [
+            "button#mobile-message-center",
+            1
+          ],
+          [
+            "button#mobile-open-crm",
+            1
+          ],
+          [
+            "div.mobile-swipe-hint",
+            1
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            1
+          ],
+          [
+            "section.mobile-filter-sheet",
+            1
+          ],
+          [
+            "button.mobile-sheet-clear",
+            1
+          ],
+          [
+            "section.modal-box",
+            1
+          ],
+          [
+            "header.modal-head",
+            1
+          ],
+          [
+            "textarea",
+            1
+          ],
+          [
+            "label.customer-space-option",
+            1
+          ],
+          [
+            "footer.modal-foot",
+            1
+          ],
+          [
+            "button.btn.btn-light.close",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "em «Parte identificada»",
+            3.82
+          ],
+          [
+            "em «Contagem parcial ·»",
+            3.82
+          ],
+          [
+            "strong «0»",
+            2.52
+          ],
+          [
+            "em «registradas»",
+            3.82
+          ],
+          [
+            "span «Ordenar por»",
+            3.77
+          ],
+          [
+            "span «Nova venda paraest»",
+            3
+          ],
+          [
+            "span «Cobrar viaWhatsApp»",
+            3
+          ],
+          [
+            "span.mobile-client-status.zero «Sem saldo»",
+            4.41
+          ],
+          [
+            "small «conta zerada»",
+            4.02
+          ],
+          [
+            "small «Última compra»",
+            3.24
+          ],
+          [
+            "small «Última cobrança»",
+            3.24
+          ],
+          [
+            "button.mobile-receive «Receber»",
+            2.32
+          ],
+          [
+            "button.mobile-whatsapp «WhatsApp»",
+            3.09
+          ],
+          [
+            "small «exigível a conferi»",
+            4.02
+          ],
+          [
+            "p «Encontre rapidamen»",
+            3.93
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-clientes-dark-1440",
+      "route": "clientes",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "span",
+            16
+          ],
+          [
+            "button.btn.btn-light",
+            6
+          ],
+          [
+            "button.client-chip",
+            6
+          ],
+          [
+            "article.professional-client-card.low",
+            4
+          ],
+          [
+            "span.client-avatar",
+            4
+          ],
+          [
+            "span.client-status.zero",
+            4
+          ],
+          [
+            "button.btn.btn-outline-whatsapp",
+            4
+          ],
+          [
+            "button.btn.btn-primary",
+            3
+          ],
+          [
+            "select",
+            2
+          ],
+          [
+            "article.client-kpi.blue",
+            2
+          ],
+          [
+            "article.client-kpi.red",
+            2
+          ],
+          [
+            "button#client-select.btn.btn-light",
+            1
+          ],
+          [
+            "button#import-csv.btn.btn-light",
+            1
+          ],
+          [
+            "label.client-search",
+            1
+          ],
+          [
+            "label.client-sort",
+            1
+          ],
+          [
+            "button#open-client-filters.btn.btn-light.client-filter-button",
+            1
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            1
+          ],
+          [
+            "aside#client-filter-drawer.client-filter-drawer",
+            1
+          ],
+          [
+            "select#filter-debito",
+            1
+          ],
+          [
+            "select#filter-compra",
+            1
+          ],
+          [
+            "select#filter-cobranca",
+            1
+          ],
+          [
+            "select#filter-promessa",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "b «4»",
+            4.08
+          ],
+          [
+            "b «0»",
+            4.4
+          ],
+          [
+            "b «3»",
+            4.4
+          ],
+          [
+            "span.client-status.zero «SEM SALDO»",
+            4.17
+          ],
+          [
+            "small «Última compra»",
+            3.59
+          ],
+          [
+            "small «Última cobrança»",
+            3.59
+          ],
+          [
+            "small «Total comprado»",
+            3.59
+          ],
+          [
+            "button.btn.btn-primary «Receber»",
+            1.88
+          ],
+          [
+            "button.btn.btn-outline-whatsapp «WhatsApp»",
+            3.44
+          ],
+          [
+            "span.client-status.zero «A CONFERIR»",
+            4.17
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo cliente",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "span",
+            16
+          ],
+          [
+            "input",
+            7
+          ],
+          [
+            "button.btn.btn-light",
+            6
+          ],
+          [
+            "button.client-chip",
+            6
+          ],
+          [
+            "article.professional-client-card.low",
+            4
+          ],
+          [
+            "span.client-avatar",
+            4
+          ],
+          [
+            "span.client-status.zero",
+            4
+          ],
+          [
+            "button.btn.btn-outline-whatsapp",
+            4
+          ],
+          [
+            "button.btn.btn-primary",
+            3
+          ],
+          [
+            "select",
+            2
+          ],
+          [
+            "article.client-kpi.blue",
+            2
+          ],
+          [
+            "article.client-kpi.red",
+            2
+          ],
+          [
+            "button#client-select.btn.btn-light",
+            1
+          ],
+          [
+            "button#import-csv.btn.btn-light",
+            1
+          ],
+          [
+            "label.client-search",
+            1
+          ],
+          [
+            "label.client-sort",
+            1
+          ],
+          [
+            "button#open-client-filters.btn.btn-light.client-filter-button",
+            1
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            1
+          ],
+          [
+            "aside#client-filter-drawer.client-filter-drawer",
+            1
+          ],
+          [
+            "select#filter-debito",
+            1
+          ],
+          [
+            "select#filter-compra",
+            1
+          ],
+          [
+            "select#filter-cobranca",
+            1
+          ],
+          [
+            "select#filter-promessa",
+            1
+          ],
+          [
+            "section.modal-box",
+            1
+          ],
+          [
+            "textarea",
+            1
+          ],
+          [
+            "label.customer-space-option",
+            1
+          ],
+          [
+            "footer.modal-foot",
+            1
+          ],
+          [
+            "button.btn.btn-light.close",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "b «4»",
+            4.08
+          ],
+          [
+            "b «0»",
+            4.4
+          ],
+          [
+            "b «3»",
+            4.4
+          ],
+          [
+            "span.client-status.zero «SEM SALDO»",
+            4.17
+          ],
+          [
+            "small «Última compra»",
+            3.59
+          ],
+          [
+            "small «Última cobrança»",
+            3.59
+          ],
+          [
+            "small «Total comprado»",
+            3.59
+          ],
+          [
+            "button.btn.btn-primary «Receber»",
+            1.88
+          ],
+          [
+            "button.btn.btn-outline-whatsapp «WhatsApp»",
+            3.44
+          ],
+          [
+            "span.client-status.zero «A CONFERIR»",
+            4.17
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-produtos-light-390",
+      "route": "produtos",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "b «0»",
+            4.48
+          ],
+          [
+            "b «4»",
+            4.48
+          ],
+          [
+            "button.active «Grade»",
+            3.15
+          ],
+          [
+            "p «Escolha uma catego»",
+            3.94
+          ],
+          [
+            "button.active «Todas as categoria»",
+            4.11
+          ],
+          [
+            "b «3»",
+            4.48
+          ],
+          [
+            "b «1»",
+            4.48
+          ],
+          [
+            "b «8»",
+            4.48
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "b «0»",
+            4.48
+          ],
+          [
+            "b «4»",
+            4.48
+          ],
+          [
+            "button.active «Grade»",
+            3.15
+          ],
+          [
+            "p «Escolha uma catego»",
+            3.94
+          ],
+          [
+            "button.active «Todas as categoria»",
+            4.11
+          ],
+          [
+            "b «3»",
+            4.48
+          ],
+          [
+            "b «1»",
+            4.48
+          ],
+          [
+            "b «8»",
+            4.48
+          ],
+          [
+            "small «Um preço e um esto»",
+            3.9
+          ],
+          [
+            "small «Um item vendido se»",
+            3.9
+          ],
+          [
+            "small «Sabores, cores, ta»",
+            3.9
+          ],
+          [
+            "small «Produtos ou serviç»",
+            3.9
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-produtos-light-1440",
+      "route": "produtos",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "p «Categoria B»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.esgotado «Esgotado»",
+            4.26
+          ],
+          [
+            "small «Preço»",
+            3.12
+          ],
+          [
+            "small «Estoque»",
+            3.12
+          ],
+          [
+            "small «Variações»",
+            3.12
+          ],
+          [
+            "button.btn.btn-primary.btn-sm «Adicionar entrada»",
+            2.75
+          ],
+          [
+            "p «Categoria A»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum «Baixo estoque»",
+            4.26
+          ],
+          [
+            "span.desktop-product-status.disponivel «Disponível»",
+            4.41
+          ],
+          [
+            "strong «6 un.»",
+            3.7
+          ],
+          [
+            "strong «12 un.»",
+            3.7
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum «Baixo estoque»",
+            4.19
+          ],
+          [
+            "strong «3 un.»",
+            2.7
+          ],
+          [
+            "strong «20 un.»",
+            3.7
+          ],
+          [
+            "strong «9 un.»",
+            3.7
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "p «Categoria B»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.esgotado «Esgotado»",
+            4.26
+          ],
+          [
+            "small «Preço»",
+            3.12
+          ],
+          [
+            "small «Estoque»",
+            3.12
+          ],
+          [
+            "small «Variações»",
+            3.12
+          ],
+          [
+            "button.btn.btn-primary.btn-sm «Adicionar entrada»",
+            2.75
+          ],
+          [
+            "p «Categoria A»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum «Baixo estoque»",
+            4.26
+          ],
+          [
+            "span.desktop-product-status.disponivel «Disponível»",
+            4.41
+          ],
+          [
+            "strong «6 un.»",
+            3.7
+          ],
+          [
+            "strong «12 un.»",
+            3.7
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum «Baixo estoque»",
+            4.19
+          ],
+          [
+            "strong «3 un.»",
+            2.7
+          ],
+          [
+            "strong «20 un.»",
+            3.7
+          ],
+          [
+            "strong «9 un.»",
+            3.7
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-produtos-dark-390",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "article.mobile-product-card.mobile-catalog-card",
+            8
+          ],
+          [
+            "button.favorite-dot.show.mobile-card-favorite",
+            8
+          ],
+          [
+            "em",
+            8
+          ],
+          [
+            "button",
+            6
+          ],
+          [
+            "button.product-filter-chip",
+            6
+          ],
+          [
+            "label",
+            2
+          ],
+          [
+            "button.active",
+            2
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-4",
+            2
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-5",
+            2
+          ],
+          [
+            "button#mobile-product-open-filters",
+            1
+          ],
+          [
+            "summary",
+            1
+          ],
+          [
+            "div.mobile-product-actions-panel",
+            1
+          ],
+          [
+            "div.product-view-toggle",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-0",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-1",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-2",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-3",
+            1
+          ],
+          [
+            "section.product-filter-sheet",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "b «0»",
+            4.48
+          ],
+          [
+            "b «4»",
+            4.48
+          ],
+          [
+            "button.active «Grade»",
+            3.15
+          ],
+          [
+            "p «Escolha uma catego»",
+            3.94
+          ],
+          [
+            "button.active «Todas as categoria»",
+            4.11
+          ],
+          [
+            "button «Categoria A»",
+            1
+          ],
+          [
+            "button «Categoria B»",
+            1
+          ],
+          [
+            "b «3»",
+            4.48
+          ],
+          [
+            "b «1»",
+            4.48
+          ],
+          [
+            "b «8»",
+            4.48
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button",
+            10
+          ],
+          [
+            "article.mobile-product-card.mobile-catalog-card",
+            8
+          ],
+          [
+            "button.favorite-dot.show.mobile-card-favorite",
+            8
+          ],
+          [
+            "em",
+            8
+          ],
+          [
+            "button.product-filter-chip",
+            6
+          ],
+          [
+            "label",
+            2
+          ],
+          [
+            "button.active",
+            2
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-4",
+            2
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-5",
+            2
+          ],
+          [
+            "button#mobile-product-open-filters",
+            1
+          ],
+          [
+            "summary",
+            1
+          ],
+          [
+            "div.mobile-product-actions-panel",
+            1
+          ],
+          [
+            "div.product-view-toggle",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-0",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-1",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-2",
+            1
+          ],
+          [
+            "div.mobile-product-avatar.mobile-card-media.color-3",
+            1
+          ],
+          [
+            "section.product-filter-sheet",
+            1
+          ],
+          [
+            "section.modal-box.product-type-picker",
+            1
+          ],
+          [
+            "header.modal-head",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "b «0»",
+            4.48
+          ],
+          [
+            "b «4»",
+            4.48
+          ],
+          [
+            "button.active «Grade»",
+            3.15
+          ],
+          [
+            "p «Escolha uma catego»",
+            3.94
+          ],
+          [
+            "button.active «Todas as categoria»",
+            4.11
+          ],
+          [
+            "button «Categoria A»",
+            1
+          ],
+          [
+            "button «Categoria B»",
+            1
+          ],
+          [
+            "b «3»",
+            4.48
+          ],
+          [
+            "b «1»",
+            4.48
+          ],
+          [
+            "b «8»",
+            4.48
+          ],
+          [
+            "small «Um preço e um esto»",
+            3.9
+          ],
+          [
+            "small «Um item vendido se»",
+            3.9
+          ],
+          [
+            "small «Sabores, cores, ta»",
+            3.9
+          ],
+          [
+            "small «Produtos ou serviç»",
+            3.9
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-produtos-dark-1440",
+      "route": "produtos",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button.desktop-product-favorite",
+            8
+          ],
+          [
+            "section.desktop-product-metrics",
+            8
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            8
+          ],
+          [
+            "summary",
+            8
+          ],
+          [
+            "div.desktop-product-more-menu",
+            8
+          ],
+          [
+            "button.desktop-product-filter",
+            4
+          ],
+          [
+            "article.desktop-product-card.disponivel",
+            4
+          ],
+          [
+            "span.desktop-product-status.disponivel",
+            4
+          ],
+          [
+            "article.desktop-product-card.baixo",
+            3
+          ],
+          [
+            "button.btn.btn-light",
+            2
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum",
+            2
+          ],
+          [
+            "select",
+            1
+          ],
+          [
+            "input#search.search",
+            1
+          ],
+          [
+            "button.desktop-product-filter-toggle",
+            1
+          ],
+          [
+            "article.desktop-product-card.esgotado",
+            1
+          ],
+          [
+            "span.desktop-product-status.esgotado",
+            1
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "p «Categoria B»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.esgotado «Esgotado»",
+            4.26
+          ],
+          [
+            "small «Preço»",
+            3.12
+          ],
+          [
+            "small «Estoque»",
+            3.12
+          ],
+          [
+            "small «Variações»",
+            3.12
+          ],
+          [
+            "button.btn.btn-primary.btn-sm «Adicionar entrada»",
+            2.75
+          ],
+          [
+            "p «Categoria A»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum «Baixo estoque»",
+            4.26
+          ],
+          [
+            "span.desktop-product-status.disponivel «Disponível»",
+            4.41
+          ],
+          [
+            "strong «6 un.»",
+            3.7
+          ],
+          [
+            "strong «12 un.»",
+            3.7
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum «Baixo estoque»",
+            4.19
+          ],
+          [
+            "strong «3 un.»",
+            2.7
+          ],
+          [
+            "strong «20 un.»",
+            3.7
+          ],
+          [
+            "strong «9 un.»",
+            3.7
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Novo produto",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button.desktop-product-favorite",
+            8
+          ],
+          [
+            "section.desktop-product-metrics",
+            8
+          ],
+          [
+            "button.btn.btn-light.btn-sm",
+            8
+          ],
+          [
+            "summary",
+            8
+          ],
+          [
+            "div.desktop-product-more-menu",
+            8
+          ],
+          [
+            "button.desktop-product-filter",
+            4
+          ],
+          [
+            "article.desktop-product-card.disponivel",
+            4
+          ],
+          [
+            "span.desktop-product-status.disponivel",
+            4
+          ],
+          [
+            "article.desktop-product-card.baixo",
+            3
+          ],
+          [
+            "button.btn.btn-light",
+            2
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum",
+            2
+          ],
+          [
+            "select",
+            1
+          ],
+          [
+            "input#search.search",
+            1
+          ],
+          [
+            "button.desktop-product-filter-toggle",
+            1
+          ],
+          [
+            "article.desktop-product-card.esgotado",
+            1
+          ],
+          [
+            "span.desktop-product-status.esgotado",
+            1
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum",
+            1
+          ],
+          [
+            "section.modal-box.product-type-picker",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "p «Categoria B»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.esgotado «Esgotado»",
+            4.26
+          ],
+          [
+            "small «Preço»",
+            3.12
+          ],
+          [
+            "small «Estoque»",
+            3.12
+          ],
+          [
+            "small «Variações»",
+            3.12
+          ],
+          [
+            "button.btn.btn-primary.btn-sm «Adicionar entrada»",
+            2.75
+          ],
+          [
+            "p «Categoria A»",
+            3.78
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-below-minimum «Baixo estoque»",
+            4.26
+          ],
+          [
+            "span.desktop-product-status.disponivel «Disponível»",
+            4.41
+          ],
+          [
+            "strong «6 un.»",
+            3.7
+          ],
+          [
+            "strong «12 un.»",
+            3.7
+          ],
+          [
+            "span.desktop-product-status.baixo.stock-at-minimum «Baixo estoque»",
+            4.19
+          ],
+          [
+            "strong «3 un.»",
+            2.7
+          ],
+          [
+            "strong «20 un.»",
+            3.7
+          ],
+          [
+            "strong «9 un.»",
+            3.7
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-financeiro-light-390",
+      "route": "financeiro",
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "small «Atualizado agora»",
+            4.08
+          ],
+          [
+            "em «Contas e carteiras»",
+            3.17
+          ],
+          [
+            "em «Compras no crédito»",
+            3.17
+          ],
+          [
+            "em «Sem repetir fatura»",
+            3.17
+          ],
+          [
+            "em «Entradas menos saí»",
+            3.17
+          ],
+          [
+            "button «Ver todos»",
+            3.41
+          ],
+          [
+            "button «Ver todas»",
+            3.41
+          ],
+          [
+            "small «SET»",
+            4.04
+          ],
+          [
+            "small «Fatura de cartão ·»",
+            4.02
+          ],
+          [
+            "button «Ver espaços»",
+            3.41
+          ],
+          [
+            "small «R$ 0,00»",
+            4.06
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "button «Contas»",
+            4.46
+          ],
+          [
+            "button «Cartões»",
+            4.46
+          ],
+          [
+            "button «Fluxo»",
+            4.46
+          ],
+          [
+            "button «Ver todas»",
+            3.41
+          ],
+          [
+            "button «Ver todos»",
+            3.41
+          ],
+          [
+            "button «Ver relatório»",
+            3.41
+          ],
+          [
+            "small «Passo 1 de 4»",
+            4.18
+          ],
+          [
+            "span «A área ampla desta»",
+            4.35
+          ],
+          [
+            "small «Sai do seu dinheir»",
+            3.71
+          ],
+          [
+            "small «Gera valor no futu»",
+            4.02
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-financeiro-light-1440",
+      "route": "financeiro",
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "small «Atualizado agora»",
+            4.08
+          ],
+          [
+            "em «Contas e carteiras»",
+            3.17
+          ],
+          [
+            "em «Compras no crédito»",
+            3.17
+          ],
+          [
+            "em «Sem repetir fatura»",
+            3.17
+          ],
+          [
+            "em «Entradas menos saí»",
+            3.17
+          ],
+          [
+            "small «SET»",
+            4.04
+          ],
+          [
+            "small «Fatura de cartão ·»",
+            4.02
+          ],
+          [
+            "small «R$ 0,00»",
+            4.06
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [],
+        "lowContrast": [
+          [
+            "small «Visão financeira»",
+            4.5
+          ],
+          [
+            "small «Período»",
+            4.5
+          ],
+          [
+            "span «A área ampla desta»",
+            4.35
+          ],
+          [
+            "small «Sai do seu dinheir»",
+            3.71
+          ],
+          [
+            "small «Gera valor no futu»",
+            4.02
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-financeiro-dark-390",
+      "route": "financeiro",
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "small.vac-due.is-overdue",
+            10
+          ],
+          [
+            "button",
+            6
+          ],
+          [
+            "span",
+            5
+          ],
+          [
+            "section.financial-home-summary",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-institutions",
+            1
+          ],
+          [
+            "button.vac-pencil",
+            1
+          ],
+          [
+            "section.financial-section.financial-attention",
+            1
+          ],
+          [
+            "button.is-danger",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-upcoming",
+            1
+          ],
+          [
+            "div.financial-home-payables",
+            1
+          ],
+          [
+            "time",
+            1
+          ],
+          [
+            "span.financial-row-icon",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-spaces",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "small «Atualizado agora»",
+            4.08
+          ],
+          [
+            "em «Contas e carteiras»",
+            3.17
+          ],
+          [
+            "em «Compras no crédito»",
+            3.17
+          ],
+          [
+            "em «Sem repetir fatura»",
+            3.17
+          ],
+          [
+            "em «Entradas menos saí»",
+            3.17
+          ],
+          [
+            "button «Ver todos»",
+            3.41
+          ],
+          [
+            "button «Ver todas»",
+            3.41
+          ],
+          [
+            "small «SET»",
+            4.04
+          ],
+          [
+            "small «Fatura de cartão ·»",
+            4.02
+          ],
+          [
+            "button «Ver espaços»",
+            3.41
+          ],
+          [
+            "small «R$ 0,00»",
+            4.06
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button",
+            10
+          ],
+          [
+            "small.vac-due.is-overdue",
+            5
+          ],
+          [
+            "section.financial-section",
+            4
+          ],
+          [
+            "span",
+            4
+          ],
+          [
+            "div.financial-empty-inline",
+            3
+          ],
+          [
+            "input",
+            2
+          ],
+          [
+            "section.financial-summary-card",
+            1
+          ],
+          [
+            "section.financial-section.financial-attention",
+            1
+          ],
+          [
+            "button.is-danger",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-institutions",
+            1
+          ],
+          [
+            "button.vac-pencil",
+            1
+          ],
+          [
+            "section.modal-box.financial-sheet.financial-entry-wizard",
+            1
+          ],
+          [
+            "header.modal-head.financial-wizard-head",
+            1
+          ],
+          [
+            "button.is-create",
+            1
+          ],
+          [
+            "button.active",
+            1
+          ],
+          [
+            "footer.modal-foot",
+            1
+          ],
+          [
+            "button.btn.btn-light",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "button «Contas»",
+            4.46
+          ],
+          [
+            "button «Cartões»",
+            4.46
+          ],
+          [
+            "button «Fluxo»",
+            4.46
+          ],
+          [
+            "button «Ver todas»",
+            3.41
+          ],
+          [
+            "button «Ver todos»",
+            3.41
+          ],
+          [
+            "button «Ver relatório»",
+            3.41
+          ],
+          [
+            "small «Passo 1 de 4»",
+            4.18
+          ],
+          [
+            "span «A área ampla desta»",
+            4.35
+          ],
+          [
+            "small «Sai do seu dinheir»",
+            3.71
+          ],
+          [
+            "small «Gera valor no futu»",
+            4.02
+          ]
+        ]
+      },
+      "errors": []
+    },
+    {
+      "name": "antes-financeiro-dark-1440",
+      "route": "financeiro",
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button",
+            10
+          ],
+          [
+            "small.vac-due.is-overdue",
+            10
+          ],
+          [
+            "span",
+            5
+          ],
+          [
+            "section.financial-home-summary",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-institutions",
+            1
+          ],
+          [
+            "button.vac-pencil",
+            1
+          ],
+          [
+            "section.financial-section.financial-attention",
+            1
+          ],
+          [
+            "button.is-danger",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-upcoming",
+            1
+          ],
+          [
+            "div.financial-home-payables",
+            1
+          ],
+          [
+            "time",
+            1
+          ],
+          [
+            "span.financial-row-icon",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-spaces",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "small «Atualizado agora»",
+            4.08
+          ],
+          [
+            "em «Contas e carteiras»",
+            3.17
+          ],
+          [
+            "em «Compras no crédito»",
+            3.17
+          ],
+          [
+            "em «Sem repetir fatura»",
+            3.17
+          ],
+          [
+            "em «Entradas menos saí»",
+            3.17
+          ],
+          [
+            "small «SET»",
+            4.04
+          ],
+          [
+            "small «Fatura de cartão ·»",
+            4.02
+          ],
+          [
+            "small «R$ 0,00»",
+            4.06
+          ]
+        ]
+      },
+      "modal": {
+        "opened": true,
+        "via": "Nova despesa",
+        "overflow": false,
+        "lightSurfaces": [
+          [
+            "button",
+            12
+          ],
+          [
+            "small.vac-due.is-overdue",
+            5
+          ],
+          [
+            "section.financial-section",
+            4
+          ],
+          [
+            "span",
+            4
+          ],
+          [
+            "div.financial-empty-inline",
+            3
+          ],
+          [
+            "input",
+            2
+          ],
+          [
+            "button.financial-context-button",
+            1
+          ],
+          [
+            "button.financial-context-button.is-period",
+            1
+          ],
+          [
+            "button.financial-save-view",
+            1
+          ],
+          [
+            "section.financial-summary-card",
+            1
+          ],
+          [
+            "section.financial-section.financial-attention",
+            1
+          ],
+          [
+            "button.is-danger",
+            1
+          ],
+          [
+            "section.financial-section.financial-home-institutions",
+            1
+          ],
+          [
+            "button.vac-pencil",
+            1
+          ],
+          [
+            "section.modal-box.financial-sheet.financial-entry-wizard",
+            1
+          ],
+          [
+            "button.is-create",
+            1
+          ],
+          [
+            "button.active",
+            1
+          ],
+          [
+            "footer.modal-foot",
+            1
+          ],
+          [
+            "button.btn.btn-light",
+            1
+          ]
+        ],
+        "lowContrast": [
+          [
+            "small «Visão financeira»",
+            4.5
+          ],
+          [
+            "small «Período»",
+            4.5
+          ],
+          [
+            "span «A área ampla desta»",
+            4.35
+          ],
+          [
+            "small «Sai do seu dinheir»",
+            3.71
+          ],
+          [
+            "small «Gera valor no futu»",
+            4.02
+          ]
+        ]
+      },
+      "errors": []
+    }
+  ]
+}
