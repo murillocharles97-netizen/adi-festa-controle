@@ -11,7 +11,7 @@
 |---|---|---|
 | 1A | `ed218dd` | Tokens, tema claro e escuro, alternador e Início redesenhado |
 | 1B | `c7c0a8e` | Assinatura "geometria em camadas", aprovada pelo usuário |
-| 1C | commit "VECONI 1C" logo depois de `c7c0a8e` | Vender, Clientes, Produtos e Financeiro nos dois temas |
+| 1C | `d1e6035` | Vender, Clientes, Produtos e Financeiro nos dois temas |
 
 Para ver tudo: `git diff 350d2b8..claude/veconi-visual-v1 --stat`.
 
