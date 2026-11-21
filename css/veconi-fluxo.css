@@ -3195,3 +3195,25 @@ html.vf-dark-1c .product-spreadsheet-modal [data-sheet-error] {
   color: var(--vf-neg);
   background-color: var(--vf-neg-soft);
 }
+
+/* Linhas inválidas herdam o vermelho legado mesmo após a troca de superfície. */
+html.vf-dark-1c .product-spreadsheet-modal :is(.product-sheet-rows .is-invalid, .product-sheet-failure) {
+  color: var(--vf-neg);
+}
+
+/* O toast usa tinta como fundo no tema legado. No escuro, a tinta é clara. */
+html.vf-dark-1c #toasts .toast:not(.toast-error) {
+  background: var(--vf-surface-3);
+  color: var(--vf-ink);
+}
+
+html.vf-dark-1c .terminal-pending-warning,
+html.vf-dark-1c .terminal-status-orb.is-pending_confirmation {
+  color: var(--vf-warn);
+}
+html.vf-dark-1c .terminal-result:is(.is-error, .is-declined) > span {
+  color: var(--vf-neg);
+}
+html.vf-dark-1c .terminal-mock-controls > b {
+  color: var(--vf-accent-text);
+}
