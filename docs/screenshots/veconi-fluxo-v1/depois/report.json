@@ -1,0 +1,125 @@
+{
+  "mode": "after",
+  "shots": [
+    {
+      "name": "depois-light-360",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "depois-light-390",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "depois-light-768",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-light-1024",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-light-1440",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-dark-360",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "depois-dark-390",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "depois-dark-768",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-dark-1024",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-dark-1440",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "depois-vazio-light-390"
+    },
+    {
+      "name": "depois-vazio-dark-390"
+    },
+    {
+      "name": "depois-vazio-light-1440"
+    },
+    {
+      "name": "depois-vazio-dark-1440"
+    }
+  ],
+  "checks": [
+    {
+      "systemDefault": "dark",
+      "afterClick": {
+        "attr": "light",
+        "stored": "light",
+        "pressed": "false"
+      },
+      "persisted": "light",
+      "focusVisible": true
+    },
+    {
+      "reducedMotionRunningAnimations": 0
+    },
+    {
+      "chartTooltipKeyboard": true
+    },
+    {
+      "theme": "light",
+      "contrastChecked": 56,
+      "below45": []
+    },
+    {
+      "theme": "dark",
+      "contrastChecked": 56,
+      "below45": []
+    }
+  ]
+}

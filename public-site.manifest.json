@@ -277,6 +277,8 @@
     "css/renovacoes.css",
     "functions/src/shared/flexible-service.js",
     "js/flexible-service-ui.js",
-    "css/flexible-service.css"
+    "css/flexible-service.css",
+    "js/veconi-fluxo.js",
+    "css/veconi-fluxo.css"
   ]
 }

@@ -1,0 +1,46 @@
+{
+  "mode": "before",
+  "shots": [
+    {
+      "name": "antes-light-360",
+      "overflow": false,
+      "theme": null,
+      "toggleVisible": false,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "antes-light-390",
+      "overflow": false,
+      "theme": null,
+      "toggleVisible": false,
+      "kpisInFirstFold": true,
+      "legacyNotice": false
+    },
+    {
+      "name": "antes-light-768",
+      "overflow": false,
+      "theme": null,
+      "toggleVisible": false,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "antes-light-1024",
+      "overflow": false,
+      "theme": null,
+      "toggleVisible": false,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    },
+    {
+      "name": "antes-light-1440",
+      "overflow": false,
+      "theme": null,
+      "toggleVisible": false,
+      "kpisInFirstFold": true,
+      "legacyNotice": true
+    }
+  ],
+  "checks": []
+}
