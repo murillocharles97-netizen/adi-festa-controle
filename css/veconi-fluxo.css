@@ -3190,3 +3190,8 @@ html.vf-dark-1c .financial-row-action[data-financial-open-invoice] { color: var(
 html.vf-dark-1c .crm-insights article.success p { color: var(--vf-pos); }
 html.vf-dark-1c .crm-insights article.warning p { color: var(--vf-warn); }
 html.vf-dark-1c .crm-insights article.danger p { color: var(--vf-neg); }
+
+html.vf-dark-1c .product-spreadsheet-modal [data-sheet-error] {
+  color: var(--vf-neg);
+  background-color: var(--vf-neg-soft);
+}
