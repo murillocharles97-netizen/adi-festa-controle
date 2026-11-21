@@ -85,7 +85,7 @@ async function openRoute(browser, base, route, width, theme) {
     await page.waitForFunction(() => document.body.dataset.visualReady === 'inicio');
     await page.addScriptTag({ url: base + '/js/spaces.js' });
     // Módulos que o app carrega e a fixture do shell não: necessários para abrir Clientes.
-    for (const src of ['/functions/src/shared/permission-policy.js', '/functions/src/shared/installment-plan.js', '/js/installment-credit.js']) await page.addScriptTag({ url: base + src });
+    for (const src of ['/functions/src/shared/permission-policy.js', '/functions/src/shared/installment-plan.js', '/js/installment-credit.js', '/js/sale-money.js']) await page.addScriptTag({ url: base + src });
     await seed(page);
     await page.evaluate(r => { document.querySelector('#modal').innerHTML = ''; Router.ir(r); }, route);
     await page.evaluate(() => new Promise(r => setTimeout(r, 300)));
@@ -119,7 +119,13 @@ async function openModal(page, route, shot) {
       button?.click(); await new Promise(r => setTimeout(r, 700));
       return button?.textContent.trim().replace(/\s+/g, ' ').slice(0, 30);
     });
-    return { opened: Boolean(via), via, cartStepLeak: cartStep.desktop && (cartStep.fieldsVisible || cartStep.finishVisible) };
+    const opened = await page.evaluate(desktop => {
+      const node = desktop
+        ? document.querySelector('.desktop-checkout-fields #finish-sale')
+        : document.querySelector('.sale-receipt-paper');
+      return Boolean(node && node.getClientRects().length);
+    }, cartStep.desktop);
+    return { opened, via, cartStepLeak: cartStep.desktop && (cartStep.fieldsVisible || cartStep.finishVisible) };
   }
   return page.evaluate(async (route, openers) => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -166,7 +172,7 @@ async function inspect(page, theme) {
       const fg = parse(s.color); if (fg.length === 4 && fg[3] < .5) continue;
       const bg = bgOf(n); if (!bg) continue;
       const a = lum(fg.slice(0, 3)), b = lum(bg), ratio = (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
-      const large = parseFloat(s.fontSize) >= 18.6 || (parseFloat(s.fontSize) >= 14 && +s.fontWeight >= 700);
+      const large = parseFloat(s.fontSize) >= 24 || (parseFloat(s.fontSize) >= 18.667 && +s.fontWeight >= 700);
       if (ratio < (large ? 3 : 4.5)) { const k = sig(n) + ' «' + n.textContent.trim().slice(0, 18) + '»'; if (!low.has(k)) low.set(k, +ratio.toFixed(2)); }
     }
     return {
@@ -207,6 +213,7 @@ async function main() {
         if (modal?.opened && theme === 'dark' && modal.lightSurfaces.length) failures.push(`${name}: modal com superfícies claras ${JSON.stringify(modal.lightSurfaces.slice(0, 6))}`);
         if (modal?.opened && modal.lowContrast.length) failures.push(`${name}: modal com contraste baixo ${JSON.stringify(modal.lowContrast.slice(0, 6))}`);
         if (errors.length) failures.push(`${name}: erros de página ${errors.slice(0, 2).join(' | ')}`);
+        if (modal && !modal.opened) failures.push(`${name}: fluxo não chegou à tela esperada`);
         if (modal?.cartStepLeak) failures.push(`${name}: campos de pagamento visíveis no passo do carrinho`);
       }
       console.log(name, JSON.stringify({ overflow: pageCheck.overflow, light: pageCheck.lightSurfaces.length, low: pageCheck.lowContrast.length, modal: modal && { opened: modal.opened, via: modal.via, light: modal.lightSurfaces.length, low: modal.lowContrast.length }, errors: errors.length }));

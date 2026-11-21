@@ -190,8 +190,10 @@ html[data-theme="dark"] :is(.topbar, .vf-home, .bottom-nav) {
 html:has(#app[data-route="inicio"]),
 html:has(#app[data-route="inicio"]) body,
 html:has(#app[data-route="inicio"]) .shell { background: var(--vf-bg); }
-html.vf-theme-switching :is(body, .shell, .topbar, .bottom-nav, .vf-home, .vf-home *) {
-  transition: background-color .35s ease, border-color .35s ease, color .25s ease, fill .35s ease, stroke .35s ease !important;
+@media (prefers-reduced-motion: no-preference) {
+  html.vf-theme-switching :is(body, .shell, .topbar, .bottom-nav, .vf-home, .vf-home *) {
+    transition: background-color .35s ease, border-color .35s ease, color .25s ease, fill .35s ease, stroke .35s ease !important;
+  }
 }
 .vf-home :where(button, select, a, [tabindex]):focus-visible {
   outline: 2px solid var(--vf-brand) !important;
@@ -503,7 +505,7 @@ html[data-theme="dark"] #app[data-route="inicio"] [data-consignment-daily] { bor
   .vf-home .desktop-space-goal-copy b { color: var(--vf-ink); font-size: 14px; font-weight: 700; }
   .vf-home .desktop-space-goal-copy small { color: var(--vf-text-3); font-size: 12.5px; }
   .vf-home .desktop-space-goal > em { grid-area: pct; color: var(--vf-ink); font-size: 22px; font-style: normal; font-weight: 760; letter-spacing: -.02em; }
-  .vf-home button.desktop-space-goal > strong { grid-area: pct; display: inline-flex; align-items: center; gap: 2px; color: var(--vf-accent-text); font-size: 13px; }
+  .vf-home button.desktop-space-goal.is-empty > strong { background: var(--vf-brand-soft); grid-area: pct; display: inline-flex; align-items: center; gap: 2px; color: var(--vf-accent-text); font-size: 13px; }
   .vf-home .desktop-space-goal > button {
     grid-area: edit;
     align-self: end;
@@ -3148,3 +3150,43 @@ html.vf-area-1c[data-vf-route="financeiro"] .veconi-accounts-carousel .vac-card 
 /* Estado de erro do botão de concluir venda continua vermelho (semântico), acima do turquesa do botão principal. */
 html.vf-area-1c #finish-sale[data-sale-state="error"],
 html.vf-area-1c .desktop-checkout-fields #finish-sale[data-sale-state="error"] { background: #b3242b; color: #fff; box-shadow: none; }
+
+/* Estados operacionais com tokens explícitos: a ponte só infere famílias de cor. */
+html.vf-dark-1c .sale-payment-confirmed,
+html.vf-dark-1c .sale-operation-status > span {
+  color: var(--vf-pos);
+  background-color: var(--vf-pos-soft);
+}
+html.vf-dark-1c .sale-operation-status p { color: var(--vf-warn); }
+html.vf-dark-1c .mobile-sale-success > button:not(:disabled) { color: var(--vf-accent-text); }
+
+html.vf-area-1c .crm-profile-top small,
+html.vf-area-1c .crm-profile .balance-zero,
+html.vf-area-1c .product-image-heading small { color: var(--vf-text-2); }
+html.vf-dark-1c .crm-insights article p { color: var(--vf-text-2); }
+html.vf-dark-1c .product-image-heading > span { color: var(--vf-pos); }
+
+html.vf-dark-1c .financial-status.is-overdue {
+  color: var(--vf-neg);
+  background-color: var(--vf-neg-soft);
+}
+html.vf-dark-1c .financial-status.is-pending {
+  color: var(--vf-warn);
+  background-color: var(--vf-warn-soft);
+}
+html.vf-area-1c .financial-credit-hero aside,
+html.vf-area-1c .financial-credit-hero aside b,
+html.vf-dark-1c .financial-card-scope,
+html.vf-dark-1c .financial-add-card b { color: var(--vf-ink); }
+html.vf-dark-1c [data-financial-invoice-payment] .financial-payment-balance strong { color: var(--vf-accent-text); }
+
+/* Estes dois seletores legados de cartões já usam !important. */
+html.vf-dark-1c .financial-page .financial-credit-card header .financial-status.is-pending {
+  color: var(--vf-warn) !important;
+  background-color: var(--vf-warn-soft) !important;
+}
+html.vf-dark-1c .financial-page .financial-card-scope { color: var(--vf-ink) !important; }
+html.vf-dark-1c .financial-row-action[data-financial-open-invoice] { color: var(--vf-accent-text); }
+html.vf-dark-1c .crm-insights article.success p { color: var(--vf-pos); }
+html.vf-dark-1c .crm-insights article.warning p { color: var(--vf-warn); }
+html.vf-dark-1c .crm-insights article.danger p { color: var(--vf-neg); }

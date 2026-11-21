@@ -12,7 +12,9 @@
   const META = { light: '#f3f6f7', dark: '#061519' };
 
   const stored = () => { try { const v = localStorage.getItem(KEY); return v === 'dark' || v === 'light' ? v : null; } catch { return null; } };
-  const current = () => stored() || (media.matches ? 'dark' : 'light');
+  let sessionTheme = null;
+  const preference = () => sessionTheme || stored();
+  const current = () => preference() || (media.matches ? 'dark' : 'light');
 
   function syncToggles(theme) {
     document.querySelectorAll('[data-theme-toggle]').forEach(button => {
@@ -25,7 +27,7 @@
   function apply() {
     const theme = current();
     root.dataset.theme = theme;
-    root.dataset.themeSource = stored() ? 'user' : 'system';
+    root.dataset.themeSource = preference() ? 'user' : 'system';
     const meta = document.querySelector('meta[name="theme-color"]');
     // O cabeçalho mobile é escuro nos dois temas; a barra do sistema acompanha só no desktop.
     if (meta && !(window.matchMedia && matchMedia('(max-width: 767px)').matches)) meta.content = META[theme];
@@ -35,7 +37,7 @@
   }
   function set(theme) {
     if (theme !== 'dark' && theme !== 'light') return apply();
-    try { localStorage.setItem(KEY, theme); } catch { /* aparelho sem armazenamento: vale só nesta sessão */ }
+    try { localStorage.setItem(KEY, theme); sessionTheme = null; } catch { sessionTheme = theme; }
     root.classList.add('vf-theme-switching');
     const result = apply();
     clearTimeout(set.timer);
@@ -53,7 +55,7 @@
     root.classList.toggle('vf-dark-1c', inArea && root.dataset.theme === 'dark');
     if (inArea) root.dataset.vfRoute = route; else delete root.dataset.vfRoute;
   }
-  media.addEventListener?.('change', () => { if (!stored()) apply(); });
+  media.addEventListener?.('change', () => { if (!preference()) apply(); });
   window.addEventListener?.('storage', event => { if (event.key === KEY) apply(); });
   apply();
 
