@@ -1,4 +1,5 @@
-// VECONI Fluxo V1 — auditoria visual isolada da tela Início (claro/escuro, 5 larguras).
+// VECONI Fluxo V1 (proposta 1B: geometria em camadas) — auditoria visual isolada da tela
+// Início (claro/escuro, 5 larguras).
 // Servidor loopback com a fixture do shell; dados 100% fictícios; nenhuma rede externa,
 // nenhuma autenticação e nenhuma escrita em produção.
 // Uso: node scripts/audit-veconi-fluxo-v1.cjs [pasta-de-saida] [--before]
@@ -100,6 +101,9 @@ async function main() {
           toggleVisible: Boolean(tr && tr.width >= 40 && tr.height >= 40 && tr.top >= 0 && tr.top < 120),
           kpisInFirstFold: kpiTop !== undefined && kpiTop < innerHeight * .8,
           legacyNotice: /antigas sem espaço/.test(text),
+          geoArt: Boolean(document.querySelector('.vf-hero .vf-geo .vf-geo-v')) && !document.querySelector('.vf-flow'),
+          dateOneLine: (() => { const d = document.querySelector('#date'); return !d || (d.scrollWidth <= d.clientWidth + 1 && d.getBoundingClientRect().height < 22); })(),
+          prioritiesTop: Math.round(document.querySelector('.home-attention')?.getBoundingClientRect().top || 0),
         };
       });
       assert.equal(layout.overflow, false, `${name}: rolagem horizontal`);
@@ -107,6 +111,11 @@ async function main() {
         assert.equal(layout.theme, theme, `${name}: tema aplicado`);
         assert.ok(layout.toggleVisible, `${name}: alternador visível com 40px+`);
         assert.ok(layout.kpisInFirstFold, `${name}: indicadores na primeira dobra`);
+        assert.ok(layout.geoArt, `${name}: assinatura geométrica presente (sem linhas do fluxo 1A)`);
+        if (width < 768) {
+          assert.ok(layout.dateOneLine, `${name}: data do cabeçalho numa linha, sem corte`);
+          assert.ok(layout.prioritiesTop > 0 && layout.prioritiesTop < 800 * .8, `${name}: prioridades visíveis na primeira tela`);
+        }
       }
       if (width >= 768) assert.ok(layout.legacyNotice, `${name}: aviso de vendas antigas preservado`);
       assert.deepEqual(errors, [], `${name}: erros de página`);
@@ -162,12 +171,20 @@ async function main() {
       // Registro das animações: quadros da entrada (desktop escuro e mobile claro).
       for (const [width, theme] of [[1440, 'dark'], [390, 'light']]) {
         const { page } = await boot(browser, base, width, theme);
-        await page.evaluate(() => { document.querySelector('#app').innerHTML = ''; });
+        // Reabre a tela com a entrada liberada de novo (só na auditoria), para registrar os quadros.
+        // Espera o temporizador da primeira entrada terminar antes de liberar.
+        await page.waitForFunction(() => document.documentElement.classList.contains('vf-entered'), { timeout: 5000 });
+        await page.evaluate(() => { document.querySelector('#app').innerHTML = ''; document.documentElement.classList.remove('vf-entered'); });
         await page.evaluate(() => { window.AppPageRuntime?.mount ? AppPageRuntime.mount('inicio') : Router.ir('inicio'); if (window.MobileHome?.isMobile()) MobileHome.refresh(); });
         for (const ms of [60, 260, 520, 1100]) {
           await page.evaluate(t => new Promise(r => setTimeout(r, t)), ms === 60 ? 60 : ms - [60, 260, 520, 1100][[60, 260, 520, 1100].indexOf(ms) - 1]);
           await page.screenshot({ path: path.join(out, `animacao-${theme}-${width}-${String(ms).padStart(4, '0')}ms.png`) });
         }
+        // Depois da entrada, nada continua se mexendo (sem animação infinita).
+        await page.evaluate(() => new Promise(r => setTimeout(r, 1600)));
+        const still = await page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').length);
+        assert.equal(still, 0, `${width}/${theme}: animações ainda rodando após a entrada`);
+        report.checks.push({ width, theme, runningAfterEntrance: still });
         // Tooltip do gráfico (desktop) por teclado.
         if (width >= 768) {
           const point = await page.$('[data-chart-point]');
@@ -176,20 +193,21 @@ async function main() {
         await page.close();
       }
       // Contraste dos textos-chave nos dois temas.
-      for (const theme of THEMES) {
-        const { page } = await boot(browser, base, 1440, theme);
+      for (const theme of THEMES) for (const width of [1440, 390]) {
+        const { page } = await boot(browser, base, width, theme);
         const ratios = await page.evaluate(() => {
           const parse = c => (c.match(/[\d.]+/g) || []).map(Number);
           const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
-          const bgOf = el => { if (el.closest('.sidebar')) return [8, 28, 35]; for (let n = el; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c.length === 3 || (c.length === 4 && c[3] > .9)) return c.slice(0, 3); } return [255, 255, 255]; };
-          return [...document.querySelectorAll('.desktop-kpi strong, .desktop-kpi small, .desktop-kpi em, .desktop-finance small, .desktop-finance b, .desktop-panel-head h3, .vf-hero h2, .vf-hero p, .desktop-nav-section, #nav a')].filter(n => n.offsetParent && n.textContent.trim()).map(n => {
+          // Fundos em gradiente: usa o tom mais claro (pior caso para texto claro).
+          const bgOf = el => { if (el.closest('.sidebar')) return [8, 28, 35]; if (el.closest('.home-goal-card')) return document.documentElement.dataset.theme === 'dark' ? [18, 58, 63] : [16, 52, 59]; for (let n = el; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c.length === 3 || (c.length === 4 && c[3] > .9)) return c.slice(0, 3); } return [255, 255, 255]; };
+          return [...document.querySelectorAll('.desktop-kpi strong, .desktop-kpi small, .desktop-kpi em, .desktop-finance small, .desktop-finance b, .desktop-panel-head h3, .vf-hero h2, .vf-hero p, .desktop-nav-section, #nav a, .home-goal-card header span, .home-goal-card header strong, .goal-values strong, .goal-values span, .goal-footer p, .goal-footer button, .home-main-metrics small, .home-main-metrics strong, .home-attention b')].filter(n => n.offsetParent && n.textContent.trim()).map(n => {
             const a = lum(parse(getComputedStyle(n).color).slice(0, 3)), b = lum(bgOf(n));
             return { sel: n.className || n.tagName, text: n.textContent.trim().slice(0, 24), ratio: +((Math.max(a, b) + .05) / (Math.min(a, b) + .05)).toFixed(2) };
           });
         });
         const low = ratios.filter(r => r.ratio < 4.5);
-        report.checks.push({ theme, contrastChecked: ratios.length, below45: low });
-        assert.deepEqual(low, [], `${theme}: contraste abaixo de 4,5:1`);
+        report.checks.push({ theme, width, contrastChecked: ratios.length, below45: low });
+        assert.deepEqual(low, [], `${theme}/${width}: contraste abaixo de 4,5:1`);
         await page.close();
       }
     }

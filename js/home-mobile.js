@@ -73,7 +73,7 @@
       latest=data.today.reduce((last,sale)=>{const date=new Date(sale.data||sale.createdAt);return Number.isNaN(date.getTime())||last&&last>=date?last:date},null),
       summary=data.today.length?`${data.today.length} venda${data.today.length===1?'':'s'} hoje${latest?`, a última às ${latest.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`:''}.`:'Nenhuma venda registrada hoje até agora.';
     // Cabeçalho universal VECONI Fluxo: só apresentação, mesmos dados do modelo.
-    const hero=`<header class="vf-hero vf-hero--mobile" data-vf-hero>${VF?.flowArt?.('mobile')||''}<div class="vf-hero-copy"><h2>${esc(VF?.greeting?.()||'Olá')}</h2><p>${esc(summary)}</p></div><div class="vf-hero-context">${contextBar}</div></header>`;
+    const hero=`<header class="vf-hero vf-hero--mobile" data-vf-hero>${VF?.geoArt?.('mobile')||''}<div class="vf-hero-copy"><h2>${esc(VF?.greeting?.()||'Olá')}</h2><p>${esc(summary)}</p></div><div class="vf-hero-context">${contextBar}</div></header>`;
     return`<section class="mobile-home-dashboard vf-home">${hero}${goalCard(data)}${main}${window.ExchangeEconomics?`<p class="home-exchange-note" data-state="${(s=>s.mode==='unavailable'||s.mode==='historical'||!s.ready&&s.error?'warning':s.ready?'ok':'pending')(window.ExchangeEconomics.state())}" role="status">${esc(window.ExchangeEconomics.statusMessage())}${data.exchangeCount?` Ajustes de troca hoje: ${money(data.exchangeAdjustment)}.`:''}</p>`:''}${secondary}${attention}${quick}</section>`
   }
   function goalModal(){

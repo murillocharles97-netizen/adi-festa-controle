@@ -612,7 +612,7 @@
       summary = count
         ? `${count} venda${count === 1 ? "" : "s"} hoje${latest ? `, a última às ${latest.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}.`
         : "Nenhuma venda registrada hoje até agora.";
-    return `<header class="vf-hero" data-vf-hero>${VF?.flowArt?.("hero") || ""}<div class="vf-hero-copy"><h2>${esc(VF?.greeting?.() || "Olá")}</h2><p>${esc(summary)}</p></div><div class="vf-hero-context">${contextBar}</div><div class="vf-hero-goal">${goalCard(view)}</div></header>`;
+    return `<header class="vf-hero" data-vf-hero>${VF?.geoArt?.("hero") || ""}<div class="vf-hero-copy"><h2>${esc(VF?.greeting?.() || "Olá")}</h2><p>${esc(summary)}</p></div><div class="vf-hero-context">${contextBar}</div><div class="vf-hero-goal">${goalCard(view)}</div></header>`;
   }
   // Mesmas origens e fórmulas de antes; ícones e descrições tornam o papel de cada linha legível sem depender de cor.
   function financePanel(view) {

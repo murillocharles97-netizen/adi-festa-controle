@@ -38,3 +38,43 @@ Capturas com dados fictícios (fixture local, servidor loopback, sem rede): `doc
 - O nome do usuário depende de `FirebaseSession.profile/user`; sem nome, a saudação fica só "Bom dia/Boa tarde/Boa noite".
 - Falta validar num Android físico modesto (fluidez da entrada) e num iPhone (barra de status).
 - Na publicação, avaliar o aumento da versão do cache do service worker.
+
+---
+
+# Proposta 1B — Geometria em camadas
+
+Mesma estrutura da 1A (organização, quatro indicadores, temas, alternador, gráfico, estados "Em revisão"/"A conferir", avisos, painel financeiro). Cálculos e regras intactos. Muda só a direção artística e três correções de layout.
+Capturas 1B: `docs/screenshots/veconi-fluxo-v1/proposta-1b/` (as da 1A continuam em `depois/` para comparar).
+
+## Decisões
+- **Assinatura**: as linhas luminosas e os nós saíram. Agora é uma composição isométrica em SVG gerada no `veconi-fluxo.js`: poucos cubos de alturas diferentes, recortados nas bordas do cabeçalho, um pedestal com linhas de camada finas (a influência da impressão 3D) e o V da marca extrudado em turquesa fosco.
+- **V em 3D**: o V fica num plano de frente para quem olha (a diagonal que a isometria projeta sem inclinação). Assim ele continua legível como a letra da marca, e a espessura aparece só nas faces de cima, como uma peça impressa. Não há biblioteca 3D, só polígonos.
+- **Textura**: cubos "tumbling blocks" em CSS (`--vf-texture`, SVG embutido de ~2 KB) com máscara em gradiente. Some atrás do texto e só aparece de perto, à direita do cabeçalho.
+- **Materiais**: o brilho foi removido de toda parte (halo, pulso, nó luminoso do menu e da meta, linha gradiente no topo dos cartões). Agora há sombras naturais (contato curto + difusão longa) e um realce interno de 1 px. A meta usa uma fita com linhas de camada e a ponta em losango.
+- **Claro**: fundo gelo, faces brancas e cinza, turquesa só no V e em um cubo.
+- **Escuro**: grafite-petróleo, faces muito próximas do fundo e o V num turquesa mais fechado, sem neon.
+- **Menu lateral**: o item ativo usa um losango pequeno no lugar do ponto luminoso.
+
+## Correções das capturas
+1. **Data no cabeçalho mobile**: agora ocupa uma linha inteira, sem corte, em 360 e em 390. Para isso:
+   - botões de 40 px;
+   - abaixo de 380 px, o símbolo pequeno do topo some só no Início, porque o V já aparece no cabeçalho da página.
+2. **Meta no celular**: virou o bloco de maior peso (material petróleo fosco nos dois temas, com relevo de cubos no canto). Ficou mais compacta: o "Faltam…" cabe numa linha, ao lado de "Editar".
+3. **Prioridades**: em 390 px, aparecem a 589 px do topo. Na 1A era 630 px, e antes da 1A, 548 px.
+4. **Avisos e informações**: todos preservados, verificados na auditoria.
+
+## Movimento (uma vez por sessão)
+Os cubos assentam em cascata (~28 ms entre eles), o V sobe do pedestal e a luz no V acomoda. A meta cresce. Depois disso, nada se move: a auditoria confirma 0 animações rodando após a entrada, no desktop e no celular. Com `prefers-reduced-motion`, nada anima.
+
+## Testes
+- `audit-veconi-fluxo-v1.cjs`: ok. Novas verificações da 1B:
+  - assinatura geométrica presente e sem linhas da 1A;
+  - data numa linha;
+  - prioridades na primeira tela;
+  - nenhuma animação após a entrada;
+  - contraste ≥ 4,5:1 também no celular, incluindo a meta (16 textos por tema), além dos 56 do desktop.
+- Unitários: js 1160/104 e cjs 988/100, os mesmos números da base e da 1A. Lint ok.
+
+## Limitações
+- A escultura é a mesma em todas as larguras. De 768 a 1023 px ela fica menor, na faixa da saudação.
+- Os blocos foram compostos à mão (coordenadas no `veconi-fluxo.js`). Trocar a composição é trocar a lista `BLOCKS`.

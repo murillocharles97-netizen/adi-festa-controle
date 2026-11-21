@@ -1,0 +1,179 @@
+{
+  "mode": "after",
+  "shots": [
+    {
+      "name": "depois-light-360",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 606
+    },
+    {
+      "name": "depois-light-390",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 589
+    },
+    {
+      "name": "depois-light-768",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-light-1024",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-light-1440",
+      "overflow": false,
+      "theme": "light",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-dark-360",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 606
+    },
+    {
+      "name": "depois-dark-390",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": false,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 589
+    },
+    {
+      "name": "depois-dark-768",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-dark-1024",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-dark-1440",
+      "overflow": false,
+      "theme": "dark",
+      "toggleVisible": true,
+      "kpisInFirstFold": true,
+      "legacyNotice": true,
+      "geoArt": true,
+      "dateOneLine": true,
+      "prioritiesTop": 0
+    },
+    {
+      "name": "depois-vazio-light-390"
+    },
+    {
+      "name": "depois-vazio-dark-390"
+    },
+    {
+      "name": "depois-vazio-light-1440"
+    },
+    {
+      "name": "depois-vazio-dark-1440"
+    }
+  ],
+  "checks": [
+    {
+      "systemDefault": "dark",
+      "afterClick": {
+        "attr": "light",
+        "stored": "light",
+        "pressed": "false"
+      },
+      "persisted": "light",
+      "focusVisible": true
+    },
+    {
+      "reducedMotionRunningAnimations": 0
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "runningAfterEntrance": 0
+    },
+    {
+      "chartTooltipKeyboard": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "runningAfterEntrance": 0
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "contrastChecked": 56,
+      "below45": []
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "contrastChecked": 16,
+      "below45": []
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "contrastChecked": 56,
+      "below45": []
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "contrastChecked": 16,
+      "below45": []
+    }
+  ]
+}
