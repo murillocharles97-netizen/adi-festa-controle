@@ -24,8 +24,7 @@
       return{serviceConfig:product.serviceConfig};
     }
     const cost=M.costConfig({model:form.elements.serviceCostModel.value,rate:form.elements.custo.value,feePercent:form.elements.serviceFeePercent.value,kmPerLiter:form.elements.serviceFuelEfficiency.value,pricePerLiter:form.elements.serviceFuelPrice.value}),pricingModel=form.elements.servicePricingModel.value;
-    const same=product.serviceConfig?.pricingModel===pricingModel&&JSON.stringify(product.serviceCostConfig?M.costConfig(product.serviceCostConfig):null)===JSON.stringify(cost)&&Number(product.preco)===Number(form.elements.preco.value);
-    return{serviceConfig:M.config({version:1,id:same?product.serviceConfig.id:Utils.uuid(),pricingModel,requiresKm:pricingModel==='km'||cost.model==='km',requiresMinutes:pricingModel==='hour'||cost.model==='hour',...(cost.fuel||product.serviceConfig?.calculationVersion===2?{calculationVersion:2}:{})}),serviceCostConfig:cost};
+    return{serviceConfig:M.config({version:1,id:Utils.uuid(),pricingModel,requiresKm:pricingModel==='km'||cost.model==='km',requiresMinutes:pricingModel==='hour'||cost.model==='hour',...(cost.fuel||product.serviceConfig?.calculationVersion===2?{calculationVersion:2}:{})}),serviceCostConfig:cost};
   }
   function open(product,item,onDone){
     if(!M.enabled(product))return false;

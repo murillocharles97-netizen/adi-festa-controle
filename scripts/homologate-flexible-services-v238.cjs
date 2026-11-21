@@ -12,7 +12,7 @@ const {queueRuntime}=require('../tests/helpers/sync-queue-runtime.cjs');
 const {section}=require('../tests/helpers/fiado-cancellation-harness.cjs');
 const fixture=require('./audit-flexible-services-v238.cjs');
 const puppeteer=require(process.env.PUPPETEER_CORE_PATH||'C:/Users/Murillo/AppData/Local/Temp/veconi-fiado-mensagens-v2/node_modules/puppeteer-core');
-const root=path.resolve(__dirname,'..'),out=path.join(root,'qa-artifacts','v238-homologation');fs.mkdirSync(out,{recursive:true});
+const root=path.resolve(__dirname,'..'),out=path.join(root,'qa-artifacts','service-sync-homologation');fs.mkdirSync(out,{recursive:true});
 const projectId='demo-veconi-v238-homologation',app=initializeApp({projectId},'v238-http'),db=getFirestore(app),gateway=operationalCommitService(db),income=financialIncomeService(db),performance=performanceReadService(db),activity=activityEventService(db,{FieldValue,Timestamp});
 // Compatibility proof against the published V237 Git reference; no live deployment is read or changed.
 function referenceModule(name){const Module=require('node:module'),filename=path.join(root,'functions/src/services',name),m=new Module(filename,module);m.filename=filename;m.paths=Module._nodeModulePaths(path.dirname(filename));const source=require('node:child_process').execFileSync('git',['show','c94f60a:functions/src/services/'+name],{cwd:root,encoding:'utf8'});m._compile(source,filename);return m.exports;}
@@ -34,11 +34,18 @@ async function caseServer(width,{catalog=false}={}){
   return{sales:sales.docs.map(d=>({id:d.id,...d.data()})),financial:financial.docs.map(d=>({id:d.id,...d.data()})),markers:markers.docs.map(d=>({id:d.id,...d.data()})),movements:movements.size,entries:entries.docs.map(d=>({id:d.id,...d.data()})),sentinel:sentinel.data(),requests,drains,...(catalog?{products:products.docs.map(d=>({id:d.id,...d.data()})),configs:configs.docs.map(d=>({id:d.id,...d.data()}))}:{})};
  };
  const diff=section('function changedFields(','function captureChanges(');
+ const proof=section('function serviceConfigurationCanonical(', 'function assertSaleQueueDependencies(').replaceAll('localStorage.','serviceProofStorage.');
  const adapter=String.raw`
 const SOURCES={clients:{key:'clientes'},products:{key:'produtos'},productVariants:{key:'variacoesProdutos'},sales:{key:'vendas'},stockMovements:{key:'movimentacoesEstoque'},payments:{key:'pagamentos'}};
 const currentUser=FirebaseSession.user,auth={currentUser};
 const activeBusinessId=()=>DB.getBusinessId(),sourceItems=(d,n)=>d[SOURCES[n].key]||[];
 ${diff}
+const serviceProofStorage={peekItem:k=>localStorage.getItem(k),setItem:(k,v)=>localStorage.setItem(k,v)};
+const checksumValue=s=>{let h=0;for(const c of s)h=(Math.imul(31,h)+c.charCodeAt(0))|0;return String(h);};
+const captureCloudReadScope=()=>DB.getBusinessId(),assertCloudReadScope=s=>{if(s!==DB.getBusinessId())throw Error("QA scope changed");};
+${proof}
+SyncFirebase.prepareServiceConfigurations=prepareServiceConfigurations;
+SyncFirebase.assertServiceConfigurations=assertServiceConfigurations;
 window.qaTapCount=0;document.addEventListener('pointerdown',()=>qaTapCount++,true);
 let queue=[],evidence=[],confirmed=[],draining=null;
 const persist=()=>{const data=structuredClone(state),q=structuredClone(queue),e=structuredClone(evidence),c=structuredClone(confirmed);pending=new Promise((resolve,reject)=>{const t=qaIdb.transaction('state','readwrite'),s=t.objectStore('state');s.put(data,'data');s.put(q,'queue');s.put(e,'evidence');s.put(c,'confirmed');t.oncomplete=resolve;t.onerror=()=>reject(t.error);});return pending;};
@@ -47,12 +54,12 @@ const makePacket=(before,next,sale)=>{const writes=diffWrites(before,next);if(!w
 window.qaAutoDrain=true;
 const publish=(before,next,sale)=>{makePacket(before,next,sale);state=next;persist();if(navigator.onLine&&qaAutoDrain)setTimeout(()=>qaDrain().catch(e=>qaErrors.push(e.message)),60);};
 DB.alterar=fn=>{const before=structuredClone(state),next=structuredClone(state);fn(next);publish(before,next);};
-SyncFirebase.createSaleOperation=(before,next,sale)=>publish(before,next,sale);
+SyncFirebase.createSaleOperation=(before,next,sale)=>{assertServiceConfigurations(sale);publish(before,next,sale);};
 SyncFirebase.isSalePending=s=>!confirmed.includes(s.operationId);
 SyncFirebase.inspectCheckoutSaleAttempt=attempt=>{const sale=state.vendas.find(s=>s.operationId===attempt.operationId);return sale?{sale,status:confirmed.includes(sale.operationId)?'confirmed':'pending'}:null;};
 window.qaDrain=async()=>{if(!navigator.onLine)return;if(draining)return draining;draining=(async()=>{await DB.flush();if(!queue.length)return;const batch=queue.slice(),ids=new Set(batch.map(x=>x.operationId));dispatchEvent(new Event('firebase-sync-status'));const response=await api('drain',{queue:batch});queue=[...queue.filter(x=>!ids.has(x.operationId)),...response.queue];confirmed=[...new Set([...confirmed,...response.confirmed])];await persist();dispatchEvent(new Event('firebase-sync-status'));})().finally(()=>{draining=null;});return draining;};
 addEventListener('online',()=>qaDrain().catch(e=>qaErrors.push(e.message)));
-window.FirebaseCallable=async(name,input)=>{if(name!=='getPerformancePage')throw Error('QA callable not allowed');return{data:await api('performance',input)};};
+window.FirebaseCallable=async(name,input)=>{if(name==='getOperationalSyncReceipt')return{data:await api('service-proof',input)};if(name!=='getPerformancePage')throw Error('QA callable not allowed');return{data:await api('performance',input)};};
 BusinessContext.get=()=>({businessId:${JSON.stringify(bid)},role:'owner',spaceAccess:'all',business:{ownerId:${JSON.stringify(uid)},active:true,workspaceGeneration:0,timezone:'America/Sao_Paulo'},permissionSignature:'qa-owner'});
 TeamAccess.current=()=>({role:'owner'});DB.isHydrated=()=>true;
 ${catalog?`SpaceContext.setSpaces([${JSON.stringify(qaSpace)}]);SpaceContext.selectActive(${JSON.stringify(space)});`:`SpaceContext.contextualData=d=>d;SpaceContext.list=()=>[{id:${JSON.stringify(space)},name:'Corridas QA',businessId:${JSON.stringify(bid)}}];`}
@@ -88,7 +95,8 @@ qaReady.then(async()=>{const get=key=>new Promise(resolve=>{const r=qaIdb.transa
     }});
     await runtime.run();for(let i=0;i<12&&runtime.queue().some(q=>['pending','error'].includes(q.status))&&runtime.timers.size;i++)await runtime.advance();
     result={queue:runtime.queue(),confirmed:runtime.marked};drains.push({received:data.queue.length,remaining:result.queue.length,confirmed:result.confirmed.length,errors:runtime.errors});
-   }else if(req.url==='/qa-api/performance'){assert.equal(data.businessId,bid);result=await performance.page({auth:{uid},data});}
+   }else if(req.url==='/qa-api/service-proof'){assert.equal(data.businessId,bid);assert.equal(data.kind,'service_configuration');result=await gateway.receipt({auth:{uid},data});}
+   else if(req.url==='/qa-api/performance'){assert.equal(data.businessId,bid);result=await performance.page({auth:{uid},data});}
    else if(req.url==='/qa-api/activities'){const rows=await business.collection('activityEvents').get();result=rows.docs.map(d=>({...d.data(),createdAt:d.data().createdAt.toDate().toISOString(),updatedAt:d.data().updatedAt.toDate().toISOString(),sourceUpdatedAt:d.data().sourceUpdatedAt.toDate().toISOString()}));}
    else if(req.url==='/qa-api/sale'){assert.ok(/^[a-z0-9-]{36}$/.test(data.id));result={id:data.id,...(await business.collection('sales').doc(data.id).get()).data()};}
    else if(req.url==='/qa-api/product-status'){assert.ok(/^[a-z0-9-]{36}$/.test(data.id));const doc=await business.collection('products').doc(data.id).get(),value=doc.data();result=doc.exists?Object.fromEntries(['businessId','workspaceGeneration','nome','itemKind','productType','preco','atualizadoEm','spaceAccessMode','allowedSpaceIds','defaultSpaceId','serviceConfig','ativo','active'].filter(k=>k in value).map(k=>[k,value[k]])):null;}
@@ -114,7 +122,8 @@ async function main(){
    for(const trip of trips){await page.click('#qa-selling');if(trip.offline)await page.setOfflineMode(true);await page.evaluate(()=>qaTapCount=0);
     await page.click(`[data-add="${product.id}"]`);await page.waitForSelector('.flexible-service-modal');
     for(const [name,value]of [['km',trip.km],['charge',trip.charge],...(trip.extra?[['extra',trip.extra]]:[])]){await page.click(`[name="${name}"]`);await page.$eval(`[name="${name}"]`,e=>{e.value='';});await page.type(`[name="${name}"]`,String(value));}
-    await page.screenshot({path:path.join(out,`execucao-${width}-${trip.charge}.png`)});await page.click('.flexible-service-modal .btn-primary');await page.click('#open-sale-summary');if(trip.payment!=='pix')await page.click(`[data-payment="${trip.payment}"]`);await page.click('#finish-sale');await page.waitForSelector('.sale-receipt-paper');await page.evaluate(()=>DB.flush());
+    await page.screenshot({path:path.join(out,`execucao-${width}-${trip.charge}.png`)});await page.click('.flexible-service-modal .btn-primary');await page.click('#open-sale-summary');if(trip.payment!=='pix')await page.click(`[data-payment="${trip.payment}"]`);if(!recorded.length){const before=await page.evaluate(()=>JSON.stringify(DB.carregar()));await page.setOfflineMode(true);await page.click('#finish-sale');await page.waitForFunction(()=>document.querySelector('#sale-submit-feedback')?.textContent.includes('carrinho foi preservado'));assert.equal(await page.evaluate(()=>JSON.stringify(DB.carregar())),before);assert.ok(await page.$('#finish-sale'));await page.setOfflineMode(false);}
+    await page.click('#finish-sale');await page.waitForSelector('.sale-receipt-paper');await page.evaluate(()=>DB.flush());
     const sale=await page.evaluate(()=>DB.carregar().vendas.at(-1)),taps=await page.evaluate(()=>qaTapCount);assert.equal(sale.valorFinal,trip.charge);assert.equal(sale.custoTotal,trip.cost);assert.equal(sale.lucro,trip.profit);assert.equal(sale.itens[0].serviceExecution.km,trip.km);assert.match(await page.$eval('.sale-receipt-paper',e=>e.textContent),new RegExp(String(trip.km).replace('.','\\.')));await page.screenshot({path:path.join(out,`recibo-${width}-${trip.charge}.png`)});
     recorded.push({...trip,saleId:sale.id,operationId:sale.operationId,taps});await page.click('[data-sale-close]');
     if(trip.offline){const originals=await page.evaluate(()=>qaOriginals());await page.reload();await page.waitForFunction(()=>window.qaHomologReady);assert.equal((await page.evaluate(()=>DB.carregar().vendas.at(-1))).operationId,sale.operationId);assert.deepEqual(await page.evaluate(()=>qaOriginals()),originals);await page.setOfflineMode(false);await page.waitForFunction(()=>!SyncFirebase.isSalePending(DB.carregar().vendas.at(-1)),{timeout:20000});}

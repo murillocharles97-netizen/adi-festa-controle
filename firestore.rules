@@ -1195,7 +1195,11 @@ service cloud.firestore {
         allow create, update: if workspaceWriteAllowed(businessId) && hasPermission(businessId, 'cost.view')
           && canAccessProduct(businessId,getAfter(/databases/$(database)/documents/businesses/$(businessId)/products/$(productId)).data)
           && request.resource.data.businessId == businessId
-          && request.resource.data.productId == productId;
+          && request.resource.data.productId == productId
+          && ((!exists(/databases/$(database)/documents/businesses/$(businessId)/productFinancials/$(productId))
+              && !request.resource.data.keys().hasAny(['serviceCostConfigs']))
+            || (exists(/databases/$(database)/documents/businesses/$(businessId)/productFinancials/$(productId))
+              && request.resource.data.get('serviceCostConfigs', {}) == resource.data.get('serviceCostConfigs', {})));
         allow delete: if false;
       }
       match /variantFinancials/{variantId} {

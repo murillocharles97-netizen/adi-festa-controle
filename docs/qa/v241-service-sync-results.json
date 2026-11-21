@@ -1,0 +1,363 @@
+{
+  "date": "2026-11-20",
+  "base": "0dbac1e",
+  "branch": "codex/service-sync-reliability",
+  "productionWrites": 0,
+  "unit": {
+    "summary": [
+      "ℹ tests 1282",
+      "ℹ pass 1186",
+      "ℹ fail 96",
+      "ℹ skipped 0"
+    ],
+    "failures": [
+      "✖ Fiados calcula legado residual, aplica FIFO e salva snapshot da confirmação",
+      "✖ bottom sheet mobile compartilha todas as ações operacionais",
+      "✖ a cadeia de módulos mantém versões explícitas na release 130",
+      "✖ cache PWA publica a revisão da busca e das ações",
+      "✖ sem reload: duas e três vendas partem do saldo produzido pela anterior, com versões N+1/N+2/N+3",
+      "✖ Nat: 312,84 + 14 + 25 = 351,84 no mesmo aparelho, WhatsApp usa os snapshots da segunda venda",
+      "✖ offline: duas vendas mantêm projeção local e deltas distintos na fila até convergir",
+      "✖ projeção remota velha não permite segunda venda sobre saldo revertido; a primeira venda permanece",
+      "✖ sem interceptador de sync, venda não é considerada concluída localmente",
+      "✖ checkout atualiza pontualmente o cliente remoto, mas bloqueia venda online enquanto houver pendência",
+      "✖ venda local recente fora da fila bloqueia novo fiado até confirmação idempotente no servidor",
+      "✖ venda fiado repetida só é idempotente se a operação estiver na fila ou confirmada",
+      "✖ checkout online só conclui com venda financeira confirmada e recibo usa saldo transacional",
+      "✖ atalho do perfil fixa a segunda vigência e impede repetir a confirmação do modal",
+      "✖ atalho recusa vigência de outro espaço, removida ou alterada durante a confirmação",
+      "✖ modal de renovação: personalizar é opcional; ligado, a sacola leva a data exata e o horário informado",
+      "✖ sem personalização nada muda: a venda não leva customExpiry e a vigência segue o cálculo automático",
+      "✖ sync automático não faz varredura completa de todas as coleções",
+      "✖ sincronização completa permanece disponível apenas em ações explícitas",
+      "✖ diagnóstico é carregado antes do app e cache PWA publica a correção",
+      "✖ sincronização combina listeners compartilhados e reconciliação canônica",
+      "✖ publica os arquivos desktop e o identificador do build em cache novo",
+      "✖ metadata usa o domínio oficial sem impor base ou redirect de hostname",
+      "✖ loading exchange projection keeps mobile, desktop, closing and analytical profit in review",
+      "✖ failed exchange projection keeps mobile, desktop, closing and analytical profit in review",
+      "✖ confirmed projection without exchanges preserves existing complete cost/profit metrics",
+      "✖ confirmed exchange keeps all affected cost/profit surfaces unavailable and explicitly labelled",
+      "✖ real owner aggregate consumers agree on two sales-space adjustments and ignore finance-only queries",
+      "✖ real restricted seller receives the same operational A totals without financial or private fields",
+      "✖ venda paga não altera o saldo em aberto",
+      "✖ venda fiado aumenta a dívida e retry não duplica",
+      "✖ pagamento parcial reduz dívida e pagamento total zera",
+      "✖ status financeiro compartilhado preserva o sinal oficial",
+      "✖ desfazer venda fiado restaura saldo uma única vez",
+      "✖ release 136 mantém recursos financeiros globais no cache PWA",
+      "✖ espaço não autorizado não altera dívida nem cria pagamento; formulário deixa origem visível",
+      "✖ aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total aberto",
+      "✖ duas e três vendas offline mantêm snapshots, versões e uma fila por operação; recebimento mantém 110",
+      "✖ falha ao gravar fila impede venda e saldo locais",
+      "✖ falha ao gravar fila impede também recebimento e preserva o saldo da venda",
+      "✖ falha após preparar fila preserva operação para diagnóstico, sem enviar venda inexistente",
+      "✖ queda entre persistir dados e ativar fila retoma a operação existente sem duplicar",
+      "✖ fila ilegível bloqueia nova venda sem sobrescrever o registro corrompido",
+      "✖ detecção local assinala venda sem fila mesmo quando pendentes chega a zero",
+      "✖ contratos estruturais preservam Financeiro, isolamento e exigem spaceId novo",
+      "✖ manual vazio conclui e grava timestamp; duplo toque compartilha uma execução",
+      "✖ quota em metadados de horário não invalida transferência confirmada",
+      "✖ erro no pull preserva código, estágio e último sucesso com fila zero",
+      "✖ erro interno de persistência não é reclassificado como falha de internet",
+      "✖ auditoria opcional falha sem invalidar sync concluído",
+      "✖ divergência não corrige finanças e separa dados recebidos da integridade",
+      "✖ offline não inicia requests nem afirma sucesso",
+      "✖ tests\\hardening.test.js",
+      "✖ V198 runtime is exclusively History presentation + PWA metadata, preserving every V197 financial/Sync guard",
+      "✖ PWA V198 updates only History and build-info URLs while retaining V197 Sync and sale URLs",
+      "✖ isolated release package excludes unrelated branches and all migrations",
+      "✖ Clientes preserva paginação, busca robusta e contexto condicional de renovação",
+      "✖ infraestrutura global publica safe areas e preserva botão existente",
+      "✖ centro de atividades usa eventos canônicos e evita duplicar saída de venda",
+      "✖ histórico limita renderização inicial a 20 pendências locais e não consulta por tecla",
+      "✖ recovery segura usa mesmo saleId/operationId e aplica efeito uma vez, inclusive no retry",
+      "✖ efeito já aplicado permite publicar só a venda sem cobrar novamente",
+      "✖ versão ou saldo remoto alterado cancela recovery sem escrita financeira",
+      "✖ sale remota sem evento financeiro não é declarada recuperada",
+      "✖ ack da fila não remove venda só por marcador de início ou transação sem documento",
+      "✖ guard bloqueia somente cliente da órfã conhecida e libera após revisão explícita",
+      "✖ carrinho mostra um aviso com ação de comparar e não tenta reenviar fila vazia",
+      "✖ real-shaped snapshot: 401.60/8 store sales, 37 customers, 180 products for owner and both sellers, daily/month periods equal",
+      "✖ store metrics respond to owner, seller A and seller B operations; customer with no sale is counted and explicit foreign scopes are excluded",
+      "✖ read policy expands via one complete paginated read despite newer own-only cursor; reload then uses incremental path without touching queues",
+      "✖ failed durable cache write never advances read-policy cursor; retired session never applies its old snapshot",
+      "✖ sync revalida o efeito antes de campanhas e preserva resolução auditável",
+      "✖ venda e catálogo continuam vinculados ao espaço selecionado",
+      "✖ atualizações assíncronas da venda preservam o componente e renovam só seus dados",
+      "✖ hotfix mantém tentativa idempotente, recuperável e nunca deixa finalização presa",
+      "✖ tests\\settings-logout.test.js",
+      "✖ clientes, produtos e configurações compartilham listeners centrais",
+      "✖ toda rejeição literal do commitOperationalSync tem motivo estável (repositório e, se informado, o pacote publicado)",
+      "✖ authenticated restart cannot retain the signed-out status/message",
+      "✖ stop/restart preserves the exact durable queue; zero signed-out count is not deletion",
+      "✖ active permission failure records read path/actors/queue and does not sign out or delete queue",
+      "✖ diagnostic history is isolated when a different user logs in",
+      "✖ errors are bounded and a space filter does not replace identity or queue",
+      "✖ obsolete collection callbacks cannot overwrite the new session; active denial is not swallowed",
+      "✖ sync signal callbacks are fenced too; a current denial retains its exact document path",
+      "✖ an existing permission-denied sale is held without changing any original field",
+      "✖ hold survives pending/syncing status and explicit force; fresh and network-only failures are not held",
+      "✖ hold does not bypass tenant, user or generation checks",
+      "✖ technical hold is visible and the all-held bulk action is disabled, not a hidden retry",
+      "✖ release cache and imports refresh changed assets without duplicating preserved Sync singletons",
+      "✖ normal checkout stays identical to V177 outside approved preferences and the isolated exchange-credit branch",
+      "✖ actual bootstrap ends old Sync/badge before starting replacements; stale mount cannot fire",
+      "✖ authorized UI does not erase an optional Sync initialization failure from diagnostics",
+      "✖ service worker V135 migra apenas caches do app e preserva os assets V133",
+      "✖ service worker troca o cache, mantém os recursos de marca e retira a Central do precache",
+      "✖ leitor canônico aponta para o cliente e aceita somente snapshot recente de servidor"
+    ]
+  },
+  "backend": {
+    "summary": [
+      "ℹ tests 250",
+      "ℹ pass 247",
+      "ℹ fail 3",
+      "ℹ skipped 0"
+    ],
+    "failures": [
+      "✖ changing only timestamp unit cannot bypass duplicate event lease",
+      "✖ valid subscription reuses verified resource and duplicate event does not reconcile twice",
+      "✖ concurrent duplicate preserves existing event lease"
+    ]
+  },
+  "directed": {
+    "pass": 29,
+    "fail": 0
+  },
+  "emulator": {
+    "pass": 29,
+    "fail": 0,
+    "skipped": 3
+  },
+  "v240Rules": {
+    "pass": 25,
+    "fail": 0
+  },
+  "v240Unit": {
+    "pass": 10,
+    "fail": 0
+  },
+  "version": {
+    "pass": 5,
+    "fail": 0
+  },
+  "containment": {
+    "pass": 56,
+    "fail": 0
+  },
+  "browser": {
+    "synthetic": true,
+    "projectId": "demo-veconi-v238-homologation",
+    "productionWrites": 0,
+    "results": [
+      {
+        "width": 360,
+        "productId": "050690b2-4843-443a-b014-9d3a308c220d",
+        "trips": [
+          {
+            "charge": 30,
+            "km": 10,
+            "cost": 15,
+            "profit": 15,
+            "payment": "pix",
+            "saleId": "18b9c9d3-4190-4eff-9679-3e006341fde3",
+            "operationId": "d036e9cc-01a0-4312-8224-0f6233935859",
+            "taps": 7
+          },
+          {
+            "charge": 47.5,
+            "km": 17.5,
+            "cost": 25.75,
+            "profit": 21.75,
+            "payment": "dinheiro",
+            "saleId": "5d38b773-fbd4-4047-879c-021aae6eb24a",
+            "operationId": "14cf943b-ae99-41d6-b367-dc7db6a1c3c6",
+            "taps": 7
+          },
+          {
+            "charge": 22,
+            "km": 6,
+            "extra": 2,
+            "cost": 11.4,
+            "profit": 10.6,
+            "payment": "cartao",
+            "offline": true,
+            "saleId": "db1c73ad-13df-4b0f-9aff-d04653c31ec9",
+            "operationId": "bf07e307-f213-42ff-856e-66b665b4fe2a",
+            "taps": 8
+          }
+        ],
+        "totals": {
+          "revenue": 99.5,
+          "cost": 52.15,
+          "profit": 47.35,
+          "km": 33.5
+        },
+        "stockMovements": 0,
+        "physicalStock": 5,
+        "financialEntries": 3,
+        "serverSales": 3,
+        "lostResponseRecoveredByReceipt": true,
+        "v237ReceiptCompatible": true,
+        "v237CostTriggerSkipsSnapshot": true,
+        "offlineRestart": true,
+        "requests": [
+          {
+            "name": "commitOperationalSync",
+            "operationId": "c0dc5737-4220-4ef1-8e5f-bfcf0b56c385"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "d036e9cc-01a0-4312-8224-0f6233935859"
+          },
+          {
+            "name": "getOperationalSyncReceipt",
+            "operationId": "d036e9cc-01a0-4312-8224-0f6233935859"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "14cf943b-ae99-41d6-b367-dc7db6a1c3c6"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "bf07e307-f213-42ff-856e-66b665b4fe2a"
+          }
+        ],
+        "drains": [
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          }
+        ],
+        "unknownOfflineConfigurationPreservedDraft": true
+      },
+      {
+        "width": 390,
+        "productId": "f52e01db-f770-4f2f-860a-f866e7b228c0",
+        "trips": [
+          {
+            "charge": 30,
+            "km": 10,
+            "cost": 15,
+            "profit": 15,
+            "payment": "pix",
+            "saleId": "2bcbe27e-5d92-4267-ab5e-440edc8e7b59",
+            "operationId": "eeb2ed4e-9043-4657-b00b-9f0f2599e27b",
+            "taps": 7
+          },
+          {
+            "charge": 47.5,
+            "km": 17.5,
+            "cost": 25.75,
+            "profit": 21.75,
+            "payment": "dinheiro",
+            "saleId": "00fad6b6-1343-4b4e-9e80-b33e1e1a1b6e",
+            "operationId": "0b914d95-c081-4193-b543-973c28115ca7",
+            "taps": 7
+          },
+          {
+            "charge": 22,
+            "km": 6,
+            "extra": 2,
+            "cost": 11.4,
+            "profit": 10.6,
+            "payment": "cartao",
+            "offline": true,
+            "saleId": "4ed699a4-5b45-4f10-a869-e2090edfdd7e",
+            "operationId": "ad785894-139d-4575-b62b-a4ddeb61a016",
+            "taps": 8
+          }
+        ],
+        "totals": {
+          "revenue": 99.5,
+          "cost": 52.15,
+          "profit": 47.35,
+          "km": 33.5
+        },
+        "stockMovements": 0,
+        "physicalStock": 5,
+        "financialEntries": 3,
+        "serverSales": 3,
+        "lostResponseRecoveredByReceipt": true,
+        "v237ReceiptCompatible": true,
+        "v237CostTriggerSkipsSnapshot": true,
+        "offlineRestart": true,
+        "requests": [
+          {
+            "name": "commitOperationalSync",
+            "operationId": "756128d4-2d6d-451b-842a-2f10f27c5628"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "eeb2ed4e-9043-4657-b00b-9f0f2599e27b"
+          },
+          {
+            "name": "getOperationalSyncReceipt",
+            "operationId": "eeb2ed4e-9043-4657-b00b-9f0f2599e27b"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "0b914d95-c081-4193-b543-973c28115ca7"
+          },
+          {
+            "name": "commitOperationalSync",
+            "operationId": "ad785894-139d-4575-b62b-a4ddeb61a016"
+          }
+        ],
+        "drains": [
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          },
+          {
+            "received": 1,
+            "remaining": 0,
+            "confirmed": 1,
+            "errors": []
+          }
+        ],
+        "unknownOfflineConfigurationPreservedDraft": true
+      }
+    ]
+  },
+  "newFailures": {
+    "unit": [],
+    "backend": []
+  }
+}

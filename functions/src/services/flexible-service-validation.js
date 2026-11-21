@@ -26,10 +26,17 @@ async function validateFlexibleServices({c,writes,plan,get,ref,FieldValue}){
       const config=M.costConfig(w.data.serviceCostConfig),financial=await old('productFinancials',w.entityId),saved=financial?.serviceCostConfigs?.[product.serviceConfig.id];
       if((config.fuel||previous?.serviceConfig?.calculationVersion===2)&&w.data.serviceConfig?.calculationVersion!==2)fail('Atualize a VECONI para alterar a configuração deste serviço com segurança.');
       if(saved&&(JSON.stringify(M.costConfig(saved))!==JSON.stringify(config)||saved.pricingModel&&saved.pricingModel!==product.serviceConfig.pricingModel||saved.priceRate!==undefined&&Number(saved.priceRate)!==Number(product.preco)))fail('Uma configuração já utilizada não pode ser reescrita. Salve uma nova versão.');
+      // Persist the private version even when a delta contains no numeric custo.
+      // Use the merged public product for unchanged tariff fields, never write.before.
+      const target=ref(c.bid,'productFinancials',w.entityId),buffered=plan.get(target.path);
+      plan.set(target.path,{ref:target,data:{...buffered?.data,id:w.entityId,productId:w.entityId,businessId:c.bid,
+        serviceCostConfigs:{...buffered?.data?.serviceCostConfigs,[product.serviceConfig.id]:{...config,pricingModel:product.serviceConfig.pricingModel,priceRate:Number(product.preco||0)}},
+        updatedByUid:c.uid,updatedAt:FieldValue.serverTimestamp(),schemaVersion:1}});
     }else if(product.serviceConfig.id!==previous?.serviceConfig?.id)fail('A nova configuração precisa de seu snapshot de custo autorizado.');
   }
   // Guard explicit writes to private configuration maps as well as catalog writes.
-  for(const w of writes.filter(w=>w.entityType==='productFinancials'&&w.data?.serviceCostConfigs)){
+  for(const w of writes.filter(w=>w.entityType==='productFinancials'&&Object.hasOwn(w.data||{},'serviceCostConfigs'))){
+    if(!w.data.serviceCostConfigs||typeof w.data.serviceCostConfigs!=='object'||Array.isArray(w.data.serviceCostConfigs)||!Object.keys(w.data.serviceCostConfigs).length)fail('Snapshots de custo existentes são imutáveis.');
     const previous=await old('productFinancials',w.entityId);
     for(const [id,value] of Object.entries(w.data.serviceCostConfigs)){
       const config=M.costConfig(value),saved=previous?.serviceCostConfigs?.[id];

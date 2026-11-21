@@ -176,3 +176,82 @@ test('fuel containment rollback preserves confirmed receipt and pauses only new 
 });
 
 require('../helpers/service-beneficiary-emulator-cases.cjs')({test,setup,getService:()=>svc,getDb:()=>db,bridge});
+
+
+test('service dependency regression: delta with unchanged numeric custo must persist immutable fuel configuration',async()=>{
+ const c=await setup(),id=c.p.id,next={version:1,id:'fuel-delta-config-001',pricingModel:'sale',calculationVersion:2,requiresKm:true};
+ const packet={operationId:crypto.randomUUID(),businessId:c.bid,userId:c.owner,payloadVersion:4,payload:{eventKind:'simple',writes:[{entityType:'products',entityId:id,operation:'update',before:c.p,data:{serviceConfig:next,serviceCostConfig:{model:'km',rate:.75,feePercent:0,fuel:{version:1,kmPerLiter:8,pricePerLiter:6}}}}]}};
+ await c.commit(packet);
+ const publicProduct=await c.read('products',id),financial=await c.read('productFinancials',id);
+ assert.equal(publicProduct.serviceConfig.id,next.id);
+ assert.ok(financial.serviceCostConfigs[next.id],'public configuration ID was committed without its private cost');
+ assert.equal(financial.serviceCostConfigs[next.id].fuel.pricePerLiter,6);
+ assert.equal(financial.serviceCostConfigs['config-ride-001'].rate,.75);
+});
+
+
+function serviceProof(c,spaceId=c.space){
+ return require('../helpers/service-configuration-proof.cjs').proofClient({businessId:c.bid,uid:c.owner,spaceId,read:data=>svc.receipt({auth:{uid:c.owner},data})});
+}
+test('new service: first checkout cannot precede configuration commit; then original sale succeeds once',async()=>{
+ const c=await setup(),product={...bridge(c.h.data().produtos[0]),id:'brand-new-service',preco:3,custo:.75,estoqueAtual:0,estoque:0,totalStock:0};
+ c.p.id=product.id;Object.assign(c.h.data().produtos[0],product);
+ const a=c.sell(),draft={spaceId:c.space,itens:a.sale.itens},proof=serviceProof(c);
+ await assert.rejects(proof.c.prepareServiceConfigurations(draft));
+ const creation={operationId:crypto.randomUUID(),businessId:c.bid,userId:c.owner,payloadVersion:4,payload:{eventKind:'simple',writes:[{entityType:'products',entityId:product.id,operation:'create',data:product}]}};
+ await c.commit(creation);await proof.c.prepareServiceConfigurations(draft);
+ await c.commit(a.packet);assert.equal((await c.commit(a.packet)).replayed,true);
+ assert.equal((await c.root.collection('sales').get()).size,1);assert.equal((await c.read('saleFinancials',a.sale.id)).custoTotal,15);
+});
+test('fuel proof + offline + new configuration + lost response preserve originals and financial idempotency',async()=>{
+ const c=await fuelCase(),a=c.fuelSale(),draft={spaceId:c.space,itens:a.sale.itens},proof=serviceProof(c);
+ await proof.c.prepareServiceConfigurations(draft);proof.c.navigator.onLine=false;
+ await proof.c.prepareServiceConfigurations(draft);const original=JSON.stringify(a.packet);
+ await c.configureFuel('fuel-updated-002',4.5);
+ await c.commit(a.packet); // successful server commit with a simulated lost response
+ const once=await c.read('saleFinancials',a.sale.id);assert.equal((await c.commit(a.packet)).replayed,true);
+ assert.deepEqual(await c.read('saleFinancials',a.sale.id),once);assert.equal(once.custoTotal,9.25);assert.equal(JSON.stringify(a.packet),original);
+ for(let i=0;i<4;i++){const ride=c.fuelSale({price:30+i});await c.commit(ride.packet);await c.commit(ride.packet);}
+ assert.equal((await c.root.collection('sales').get()).size,5);assert.equal((await c.root.collection('stockMovements').get()).size,0);
+ assert.equal((await c.root.collection('payments').get()).size,0);
+});
+test('immediate delta configuration is checked and sold with exact fuel/tariff; previous version remains immutable',async()=>{
+ const c=await fuelCase(),version='fuel-delta-002',cost=M.costConfig({model:'fuel',kmPerLiter:8,pricePerLiter:3.71,feePercent:0});
+ const change={operationId:crypto.randomUUID(),businessId:c.bid,userId:c.owner,payloadVersion:4,payload:{eventKind:'simple',writes:[{entityType:'products',entityId:c.p.id,operation:'update',data:{serviceConfig:{version:1,id:version,pricingModel:'sale',calculationVersion:2},serviceCostConfig:cost}}]}};
+ const a=c.fuelSale({configId:version});const item=a.packet.payload.writes.find(w=>w.entityType==='sales').data.itens[0];item.serviceCostSnapshot=M.estimate(cost,item.serviceExecution,50);
+ const draft={spaceId:c.space,itens:[item]},proof=serviceProof(c);await assert.rejects(proof.c.prepareServiceConfigurations(draft));
+ await c.commit(change);await proof.c.prepareServiceConfigurations(draft);await c.commit(a.packet);
+ assert.equal((await c.read('saleFinancials',a.sale.id)).custoTotal,9.28);
+ const versions=(await c.read('productFinancials',c.p.id)).serviceCostConfigs;assert.equal(versions['fuel-config-001'].fuel.pricePerLiter,3.7);assert.equal(versions[version].fuel.pricePerLiter,3.71);assert.equal(versions[version].priceRate,0);
+ const bad=bridge(change);bad.operationId=crypto.randomUUID();bad.payload.writes[0].data.serviceCostConfig.fuel.pricePerLiter=99;await assert.rejects(c.commit(bad),/reescrita/);
+});
+test('configuration proof rejects missing, divergent, unauthorized space and company; shared service keeps separate sales',async()=>{
+ const c=await setup(),a=c.sell(),draft={spaceId:c.space,itens:a.sale.itens};
+ const request={kind:'service_configuration',businessId:c.bid,workspaceGeneration:0,spaceId:c.space,items:[{productId:c.p.id,configurationId:'config-ride-001',pricingSnapshot:{model:'km',rate:3}}]};
+ await svc.receipt({auth:{uid:c.seller},data:request});
+ await assert.rejects(svc.receipt({auth:{uid:c.seller},data:{...request,spaceId:c.other}}));
+ await assert.rejects(svc.receipt({auth:{uid:c.owner},data:{...request,businessId:'foreign'}}));
+ await assert.rejects(serviceProof(c).c.prepareServiceConfigurations({...draft,itens:[{...a.sale.itens[0],serviceCostSnapshot:{configuration:{model:'km',rate:999,feePercent:10}}}]}));
+ await c.root.collection('products').doc(c.p.id).update({spaceAccessMode:'all_spaces'});
+ const other={...request,spaceId:c.other};await svc.receipt({auth:{uid:c.owner},data:other});
+ const b=c.sell();Object.assign(b.packet.payload.writes.find(w=>w.entityType==='sales').data,{spaceId:c.other,financialSpaceId:c.other});
+ await c.commit(a.packet);await c.commit(b.packet);assert.equal((await c.read('sales',a.sale.id)).spaceId,c.space);assert.equal((await c.read('sales',b.sale.id)).spaceId,c.other);
+});
+test('Rules disallow overwriting/removing historical configuration maps, preserving ordinary cost edits',async()=>{
+ const c=await setup(),owner=env.authenticatedContext(c.owner).firestore(),reference=sdk.doc(owner,`businesses/${c.bid}/productFinancials/${c.p.id}`);
+ await assertFails(sdk.updateDoc(reference,{'serviceCostConfigs.config-ride-001.rate':999}));
+ await assertFails(sdk.updateDoc(reference,{serviceCostConfigs:null}));
+ await assertFails(sdk.updateDoc(reference,{serviceCostConfigs:sdk.deleteField()}));
+ await assertSucceeds(sdk.updateDoc(reference,{custo:2}));
+ assert.equal((await c.read('productFinancials',c.p.id)).serviceCostConfigs['config-ride-001'].rate,.75);
+});
+test('original missing-config rejection is not replayed even if its configuration becomes available',async()=>{
+ const c=await setup(),a=c.sell();a.packet.lastErrorCode='failed-precondition';a.packet.lastErrorMessage='Configuração original de custo indisponível.';
+ const before=JSON.stringify(a.packet);await assert.rejects(c.commit(a.packet),/não será reenviada/);assert.equal(JSON.stringify(a.packet),before);assert.equal((await c.root.collection('sales').get()).size,0);
+});
+
+test('empty or null private configuration patches cannot erase historical versions through the gateway',async()=>{
+ const c=await setup(),original=await c.read('productFinancials',c.p.id);
+ for(const serviceCostConfigs of [{},null]){const packet={operationId:crypto.randomUUID(),businessId:c.bid,userId:c.owner,payloadVersion:4,payload:{eventKind:'simple',writes:[{entityType:'productFinancials',entityId:c.p.id,operation:'update',data:{productId:c.p.id,businessId:c.bid,serviceCostConfigs}}]}};await assert.rejects(c.commit(packet),/imutáveis/);}
+ assert.deepEqual(await c.read('productFinancials',c.p.id),original);
+});

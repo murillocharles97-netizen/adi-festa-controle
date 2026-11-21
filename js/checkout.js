@@ -1314,6 +1314,16 @@ window.Checkout = (() => {
         } catch (error) { return validationError(error.message || 'O cliente ainda não foi confirmado. O carrinho foi preservado.'); }
         finally{finishing=false;}
       }
+      if(cart.some(item=>item.serviceExecution)){
+        const serviceScope=()=>JSON.stringify([DB.getBusinessId(),DB.getPrincipal?.(),selectedSalesSpaceId(),cart,document.querySelector('#sale-client')?.value,document.querySelector('#sale-payment-method')?.value]);
+        const original=serviceScope();finishing=true;setSubmissionState('processing','Conferindo a configuração do serviço…');
+        try{
+          if(!window.SyncFirebase?.prepareServiceConfigurations)throw Error('Atualize o aplicativo para conferir o serviço. O carrinho foi preservado.');
+          await window.SyncFirebase.prepareServiceConfigurations({spaceId,itens:cart});
+          if(original!==serviceScope())return validationError('O carrinho mudou durante a conferência. Revise antes de confirmar.');
+        }catch(error){return validationError(error.message||'Não foi possível conferir o serviço. O carrinho foi preservado.');}
+        finally{finishing=false;}
+      }
       if(window.OperationalReadPolicy?.restricted?.()){
         finishing=true;setSubmissionState('processing','Conferindo disponibilidade da venda…');
         try{await window.OperationalReadPolicy.prepareSale();if(businessId!==DB.getBusinessId()||spaceId!==selectedSalesSpaceId())return validationError('O espaço mudou. Revise o carrinho antes de confirmar.');}

@@ -589,7 +589,7 @@ function classifyQueueOperation(item) {
     if(reason){const quarantined=Boolean(queueQuarantineReason(item));return result(quarantined?'quarantined':'manual_review',{
       reviewRequired:true,reviewState:quarantined?'quarantined':'manual_review',reviewReason:reason});}
     if(item.status==='error'){
-      const reviewReason=monetaryRecoveryRequired(item)?'monetary_recovery_required':
+      const reviewReason=item.lastErrorCode==='failed-precondition'&&String(item.lastErrorMessage||'').includes('Configuração original de custo indisponível')?'service_configuration_missing':monetaryRecoveryRequired(item)?'monetary_recovery_required':
         rejectedProductStockUpdate(item)?'product_stock_review_required':
         ['sync-receipt-review-required','sync-retry-exhausted'].includes(item.lastErrorCode)?'sync_receipt_review_required':null;
       return result('error',{activeError:true,canRetry:!reviewReason&&!favoriteWriteWasRejected(item),
@@ -1279,6 +1279,60 @@ function saleIndependentOfRejectedStock(item,write){
   return noStock(write.before)&&Object.keys(write.data||{}).every(key=>stockOnly.includes(key))&&
     noStock(DB.carregar().produtos?.find(product=>product.id===write.entityId));
 }
+// Service proof is advisory for new drafts only; the server still validates every sale.
+// Never upload/retry the queue here: old rejected operations must remain untouched.
+function serviceConfigurationCanonical(value){
+  const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])])):v;
+  return JSON.stringify(sort(value));
+}
+function serviceConfigurationRequest(sale){
+  const rows=(sale.itens||[]).filter(i=>i.serviceExecution).map(i=>({productId:i.produtoId||i.productId,
+    configurationId:i.serviceExecution.configurationId,
+    ...(i.serviceExecution.pricingSnapshot?{pricingSnapshot:i.serviceExecution.pricingSnapshot}:{}),
+    ...(i.serviceCostSnapshot?.configuration?{costConfiguration:i.serviceCostSnapshot.configuration}:{})}));
+  return [...new Map(rows.map(r=>[JSON.stringify(r),r])).values()];
+}
+function serviceConfigurationIdentity(spaceId){
+  return {businessId:activeBusinessId(),actorUid:currentUser?.uid,workspaceGeneration:DB.getWorkspaceGeneration?.()??0,spaceId};
+}
+function serviceConfigurationProof(sale){
+  const items=serviceConfigurationRequest(sale),identity=serviceConfigurationIdentity(sale.spaceId);
+  const signature=serviceConfigurationCanonical({identity,items});
+  const key='adiFesta:'+identity.businessId+':'+identity.actorUid+':service-configuration:'+checksumValue(signature);
+  return {items,identity,signature,key};
+}
+function assertServiceConfigurations(sale){
+  const proof=serviceConfigurationProof(sale);if(!proof.items.length)return;
+  let receipt;try{receipt=JSON.parse(localStorage.peekItem(proof.key)||'null');}catch{}
+  if(!receipt?.confirmed||receipt.signature!==proof.signature)
+    throw Object.assign(Error('Confirme a configuração deste serviço com internet antes de vender. O carrinho foi preservado; nenhuma venda foi registrada.'),{code:'service-configuration-unconfirmed'});
+}
+async function prepareServiceConfigurations(sale){
+  const proof=serviceConfigurationProof(sale);if(!proof.items.length)return;
+  const scope=captureCloudReadScope();
+  const check=()=>{assertCloudReadScope(scope);if(JSON.stringify(serviceConfigurationIdentity(sale.spaceId))!==JSON.stringify(proof.identity)||window.SpaceContext?.salesId?.()&&window.SpaceContext.salesId()!==sale.spaceId)throw Error('A sessão ou espaço mudou. O carrinho foi preservado.');};
+  check();
+  if(navigator.onLine===false){assertServiceConfigurations(sale);return;}
+  if(!window.FirebaseCallable)throw Error('A conferência do serviço está indisponível. O carrinho foi preservado.');
+  let timer;
+  try{
+    const response=await Promise.race([window.FirebaseCallable('getOperationalSyncReceipt',{
+      kind:'service_configuration',...proof.identity,items:proof.items}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('Tempo limite na conferência do serviço.'),{code:'deadline-exceeded'})),8000);})]);
+    check();const receipt=response?.data??response;
+    if(!receipt?.confirmed||serviceConfigurationCanonical(receipt.request)!==serviceConfigurationCanonical(proof.items)||
+      Object.keys(proof.identity).some(k=>receipt[k]!==proof.identity[k]))throw Object.assign(Error('O servidor não confirmou esta configuração. O carrinho foi preservado.'),{code:'service-configuration-unconfirmed'});
+    localStorage.setItem(proof.key,JSON.stringify({confirmed:true,signature:proof.signature}));
+    await DB.flush?.();check();
+  }catch(error){
+    check();
+    if(['unavailable','deadline-exceeded','network-request-failed'].includes(String(error.code||'').replace(/^functions\//,''))){
+      // A previously verified immutable version supports offline drafts, not a fabricated confirmation.
+      assertServiceConfigurations(sale);return;
+    }
+    localStorage.setItem(proof.key,'null');throw error;
+  }finally{clearTimeout(timer);}
+}
+
 function assertSaleQueueDependencies(sale,writes=[{entityType:'sales',data:sale}]){
   const queue=readQueueStrict({readOnly:true}),item={businessId:activeBusinessId(),userId:currentUser?.uid,
     workspaceGeneration:DB.getWorkspaceGeneration?.()??0,payload:{writes}};
@@ -2714,6 +2768,7 @@ function createSaleOperation(before, after, sale) {
       Number(clientWrite.data.financialVersion) !== Number(sale.financialVersionAnterior) + 1)))
     throw Error("Venda e saldo não formam uma operação financeira única. Nenhuma venda foi salva.");
   window.PermissionMutations?.assertWrites(writes, window.TeamAccess, window.VeconiPermissionPolicy);
+  assertServiceConfigurations(sale);
   assertSaleQueueDependencies(sale,writes);
   const existing=readQueueStrict().filter(item=>String(item.operationId)===String(sale.operationId));
   if (existing.length) {
@@ -2800,7 +2855,10 @@ function diffWrites(before, after) {
           entityId: id,
           operation: exists ? "update" : "create",
           before: previous.get(id) || null,
-          data: exists ? changedFields(previous.get(id), item) : item,
+          data: exists ? {...changedFields(previous.get(id), item),
+            ...(name==='products'&&item.serviceConfig&&item.serviceCostConfig&&
+              ['serviceConfig','serviceCostConfig','preco'].some(key=>JSON.stringify(previous.get(id)?.[key])!==JSON.stringify(item[key]))
+              ? {serviceConfig:item.serviceConfig,serviceCostConfig:item.serviceCostConfig,preco:item.preco} : {})} : item,
           // Captured at the USER ACTION, never inferred from the UI at upload
           // or used to rewrite any previously persisted operation.
           ...(!exists&&['products','productVariants'].includes(name)&&Number(name==='products'?item.estoqueAtual:item.stock)>0&&item.productType!=='variable'
@@ -7557,6 +7615,8 @@ window.SyncFirebase = {
   processSyncQueue,
   createSaleOperation,
   assertSaleQueueDependencies,
+  prepareServiceConfigurations,
+  assertServiceConfigurations,
   createPaymentOperation,
   assertSaleTracked,
   inspectCheckoutSaleAttempt,

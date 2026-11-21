@@ -38,7 +38,8 @@
     "test:functions-emulator": "firebase emulators:exec --only firestore,auth,functions --project adi-festa-variations-test \"node tests/emulator/onboarding-functions-smoke.js && node tests/emulator/team-access-functions-smoke.js && node tests/emulator/functions-smoke.js && node tests/emulator/activity-events-functions-smoke.js && node tests/emulator/terminal-payment-functions-smoke.js && node functions/test/pix-billing-emulator.js && node functions/test/card-monthly-emulator.js && node functions/test/billing-state-machine-emulator.js && node functions/test/financial-income-emulator.js && node functions/test/financial-account-delete-emulator.js && node functions/test/financial-credit-card-delete-emulator.js\"",
     "build": "node scripts/check-project.js --build",
     "test:v240": "node --test tests/v240-*.test.cjs",
-    "test:v240:emulator": "firebase emulators:exec --config firebase.v240-qa.json --only firestore --project demo-veconi-v240 \"node functions/test/financial-space-automation-emulator.js && node --test tests/emulator/financial-spaces.rules.test.js\""
+    "test:v240:emulator": "firebase emulators:exec --config firebase.v240-qa.json --only firestore --project demo-veconi-v240 \"node functions/test/financial-space-automation-emulator.js && node --test tests/emulator/financial-spaces.rules.test.js\"",
+    "test:service-sync": "node --test tests/service-sync-reliability.test.cjs tests/flexible-service-v238.test.cjs tests/service-fuel.test.cjs tests/service-save-v238.test.cjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "4.0.1",

@@ -157,6 +157,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    }
    if(paymentRecovery&&(!c.has('customers.receiveDebt')||!c.has('customers.view')))fail('Sem autorização para revisar este recebimento.');
    const priorFailure=String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'');
+   if(priorFailure==='failed-precondition'&&String(item.lastErrorMessage||'').includes('Configuração original de custo indisponível')&&attemptWrites.some(w=>w.entityType==='sales'&&w.operation==='create'))
+    fail('Esta venda original aguarda revisão de configuração; não será reenviada ou recalculada.','failed-precondition');
    const protectedFinancialIntent=attemptWrites.some(w=>w.operation==='create'&&(w.entityType==='payments'||w.entityType==='sales'&&w.data.installmentPlan));
    if(!paymentRecovery&&protectedFinancialIntent&&['permission-denied','failed-precondition','invalid-argument','already-exists'].includes(priorFailure))fail('Operação com rejeição permanente exige revisão explícita; o envelope original foi preservado.','failed-precondition');
    const incomingPlan=attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&w.data.installmentPlan);
@@ -616,6 +618,26 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   return db.runTransaction(async tx=>{
    const d=request.data||{},c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});
    // Read-only session handshake. No sale/financial data or persistent marker.
+   if(d.kind==='service_configuration'){
+    if(!c.has('sales.create')||!c.has('products.view'))fail('Sem autorização para conferir o serviço.');
+    const spaceId=validId(d.spaceId,'Espaço'),space=await c.space(spaceId);
+    if(space.capabilities?.sales!==true)fail('Este espaço não permite vendas.');
+    if(!Array.isArray(d.items)||!d.items.length||d.items.length>50)fail('Serviços inválidos.','invalid-argument');
+    const M=require('../shared/flexible-service');
+    for(const item of d.items){
+     const pid=validId(item.productId,'Produto'),cid=validId(item.configurationId,'Configuração');
+     const p=(await tx.get(ref(c.bid,'products',pid))).data();await scopeProduct(c,p,spaceId);
+     if(!M.enabled(p)||p.active===false||p.ativo===false||p.deletedAt)fail('Serviço indisponível.','failed-precondition');
+     const metadata=(await tx.get(ref(c.bid,'productFinancials',pid))).data(),config=metadata?.serviceCostConfigs?.[cid];
+     if(!config)fail('A configuração do serviço ainda não foi confirmada. Aguarde a sincronização do cadastro; se persistir, abra o serviço e salve uma nova configuração. O carrinho foi preservado.','failed-precondition');
+     if(item.pricingSnapshot&&(item.pricingSnapshot.model!==config.pricingModel||Number(item.pricingSnapshot.rate)!==Number(config.priceRate)))fail('A tarifa original diverge da configuração confirmada. O carrinho foi preservado.','failed-precondition');
+     if(item.costConfiguration){
+      if(!c.has('cost.view'))fail('Sem autorização para consultar custos.');
+      if(canonical(M.costConfig(item.costConfiguration))!==canonical(M.costConfig(config)))fail('O custo original diverge da configuração confirmada. O carrinho foi preservado.','failed-precondition');
+     }
+    }
+    return{confirmed:true,businessId:c.bid,actorUid:c.uid,workspaceGeneration:gen(c.business),spaceId,request:d.items};
+   }
    if(d.kind==='sync_protocol')return{operationalReadPolicyVersion:1,protocolVersion:1,permissionsVersion:2,fiadoHistoryReadVersion:1,paymentRecoveryReadVersion:1,queueRecoveryVersion:1,minClientRelease:require('../shared/operational-privacy-policy').restricted(c.member)?224:202,channel:'commitOperationalSync',businessId:c.bid,workspaceGeneration:gen(c.business)};
    if(d.kind==='queued_operation_status'){
     const operationId=operationalId(d.operationId,'Operação'),workspaceGeneration=gen(c.business);
