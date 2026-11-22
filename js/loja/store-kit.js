@@ -119,7 +119,7 @@
     return {steps,done:steps.filter(s=>s.done).length,next:steps.find(s=>!s.done)?.id||null,canPublish:steps.slice(0,2).every(s=>s.done)};
   }
   const SETTING_LABELS={publicName:'nome',welcomeText:'descrição',primaryColor:'cores',secondaryColor:'cores',logoUrl:'logo',bannerUrl:'capa',coverUrl:'capa',contactPhone:'WhatsApp',instagram:'Instagram',address:'endereço',openingHours:'horários',pickupEnabled:'retirada',deliveryEnabled:'entrega',pickupAddress:'retirada',deliveryInstructions:'entrega',paymentMethods:'formas de pagamento'};
-  function publishedDiff(draft,live){
+  function publishedDiff(draft,live,baseCategory){
     if(!live)return null;
     const changes=[],seen=new Set(),ls=live.publicSettings||live;
     for(const [key,label] of Object.entries(SETTING_LABELS)){const a=JSON.stringify(draft.settings[key]??''),b=JSON.stringify(ls[key]??'');if(a!==b&&!seen.has(label)){seen.add(label);changes.push(label);}}
@@ -128,8 +128,13 @@
     if(added)changes.push(added===1?'1 produto incluído':`${added} produtos incluídos`);
     if(removed)changes.push(removed===1?'1 produto retirado':`${removed} produtos retirados`);
     const liveItems=new Map((live.items||[]).map(i=>[i.productId,i]));
-    let featured=0,order=0;for(const id of ids){const i=liveItems.get(id),x=draft.presentation.products[id]||{};if(!i)continue;if(!!i.featured!==!!x.featured)featured++;if(Number(i.displayOrder||0)!==Number(x.order||0))order++;}
+    let featured=0,order=0,categoryChanged=false;for(const id of ids){const i=liveItems.get(id),x=draft.presentation.products[id]||{};if(!i)continue;if(!!i.featured!==!!x.featured||!!i.bestseller!==!!x.bestseller)featured++;if(Number(i.displayOrder||0)!==Number(x.order||0))order++;const category=x.category||baseCategory?.(id);if(category&&i.category!==category)categoryChanged=true;}
     if(featured)changes.push('destaques');if(order)changes.push('ordem dos produtos');
+    const liveCategories=new Map((live.categories||[]).map(c=>[c.internalName,c]));
+    if(categoryChanged||draft.presentation.categories.some(c=>{
+      const previous=liveCategories.get(c.internalName);
+      return !previous||['publicName','active','order'].some(k=>c[k]!==previous[k]);
+    }))changes.push('categorias');
     return changes;
   }
 
@@ -138,10 +143,10 @@
   function orderMessage(input){
     const store=line(input.storeName,100)||'da loja',items=(input.items||[]).filter(i=>Number(i.quantity)>0);
     if(!items.length)throw Error('O carrinho está vazio.');
-    const rows=items.map(i=>{const q=Math.max(1,Math.floor(Number(i.quantity))),name=line(i.name,120),variant=line(i.variant,80);return {text:`${q}x ${name}${variant?` (${variant})`:''} — ${money(q*Number(i.unitPrice||0))}`,total:q*Number(i.unitPrice||0)};});
+    const rows=items.map(i=>{const q=Math.max(1,Math.floor(Number(i.quantity))),name=line(i.name),variant=line(i.variant);return {text:`${q}x ${name}${variant?` (${variant})`:''} — ${money(q*Number(i.unitPrice||0))}`,total:q*Number(i.unitPrice||0)};});
     const subtotal=Math.round(rows.reduce((s,r)=>s+r.total,0)*100)/100,mode=input.mode||null,customer=input.customer||{};
     const out=[`Olá! Gostaria de fazer um pedido pela loja ${store}.`,'','🛒 *Meu pedido*',...rows.map(r=>r.text),'',`Subtotal: ${money(subtotal)}`];
-    if(mode==='pickup'){out.push('Entrega: Retirada na loja');if(line(input.pickupAddress))out.push(`Local de retirada: ${line(input.pickupAddress,200)}`);}
+    if(mode==='pickup'){out.push('Entrega: Retirada na loja');const address=line(input.pickupAddress,300);if(address)out.push(`Local de retirada: ${address}`);}
     else if(mode==='delivery'){out.push('Entrega: Entregar no endereço');const address=line(customer.address,200);if(address)out.push(`Endereço: ${address}`);out.push('Taxa de entrega: a combinar');}
     const payment=PAYMENT_LABELS[input.payment];if(payment&&input.payment!=='entrega')out.push(`Pagamento: ${payment}`);
     const note=text(input.note,500).replace(/\n{3,}/g,'\n\n');if(note)out.push(`Observações: ${note}`);
@@ -151,12 +156,24 @@
     out.push('','Aguardo a confirmação da disponibilidade e do pedido. Obrigado!');
     return {text:out.join('\n'),subtotal};
   }
-  function whatsappUrl(phone,message){
+  // Budget for the encoded URL, leaving room for redirects within the HTTP
+  // interoperability recommendation (RFC 9110 §4.1). WhatsApp publishes no cap.
+  const WHATSAPP_PREFILL_URL_BUDGET=4000;
+  function whatsappPhone(phone){
     if(!validPhone(phone))throw Error('Esta loja ainda não informou um WhatsApp válido.');
-    const safeMessage=String(message).replace(/(?:[\uD800-\uDBFF][\uDC00-\uDFFF])|[\uD800-\uDFFF]/g,part=>part.length===2?part:'\uFFFD');
-    return `https://wa.me/${phoneDigits(phone)}?text=${encodeURIComponent(safeMessage)}`;
+    return phoneDigits(phone);
+  }
+  const whatsappChatUrl=phone=>`https://wa.me/${whatsappPhone(phone)}`;
+  function whatsappUrl(phone,message){
+    // The wa.me redirect can replace emoji. Use its web destination directly.
+    const prefix=`https://api.whatsapp.com/send/?phone=${whatsappPhone(phone)}&text=`;
+    const text=String(message);
+    if(prefix.length+text.length>WHATSAPP_PREFILL_URL_BUDGET)return '';
+    const safeMessage=text.replace(/(?:[\uD800-\uDBFF][\uDC00-\uDFFF])|[\uD800-\uDFFF]/g,part=>part.length===2?part:'\uFFFD');
+    const url=prefix+encodeURIComponent(safeMessage);
+    return url.length<=WHATSAPP_PREFILL_URL_BUDGET?url:'';
   }
 
   return Object.freeze({text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,
-    slugify,slugProblem,draftFromStore,applyOp,applyOps,savePayload,status,readiness,publishedDiff,PAYMENT_LABELS,orderMessage,whatsappUrl});
+    slugify,slugProblem,draftFromStore,applyOp,applyOps,savePayload,status,readiness,publishedDiff,PAYMENT_LABELS,orderMessage,whatsappChatUrl,whatsappUrl});
 });

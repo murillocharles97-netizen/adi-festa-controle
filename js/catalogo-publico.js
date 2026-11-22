@@ -179,6 +179,18 @@ function orderInput(){
 }
 function message(extraTop=''){try{const m=K.orderMessage(orderInput());return extraTop?{...m,text:`${extraTop}\n\n${m.text}`}:m;}catch{return {text:'',subtotal:0};}}
 function waHref(text){try{return K.whatsappUrl(storePhone(),text);}catch{return '';}}
+function whatsAppActions(href){
+  const chat=phoneOk()?K.whatsappChatUrl(storePhone()):'';
+  return `<a class="sf-btn sf-btn-wa sf-btn-wide" id="sf-send-wa" ${href?`href="${esc(href)}"`:'hidden'} target="_blank" rel="noopener">${I.wa}<span>Abrir pedido no WhatsApp</span></a>
+    <div class="sf-actions" data-wa-long ${!href&&chat?'':'hidden'}>
+      <p class="sf-muted">Para levar todos os itens, copie o resumo completo. Abra o WhatsApp da loja, cole a mensagem e toque em enviar.</p>
+      <button type="button" class="sf-btn sf-btn-accent sf-btn-wide" data-wa-copy>Copiar resumo completo</button>
+      <p class="sf-muted" data-wa-status role="status"></p>
+      <label class="sf-field" data-wa-manual hidden><span>Resumo para copiar</span><textarea rows="4" readonly></textarea></label>
+      <a class="sf-btn sf-btn-ghost sf-btn-wide" href="${esc(chat)}" target="_blank" rel="noopener">${I.wa}<span>Abrir WhatsApp da loja</span></a>
+    </div>
+    <p class="sf-muted sf-center">O pedido só é confirmado quando a loja responder.</p>`;
+}
 function pendingOrderView(){
   return `${topbar('Pedido em confirmação','catalog')}<main class="sf-page"><form class="sf-panel" id="sf-checkout" novalidate>
     <h2>Verifique o envio pendente</h2><p role="status">Existe um envio em confirmação. Vamos consultar a mesma tentativa para evitar outro pedido.</p>
@@ -189,8 +201,9 @@ function checkoutView(){
   if(hasPendingOrder())return pendingOrderView();
   const lines=cartLines();if(!lines.length){view='cart';return cartView();}
   const list=modes(),mode=currentMode(),pays=paymentOptions(),reg=registered(),m=message(),err=k=>errors[k]?`<small class="sf-error" id="sf-err-${k}" role="alert">${esc(errors[k])}</small>`:'';
+  const href=reg?'':waHref(m.text),long=!reg&&!href&&phoneOk();
   const modeInfo=mode?.type==='delivery'?esc(catalog.deliveryInstructions||'Informe o endereço. A taxa de entrega é combinada com a loja.'):mode?.type==='pickup'?esc(catalog.pickupAddress?`Retire em: ${catalog.pickupAddress}`:'A loja informa onde retirar.'):'';
-  return `${topbar('Finalizar pedido','cart')}<main class="sf-page"><form class="sf-checkout" id="sf-checkout" novalidate>
+  return `${topbar('Finalizar pedido','cart')}<main class="sf-page"><form class="sf-checkout" id="sf-checkout" data-wa-long-summary="${long}" novalidate>
     ${list.length?`<section class="sf-panel"><h2>Como você quer receber?</h2><div class="sf-modes" role="radiogroup" aria-label="Forma de receber">${list.map(x=>{const id=String(x.id||x.type),on=id===String(mode?.id||mode?.type);return `<button type="button" role="radio" aria-checked="${on}" class="sf-mode" data-mode="${esc(id)}">${x.type==='delivery'?I.truck:I.store}<span><b>${x.type==='delivery'?'Entrega':'Retirada'}</b><small>${x.type==='delivery'?'Taxa combinada com a loja':'Sem taxa de entrega'}</small></span></button>`;}).join('')}</div>${modeInfo?`<p class="sf-muted">${modeInfo}</p>`:''}</section>`:''}
     <section class="sf-panel"><h2>Seus dados</h2>
       <label class="sf-field"><span>Seu nome</span><input name="name" value="${esc(customer.name||'')}" autocomplete="name" maxlength="80" required ${errors.name?'aria-invalid="true" aria-describedby="sf-err-name"':''}>${err('name')}</label>
@@ -198,14 +211,14 @@ function checkoutView(){
       ${mode?.type==='delivery'?`<label class="sf-field"><span>Endereço de entrega</span><textarea name="address" rows="2" maxlength="200" autocomplete="street-address" placeholder="Rua, número, bairro e complemento" required ${errors.address?'aria-invalid="true" aria-describedby="sf-err-address"':''}>${esc(customer.address||'')}</textarea>${err('address')}</label>`:''}
     </section>
     ${pays.length?`<section class="sf-panel"><h2>Como prefere pagar? ${requiresPaymentChoice()?'':'<small>(opcional)</small>'}</h2><div class="sf-chips" role="radiogroup" aria-label="Forma de pagamento" ${errors.payment?'aria-invalid="true" aria-describedby="sf-err-payment"':''}>${pays.map(p=>`<button type="button" role="radio" class="sf-chip" data-pay="${p}" aria-checked="${payment===p}">${esc(K.PAYMENT_LABELS[p])}</button>`).join('')}</div>${err('payment')}<p class="sf-muted">O pagamento é combinado com a loja. Nada é cobrado aqui.</p></section>`:''}
-    <section class="sf-panel sf-summary"><ul class="sf-review">${lines.map(l=>`<li><span>${l.qty}x ${esc(l.name)}${l.variantName?` <small>(${esc(l.variantName)})</small>`:''}</span><b>${money(l.qty*l.price)}</b></li>`).join('')}</ul><div class="sf-sum"><span>Total dos produtos</span><b>${money(total())}</b></div>${mode?.type==='delivery'?'<p class="sf-muted">A taxa de entrega será combinada com a loja.</p>':''}</section>
-    ${reg?'':`<section class="sf-panel sf-msg"><h2>Mensagem que vai para a loja</h2><p class="sf-muted">Você confere no WhatsApp e toca em enviar.</p><div class="sf-bubble" data-msg>${esc(m.text)}</div></section>`}
+    <section class="sf-panel sf-summary"><ul class="sf-review" aria-label="Itens do pedido" ${long?'tabindex="0"':''}>${lines.map(l=>`<li><span>${l.qty}x ${esc(l.name)}${l.variantName?` <small>(${esc(l.variantName)})</small>`:''}</span><b>${money(l.qty*l.price)}</b></li>`).join('')}</ul><div class="sf-sum"><span>Total dos produtos</span><b>${money(total())}</b></div>${mode?.type==='delivery'?'<p class="sf-muted">A taxa de entrega será combinada com a loja.</p>':''}</section>
+    ${reg?'':`<section class="sf-panel sf-msg"><h2>Resumo para o WhatsApp</h2><p class="sf-muted">Confira todos os itens antes de enviar.</p><div class="sf-bubble" data-msg>${esc(m.text)}</div></section>`}
     <div class="sf-actions sf-actions-sticky">${reg?`<button type="submit" class="sf-btn sf-btn-accent sf-btn-wide" ${submittingOrder?'disabled':''}>${submittingOrder?'Enviando pedido…':'Fazer pedido'}</button>`
-      :`<a class="sf-btn sf-btn-wa sf-btn-wide" id="sf-send-wa" href="${esc(waHref(m.text))}" target="_blank" rel="noopener">${I.wa}<span>Enviar pedido pelo WhatsApp</span></a><p class="sf-muted sf-center">O pedido só é confirmado quando a loja responder.</p>`}</div>
+      :whatsAppActions(href)}</div>
   </form></main>`;
 }
 function sentView(){
-  return `${topbar('Pedido no WhatsApp','checkout')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon">${I.wa}</span><h2>Agora é só enviar no WhatsApp</h2><p>Abrimos a conversa com <b>${esc(catalog.publicName)}</b> e o pedido já escrito. Toque em enviar por lá.</p><p class="sf-muted">A loja confirma disponibilidade, entrega e pagamento pela conversa. Seu pedido ainda não foi confirmado.</p>
+  return `${topbar('Pedido no WhatsApp','checkout')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon">${I.wa}</span><h2>Agora é só enviar no WhatsApp</h2><p>Se a conversa com <b>${esc(catalog.publicName)}</b> abriu, confira o pedido e toque em enviar. Se precisar, use o botão abaixo para tentar de novo.</p><p class="sf-muted">A loja confirma disponibilidade, entrega e pagamento pela conversa. Seu pedido ainda não foi confirmado.</p>
     <div class="sf-actions"><a class="sf-btn sf-btn-wa sf-btn-wide" href="${esc(sentUrl)}" target="_blank" rel="noopener">${I.wa}<span>Abrir o WhatsApp de novo</span></a><button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-clear-cart>Já enviei, limpar o carrinho</button><button type="button" class="sf-link" data-go="catalog">Voltar à loja</button></div></section></main>`;
 }
 const orderLabel=s=>window.OnlineOrderModel?.labels?.[s]||({recebido:'Recebido',confirmado:'Confirmado',preparando:'Preparando',separando:'Pronto',deslocamento:'Enviado',entregue:'Concluído',cancelado:'Cancelado',expirado:'Expirado'}[s]||s);
@@ -301,7 +314,48 @@ function validate(){
   if(requiresPaymentChoice()&&!paymentOptions().includes(payment))errors.payment='Escolha uma forma de pagamento oferecida pela loja.';
   return !Object.keys(errors).length;
 }
-function refreshMessage(){const bubble=root.querySelector('[data-msg]'),link=root.querySelector('#sf-send-wa');const m=message();if(bubble)bubble.textContent=m.text;if(link)link.href=waHref(m.text);}
+function refreshMessage(){
+  const bubble=root.querySelector('[data-msg]');
+  if(!bubble)return;
+  const {text}=message(),href=waHref(text),link=root.querySelector('#sf-send-wa');
+  bubble.textContent=text;
+  link.hidden=!href;
+  if(href)link.href=href;else link.removeAttribute('href');
+  const long=!href&&phoneOk();
+  const form=bubble.closest('form');
+  form.dataset.waLongSummary=String(long);
+  const review=form.querySelector('.sf-review');
+  if(long)review.tabIndex=0;else review.removeAttribute('tabindex');
+  root.querySelector('[data-wa-long]').hidden=!long;
+  root.querySelector('[data-wa-status]').textContent='';
+  root.querySelector('[data-wa-manual] textarea').value=text;
+}
+function validateWhatsApp(){
+  readForm();
+  if(validate())return true;
+  render();
+  root.querySelector('[aria-invalid="true"]')?.focus();
+  toast('Confira os campos destacados.');
+  return false;
+}
+async function copyWhatsApp(){
+  if(!validateWhatsApp())return;
+  const {text}=message(),status=root.querySelector('[data-wa-status]');
+  if(preview){previewMessage(text);return;}
+  const current=()=>status.isConnected&&root.querySelector('[data-msg]')?.textContent===text;
+  try{
+    await navigator.clipboard.writeText(text);
+    if(current())status.textContent='Resumo copiado. Abra o WhatsApp da loja e cole a mensagem.';
+  }catch{
+    if(!current())return;
+    const manual=root.querySelector('[data-wa-manual]'),field=manual.querySelector('textarea');
+    manual.hidden=false;
+    field.value=text;
+    field.focus();
+    field.select();
+    status.textContent='Use a opção Copiar do seu dispositivo para copiar o texto selecionado.';
+  }
+}
 root.addEventListener('click',event=>{
   const t=event.target;
   const close=t.closest('[data-close]');if(close){closeSheet();return;}
@@ -318,9 +372,10 @@ root.addEventListener('click',event=>{
   const pay=t.closest('[data-pay]');if(pay){readForm();payment=payment===pay.dataset.pay?'':pay.dataset.pay;root.querySelectorAll('[data-pay]').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.pay===payment)));refreshMessage();return;}
   if(t.closest('[data-clear-search]')){query='';const input=root.querySelector('#sf-search');if(input)input.value='';paintMain();input?.focus();return;}
   if(t.closest('[data-clear-cart]')){cart={};note='';save();view='catalog';render();toast('Carrinho limpo. Obrigado pela compra!');return;}
+  if(t.closest('[data-wa-copy]')){void copyWhatsApp();return;}
   const wa=t.closest('#sf-send-wa');
-  if(wa){if(hasPendingOrder()||(!preview&&!navigator.onLine)){event.preventDefault();toast('Conecte-se à internet para continuar com seu pedido.');return;}readForm();if(!validate()){event.preventDefault();render();const first=root.querySelector('[aria-invalid="true"]');first?.focus();toast('Confira os campos destacados.');return;}
-    const m=message(),href=waHref(m.text);if(!href){event.preventDefault();toast('A loja ainda não informou um WhatsApp válido.');return;}
+  if(wa){if(hasPendingOrder()||(!preview&&!navigator.onLine)){event.preventDefault();toast('Conecte-se à internet para continuar com seu pedido.');return;}if(!validateWhatsApp()){event.preventDefault();return;}
+    const m=message(),href=waHref(m.text);if(!href){event.preventDefault();refreshMessage();root.querySelector('[data-wa-copy]')?.focus();return;}
     wa.href=href;
     if(preview){event.preventDefault();previewMessage(m.text);return;}
     sentUrl=href;setTimeout(()=>{view='sent';render();pushState('sent');scrollTo(0,0);},60);return;}
@@ -332,7 +387,7 @@ root.addEventListener('input',event=>{
   if(t.id==='sf-note'){note=t.value.slice(0,500);save();return;}
   if(t.closest('#sf-checkout')){readForm();if(errors[t.name]){delete errors[t.name];t.removeAttribute('aria-invalid');t.parentElement.querySelector('.sf-error')?.remove();}refreshMessage();}
 });
-root.addEventListener('submit',async event=>{if(event.target.id!=='sf-checkout')return;event.preventDefault();if(hasPendingOrder()){await submitOrder();return;}readForm();if(!registered()){root.querySelector('#sf-send-wa')?.click();return;}if(!validate()){render();root.querySelector('[aria-invalid="true"] input,[aria-invalid="true"] button,[aria-invalid="true"]')?.focus();return;}await submitOrder();});
+root.addEventListener('submit',async event=>{if(event.target.id!=='sf-checkout')return;event.preventDefault();if(hasPendingOrder()){await submitOrder();return;}readForm();if(!registered()){root.querySelector('#sf-send-wa:not([hidden]),[data-wa-long]:not([hidden]) [data-wa-copy]')?.click();return;}if(!validate()){render();root.querySelector('[aria-invalid="true"] input,[aria-invalid="true"] button,[aria-invalid="true"]')?.focus();return;}await submitOrder();});
 root.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&sheet){event.preventDefault();closeSheet();return;}
   if(event.key==='Tab'&&sheet){const nodes=[...root.querySelectorAll('.sf-sheet :is(button,a,input,textarea,select):not([disabled])')];if(!nodes.length)return;const first=nodes[0],last=nodes[nodes.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}

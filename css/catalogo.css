@@ -154,6 +154,11 @@ svg { flex-shrink: 0; }
 .sf-review small { color: var(--sf-text-2); }
 .sf-actions { display: grid; gap: 10px; }
 .sf-actions-sticky { position: sticky; bottom: 0; z-index: 5; margin: 0 -16px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--sf-page) 22%); }
+.sf-checkout[data-wa-long-summary="true"] .sf-actions-sticky { position: static; }
+.sf-checkout[data-wa-long-summary="true"] .sf-review { max-height: 16rem; overflow: auto; }
+.sf-review li > span { min-width: 0; overflow-wrap: anywhere; }
+.sf-review li > b { flex-shrink: 0; }
+[data-wa-status]:empty { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
 .sf-field { display: grid; gap: 6px; }
 .sf-field > span { color: var(--sf-ink); font-size: 14px; font-weight: 700; }
 .sf-field small { color: var(--sf-text-2); font-weight: 500; }

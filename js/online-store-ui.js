@@ -12,7 +12,7 @@
   // Ícones pequenos inline nos cartões: milhares de cartões sem varrer o documento com o Lucide.
   const SVG={star:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.8-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.8Z"/></svg>',check:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',grip:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>'};
   const state={key:'',spaceId:'',view:'home',data:null,base:null,draft:null,sel:new Set(),ops:[],inflight:null,flushing:null,saveTimer:0,saveState:'idle',saveError:'',savedAt:0,conflicts:0,
-    live:null,unpublished:null,busy:false,sequence:0,receptionConfirm:null,receptionMessage:'',filter:{q:'',scope:'all',category:''},selecting:false,picked:new Set(),results:[],shown:0,sheet:null,device:'phone',errors:{},sortCategory:''};
+    live:null,liveMissing:false,unpublished:null,busy:false,sequence:0,receptionConfirm:null,receptionMessage:'',filter:{q:'',scope:'all',category:''},selecting:false,picked:new Set(),results:[],shown:0,sheet:null,device:'phone',errors:{},sortCategory:''};
   let index=null,observer=null,previewTimer=0,searchTimer=0,toastTimer=0,liveRead=0;
   const business=()=>window.BusinessContext?.getCurrentBusinessId?.()||window.FirebaseSession?.businessId||window.FirebaseSession?.profile?.businessId||'';
   const spaces=()=>window.SpaceContext?.salesSpaces?.()||[];
@@ -21,9 +21,19 @@
   const spaceName=()=>spaces().find(s=>s.id===state.spaceId)?.name||'este espaço';
   const owner=()=>state.data?.owner===true;
   const store=()=>state.data?.store||null;
-  const status=()=>K.status(store());
+  function status(){
+    const s=store(),value=K.status(s);
+    return value==='paused'&&state.liveMissing&&!Array.isArray(s.publishedProductIds)?'draft':value;
+  }
   const codeOf=e=>String(e?.code||'').replace(/^functions\//,'');
-  const friendly=e=>{const c=codeOf(e);if(c==='unavailable'||c==='deadline-exceeded'||/network|internet/i.test(e?.message||''))return 'Sem conexão com o servidor. Suas alterações continuam aqui; tente de novo.';return window.Utils?.friendlyError?.(e,e?.message||'Tente novamente.')??(e?.message||'Tente novamente.');};
+  const friendly=e=>{
+    const code=codeOf(e),message=e?.message||'';
+    if(code==='unavailable'||code==='deadline-exceeded'||/network|internet/i.test(message))
+      return 'Sem conexão com o servidor. Suas alterações continuam aqui; tente de novo.';
+    if(code==='resource-exhausted'&&/variações exigem paginação/i.test(message))
+      return 'A empresa tem mais de 1.000 variações. O limite conta todos os espaços e impede salvar ou publicar este rascunho.';
+    return window.Utils?.friendlyError?.(e,message||'Tente novamente.')??(message||'Tente novamente.');
+  };
   const publicUrl=()=>store()?.slug?M.url(store().slug):'';
   const previewSrc=()=>window.OnlineStorePreviewUrl||'catalogo.html?preview=1';
   const shortUrl=u=>String(u||'').replace(/^https?:\/\//,'');
@@ -43,7 +53,7 @@
     try{
       const data=await call('getOnlineStore',c);
       if(ticket!==state.sequence||c.businessId!==business()||c.spaceId!==state.spaceId)return;
-      state.data=data;state.base=K.draftFromStore(data.store,spaceName());state.live=null;state.unpublished=null;
+      state.data=data;state.base=K.draftFromStore(data.store,spaceName());state.live=null;state.liveMissing=false;state.unpublished=null;
       if(!state.base.settings.publicName)state.base.settings.publicName=spaceName();
       buildIndex();refreshDraft();draw();readLive();
     }catch(e){
@@ -64,8 +74,9 @@
     try{
       const live=await window.FirebasePublicCatalogReader(s.publicToken);
       if(ticket!==state.sequence||request!==liveRead||s!==store())return;
-      state.live=live&&live.businessId===s.businessId&&live.spaceId===s.spaceId&&live.workspaceGeneration===s.workspaceGeneration?live:null;
-      if(state.live&&state.unpublished!==true)state.unpublished=(K.publishedDiff(state.base,state.live)||[]).length>0||Number(state.live.revision)!==Number(s.revision);
+      state.liveMissing=live===null;
+      state.live=live&&live.businessId===s.businessId&&live.spaceId===s.spaceId&&live.workspaceGeneration===s.workspaceGeneration&&live.active===s.published?live:null;
+      if(state.live&&state.unpublished!==true)state.unpublished=compareLive(state.base).length>0||Number(state.live.revision)!==Number(s.revision);
       paint('head');paint('save');if(state.view==='home')paint('main');
     }catch{/* Continua mostrando a última situação confirmada. */}
   }
@@ -149,7 +160,8 @@
   // Nunca presume que algo está publicado: só uma publicação confirmada (ou a leitura da versão pública) zera a pendência.
   function pendingPublish(){const s=store();if(!s||!s.published)return false;return !!(state.ops.length||state.inflight||state.unpublished===true);}
   const publicationUnknown=()=>status()==='published'&&state.unpublished===null;
-  function diffList(){return state.live?K.publishedDiff(state.draft,state.live)||[]:[];}
+  const compareLive=draft=>K.publishedDiff(draft,state.live,id=>index.byId.get(id)?.baseCategory)||[];
+  function diffList(){return compareLive(state.draft);}
   function readiness(){return K.readiness({settings:state.draft.settings,selectedCount:state.sel.size,state:status(),pending:pendingPublish()||publicationUnknown()});}
 
   /* ---------- Desenho ---------- */
@@ -527,16 +539,17 @@
     if(t==='organize')return organizeSheet();
     if(t==='preview')return `<div class="lo-sheet-backdrop" data-act="close-sheet"></div><section class="lo-sheet lo-sheet-full" role="dialog" aria-modal="true" aria-label="Prévia da loja"><header class="lo-sheet-head"><div><h2>Prévia da loja</h2><p>Rascunho: teste o carrinho e veja a mensagem do pedido. Nada é enviado.</p></div><button type="button" class="lo-icon-btn" data-act="close-sheet" aria-label="Fechar prévia">${icon('x')}</button></header><iframe class="lo-preview-frame lo-preview-full" src="${esc(previewSrc())}" title="Prévia da loja em tela cheia"></iframe></section>`;
     if(t==='share')return shareSheet();
-    const st=status(),r=readiness(),pause=t==='pause',d=state.draft.settings,phoneOk=K.validPhone(d.contactPhone),url=publicUrl(),diff=diffList();
+    const st=status(),r=readiness(),pause=t==='pause',resume=!pause&&st==='paused',d=state.draft.settings,phoneOk=K.validPhone(d.contactPhone),url=publicUrl(),diff=diffList();
     const check=(ok,label,warn)=>`<li class="${ok?'is-ok':'is-warn'}">${ok?SVG.check:icon('triangle-alert')}<span>${ok?label:warn}</span></li>`;
     const title=pause?'Pausar a loja?':st==='paused'?'Retomar a loja?':st==='published'?'Publicar alterações?':'Publicar a loja?';
     const body=pause?'<p>O link continua existindo, mas o cliente verá que a loja está indisponível. Seus produtos e configurações ficam guardados para quando você retomar.</p>'
+      :resume?'<p>A última vitrine publicada ficará disponível novamente. Para aplicar as edições do rascunho, use Publicar alterações depois de retomar.</p>'
       :`<ul class="lo-checklist">${check(!!d.publicName,`Nome: ${esc(d.publicName)}`,'Falta o nome da loja')}${check(state.sel.size>0,`${state.sel.size} ${state.sel.size===1?'produto':'produtos'} na vitrine`,'Nenhum produto escolhido')}${check(phoneOk,`Pedidos pelo WhatsApp ${esc(K.formatPhone(d.contactPhone))}`,'Sem WhatsApp: o cliente vê a loja, mas não consegue enviar o pedido')}${d.pickupEnabled===false&&!d.deliveryEnabled?check(false,'','Nem retirada nem entrega ativas: o pedido vai sem forma de recebimento'):''}</ul>${st==='published'&&diff.length?`<p>Vai mudar: ${esc(diff.join(', '))}.</p>`:''}<p>Qualquer pessoa com o link ${url?`<b>${esc(shortUrl(url))}</b> `:''}poderá ver a loja. Você pode pausar quando quiser.</p>`;
-    const blocked=!pause&&!r.canPublish;
-    return `<div class="lo-sheet-backdrop" data-act="close-sheet"></div><section class="lo-sheet" role="dialog" aria-modal="true" aria-labelledby="lo-sheet-title"><header class="lo-sheet-head"><div><h2 id="lo-sheet-title">${title}</h2></div><button type="button" class="lo-icon-btn" data-act="close-sheet" aria-label="Fechar">${icon('x')}</button></header><div class="lo-sheet-body">${body}${!pause&&!phoneOk?`<button type="button" class="lo-link-btn" data-act="view" data-v="design" data-focus="whatsapp">Configurar WhatsApp agora</button>`:''}</div><footer class="lo-sheet-foot"><button type="button" class="lo-btn lo-btn-quiet" data-act="close-sheet">Voltar</button><button type="button" class="lo-btn ${pause?'lo-btn-danger':'lo-btn-primary'}" data-act="${pause?'do-pause':'do-publish'}" ${blocked||state.busy?'disabled':''}>${pause?'Pausar loja':st==='paused'?'Retomar loja':st==='published'?'Publicar alterações':'Publicar loja'}</button></footer></section>`;
+    const explicit=!pause&&!resume;
+    return `<div class="lo-sheet-backdrop" data-act="close-sheet"></div><section class="lo-sheet" role="dialog" aria-modal="true" aria-labelledby="lo-sheet-title"><header class="lo-sheet-head"><div><h2 id="lo-sheet-title">${title}</h2></div><button type="button" class="lo-icon-btn" data-act="close-sheet" aria-label="Fechar">${icon('x')}</button></header><div class="lo-sheet-body">${body}${explicit&&!phoneOk?`<button type="button" class="lo-link-btn" data-act="view" data-v="design" data-focus="whatsapp">Configurar WhatsApp agora</button>`:''}</div><footer class="lo-sheet-foot"><button type="button" class="lo-btn lo-btn-quiet" data-act="close-sheet">Voltar</button><button type="button" class="lo-btn ${pause?'lo-btn-danger':'lo-btn-primary'}" data-act="${pause?'do-pause':'do-publish'}" ${explicit&&!r.canPublish||state.busy?'disabled':''}>${pause?'Pausar loja':resume?'Retomar loja':st==='published'?'Publicar alterações':'Publicar loja'}</button></footer></section>`;
   }
   function shareSheet(){
-    const url=publicUrl(),st=status(),name=state.draft.settings.publicName||spaceName(),text=`Conheça a ${name}: escolha seus produtos e faça o pedido pelo WhatsApp. ${url}`;
+    const url=publicUrl(),st=status(),name=state.live?.publicName,text=`${name?`Conheça a loja ${name}.`:'Conheça nossa loja.'} ${url}`;
     return `<div class="lo-sheet-backdrop" data-act="close-sheet"></div><section class="lo-sheet" role="dialog" aria-modal="true" aria-labelledby="lo-share-title"><header class="lo-sheet-head"><div><h2 id="lo-share-title">Compartilhar a loja</h2><p>${st==='published'?'Envie o link para clientes, coloque na bio do Instagram ou imprima o QR Code.':'O link só funciona depois de publicar a loja.'}</p></div><button type="button" class="lo-icon-btn" data-act="close-sheet" aria-label="Fechar">${icon('x')}</button></header>
       <div class="lo-sheet-body"><div class="lo-share-link"><input readonly value="${esc(url)}" aria-label="Link da loja"><button type="button" class="lo-btn lo-btn-primary" data-act="copy">${icon('copy')}<span>Copiar</span></button></div>
       <div class="lo-share-actions"><a class="lo-btn lo-btn-quiet" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">${icon('message-circle')}<span>Enviar pelo WhatsApp</span></a>${navigator.share?`<button type="button" class="lo-btn lo-btn-quiet" data-act="native-share">${icon('share-2')}<span>Mais opções</span></button>`:''}<button type="button" class="lo-btn lo-btn-quiet" data-act="qr">${icon('qr-code')}<span>QR Code</span></button></div><div id="store-qr" class="lo-qr"></div></div></section>`;
@@ -548,21 +561,33 @@
     const ticket=state.sequence;
     if(!(await settle())){toast('Salve as alterações pendentes antes de publicar.',true);return;}
     if(ticket!==state.sequence||state.busy||!owner())return;
-    if(kind!=='pause'&&!readiness().canPublish){toast('Dê um nome e escolha ao menos um produto antes de publicar.',true);return;}
-    const c=scope(),d=state.base,payload=K.savePayload(d),wanted=kind!=='pause';
+    const wanted=kind!=='pause',resume=wanted&&status()==='paused',explicit=wanted&&!resume;
+    if(explicit&&!readiness().canPublish){toast('Dê um nome e escolha ao menos um produto antes de publicar.',true);return;}
+    const c=scope(),d=state.base,payload=K.savePayload(d);
     state.busy=true;state.sheet=null;document.body.classList.remove('lo-sheet-open');draw();
     try{
       payload.settings=M.settings({...d.settings,checkoutEnabled:store()?.checkoutEnabled===true});
       const revision=store()?.revision||0;
-      const r=await call('saveOnlineStore',{...c,action:'publish',confirmed:true,published:wanted,revision,...payload});
+      const r=await call('saveOnlineStore',{...c,action:'publish',confirmed:true,published:wanted,revision,...(explicit?payload:{})});
       if(ticket!==state.sequence)return;
       if(r?.store?.published!==wanted||!confirmsDraft(r.store,payload,revision))throw Error('O servidor não confirmou a publicação. Recarregue a loja para conferir.');
-      state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());refreshDraft();state.unpublished=wanted?false:null;state.saveState=wanted?'published':'paused';state.savedAt=Date.now();
-      state.live={...(state.live||{}),revision:r.store.revision,items:state.base.productIds.map(id=>({productId:id,featured:!!state.base.presentation.products[id]?.featured,displayOrder:Number(state.base.presentation.products[id]?.order||0)})),publicSettings:{...state.base.settings},businessId:r.store.businessId,spaceId:r.store.spaceId};
-      toast(wanted?'Loja publicada. O link já mostra esta versão.':'Loja pausada. O link mostra que ela está indisponível.');
+      state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());refreshDraft();
+      state.unpublished=explicit?false:null;state.live=null;state.liveMissing=false;
+      state.saveState=explicit?'published':resume?'resumed':'paused';state.savedAt=Date.now();
+      state.data.orderReception=null;state.receptionConfirm=null;state.receptionMessage='';
+      toast(explicit?'Loja publicada. O link já mostra esta versão.':resume?'Loja retomada com a última vitrine publicada.':'Loja pausada. O link mostra que ela está indisponível.');
       readLive();
-    }catch(e){if(ticket===state.sequence)toast(`Não foi possível ${wanted?'publicar':'pausar'}: ${friendly(e)}`,true);}
+      refreshReception(c,ticket,r.store.revision);
+    }catch(e){if(ticket===state.sequence)toast(`Não foi possível ${explicit?'publicar':resume?'retomar':'pausar'}: ${friendly(e)}`,true);}
     finally{if(ticket===state.sequence){state.busy=false;draw();}}
+  }
+  async function refreshReception(c,ticket,revision){
+    try{
+      const result=await call('getOnlineStore',c);
+      if(ticket!==state.sequence||store()?.revision!==revision||result.store?.revision!==revision)return;
+      state.data.orderReception=result.orderReception;
+      if(state.view==='home')paint('main');
+    }catch{/* A interface mantém a recepção indisponível até uma nova leitura. */}
   }
   async function qr(){
     const link=publicUrl(),sequence=state.sequence;
@@ -588,6 +613,7 @@
     const pending=pendingPublish();
     if(pending)return `<div class="lo-savebar is-publish" role="status">${icon('cloud-check')}<span>${s==='saved'?`Rascunho salvo às ${time}. `:''}O cliente ainda vê a versão anterior.</span><div class="lo-savebar-actions"><button type="button" class="lo-btn lo-btn-sm lo-btn-primary" data-act="ask-publish" ${state.busy?'disabled':''}>Publicar alterações</button></div></div>`;
     if(s==='published'&&status()==='published')return `<div class="lo-savebar is-saved" role="status">${icon('globe')}<span>Publicado às ${time}. O link já mostra esta versão.</span></div>`;
+    if(s==='resumed'&&status()==='published')return `<div class="lo-savebar is-saved" role="status">${icon('globe')}<span>Última vitrine retomada às ${time}.${publicationUnknown()?' Confira a vitrine antes de publicar alterações.':''}</span></div>`;
     return s==='saved'?`<div class="lo-savebar is-saved" role="status">${icon('cloud-check')}<span>Rascunho salvo às ${time}.</span></div>`:'';
   }
 
