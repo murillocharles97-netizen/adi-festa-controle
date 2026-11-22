@@ -174,6 +174,34 @@
     return url.length<=WHATSAPP_PREFILL_URL_BUDGET?url:'';
   }
 
-  return Object.freeze({text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,
+  const bannerTemplates = {
+    robot: ['Monte seu carrinho.', 'Finalize pelo WhatsApp.', 'Ver catálogo'],
+    offers: ['Ofertas especiais', '', 'Ver produtos'],
+    arrivals: ['Novidades da loja', '', 'Explorar catálogo'],
+    promotion: ['Promoções', '', 'Ver produtos'],
+    featured: ['Produtos em destaque', '', 'Ver destaques'],
+    discover: ['Aproveite nossas ofertas', '', 'Ver catálogo'],
+    easy: ['Compre com facilidade', '', 'Escolher produtos']
+  };
+  function bannerSlide(template = 'robot') {
+    const [title, description, button] = bannerTemplates[template];
+    return {template, title, description, button, target:template === 'featured' ? 'featured' : 'catalog', active:true, imageUrl:''};
+  }
+  function storefrontLayout(catalog = {}) {
+    if (catalog.storefrontLayout?.version === 1) return catalog.storefrontLayout;
+    const slides = (catalog.banners || []).filter(b => b.active !== false && b.imageUrl &&
+      (!b.startsAt || Date.parse(b.startsAt) <= Date.now()) && (!b.endsAt || Date.parse(b.endsAt) >= Date.now()))
+      .slice().sort((a,b) => a.order-b.order)
+      .map(b => ({...bannerSlide(), title:b.title || catalog.publicName, description:b.subtitle || '', imageUrl:b.imageUrl,
+        button:b.actionUrl ? 'Saiba mais' : 'Ver catálogo', target:/^https?:\/\//i.test(b.actionUrl || '') ? b.actionUrl : 'catalog'}));
+    if (!slides.length) {
+      const slide = bannerSlide();
+      if (catalog.acceptingOrders || !validPhone(catalog.contactPhone)) slide.description = 'Escolha os produtos da loja.';
+      slides.push(slide);
+    }
+    return {version:1, slides, featured:true, secondary:{...bannerSlide('easy'), active:false}};
+  }
+
+  return Object.freeze({bannerTemplates,bannerSlide,storefrontLayout,text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,
     slugify,slugProblem,draftFromStore,applyOp,applyOps,savePayload,status,readiness,publishedDiff,PAYMENT_LABELS,orderMessage,whatsappChatUrl,whatsappUrl});
 });

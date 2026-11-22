@@ -398,3 +398,10 @@ html[data-theme="dark"] .lo-toast.is-error { color: #2a0608; }
 @media (prefers-reduced-motion: reduce) {
   .lo *, .lo *::before, .lo *::after { transition: none !important; animation-duration: .01ms !important; }
 }
+
+.lo-banners fieldset{display:grid;gap:1rem;min-width:0;padding:0;border:0}
+.lo-banners label{display:grid;gap:.35rem;font-size:.85rem;font-weight:650}
+.lo-banners :is(input:not([type=checkbox]),select){width:100%;min-width:0;border:1px solid var(--lo-border,currentColor);border-radius:10px;background:var(--lo-surface,Canvas);color:inherit;padding:.7rem}
+.lo-banners .lo-banner-check{display:flex;align-items:center;gap:.55rem;min-height:40px}
+.lo-banner-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px}
+.lo-banners .lo-chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}

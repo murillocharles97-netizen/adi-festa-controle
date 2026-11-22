@@ -441,6 +441,75 @@
     const attrs=`id="${id}" name="${key}" data-field="${key}" maxlength="${max}" ${placeholder?`placeholder="${esc(placeholder)}"`:''} ${inputmode?`inputmode="${inputmode}"`:''} autocomplete="${autocomplete}" aria-describedby="${desc}" ${err?'aria-invalid="true"':''} ${required?'required':''} ${disabled?'disabled':''}`;
     return `<div class="lo-field"><label for="${id}">${label}${required?'':' <span class="lo-optional">(opcional)</span>'}</label>${multiline?`<textarea ${attrs} rows="3">${esc(value)}</textarea>`:`<input type="${type}" ${attrs} value="${esc(value)}">`}${max>=120&&multiline?`<small class="lo-counter" data-counter="${key}">${String(value||'').length}/${max}</small>`:''}${hint?`<small id="${id}-hint">${hint}</small>`:''}<small class="lo-error" id="${id}-error" role="alert">${esc(err)}</small></div>`;
   }
+  let layoutSession = null;
+  function currentLayout() {
+    const key = JSON.stringify([state.key, state.spaceId]);
+    if (layoutSession?.key !== key) layoutSession = {key, index:0, value:K.storefrontLayout({
+      ...state.draft.settings, acceptingOrders:store()?.checkoutEnabled, banners:store()?.presentation?.banners,
+      storefrontLayout:store()?.presentation?.storefrontLayout
+    })};
+    return layoutSession;
+  }
+  function layoutEditor() {
+    const session = currentLayout(), layout = session.value, secondary = session.index === -1;
+    const slide = secondary ? layout.secondary : layout.slides[session.index];
+    const field = (key,label,max) => `<label>${label}<input data-slide-field="${key}" maxlength="${max}" value="${esc(slide[key])}"></label>`;
+    return `<section class="lo-panel lo-banners"><header class="lo-panel-head"><div><h2>Layout e Banners</h2><p>Experimente o layout na prévia desta sessão. As alterações de banners ainda não podem ser publicadas.</p></div></header>
+    <fieldset ${owner()?'':'disabled'}><div class="lo-chips" aria-label="Escolha o banner">${layout.slides.map((s,i)=>`<button class="lo-chip" data-slide-index="${i}" aria-pressed="${i===session.index}">${i+1} · ${esc(s.title || 'Banner')}${s.active?'':' (oculto)'}</button>`).join('')}<button class="lo-chip" data-slide-index="-1" aria-pressed="${secondary}">Banner secundário</button></div>
+    <label>Modelo rápido<select data-slide-template>${Object.entries(K.bannerTemplates).map(([id,[name]])=>`<option value="${id}" ${slide.template===id?'selected':''}>${esc(name)}</option>`).join('')}</select></label>
+    ${field('title','Título',100)}${field('description','Descrição',300)}<div class="lo-banner-pair">${field('button','Texto do botão',40)}
+    <label>Destino<select data-slide-field="target">${[['catalog','Catálogo'],['featured','Destaques'],['cart','Carrinho'],...(slide.target.startsWith('http')?[[slide.target,'Link publicado']]:[])].map(([id,n])=>`<option value="${esc(id)}" ${slide.target===id?'selected':''}>${n}</option>`).join('')}</select></label></div>
+    <label>Arte personalizada<input type="file" data-slide-image accept="image/jpeg,image/png,image/webp"></label>
+    ${slide.imageUrl?'<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="clear">Voltar à arte do modelo</button>':''}
+    <label class="lo-banner-check"><input type="checkbox" data-slide-field="active" ${slide.active?'checked':''}> Exibir este banner</label>
+    <div class="lo-actions"><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="add">Adicionar slide</button>
+    ${secondary?'':`<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="up" ${session.index===0?'disabled':''}>Mover antes</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="down" ${session.index===layout.slides.length-1?'disabled':''}>Mover depois</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="remove" ${layout.slides.length===1?'disabled':''}>Remover slide</button>`}</div>
+    <label class="lo-banner-check"><input type="checkbox" data-slide-featured ${layout.featured?'checked':''}> Exibir seção de destaques</label></fieldset></section>`;
+  }
+  function refreshLayoutEditor() {
+    const panel=document.querySelector('#store-v2 .lo-banners');
+    if(panel) panel.outerHTML=layoutEditor();
+    schedulePreview();
+  }
+  function editLayout(event) {
+    const el=event.target.closest('button,input,select');
+    if(!el?.closest('.lo-banners') || !owner()) return;
+    const session=currentLayout(), layout=session.value, slides=layout.slides, index=session.index;
+    const slide=index===-1?layout.secondary:slides[index];
+    if (event.type==='click') {
+      if(el.dataset.slideIndex!==undefined) session.index=Number(el.dataset.slideIndex);
+      else switch(el.dataset.slideAction) {
+        case 'add': slides.push(K.bannerSlide('easy')); session.index=slides.length-1; break;
+        case 'remove': if(index<0||slides.length===1)return; slides.splice(index,1);session.index=Math.min(index,slides.length-1);break;
+        case 'up': case 'down': {
+          const next=index+(el.dataset.slideAction==='up'?-1:1);
+          if(index<0||next<0||next>=slides.length)return;
+          [slides[index],slides[next]]=[slides[next],slides[index]]; session.index=next;break;
+        }
+        case 'clear': slide.imageUrl='';break;
+        default:return;
+      }
+      refreshLayoutEditor();
+      const buttons=document.querySelectorAll('.lo-banners [data-slide-index]');
+      [...buttons].find(b=>Number(b.dataset.slideIndex)===session.index)?.focus();
+    } else if (el.hasAttribute('data-slide-template') && event.type==='change') {
+      Object.assign(slide,K.bannerSlide(el.value),{active:slide.active});refreshLayoutEditor();
+    } else if (el.hasAttribute('data-slide-featured')) {
+      layout.featured=el.checked;schedulePreview();
+    } else if (el.dataset.slideField) {
+      slide[el.dataset.slideField]=el.type==='checkbox'?el.checked:el.value;
+      const tab=document.querySelector(`[data-slide-index="${index}"]`);
+      if(index!==-1&&tab)tab.textContent=`${index+1} · ${slide.title||'Banner'}${slide.active?'':' (oculto)'}`;
+      schedulePreview();
+    } else if(el.hasAttribute('data-slide-image') && event.type==='change') {
+      const file=el.files?.[0]; if(!file)return;
+      if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>4*1024*1024){toast('Escolha uma imagem JPG, PNG ou WebP de até 4 MB.',true);return;}
+      const reader=new FileReader();
+      reader.onload=()=>{if(session!==layoutSession || !el.isConnected)return;slide.imageUrl=reader.result;refreshLayoutEditor();};
+      reader.onerror=()=>toast('Falha ao ler a imagem.',true);reader.readAsDataURL(file);
+    }
+  }
+
   function designView(){
     const d=state.draft.settings,ro=!owner(),current=K.paletteId(d),warn=K.colorWarning(d),pay=d.paymentMethods||[];
     const upload=uploadHtml;
@@ -448,7 +517,7 @@
       <section class="lo-panel" id="lo-sec-identity" aria-labelledby="lo-id-title"><header class="lo-panel-head"><div><h2 id="lo-id-title">Identidade</h2><p>O que o cliente vê primeiro.</p></div></header>
         ${fieldHtml({key:'publicName',label:'Nome da loja',value:d.publicName,max:100,required:true,disabled:ro})}
         ${fieldHtml({key:'welcomeText',label:'Descrição curta',value:d.welcomeText,max:300,multiline:true,placeholder:'Ex.: Doces artesanais feitos por encomenda. Entregamos no bairro.',disabled:ro})}
-        ${upload('logo')}${upload('cover')}</section>
+        ${upload('logo')}${upload('cover')}</section>${layoutEditor()}
       <section class="lo-panel" id="lo-sec-style" aria-labelledby="lo-style-title"><header class="lo-panel-head"><div><h2 id="lo-style-title">Estilo</h2><p>Escolha um estilo pronto. O texto se ajusta para continuar legível.</p></div></header>
         <div class="lo-palettes" role="radiogroup" aria-label="Estilo da loja">${K.PALETTES.map(p=>{const t=K.theme({primaryColor:p.primary,secondaryColor:p.secondary});return `<button type="button" class="lo-palette" role="radio" aria-checked="${current===p.id}" data-act="palette" data-id="${p.id}" style="--pb:${t.band};--pf:${t.onBand};--pa:${t.accent};--pt:${t.onAccent}" ${ro?'disabled':''}><span class="lo-palette-band"><b>Aa</b><i></i></span><span class="lo-palette-name">${p.name}</span></button>`;}).join('')}</div>
         <details class="lo-custom lo-custom-colors" ${current==='custom'?'open':''}><summary>Cores personalizadas</summary><div class="lo-colors"><label class="lo-color"><span>Destaque <small>botões e preços</small></span><input type="color" data-color="primaryColor" value="${esc(d.primaryColor||'#0f9f94')}" ${ro?'disabled':''}></label><label class="lo-color"><span>Faixa da marca <small>topo da loja</small></span><input type="color" data-color="secondaryColor" value="${esc(d.secondaryColor||'#0b2730')}" ${ro?'disabled':''}></label></div>${warn?`<p class="lo-warn" role="status">${icon('triangle-alert')}<span>${esc(warn)}</span></p>`:''}</details></section>
@@ -541,7 +610,7 @@
       if(!item){const x=pres(p.id);item={...p.src,category:x.category||p.baseCategory,featured:!!x.featured,displayOrder:Number(x.order||0),active:true};}
       return item;});
     let categories=[];try{categories=M.publicPresentation(d.presentation).categories;}catch{}
-    return {preview:true,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],
+    return {preview:true,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],storefrontLayout:currentLayout().value,
       serviceModes:[...(s.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(s.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],
       acceptingOrders:state.data.orderReception?.enabled===true,active:true,catalogVisible:true};
   }
@@ -659,6 +728,7 @@
   function bind(root){
     if(root.dataset.bound)return;root.dataset.bound='1';
     root.addEventListener('click',onClick);
+    for(const event of ['click','input','change'])root.addEventListener(event,editLayout);
     root.addEventListener('input',e=>{
       const el=e.target;
       if(el.matches('[data-q]')){clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.filter.q=el.value;mountGrid();},120);return;}
