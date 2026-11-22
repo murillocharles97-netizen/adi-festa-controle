@@ -56,8 +56,8 @@ test('login, planos e catálogo usam a marca da plataforma nos pontos corretos',
   assert.doesNotMatch(read('js/firebase/auth.js'), /auth-logo">AF/);
   const catalog = require('../functions/src/shared/plan-catalog');
   assert.deepEqual(Object.values(catalog.plans).map(plan=>plan.name), ['Essencial','Gestão','Pro']);
-  assert.match(read('js/catalogo-publico.js'), /Criado com <b>VECONI<\/b>/);
-  assert.match(read('js/catalogo-publico.js'), /catalog\.publicName\|\|catalog\.businessName/);
+  assert.match(read('js/catalogo-publico.js'), /Loja criada com VECONI/);
+  assert.match(read('js/catalogo-publico.js'), /catalog\.publicName\|\|'Loja'/);
   assert.match(read('functions/src/services/mercado-pago-service.js'), /reason:`VECONI - \$\{plan\.name\}`/);
 });
 

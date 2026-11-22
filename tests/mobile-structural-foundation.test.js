@@ -30,7 +30,7 @@ test("CRM, Campanhas, Catálogo e Pedidos usam a mesma camada sem novas leituras
   assert.ok(index.indexOf("engagement-operations.css") < index.indexOf("mobile-components.css"));
   assert.match(modules, /mobile-page/);
   assert.match(modules, /mobile-modal/);
-  assert.match(read("js/online-store-ui.js"), /store-upload-actions/);
+  assert.match(read("js/online-store-ui.js"), /lo-upload-actions/);
   assert.match(modules, /Progresso da campanha/);
   assert.match(modules, /Acompanhe, filtre e atenda os pedidos da sua loja/);
   assert.doesNotMatch(modules, /\b(?:getDocs|getDoc|onSnapshot|collection|query)\s*\(/);
@@ -38,9 +38,10 @@ test("CRM, Campanhas, Catálogo e Pedidos usam a mesma camada sem novas leituras
 
 test("editores V2 mantêm seleção e uploads no painel próprio", () => {
   const catalog = read("js/online-store-ui.js");
-  assert.match(catalog, /data-store-image/);
-  assert.match(catalog, /store-check/);
+  // V3: envio de logo/capa em cartões próprios, seleção por cartão e organização em folha própria.
+  assert.match(catalog, /data-upload="\$\{slot\}"/);
+  assert.match(catalog, /lo-check/);
   assert.doesNotMatch(catalog, /<label>Imagem(?: própria)?<input type="file"/);
-  assert.match(catalog, /Ordem das categorias/);
-  assert.match(catalog, /Produtos deste espaço/);
+  assert.match(catalog, /Organizar a vitrine/);
+  assert.match(catalog, /role="\$\{sel\?'checkbox':'switch'\}"/);
 });

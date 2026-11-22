@@ -101,8 +101,9 @@ test("camada visual expõe ações, filtros completos, pedidos e editor do catá
   assert.equal(loadSegments(baseData()).templates.length >= 8, true);
   assert.match(campaign, /Progresso pendente \(fiado\)/);
   assert.match(campaign, /Clientes parados/);
-  assert.match(catalog, /Banner — URL HTTPS/);
-  assert.match(catalog, /data-store-image/);
+  // V3: imagens só por envio (sem campo de URL para o lojista digitar).
+  assert.doesNotMatch(catalog, /URL HTTPS/);
+  assert.match(catalog, /data-upload=/);
   const v2Orders=fs.readFileSync(path.join(__dirname, "../js/online-orders-ui.js"), "utf8");
   assert.match(v2Orders, /Histórico da loja anterior/);
   assert.match(v2Orders, /Somente consulta/);

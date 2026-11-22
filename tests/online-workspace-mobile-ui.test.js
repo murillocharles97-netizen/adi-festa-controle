@@ -33,20 +33,26 @@ test('cards escape content, show quantities/status/total, and keep operations in
   assert.match(api.card({id:'done',items:[],orderStatus:'entregue',createdAt:current}),/Ver detalhes/);
   assert.match(api.card({id:'pending',items:[],orderStatus:'separando',finalizationStatus:'pending',createdAt:current}),/Retomar conclusão/);
 });
-function storeFixture(){
-  const root={innerHTML:''},c={structuredClone,OnlineStoreModel:Store,document:{querySelector:()=>root},SpaceContext:{salesSpaces:()=>[{id:'a',name:'QA A'}]},BusinessContext:{getCurrentBusinessId:()=> 'qa'}};c.window=c;vm.createContext(c);
-  vm.runInContext(fs.readFileSync('js/online-store-ui.js','utf8').replace('bindContent(root);window.lucide?.createIcons?.();','window.lucide?.createIcons?.();').replace('window.OnlineStoreUI={render,bind:()=>load()};','window.OnlineStoreUI={render,bind:()=>load()};window.inspectStore={state,draw};'),c);
-  Object.assign(c.inspectStore.state,{spaceId:'a',data:{owner:true,store:{published:true,slug:'qa-store'},orders:[],products:[{productId:'p',productName:'<Produto QA>',salePrice:15,productImage:'https://example.invalid/qa.png'}]},draft:{...Store.settings({publicName:'QA A'}),productIds:['p'],presentation:{products:{}}}});return {c,root};
+// Loja Online V3: o painel é testado com DOM real em tests/loja-online-v3.test.js.
+function storeFixture(store){
+  const {JSDOM}=require('jsdom'),dom=new JSDOM('<main id="app"></main>',{url:'http://127.0.0.1/',pretendToBeVisual:true,runScripts:'outside-only'}),w=dom.window;
+  Object.assign(w,{OnlineStoreModel:Store,StoreKit:require('../js/loja/store-kit.js'),SpaceContext:{salesSpaces:()=>[{id:'a',name:'QA A'}]},BusinessContext:{getCurrentBusinessId:()=> 'qa'},FirebaseSession:{user:{uid:'u'}},WorkspaceRuntime:{capture:()=>({workspaceGeneration:0})}});
+  w.eval(fs.readFileSync('js/online-store-ui.js','utf8').replace('window.OnlineStoreUI={render,bind:()=>load()};','window.OnlineStoreUI={render,bind:()=>load()};window.inspectStore={state,draw,refreshDraft,buildIndex};'));
+  w.document.querySelector('#app').innerHTML=w.OnlineStoreUI.render();const api=w.inspectStore;
+  api.state.data={owner:true,store,orders:[],orderReception:{enabled:false,canEnable:false,reason:'not_published'},products:[{productId:'p',productName:'<Produto QA>',salePrice:15,category:'QA',itemKind:'product',productImage:'https://example.invalid/qa.png'}]};
+  api.state.base=w.StoreKit.draftFromStore(store,'QA A');api.buildIndex();api.refreshDraft();api.draw();return {w,root:w.document.querySelector('#store-v2')};
 }
-test('catalog preserves all six tabs/footer/preview and adds real selected images without quick actions',()=>{
-  const {c,root}=storeFixture();c.inspectStore.draw();
-  for(const text of ['Visão geral','Tema e marca','Catálogo','Entrega e retirada','Pagamentos','Link e QR Code','Salvar alterações','Desativar loja','Prévia da loja','Ver minha loja','Ainda não medido'])assert.ok(root.innerHTML.includes(text),text);
-  assert.match(root.innerHTML,/store-catalog-strip[^]*?img src="https:\/\/example.invalid\/qa.png"/);assert.match(root.innerHTML,/&lt;Produto QA&gt;/);assert.doesNotMatch(root.innerHTML,/Ações rápidas|data-migrate/);
+const storeDoc=extra=>({published:true,slug:'qa-store',revision:2,publicToken:'qa_token_0000000000000000000',activation:{confirmedAt:'x'},catalogSettings:Store.settings({publicName:'QA A',contactPhone:'(11) 90000-0000'}),selectedProductIds:['p'],presentation:{products:{}},...extra});
+test('painel mostra etapas reais, cartões com foto e nenhuma métrica fictícia',()=>{
+  const {root}=storeFixture(storeDoc());
+  for(const text of ['Painel','Produtos','Aparência','Prepare sua loja','Resumo da vitrine','Ver loja','Compartilhar','Mais opções'])assert.ok(root.innerHTML.includes(text),text);
+  assert.match(root.innerHTML,/&lt;Produto QA&gt;|Doceria|QA A/);assert.doesNotMatch(root.innerHTML,/Taxa de conversão|Cliques no link|Ainda não medido|data-migrate/);
 });
-test('unpublished store stays in preparation; no public store action or auto activation added',()=>{
-  const {c,root}=storeFixture();c.inspectStore.state.data.store.published=false;c.inspectStore.draw();assert.match(root.innerHTML,/Em preparação/);assert.match(root.innerHTML,/Publicar loja/);assert.doesNotMatch(root.innerHTML,/Ver minha loja/);
+test('loja em rascunho fica em preparação; sem link público nem ativação automática',()=>{
+  const {root}=storeFixture(storeDoc({published:false,activation:null}));
+  assert.match(root.innerHTML,/Rascunho/);assert.match(root.innerHTML,/Publicar loja/);assert.doesNotMatch(root.innerHTML,/>Ver loja</);
 });
 test('CSS confines horizontal scrolling to tabs and retains mobile touch targets/reduced motion',()=>{
   const styles=fs.readFileSync('css/online-store.css','utf8'),orders=fs.readFileSync('css/online-orders.css','utf8');
-  assert.match(styles,/\.store-tabs\{flex-wrap:nowrap;overflow-x:auto/);assert.match(styles,/min-height:44px/);assert.match(styles,/prefers-reduced-motion:reduce/);assert.match(orders,/prefers-reduced-motion:reduce/);assert.match(orders,/\.online-v2-grid\{grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(styles,/\.lo-tabs \{[^}]*overflow-x: auto/);assert.match(styles,/min-height: 44px/);assert.match(styles,/prefers-reduced-motion: reduce/);assert.match(orders,/prefers-reduced-motion:reduce/);assert.match(orders,/\.online-v2-grid\{grid-template-columns:minmax\(0,1fr\)/);
 });

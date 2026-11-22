@@ -26,6 +26,6 @@ test('failed reconstructable cache write does not undo successful public refresh
   const s=harness();s.DB.localRecords.transaction=async()=>{throw Error('quota');};assert.equal(await s.refreshPublicAvailability(),true);assert.equal(s.catalog.items[0].availableQuantity,2);assert.equal(s.errors.length,0);
 });
 test('catalog return refresh is registered AFTER navigation, without a premature microtask',()=>{
-  const navigation=source.indexOf("root.addEventListener('click',event=>{const add="),refresh=source.indexOf("root.addEventListener('click',event=>{if(event.target.closest('[data-view=\"catalog\"]'))refreshPublicAvailability();});");
+  const navigation=source.search(/root\.addEventListener\('click',event=>\{\r?\n  const t=event\.target;/),refresh=source.indexOf("root.addEventListener('click',event=>{if(!preview&&event.target.closest('[data-go=\"catalog\"],[data-back=\"catalog\"]'))refreshPublicAvailability();});");
   assert.ok(navigation>0&&refresh>navigation);assert.equal(source.includes('queueMicrotask(()=>refreshPublicAvailability())'),false);
 });

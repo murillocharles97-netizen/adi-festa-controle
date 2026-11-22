@@ -17,8 +17,9 @@ assert.match(service,/schemaVersion:6,catalogType:'space_store'/);
 assert.doesNotMatch(bridge,/setDoc|onSnapshot|addEventListener/);
 assert.doesNotMatch(bridge,/CatalogoUniversal\?\.ensure\?\.\(\)/);
 assert.doesNotMatch(portal,/legacy-token-redirected|redirectToken/);
-assert.match(portal,/httpsCallable\(functions,'identifyCatalogCustomer'\)/);
-assert.match(portal,/httpsCallable\(functions,'submitCatalogOrder'\)/);
+// V3: a identificação do portal legado era inalcançável (a loja só aceita schemaVersion 6) e saiu da página pública.
+assert.doesNotMatch(portal,/identifyCatalogCustomer/);
+assert.match(portal,/callable\('submitCatalogOrder',payload\)/);
 assert.doesNotMatch(portal,/getDocs\(collection/);
 assert.match(functions,/exports\.identifyCatalogCustomer=onCall/);
 assert.match(functions,/exports\.submitCatalogOrder=onCall/);

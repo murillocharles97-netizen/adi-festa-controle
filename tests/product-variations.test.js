@@ -123,7 +123,7 @@ test('integrações usam variação sem listeners por card',()=>{
   assert.doesNotMatch(bootstrapPull,/["']productVariants["']/);
   assert.match(sync,/listWhere\(\s*["']parentProductId["']/);
   assert.match(catalog,/variants/);
-  assert.match(portal,/variantId/);
+  assert.match(portal,/variantsOf\(item\)/);assert.match(portal,/\$\{item\.id\}::\$\{v\.id\}/);
   assert.match(rules,/match \/productVariants\/\{variantId\}/);
   assert.match(desktopSales,/product\.itemKind === "service"/);
   assert.match(desktopSales,/Serviço · sem estoque físico/);
