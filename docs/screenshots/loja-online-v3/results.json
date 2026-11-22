@@ -1,0 +1,929 @@
+{
+ "generatedAt": "2026-11-22T07:12:21.488Z",
+ "captures": [
+  {
+   "file": "painel-light-360.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-light-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-light-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "aparencia-light-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-dark-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-dark-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "aparencia-dark-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-light-412.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-light-768.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-light-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-light-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "aparencia-light-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-dark-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-dark-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "aparencia-dark-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "painel-light-1440.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-ativando-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-salvo-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "produtos-selecao-em-lote-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "organizar-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "publicar-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "publicado-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "compartilhar-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "erro-salvamento-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "aparencia-validacao-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "previa-tela-cheia-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-new-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-new-link-ocupado-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-new-criada-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-new-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-draft-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-paused-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-nophone-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-readonly-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "estado-overlimit-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "desempenho-2000-produtos-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-360.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-completa-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-412.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-768.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-completa-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-vitrine-1440.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-produto-variacao-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-com-itens-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-carrinho-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-validacao-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-finalizar-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-finalizar-completa-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-enviado-whatsapp-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-produto-variacao-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-com-itens-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-validacao-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-finalizar-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-finalizar-completa-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-enviado-whatsapp-1366.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-estado-pausada-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-estado-sem-produtos-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-estado-sem-whatsapp-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "loja-estado-nao-encontrada-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  },
+  {
+   "file": "emulador-loja-real-390.png",
+   "overflow": 0,
+   "small": [],
+   "unnamed": [],
+   "imgsWithoutAlt": 0
+  }
+ ],
+ "checks": [
+  {
+   "name": "painel light 360: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel light 390: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel dark 390: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel light 412: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel light 768: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel light 1366: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel dark 1366: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel light 1440: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "toque no cartão ativa o produto e só mostra salvo após confirmar",
+   "ok": true,
+   "detail": "{\"pending\":\"Alterações pendentes…\",\"on\":true,\"bar\":\"Rascunho salvo às 04:12. O cliente ainda vê a versão anterior.Publicar alterações\",\"calls\":1}"
+  },
+  {
+   "name": "teclado: Espaço alterna o produto e mantém o foco",
+   "ok": true,
+   "detail": "false"
+  },
+  {
+   "name": "teclado: Alt+↓ reordena categorias",
+   "ok": true,
+   "detail": "Bolos > Doces > Bebidas > Biscoitos > Presentes > Tortas"
+  },
+  {
+   "name": "publicação confirmada pelo servidor",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "erro de rede mostra \"Não salvo\" e oferece tentar de novo",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "tentar de novo salva a alteração pendente",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "WhatsApp inválido é apontado e não é salvo",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "painel: interações sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado new",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "criar loja leva à próxima etapa",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado new: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado new",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado new: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado draft",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado draft: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado paused",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado paused: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado nophone",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado nophone: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado readonly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado readonly: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado overlimit",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "estado overlimit: sem erros de página",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "2.000 produtos: monta no máximo 36 cartões",
+   "ok": true,
+   "detail": "{\"open\":48,\"cards\":36,\"search\":48,\"found\":[\"Cesta café da manhã 83\"],\"toggle\":0.3,\"dom\":130}"
+  },
+  {
+   "name": "2.000 produtos: busca encontra item fora do lote montado",
+   "ok": true,
+   "detail": "Cesta café da manhã 83"
+  },
+  {
+   "name": "loja 360: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 412: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 768: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1440: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: opção esgotada fica indisponível",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: sem nome não abre o WhatsApp",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: abre wa.me com o número publicado",
+   "ok": true,
+   "detail": "https://wa.me/5511900000000?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20Aurora.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A2x%20Bolo%20de%20pote%20(Ninho%20com%20morango)%20%E2%80%94%20R%24%2032%2C00%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%203%2C50%0A2x%20Cookie%20com%20gotas%20%E2%80%94%20R%24%2014%2C00%0A%0ASubtotal%3A%20R%24%2049%2C50%0AEntrega%3A%20Entregar%20no%20endere%C3%A7o%0AEndere%C3%A7o%3A%20Rua%20Fict%C3%ADcia%2C%20200%20%E2%80%94%20Jardim%20QA%0ATaxa%20de%20entrega%3A%20a%20combinar%0APagamento%3A%20Pix%0AObserva%C3%A7%C3%B5es%3A%20Sem%20granulado%20colorido%2C%20por%20favor.%0ANome%3A%20Maria%20Teste%0A%0A*Total%20dos%20produtos%3A%20R%24%2049%2C50*%0AA%20taxa%20de%20entrega%20ainda%20n%C3%A3o%20est%C3%A1%20inclu%C3%ADda.%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!"
+  },
+  {
+   "name": "loja 390: mensagem contém \"Olá! Gostaria de fazer um pedido pela loja Doceria Aurora.\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"2x Bolo de pote (Ninho com morango) — R$ 32,00\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"1x Brigadeiro gourmet — R$ 3,50\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"2x Cookie com gotas — R$ 14,00\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Subtotal: R$ 49,50\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Entrega: Entregar no endereço\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Endereço: Rua Fictícia, 200 — Jardim QA\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Taxa de entrega: a combinar\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Pagamento: Pix\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Observações: Sem granulado colorido, por favor.\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Nome: Maria Teste\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"*Total dos produtos: R$ 49,50*\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: mensagem contém \"Aguardo a confirmação da disponibilidade e do pedido. Obrigado!\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: abrir o WhatsApp não registra pedido",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: carrinho continua até o cliente confirmar",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 390: fluxo sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: opção esgotada fica indisponível",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: sem nome não abre o WhatsApp",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: abre wa.me com o número publicado",
+   "ok": true,
+   "detail": "https://wa.me/5511900000000?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20Aurora.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A2x%20Bolo%20de%20pote%20(Ninho%20com%20morango)%20%E2%80%94%20R%24%2032%2C00%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%203%2C50%0A2x%20Cookie%20com%20gotas%20%E2%80%94%20R%24%2014%2C00%0A%0ASubtotal%3A%20R%24%2049%2C50%0AEntrega%3A%20Entregar%20no%20endere%C3%A7o%0AEndere%C3%A7o%3A%20Rua%20Fict%C3%ADcia%2C%20200%20%E2%80%94%20Jardim%20QA%0ATaxa%20de%20entrega%3A%20a%20combinar%0APagamento%3A%20Pix%0AObserva%C3%A7%C3%B5es%3A%20Sem%20granulado%20colorido%2C%20por%20favor.%0ANome%3A%20Maria%20Teste%0A%0A*Total%20dos%20produtos%3A%20R%24%2049%2C50*%0AA%20taxa%20de%20entrega%20ainda%20n%C3%A3o%20est%C3%A1%20inclu%C3%ADda.%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!"
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Olá! Gostaria de fazer um pedido pela loja Doceria Aurora.\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"2x Bolo de pote (Ninho com morango) — R$ 32,00\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"1x Brigadeiro gourmet — R$ 3,50\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"2x Cookie com gotas — R$ 14,00\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Subtotal: R$ 49,50\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Entrega: Entregar no endereço\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Endereço: Rua Fictícia, 200 — Jardim QA\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Taxa de entrega: a combinar\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Pagamento: Pix\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Observações: Sem granulado colorido, por favor.\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Nome: Maria Teste\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"*Total dos produtos: R$ 49,50*\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: mensagem contém \"Aguardo a confirmação da disponibilidade e do pedido. Obrigado!\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: abrir o WhatsApp não registra pedido",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: carrinho continua até o cliente confirmar",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja 1366: fluxo sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja: teclado abre e fecha o produto devolvendo o foco",
+   "ok": true,
+   "detail": "{\"inside\":true,\"back\":true}"
+  },
+  {
+   "name": "loja estado pausada",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado pausada: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado sem-produtos",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado sem-produtos: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado sem-whatsapp",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja sem WhatsApp não oferece adicionar",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado sem-whatsapp: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado nao-encontrada",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja estado nao-encontrada: sem erros",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "loja com 400 produtos responde à busca",
+   "ok": true,
+   "detail": "{\"items\":400,\"cards\":16,\"searchMs\":75,\"dom\":286}"
+  },
+  {
+   "name": "emulador: WhatsApp do documento real e mensagem com a loja publicada",
+   "ok": true,
+   "detail": "https://wa.me/5511912345678?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20V3%20QA.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%205%2C00%0A%0ASubtotal%3A%20R%24%205%2C00%0AEntrega%3A%20Retirada%20na%20loja%0ALocal%20de%20retirada%3A%20Rua%20Fict%C3%ADcia%2C%201%0ANome%3A%20Cliente%20Emulador%0A%0A*Total%20dos%20produtos%3A%20R%24%205%2C00*%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!"
+  },
+  {
+   "name": "emulador: documento real sem erros na loja",
+   "ok": true,
+   "detail": ""
+  }
+ ],
+ "performance": {
+  "admin2000": {
+   "open": 48,
+   "cards": 36,
+   "search": 48,
+   "found": [
+    "Cesta café da manhã 83"
+   ],
+   "toggle": 0.3,
+   "dom": 130
+  },
+  "store400": {
+   "items": 400,
+   "cards": 16,
+   "searchMs": 75,
+   "dom": 286,
+   "domContentLoaded": 40,
+   "load": 41
+  }
+ },
+ "whatsapp": [
+  {
+   "width": 390,
+   "url": "https://wa.me/5511900000000?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20Aurora.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A2x%20Bolo%20de%20pote%20(Ninho%20com%20morango)%20%E2%80%94%20R%24%2032%2C00%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%203%2C50%0A2x%20Cookie%20com%20gotas%20%E2%80%94%20R%24%2014%2C00%0A%0ASubtotal%3A%20R%24%2049%2C50%0AEntrega%3A%20Entregar%20no%20endere%C3%A7o%0AEndere%C3%A7o%3A%20Rua%20Fict%C3%ADcia%2C%20200%20%E2%80%94%20Jardim%20QA%0ATaxa%20de%20entrega%3A%20a%20combinar%0APagamento%3A%20Pix%0AObserva%C3%A7%C3%B5es%3A%20Sem%20granulado%20colorido%2C%20por%20favor.%0ANome%3A%20Maria%20Teste%0A%0A*Total%20dos%20produtos%3A%20R%24%2049%2C50*%0AA%20taxa%20de%20entrega%20ainda%20n%C3%A3o%20est%C3%A1%20inclu%C3%ADda.%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!",
+   "text": "Olá! Gostaria de fazer um pedido pela loja Doceria Aurora.\n\n🛒 *Meu pedido*\n2x Bolo de pote (Ninho com morango) — R$ 32,00\n1x Brigadeiro gourmet — R$ 3,50\n2x Cookie com gotas — R$ 14,00\n\nSubtotal: R$ 49,50\nEntrega: Entregar no endereço\nEndereço: Rua Fictícia, 200 — Jardim QA\nTaxa de entrega: a combinar\nPagamento: Pix\nObservações: Sem granulado colorido, por favor.\nNome: Maria Teste\n\n*Total dos produtos: R$ 49,50*\nA taxa de entrega ainda não está incluída.\n\nAguardo a confirmação da disponibilidade e do pedido. Obrigado!"
+  },
+  {
+   "width": 1366,
+   "url": "https://wa.me/5511900000000?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20Aurora.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A2x%20Bolo%20de%20pote%20(Ninho%20com%20morango)%20%E2%80%94%20R%24%2032%2C00%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%203%2C50%0A2x%20Cookie%20com%20gotas%20%E2%80%94%20R%24%2014%2C00%0A%0ASubtotal%3A%20R%24%2049%2C50%0AEntrega%3A%20Entregar%20no%20endere%C3%A7o%0AEndere%C3%A7o%3A%20Rua%20Fict%C3%ADcia%2C%20200%20%E2%80%94%20Jardim%20QA%0ATaxa%20de%20entrega%3A%20a%20combinar%0APagamento%3A%20Pix%0AObserva%C3%A7%C3%B5es%3A%20Sem%20granulado%20colorido%2C%20por%20favor.%0ANome%3A%20Maria%20Teste%0A%0A*Total%20dos%20produtos%3A%20R%24%2049%2C50*%0AA%20taxa%20de%20entrega%20ainda%20n%C3%A3o%20est%C3%A1%20inclu%C3%ADda.%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!",
+   "text": "Olá! Gostaria de fazer um pedido pela loja Doceria Aurora.\n\n🛒 *Meu pedido*\n2x Bolo de pote (Ninho com morango) — R$ 32,00\n1x Brigadeiro gourmet — R$ 3,50\n2x Cookie com gotas — R$ 14,00\n\nSubtotal: R$ 49,50\nEntrega: Entregar no endereço\nEndereço: Rua Fictícia, 200 — Jardim QA\nTaxa de entrega: a combinar\nPagamento: Pix\nObservações: Sem granulado colorido, por favor.\nNome: Maria Teste\n\n*Total dos produtos: R$ 49,50*\nA taxa de entrega ainda não está incluída.\n\nAguardo a confirmação da disponibilidade e do pedido. Obrigado!"
+  },
+  {
+   "source": "emulador",
+   "url": "https://wa.me/5511912345678?text=Ol%C3%A1!%20Gostaria%20de%20fazer%20um%20pedido%20pela%20loja%20Doceria%20V3%20QA.%0A%0A%F0%9F%9B%92%20*Meu%20pedido*%0A1x%20Brigadeiro%20gourmet%20%E2%80%94%20R%24%205%2C00%0A%0ASubtotal%3A%20R%24%205%2C00%0AEntrega%3A%20Retirada%20na%20loja%0ALocal%20de%20retirada%3A%20Rua%20Fict%C3%ADcia%2C%201%0ANome%3A%20Cliente%20Emulador%0A%0A*Total%20dos%20produtos%3A%20R%24%205%2C00*%0A%0AAguardo%20a%20confirma%C3%A7%C3%A3o%20da%20disponibilidade%20e%20do%20pedido.%20Obrigado!",
+   "text": "Olá! Gostaria de fazer um pedido pela loja Doceria V3 QA.\n\n🛒 *Meu pedido*\n1x Brigadeiro gourmet — R$ 5,00\n\nSubtotal: R$ 5,00\nEntrega: Retirada na loja\nLocal de retirada: Rua Fictícia, 1\nNome: Cliente Emulador\n\n*Total dos produtos: R$ 5,00*\n\nAguardo a confirmação da disponibilidade e do pedido. Obrigado!"
+  }
+ ],
+ "problems": []
+}

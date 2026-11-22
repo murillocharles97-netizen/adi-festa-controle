@@ -70,11 +70,14 @@ const FIREBASE_STUBS = {
   'firebase-app.js': 'export const initializeApp=()=>({});export const getApp=()=>({});export const getApps=()=>[];',
   'firebase-auth.js': 'export const getAuth=()=>({});export const setPersistence=async()=>true;export const browserLocalPersistence={};',
   'firebase-firestore.js': 'export const initializeFirestore=()=>({});export const memoryLocalCache=()=>({});export const onSnapshot=()=>()=>{};export const doc=(db,...s)=>({path:s.join("/"),id:s[s.length-1]});export const getDoc=async r=>{window.__QA_READS__=(window.__QA_READS__||0)+1;const d=(window.__QA_DOCS__||{})[r.path];if(window.__QA_OFFLINE__)throw Object.assign(Error("offline"),{code:"unavailable"});return {id:r.id,exists:()=>!!d,data:()=>d?structuredClone(d):undefined};};',
-  'firebase-functions.js': 'export const getFunctions=()=>({});export const httpsCallable=(f,name)=>async data=>{if(!window.__QA_CALL__)throw Object.assign(Error("sem backend"),{code:"functions/unavailable"});return window.__QA_CALL__(name,data);};',
+  'firebase-functions.js': 'export const getFunctions=()=>({});export const httpsCallable=(f,name)=>async data=>{(window.__QA_CALLS__=window.__QA_CALLS__||[]).push(name);if(!window.__QA_CALL__)throw Object.assign(Error("sem backend"),{code:"functions/unavailable"});return window.__QA_CALL__(name,data);};',
 };
 
-async function openStore(browser, base, { width = 390, height = 844, slug = 'doceria-aurora', doc = null, query = '', offline = false } = {}) {
-  const page = await browser.newPage(), errors = [];
+async function openStore(browser, base, { width = 390, height = 844, slug = 'doceria-aurora', doc = null, query = '', offline = false, fresh = true } = {}) {
+  // Cada abertura usa um contexto anônimo: carrinho e dados do cliente não vazam entre cenários.
+  const ctx = fresh ? await (browser.createBrowserContext ? browser.createBrowserContext() : browser.createIncognitoBrowserContext()) : browser;
+  const page = await ctx.newPage(), errors = [];
+  page.once('close', () => { if (fresh) ctx.close().catch(() => {}); });
   page.on('pageerror', e => errors.push(String(e.stack || e.message).split(/\n/).slice(0, 3).join(' | ')));
   page.on('console', m => { if (m.type() === 'error' && !/favicon|ERR_|404|Public catalog load/.test(m.text())) errors.push(m.text()); });
   await interceptImages(page);
@@ -92,9 +95,9 @@ async function openStore(browser, base, { width = 390, height = 844, slug = 'doc
   return { page, errors };
 }
 
-async function launch() { return puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--font-render-hinting=none'] }); }
+async function launch() { return puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--font-render-hinting=none', '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1'] }); }
 
-async function openAdmin(browser, base, { width = 390, height = 844, theme = 'light', scenario = 'published', count = 24, latency = 120 } = {}) {
+async function openAdmin(browser, base, { width = 390, height = 844, theme = 'light', scenario = 'published', count = 24, latency = 120, select } = {}) {
   const page = await browser.newPage(), errors = [];
   page.on('pageerror', e => errors.push(String(e.stack || e.message).split(/\n/).slice(0, 3).join(' | ')));
   // "[BOOT] app mount failed" (mountHome) já acontece no fixture do shell sem este módulo: ignorado.
@@ -105,7 +108,7 @@ async function openAdmin(browser, base, { width = 390, height = 844, theme = 'li
   await page.goto(base + '/tests/desktop-shell-content.fixture.html?visual=inicio');
   await page.waitForFunction(() => document.body.dataset.visualReady === 'inicio', { timeout: 20000 });
   for (const src of ['/functions/src/shared/online-store.js', '/js/loja/store-kit.js']) await page.addScriptTag({ url: base + src });
-  await page.evaluate(qa => { window.__LOJA_QA__ = qa; }, { scenario, count, latency });
+  await page.evaluate(qa => { window.__LOJA_QA__ = qa; }, { scenario, count, latency, ...(select != null ? { select } : {}) });
   await page.addScriptTag({ url: base + '/tests/fixtures/online-store-v3-backend.js' });
   await page.addScriptTag({ url: base + '/js/online-store-ui.js' });
   await page.evaluate(theme => {
@@ -114,7 +117,7 @@ async function openAdmin(browser, base, { width = 390, height = 844, theme = 'li
     window.FirebaseSession = { ...window.FirebaseSession, businessId: 'loja-qa-business', user: { uid: 'loja-qa-owner' } };
     window.SpaceContext = { ...window.SpaceContext, salesSpaces: () => spaces, salesId: () => spaces[0].id, list: () => spaces };
     DB.alterar(d => { d.produtos = window.__lojaQA.raw.map(p => ({ ...p })); d.variacoesProdutos = window.__lojaQA.variants.map(v => ({ ...v })); });
-    window.OnlineStorePreviewUrl = '/catalogo.html?preview=1';
+    window.OnlineStorePreviewUrl = '/catalogo.html?preview=1'; window.OnlineStoreAssetBase = '/';
     window.VeconiFluxo?.theme?.set?.(theme); document.documentElement.dataset.theme = theme;
     document.querySelector('#modal').innerHTML = '';
     Router.ir('catalogo');

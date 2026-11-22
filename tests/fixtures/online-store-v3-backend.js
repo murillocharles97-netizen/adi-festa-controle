@@ -24,7 +24,7 @@
   }
   const spaces=[{id:'qa-space-a',name:'Doceria Aurora'},{id:'qa-space-b',name:'Quiosque Shopping'}];
   const stores=new Map(),slugs=new Map([['loja-ocupada',{businessId:'outra-empresa',storeId:'store_x'}]]),publicDocs=new Map();
-  const select=raw.slice(0,Math.min(raw.length,scenario==='large'?180:14)).map(p=>p.id);
+  const select=raw.slice(0,Math.min(raw.length,qa.select??(scenario==='large'?180:14))).map(p=>p.id);
   if(scenario!=='new'){
     const s={id:'store_qa_a',kind:'space_store',schemaVersion:2,businessId:BUSINESS,spaceId:'qa-space-a',publicToken:'qa_public_token_aurora_000000000000',slug:'doceria-aurora',revision:3,workspaceGeneration:0,v2Enabled:scenario!=='draft',
       catalogSettings:M.settings({publicName:'Doceria Aurora',welcomeText:'Doces artesanais feitos por encomenda. Entregamos no bairro Jardim e região.',primaryColor:'#c23b6a',secondaryColor:'#fbe7ee',contactPhone:scenario==='nophone'?'':'(11) 90000-0000',instagram:'@doceria.aurora.qa',openingHours:'Ter. a sáb., das 9h às 19h',pickupEnabled:true,deliveryEnabled:true,pickupAddress:'Rua Fictícia, 100 — Jardim QA',deliveryInstructions:'Entregamos no Jardim QA e bairros vizinhos.',logoUrl:`${IMG}logo/aurora.svg`,coverUrl:`${IMG}cover/aurora.svg`,paymentMethods:['pix','dinheiro','cartao']}),
