@@ -26,3 +26,30 @@
 }
 @media(max-width:360px){.online-v2-summary-card{padding:12px 10px;gap:4px 7px;grid-template-columns:28px 1fr}.online-v2-summary-icon{width:28px;height:32px}.online-v2-summary-card>span:last-child{font-size:10px}.online-v2-card-footer>.btn{width:100%}.online-v2-heading h1{font-size:24px}}
 @media(prefers-reduced-motion:reduce){.online-v2-summary-card{transition:none}}
+
+
+/* Pedidos Online uses the same semantic surfaces as the V242 workspace. */
+#online-orders-v2{color:var(--vf-text);min-width:0}
+#online-orders-v2 .online-v2-heading{background:var(--vf-texture),var(--vf-surface);border:1px solid var(--vf-border);padding:clamp(18px,3vw,32px);border-radius:20px;box-shadow:none;margin-bottom:16px}
+#online-orders-v2 .online-v2-heading h1{color:var(--vf-text);letter-spacing:-.05em;margin:0}
+#online-orders-v2 .online-v2-space-label,#online-orders-v2 .online-v2-order,#online-orders-v2 .online-v2-filters{background:var(--vf-surface);color:var(--vf-text);border-color:var(--vf-border)}
+#online-orders-v2 .online-v2-summary{gap:8px}
+#online-orders-v2 .online-v2-summary-card{border-radius:18px;grid-template-columns:auto 1fr auto;gap:8px;align-content:center;background:var(--vf-surface);border-color:var(--vf-border);color:var(--vf-text)}
+#online-orders-v2 .online-v2-summary-icon{grid-row:1;background:var(--vf-surface-3);color:var(--vf-text-2);border-radius:50%;width:30px;height:30px}
+#online-orders-v2 .online-v2-summary-card b{grid-column:3;grid-row:1;font-size:21px}
+#online-orders-v2 .online-v2-summary-card>span:last-child{grid-column:2;grid-row:1;color:var(--vf-text);font-size:12px}
+#online-orders-v2 .online-v2-summary-card[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--vf-text);background:var(--vf-surface-2)}
+#online-orders-v2 .online-v2-filters .store-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) minmax(0,1.6fr)}
+#online-orders-v2 .online-v2-filters :is(label,select,input){width:100%;min-width:0;color:var(--vf-text)}
+#online-orders-v2 .online-v2-filters :is(select,input){background:var(--vf-surface-2);border:1px solid var(--vf-border);border-radius:10px}
+#online-orders-v2 .online-v2-search{grid-column:auto}
+#online-orders-v2 .online-v2-search>span{display:grid;grid-template-columns:24px 1fr;align-items:center;background:var(--vf-surface-2);border:1px solid var(--vf-border);border-radius:10px;padding-inline-start:10px}
+#online-orders-v2 .online-v2-search svg{position:static;width:18px}
+#online-orders-v2 .online-v2-search input{padding-inline:4px!important;border:0;background:transparent}
+#online-orders-v2 .online-v2-order{border-radius:16px;border-width:1px;border-top:3px solid var(--status-color);padding:20px}
+#online-orders-v2 .online-v2-customer,#online-orders-v2 .online-v2-totals strong{color:var(--vf-text)}
+#online-orders-v2 :is(.online-v2-meta,.online-v2-origin,.online-v2-totals>span,.online-v2-card-footer time,.online-v2-list-heading>span){color:var(--vf-text-2)}
+.vv-order-items{list-style:none;display:grid;gap:4px;padding:10px 12px;margin:14px 0 0;border-radius:10px;background:var(--vf-surface-2);font-size:13px;color:var(--vf-text-2);overflow-wrap:anywhere}
+#online-orders-v2 .online-v2-card-footer .btn{min-height:44px}
+@media(max-width:1050px){#online-orders-v2 .online-v2-filters .store-fields{grid-template-columns:repeat(2,minmax(0,1fr))}#online-orders-v2 .online-v2-search{grid-column:1/-1;grid-row:1}}
+@media(max-width:760px){#online-orders-v2 .online-v2-summary-card{padding:9px;gap:5px;border-radius:99px}#online-orders-v2 .online-v2-summary-card>span:last-child{font-size:11px}#online-orders-v2 .online-v2-summary-card b{font-size:18px}#online-orders-v2 .online-v2-heading{display:flex;align-items:center;flex-wrap:wrap}#online-orders-v2 .online-v2-space-label{margin:0}}
