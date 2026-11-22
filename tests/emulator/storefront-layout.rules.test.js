@@ -49,4 +49,14 @@ test('banner media is scoped by bucket, business, space and slot before the revi
   value.slides[0].target='invalid';
   await assert.rejects(s.change(published,{presentation:{storefrontLayout:value}}),{code:'invalid-argument'});
   await assert.rejects(s.change(d,{presentation:{storefrontLayout:layout()}}),{code:'aborted'});
+});test('existing same-store cover can be kept in an edited layout, foreign media cannot',async()=>{
+  const s=await shop(v), other=await shop(v,{tenant:s});
+  const url=space=>'https://firebasestorage.googleapis.com/v0/b/'+process.env.GCLOUD_PROJECT+'.appspot.com/o/'+encodeURIComponent('businesses/'+s.businessId+'/catalog/spaces/'+space+'/cover/main-historical.webp')+'?alt=media';
+  const draft=await s.draft({settings:{...s.settings,bannerUrl:url(s.spaceId)}});
+  const value=layout();
+  value.slides[0].imageUrl=url(s.spaceId);
+  const saved=await s.change(draft,{presentation:{storefrontLayout:value}});
+  assert.equal(saved.presentation.storefrontLayout.slides[0].imageUrl,url(s.spaceId));
+  value.slides[0].imageUrl=url(other.spaceId);
+  await assert.rejects(s.change(saved,{presentation:{storefrontLayout:value}}),{code:'invalid-argument'});
 });

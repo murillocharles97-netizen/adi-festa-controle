@@ -26,9 +26,17 @@ function image(value,scope,legacyImages){
   }
   let object;
   try{object=match && decodeURIComponent(match[2]);}catch{invalid('Caminho de imagem inválido.');}
-  const folder=`businesses/${scope.businessId}/catalog/spaces/${scope.spaceId}/banner/`;
+  const businessFolder=`businesses/${scope.businessId}/catalog/`;
+  const folder=`${businessFolder}spaces/${scope.spaceId}/`;
+  const newBanner=object?.startsWith(folder)&&/^banner\/main-[a-zA-Z0-9_-]{1,80}\.(webp|jpg)$/.test(object.slice(folder.length));
+  // Retain exact links already saved for this store, including Storage objects
+  // created by the previous banner editor and its thumbnail convention.
+  const oldBanner=legacyImages.has(value)&&(
+    (object?.startsWith(folder)&&/^(?:cover|banner)\/(main|thumb)-[a-zA-Z0-9_-]{1,80}\.(webp|jpg)$/.test(object.slice(folder.length)))||
+    (object?.startsWith(businessFolder)&&/^banners\/[a-zA-Z0-9_-]+\/(main|thumb)-[a-zA-Z0-9_-]{1,80}\.(webp|jpg)$/.test(object.slice(businessFolder.length)))
+  );
   if(url.hostname!=='firebasestorage.googleapis.com'||url.port||!match||!allowedBuckets.has(match[1])||
-    !object.startsWith(folder)||!/^main-[a-zA-Z0-9-]+\.(webp|jpg|jpeg|png)$/.test(object.slice(folder.length)))
+    !(newBanner||oldBanner))
     invalid('A arte deve pertencer aos banners desta loja.');
   return value;
 }
