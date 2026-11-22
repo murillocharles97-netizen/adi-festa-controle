@@ -7,6 +7,7 @@
 
   const VERSION = 2;
   const DAY = 86400000;
+  let saoPauloDayFormatter;
   const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
   const text = (value) => String(value ?? "").trim();
   const normalize = (value) => text(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -110,7 +111,8 @@
     const date = dateValue(value);
     if (!date) return null;
     try {
-      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+      const formatter = saoPauloDayFormatter ??= new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" });
+      const parts = formatter.formatToParts(date);
       const part = (name) => Number(parts.find((entry) => entry.type === name)?.value);
       return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY;
     } catch (_) { return Math.floor(date.getTime() / DAY); }

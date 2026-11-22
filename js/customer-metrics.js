@@ -6,6 +6,7 @@
   "use strict";
 
   const DAY = 86400000;
+  let saoPauloDayFormatter;
   const INVALID_SALE_STATUSES = new Set([
     "cancelado",
     "cancelada",
@@ -48,12 +49,13 @@
   function brazilDayNumber(value) {
     const date = dateValue(value);
     if (!date) return null;
-    const parts = new Intl.DateTimeFormat("en-CA", {
+    const formatter = saoPauloDayFormatter ??= new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Sao_Paulo",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    }).formatToParts(date);
+    });
+    const parts = formatter.formatToParts(date);
     const part = (type) => Number(parts.find((item) => item.type === type)?.value);
     return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY;
   }
