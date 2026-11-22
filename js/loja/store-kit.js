@@ -124,7 +124,7 @@
     if(!live)return null;
     const changes=[],seen=new Set(),ls=live.publicSettings||live;
     for(const [key,label] of Object.entries(SETTING_LABELS)){const a=JSON.stringify(draft.settings[key]??''),b=JSON.stringify(ls[key]??'');if(a!==b&&!seen.has(label)){seen.add(label);changes.push(label);}}
-    if(draft.presentation.storefrontLayout && JSON.stringify(draft.presentation.storefrontLayout)!==JSON.stringify(live.storefrontLayout))changes.push('layout e banners');
+    if(draft.presentation.storefrontLayout && (!live.storefrontLayout || JSON.stringify(visibleLayout(draft.presentation.storefrontLayout))!==JSON.stringify(visibleLayout(live.storefrontLayout))))changes.push('layout e banners');
     const liveIds=new Set((live.items||[]).map(i=>i.productId)),ids=new Set(draft.productIds);
     const added=[...ids].filter(id=>!liveIds.has(id)).length,removed=[...liveIds].filter(id=>!ids.has(id)).length;
     if(added)changes.push(added===1?'1 produto incluído':`${added} produtos incluídos`);
@@ -192,7 +192,16 @@
     return {template, title, description, button, target:template === 'featured' ? 'featured' : 'catalog', active:true, imageUrl:''};
   }
   function storefrontLayout(catalog = {}) {
-    if (catalog.storefrontLayout?.version === 1) return catalog.storefrontLayout;
+    const configured=catalog.storefrontLayout;
+    if(configured?.version===1 && Array.isArray(configured.slides)){
+      const readSlide=s=>{
+        const template=Object.hasOwn(bannerTemplates,s?.template)?s.template:'robot';
+        return {...bannerSlide(template),title:line(s?.title,100),description:line(s?.description,300),button:line(s?.button,40),
+          target:typeof s?.target==='string'?s.target:'catalog',active:s?.active!==false,imageUrl:typeof s?.imageUrl==='string'?s.imageUrl:''};
+      };
+      return {version:1,slides:configured.slides.filter(Boolean).map(readSlide),featured:configured.featured!==false,
+        secondary:configured.secondary?readSlide(configured.secondary):{...bannerSlide('easy'),active:false}};
+    }
     const slides = (catalog.banners || []).filter(b => b.active !== false && b.imageUrl &&
       (!b.startsAt || Date.parse(b.startsAt) <= Date.now()) && (!b.endsAt || Date.parse(b.endsAt) >= Date.now()))
       .slice().sort((a,b) => a.order-b.order)
@@ -206,6 +215,10 @@
     return {version:1, slides, featured:true, secondary:{...bannerSlide('easy'), active:false}};
   }
 
+  function visibleLayout(value) {
+    const layout=storefrontLayout({storefrontLayout:value});
+    return {...layout,slides:layout.slides.filter(s=>s.active),secondary:layout.secondary.active?layout.secondary:null};
+  }
   return Object.freeze({bannerTemplates,bannerSlide,storefrontLayout,text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,
     slugify,slugProblem,draftFromStore,applyOp,applyOps,savePayload,status,readiness,publishedDiff,PAYMENT_LABELS,orderMessage,whatsappChatUrl,whatsappUrl});
 });

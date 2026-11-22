@@ -447,10 +447,10 @@
   let layoutSession = null;
   function currentLayout() {
     const key = JSON.stringify([state.key, state.spaceId,scope().workspaceGeneration]);
-    if (layoutSession?.key !== key) layoutSession = {key, index:0, value:K.storefrontLayout({
+    if (layoutSession?.key !== key) {layoutSession = {key, index:0, value:K.storefrontLayout({
       ...state.draft.settings, acceptingOrders:store()?.checkoutEnabled, banners:store()?.presentation?.banners,
       storefrontLayout:state.draft.presentation.storefrontLayout?JSON.parse(JSON.stringify(state.draft.presentation.storefrontLayout)):null
-    })};
+    })};if(!layoutSession.value.slides.length)layoutSession.index=-1;}
     return layoutSession;
   }
   function layoutEditor() {

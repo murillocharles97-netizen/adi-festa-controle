@@ -41,10 +41,15 @@
     try{localStorage.setItem(`loja-qa-public:${s.slug}`,JSON.stringify(doc));}catch{}
     return doc;
   }
+  function liveLayout(layout){
+    const project=({template,title,description,button,target,imageUrl})=>({template,title,description,button,target,imageUrl,active:true});
+    return {version:1,slides:layout.slides.filter(s=>s.active).map(project),featured:layout.featured,
+      secondary:layout.secondary?.active?project(layout.secondary):{active:false}};
+  }
   function publishDoc(s){
     const items=s.selectedProductIds.map(id=>raw.find(p=>p.id===id)).filter(Boolean).map(p=>M.product(p,variants,s.presentation)).sort((a,b)=>a.displayOrder-b.displayOrder);
     const settings=s.catalogSettings,pres=M.publicPresentation(s.presentation);
-    const doc={...(qa.layout && s.presentation.storefrontLayout ? {storefrontLayout:structuredClone(s.presentation.storefrontLayout)} : {}),catalogToken:s.publicToken,documentId:s.publicToken,schemaVersion:6,catalogType:'space_store',businessId:s.businessId,spaceId:s.spaceId,visitId:s.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...pres,active:s.published,catalogVisible:s.published,acceptingOrders:s.published&&s.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:s.checkoutEnabled?'active':'paused',workspaceGeneration:0,revision:s.revision,updatedAt:new Date().toISOString()};
+    const doc={...(qa.layout && s.presentation.storefrontLayout ? {storefrontLayout:liveLayout(s.presentation.storefrontLayout)} : {}),catalogToken:s.publicToken,documentId:s.publicToken,schemaVersion:6,catalogType:'space_store',businessId:s.businessId,spaceId:s.spaceId,visitId:s.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...pres,active:s.published,catalogVisible:s.published,acceptingOrders:s.published&&s.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:s.checkoutEnabled?'active':'paused',workspaceGeneration:0,revision:s.revision,updatedAt:new Date().toISOString()};
     return storePublicDoc(s,doc);
   }
   const productsFor=spaceId=>spaceId==='qa-space-b'?[M.product({id:'qa-b-only',nome:'Produto exclusivo do quiosque',preco:5,categoria:'Quiosque',estoqueAtual:3})]:raw.map(p=>M.product(p));

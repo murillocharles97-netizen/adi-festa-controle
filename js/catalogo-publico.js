@@ -346,8 +346,10 @@ function render(order=null){
   if(!catalog)return;
   if(order)successOrder=order;
   const scrollY=renderedOnce&&view==='catalog'?scrollY_():0;
+  const previousDrawer=root.querySelector('.vv-drawer'),drawerScroll=previousDrawer?.scrollTop||0;
   const content=view==='cart'?cartView():view==='checkout'?checkoutView():view==='sent'?sentView():view==='success'?successView(successOrder):view==='orders'?ordersView():catalogView();
-  root.innerHTML=`<div class="sf sf-view-${esc(view)}" style="${themeStyle()}">${view==='cart'?`<div class="vv-cart-underlay" inert>${band()}</div><div class="vv-cart-shade" data-back="catalog"></div><section class="vv-drawer" role="dialog" aria-modal="true" aria-label="Carrinho">${content}${footer()}</section>`:`${content}${footer()}`}${cartBar()}${sheet?productSheet():''}<div class="sf-toast" role="status" aria-live="polite"></div></div>`;
+  root.innerHTML=`<div class="sf sf-view-${esc(view)}" style="${themeStyle()}">${view==='cart'?`<div class="vv-cart-underlay" inert>${band()}</div><div class="vv-cart-shade" data-back="catalog"></div><section class="vv-drawer ${previousDrawer?'':'vv-drawer-opening'}" role="dialog" aria-modal="true" aria-label="Carrinho">${content}${footer()}</section>`:`${content}${footer()}`}${cartBar()}${sheet?productSheet():''}<div class="sf-toast" role="status" aria-live="polite"></div></div>`;
+  if(previousDrawer && view==='cart')root.querySelector('.vv-drawer').scrollTop=drawerScroll;
   attachHero();
   renderedOnce=true;
   if(view==='catalog'&&scrollY)scrollTo(0,scrollY);

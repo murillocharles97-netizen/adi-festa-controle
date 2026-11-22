@@ -331,7 +331,7 @@ svg { flex-shrink: 0; }
 
 .vv-cart-underlay{min-height:100dvh;background:var(--sf-bg)}
 .vv-cart-shade{position:fixed;inset:0;background:#111b2c66;z-index:48}
-.vv-drawer{position:fixed;inset:0 0 0 auto;z-index:49;width:min(100%,560px);overflow:auto;overscroll-behavior:contain;background:var(--sf-bg,#f5f7fa);padding-bottom:env(safe-area-inset-bottom);box-shadow:-14px 0 60px #121a2e35;animation:vv-drawer .28s cubic-bezier(.22,.61,.36,1)}
+.vv-drawer{position:fixed;inset:0 0 0 auto;z-index:49;width:min(100%,560px);overflow:auto;overscroll-behavior:contain;background:var(--sf-bg,#f5f7fa);padding-bottom:env(safe-area-inset-bottom);box-shadow:-14px 0 60px #121a2e35}.vv-drawer-opening{animation:vv-drawer .28s cubic-bezier(.22,.61,.36,1)}
 .vv-drawer .sf-page{min-width:0;width:100%}.sf-card-img img{transition:transform .25s ease-out}
 @media(hover:hover){.sf-card-open:hover .sf-card-img img{scale:1.025}}
 .sf-add.vv-added{animation:vv-added .35s ease-out}.sf-cats button{transition:background .18s,color .18s}

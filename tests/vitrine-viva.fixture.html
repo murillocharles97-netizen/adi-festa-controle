@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vitrine Viva · Demonstração local</title>
+<link rel="stylesheet" href="/css/style.css"><link rel="stylesheet" href="/css/online-store.css"><link rel="stylesheet" href="/css/catalogo-admin.css"><link rel="stylesheet" href="/css/online-orders.css"><link rel="stylesheet" href="/css/veconi-fluxo.css">
+<style>
+*{box-sizing:border-box}body{margin:0;display:block;background:var(--vf-bg);color:var(--vf-text);font-family:Inter,system-ui,sans-serif}
+.demo-nav{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;padding:6px;background:var(--vf-ink);color:white;position:relative;z-index:1}
+.demo-nav button{border:1px solid #888c;border-radius:20px;background:transparent;color:inherit;padding:6px 12px;min-height:36px;font:600 13px system-ui;cursor:pointer}.demo-nav [aria-pressed=true]{background:white;color:#12242c}
+#vitrine{display:block;width:100%;height:calc(100dvh - 48px);border:0}.demo-module{max-width:1240px;margin:auto;padding:clamp(10px,3vw,32px)}[hidden]{display:none!important}
+@media(max-width:500px){.demo-nav{gap:4px}.demo-nav button{font-size:12px;padding-inline:8px}}
+</style></head><body><nav class="demo-nav" aria-label="Demonstração com dados fictícios"><button data-view="public" aria-pressed="true">Vitrine</button><button data-view="editor">Construtor</button><button data-view="orders">Pedidos</button><button id="theme">Tema escuro</button></nav>
+<iframe id="vitrine" title="Loja fictícia"></iframe><main class="demo-module" hidden id="workspace"></main><div id="modal"></div>
+<script src="/assets/lucide.min.js"></script><script src="/functions/src/shared/online-store.js"></script><script src="/functions/src/shared/online-order.js"></script><script src="/js/loja/store-kit.js"></script><script src="/js/online-order-finalization.js"></script>
+<script>window.__LOJA_QA__={layout:true,count:400,select:400};
+const realProjection=OnlineStoreModel.product;
+window.OnlineStoreModel={...OnlineStoreModel,product(...args){const item=realProjection(...args);for(const field of ['productImage','productMainImage'])item[field]=item[field].replace('https://qa-images.veconi.test/',location.origin+'/demo-images/');return item;}};</script>
+<script src="/tests/fixtures/online-store-v3-backend.js"></script><script src="/js/online-store-ui.js"></script><script src="/js/online-orders-ui.js"></script><script src="/tests/fixtures/vitrine-viva-demo.js"></script></body></html>
