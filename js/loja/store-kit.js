@@ -79,13 +79,14 @@
   function draftFromStore(store,fallbackName=''){
     const s=store||{};
     return {settings:{...(s.catalogSettings||{publicName:fallbackName})},slug:s.slug||'',productIds:[...(s.selectedProductIds||[])],
-      presentation:{products:clone(s.presentation?.products)||{},categories:clone(s.presentation?.categories)||[]}};
+      presentation:{...(s.presentation?.storefrontLayout ? {storefrontLayout:clone(s.presentation.storefrontLayout)} : {}),products:clone(s.presentation?.products)||{},categories:clone(s.presentation?.categories)||[]}};
   }
   function applyOp(d,op){
     const products=d.presentation.products,p=id=>(products[id]=products[id]||{});
     switch(op.t){
       case 'select':{const set=new Set(d.productIds);op.on?set.add(op.id):set.delete(op.id);d.productIds=[...set];if(!op.on&&products[op.id])products[op.id].featured=false;break;}
       case 'selectMany':{const set=new Set(d.productIds);for(const id of op.ids)op.on?set.add(id):set.delete(id);d.productIds=[...set];if(!op.on)for(const id of op.ids)if(products[id])products[id].featured=false;break;}
+      case 'storefrontLayout':d.presentation.storefrontLayout=clone(op.value);break;
       case 'feature':p(op.id).featured=!!op.on;break;
       case 'featureMany':for(const id of op.ids)p(id).featured=!!op.on;break;
       case 'order':op.ids.forEach((id,i)=>{p(id).order=i+1;});break;
@@ -104,7 +105,7 @@
   function savePayload(d){
     const products={};
     for(const id of d.productIds){const x=d.presentation.products[id]||{};products[id]={featured:x.featured===true,bestseller:x.bestseller===true,order:Math.max(0,Number(x.order)||0),category:line(x.category||'',100)};}
-    return {slug:d.slug,settings:d.settings,productIds:[...d.productIds],presentation:{products,categories:d.presentation.categories.map(c=>({internalName:c.internalName,publicName:c.publicName||c.internalName,active:c.active!==false,order:Math.max(0,Number(c.order)||0)}))}};
+    return {slug:d.slug,settings:d.settings,productIds:[...d.productIds],presentation:{...(d.presentation.storefrontLayout ? {storefrontLayout:clone(d.presentation.storefrontLayout)} : {}),products,categories:d.presentation.categories.map(c=>({internalName:c.internalName,publicName:c.publicName||c.internalName,active:c.active!==false,order:Math.max(0,Number(c.order)||0)}))}};
   }
 
   /* ---------- Situação, preparação e diferenças para a versão publicada ---------- */
@@ -123,6 +124,7 @@
     if(!live)return null;
     const changes=[],seen=new Set(),ls=live.publicSettings||live;
     for(const [key,label] of Object.entries(SETTING_LABELS)){const a=JSON.stringify(draft.settings[key]??''),b=JSON.stringify(ls[key]??'');if(a!==b&&!seen.has(label)){seen.add(label);changes.push(label);}}
+    if(draft.presentation.storefrontLayout && JSON.stringify(draft.presentation.storefrontLayout)!==JSON.stringify(live.storefrontLayout))changes.push('layout e banners');
     const liveIds=new Set((live.items||[]).map(i=>i.productId)),ids=new Set(draft.productIds);
     const added=[...ids].filter(id=>!liveIds.has(id)).length,removed=[...liveIds].filter(id=>!ids.has(id)).length;
     if(added)changes.push(added===1?'1 produto incluído':`${added} produtos incluídos`);

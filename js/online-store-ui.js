@@ -103,6 +103,7 @@
   /* ---------- Fila de salvamento: nada aparece como salvo sem a confirmação do servidor ---------- */
   function queue(...ops){
     for(const op of ops){
+      if(op.t==='storefrontLayout')state.ops=state.ops.filter(o=>o.t!=='storefrontLayout');
       if(op.t==='setting'||op.t==='categoryName'){
         const field=op.t==='setting'?'key':'name',i=state.ops.findIndex(o=>o.t===op.t&&o[field]===op[field]);
         if(i>=0)state.ops.splice(i,1);
@@ -120,6 +121,7 @@
       !sameSet(saved.selectedProductIds||[],payload.productIds)||
       Object.keys(payload.settings).some(k=>JSON.stringify(saved.catalogSettings?.[k])!==JSON.stringify(payload.settings[k])))return false;
     const presentation=K.savePayload(K.draftFromStore(saved)).presentation;
+    if(payload.presentation.storefrontLayout && JSON.stringify(presentation.storefrontLayout)!==JSON.stringify(payload.presentation.storefrontLayout))return false;
     const categories=new Map(presentation.categories.map(c=>[c.internalName,c]));
     return Object.keys(payload.presentation.products).every(id=>
       JSON.stringify(presentation.products[id])===JSON.stringify(payload.presentation.products[id]))&&
@@ -147,6 +149,7 @@
     }catch(e){
       if(ticket!==state.sequence)return;
       state.ops=[...ops,...state.ops];state.inflight=null;
+      if(codeOf(e)==='aborted'&&ops.some(op=>op.t==='storefrontLayout')){fail('O layout mudou em outro aparelho. Confira a versão mais recente antes de refazer sua edição.');return;}
       if(codeOf(e)==='aborted'&&state.conflicts<1){state.conflicts++;await rebase();return;}
       fail(friendly(e));
     }
@@ -443,10 +446,10 @@
   }
   let layoutSession = null;
   function currentLayout() {
-    const key = JSON.stringify([state.key, state.spaceId]);
+    const key = JSON.stringify([state.key, state.spaceId,scope().workspaceGeneration]);
     if (layoutSession?.key !== key) layoutSession = {key, index:0, value:K.storefrontLayout({
       ...state.draft.settings, acceptingOrders:store()?.checkoutEnabled, banners:store()?.presentation?.banners,
-      storefrontLayout:store()?.presentation?.storefrontLayout
+      storefrontLayout:state.draft.presentation.storefrontLayout?JSON.parse(JSON.stringify(state.draft.presentation.storefrontLayout)):null
     })};
     return layoutSession;
   }
@@ -454,7 +457,7 @@
     const session = currentLayout(), layout = session.value, secondary = session.index === -1;
     const slide = secondary ? layout.secondary : layout.slides[session.index];
     const field = (key,label,max) => `<label>${label}<input data-slide-field="${key}" maxlength="${max}" value="${esc(slide[key])}"></label>`;
-    return `<section class="lo-panel lo-banners"><header class="lo-panel-head"><div><h2>Layout e Banners</h2><p>Experimente o layout na prévia desta sessão. As alterações de banners ainda não podem ser publicadas.</p></div></header>
+    return `<section class="lo-panel lo-banners"><header class="lo-panel-head"><div><h2>Layout e Banners</h2><p>${supportsLayout()?'As alterações são salvas no rascunho. Use Publicar para atualizar a vitrine.':'Experimente o layout na prévia desta sessão. A versão atual do servidor ainda não salva os banners.'}</p></div></header>
     <fieldset ${owner()?'':'disabled'}><div class="lo-chips" aria-label="Escolha o banner">${layout.slides.map((s,i)=>`<button class="lo-chip" data-slide-index="${i}" aria-pressed="${i===session.index}">${i+1} · ${esc(s.title || 'Banner')}${s.active?'':' (oculto)'}</button>`).join('')}<button class="lo-chip" data-slide-index="-1" aria-pressed="${secondary}">Banner secundário</button></div>
     <label>Modelo rápido<select data-slide-template>${Object.entries(K.bannerTemplates).map(([id,[name]])=>`<option value="${id}" ${slide.template===id?'selected':''}>${esc(name)}</option>`).join('')}</select></label>
     ${field('title','Título',100)}${field('description','Descrição',300)}<div class="lo-banner-pair">${field('button','Texto do botão',40)}
@@ -466,14 +469,21 @@
     ${secondary?'':`<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="up" ${session.index===0?'disabled':''}>Mover antes</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="down" ${session.index===layout.slides.length-1?'disabled':''}>Mover depois</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="remove" ${layout.slides.length===1?'disabled':''}>Remover slide</button>`}</div>
     <label class="lo-banner-check"><input type="checkbox" data-slide-featured ${layout.featured?'checked':''}> Exibir seção de destaques</label></fieldset></section>`;
   }
+  const supportsLayout = () => state.data?.storefrontLayoutVersion === 1;
+  function changedLayout() {
+    if(supportsLayout())queue({t:'storefrontLayout',value:structuredClone(currentLayout().value)});
+    schedulePreview();
+  }
   function refreshLayoutEditor() {
     const panel=document.querySelector('#store-v2 .lo-banners');
     if(panel) panel.outerHTML=layoutEditor();
     schedulePreview();
   }
-  function editLayout(event) {
+  async function editLayout(event) {
     const el=event.target.closest('button,input,select');
-    if(!el?.closest('.lo-banners') || !owner()) return;
+    if(!el?.closest('.lo-banners') || !owner() || state.busy) return;
+    if(event.type==='input' && !el.matches('input[type=text],input:not([type])'))return;
+    if(event.type==='change' && el.matches('input[type=text],input:not([type])'))return;
     const session=currentLayout(), layout=session.value, slides=layout.slides, index=session.index;
     const slide=index===-1?layout.secondary:slides[index];
     if (event.type==='click') {
@@ -489,23 +499,36 @@
         case 'clear': slide.imageUrl='';break;
         default:return;
       }
+      if(el.dataset.slideIndex===undefined)changedLayout();
       refreshLayoutEditor();
       const buttons=document.querySelectorAll('.lo-banners [data-slide-index]');
       [...buttons].find(b=>Number(b.dataset.slideIndex)===session.index)?.focus();
     } else if (el.hasAttribute('data-slide-template') && event.type==='change') {
-      Object.assign(slide,K.bannerSlide(el.value),{active:slide.active});refreshLayoutEditor();
+      Object.assign(slide,K.bannerSlide(el.value),{active:slide.active});changedLayout();refreshLayoutEditor();
     } else if (el.hasAttribute('data-slide-featured')) {
-      layout.featured=el.checked;schedulePreview();
+      layout.featured=el.checked;changedLayout();
     } else if (el.dataset.slideField) {
       slide[el.dataset.slideField]=el.type==='checkbox'?el.checked:el.value;
       const tab=document.querySelector(`[data-slide-index="${index}"]`);
       if(index!==-1&&tab)tab.textContent=`${index+1} · ${slide.title||'Banner'}${slide.active?'':' (oculto)'}`;
-      schedulePreview();
+      changedLayout();
     } else if(el.hasAttribute('data-slide-image') && event.type==='change') {
       const file=el.files?.[0]; if(!file)return;
       if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>4*1024*1024){toast('Escolha uma imagem JPG, PNG ou WebP de até 4 MB.',true);return;}
+      if(supportsLayout()){
+        const ticket=state.sequence, spaceId=state.spaceId;
+        el.disabled=true;
+        try{
+          const processed=await ProductImages.processImage(file);
+          if(ticket!==state.sequence || !el.isConnected)return;
+          const asset=await CatalogImageStorage.upload('store',{spaceId,slot:'banner'},processed);
+          if(ticket!==state.sequence || !el.isConnected)return;
+          slide.imageUrl=asset.imageUrl;changedLayout();refreshLayoutEditor();
+        }catch(e){toast(e.message||'Não foi possível enviar a imagem.',true);}finally{el.disabled=false;}
+        return;
+      }
       const reader=new FileReader();
-      reader.onload=()=>{if(session!==layoutSession || !el.isConnected)return;slide.imageUrl=reader.result;refreshLayoutEditor();};
+      reader.onload=()=>{if(session!==layoutSession || !el.isConnected)return;slide.imageUrl=reader.result;changedLayout();refreshLayoutEditor();};
       reader.onerror=()=>toast('Falha ao ler a imagem.',true);reader.readAsDataURL(file);
     }
   }
@@ -610,7 +633,7 @@
       if(!item){const x=pres(p.id);item={...p.src,category:x.category||p.baseCategory,featured:!!x.featured,displayOrder:Number(x.order||0),active:true};}
       return item;});
     let categories=[];try{categories=M.publicPresentation(d.presentation).categories;}catch{}
-    return {preview:true,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],storefrontLayout:currentLayout().value,
+    return {preview:true,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],storefrontLayout:currentLayout().value,previewSlide:currentLayout().index,
       serviceModes:[...(s.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(s.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],
       acceptingOrders:state.data.orderReception?.enabled===true,active:true,catalogVisible:true};
   }

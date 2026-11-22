@@ -594,6 +594,7 @@ function startPreview(){
     const data=event.data.catalog;if(!data||!Array.isArray(data.items))return;
     const y=scrollY_(),sheetY=root.querySelector('.sf-sheet')?.scrollTop||0;
     catalog={...data,schemaVersion:6,catalogType:'space_store'};prepareCatalogIdentity();
+    if(Number.isInteger(data.previewSlide) && data.previewSlide>=0)slideIndex=Math.max(0,K.storefrontLayout(catalog).slides.slice(0,data.previewSlide).filter(s=>s.active).length);
     if(sheet&&!catalog.items.some(i=>String(i.id)===String(sheet.id)))sheet=null;
     render();scrollTo(0,y);const s=root.querySelector('.sf-sheet');if(s)s.scrollTop=sheetY;
   });
