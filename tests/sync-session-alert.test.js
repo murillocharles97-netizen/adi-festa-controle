@@ -13,7 +13,8 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   // Visual V242 keeps the published V241 Sync modules byte-for-byte.
   const syncVersion=({'191':'190','242':'241'})[version]||version;
   for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${syncVersion}'`));
-  const uiVersion=appVersion==='242.1'?'2421':syncVersion;
+  // V242 hotfixes after the visual release retain the V242.1 auth and sync panel.
+  const uiVersion=version==='242'&&appVersion!=='242'?'2421':syncVersion;
   assert.ok(index.includes(`firebase/auth.js?v=${uiVersion}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${uiVersion}`));
 });
 function runtime() {
