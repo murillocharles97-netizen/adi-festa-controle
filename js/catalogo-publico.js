@@ -123,6 +123,72 @@ const initials=name=>String(name||'Loja').trim().split(/\s+/).slice(0,2).map(w=>
 const instagramHandle=v=>String(v||'').trim().replace(/^@/,'').replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/[/?#].*$/,'').replace(/[^A-Za-z0-9._]/g,'').slice(0,30);
 
 /* ---------- Telas ---------- */
+let slideIndex = 0, rotationPaused = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let heroCleanup = () => {};
+function activeSlides() {
+  return K.storefrontLayout(catalog).slides.filter(slide => slide.active);
+}
+function bannerAction(slide) {
+  if (!slide.button) return '';
+  if (/^https?:\/\//i.test(slide.target)) return `<a class="vv-action" href="${esc(slide.target)}" target="_blank" rel="noopener noreferrer">${esc(slide.button)} ↗</a>`;
+  return `<button type="button" class="vv-action" data-viva-target="${esc(slide.target)}">${esc(slide.button)} <span aria-hidden="true">↗</span></button>`;
+}
+function courier() {
+  return '<div class="vv-scene" aria-hidden="true"><div class="vv-orbit"></div><div class="vv-stars"></div><div class="vv-flight"><div class="vv-robot"><i class="vv-antenna"></i><i class="vv-ear"></i><i class="vv-head"><b class="vv-visor"></b></i><i class="vv-body"></i><i class="vv-arm"></i><i class="vv-thrust"></i></div><i class="vv-parcel"></i><div class="vv-trolley"><i></i><b></b></div></div></div>';
+}
+function bannerContent(slide) {
+  const image = String(slide.imageUrl || '');
+  const safeImage = /^https?:\/\//i.test(image) || (preview && /^data:image\/(jpeg|png|webp);base64,/i.test(image));
+  return `<div class="vv-slide" data-model="${esc(slide.template)}">${safeImage?`<img class="vv-art" alt="" src="${esc(image)}">`:slide.template==='robot'?courier():'<div class="vv-sculpture" aria-hidden="true"><i></i><i></i><i></i></div>'}
+    <div class="vv-caption"><h2>${esc(slide.title)}</h2>${slide.description?`<p>${esc(slide.description)}</p>`:''}${bannerAction(slide)}</div></div>`;
+}
+function hero() {
+  const slides = activeSlides();
+  if (!slides.length) return '';
+  slideIndex = Math.min(slideIndex,slides.length-1);
+  return `<section class="vv-hero" aria-label="Banners da loja" aria-roledescription="carrossel">
+    <div class="vv-stage">${bannerContent(slides[slideIndex])}</div>
+    <div class="vv-controls">${slides.length>1?`<button type="button" data-shift="-1" aria-label="Banner anterior">‹</button><span data-slide-count>${slideIndex+1} / ${slides.length}</span><button type="button" data-shift="1" aria-label="Próximo banner">›</button>`:''}<button type="button" data-viva-pause aria-pressed="${rotationPaused}" aria-label="Pausar animação">${rotationPaused?'▶':'Ⅱ'}</button></div></section>`;
+}
+function attachHero() {
+  heroCleanup();
+  const el=root.querySelector('.vv-hero');
+  if (!el) return;
+  const motion=matchMedia('(prefers-reduced-motion: reduce)');
+  let timer, startX, startY, visible=true, hovering=false;
+  function schedule() {
+    clearTimeout(timer);
+    el.classList.toggle('vv-rest',rotationPaused||!visible||document.hidden||motion.matches);
+    if(!rotationPaused&&!motion.matches&&visible&&!hovering&&!document.hidden&&!el.contains(document.activeElement)&&activeSlides().length>1)
+      timer=setTimeout(()=>shift(1),7500);
+  }
+  function shift(delta) {
+    const slides=activeSlides();
+    if(slides.length<2)return;
+    slideIndex=(slideIndex+delta+slides.length)%slides.length;
+    el.querySelector('.vv-stage').innerHTML=bannerContent(slides[slideIndex]);
+    el.querySelector('[data-slide-count]').textContent=`${slideIndex+1} / ${slides.length}`;
+    schedule();
+  }
+  el.onclick=e=>{
+    const button=e.target.closest('button');if(!button)return;
+    if(button.dataset.shift)shift(Number(button.dataset.shift));
+    if(button.hasAttribute('data-viva-pause')){
+      rotationPaused=!rotationPaused;button.setAttribute('aria-pressed',String(rotationPaused));button.textContent=rotationPaused?'▶':'Ⅱ';schedule();
+    }
+  };
+  el.onkeydown=e=>{if(['ArrowRight','ArrowLeft'].includes(e.key)){e.preventDefault();shift(e.key==='ArrowRight'?1:-1);}};
+  el.ontouchstart=e=>{startX=e.touches[0].clientX;startY=e.touches[0].clientY;};
+  el.ontouchend=e=>{const dx=e.changedTouches[0].clientX-startX,dy=e.changedTouches[0].clientY-startY;if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)*1.5)shift(dx<0?1:-1);};
+  el.onpointerenter=e=>{hovering=e.pointerType==='mouse';schedule();};
+  el.onpointermove=e=>{if(e.pointerType==='mouse'&&!rotationPaused&&!motion.matches){const r=el.getBoundingClientRect();el.style.setProperty('--vv-drift',((e.clientX-r.left)/r.width*10-5)+'px');}};
+  el.onpointerleave=()=>{hovering=false;el.style.removeProperty('--vv-drift');schedule();};
+  el.onfocusin=schedule;el.onfocusout=()=>queueMicrotask(()=>el.isConnected&&schedule());
+  const observer='IntersectionObserver' in window?new IntersectionObserver(([entry])=>{visible=entry.isIntersecting;schedule();}):null;
+  observer?.observe(el);document.addEventListener('visibilitychange',schedule);motion.addEventListener('change',schedule);schedule();
+  heroCleanup=()=>{clearTimeout(timer);observer?.disconnect();document.removeEventListener('visibilitychange',schedule);motion.removeEventListener('change',schedule);};
+}
+
 function band(){
   const name=catalog.publicName||'Loja',cover=catalog.coverUrl||catalog.bannerUrl,ig=instagramHandle(catalog.instagram),list=modes();
   return `<header class="sf-band ${cover?'has-cover':''}">${cover?`<div class="sf-band-cover" style="background-image:${cssUrl(cover)}"></div>`:''}<div class="sf-band-inner">
@@ -149,11 +215,11 @@ function mainBody(){
   let body;
   if(!catalog.items.length)body=`<div class="sf-empty"><h2>Os produtos chegam em breve</h2><p>${phoneOk()?'Enquanto isso, fale com a loja pelo WhatsApp.':'Volte mais tarde.'}</p>${phoneOk()?`<a class="sf-btn sf-btn-wa" href="https://wa.me/${esc(K.phoneDigits(storePhone()))}" target="_blank" rel="noopener">${I.wa}<span>Falar com a loja</span></a>`:''}</div>`;
   else if(query){const r=searchResults();body=`<section class="sf-section"><header class="sf-section-head"><h2>${r.length?`${r.length} ${r.length===1?'resultado':'resultados'} para “${esc(query)}”`:`Nada encontrado para “${esc(query)}”`}</h2>${r.length?'':'<button type="button" class="sf-link" data-clear-search>Limpar busca</button>'}</header><div class="sf-grid">${r.map(i=>card(i)).join('')}</div></section>`;}
-  else body=`${!category&&featured.length?`<section class="sf-section sf-featured" aria-labelledby="sf-feat"><header class="sf-section-head"><h2 id="sf-feat">Destaques</h2></header><div class="sf-rail">${featured.map(i=>card(i,'sf-card-wide')).join('')}</div></section>`:''}${secs.filter(s=>!category||s.key===category).map(s=>`<section class="sf-section" aria-labelledby="sf-cat-${esc(s.key).replace(/\W/g,'')}"><header class="sf-section-head"><h2 id="sf-cat-${esc(s.key).replace(/\W/g,'')}">${esc(s.name)}</h2><small>${s.items.length} ${s.items.length===1?'item':'itens'}</small></header><div class="sf-grid">${s.items.map(i=>card(i)).join('')}</div></section>`).join('')}`;
+  else body=`${!category&&K.storefrontLayout(catalog).featured&&featured.length?`<section class="sf-section sf-featured" aria-labelledby="sf-feat"><header class="sf-section-head"><h2 id="sf-feat">Destaques</h2></header><div class="sf-rail">${featured.map(i=>card(i,'sf-card-wide')).join('')}</div></section>`:''}${!category && K.storefrontLayout(catalog).secondary?.active ? `<section class="vv-secondary">${bannerContent(K.storefrontLayout(catalog).secondary)}</section>` : ''}${secs.filter(s=>!category||s.key===category).map(s=>`<section class="sf-section" aria-labelledby="sf-cat-${esc(s.key).replace(/\W/g,'')}"><header class="sf-section-head"><h2 id="sf-cat-${esc(s.key).replace(/\W/g,'')}">${esc(s.name)}</h2><small>${s.items.length} ${s.items.length===1?'item':'itens'}</small></header><div class="sf-grid">${s.items.map(i=>card(i)).join('')}</div></section>`).join('')}`;
   return body;
 }
 function catalogView(){
-  return `${band()}${tools()}${canOrder()?'':'<p class="sf-notice">Esta loja ainda não recebe pedidos pelo site. Você pode conferir os produtos e os preços.</p>'}<div class="sf-layout"><main class="sf-main" id="sf-main">${mainBody()}</main><aside class="sf-aside" aria-label="Seu pedido">${asideCart()}</aside></div>`;
+  return `${band()}${hero()}${tools()}${canOrder()?'':'<p class="sf-notice">Esta loja ainda não recebe pedidos pelo site. Você pode conferir os produtos e os preços.</p>'}<div class="sf-layout"><main class="sf-main" id="sf-main">${mainBody()}</main><aside class="sf-aside" aria-label="Seu pedido">${asideCart()}</aside></div>`;
 }
 function lineHtml(l,compact=false){
   const max=stockOf(l.item,l.variant);
@@ -268,6 +334,7 @@ function render(order=null){
   const scrollY=renderedOnce&&view==='catalog'?scrollY_():0;
   const content=view==='cart'?cartView():view==='checkout'?checkoutView():view==='sent'?sentView():view==='success'?successView(successOrder):view==='orders'?ordersView():catalogView();
   root.innerHTML=`<div class="sf sf-view-${esc(view)}" style="${themeStyle()}">${content}${footer()}${cartBar()}${sheet?productSheet():''}<div class="sf-toast" role="status" aria-live="polite"></div></div>`;
+  attachHero();
   renderedOnce=true;
   if(view==='catalog'&&scrollY)scrollTo(0,scrollY);
   document.body.classList.toggle('sf-lock',!!sheet);
@@ -358,6 +425,8 @@ async function copyWhatsApp(){
 }
 root.addEventListener('click',event=>{
   const t=event.target;
+  const target=t.closest('[data-viva-target]')?.dataset.vivaTarget;
+  if(target){if(target==='cart')go('cart');else{const node=(target==='featured'&&root.querySelector('#sf-feat'))||root.querySelector('#sf-search');node?.scrollIntoView({block:'center'});node?.focus({preventScroll:true});}return;}
   const close=t.closest('[data-close]');if(close){closeSheet();return;}
   const add=t.closest('[data-add]');if(add){const item=catalog.items.find(i=>String(i.id)===add.dataset.add);if(!item)return;if(isVariable(item))return openSheet(item.id,add);if(!canOrder())return;const before=Number(cart[item.id]||0);setQty(item.id,before+1);if(Number(cart[item.id]||0)>before){navigator.vibrate?.(12);paintCart(item.id);toast(`${item.productName} no pedido`);}return;}
   const open=t.closest('[data-open]');if(open){openSheet(open.dataset.open,open);return;}
