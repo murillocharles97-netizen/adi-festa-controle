@@ -14,11 +14,11 @@ function normalizeRows(items){
   return rows;
 }
 // Separate reads/writes lets the same transaction create the order and its reservation.
-async function prepareReservation(tx,root,store,items,{release=false}={}){
+async function prepareReservation(tx,root,store,items,{release=false,publishedProductIds=new Set(store.selectedProductIds)}={}){
   const rows=normalizeRows(items),changes=[];
   for(const row of rows){
     const productRef=root.collection('products').doc(row.productId),product=(await tx.get(productRef)).data();
-    if(!release&&(!Model.allows(product,store.spaceId)||!store.selectedProductIds.includes(row.productId)))throw new HttpsError('permission-denied','Produto não publicado neste espaço.');
+    if(!release&&(!Model.allows(product,store.spaceId)||!publishedProductIds.has(row.productId)))throw new HttpsError('permission-denied','Produto não publicado neste espaço.');
     let source=product,sourceRef=productRef;
     if(row.variantId){sourceRef=root.collection('productVariants').doc(row.variantId);source=(await tx.get(sourceRef)).data();if(!release&&(!Model.active(source)||source.parentProductId!==row.productId))throw new HttpsError('invalid-argument','Variação inválida.');}
     else if(!release&&product.productType==='variable')throw new HttpsError('invalid-argument','Selecione uma variação.');

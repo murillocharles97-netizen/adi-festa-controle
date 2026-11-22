@@ -33,10 +33,11 @@ function onlineStoreService(db){
     return {store:{...existing,...state},replayed:false};
   }
   function reception(c,store,catalog){
+    const settings=catalog?.publicSettings||catalog;
     const published=store?.v2Enabled===true&&store?.published===true,
       valid=liveMatches(c,store,catalog)&&catalog.active===true&&catalog.catalogVisible===true,
-      delivery=store?.catalogSettings?.pickupEnabled===true||store?.catalogSettings?.deliveryEnabled===true,
-      payments=(store?.catalogSettings?.paymentMethods||[]).length>0,
+      delivery=settings?.pickupEnabled===true||settings?.deliveryEnabled===true,
+      payments=Array.isArray(settings?.paymentMethods)&&settings.paymentMethods.length>0,
       sales=c.space.capabilities?.sales===true,
       enabled=published&&valid&&sales&&delivery&&payments&&store.checkoutEnabled===true&&catalog.acceptingOrders===true;
     return {enabled,canEnable:published&&valid&&sales&&delivery&&payments,

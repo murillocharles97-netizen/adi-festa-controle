@@ -92,9 +92,9 @@ test('activation requires published matching V2 catalog, valid service mode and 
     if(fault==='unpublished')await f.storeRef.update({published:false});
     if(fault==='wrong-public-space')await f.catalogRef.update({spaceId:b});
     if(fault==='wrong-binding')await db.doc('catalogStoreBindings/'+f.store.publicToken).update({spaceId:b});
-    if(fault==='no-service')await f.storeRef.update({'catalogSettings.pickupEnabled':false,'catalogSettings.deliveryEnabled':false});
+    if(fault==='no-service')await f.catalogRef.update({'publicSettings.pickupEnabled':false,'publicSettings.deliveryEnabled':false});
     if(fault==='no-sales')await db.doc('financialSpaces/'+f.space).update({'capabilities.sales':false});
-    if(fault==='no-payment')await f.storeRef.update({'catalogSettings.paymentMethods':[]});
+    if(fault==='no-payment')await f.catalogRef.update({'publicSettings.paymentMethods':[]});
     await assert.rejects(toggle(f,true),{code:'failed-precondition'});
     assert.equal((await f.catalogRef.get()).data().acceptingOrders,false);
   }

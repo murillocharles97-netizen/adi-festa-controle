@@ -10,6 +10,14 @@ const {RESERVATION_MS,prepareExpiry}=require('./online-order-expiry');
 const {writeOnlineSignal}=require('../shared/online-order-signal');
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex'),fail=(code,message)=>{throw new HttpsError(code,message)},text=(v,max)=>String(v||'').trim().slice(0,max);
 const phone=v=>{const digits=String(v||'').replace(/\D/g,'');return digits.startsWith('55')&&digits.length>=12?digits:`55${digits}`;};
+const toCents=value=>Math.round(Number(value)*100);
+function orderPrice(store,published,product,variant){
+  if(variant)return variant.price;
+  // Store saves preserve any legacy price override without accepting a new one.
+  // An override only applies when it is the price carried by this publication.
+  const override=store.presentation?.products?.[published.productId]?.price;
+  return override!=null&&toCents(override)===toCents(published.salePrice)?override:product.preco;
+}
 const publicOrder=o=>serialize({id:o.id,spaceId:o.spaceId,spaceName:o.spaceName,source:o.source,orderStatus:o.orderStatus,publicOrderNumber:o.publicOrderNumber,items:o.items,total:o.total,customerName:o.customerName,customerPhone:o.customerPhone,customerLocation:o.customerLocation,note:o.note,serviceModeType:o.serviceModeType,serviceModeLabel:o.serviceModeLabel,paymentPreference:o.paymentPreference,createdAt:o.createdAt,updatedAt:o.updatedAt,statusHistory:(o.statusHistory||[]).map(e=>({status:e.status,at:e.at})),finalizationStatus:o.finalizationStatus,reservationStatus:o.reservationStatus,reservationExpiresAt:o.reservationExpiresAt,expiredAt:o.expiredAt,expirationReason:o.expirationReason,expiryEligibility:o.expiryEligibility});
 function onlineOrderService(db,{clock=()=>Date.now()}={}){
   async function catalogContext(tx,data){
@@ -33,26 +41,47 @@ function onlineOrderService(db,{clock=()=>Date.now()}={}){
       const c=await catalogContext(tx,data),ref=c.root.collection('catalogOrders').doc(id),prior=await tx.get(ref);
       if(prior.exists){if(prior.data().requestFingerprint!==fingerprint)fail('already-exists','Esta tentativa já existe com dados diferentes. Verifique o pedido anterior.');const expiry=await prepareExpiry(tx,c.root,c.business,prior.data(),{now:clock()});if(expiry)expiry.commit();return {order:publicOrder(expiry?.order||prior.data()),idempotent:true};}
       assertWritable(c.business,data.workspaceGeneration??0);const access=computeAccess(c.business.subscription||{});
-      if(!access.canMutate||!access.unlimited&&!access.features?.onlineOrders||c.store.v2Enabled!==true||!c.store.published||!c.store.checkoutEnabled||!c.catalog.acceptingOrders)fail('failed-precondition','A loja não está recebendo pedidos.');
-      if(!['pickup','delivery'].includes(serviceMode)||serviceMode==='pickup'&&c.store.catalogSettings.pickupEnabled===false||serviceMode==='delivery'&&!c.store.catalogSettings.deliveryEnabled)fail('invalid-argument','Entrega ou retirada não disponível.');
+      if((data.businessId&&data.businessId!==c.root.id)||(data.spaceId&&data.spaceId!==c.store.spaceId))
+        fail('permission-denied','Loja ou espaço indisponível.');
+      const generation=c.business.workspaceGeneration??0;
+      if(c.binding.status!=='completed'||c.catalog.catalogType!=='space_store'||c.catalog.legacyStoreRetired||
+        c.catalog.catalogToken!==data.catalogToken||c.catalog.visitId!==c.binding.storeId||
+        c.store.businessId!==c.root.id||c.store.spaceId!==c.binding.spaceId||
+        [c.binding,c.catalog,c.store].some(record=>(record.workspaceGeneration??0)!==generation))
+        fail('failed-precondition','A publicação desta loja não pôde ser verificada.');
+      if(!access.canMutate||!access.unlimited&&!access.features?.onlineOrders||c.store.v2Enabled!==true||!c.store.published||
+        !c.store.checkoutEnabled||c.catalog.active!==true||c.catalog.catalogVisible===false||c.catalog.acceptingOrders!==true)
+        fail('failed-precondition','A loja não está recebendo pedidos.');
+      const settings=c.catalog.publicSettings||c.catalog;
+      if(!['pickup','delivery'].includes(serviceMode)||serviceMode==='pickup'&&settings.pickupEnabled===false||serviceMode==='delivery'&&settings.deliveryEnabled!==true)fail('invalid-argument','Entrega ou retirada não disponível.');
       if(serviceMode==='delivery'&&customerLocation.length<8)fail('invalid-argument','Informe o endereço completo para entrega.');
-      if(!(c.store.catalogSettings.paymentMethods||[]).includes(paymentPreference))fail('invalid-argument','Forma de pagamento não disponível.');
+      if(!Array.isArray(settings.paymentMethods)||!settings.paymentMethods.includes(paymentPreference))fail('invalid-argument','Forma de pagamento não disponível.');
+      const publishedItems=new Map((c.catalog.items||[]).filter(item=>item.active!==false).map(item=>[item.id,item]));
       const items=[];
       for(const raw of inputItems){
-        const split=raw.catalogItemId.lastIndexOf('::'),baseId=split>0?raw.catalogItemId.slice(0,split):raw.catalogItemId,variantId=split>0?raw.catalogItemId.slice(split+2):null,published=(c.catalog.items||[]).find(i=>i.id===baseId);
-        if(!published||published.active===false||!Number.isInteger(raw.quantity)||raw.quantity<1||raw.quantity>999)fail('invalid-argument','Produto indisponível ou quantidade inválida.');
+        const split=raw.catalogItemId.lastIndexOf('::'),baseId=split>0?raw.catalogItemId.slice(0,split):raw.catalogItemId,variantId=split>0?raw.catalogItemId.slice(split+2):null,published=publishedItems.get(baseId);
+        if(!published||!Number.isInteger(raw.quantity)||raw.quantity<1||raw.quantity>999)fail('invalid-argument','Produto indisponível ou quantidade inválida.');
         validId(published.productId,'Produto');const product=(await tx.get(c.root.collection('products').doc(published.productId))).data();
-        if(!Model.allows(product,c.store.spaceId)||!c.store.selectedProductIds.includes(published.productId))fail('permission-denied','Produto não pertence à loja deste espaço.');
-        let variant=null;if(variantId){validId(variantId,'Variação');variant=(await tx.get(c.root.collection('productVariants').doc(variantId))).data();if(!Model.active(variant)||variant.parentProductId!==published.productId||variant.catalogVisible===false)fail('invalid-argument','Variação indisponível.');}
+        if(!Model.allows(product,c.store.spaceId)||(product.businessId&&product.businessId!==c.root.id))fail('permission-denied','Produto não pertence à loja deste espaço.');
+        let variant=null;
+        if(variantId){
+          validId(variantId,'Variação');
+          if(!(published.variants||[]).some(v=>(v.variantId||v.id)===variantId&&v.active!==false&&v.catalogVisible!==false))
+            fail('invalid-argument','Variação indisponível.');
+          variant=(await tx.get(c.root.collection('productVariants').doc(variantId))).data();
+          if(!Model.active(variant)||variant.parentProductId!==published.productId||variant.catalogVisible===false||
+            (variant.businessId&&variant.businessId!==c.root.id))fail('invalid-argument','Variação indisponível.');
+        }
         if(product.productType==='variable'&&!variant||variant&&product.productType!=='variable')fail('invalid-argument','Selecione uma variação válida.');
         if(product.productType==='recurring')fail('failed-precondition','Este item recorrente exige atendimento específico. Solicite pelo WhatsApp da loja.');
-        const price=Number(variant?variant.price:c.store.presentation?.products?.[published.productId]?.price??product.preco),cents=Math.round(price*100);
+        const price=Number(orderPrice(c.store,published,product,variant)),cents=toCents(price);
         if(!Number.isFinite(price)||cents<=0)fail('failed-precondition','Produto sem preço válido.');
         items.push({productId:published.productId,variantId,catalogItemId:raw.catalogItemId,name:variant?`${published.productName} — ${variant.displayName}`:published.productName,productNameSnapshot:published.productName,variantNameSnapshot:variant?.displayName||null,attributesSnapshot:variant?.attributeValues||{},quantity:raw.quantity,unitPrice:cents/100,subtotal:cents*raw.quantity/100,itemKind:product.itemKind||'product',productType:product.productType||'simple'});
       }
       const totalCents=items.reduce((sum,i)=>sum+Math.round(i.subtotal*100),0);if(totalCents<1||totalCents>1000000)fail('invalid-argument','Total inválido.');
       if(data.expectedTotal!=null&&Math.round(Number(data.expectedTotal)*100)!==totalCents)fail('failed-precondition','O preço mudou. Atualize o catálogo e revise o resumo antes de confirmar.');
-      const reservation=await prepareReservation(tx,c.root,c.store,items),createdAt=Timestamp.fromMillis(clock()),operationId=`catalog-order:${id}`,order={id,businessId:c.root.id,spaceId:c.store.spaceId,spaceName:c.space.name||c.space.nome||'Espaço',storeId:c.store.id,catalogToken:data.catalogToken,source:'online_store',schemaVersion:2,workspaceGeneration:data.workspaceGeneration??0,requestFingerprint:fingerprint,accessTokenHash:hash(accessToken),orderStatus:'recebido',publicOrderNumber:`VC-${id.slice(0,8).toUpperCase()}`,customerName,customerPhone,customerLocation,note,serviceModeType:serviceMode,serviceModeId:serviceMode,serviceModeLabel:serviceMode==='delivery'?'Entrega':'Retirada',paymentPreference,paymentStatus:'pendente',items,subtotal:totalCents/100,total:totalCents/100,fee:0,discount:0,operationId,reservationStatus:'reserved',expiryEligibility:'automatic',reservationExpiresAt:Timestamp.fromMillis(createdAt.toMillis()+RESERVATION_MS),finalizationStatus:'none',createdAt,updatedAt:createdAt,statusHistory:[{status:'recebido',at:createdAt,actorUid:null}],revision:1};
+      const publishedProductIds=new Set([...publishedItems.values()].map(item=>item.productId));
+      const reservation=await prepareReservation(tx,c.root,c.store,items,{publishedProductIds}),createdAt=Timestamp.fromMillis(clock()),operationId=`catalog-order:${id}`,order={id,businessId:c.root.id,spaceId:c.store.spaceId,spaceName:c.space.name||c.space.nome||'Espaço',storeId:c.store.id,catalogToken:data.catalogToken,source:'online_store',schemaVersion:2,workspaceGeneration:data.workspaceGeneration??0,requestFingerprint:fingerprint,accessTokenHash:hash(accessToken),orderStatus:'recebido',publicOrderNumber:`VC-${id.slice(0,8).toUpperCase()}`,customerName,customerPhone,customerLocation,note,serviceModeType:serviceMode,serviceModeId:serviceMode,serviceModeLabel:serviceMode==='delivery'?'Entrega':'Retirada',paymentPreference,paymentStatus:'pendente',items,subtotal:totalCents/100,total:totalCents/100,fee:0,discount:0,operationId,reservationStatus:'reserved',expiryEligibility:'automatic',reservationExpiresAt:Timestamp.fromMillis(createdAt.toMillis()+RESERVATION_MS),finalizationStatus:'none',createdAt,updatedAt:createdAt,statusHistory:[{status:'recebido',at:createdAt,actorUid:null}],revision:1};
       reservation.commit(tx,order.workspaceGeneration);tx.create(c.root.collection('onlineOrderReservations').doc(id),{businessId:c.root.id,spaceId:order.spaceId,storeId:order.storeId,operationId,workspaceGeneration:order.workspaceGeneration,status:'reserved',items:reservation.changes.map(r=>r.row),createdAt});tx.create(ref,order);writeOnlineSignal(tx,c.root,createdAt,{stock:true});
       return {order:publicOrder(order),idempotent:false};
     });
