@@ -14,8 +14,8 @@ const phaseName = {
   'primeira-interacao':'Foco no campo após abrir',
   'busca-com-resultado':'Busca com resultado',
   'busca-sem-resultado':'Busca sem resultado',
-  'rolagem-e-proximo-lote':'Rolagem até itens de 2º lote',
-  'busca-codigo-fora-do-lote':'Busca por código fora do 1º lote',
+  'rolagem-e-proximo-lote':'Rolagem e acesso aos itens seguintes',
+  'busca-codigo-fora-do-lote':'Busca por código',
   'selecionar-e-incluir':'Selecionar e incluir',
   'abrir-checkout':'Abrir o carrinho',
   'remover-do-carrinho':'Remover do carrinho',
@@ -54,7 +54,7 @@ for(const mobile of [false,true]) for(const theme of ['light','dark']) for(const
   ]) summary.push([tag,name,metric,...compare(group,'primeira-abertura',select)]);
 }
 console.log('# VECONI — Benchmarks de Vender\n');
-console.log('Três repetições por célula em cada versão. Mediana (mínimo–máximo). Valores em ms, salvo cartões, nós e contagem. O trecho de rolagem na base alcança o cartão 72 já montado. Na candidata inclui a ação de solicitar e pintar a próxima leva.\n');
+console.log('Três repetições por célula em cada versão. Mediana (mínimo–máximo). Valores em ms, salvo cartões, nós e contagem. A rolagem da base pequena alcança o último cartão. Nas demais, a base V242.2 rola até o cartão 72, já montado, e a candidata inclui solicitar e pintar a próxima leva.\n');
 table(['Perfil','Base','Operação','V242.2','Candidata','Variação'], details);
 console.log('\n## Custo da primeira abertura\n');
 table(['Perfil','Base','Métrica','V242.2','Candidata','Variação'], summary);
