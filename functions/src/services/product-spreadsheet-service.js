@@ -18,9 +18,12 @@ function productSpreadsheetService(db, {FieldValue}) {
     const base = db.doc(`businesses/${businessId}`);
     return db.runTransaction(async tx => {
       const revisionRef = base.collection('productImportIdentifiers').doc('catalog-revision');
-      const [businessSnap, memberSnap, profileSnap, spaceSnap] = await Promise.all([
+      const [businessSnap, memberSnap, profileSnap, spaceSnap, , settingsSnap] = await Promise.all([
         tx.get(base), tx.get(base.collection('members').doc(uid)), tx.get(db.doc(`users/${uid}`)), tx.get(db.doc(`financialSpaces/${spaceId}`)), tx.get(revisionRef),
+        tx.get(base.collection('settings').doc('default')),
       ]);
+      // Company-wide brand rule, read in this transaction. The sheet has no Marca column yet.
+      const brandRequired = settingsSnap?.data()?.productRules?.brandRequired === true;
       const business = businessSnap.data(), member = memberSnap.data(), profile = profileSnap.data(), space = spaceSnap.data();
       assertWritable(business, workspaceGeneration);
       const legacy = !member && business.legacyAccessDisabled !== true && profile?.active === true && profile.businessId === businessId;
@@ -72,6 +75,7 @@ function productSpreadsheetService(db, {FieldValue}) {
           if (!created || created.deleted || created.deletedAt || !Sheet.inScope(created, scope, true)) { fail('Esta linha já foi processada antes e não está disponível no seu acesso atual. Nenhum produto novo foi criado.'); continue; }
           results.push({line:input.line, id:created.id, ok:true, action:'create', replayed:true}); continue;
         }
+        if (brandRequired) { fail('Esta empresa exige Marca ao cadastrar produtos e a planilha não tem coluna Marca. Cadastre pelo formulário; nenhum produto foi criado.'); continue; }
         const data = row.create;
         const sku = Sheet.canonical('codigo', data.codigo), ean = Sheet.canonical('barcode', data.barcode), sameSku = v => !!sku && Sheet.canonical('codigo', v) === sku, sameEan = v => !!ean && Sheet.canonical('barcode', v) === ean;
         if (scoped.some(p => sameSku(p.codigo) || sameEan(p.barcode) || (p.alternateBarcodes || []).some(sameEan)) || variants.some(v => sameSku(v.sku || v.codigo) || sameEan(v.barcode))) {

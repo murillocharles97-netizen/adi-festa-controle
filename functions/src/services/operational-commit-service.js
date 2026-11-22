@@ -550,6 +550,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     const parent=col==='products'?{...before,...patch}:await effective('products',patch.parentProductId||before?.parentProductId);await scopeProduct(c,parent,null);
     const metadata=changed(patch,before,Object.keys(patch)).filter(k=>!envelope.includes(k)&&!stockFields.includes(k)&&!['atualizadoEm','custo','cost'].includes(k));
     if((metadata.length||!before)&&!c.has('products.edit'))fail('Sem permissão para editar produto.');
+    // Marca: atributo opcional. Regra POR EMPRESA (settings/default.productRules.brandRequired) só para produto NOVO.
+    // Retentativas já confirmadas retornam antes, pelo recibo em processedOperations.
+    if(col==='products'&&Object.hasOwn(patch,'marca')&&(typeof patch.marca!=='string'||patch.marca.length>80))fail('Marca inválida (texto de até 80 caracteres).','invalid-argument');
+    if(col==='products'&&!before&&!String(patch.marca??'').trim()&&(await tx.get(ref(c.bid,'settings','default'))).data()?.productRules?.brandRequired===true)fail('Esta empresa exige Marca ao cadastrar produtos. Informe a marca e tente novamente.','failed-precondition');
     if(col==='productVariants'&&before&&patch.parentProductId&&patch.parentProductId!==before.parentProductId)fail('Variação não pode mudar de produto.');
     if(col==='products'&&(!before||changed(patch,before,['spaceAccessMode','allowedSpaceIds','defaultSpaceId']).length)){
      const scoped={...before,...patch},ids=scoped.allowedSpaceIds;
