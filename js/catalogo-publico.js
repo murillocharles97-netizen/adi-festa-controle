@@ -1,66 +1,56 @@
-import {db,functions} from './firebase/firebase-config.js';
-import {doc,getDoc,onSnapshot,serverTimestamp,setDoc as rawSetDoc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
-import {httpsCallable} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js';
-import {formatBrazilianPhone,isValidBrazilianPhone,normalizeBrazilianPhone,sessionDocumentId,sessionStorageKey,trackPortalEvent} from './catalog-portal.js';
-
-const root=document.querySelector('#catalog-app'),params=new URLSearchParams(location.search),queryToken=params.get('v'),legacyPathMatch=location.pathname.match(/\/catalogo\/([^/?#]+)/),legacyPathToken=legacyPathMatch?legacyPathMatch[1]:'',money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}),esc=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])),uuid=()=>crypto.randomUUID();
+// VECONI Loja Online V3 — loja pública (link compartilhável de um espaço).
+// Mostra só o documento publicado (publicCatalogs/{token}): sem custos, clientes ou dados internos.
+// Finalização: pelo WhatsApp da loja (padrão) ou, quando o lojista ativou, pedido registrado com reserva.
+// Abrir o WhatsApp NÃO registra pedido, venda, pagamento nem baixa de estoque.
+const K=window.StoreKit;
+const root=document.querySelector('#catalog-app'),params=new URLSearchParams(location.search),preview=params.get('preview')==='1';
+const queryToken=params.get('v'),legacyPathMatch=location.pathname.match(/\/catalogo\/([^/?#]+)/),legacyPathToken=legacyPathMatch?legacyPathMatch[1]:'';
+const money=v=>K.money(v),esc=value=>String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])),uuid=()=>crypto.randomUUID();
+const norm=v=>String(v??'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+let fb=null;
+// Firebase só fora da prévia: a prévia do painel nunca lê nem grava nada.
+async function firebase(){
+  if(preview)throw Object.assign(Error('Indisponível na prévia.'),{code:'preview'});
+  if(fb)return fb;
+  const [cfg,fs,fn]=await Promise.all([import('./firebase/firebase-config.js'),import('https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js'),import('https://www.gstatic.com/firebasejs/10.13.2/firebase-functions.js')]);
+  fb={db:cfg.db,functions:cfg.functions,doc:fs.doc,getDoc:fs.getDoc,httpsCallable:fn.httpsCallable};return fb;
+}
+const callable=async(name,data)=>{const f=await firebase();return f.httpsCallable(f.functions,name)(data);};
 let visitToken=queryToken||legacyPathToken||'';
 let slugResolutionError=null;
-if(params.has('loja')){
-  try{const slug=String(params.get('loja')||'');if(!/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(slug))throw Error('Link da loja inválido.');const alias=await getDoc(doc(db,'publicCatalogSlugs',slug));if(!alias.exists())throw Error('Loja não encontrada.');visitToken=alias.data().catalogToken||'';}catch(error){slugResolutionError=error;}
+if(!preview&&params.has('loja')){
+  try{const slug=String(params.get('loja')||'');if(!/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(slug))throw Error('Link da loja inválido.');const f=await firebase();const alias=await f.getDoc(f.doc(f.db,'publicCatalogSlugs',slug));if(!alias.exists())throw Error('Loja não encontrada.');visitToken=alias.data().catalogToken||'';}
+  catch(error){slugResolutionError=error;}
 }
-const cartKey=`adiFesta:catalogCart:${visitToken}`,legacyCartKey=`adiCatalogCart:${visitToken}`,ordersKey=`adiCatalogOrders:${visitToken}`,serviceModeKey=`adiFesta:catalogServiceMode:${visitToken}`;
-let catalog=null,view='catalog',category='Todos',query='',quickFilter='all',visibleLimit=12,serviceModeId='',productDetailsId=null,cart=read(cartKey,read(legacyCartKey,{})),orders=read(ordersKey,[]),identity=read(`adiFesta:portalIdentity:${visitToken}`,{}),portalSession=null,portalProfile=null,unsub=[],subscribedProfile='',subscribedOrderIds=new Set(),toastTimer=null,pendingOrderForm=null,submittingOrder=false,pendingOrderAttempt=null,pendingIdentityResult=null,variantPickerProductId=null;
-const identifyCustomer=payload=>httpsCallable(functions,'identifyCatalogCustomer')({...payload,workspaceGeneration:catalog?.workspaceGeneration??0}),submitCatalogOrder=httpsCallable(functions,'submitCatalogOrder');
-const setDoc=(reference,data)=>rawSetDoc(reference,{...data,workspaceGeneration:catalog?.workspaceGeneration??0,workspaceWriteId:crypto.randomUUID()});
+const cartKey=`adiFesta:catalogCart:${visitToken}`,noteKey=`adiCatalogNote:${visitToken}`,customerKey=`veconi:storeCustomer:${visitToken}`,serviceModeKey=`adiFesta:catalogServiceMode:${visitToken}`;
+let catalog=null,view='catalog',query='',category='',sheet=null,toastTimer=0,lastFocus=null,sentUrl='',successOrder=null,renderedOnce=false;
+let cart=preview?{}:read(cartKey,{}),customer=preview?{}:read(customerKey,{}),note=preview?'':read(noteKey,''),serviceModeId=preview?'':read(serviceModeKey,''),payment='',orders=[],pendingOrderAttempt=null,submittingOrder=false,errors={};
 const v2=()=>Number(catalog?.schemaVersion)>=6;
-const publicOrderLabel=status=>(v2()?window.OnlineOrderModel?.labels?.[status]:null)||({recebido:'Recebido',confirmado:'Confirmado',preparando:'Preparando',separando:'Pronto',deslocamento:'Enviado',entregue:'Concluído',cancelado:'Cancelado'}[status]||status);
 const attempts=()=>window.OnlineCheckoutAttempts.create(window.DB.localRecords,visitToken);
-const orderStatusCall=httpsCallable(functions,'getOnlineOrderStatus');
-let statusTimer=null;
-async function acceptV2(payload,order){await attempts().accept(payload,order);orders=await attempts().list();cart={};pendingOrderAttempt=null;save();view='success';render(order);return true;}
-async function restoreV2(){
-  orders=await attempts().list();const payload=await attempts().pending();
-  if(payload){pendingOrderAttempt={payload};cart=Object.fromEntries(payload.items.map(i=>[i.catalogItemId,i.quantity]));identity={...identity,nome:payload.customerName,telefone:payload.customerPhone,local:payload.customerLocation};serviceModeId=payload.serviceModeId;view='checkout';
-    try{const r=await orderStatusCall({catalogToken:visitToken,id:payload.id,orderAccessToken:payload.orderAccessToken});await acceptV2(payload,r.data.order);return true;}catch(e){if(!String(e.code||'').endsWith('not-found'))toast('Há um envio em confirmação. Tente verificar novamente, sem criar outro pedido.');}
-  }return false;
-}
-async function refreshV2Orders(){
-  if(document.hidden||!navigator.onLine)return;
-  for(const entry of orders.filter(o=>!['entregue','cancelado','expirado'].includes(o.data?.orderStatus)).slice(0,5)){
-    try{const r=await orderStatusCall({catalogToken:visitToken,id:entry.id,orderAccessToken:entry.accessToken});entry.data=r.data.order;if(v2())await attempts().accept({orderAccessToken:entry.accessToken},entry.data);else save();}catch{/* Keep the last confirmed state; never claim success from a transport failure. */}
-  }if(view==='orders')render();
-}
-function safeStorage(key,value){try{localStorage.setItem(key,value);}catch{/* Checkout is durable in IndexedDB before any request. */}}
-
+const orderStatusCall=data=>callable('getOnlineOrderStatus',data);
+function safeStorage(key,value){if(preview)return;try{localStorage.setItem(key,value);}catch{/* Checkout é durável no IndexedDB antes de qualquer envio. */}}
 function read(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}}
-function save(){safeStorage(cartKey,JSON.stringify(cart));localStorage.removeItem(legacyCartKey);if(!v2())safeStorage(ordersKey,JSON.stringify(orders));safeStorage(`adiFesta:portalIdentity:${visitToken}`,JSON.stringify(identity))}
+function save(){safeStorage(cartKey,JSON.stringify(cart));safeStorage(customerKey,JSON.stringify(customer));safeStorage(noteKey,JSON.stringify(note));}
 const validVisitToken=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{20,128}$/.test(value);
 const publicCatalogError=(code,message)=>Object.assign(new Error(message||code),{code});
-function normalizedCatalogErrorCode(error){const code=String(error?.code||'').replace('firestore/','');if(code==='permission-denied')return'permission-denied';if(code==='not-found')return'not-found';if(code==='inactive')return'inactive';if(['unavailable','network-request-failed','deadline-exceeded','failed-precondition'].includes(code)||!navigator.onLine)return'network';return'network'}
-function catalogErrorMessage(code){return{'permission-denied':'Sem permissão para acessar o catálogo','not-found':'Catálogo não encontrado',inactive:'Catálogo encerrado ou indisponível',network:'Não foi possível conectar ao servidor'}[code]||'Não foi possível conectar ao servidor'}
-function showCatalogError(code,error){const message=catalogErrorMessage(code);console.error('[Public catalog load]',{code,message,firestoreCode:error?.code||null,documentPath:visitToken?`publicCatalogs/${visitToken}`:null,urlToken:queryToken,legacyPathToken:queryToken?null:legacyPathToken,tokenSource:queryToken?'query-v':legacyPathToken?'legacy-path':'missing',online:navigator.onLine});root.innerHTML=`<div class="catalog-loading catalog-load-error"><span class="catalog-logo"><img src="./assets/veconi-symbol.svg" alt=""></span><b>VECONI</b><h2>${esc(message)}</h2><p>${code==='permission-denied'?'O link existe, mas o acesso público não foi autorizado.':code==='not-found'?'Confira se o link recebido está completo.':code==='inactive'?'Peça ao vendedor um novo catálogo ativo.':'Verifique sua internet e tente novamente.'}</p><button type="button" class="secondary-button" onclick="location.reload()">Tentar novamente</button></div>`}
+function normalizedCatalogErrorCode(error){const code=String(error?.code||'').replace('firestore/','');if(code==='permission-denied')return'permission-denied';if(code==='not-found')return'not-found';if(code==='inactive')return'inactive';if(code==='paused')return'paused';return'network'}
 function validatePublicCatalog(snapshot){
   if(!snapshot.exists())throw publicCatalogError('not-found','Documento público não encontrado.');
   if(snapshot.id!==visitToken)throw publicCatalogError('not-found','O token não corresponde ao ID do documento.');
   const data=snapshot.data()||{};
   if(data.legacyStoreRetired||data.schemaVersion<6||data.catalogType!=='space_store'||!data.spaceId)throw publicCatalogError('inactive','Esta loja antiga foi desativada. Peça o novo link da loja.');
   if(data.catalogToken&&data.catalogToken!==snapshot.id)throw publicCatalogError('not-found','O token publicado não corresponde ao ID do documento.');
-  if(data.active!==true)throw publicCatalogError('inactive','Catálogo inativo.');
   if(!data.visitId||!data.businessId||!data.publicName||!Array.isArray(data.items))throw publicCatalogError('not-found','Documento público incompleto.');
+  // Loja pausada pelo lojista: mostra a marca e o contato, sem produtos.
+  if(data.active!==true)throw Object.assign(publicCatalogError('paused','Loja pausada.'),{store:{publicName:data.publicName,logoUrl:data.logoUrl,primaryColor:data.primaryColor,secondaryColor:data.secondaryColor,contactPhone:data.contactPhone,openingHours:data.openingHours}});
   return{token:snapshot.id,...data};
 }
 async function loadPublicCatalog(){
   if(slugResolutionError)throw publicCatalogError('not-found',slugResolutionError.message);
-  if(!queryToken&&legacyPathToken)console.warn('[Public catalog load]',{code:'legacy-path-token',message:'Link antigo detectado. Novos links usam catalogo.html?v={visitToken}.',visitToken});
   if(!validVisitToken(visitToken))throw publicCatalogError('not-found','Token ausente ou inválido.');
-  const reference=doc(db,'publicCatalogs',visitToken);
+  const f=await firebase(),reference=f.doc(f.db,'publicCatalogs',visitToken);
   if(reference.id!==visitToken)throw publicCatalogError('not-found','O token não corresponde ao ID do documento.');
-  console.info('[Public catalog load]',{code:'loading',documentPath:reference.path,documentId:reference.id,urlToken:visitToken,tokenMatchesDocumentId:reference.id===visitToken,authRequired:false,operation:'getDoc'});
-  const snapshot=await getDoc(reference);
-  let data=validatePublicCatalog(snapshot);
-  console.info('[Public catalog load]',{code:'loaded',documentPath:reference.path,documentId:snapshot.id,urlToken:visitToken,tokenMatchesDocumentId:snapshot.id===visitToken,itemCount:data.items.length,active:data.active});
-  return data;
+  return validatePublicCatalog(await f.getDoc(reference));
 }
 let availabilityRefresh=null;
 async function refreshPublicAvailability(){
@@ -86,189 +76,316 @@ async function refreshPublicAvailability(){
   try{return await availabilityRefresh;}finally{availabilityRefresh=null;}
 }
 // Refresh ONLY this public document on navigation/return, no global listener or polling.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshPublicAvailability();});
-addEventListener('pageshow',event=>{if(event.persisted)refreshPublicAvailability();});
-addEventListener('online',()=>refreshPublicAvailability());
-function toast(text,undoId=null){const el=document.querySelector('#catalog-toast');clearTimeout(toastTimer);el.innerHTML=`<span>${esc(text)}</span>${undoId?'<button type="button" data-toast-undo>Desfazer</button>':''}`;if(undoId)el.querySelector('[data-toast-undo]').onclick=()=>{changeCart(undoId,-1,null,{silent:true});el.classList.remove('show')};el.classList.add('show');toastTimer=setTimeout(()=>el.classList.remove('show'),2600)}
-const icon=name=>`<i data-lucide="${name}"></i>`;
-const orderableItems=()=>catalog.items.flatMap(item=>item.productType==='variable'?(item.variants||[]).filter(variant=>variant.active!==false&&variant.catalogVisible!==false).map(variant=>({...item,id:`${item.id}::${variant.id}`,variantId:variant.id,variantName:variant.displayName,attributeValues:variant.attributeValues,productName:`${item.productName} — ${variant.displayName}`,salePrice:Number(variant.salePrice),availableQuantity:Number(variant.availableQuantity),productImage:variant.imageUrl||item.productImage,imagePresentation:variant.imagePresentation||item.imagePresentation,productType:'variant'})):[item]);
-const findOrderable=id=>orderableItems().find(item=>String(item.id)===String(id));
-const count=()=>Object.values(cart).reduce((sum,quantity)=>sum+Number(quantity||0),0),total=()=>orderableItems().reduce((sum,item)=>sum+Number(cart[item.id]||0)*Number(item.salePrice),0);
-const tracksStock=item=>item.controlaEstoque!==false&&item.trackStock!==false&&item.semControleEstoque!==true;
-const available=item=>tracksStock(item)?Math.max(0,Number(item.availableQuantity??item.currentStock??0)-Number(item.reservedStock??0)):Number.POSITIVE_INFINITY;
-function receiving(){if(catalog.catalogType==='universal'||Number(catalog.schemaVersion)>=4)return catalog.catalogVisible!==false&&(catalog.acceptingOrders===true||catalog.closedBehavior==='accept_for_later');const statusOk=['recebendo','receiving_orders','recebendo_pedidos','recebendo pedidos'].includes(String(catalog.status||'').toLowerCase()),deadline=catalog.data&&catalog.horarioLimite?new Date(`${catalog.data}T${catalog.horarioLimite}:00`):null;return catalog.active!==false&&statusOk&&(!deadline||Number.isNaN(deadline.getTime())||Date.now()<=deadline.getTime())}
-const campaignProgress=campaignId=>(portalProfile?.campaigns||[]).find(item=>item.campaignId===campaignId)||null;
-const visibleCampaigns=()=>{const map=new Map((catalog.campaigns||[]).map(campaign=>[campaign.id,campaign]));for(const progress of portalProfile?.campaigns||[]){const id=progress.id||progress.campaignId;map.set(id,{...(map.get(id)||{}),...progress,id})}return[...map.values()]};
-function campaignTarget(campaign,progress={}){progress=progress||{};if(progress.target)return Number(progress.target);if(campaign.tipo==='points')return Number((campaign.rewards||[]).filter(reward=>Number(reward.pointsCost)>0).sort((a,b)=>a.pointsCost-b.pointsCost)[0]?.pointsCost||campaign.regras?.rewardPoints||100);if(campaign.tipo==='nth_product')return Number(campaign.rule?.requiredPurchases||campaign.regras?.requiredPurchases||5);return Number(campaign.rule?.requiredQuantity||campaign.regras?.requiredQuantity||5)}
-function campaignCurrent(campaign,progress={}){progress=progress||{};return campaign.tipo==='points'?Number(progress.availablePoints??progress.points??0):Number(progress.cycleRemainder??progress.currentProgress??0)}
-function availableCampaignReward(campaign,progress={}){if(campaign.tipo==='points')return[...(campaign.rewards||[])].filter(reward=>Number(reward.pointsCost)>0&&Number(reward.pointsCost)<=campaignCurrent(campaign,progress)).sort((a,b)=>Number(b.pointsCost)-Number(a.pointsCost))[0]||null;return Number(progress?.rewardsAvailable||0)>0?(campaign.rewards||[])[0]||{id:'reward-1'}:null}
-function relevantCampaigns(){return visibleCampaigns().map(campaign=>({campaign,progress:campaignProgress(campaign.id)})).sort((a,b)=>Number(Boolean(availableCampaignReward(b.campaign,b.progress)))-Number(Boolean(availableCampaignReward(a.campaign,a.progress)))||(campaignTarget(a.campaign,a.progress)-campaignCurrent(a.campaign,a.progress))-(campaignTarget(b.campaign,b.progress)-campaignCurrent(b.campaign,b.progress)))}
-function bestBenefit(){return relevantCampaigns().find(item=>availableCampaignReward(item.campaign,item.progress))||relevantCampaigns().filter(item=>item.progress).sort((a,b)=>(campaignTarget(a.campaign,a.progress)-campaignCurrent(a.campaign,a.progress))-(campaignTarget(b.campaign,b.progress)-campaignCurrent(b.campaign,b.progress)))[0]||null}
-const activeServiceModes=()=>{
-  const configured=(catalog.serviceModes||[]).filter(item=>item.active!==false);
-  if(configured.length)return configured;
-  if(['pickup','delivery','store'].includes(catalog.operationMode))return[{id:catalog.operationMode,type:catalog.operationMode,label:{pickup:'Retirada',delivery:'Entrega',store:'Loja física'}[catalog.operationMode],active:true,instructions:''}];
-  return[];
-};
-function currentServiceMode(){const modes=activeServiceModes();return modes.find(item=>String(item.id||item.type)===String(serviceModeId))||modes[0]||null}
-function header(title='Catálogo online'){const quantity=count(),badge=quantity>99?'99+':quantity,brand=catalog.publicName||catalog.businessName||'Loja',mode=currentServiceMode();return `<header class="catalog-header">${view!=='catalog'?`<button type="button" class="back-button" data-view="catalog" aria-label="Voltar">${icon('chevron-left')}</button>`:`${catalog.logoUrl?`<img class="space-store-logo" src="${esc(catalog.logoUrl)}" alt="">`:''}<span class="catalog-brand-mark" aria-hidden="true">${esc(brand.split(/\s+/).slice(0,2).map(word=>word[0]).join('').toUpperCase())}</span><span class="catalog-brand">${esc(brand)}</span>`}<div class="catalog-title"><b>${esc(title)}</b><small>${esc(catalog.operationMode==='scheduled_visit'?catalog.local:(mode?.label||'Pedidos online'))}</small></div><button type="button" class="cart-button" data-view="cart" data-desktop-cart aria-label="${quantity?`Abrir carrinho com ${quantity} itens`:'Carrinho vazio'}">${icon('shopping-cart')}<span class="cart-count">${badge}</span></button></header>`}
-function nav(){if(v2())return `<nav class="catalog-bottom" aria-label="Loja online"><button data-view="catalog">${icon('shopping-basket')}Catálogo</button><button data-view="cart">${icon('shopping-cart')}Carrinho</button><button data-view="orders">${icon('receipt-text')}Meus pedidos</button></nav>`;return `<nav class="catalog-bottom" aria-label="Portal do cliente"><button data-view="catalog" class="${view==='catalog'?'active':''}">${icon('shopping-basket')}<span>Catálogo</span></button><button data-view="orders" class="${view==='orders'?'active':''}">${icon('receipt-text')}<span>Meus pedidos</span></button><button data-view="benefits" class="${view==='benefits'?'active':''}">${icon('gift')}<span>Meus benefícios</span></button><button data-view="account" class="${view==='account'?'active':''}">${icon('user-round')}<span>Conta</span></button></nav>`}
-function poweredBy(){return `<footer class="veconi-powered-by"><img src="./assets/veconi-symbol.svg" alt=""><span>Criado com <b>VECONI</b></span></footer>`}
-function guestCard(){if(v2())return '';if(portalProfile)return`<section class="guest-identify-card identified"><span>${icon('badge-check')}</span><div><b>Olá, ${esc(portalProfile.displayName)} 👋</b><p>Seus pedidos e benefícios estão vinculados.</p></div><button id="switch-client" type="button">Alterar</button></section>`;return `<section class="guest-identify-card"><span>${icon('shield-check')}</span><div><b>Já compra com a gente?</b><p>Informe seu WhatsApp para acompanhar pedidos, campanhas e benefícios.</p></div><button data-identify>Identificar-me</button></section>`}
-function benefitHighlight(){if(!portalProfile)return'';const best=bestBenefit();if(!best)return'';const target=campaignTarget(best.campaign,best.progress),current=campaignCurrent(best.campaign,best.progress),available=Boolean(availableCampaignReward(best.campaign,best.progress)),message=available?'Você tem um prêmio disponível!':`Faltam ${Math.max(0,target-current)} para concluir ${best.campaign.nome}.`;return `<section class="benefit-highlight"><div><span>${icon(available?'gift':'sparkles')}</span><div><b>${esc(message)}</b><small>${current} / ${target}</small></div></div><i><em style="width:${Math.min(100,current/target*100)}%"></em></i><button data-view="benefits">Ver meus benefícios</button></section>`}
-function campaignForProduct(productId){return visibleCampaigns().find(campaign=>(campaign.produtoIds||[]).includes(productId)||(campaign.regras?.comboProductIds||[]).includes(productId))}
-function imageStyle(item){const value=item.imagePresentation||{},fit=value.fit==='contain'?'contain':'cover',x=Math.min(100,Math.max(0,Number(value.positionX??50))),y=Math.min(100,Math.max(0,Number(value.positionY??50))),zoom=Math.min(3,Math.max(1,Number(value.zoom??1)));return`--catalog-image-fit:${fit};--catalog-image-x:${x}%;--catalog-image-y:${y}%;--catalog-image-zoom:${zoom}`}
-function productCard(item){const variable=item.productType==='variable',quantity=variable?orderableItems().filter(v=>v.productId===item.productId).reduce((sum,v)=>sum+Number(cart[v.id]||0),0):Number(cart[item.id]||0),max=Number(item.maxPerCustomer||0),stock=available(item),soldOut=tracksStock(item)&&stock<=0,disabled=!receiving()||soldOut||(max&&quantity>=max)||stock<=quantity,stockText=tracksStock(item)?(stock>0?`${stock} disponíveis`:'Esgotado'):'Disponível',campaign=campaignForProduct(item.productId),price=variable&&Number(item.minPrice)!==Number(item.maxPrice)?`A partir de ${money(item.minPrice)}`:money(item.salePrice);return `<article class="product-card ${variable?'is-variable':''} ${disabled?'is-disabled':''} ${quantity?'is-in-cart':''}" data-catalog-item-id="${esc(item.id)}" data-product-details="${esc(item.id)}" tabindex="0" aria-label="Ver detalhes de ${esc(item.productName)}">${quantity?`<span class="qty-badge">${quantity}</span>`:''}${campaign?`<span class="benefit-product-badge" title="Esta compra conta para ${esc(campaign.nome)}">${icon('gift')}</span>`:''}<div class="product-image" style="${imageStyle(item)}">${item.productImage?`<img src="${esc(item.productImage)}" alt="${esc(item.productName)}" loading="lazy" decoding="async">`:`<span class="product-initial">${esc(item.productName.slice(0,2).toUpperCase())}</span>`}</div><h4>${esc(item.productName)}</h4><p>${esc(item.category||'Outros')}${variable?` · ${Number(item.variants?.length||0)} opções`:item.productType==='recurring'&&item.durationValue?` · ${esc(item.durationValue)} ${item.durationUnit==='months'?'meses':'dias'}`:''}</p><div class="product-footer"><span class="product-price"><b>${price}</b><small class="${soldOut?'sold-out':''}">${stockText}</small></span><button type="button" class="add-product" data-action="add-to-cart" data-catalog-item-id="${esc(item.id)}" aria-label="${variable?'Escolher variação':`Adicionar ${esc(item.productName)}`}" ${disabled?'disabled':''}>${variable?icon('chevron-right'):'+'}</button></div></article>`}
-function operationDetails(){if(['scheduled_visit','itinerant'].includes(catalog.operationMode))return `<div class="visit-deadline"><span>${icon('clock')}<span>Pedidos até<b>${esc(catalog.horarioLimite||'—')}</b></span></span><span>${icon('map-pin')}<span>Chegada prevista<b>${esc(catalog.horarioChegada||'—')}</b></span></span></div>`;const modes=activeServiceModes();return modes.length?`<div class="visit-deadline service-mode-hero">${modes.slice(0,2).map(item=>{const id=String(item.id||item.type),active=id===String(currentServiceMode()?.id||currentServiceMode()?.type);return`<button type="button" data-service-mode="${esc(id)}" class="${active?'active':''}">${icon(item.type==='delivery'?'truck':'package-check')}<span>${esc(item.label||item.type)}<b>${active?'Selecionado':'Disponível'}</b></span></button>`}).join('')}</div>`:''}
-function availabilityNotice(){if(receiving())return'';const text=catalog.closedBehavior==='unavailable'?'Este catálogo está temporariamente indisponível.':'Estamos temporariamente sem receber novos pedidos.';return `<div class="catalog-paused-notice" role="status">${icon('clock-alert')}<span><b>Pedidos pausados</b><small>${esc(text)}</small></span></div>`}
-function activeBanners(){const today=new Date().toISOString().slice(0,10);return(catalog.banners||[]).filter(item=>item.active!==false&&!item.deletedAt&&(!item.startsAt||item.startsAt<=today)&&(!item.endsAt||item.endsAt>=today)).sort((a,b)=>Number(a.order)-Number(b.order))}
-function safeBannerUrl(value){try{const url=new URL(String(value||''),location.href);return ['http:','https:'].includes(url.protocol)?url.href:''}catch{return''}}
-function bannerRail(){const banners=activeBanners();if(!banners.length)return'';return`<section class="public-banner-rail" aria-label="Destaques">${banners.map(item=>{const body=`<span class="public-banner-copy"><b>${esc(item.title||'Destaque')}</b>${item.subtitle?`<small>${esc(item.subtitle)}</small>`:''}</span>${item.imageUrl||item.imageThumbUrl?`<img src="${esc(item.imageUrl||item.imageThumbUrl)}" alt="">`:''}`,actionUrl=safeBannerUrl(item.actionUrl);return actionUrl?`<a class="public-banner" href="${esc(actionUrl)}" target="_blank" rel="noopener">${body}</a>`:`<article class="public-banner">${body}</article>`}).join('')}</section>`}
-function isPromotion(item){return Number(item.originalPrice)>Number(item.salePrice)&&Number(item.salePrice)>0}
-function quickFilterDefinitions(){const active=(catalog.items||[]).filter(item=>item.active!==false),definitions=[{id:'all',label:'Todos',icon:'list-filter',test:()=>true},{id:'available',label:'Disponíveis',icon:'badge-check',test:item=>!tracksStock(item)||available(item)>0}];if(active.some(isPromotion))definitions.push({id:'promotion',label:'Em promoção',icon:'badge-percent',test:isPromotion});if(active.some(item=>item.featured))definitions.push({id:'featured',label:'Destaques',icon:'sparkles',test:item=>item.featured===true});definitions.push({id:'soldout',label:'Esgotados',icon:'package-x',test:item=>tracksStock(item)&&available(item)<=0});return definitions.map(definition=>({...definition,count:active.filter(definition.test).length}))}
-function filteredCatalogItems(){const hidden=catalog.closedBehavior==='unavailable'&&!receiving();if(hidden)return[];const filter=quickFilterDefinitions().find(item=>item.id===quickFilter)||quickFilterDefinitions()[0];return(catalog.items||[]).filter(item=>item.active!==false&&(category==='Todos'||item.category===category)&&(!query||`${item.productName} ${item.category} ${item.description||''} ${item.brand||''} ${item.barcode||''}`.toLocaleLowerCase('pt-BR').includes(query))&&filter.test(item)).sort((a,b)=>Number(b.featured)-Number(a.featured)||Number(a.displayOrder)-Number(b.displayOrder)||String(a.productName).localeCompare(String(b.productName),'pt-BR'))}
-function serviceModeSelector(){const modes=activeServiceModes();if(!modes.length)return'';return`<section class="desktop-side-card service-mode-card"><h3>${icon('calendar-range')} Tipo de pedido</h3><div class="service-mode-list">${modes.map(item=>{const id=String(item.id||item.type),active=id===String(currentServiceMode()?.id||currentServiceMode()?.type);return`<button type="button" data-service-mode="${esc(id)}" class="${active?'active':''}"><span class="mode-radio" aria-hidden="true"></span><span><b>${esc(item.label||item.type)}</b><small>${esc(item.instructions||({pickup:'Retire no local combinado.',delivery:'Consulte a disponibilidade.',store:'Compre e retire na loja.'}[item.type]||'Disponível para este pedido.'))}</small></span></button>`}).join('')}</div></section>`}
-function desktopCartPanel(){const items=orderableItems().filter(item=>cart[item.id]),mode=currentServiceMode();return`<section class="desktop-side-card desktop-order-card" id="desktop-order-card"><h3>${icon('shopping-bag')} Seu pedido</h3>${mode?`<div class="desktop-order-mode">${icon(mode.type==='delivery'?'truck':'package-check')} ${esc(mode.label||mode.type)}</div>`:''}<div class="desktop-cart-items">${items.length?items.map(item=>`<article class="desktop-cart-item"><div class="desktop-cart-copy"><b>${esc(item.productName)}</b><small>${money(item.salePrice)} cada</small></div><div class="qty-control"><button type="button" data-minus="${esc(item.id)}" aria-label="Diminuir ${esc(item.productName)}">−</button><b>${Number(cart[item.id])}</b><button type="button" data-add="${esc(item.id)}" aria-label="Aumentar ${esc(item.productName)}">+</button></div><strong>${money(Number(cart[item.id])*Number(item.salePrice))}</strong></article>`).join(''):'<p class="desktop-empty-cart">Selecione os produtos para montar seu pedido.</p>'}</div><div class="desktop-order-summary"><span>Itens <b>${count()}</b></span><span>Total <b>${money(total())}</b></span></div><button type="button" class="primary-button" data-desktop-checkout ${items.length&&receiving()?'':'disabled'}>Finalizar pedido</button></section>`}
-function quickFilters(){return`<section class="desktop-side-card quick-filter-card"><h3>${icon('filter')} Filtros rápidos</h3><div>${quickFilterDefinitions().map(item=>`<button type="button" data-quick-filter="${item.id}" class="${quickFilter===item.id?'active':''}"><span class="filter-check">${quickFilter===item.id?icon('check'):''}</span><span>${esc(item.label)}</span><b>${item.count}</b></button>`).join('')}</div></section>`}
-function whatsappCard(){const contact=normalizeBrazilianPhone(catalog.contactPhone||catalog.publicSettings?.contactPhone||'');if(!isValidBrazilianPhone(contact))return'';return`<section class="desktop-side-card whatsapp-card"><h3>${icon('message-circle')} Fale com a gente</h3><p>Dúvidas ou sugestões?<br>Chame a gente no WhatsApp.</p><a href="https://wa.me/${esc(contact)}" target="_blank" rel="noopener">${icon('message-circle')} Abrir WhatsApp</a></section>`}
-function catalogView(){const categorySettings=new Map((catalog.categories||[]).map(item=>[item.publicName||item.internalName,item])),categories=['Todos',...[...new Set(catalog.items.map(item=>item.category).filter(Boolean))].sort((a,b)=>Number(categorySettings.get(a)?.order||0)-Number(categorySettings.get(b)?.order||0))],items=filteredCatalogItems(),shown=items.slice(0,visibleLimit),hidden=catalog.closedBehavior==='unavailable'&&!receiving();return `${header()}${!navigator.onLine?'<div class="offline-banner">Você está offline. O carrinho continua disponível.</div>':''}${availabilityNotice()}<div class="desktop-catalog-layout"><main class="catalog-main"><section class="visit-hero"><div class="hero-greeting" aria-hidden="true">👋</div><div><h2>${portalProfile?`Olá, ${esc(portalProfile.displayName)}! Veja o que está disponível.`:'Olá! Veja o que está disponível.'}</h2><p>${esc(catalog.welcomeText||'Veja os produtos disponíveis e faça seu pedido.')}</p>${operationDetails()}</div></section>${bannerRail()}${benefitHighlight()}${guestCard()}<label class="catalog-search">${icon('search')}<input id="catalog-search" value="${esc(query)}" placeholder="Buscar produto ou categoria" autocomplete="off"></label><div class="category-row">${categories.map(value=>{const meta=categorySettings.get(value);return`<button data-category="${esc(value)}" class="${category===value?'active':''}">${value!=='Todos'&&(meta?.imageThumbUrl||meta?.imageUrl)?`<img src="${esc(meta.imageThumbUrl||meta.imageUrl)}" alt="">`:''}${esc(value)}</button>`}).join('')}</div><div class="section-title"><h3>${category==='Todos'?'Produtos disponíveis':esc(category)}</h3><small>${items.length} ${items.length===1?'item':'itens'}</small></div><section class="product-grid">${shown.map(productCard).join('')||`<div class="empty-state">${hidden?'Produtos indisponíveis no momento.':'Nenhum produto encontrado.'}</div>`}</section>${shown.length<items.length?`<button type="button" class="load-more-products" data-load-more>Ver mais produtos ${icon('chevron-down')}</button>`:''}</main><aside class="catalog-desktop-sidebar" aria-label="Resumo do pedido">${desktopCartPanel()}${serviceModeSelector()}${quickFilters()}${whatsappCard()}</aside></div>${count()?`<button class="floating-cart" data-view="cart"><span>${count()} itens</span><b>${money(total())}</b></button>`:''}${nav()}`}
-function cartCampaignPreview(){if(!portalProfile)return'';for(const {campaign,progress} of relevantCampaigns()){if(!progress||!['buy_get','nth_product'].includes(campaign.tipo))continue;const eligible=(catalog.items||[]).filter(item=>(campaign.produtoIds||[]).includes(item.productId)).reduce((sum,item)=>sum+Number(cart[item.id]||0),0);if(!eligible)continue;const target=campaignTarget(campaign,progress),current=campaignCurrent(campaign,progress),after=(current+eligible)%target,rewards=Math.floor((current+eligible)/target);return `<section class="cart-benefit-preview">${icon('sparkles')}<div><b>Prévia do benefício</b><p>Após a venda ser entregue: ${after} de ${target}.${rewards?` Este pedido completa ${rewards} recompensa(s)!`:` Faltarão ${target-after}.`}</p><small>O progresso real só muda quando o pedido virar uma venda entregue.</small></div></section>`}return''}
-function cartView(){const items=orderableItems().filter(item=>cart[item.id]);return `${header('Meu carrinho')}<main class="catalog-main">${items.length?`<section class="cart-list">${items.map(item=>`<article class="cart-item">${item.productImage?`<img class="cart-thumb" src="${esc(item.productImage)}" alt="">`:`<span class="cart-thumb product-initial">${esc(item.productName.slice(0,2))}</span>`}<div><h3>${esc(item.productName)}</h3><small>${money(item.salePrice)} cada</small><div class="qty-control"><button data-minus="${item.id}">−</button><b>${cart[item.id]}</b><button data-add="${item.id}">+</button></div></div><span class="cart-subtotal">${money(Number(cart[item.id])*Number(item.salePrice))}</span></article>`).join('')}</section><label class="cart-note">Observação (opcional)<textarea id="cart-note" placeholder="Alguma observação para seu pedido?">${esc(read(`adiCatalogNote:${visitToken}`,'')||'')}</textarea></label>${cartCampaignPreview()}<section class="summary-box"><div class="summary-row"><span>Subtotal</span><b>${money(total())}</b></div><div class="summary-row total"><span>Total</span><b>${money(total())}</b></div></section><button class="primary-button" id="checkout">Confirmar pedido</button><button class="secondary-button" data-view="catalog">Continuar comprando</button>`:`<section class="empty-state">${icon('shopping-basket')}<h2>Seu carrinho está vazio</h2><button class="primary-button" data-view="catalog">Ver produtos</button></section>`}</main>${nav()}`}
-function checkoutView(){const methods=catalog.paymentMethods||['entrega','pix','dinheiro','cartao'],mode=currentServiceMode();return `${header('Confirmar pedido')}<main class="catalog-main"><section class="visit-hero"><h2>Está quase pronto!</h2><p>${portalProfile?'Confirme os dados do pedido.':'Informe seus dados para enviar o pedido.'}</p></section><form class="identify-form" id="order-form">${mode?`<div class="checkout-service-mode">${icon(mode.type==='delivery'?'truck':'package-check')}<span><small>Tipo de pedido</small><b>${esc(mode.label||mode.type)}</b></span><button type="button" data-view="catalog">Alterar</button><input type="hidden" name="serviceModeId" value="${esc(mode.id||mode.type)}"></div>`:''}<label>Nome completo<input name="nome" value="${esc(portalProfile?.displayName||identity.nome||'')}" autocomplete="name" minlength="2" maxlength="120" required></label><label>WhatsApp<input name="telefone" value="${esc(identity.telefone?formatBrazilianPhone(identity.telefone):'')}" inputmode="tel" autocomplete="tel" placeholder="(17) 99999-9999" required ${portalProfile?'readonly':''}></label><label>${mode?.type==='delivery'?'Endereço completo de entrega':'Local de retirada / referência (opcional)'}<input ${mode?.type==='delivery'?'required minlength="8"':''} name="local" value="${esc(identity.local||portalProfile?.location||'')}" maxlength="160" placeholder="Ex.: Loja 204"></label><label>Como prefere pagar?<select name="payment">${methods.map(method=>`<option value="${normalizePaymentPreference(method)}">${({entrega:'Pagar na entrega',pix:'PIX',dinheiro:'Dinheiro',cartao:'Cartão',fiado:'Adicionar à conta'}[normalizePaymentPreference(method)]||method)}</option>`).join('')}</select></label>${portalProfile||v2()?'':`<p class="catalog-link-notice">${icon('shield-check')} Seus benefícios serão vinculados após a confirmação do pedido.</p>`}${v2()?`<label>Observação (opcional)<textarea name="note" maxlength="1000">${esc(read(`adiCatalogNote:${visitToken}`,'')||'')}</textarea></label><section class="summary-box"><h3>Revise seu pedido</h3>${orderableItems().filter(i=>cart[i.id]).map(i=>`<div class="summary-row"><span>${cart[i.id]}× ${esc(i.productName)}</span><b>${money(cart[i.id]*i.salePrice)}</b></div>`).join('')}</section>${pendingOrderAttempt?.payload?'<p role="status">Existe um envio em confirmação. O botão reutiliza a mesma tentativa; não será criado outro pedido.</p>':''}`:''}<section class="summary-box"><div class="summary-row"><span>${count()} itens</span><b>${money(total())}</b></div></section><button class="primary-button" id="submit-order" type="submit">${submittingOrder?'Enviando pedido…':v2()&&pendingOrderAttempt?.payload?'Verificar envio pendente':'Enviar pedido'}</button><button type="button" class="secondary-button" data-view="cart">Voltar ao carrinho</button></form></main>${nav()}`}
-function lockedPersonalView(title,text){return `${header(title)}<main class="catalog-main"><section class="personal-locked">${icon('shield-check')}<h2>${esc(title)}</h2><p>${esc(text)}</p><button class="primary-button" data-identify>Identificar-me</button><button class="secondary-button" data-view="catalog">Continuar como visitante</button></section></main>${nav()}`}
-const reservationInfo=order=>order.expiryEligibility==='review_required'?'<p class="local-orders-note">A reserva aguarda revisão da loja. Nenhuma liberação foi realizada.</p>':order.orderStatus==='expirado'?'<p class="local-orders-note">Reserva liberada: a loja não confirmou em 30 minutos. Revise a disponibilidade antes de fazer um novo pedido.</p>':order.orderStatus==='recebido'&&order.reservationExpiresAt?`<p class="local-orders-note">Reserva aguardando confirmação da loja até ${esc(new Date(order.reservationExpiresAt).toLocaleTimeString('pt-BR'))}.</p>`:'';
-function ordersView(){const localOrders=orders.map(item=>item.data).filter(Boolean);if(!portalProfile&&!localOrders.length)return lockedPersonalView('Meus pedidos','Identifique-se para acompanhar seus pedidos neste aparelho.');const profileOrders=portalProfile?.orders||[],all=[...new Map([...profileOrders,...localOrders].map(order=>[order.id,order])).values()].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return `${header('Meus pedidos')}<main class="catalog-main">${!portalProfile?'<p class="local-orders-note">Mostrando apenas os pedidos feitos neste aparelho.</p>':''}${all.length?all.map(order=>`<article class="order-card-public"><header><div><b>Pedido #${esc(order.publicOrderNumber)}</b><small>${new Date(order.createdAt?.toDate?.()||order.createdAt).toLocaleString('pt-BR')}</small></div><span class="status-pill">${esc(publicOrderLabel(order.orderStatus))}</span></header>${reservationInfo(order)}<ul>${(order.items||[]).map(item=>`<li>${item.quantity}× ${esc(item.name)} — ${money(item.subtotal)}</li>`).join('')}</ul><div class="summary-row total"><span>Total</span><b>${money(order.total)}</b></div></article>`).join(''):'<section class="empty-state"><h2>Nenhum pedido ainda</h2><button class="primary-button" data-view="catalog">Abrir catálogo</button></section>'}</main>${nav()}`}
-function benefitCard(campaign){const progress=campaignProgress(campaign.id),target=campaignTarget(campaign,progress),current=campaignCurrent(campaign,progress),reward=availableCampaignReward(campaign,progress),available=campaign.tipo==='points'?Number(Boolean(reward)):Number(progress?.rewardsAvailable||0),pending=Number(campaign.tipo==='points'?progress?.pendingPoints:progress?.pendingProgress)||0,pct=Math.min(100,current/target*100),started=Boolean(progress);return `<article class="public-campaign-card">${campaign.imagem?`<img src="${esc(campaign.imagem)}" alt="">`:`<span class="public-campaign-icon">${icon(campaign.icone||'gift')}</span>`}<div><span class="public-campaign-type">${available?'Prêmio disponível':started?'Em andamento':'Disponível'}</span><h3>${esc(campaign.nome)}</h3><p>${esc(campaign.descricao||'Participe e aproveite!')}</p>${portalProfile?`<div class="public-progress-head"><b>${campaign.tipo==='points'?`${current} pontos`:'Seu progresso'}</b><span>${current} / ${target}</span></div><i class="public-progress"><em style="width:${pct}%"></em></i><small>${available?`${reward?.name||available+' recompensa(s)'} disponível para resgate`:`Faltam ${Math.max(0,target-current)} para completar`}${pending?` · ${pending} pendente(s) de pagamento`:''}</small><div class="benefit-actions"><button data-view="catalog">Comprar agora</button>${available?`<button class="primary" data-request-reward="${campaign.id}">Solicitar resgate</button>`:''}</div>`:'<small>Identifique-se para acompanhar seu progresso.</small>'}</div></article>`}
-function benefitsView(){const campaigns=visibleCampaigns();return `${header(portalProfile?'Meus benefícios':'Campanhas')}<main class="catalog-main">${portalProfile?'':guestCard()}<section class="campaign-intro"><span>${icon('gift')}</span><div><h2>${portalProfile?'Seus benefícios e recompensas':`Campanhas da ${esc(catalog.publicName||catalog.businessName||'loja')}`}</h2><p>${portalProfile?'O progresso aumenta somente quando o pedido vira uma venda entregue.':'Conheça as campanhas ativas. Identifique-se para ver seu progresso.'}</p></div></section><div class="section-title"><h3>Campanhas ativas</h3><small>${campaigns.length}</small></div><section class="public-campaign-list">${campaigns.map(benefitCard).join('')||'<section class="empty-state"><h2>Nenhuma campanha ativa</h2></section>'}</section></main>${nav()}`}
-function accountView(){if(!portalProfile)return lockedPersonalView('Identificar-se','Informe seu WhatsApp para acessar pedidos e benefícios.');return `${header('Conta')}<main class="catalog-main"><section class="account-card"><span class="account-avatar">${esc(portalProfile.displayName.split(/\s+/).slice(0,2).map(value=>value[0]).join(''))}</span><h2>${esc(portalProfile.displayName)}</h2><p>${esc(portalProfile.maskedPhone)}</p><span class="verified-status">${icon('badge-check')} Identificação confirmada</span><dl><dt>Local</dt><dd>${esc(identity.local||portalProfile.location||'Não informado')}</dd><dt>Conta e saldo</dt><dd>Disponível após confirmação adicional de segurança.</dd></dl><button class="secondary-button" id="switch-client">Trocar cliente</button><button class="secondary-button danger" id="portal-logout">Sair deste aparelho</button></section></main>${nav()}`}
-function successView(order){return `${header('Pedido recebido')}<main class="catalog-main"><section class="order-success"><span class="success-icon">${icon('check')}</span><h2>${order.orderStatus==='expirado'?'Reserva expirada':'Pedido recebido!'}</h2>${reservationInfo(order)}<p>Pedido <b>#${esc(order.publicOrderNumber)}</b></p>${portalProfile?'<p>Seu progresso será atualizado quando este pedido for entregue e registrado como venda.</p>':'<p>Você poderá acompanhar este pedido neste aparelho.</p>'}<button class="primary-button" data-view="orders">Ver meu pedido</button><button class="secondary-button" data-view="catalog">Continuar comprando</button></section></main>${nav()}`}
-function variantSheet(){const product=catalog.items.find(item=>item.id===variantPickerProductId);if(!product)return'';return`<div class="catalog-variant-overlay" data-close-variants></div><section class="catalog-variant-sheet" role="dialog" aria-modal="true" aria-label="Escolher variação de ${esc(product.productName)}"><span class="sheet-handle"></span><header><div><h3>${esc(product.productName)}</h3><p>Escolha uma opção</p></div><button data-close-variants aria-label="Fechar">${icon('x')}</button></header><div>${(product.variants||[]).filter(v=>v.active!==false&&v.catalogVisible!==false).map(variant=>{const id=`${product.id}::${variant.id}`,quantity=Number(cart[id]||0),out=!variant.allowNegativeStock&&Number(variant.availableQuantity)<=0;return`<article class="${out?'out':''}"><div><b>${esc(variant.displayName)}</b><small>${money(variant.salePrice)} · ${out?'Esgotado':`${Number(variant.availableQuantity)} disponíveis`}</small></div><div class="qty-control"><button data-minus="${esc(id)}" ${quantity<=0?'disabled':''}>−</button><b>${quantity}</b><button data-add="${esc(id)}" ${out||quantity>=Number(variant.availableQuantity)&&!variant.allowNegativeStock?'disabled':''}>+</button></div></article>`}).join('')}</div><footer><button class="primary-button" data-close-variants>Concluir</button></footer></section>`}
-function productDetails(){const product=catalog.items.find(item=>String(item.id)===String(productDetailsId));if(!product)return'';const variable=product.productType==='variable',stock=available(product),soldOut=tracksStock(product)&&stock<=0,price=variable&&Number(product.minPrice)!==Number(product.maxPrice)?`A partir de ${money(product.minPrice)}`:money(product.salePrice);return`<div class="product-details-overlay" data-close-product-details></div><section class="product-details-dialog" role="dialog" aria-modal="true" aria-label="Detalhes de ${esc(product.productName)}"><button class="product-details-close" type="button" data-close-product-details aria-label="Fechar">${icon('x')}</button><div class="product-details-image" style="${imageStyle(product)}">${product.productMainImage||product.productImage?`<img src="${esc(product.productMainImage||product.productImage)}" alt="${esc(product.productName)}">`:`<span class="product-initial">${esc(product.productName.slice(0,2).toUpperCase())}</span>`}</div><div class="product-details-copy"><small>${esc(product.category||'Outros')}</small><h2>${esc(product.productName)}</h2><p>${esc(product.description||'Confira a disponibilidade e adicione ao seu pedido.')}</p><b class="product-details-price">${price}</b><span class="product-details-stock ${soldOut?'sold-out':''}">${tracksStock(product)?soldOut?'Esgotado':`${stock} disponíveis`:'Disponível'}</span><button type="button" class="primary-button" data-action="add-to-cart" data-catalog-item-id="${esc(product.id)}" ${soldOut||!receiving()?'disabled':''}>${variable?'Escolher variação':'Adicionar ao pedido'}</button></div></section>`}
-function render(successOrder=null){root.innerHTML=`<div class="catalog-shell view-${esc(view)}">${view==='catalog'?catalogView():view==='cart'?cartView():view==='checkout'?checkoutView():view==='success'?successView(successOrder):view==='orders'?ordersView():view==='benefits'?benefitsView():accountView()}${poweredBy()}${variantPickerProductId?variantSheet():''}${productDetailsId?productDetails():''}</div>`;window.lucide?.createIcons();bind();root.querySelectorAll('[data-close-variants]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();variantPickerProductId=null;render()}));root.querySelectorAll('[data-close-product-details]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();productDetailsId=null;render()}))}
+if(!preview){document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshPublicAvailability();});addEventListener('pageshow',event=>{if(event.persisted)refreshPublicAvailability();});addEventListener('online',()=>refreshPublicAvailability());}
 
-function openIdentify(){trackPortalEvent('identification_started',{visitToken});document.body.insertAdjacentHTML('beforeend',`<div class="portal-sheet-layer" id="portal-sheet"><section class="portal-sheet"><header><div><h2>Identifique-se</h2><p>Informe o número de WhatsApp usado nas suas compras.</p></div><button data-sheet-close aria-label="Fechar">${icon('x')}</button></header><form id="identify-phone-form"><label>WhatsApp<input name="phone" inputmode="tel" autocomplete="tel" placeholder="(17) 99999-9999" value="${esc(identity.telefone?formatBrazilianPhone(identity.telefone):'')}" required></label><p class="portal-sheet-message" id="identify-message"></p><button class="primary-button">Continuar</button></form></section></div>`);document.querySelector('[data-sheet-close]').onclick=closeSheet;document.querySelector('#identify-phone-form').onsubmit=event=>{event.preventDefault();identifyPhone(new FormData(event.currentTarget).get('phone'))};window.lucide?.createIcons()}
-function closeSheet(){document.querySelector('#portal-sheet')?.remove()}
-async function identifyPhone(value){const normalizedPhone=normalizeBrazilianPhone(value),message=document.querySelector('#identify-message'),button=document.querySelector('#identify-phone-form button');if(!isValidBrazilianPhone(normalizedPhone)){message.textContent='Informe um número com DDD.';return}button.disabled=true;message.textContent='Procurando seu cadastro…';try{const response=await identifyCustomer({catalogToken:visitToken,phone:normalizedPhone}),result=response.data||{};if(!result.found){trackPortalEvent('client_not_found');showNewClient(normalizedPhone);return}pendingIdentityResult={...result,phone:normalizedPhone};trackPortalEvent('client_found');showIdentityConfirmation(normalizedPhone,result)}catch(error){console.error('[Portal identify]',{code:error?.code||'unknown'});message.textContent=error?.code?.includes('resource-exhausted')?'Muitas tentativas. Aguarde alguns minutos.':'Não foi possível identificar você agora. Seu carrinho continua salvo.';button.disabled=false}}
-function showIdentityConfirmation(phone,data){const sheet=document.querySelector('.portal-sheet');sheet.innerHTML=`<header><div><h2>Encontramos seu cadastro</h2><p>Confirme se estes dados são seus.</p></div><button data-sheet-close>${icon('x')}</button></header><section class="identity-found"><span>${icon('user-round-check')}</span><h3>${esc(data.maskedName)}</h3><p>${esc(data.maskedPhone)}</p><button class="primary-button" id="confirm-identity">Sou eu</button><button class="secondary-button" id="wrong-identity">Não sou eu</button></section>`;sheet.querySelector('[data-sheet-close]').onclick=closeSheet;sheet.querySelector('#wrong-identity').onclick=()=>{pendingIdentityResult=null;closeSheet();openIdentify()};sheet.querySelector('#confirm-identity').onclick=()=>acceptPortalSession(phone);window.lucide?.createIcons()}
-function showNewClient(phone){const contact=normalizeBrazilianPhone(catalog.contactPhone||'');const sheet=document.querySelector('.portal-sheet');sheet.innerHTML=`<header><div><h2>Não encontramos esse número</h2><p>Você pode continuar como novo cliente.</p></div><button data-sheet-close>${icon('x')}</button></header><form id="new-client-form"><label>Nome completo<input name="nome" required></label><label>WhatsApp<input name="telefone" value="${esc(formatBrazilianPhone(phone))}" readonly></label><label>Loja ou local<input name="local" value="${esc(identity.local||'')}"></label><label>Observação<textarea name="observacao"></textarea></label><button class="primary-button">Continuar como novo cliente</button><button type="button" class="secondary-button" id="correct-phone">Corrigir telefone</button>${isValidBrazilianPhone(contact)?`<a class="secondary-button portal-whatsapp" href="https://wa.me/${contact}" target="_blank" rel="noopener">Falar pelo WhatsApp</a>`:''}</form>`;sheet.querySelector('[data-sheet-close]').onclick=closeSheet;sheet.querySelector('#correct-phone').onclick=()=>{closeSheet();openIdentify()};sheet.querySelector('#new-client-form').onsubmit=event=>{event.preventDefault();const fd=new FormData(event.currentTarget);identity={nome:String(fd.get('nome')).trim(),telefone:phone,local:String(fd.get('local')).trim(),observacao:String(fd.get('observacao')).trim(),newCustomer:true};save();closeSheet();if(pendingOrderForm){const data=pendingOrderForm;pendingOrderForm=null;submitOrderData(data)}else{toast('Dados salvos. Você pode continuar comprando.');render()}};window.lucide?.createIcons()}
-async function acceptPortalSession(phone){const result=pendingIdentityResult;if(!result?.sessionToken)return toast('A identificação expirou. Tente novamente.');localStorage.setItem(sessionStorageKey(visitToken),result.sessionToken);portalSession={clientRefToken:result.clientRefToken,tokenHash:result.sessionHash,businessId:catalog.businessId,visitId:catalog.visitId,active:true,expiresAt:result.expiresAt};portalProfile=result.profile||{displayName:result.maskedName,maskedPhone:result.maskedPhone,campaigns:[],orders:[]};identity={...identity,nome:portalProfile.displayName||result.maskedName,telefone:phone,newCustomer:false};pendingIdentityResult=null;save();closeSheet();subscribeProfile(result.clientRefToken);trackPortalEvent('identification_completed');toast('Identificação confirmada.');if(pendingOrderForm){const data=pendingOrderForm;pendingOrderForm=null;submitOrderData(data)}else render()}
-async function validatePortalSession(){const token=localStorage.getItem(sessionStorageKey(visitToken));if(!token)return false;try{const tokenHash=await sessionDocumentId(token),snap=await getDoc(doc(db,'publicCatalogs',visitToken,'portalSessions',tokenHash));if(!snap.exists())throw Error('missing');const session=snap.data();if(session.active!==true||session.businessId!==catalog.businessId||session.visitId!==catalog.visitId||new Date(session.expiresAt)<=new Date())throw Error('expired');const profileSnap=await getDoc(doc(db,'publicCatalogs',visitToken,'portalProfiles',session.clientRefToken));if(!profileSnap.exists()||profileSnap.data().active===false)throw Error('profile');portalSession={...session,tokenHash};portalProfile=profileSnap.data();identity={...identity,nome:portalProfile.displayName,telefone:identity.telefone||'',newCustomer:false};save();updateDoc(doc(db,'publicCatalogs',visitToken,'portalSessions',tokenHash),{lastAccessAt:serverTimestamp(),updatedAt:serverTimestamp()}).catch(()=>{});subscribeProfile(session.clientRefToken);return true}catch{localStorage.removeItem(sessionStorageKey(visitToken));portalSession=null;portalProfile=null;return false}}
-function subscribeProfile(clientRefToken){if(!clientRefToken||subscribedProfile===clientRefToken)return;subscribedProfile=clientRefToken;unsub.push(onSnapshot(doc(db,'publicCatalogs',visitToken,'portalProfiles',clientRefToken),snap=>{if(!snap.exists())return;portalProfile=snap.data();if(['catalog','orders','benefits','account'].includes(view))render()}))}
-async function logoutPortal(){if(!confirm('Sair deste aparelho? Seu carrinho será preservado.'))return;try{if(portalSession)await updateDoc(doc(db,'publicCatalogs',visitToken,'portalSessions',portalSession.tokenHash),{active:false,revokedAt:serverTimestamp(),updatedAt:serverTimestamp()})}catch{}localStorage.removeItem(sessionStorageKey(visitToken));portalSession=null;portalProfile=null;identity={};save();view='catalog';render();toast('Você está navegando como visitante.')}
-async function requestReward(campaignId){if(!portalSession)return openIdentify();const campaign=visibleCampaigns().find(item=>item.id===campaignId),progress=campaignProgress(campaignId),reward=campaign?availableCampaignReward(campaign,progress):null;if(!campaign||!reward)return toast('Nenhum prêmio disponível para esta campanha.');const id=uuid();try{await setDoc(doc(db,'publicCatalogs',visitToken,'redemptionRequests',id),{id,campaignId,campaignName:campaign.nome,rewardId:reward.id||null,rewardName:reward.name||null,clientRefToken:portalSession.clientRefToken,portalSessionHash:portalSession.tokenHash,status:'solicitado',businessId:catalog.businessId,visitId:catalog.visitId,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});trackPortalEvent('reward_requested',{campaignId});toast('Resgate solicitado. Aguarde a confirmação do vendedor.')}catch{toast('Não foi possível solicitar o resgate agora.')}}
+/* ---------- Ícones (inline: sem dependência e sem varrer o documento) ---------- */
+const svg=(d,extra='')=>`<svg viewBox="0 0 24 24" aria-hidden="true" ${extra}>${d}</svg>`;
+const I={search:svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),bag:svg('<path d="M6 7h12l1 13H5z"/><path d="M9 7a3 3 0 0 1 6 0"/>'),plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),x:svg('<path d="M6 6l12 12M18 6 6 18"/>'),back:svg('<path d="m15 18-6-6 6-6"/>'),clock:svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),pin:svg('<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>'),store:svg('<path d="M4 9h16l-1.5-5h-13z"/><path d="M5 9v11h14V9"/><path d="M10 20v-5h4v5"/>'),truck:svg('<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>'),insta:svg('<rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.8" cy="7.2" r=".9" fill="currentColor"/>'),check:svg('<path d="m5 12.5 4.2 4.2L19 7"/>'),trash:svg('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
+  wa:'<svg viewBox="0 0 32 32" aria-hidden="true" class="sf-wa-glyph"><path fill="currentColor" d="M16.04 4C9.4 4 4 9.38 4 16c0 2.1.56 4.15 1.6 5.95L4 28l6.2-1.62A12 12 0 0 0 16.04 28C22.66 28 28 22.62 28 16S22.66 4 16.04 4zm0 21.8c-1.86 0-3.68-.5-5.27-1.45l-.38-.22-3.68.96.98-3.58-.25-.37A9.77 9.77 0 0 1 6.2 16c0-5.42 4.42-9.82 9.84-9.82 5.42 0 9.82 4.4 9.82 9.82 0 5.42-4.4 9.8-9.82 9.8zm5.4-7.34c-.3-.15-1.75-.86-2.02-.96-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.65.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.64-2.05-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.38-.02-.53-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.48.71.31 1.27.5 1.7.63.72.23 1.37.2 1.88.12.57-.08 1.75-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35z"/></svg>'};
 
-function normalizePaymentPreference(value){
-  const normalized=String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const aliases={'pagar na entrega':'entrega','na entrega':'entrega',entrega:'entrega',pix:'pix',dinheiro:'dinheiro',cartao:'cartao','cartão':'cartao','adicionar a conta':'fiado','adicionar à conta':'fiado',fiado:'fiado'};
-  return aliases[normalized]||'entrega';
+/* ---------- Dados derivados ---------- */
+const tracksStock=item=>item.controlaEstoque!==false&&item.trackStock!==false&&item.semControleEstoque!==true&&item.itemKind!=='service'&&item.itemKind!=='subscription';
+const unlimited=item=>!tracksStock(item)||item.allowNegativeStock===true;
+const variantsOf=item=>(item.variants||[]).filter(v=>v.active!==false&&v.catalogVisible!==false);
+const isVariable=item=>item.productType==='variable'&&variantsOf(item).length>0;
+function stockOf(item,variant){if(variant){if(variant.allowNegativeStock||!tracksStock(item))return Infinity;return Math.max(0,Number(variant.availableQuantity||0));}if(unlimited(item))return Infinity;if(isVariable(item))return variantsOf(item).reduce((s,v)=>s+(v.allowNegativeStock?Infinity:Math.max(0,Number(v.availableQuantity||0))),0);return Math.max(0,Number(item.availableQuantity??0));}
+const soldOut=item=>stockOf(item)<=0;
+function priceLabel(item){if(isVariable(item)){const prices=variantsOf(item).map(v=>Number(v.salePrice||0));const min=Math.min(...prices),max=Math.max(...prices);return min!==max?`a partir de ${money(min)}`:money(min);}return money(item.salePrice);}
+const orderable=()=>catalog.items.flatMap(item=>isVariable(item)?variantsOf(item).map(v=>({key:`${item.id}::${v.id}`,item,variant:v,name:item.productName,variantName:v.displayName,price:Number(v.salePrice||0),image:v.imageUrl||item.productImage})):[{key:item.id,item,variant:null,name:item.productName,variantName:'',price:Number(item.salePrice||0),image:item.productImage}]);
+const cartLines=()=>{const map=new Map(orderable().map(o=>[o.key,o]));return Object.entries(cart).map(([key,qty])=>({...map.get(key),key,qty:Number(qty)})).filter(l=>l.item&&l.qty>0);};
+const count=()=>cartLines().reduce((s,l)=>s+l.qty,0),total=()=>Math.round(cartLines().reduce((s,l)=>s+l.qty*l.price,0)*100)/100;
+const qtyForItem=item=>Object.entries(cart).reduce((s,[k,q])=>s+(k===item.id||k.startsWith(`${item.id}::`)?Number(q):0),0);
+const registered=()=>catalog.acceptingOrders===true;
+const phoneOk=()=>K.validPhone(catalog.contactPhone||catalog.publicSettings?.contactPhone);
+const storePhone=()=>catalog.contactPhone||catalog.publicSettings?.contactPhone||'';
+const canOrder=()=>registered()||phoneOk();
+function modes(){const configured=(catalog.serviceModes||[]).filter(m=>m.active!==false&&['pickup','delivery'].includes(m.type));if(configured.length)return configured;return[...(catalog.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada'}]:[]),...(catalog.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega'}]:[])];}
+function currentMode(){const list=modes();return list.find(m=>String(m.id||m.type)===String(serviceModeId))||list[0]||null;}
+function categoryName(internal){const c=(catalog.categories||[]).find(x=>x.internalName===internal);return c?.publicName||internal||'Outros';}
+function categoryOrder(internal){const c=(catalog.categories||[]).find(x=>x.internalName===internal);return c?Number(c.order||0):999;}
+const sortItems=list=>[...list].sort((a,b)=>Number(!!b.featured)-Number(!!a.featured)||Number(a.displayOrder||0)-Number(b.displayOrder||0)||String(a.productName).localeCompare(String(b.productName),'pt-BR'));
+function sections(){
+  const groups=new Map();for(const item of catalog.items.filter(i=>i.active!==false)){const k=item.category||'Outros';if(!groups.has(k))groups.set(k,[]);groups.get(k).push(item);}
+  return [...groups.entries()].sort((a,b)=>categoryOrder(a[0])-categoryOrder(b[0])||categoryName(a[0]).localeCompare(categoryName(b[0]),'pt-BR')).map(([k,items])=>({key:k,name:categoryName(k),items:sortItems(items)}));
 }
-function generateSecureToken(length=32){
-  const bytes=crypto.getRandomValues(new Uint8Array(Math.ceil(length/2)));
-  return [...bytes].map(byte=>byte.toString(16).padStart(2,'0')).join('').slice(0,length);
+function searchResults(){const terms=norm(query).split(/\s+/).filter(Boolean);return sortItems(catalog.items.filter(i=>i.active!==false&&terms.every(t=>norm(`${i.productName} ${categoryName(i.category)} ${i.description||''}`).includes(t))));}
+
+/* ---------- Tema da marca ---------- */
+function themeStyle(){const t=K.theme({primaryColor:catalog.primaryColor||catalog.publicSettings?.primaryColor,secondaryColor:catalog.secondaryColor||catalog.publicSettings?.secondaryColor});return `--sf-accent:${t.accent};--sf-on-accent:${t.onAccent};--sf-accent-text:${t.accentText};--sf-accent-soft:${t.accentSoft};--sf-band:${t.band};--sf-on-band:${t.onBand};--sf-band-muted:${t.bandMuted};--sf-band-chip:${t.bandChip};--sf-band-accent:${t.bandAccent}`;}
+// Enquadramento salvo da foto (quando publicado): ajuste, posição e zoom, sem ler metadados do Storage.
+function imageStyle(item){const v=item?.imagePresentation||{},fit=v.fit==='contain'?'contain':'cover',x=Math.min(100,Math.max(0,Number(v.positionX??50))),y=Math.min(100,Math.max(0,Number(v.positionY??50))),zoom=Math.min(3,Math.max(1,Number(v.zoom??1)));return `--catalog-image-fit:${fit};--catalog-image-x:${x}%;--catalog-image-y:${y}%;--catalog-image-zoom:${zoom}`;}
+const cssUrl=u=>`url(&quot;${esc(String(u).replace(/["\\\n\r]/g,''))}&quot;)`;
+const initials=name=>String(name||'Loja').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase();
+const instagramHandle=v=>String(v||'').trim().replace(/^@/,'').replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/[/?#].*$/,'').replace(/[^A-Za-z0-9._]/g,'').slice(0,30);
+
+/* ---------- Telas ---------- */
+function band(){
+  const name=catalog.publicName||'Loja',cover=catalog.coverUrl||catalog.bannerUrl,ig=instagramHandle(catalog.instagram),list=modes();
+  return `<header class="sf-band ${cover?'has-cover':''}">${cover?`<div class="sf-band-cover" style="background-image:${cssUrl(cover)}"></div>`:''}<div class="sf-band-inner">
+    <div class="sf-brand"><span class="sf-logo">${catalog.logoUrl?`<img src="${esc(catalog.logoUrl)}" alt="">`:`<span>${esc(initials(name))}</span>`}</span><div class="sf-brand-copy"><h1>${esc(name)}</h1>${catalog.welcomeText?`<p>${esc(catalog.welcomeText)}</p>`:''}</div></div>
+    <ul class="sf-facts" aria-label="Informações da loja">${catalog.openingHours?`<li>${I.clock}<span>${esc(catalog.openingHours)}</span></li>`:''}${list.map(m=>`<li>${m.type==='delivery'?I.truck:I.store}<span>${m.type==='delivery'?'Entrega':'Retirada'}</span></li>`).join('')}${ig?`<li><a href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener">${I.insta}<span>@${esc(ig)}</span></a></li>`:''}</ul>
+  </div></header>`;
+}
+function topbar(title,back='catalog'){
+  const name=catalog.publicName||'Loja';
+  return `<header class="sf-top"><div class="sf-top-inner"><button type="button" class="sf-icon-btn" data-back="${back}" aria-label="Voltar">${I.back}</button><span class="sf-top-logo">${catalog.logoUrl?`<img src="${esc(catalog.logoUrl)}" alt="">`:esc(initials(name))}</span><div class="sf-top-copy"><small>${esc(name)}</small><b>${esc(title)}</b></div></div></header>`;
+}
+function tools(){
+  const secs=sections(),n=count();
+  return `<div class="sf-tools"><div class="sf-tools-inner"><label class="sf-search">${I.search}<span class="sf-sr">Buscar produtos</span><input type="search" id="sf-search" value="${esc(query)}" placeholder="Buscar produtos" autocomplete="off" enterkeyhint="search"></label><button type="button" class="sf-cart-btn" data-go="cart" aria-label="${n?`Ver pedido com ${n} ${n===1?'item':'itens'}`:'Pedido vazio'}">${I.bag}<b class="sf-cart-n" ${n?'':'hidden'}>${n>99?'99+':n}</b></button></div>
+    ${secs.length>1?`<nav class="sf-cats" aria-label="Categorias" ${query?'hidden':''}><button type="button" data-cat="" aria-pressed="${!category}">Tudo</button>${secs.map(s=>`<button type="button" data-cat="${esc(s.key)}" aria-pressed="${category===s.key}">${esc(s.name)}</button>`).join('')}</nav>`:''}</div>`;
+}
+function card(item,size=''){
+  const out=soldOut(item),qty=qtyForItem(item),stock=stockOf(item),low=!out&&Number.isFinite(stock)&&stock<=5;
+  const img=item.productImage?`<img src="${esc(item.productImage)}" alt="" loading="lazy" decoding="async">`:`<span class="sf-noimg">${esc(initials(item.productName))}</span>`;
+  return `<article class="sf-card ${size} ${out?'is-out':''}" data-item="${esc(item.id)}"><button type="button" class="sf-card-open" data-open="${esc(item.id)}" aria-label="${esc(item.productName)}, ${esc(priceLabel(item))}${out?', esgotado':''}"><span class="sf-card-img" style="${imageStyle(item)}">${img}${out?'<span class="sf-flag">Esgotado</span>':low?`<span class="sf-flag sf-flag-low">Últimas ${stock}</span>`:''}</span><span class="sf-card-body"><span class="sf-card-name">${esc(item.productName)}</span><span class="sf-card-price">${esc(priceLabel(item))}</span>${isVariable(item)?`<span class="sf-card-note">${variantsOf(item).length} opções</span>`:''}</span></button>${!out&&canOrder()?`<button type="button" class="sf-add ${qty?'has-qty':''}" data-add="${esc(item.id)}" aria-label="${isVariable(item)?'Escolher opção de':'Adicionar'} ${esc(item.productName)}${qty?` (${qty} no pedido)`:''}">${qty?`<b>${qty}</b>`:I.plus}</button>`:''}</article>`;
+}
+function mainBody(){
+  const secs=sections(),featured=sortItems(catalog.items.filter(i=>i.featured&&i.active!==false)).slice(0,12);
+  let body;
+  if(!catalog.items.length)body=`<div class="sf-empty"><h2>Os produtos chegam em breve</h2><p>${phoneOk()?'Enquanto isso, fale com a loja pelo WhatsApp.':'Volte mais tarde.'}</p>${phoneOk()?`<a class="sf-btn sf-btn-wa" href="https://wa.me/${esc(K.phoneDigits(storePhone()))}" target="_blank" rel="noopener">${I.wa}<span>Falar com a loja</span></a>`:''}</div>`;
+  else if(query){const r=searchResults();body=`<section class="sf-section"><header class="sf-section-head"><h2>${r.length?`${r.length} ${r.length===1?'resultado':'resultados'} para “${esc(query)}”`:`Nada encontrado para “${esc(query)}”`}</h2>${r.length?'':'<button type="button" class="sf-link" data-clear-search>Limpar busca</button>'}</header><div class="sf-grid">${r.map(i=>card(i)).join('')}</div></section>`;}
+  else body=`${!category&&featured.length?`<section class="sf-section sf-featured" aria-labelledby="sf-feat"><header class="sf-section-head"><h2 id="sf-feat">Destaques</h2></header><div class="sf-rail">${featured.map(i=>card(i,'sf-card-wide')).join('')}</div></section>`:''}${secs.filter(s=>!category||s.key===category).map(s=>`<section class="sf-section" aria-labelledby="sf-cat-${esc(s.key).replace(/\W/g,'')}"><header class="sf-section-head"><h2 id="sf-cat-${esc(s.key).replace(/\W/g,'')}">${esc(s.name)}</h2><small>${s.items.length} ${s.items.length===1?'item':'itens'}</small></header><div class="sf-grid">${s.items.map(i=>card(i)).join('')}</div></section>`).join('')}`;
+  return body;
+}
+function catalogView(){
+  return `${band()}${tools()}${canOrder()?'':`<p class="sf-notice">Esta loja ainda não recebe pedidos pelo site. ${catalog.openingHours?'Consulte o horário de atendimento.':''}</p>`}<div class="sf-layout"><main class="sf-main" id="sf-main">${mainBody()}</main><aside class="sf-aside" aria-label="Seu pedido">${asideCart()}</aside></div>`;
+}
+function lineHtml(l,compact=false){
+  const max=stockOf(l.item,l.variant);
+  return `<li class="sf-line" data-line="${esc(l.key)}">${compact?'':`<span class="sf-line-img">${l.image?`<img src="${esc(l.image)}" alt="">`:esc(initials(l.name))}</span>`}<div class="sf-line-copy"><b>${esc(l.name)}</b>${l.variantName?`<small>${esc(l.variantName)}</small>`:''}<small>${money(l.price)} cada</small></div><div class="sf-qty" role="group" aria-label="Quantidade de ${esc(l.name)}"><button type="button" data-dec="${esc(l.key)}" aria-label="${l.qty===1?'Remover':'Diminuir'} ${esc(l.name)}">${l.qty===1?I.trash:I.minus}</button><output aria-live="polite">${l.qty}</output><button type="button" data-inc="${esc(l.key)}" aria-label="Aumentar ${esc(l.name)}" ${l.qty>=max?'disabled':''}>${I.plus}</button></div><b class="sf-line-total">${money(l.qty*l.price)}</b></li>`;
+}
+function asideCart(){
+  const lines=cartLines();
+  return `<div class="sf-aside-card"><h2>Seu pedido</h2>${lines.length?`<ul class="sf-lines">${lines.map(l=>lineHtml(l,true)).join('')}</ul><div class="sf-sum"><span>Total dos produtos</span><b>${money(total())}</b></div><button type="button" class="sf-btn sf-btn-accent sf-btn-wide" data-go="checkout" ${canOrder()?'':'disabled'}>Finalizar pedido</button>`:`<p class="sf-muted">Escolha os produtos e eles aparecem aqui.</p>`}</div>${phoneOk()?`<a class="sf-aside-wa" href="https://wa.me/${esc(K.phoneDigits(storePhone()))}" target="_blank" rel="noopener">${I.wa}<span>Dúvidas? Fale com a loja</span></a>`:''}`;
+}
+function cartBar(){const n=count();if(view!=='catalog'||!n)return '';return `<button type="button" class="sf-cartbar" data-go="cart"><span class="sf-cartbar-n">${n}</span><span>Ver pedido</span><b>${money(total())}</b></button>`;}
+function cartView(){
+  const lines=cartLines();
+  if(!lines.length)return `${topbar('Seu pedido')}<main class="sf-page"><div class="sf-empty"><h2>Seu pedido está vazio</h2><p>Toque em + nos produtos para montar o pedido.</p><button type="button" class="sf-btn sf-btn-accent" data-go="catalog">Ver produtos</button></div></main>`;
+  return `${topbar('Seu pedido')}<main class="sf-page"><section class="sf-panel"><ul class="sf-lines">${lines.map(l=>lineHtml(l)).join('')}</ul></section>
+    <section class="sf-panel"><label class="sf-field"><span>Observações <small>(opcional)</small></span><textarea id="sf-note" maxlength="500" rows="3" placeholder="Ex.: sem cobertura, entregar após as 18h">${esc(note)}</textarea></label></section>
+    <section class="sf-panel sf-summary"><div class="sf-sum"><span>Subtotal</span><b>${money(total())}</b></div>${modes().some(m=>m.type==='delivery')?'<p class="sf-muted">Se escolher entrega, a taxa é combinada com a loja.</p>':''}</section>
+    <div class="sf-actions"><button type="button" class="sf-btn sf-btn-accent sf-btn-wide" data-go="checkout" ${canOrder()?'':'disabled'}>Continuar</button><button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-go="catalog">Adicionar mais itens</button></div></main>`;
+}
+function orderInput(){
+  const mode=currentMode();
+  return {storeName:catalog.publicName,items:cartLines().map(l=>({name:l.name,variant:l.variantName,quantity:l.qty,unitPrice:l.price})),mode:mode?.type||null,pickupAddress:catalog.pickupAddress,customer:{name:customer.name||'',address:customer.address||''},payment,note};
+}
+function message(extraTop=''){try{const m=K.orderMessage(orderInput());return extraTop?{...m,text:`${extraTop}\n\n${m.text}`}:m;}catch{return {text:'',subtotal:0};}}
+function waHref(text){try{return K.whatsappUrl(storePhone(),text);}catch{return '';}}
+function checkoutView(){
+  const lines=cartLines();if(!lines.length){view='cart';return cartView();}
+  const list=modes(),mode=currentMode(),pays=(catalog.paymentMethods||[]).filter(p=>K.PAYMENT_LABELS[p]),reg=registered(),m=message(),err=k=>errors[k]?`<small class="sf-error" id="sf-err-${k}" role="alert">${esc(errors[k])}</small>`:'';
+  const modeInfo=mode?.type==='delivery'?esc(catalog.deliveryInstructions||'Informe o endereço. A taxa de entrega é combinada com a loja.'):mode?.type==='pickup'?esc(catalog.pickupAddress?`Retire em: ${catalog.pickupAddress}`:'A loja informa onde retirar.'):'';
+  return `${topbar('Finalizar pedido','cart')}<main class="sf-page"><form class="sf-checkout" id="sf-checkout" novalidate>
+    ${list.length?`<section class="sf-panel"><h2>Como você quer receber?</h2><div class="sf-modes" role="radiogroup" aria-label="Forma de receber">${list.map(x=>{const id=String(x.id||x.type),on=id===String(mode?.id||mode?.type);return `<button type="button" role="radio" aria-checked="${on}" class="sf-mode" data-mode="${esc(id)}">${x.type==='delivery'?I.truck:I.store}<span><b>${x.type==='delivery'?'Entrega':'Retirada'}</b><small>${x.type==='delivery'?'Taxa combinada com a loja':'Sem taxa de entrega'}</small></span></button>`;}).join('')}</div>${modeInfo?`<p class="sf-muted">${modeInfo}</p>`:''}</section>`:''}
+    <section class="sf-panel"><h2>Seus dados</h2>
+      <label class="sf-field"><span>Seu nome</span><input name="name" value="${esc(customer.name||'')}" autocomplete="name" maxlength="80" required ${errors.name?'aria-invalid="true" aria-describedby="sf-err-name"':''}>${err('name')}</label>
+      ${reg?`<label class="sf-field"><span>Seu WhatsApp</span><input name="phone" value="${esc(customer.phone?K.formatPhone(customer.phone):'')}" inputmode="tel" autocomplete="tel" placeholder="(11) 91234-5678" required ${errors.phone?'aria-invalid="true" aria-describedby="sf-err-phone"':''}>${err('phone')}</label>`:''}
+      ${mode?.type==='delivery'?`<label class="sf-field"><span>Endereço de entrega</span><textarea name="address" rows="2" maxlength="200" autocomplete="street-address" placeholder="Rua, número, bairro e complemento" required ${errors.address?'aria-invalid="true" aria-describedby="sf-err-address"':''}>${esc(customer.address||'')}</textarea>${err('address')}</label>`:''}
+    </section>
+    ${pays.length?`<section class="sf-panel"><h2>Como prefere pagar? <small>(opcional)</small></h2><div class="sf-chips" role="radiogroup" aria-label="Forma de pagamento">${pays.map(p=>`<button type="button" role="radio" class="sf-chip" data-pay="${p}" aria-checked="${payment===p}">${esc(K.PAYMENT_LABELS[p])}</button>`).join('')}</div><p class="sf-muted">O pagamento é combinado com a loja. Nada é cobrado aqui.</p></section>`:''}
+    <section class="sf-panel sf-summary"><ul class="sf-review">${lines.map(l=>`<li><span>${l.qty}x ${esc(l.name)}${l.variantName?` <small>(${esc(l.variantName)})</small>`:''}</span><b>${money(l.qty*l.price)}</b></li>`).join('')}</ul><div class="sf-sum"><span>Total dos produtos</span><b>${money(total())}</b></div>${mode?.type==='delivery'?'<p class="sf-muted">A taxa de entrega será combinada com a loja.</p>':''}</section>
+    ${reg?'':`<section class="sf-panel sf-msg"><h2>Mensagem que vai para a loja</h2><p class="sf-muted">Você confere no WhatsApp e toca em enviar.</p><div class="sf-bubble" data-msg>${esc(m.text)}</div></section>`}
+    <div class="sf-actions sf-actions-sticky">${reg?`<button type="submit" class="sf-btn sf-btn-accent sf-btn-wide" ${submittingOrder?'disabled':''}>${submittingOrder?'Enviando pedido…':pendingOrderAttempt?.payload?'Verificar envio pendente':'Fazer pedido'}</button>${pendingOrderAttempt?.payload?'<p class="sf-muted" role="status">Existe um envio em confirmação. O botão reutiliza a mesma tentativa; não será criado outro pedido.</p>':''}`
+      :`<a class="sf-btn sf-btn-wa sf-btn-wide" id="sf-send-wa" href="${esc(waHref(m.text))}" target="_blank" rel="noopener">${I.wa}<span>Enviar pedido pelo WhatsApp</span></a><p class="sf-muted sf-center">O pedido só é confirmado quando a loja responder.</p>`}</div>
+  </form></main>`;
+}
+function sentView(){
+  return `${topbar('Pedido no WhatsApp','checkout')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon">${I.wa}</span><h2>Agora é só enviar no WhatsApp</h2><p>Abrimos a conversa com <b>${esc(catalog.publicName)}</b> e o pedido já escrito. Toque em enviar por lá.</p><p class="sf-muted">A loja confirma disponibilidade, entrega e pagamento pela conversa. Seu pedido ainda não foi confirmado.</p>
+    <div class="sf-actions"><a class="sf-btn sf-btn-wa sf-btn-wide" href="${esc(sentUrl)}" target="_blank" rel="noopener">${I.wa}<span>Abrir o WhatsApp de novo</span></a><button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-clear-cart>Já enviei, limpar o carrinho</button><button type="button" class="sf-link" data-go="catalog">Voltar à loja</button></div></section></main>`;
+}
+const orderLabel=s=>window.OnlineOrderModel?.labels?.[s]||({recebido:'Recebido',confirmado:'Confirmado',preparando:'Preparando',separando:'Pronto',deslocamento:'Enviado',entregue:'Concluído',cancelado:'Cancelado',expirado:'Expirado'}[s]||s);
+const reservationInfo=order=>order.expiryEligibility==='review_required'?'<p class="sf-muted">A reserva aguarda revisão da loja. Nenhuma liberação foi realizada.</p>':order.orderStatus==='expirado'?'<p class="sf-muted">Reserva liberada: a loja não confirmou em 30 minutos. Revise a disponibilidade antes de fazer um novo pedido.</p>':order.orderStatus==='recebido'&&order.reservationExpiresAt?`<p class="sf-muted">Reserva aguardando confirmação da loja até ${esc(new Date(order.reservationExpiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}))}.</p>`:'';
+function successView(order){
+  const o=order||successOrder||{},text=`Olá! Acabei de fazer o pedido #${o.publicOrderNumber||''} na loja ${catalog.publicName}.`,href=phoneOk()?waHref(text):'';
+  return `${topbar('Pedido recebido')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon sf-ok">${I.check}</span><h2>${o.orderStatus==='expirado'?'Reserva expirada':'Pedido recebido pela loja'}</h2><p>Pedido <b>#${esc(o.publicOrderNumber||'')}</b></p>${reservationInfo(o)}<p class="sf-muted">A loja confirma o atendimento. O pagamento é combinado com ela.</p><div class="sf-actions">${href?`<a class="sf-btn sf-btn-wa sf-btn-wide" href="${esc(href)}" target="_blank" rel="noopener">${I.wa}<span>Avisar a loja pelo WhatsApp</span></a>`:''}<button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-go="orders">Acompanhar meus pedidos</button><button type="button" class="sf-link" data-go="catalog">Voltar à loja</button></div></section></main>`;
+}
+function ordersView(){
+  const list=orders.map(o=>o.data).filter(Boolean).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  return `${topbar('Meus pedidos')}<main class="sf-page"><p class="sf-muted">Pedidos feitos neste aparelho.</p>${list.length?list.map(o=>`<article class="sf-panel sf-order"><header><b>Pedido #${esc(o.publicOrderNumber)}</b><span class="sf-pill">${esc(orderLabel(o.orderStatus))}</span></header><small class="sf-muted">${esc(new Date(o.createdAt?.toDate?.()||o.createdAt).toLocaleString('pt-BR'))}</small>${reservationInfo(o)}<ul class="sf-review">${(o.items||[]).map(i=>`<li><span>${i.quantity}x ${esc(i.name)}</span><b>${money(i.subtotal)}</b></li>`).join('')}</ul><div class="sf-sum"><span>Total</span><b>${money(o.total)}</b></div></article>`).join(''):'<div class="sf-empty"><h2>Nenhum pedido ainda</h2></div>'}</main>`;
+}
+function footer(){
+  if(view!=='catalog')return '';
+  const ig=instagramHandle(catalog.instagram);
+  return `<footer class="sf-footer"><div class="sf-footer-inner"><div class="sf-footer-store"><b>${esc(catalog.publicName)}</b>${catalog.address?`<p>${I.pin}<span>${esc(catalog.address)}</span></p>`:''}${catalog.openingHours?`<p>${I.clock}<span>${esc(catalog.openingHours)}</span></p>`:''}<div class="sf-footer-links">${phoneOk()?`<a href="https://wa.me/${esc(K.phoneDigits(storePhone()))}" target="_blank" rel="noopener">${I.wa}<span>WhatsApp</span></a>`:''}${ig?`<a href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener">${I.insta}<span>Instagram</span></a>`:''}${orders.length?'<button type="button" class="sf-link" data-go="orders">Meus pedidos</button>':''}</div></div><p class="sf-made"><img src="./assets/veconi-symbol.svg" alt="" width="16" height="16"><span>Loja criada com VECONI</span></p></div></footer>`;
+}
+
+/* ---------- Folha do produto ---------- */
+function groupsOf(item){
+  const vs=variantsOf(item),keys=[...new Set(vs.flatMap(v=>Object.keys(v.attributeValues||{})))];
+  if(keys.length&&vs.every(v=>keys.every(k=>v.attributeValues?.[k]!=null)))return keys.map(k=>({key:k,options:[...new Set(vs.map(v=>String(v.attributeValues[k])))]}));
+  return [{key:'Opção',options:vs.map(v=>v.displayName),byName:true}];
+}
+function resolveVariant(item,picks){const vs=variantsOf(item),groups=groupsOf(item);if(groups[0]?.byName)return vs.find(v=>v.displayName===picks['Opção'])||null;return vs.find(v=>groups.every(g=>String(v.attributeValues?.[g.key])===picks[g.key]))||null;}
+function optionOut(item,group,value,picks){const vs=variantsOf(item);return !vs.some(v=>{const ok=group.byName?v.displayName===value:String(v.attributeValues?.[group.key])===value;if(!ok)return false;const others=groupsOf(item).filter(g=>g.key!==group.key&&picks[g.key]);if(!group.byName&&others.some(g=>String(v.attributeValues?.[g.key])!==picks[g.key]))return false;return stockOf(item,v)>0;});}
+function productSheet(){
+  const item=catalog.items.find(i=>String(i.id)===String(sheet?.id));if(!item)return '';
+  const variable=isVariable(item),groups=variable?groupsOf(item):[],variant=variable?resolveVariant(item,sheet.picks):null,price=variable?(variant?Number(variant.salePrice):null):Number(item.salePrice);
+  const stock=variable?(variant?stockOf(item,variant):0):stockOf(item),key=variant?`${item.id}::${variant.id}`:item.id,inCart=Number(cart[key]||0),room=Number.isFinite(stock)?Math.max(0,stock-inCart):Infinity;
+  const qty=Math.max(1,Math.min(sheet.qty,Number.isFinite(room)?Math.max(1,room):99)),ready=!variable||variant,canAdd=canOrder()&&ready&&room>0;
+  const img=(variant?.imageUrl)||item.productMainImage||item.productImage;
+  const stockNote=!ready?'Escolha uma opção.':room<=0?(inCart?'Você já colocou todas as unidades disponíveis no pedido.':'Esgotado no momento.'):Number.isFinite(stock)&&stock<=5?`Últimas ${stock} unidades.`:'';
+  return `<div class="sf-backdrop" data-close></div><section class="sf-sheet sf-product" role="dialog" aria-modal="true" aria-labelledby="sf-p-title"><button type="button" class="sf-sheet-x" data-close aria-label="Fechar">${I.x}</button>
+    <div class="sf-product-img" style="${imageStyle(item)}">${img?`<img src="${esc(img)}" alt="${esc(item.productName)}">`:`<span class="sf-noimg">${esc(initials(item.productName))}</span>`}</div>
+    <div class="sf-product-body"><small class="sf-product-cat">${esc(categoryName(item.category))}</small><h2 id="sf-p-title">${esc(item.productName)}</h2><b class="sf-product-price">${price!=null?money(price):esc(priceLabel(item))}</b>${item.description?`<p class="sf-product-desc">${esc(item.description)}</p>`:''}
+      ${groups.map(g=>`<fieldset class="sf-options"><legend>${esc(g.key)}</legend><div class="sf-chips">${g.options.map(o=>{const out=optionOut(item,g,o,sheet.picks),on=sheet.picks[g.key]===o;return `<button type="button" class="sf-chip" role="radio" aria-checked="${on}" data-pick="${esc(g.key)}" data-value="${esc(o)}" ${out?'disabled aria-disabled="true"':''}>${esc(o)}${out?' <small>esgotado</small>':''}</button>`;}).join('')}</div></fieldset>`).join('')}
+      <p class="sf-stock" role="status">${esc(stockNote)}</p>
+      ${canOrder()?`<div class="sf-buy"><div class="sf-qty sf-qty-lg" role="group" aria-label="Quantidade"><button type="button" data-sheet-qty="-1" aria-label="Diminuir" ${qty<=1?'disabled':''}>${I.minus}</button><output>${qty}</output><button type="button" data-sheet-qty="1" aria-label="Aumentar" ${!canAdd||qty>=room?'disabled':''}>${I.plus}</button></div><button type="button" class="sf-btn sf-btn-accent sf-buy-btn" data-sheet-add ${canAdd?'':'disabled'}>${ready?`Adicionar ${money((price||0)*qty)}`:'Escolha uma opção'}</button></div>`:`<p class="sf-muted">Esta loja ainda não recebe pedidos pelo site.</p>`}
+    </div></section>`;
+}
+
+/* ---------- Render e interações ---------- */
+function render(order=null){
+  if(!catalog)return;
+  if(order)successOrder=order;
+  const scrollY=renderedOnce&&view==='catalog'?scrollY_():0;
+  const content=view==='cart'?cartView():view==='checkout'?checkoutView():view==='sent'?sentView():view==='success'?successView(successOrder):view==='orders'?ordersView():catalogView();
+  root.innerHTML=`<div class="sf sf-view-${esc(view)}" style="${themeStyle()}">${content}${footer()}${cartBar()}${sheet?productSheet():''}<div class="sf-toast" role="status" aria-live="polite"></div></div>`;
+  renderedOnce=true;
+  if(view==='catalog'&&scrollY)scrollTo(0,scrollY);
+  document.body.classList.toggle('sf-lock',!!sheet);
+}
+const scrollY_=()=>window.scrollY||document.documentElement.scrollTop||0;
+// Atualiza só o que muda com o carrinho, sem perder a rolagem nem o foco.
+function paintMain(){const main=root.querySelector('#sf-main');if(!main){render();return;}main.innerHTML=mainBody();const cats=root.querySelector('.sf-cats');if(cats){cats.hidden=!!query;cats.querySelectorAll('[data-cat]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.cat===category)));}}
+function paintCart(itemId=null){
+  if(view!=='catalog'){render();return;}
+  const n=count(),badge=root.querySelector('.sf-cart-n');if(badge){badge.hidden=!n;badge.textContent=n>99?'99+':n;}
+  root.querySelector('.sf-cart-btn')?.setAttribute('aria-label',n?`Ver pedido com ${n} ${n===1?'item':'itens'}`:'Pedido vazio');
+  const bar=root.querySelector('.sf-cartbar');if(bar)bar.outerHTML=cartBar();else if(n)root.querySelector('.sf').insertAdjacentHTML('beforeend',cartBar());
+  const aside=root.querySelector('.sf-aside');if(aside)aside.innerHTML=asideCart();
+  for(const el of root.querySelectorAll(itemId?`.sf-card[data-item="${CSS.escape(itemId)}"]`:'.sf-card[data-item]')){const item=catalog.items.find(i=>String(i.id)===el.dataset.item);if(item){const fresh=document.createElement('div');fresh.innerHTML=card(item,el.classList.contains('sf-card-wide')?'sf-card-wide':'');const add=fresh.querySelector('.sf-add'),old=el.querySelector('.sf-add');if(old&&add)old.replaceWith(add);}}
+}
+function toast(text){const el=root.querySelector('.sf-toast');if(!el)return;el.textContent=text;el.classList.add('is-on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('is-on'),2400);}
+function setQty(key,next){
+  const o=orderable().find(x=>x.key===key);if(!o)return;
+  if(pendingOrderAttempt?.payload)return toast('Verifique o envio pendente antes de alterar o pedido.');
+  const max=stockOf(o.item,o.variant);next=Math.max(0,next);
+  if(next>max)return toast(`Só ${max===1?'resta 1 unidade':`restam ${max} unidades`} deste item.`);
+  if(next)cart[key]=next;else delete cart[key];save();
+}
+function openSheet(id,opener){lastFocus=opener||document.activeElement;const item=catalog.items.find(i=>String(i.id)===String(id));if(!item)return;const picks={};if(isVariable(item)){const groups=groupsOf(item);for(const g of groups){const avail=g.options.filter(o=>!optionOut(item,g,o,picks));if(avail.length===1||(g.options.length===1))picks[g.key]=avail[0]||g.options[0];}}sheet={id,qty:1,picks};render();pushState('sheet');requestAnimationFrame(()=>root.querySelector('.sf-sheet .sf-chip:not(:disabled),.sf-sheet [data-sheet-add],.sf-sheet-x')?.focus());}
+function closeSheet(fromPop=false){if(!sheet)return;sheet=null;render();if(!fromPop&&!preview&&history.state?.sf==='sheet')history.back();lastFocus?.isConnected?lastFocus.focus():root.querySelector(`[data-open]`)?.focus();}
+const DEPTH={catalog:0,cart:1,orders:1,checkout:2,sent:3,success:3};
+function go(next){
+  if(next===view)return;
+  if(next==='checkout'&&!canOrder())return toast('Esta loja ainda não recebe pedidos pelo site.');
+  const forward=(DEPTH[next]??0)>(DEPTH[view]??0);
+  view=next;sheet=null;errors={};render();forward?pushState(next):replaceState(next);scrollTo(0,0);
+  root.querySelector('.sf-top .sf-icon-btn,.sf-search input')?.focus({preventScroll:true});
+  if(next==='orders')refreshV2Orders();
+}
+function pushState(v){if(preview)return;try{history.pushState({sf:v},'',location.href);}catch{}}
+function replaceState(v){if(preview)return;try{history.replaceState({sf:v},'',location.href);}catch{}}
+addEventListener('popstate',e=>{if(sheet){closeSheet(true);return;}const v=e.state?.sf;const next=['cart','checkout','sent','orders','success'].includes(v)?v:'catalog';if(next===view)return;readForm();view=next;errors={};render();scrollTo(0,0);if(next==='catalog')refreshPublicAvailability();});
+function readForm(){const form=root.querySelector('#sf-checkout');if(!form)return;const fd=new FormData(form);if(fd.has('name'))customer.name=String(fd.get('name')||'').slice(0,80);if(fd.has('phone'))customer.phone=String(fd.get('phone')||'');if(fd.has('address'))customer.address=String(fd.get('address')||'').slice(0,200);save();}
+function validate(){
+  errors={};const mode=currentMode();
+  if(!String(customer.name||'').trim())errors.name='Informe seu nome.';
+  if(mode?.type==='delivery'&&String(customer.address||'').trim().length<8)errors.address='Informe o endereço completo para a entrega.';
+  if(registered()&&!K.validPhone(customer.phone))errors.phone='Informe um WhatsApp válido com DDD.';
+  return !Object.keys(errors).length;
+}
+function refreshMessage(){const bubble=root.querySelector('[data-msg]'),link=root.querySelector('#sf-send-wa');const m=message();if(bubble)bubble.textContent=m.text;if(link)link.href=waHref(m.text);}
+root.addEventListener('click',event=>{
+  const t=event.target;
+  const close=t.closest('[data-close]');if(close){closeSheet();return;}
+  const add=t.closest('[data-add]');if(add){const item=catalog.items.find(i=>String(i.id)===add.dataset.add);if(!item)return;if(isVariable(item))return openSheet(item.id,add);if(!canOrder())return;const before=Number(cart[item.id]||0);setQty(item.id,before+1);if(Number(cart[item.id]||0)>before){navigator.vibrate?.(12);paintCart(item.id);toast(`${item.productName} no pedido`);}return;}
+  const open=t.closest('[data-open]');if(open){openSheet(open.dataset.open,open);return;}
+  const inc=t.closest('[data-inc]'),dec=t.closest('[data-dec]');if(inc||dec){const key=(inc||dec).dataset[inc?'inc':'dec'];setQty(key,Number(cart[key]||0)+(inc?1:-1));if(view==='catalog')paintCart(key.split('::')[0]);else{render();root.querySelector(`[data-${inc?'inc':'dec'}="${CSS.escape(key)}"]`)?.focus();}return;}
+  const pick=t.closest('[data-pick]');if(pick&&sheet){sheet.picks={...sheet.picks,[pick.dataset.pick]:pick.dataset.value};sheet.qty=1;const y=root.querySelector('.sf-sheet')?.scrollTop||0;render();const s=root.querySelector('.sf-sheet');if(s)s.scrollTop=y;root.querySelector(`[data-pick="${CSS.escape(pick.dataset.pick)}"][data-value="${CSS.escape(pick.dataset.value)}"]`)?.focus();return;}
+  const sq=t.closest('[data-sheet-qty]');if(sq&&sheet){sheet.qty=Math.max(1,sheet.qty+Number(sq.dataset.sheetQty));render();root.querySelector(`[data-sheet-qty="${sq.dataset.sheetQty}"]`)?.focus();return;}
+  if(t.closest('[data-sheet-add]')&&sheet){const item=catalog.items.find(i=>String(i.id)===String(sheet.id)),variant=isVariable(item)?resolveVariant(item,sheet.picks):null,key=variant?`${item.id}::${variant.id}`:item.id;const before=Number(cart[key]||0);setQty(key,before+sheet.qty);if(Number(cart[key]||0)>before){sheet=null;render();if(!preview&&history.state?.sf==='sheet')history.back();toast(`${item.productName}${variant?` (${variant.displayName})`:''} no pedido`);}return;}
+  const cat=t.closest('[data-cat]');if(cat){category=cat.dataset.cat;paintMain();const tools_=root.querySelector('.sf-tools');if(tools_&&tools_.getBoundingClientRect().top<0)tools_.scrollIntoView({block:'start'});return;}
+  const back=t.closest('[data-back]');if(back){readForm();if(!preview&&history.state?.sf===view)history.back();else go(back.dataset.back);return;}
+  const g=t.closest('[data-go]');if(g){readForm();go(g.dataset.go);return;}
+  const mode=t.closest('[data-mode]');if(mode){readForm();serviceModeId=mode.dataset.mode;safeStorage(serviceModeKey,JSON.stringify(serviceModeId));render();root.querySelector(`[data-mode="${CSS.escape(serviceModeId)}"]`)?.focus();return;}
+  const pay=t.closest('[data-pay]');if(pay){readForm();payment=payment===pay.dataset.pay?'':pay.dataset.pay;root.querySelectorAll('[data-pay]').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.pay===payment)));refreshMessage();return;}
+  if(t.closest('[data-clear-search]')){query='';const input=root.querySelector('#sf-search');if(input)input.value='';paintMain();input?.focus();return;}
+  if(t.closest('[data-clear-cart]')){cart={};note='';save();view='catalog';render();toast('Carrinho limpo. Obrigado pela compra!');return;}
+  const wa=t.closest('#sf-send-wa');
+  if(wa){readForm();if(!validate()){event.preventDefault();render();const first=root.querySelector('[aria-invalid="true"]');first?.focus();toast('Confira os campos destacados.');return;}
+    const m=message(),href=waHref(m.text);if(!href){event.preventDefault();toast('A loja ainda não informou um WhatsApp válido.');return;}
+    wa.href=href;
+    if(preview){event.preventDefault();previewMessage(m.text);return;}
+    sentUrl=href;setTimeout(()=>{view='sent';render();pushState('sent');scrollTo(0,0);},60);return;}
+  const ext=t.closest('a[target="_blank"]');if(ext&&preview){event.preventDefault();toast('Na prévia, links externos não abrem.');}
+});
+root.addEventListener('input',event=>{
+  const t=event.target;
+  if(t.id==='sf-search'){clearTimeout(t._t);t._t=setTimeout(()=>{query=t.value.trim();paintMain();},140);return;}
+  if(t.id==='sf-note'){note=t.value.slice(0,500);save();return;}
+  if(t.closest('#sf-checkout')){readForm();if(errors[t.name]){delete errors[t.name];t.removeAttribute('aria-invalid');t.parentElement.querySelector('.sf-error')?.remove();}refreshMessage();}
+});
+root.addEventListener('submit',async event=>{if(event.target.id!=='sf-checkout')return;event.preventDefault();readForm();if(!registered()){root.querySelector('#sf-send-wa')?.click();return;}if(!validate()&&!pendingOrderAttempt?.payload){render();root.querySelector('[aria-invalid="true"]')?.focus();return;}await submitOrder();});
+root.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&sheet){event.preventDefault();closeSheet();return;}
+  if(event.key==='Tab'&&sheet){const nodes=[...root.querySelectorAll('.sf-sheet :is(button,a,input,textarea,select):not([disabled])')];if(!nodes.length)return;const first=nodes[0],last=nodes[nodes.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}
+});
+function previewMessage(text){
+  const el=document.createElement('div');el.className='sf-preview-msg';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-label','Prévia da mensagem');
+  el.innerHTML=`<div class="sf-backdrop" data-close-msg></div><section class="sf-sheet sf-msg-sheet"><h2>Prévia da mensagem</h2><p class="sf-muted">Na loja publicada, o cliente abre o WhatsApp ${phoneOk()?`de ${esc(K.formatPhone(storePhone()))} `:''}com este texto. Nada foi enviado.</p><div class="sf-bubble">${esc(text)}</div><button type="button" class="sf-btn sf-btn-accent sf-btn-wide" data-close-msg>Fechar</button></section>`;
+  root.querySelector('.sf').appendChild(el);el.querySelector('button').focus();el.addEventListener('click',e=>{if(e.target.closest('[data-close-msg]'))el.remove();});
+}
+
+/* ---------- Pedido registrado (fluxo existente, com reserva de estoque) ---------- */
+async function acceptV2(payload,order){await attempts().accept(payload,order);orders=await attempts().list();cart={};pendingOrderAttempt=null;save();view='success';render(order);return true;}
+async function restoreV2(){
+  orders=await attempts().list();const payload=await attempts().pending();
+  if(payload){pendingOrderAttempt={payload};cart=Object.fromEntries(payload.items.map(i=>[i.catalogItemId,i.quantity]));customer={...customer,name:payload.customerName,phone:payload.customerPhone,address:payload.customerLocation};serviceModeId=payload.serviceModeId;view='checkout';
+    try{const r=await orderStatusCall({catalogToken:visitToken,id:payload.id,orderAccessToken:payload.orderAccessToken});await acceptV2(payload,r.data.order);return true;}catch(e){if(!String(e.code||'').endsWith('not-found'))setTimeout(()=>toast('Há um envio em confirmação. Tente verificar novamente, sem criar outro pedido.'),300);}
+  }return false;
+}
+async function refreshV2Orders(){
+  if(preview||document.hidden||!navigator.onLine)return;
+  for(const entry of orders.filter(o=>!['entregue','cancelado','expirado'].includes(o.data?.orderStatus)).slice(0,5)){
+    try{const r=await orderStatusCall({catalogToken:visitToken,id:entry.id,orderAccessToken:entry.accessToken});entry.data=r.data.order;await attempts().accept({orderAccessToken:entry.accessToken},entry.data);}catch{/* Mantém o último estado confirmado; nunca afirma sucesso por falha de transporte. */}
+  }if(view==='orders')render();
 }
 function orderErrorMessage(error){
   const code=String(error?.code||'').replace(/^(firestore|functions)\//,'');
-  if(v2()&&['invalid-argument','failed-precondition','aborted','already-exists'].includes(code))return error.message||'Revise os dados e tente novamente.';
+  if(['invalid-argument','failed-precondition','aborted','already-exists'].includes(code))return error.message||'Revise os dados e tente novamente.';
   if(code==='permission-denied')return'Não foi possível registrar o pedido. Os dados enviados não foram aceitos.';
   if(code==='resource-exhausted'||code==='deadline-exceeded')return'O servidor atingiu um limite temporário. Seu carrinho continua salvo; tente novamente mais tarde.';
   if(!navigator.onLine)return'Sem conexão. Seu carrinho continua salvo.';
-  if(code==='unavailable')return v2()?'Não foi possível confirmar a resposta do servidor. Verifique o envio pendente; seu carrinho continua salvo.':'Sem conexão. Seu carrinho continua salvo.';
+  if(code==='unavailable')return'Não foi possível confirmar a resposta do servidor. Verifique o envio pendente; seu carrinho continua salvo.';
   return'Não foi possível enviar o pedido. Tente novamente.';
 }
-function orderWriteWithTimeout(payload,timeoutMs=12000){
-  let timer;
-  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(new Error('Tempo limite ao registrar pedido.'),{code:'deadline-exceeded'})),timeoutMs)});
-  return Promise.race([submitCatalogOrder(payload),timeout]).finally(()=>clearTimeout(timer));
-}
-function prepareOrder(form){
-  const fd=new FormData(form),nome=String(fd.get('nome')||'').trim(),normalizedPhone=normalizeBrazilianPhone(fd.get('telefone'));
-  if(nome.length<2||nome.length>120){toast('Informe um nome com pelo menos 2 caracteres.');return null}
-  if(!isValidBrazilianPhone(normalizedPhone)||normalizedPhone.length<10||normalizedPhone.length>15){toast('Informe um WhatsApp válido com DDD.');return null}
-  return{nome,telefone:normalizedPhone,local:String(fd.get('local')||'').trim(),payment:normalizePaymentPreference(fd.get('payment')),serviceModeId:String(fd.get('serviceModeId')||currentServiceMode()?.id||currentServiceMode()?.type||'').trim()}
-}
-async function submitOrder(form){
-  console.log('[Catalog Order] submit started');
-  if(submittingOrder)return;
-  const pending=v2()&&pendingOrderAttempt?.payload;
-  const data=pending?null:prepareOrder(form);if(v2()&&data){if(data.serviceModeId==='delivery'&&data.local.length<8){toast('Informe o endereço completo de entrega.');return;}safeStorage(`adiCatalogNote:${visitToken}`,JSON.stringify(String(new FormData(form).get('note')||'').trim()));}
-  if(!pending&&!data)return;
-  if(!navigator.onLine){toast('Sem conexão. Seu carrinho continua salvo.');return}
-  submittingOrder=true;
-  const button=form.querySelector('#submit-order');
-  if(button){button.disabled=true;button.textContent='Enviando pedido…'}
+function orderWriteWithTimeout(payload,timeoutMs=12000){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(new Error('Tempo limite ao registrar pedido.'),{code:'deadline-exceeded'})),timeoutMs)});return Promise.race([callable('submitCatalogOrder',payload),timeout]).finally(()=>clearTimeout(timer));}
+function generateSecureToken(length=32){const bytes=crypto.getRandomValues(new Uint8Array(Math.ceil(length/2)));return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,length);}
+const normalizePaymentPreference=value=>({pix:'pix',dinheiro:'dinheiro',cartao:'cartao',entrega:'entrega'}[value]||'entrega');
+async function submitOrder(){
+  if(submittingOrder||preview)return;
+  if(!navigator.onLine){toast('Sem conexão. Seu carrinho continua salvo.');return;}
+  submittingOrder=true;render();
   try{
+    const pending=pendingOrderAttempt?.payload;
     if(pending){
-      try{
-        const response=await attempts().verify(pending,p=>orderStatusCall({catalogToken:visitToken,id:p.id,orderAccessToken:p.orderAccessToken}),p=>orderWriteWithTimeout(p));
-        await acceptV2(pending,response.data.order);toast('Pedido confirmado.');
-      }catch(error){console.error('[Catalog Order] verify failed',{code:error.code||'local-persistence',stage:'verify_pending_order'});view='checkout';render();toast(orderErrorMessage(error));}
-    }else await submitOrderData(data);
-  }
-  finally{
-    submittingOrder=false;
-    const currentButton=root.querySelector('#submit-order');
-    if(currentButton){currentButton.disabled=false;currentButton.textContent=v2()&&pendingOrderAttempt?.payload?'Verificar envio pendente':'Enviar pedido';}
-  }
+      try{const response=await attempts().verify(pending,p=>orderStatusCall({catalogToken:visitToken,id:p.id,orderAccessToken:p.orderAccessToken}),p=>orderWriteWithTimeout(p));await acceptV2(pending,response.data.order);toast('Pedido confirmado.');}
+      catch(error){console.error('[Catalog Order] verify failed',{code:error.code||'local-persistence',stage:'verify_pending_order'});view='checkout';render();toast(orderErrorMessage(error));}
+    }else await submitOrderData();
+  }finally{submittingOrder=false;if(view==='checkout')render();}
 }
-async function submitOrderData(data){
-  const normalizedItems=orderableItems().filter(item=>cart[item.id]).map(item=>({productId:String(item.productId||''),variantId:item.variantId?String(item.variantId):null,catalogItemId:String(item.id||''),name:String(item.productName||'').slice(0,160),productNameSnapshot:String(item.productName||'').split(' — ')[0],variantNameSnapshot:item.variantName||null,attributesSnapshot:item.attributeValues||null,image:String(item.productImage||''),quantity:Number(cart[item.id]),unitPrice:Number(Number(item.salePrice).toFixed(2)),subtotal:Number((Number(cart[item.id])*Number(item.salePrice)).toFixed(2))}));
-  const canonicalTotal=Number(normalizedItems.reduce((sum,item)=>sum+item.subtotal,0).toFixed(2));
-  if(!normalizedItems.length){toast('Seu carrinho está vazio.');return false}
-  if(!(canonicalTotal>0&&canonicalTotal<=10000)){toast('O total do pedido precisa estar entre R$ 0,01 e R$ 10.000,00.');return false}
-  identity={...identity,nome:data.nome,telefone:data.telefone,local:data.local};
-  save();
-  const attemptKey=JSON.stringify({items:normalizedItems.map(item=>[item.catalogItemId,item.quantity,item.unitPrice]),total:canonicalTotal,nome:data.nome,telefone:data.telefone,local:data.local,payment:data.payment,serviceModeId:data.serviceModeId});
+async function submitOrderData(){
+  const mode=currentMode(),data={nome:String(customer.name||'').trim(),telefone:K.phoneDigits(customer.phone),local:String(customer.address||'').trim(),payment:normalizePaymentPreference(payment),serviceModeId:String(mode?.id||mode?.type||'')};
+  const normalizedItems=cartLines().map(l=>({catalogItemId:String(l.key),quantity:l.qty,unitPrice:Number(l.price.toFixed(2)),subtotal:Number((l.qty*l.price).toFixed(2))}));
+  const canonicalTotal=Number(normalizedItems.reduce((s,i)=>s+i.subtotal,0).toFixed(2));
+  if(!normalizedItems.length){toast('Seu carrinho está vazio.');return false;}
+  if(!(canonicalTotal>0&&canonicalTotal<=10000)){toast('O total do pedido precisa estar entre R$ 0,01 e R$ 10.000,00.');return false;}
+  const attemptKey=JSON.stringify({items:normalizedItems.map(i=>[i.catalogItemId,i.quantity,i.unitPrice]),total:canonicalTotal,...data});
   if(!pendingOrderAttempt||pendingOrderAttempt.key!==attemptKey)pendingOrderAttempt={key:attemptKey,orderId:uuid(),orderAccessToken:generateSecureToken(32),publicOrderNumber:`VC${Date.now().toString().slice(-6)}`};
   const {orderId,orderAccessToken,publicOrderNumber}=pendingOrderAttempt;
-  const payload={
-    id:orderId,
-    businessId:catalog.businessId,
-    workspaceGeneration:catalog.workspaceGeneration??0,
-    catalogToken:visitToken,
-    source:'online_catalog',
-    orderStatus:'recebido',
-    customerName:data.nome.trim(),
-    customerPhone:normalizeBrazilianPhone(data.telefone),
-    customerLocation:data.local.trim(),
-    items:normalizedItems.map(item=>({catalogItemId:item.catalogItemId,quantity:item.quantity})),
-    subtotal:Number(canonicalTotal),
-    discount:0,
-    fee:0,
-    total:Number(canonicalTotal),
-    expectedTotal:Number(canonicalTotal),
-    paymentPreference:normalizePaymentPreference(data.payment),
-    serviceModeId:data.serviceModeId||null,
-    orderAccessToken,
-    operationId:`catalog-order:${orderId}`,
-    publicOrderNumber,
-    visitId:catalog.visitId,
-    clientRefToken:portalSession?.clientRefToken||null,
-    portalSessionHash:portalSession?.tokenHash||null,
-    paymentStatus:'pendente',
-    note:read(`adiCatalogNote:${visitToken}`,'')||identity.observacao||'',
-    customerSessionToken:localStorage.getItem(sessionStorageKey(visitToken))||null
-  };
+  const payload={id:orderId,businessId:catalog.businessId,workspaceGeneration:catalog.workspaceGeneration??0,catalogToken:visitToken,source:'online_catalog',orderStatus:'recebido',customerName:data.nome,customerPhone:data.telefone,customerLocation:data.local,
+    items:normalizedItems.map(i=>({catalogItemId:i.catalogItemId,quantity:i.quantity})),subtotal:canonicalTotal,discount:0,fee:0,total:canonicalTotal,expectedTotal:canonicalTotal,paymentPreference:data.payment,serviceModeId:data.serviceModeId||null,
+    orderAccessToken,operationId:`catalog-order:${orderId}`,publicOrderNumber,visitId:catalog.visitId,clientRefToken:null,portalSessionHash:null,paymentStatus:'pendente',note:String(note||'').slice(0,1000),customerSessionToken:null};
   let durableAttempt=null;
   try{
-    if(v2()){
-      // Commit the exact request and secret BEFORE network I/O. A second tab/reload reuses it.
-      const durable=await attempts().prepare(payload);durableAttempt=durable;pendingOrderAttempt={payload:durable};
-      const response=await orderWriteWithTimeout(durable);
-      await acceptV2(durable,response.data.order);toast('Pedido recebido. Estoque reservado.');return true;
-    }
-    const response=await orderWriteWithTimeout(payload),serverOrder=response.data?.order||{};
-    const localOrder={...serverOrder,id:serverOrder.id||orderId,publicOrderNumber:serverOrder.publicOrderNumber||publicOrderNumber,orderStatus:serverOrder.orderStatus||'recebido',items:serverOrder.items||normalizedItems,total:Number(serverOrder.total??canonicalTotal),createdAt:serverOrder.createdAt||new Date().toISOString(),updatedAt:serverOrder.updatedAt||new Date().toISOString()};
-    orders.unshift({id:orderId,accessToken:orderAccessToken,data:localOrder});
-    cart={};
-    pendingOrderAttempt=null;
-    localStorage.removeItem(`adiCatalogNote:${visitToken}`);
-    save();
-    subscribeOrder(orderId);
-    trackPortalEvent('order_created',{visitToken,identified:Boolean(portalSession)});
-    view='success';
-    render(localOrder);
-    toast('Pedido enviado com sucesso.');
-    return true;
+    // Grava a tentativa exata ANTES da rede. Outra aba ou recarga reutiliza a mesma.
+    const durable=await attempts().prepare(payload);durableAttempt=durable;pendingOrderAttempt={payload:durable};
+    const response=await orderWriteWithTimeout(durable);
+    await acceptV2(durable,response.data.order);toast('Pedido recebido. Estoque reservado.');return true;
   }catch(error){
     if(durableAttempt&&['invalid-argument','failed-precondition','permission-denied'].some(c=>String(error.code||'').endsWith(c))){
       const recovery=await attempts().reconcileFailure(durableAttempt,async p=>(await orderStatusCall({catalogToken:visitToken,id:p.id,orderAccessToken:p.orderAccessToken})).data.order);
@@ -276,24 +393,53 @@ async function submitOrderData(data){
       if(recovery.status==='absent')pendingOrderAttempt=null;
     }
     console.error('[Catalog Order] create failed',{code:error.code||'local-persistence',stage:'submit_order'});
-    if(v2()&&pendingOrderAttempt?.payload){view='checkout';render();}
-    toast(orderErrorMessage(error));
-    return false;
+    view='checkout';render();toast(orderErrorMessage(error));return false;
   }
 }
-function subscribeOrder(id){if(v2())return;const entry=orders.find(order=>order.id===id);if(!entry||!entry.accessToken)return;orderStatusCall({catalogToken:visitToken,id:entry.id,orderAccessToken:entry.accessToken}).then(r=>{entry.data=r.data.order;save();if(view==='orders')render();}).catch(()=>{});}
-function changeCart(id,delta=1,source=null,options={}){if(v2()&&pendingOrderAttempt?.payload)return toast('Verifique o envio pendente antes de alterar o carrinho.');const parent=catalog.items.find(product=>String(product.id)===String(id));if(parent?.productType==='variable'){productDetailsId=null;variantPickerProductId=parent.id;render();return true}const item=findOrderable(id);if(!item)return false;if(delta>0&&!receiving())return toast('Este catálogo não está recebendo pedidos agora.');const current=Number(cart[item.id]||0),next=Math.max(0,current+Number(delta||0)),stock=available(item),limit=Number(item.maxPerCustomer||0);if(delta>0&&tracksStock(item)&&next>stock)return toast(`Somente ${stock} unidade(s) disponível(is).`);if(delta>0&&limit&&next>limit)return toast(`Limite de ${limit} unidade(s) por cliente.`);next?cart[item.id]=next:delete cart[item.id];if(source?.closest?.('.product-details-dialog'))productDetailsId=null;save();navigator.vibrate?.(15);trackPortalEvent('product_added',{productId:item.productId,variantId:item.variantId||null,quantity:next});render();if(delta>0&&!options.silent)toast(`${item.productName} adicionado`,item.id);return true}
-function bind(){root.querySelector('#catalog-search')?.addEventListener('input',event=>{query=event.target.value.toLocaleLowerCase('pt-BR');visibleLimit=12;const position=event.target.selectionStart;render();const input=root.querySelector('#catalog-search');input.focus();input.setSelectionRange(position,position)});root.querySelector('#cart-note')?.addEventListener('input',event=>safeStorage(`adiCatalogNote:${visitToken}`,JSON.stringify(event.target.value)));root.querySelector('#order-form')?.addEventListener('submit',async event=>{event.preventDefault();event.stopPropagation();await submitOrder(event.currentTarget)});root.querySelector('#portal-logout')?.addEventListener('click',logoutPortal);root.querySelector('#switch-client')?.addEventListener('click',logoutPortal)}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshV2Orders();});
-addEventListener('pageshow',()=>refreshV2Orders());
-statusTimer=setInterval(()=>{if(view==='orders')refreshV2Orders();},30000);
-root.addEventListener('click',event=>{const add=event.target.closest('[data-action="add-to-cart"],[data-add]');if(add){event.stopPropagation();changeCart(add.dataset.catalogItemId||add.dataset.add,1,add);return}const remove=event.target.closest('[data-action="remove-from-cart"],[data-minus]');if(remove){event.stopPropagation();changeCart(remove.dataset.catalogItemId||remove.dataset.minus,-1,remove,{silent:true});return}const details=event.target.closest('[data-product-details]');if(details&&!event.target.closest('button,a,input,select,textarea')){productDetailsId=details.dataset.productDetails;render();return}const desktopCheckout=event.target.closest('[data-desktop-checkout]');if(desktopCheckout){view='checkout';render();return}const desktopCart=event.target.closest('[data-desktop-cart]');if(desktopCart&&matchMedia('(min-width:900px)').matches&&view==='catalog'){event.preventDefault();root.querySelector('#desktop-order-card')?.scrollIntoView({behavior:'smooth',block:'start'});return}const mode=event.target.closest('[data-service-mode]');if(mode){serviceModeId=mode.dataset.serviceMode;safeStorage(serviceModeKey,JSON.stringify(serviceModeId));render();return}const filter=event.target.closest('[data-quick-filter]');if(filter){quickFilter=filter.dataset.quickFilter;visibleLimit=12;render();return}if(event.target.closest('[data-load-more]')){visibleLimit+=12;render();return}const targetView=event.target.closest('[data-view]');if(targetView){view=targetView.dataset.view;trackPortalEvent(view==='cart'?'cart_opened':view==='benefits'?'benefit_viewed':'navigation',{view});render();if(view==='orders')refreshV2Orders();return}if(event.target.closest('[data-identify]')){openIdentify();return}const categoryButton=event.target.closest('[data-category]');if(categoryButton){category=categoryButton.dataset.category;visibleLimit=12;render();return}if(event.target.closest('#checkout')){view='checkout';render();return}const reward=event.target.closest('[data-request-reward]');if(reward){requestReward(reward.dataset.requestReward);return}});
-root.addEventListener('keydown',event=>{const card=event.target.closest('.product-card[data-product-details]');if(card&&(event.key==='Enter'||event.key===' ')){event.preventDefault();productDetailsId=card.dataset.productDetails;render()}});
-function prepareCatalogIdentity(){serviceModeId=read(serviceModeKey,'')||String(activeServiceModes()[0]?.id||activeServiceModes()[0]?.type||'');const brand=catalog.publicName||catalog.businessName||'Loja';document.title=`${brand} — Catálogo online`;document.querySelector('meta[name="description"]')?.setAttribute('content',`Catálogo online de ${brand}. Veja produtos disponíveis e faça seu pedido.`);document.documentElement.style.setProperty('--primary',catalog.primaryColor||catalog.publicSettings?.primaryColor||'#08ad81')}
-async function start(){try{catalog=await loadPublicCatalog();prepareCatalogIdentity();if(v2()){await DB.localRecords.transaction('readwrite',(store,done)=>{store.put({key:`public-catalog:${visitToken}:cache`,scope:`public-catalog:${visitToken}`,type:'reconstructable-catalog',data:catalog});done(true);});localStorage.removeItem(`adiCatalogCache:${visitToken}`);}else safeStorage(`adiCatalogCache:${visitToken}`,JSON.stringify(catalog));if(v2()&&await restoreV2())return;orders.forEach(order=>subscribeOrder(order.id));const hadSession=Boolean(localStorage.getItem(sessionStorageKey(visitToken))),valid=v2()?false:await validatePortalSession();trackPortalEvent('catalog_opened',{visitToken,identified:Boolean(portalProfile)});render();if(hadSession&&!valid)toast('Para proteger seus dados, confirme sua identificação novamente.')}catch(error){const code=normalizedCatalogErrorCode(error);if(code==='network'){const cached=(await DB.localRecords.read(`public-catalog:${visitToken}:cache`).catch(()=>null))?.data;if(cached?.schemaVersion>=6&&cached.catalogType==='space_store'&&cached.spaceId&&cached.active===true&&(!cached.catalogToken||cached.catalogToken===visitToken)){catalog=cached;prepareCatalogIdentity();render();root.insertAdjacentHTML('afterbegin',`<div class="catalog-network-warning" role="status">${icon('cloud-off')}<span><b>Não foi possível conectar ao servidor</b><small>Mostrando a última versão salva.</small></span></div>`);window.lucide?.createIcons();console.warn('[Public catalog load]',{code:'network-cache',documentPath:`publicCatalogs/${visitToken}`,urlToken:visitToken});return}}showCatalogError(code,error)}}
-function startDemo(){const names=[['Poty 220ml','Bebidas',3.5,11],['Coca zero 220ml','Bebidas',3.5,0],['Cone recheado Negresco','Doces',6,4],['Monster Energy 473ml','Energético',12,7],['Gift Card Twitch R$50','Streaming',50,3],['Doritos Queijo Nacho 84g','Lanches',8,9],['Fini Gelatinas 80g','Doces',4.5,12],['Pringles Original 104g','Lanches',10,5],['Brownie recheado','Doces',10,8],['Água mineral 500ml','Bebidas',2.5,18],['IPTV 30 dias','Streaming',25.9,0],['Combo Festa','Outros',28.9,6]];catalog={token:'demo',visitId:'demo',businessId:'adi-festa',publicName:'Loja demonstração',local:'Shopping Iguatemi',nome:'Visita de hoje',horarioChegada:'14:00',horarioLimite:'13:30',status:'recebendo',catalogType:'universal',schemaVersion:5,catalogVisible:true,acceptingOrders:true,closedBehavior:'view_only',active:true,welcomeText:'Veja os produtos disponíveis e faça seu pedido.',contactPhone:'5517999999999',serviceModes:[{id:'pickup',type:'pickup',label:'Retirada',active:true,instructions:'Retire no local combinado.'},{id:'delivery',type:'delivery',label:'Entrega',active:true,instructions:'Consulte disponibilidade.'}],paymentMethods:['entrega','pix','dinheiro','cartao'],categories:['Bebidas','Doces','Energético','Streaming','Lanches','Outros'].map((name,index)=>({internalName:name,publicName:name,active:true,order:index})),items:names.map((value,index)=>({id:`demo-${index}`,productId:`p-${index}`,productName:value[0],category:value[1],salePrice:value[2],originalPrice:index===7?12:value[2],availableQuantity:value[3],controlaEstoque:index!==10,productType:index===10?'recurring':'simple',durationValue:index===10?30:null,durationUnit:index===10?'days':null,description:'Produto selecionado para o catálogo público.',featured:index===0||index===3,displayOrder:index,active:true})),campaigns:[{id:'camp-1',nome:'Compre 5 Cones e ganhe 1 grátis',descricao:'A cada 5 cones, você ganha 1 cone grátis!',tipo:'buy_get',icone:'shopping-cart',produtoIds:['p-2'],regras:{requiredQuantity:5,rewardQuantity:1}},{id:'camp-2',nome:'Acumule pontos e troque por prêmios',descricao:'A cada R$ 1,00 você ganha 1 ponto.',tipo:'points',icone:'award',regras:{rewardPoints:120}}]};catalog.items[2]={...catalog.items[2],productType:'variable',minPrice:6,maxPrice:8,variants:[{id:'tradicional',displayName:'Tradicional',salePrice:6,availableQuantity:4,active:true},{id:'nutella',displayName:'Nutella',salePrice:8,availableQuantity:2,active:true}]};prepareCatalogIdentity();if(params.get('identified')==='1'){portalSession={clientRefToken:'demo-client',tokenHash:'demo'};portalProfile={displayName:'João',maskedPhone:'•••••-32859',location:'Loja 204',campaigns:[{campaignId:'camp-1',currentProgress:3,target:5,rewardsAvailable:Number(params.get('reward')==='1')},{campaignId:'camp-2',points:72,target:120,rewardsAvailable:0}],orders:[]}}render()}
-addEventListener('online',()=>catalog&&render());addEventListener('offline',()=>catalog&&render());addEventListener('pagehide',()=>{unsub.splice(0).forEach(stop=>stop());subscribedOrderIds.clear();subscribedProfile=''});
+
+/* ---------- Início, erros e prévia ---------- */
+function prepareCatalogIdentity(){
+  const modes_=modes();if(!modes_.some(m=>String(m.id||m.type)===String(serviceModeId)))serviceModeId=String(modes_[0]?.id||modes_[0]?.type||'');
+  const brand=catalog.publicName||'Loja';
+  if(!preview){document.title=`${brand} — Catálogo online`;document.querySelector('meta[name="description"]')?.setAttribute('content',`Catálogo online de ${brand}. Veja produtos disponíveis e faça seu pedido.`);}
+  const t=K.theme({primaryColor:catalog.primaryColor,secondaryColor:catalog.secondaryColor});document.querySelector('meta[name="theme-color"]')?.setAttribute('content',t.band);document.documentElement.style.setProperty('--sf-page-band',t.band);
+  for(const key of Object.keys(cart))if(!orderable().some(o=>o.key===key))delete cart[key];
+}
+function showCatalogError(code,error){
+  const s=error?.store;
+  if(code==='paused'&&s){const t=K.theme(s),phone=K.validPhone(s.contactPhone)?K.phoneDigits(s.contactPhone):'';document.title=`${s.publicName} — Loja pausada`;
+    root.innerHTML=`<div class="sf sf-state" style="--sf-band:${t.band};--sf-on-band:${t.onBand};--sf-accent:${t.accent};--sf-on-accent:${t.onAccent};--sf-band-muted:${t.bandMuted}"><section class="sf-state-card"><span class="sf-logo">${s.logoUrl?`<img src="${esc(s.logoUrl)}" alt="">`:`<span>${esc(initials(s.publicName))}</span>`}</span><h1>${esc(s.publicName)}</h1><p>A loja está pausada no momento e não recebe pedidos por aqui.</p>${s.openingHours?`<p class="sf-muted">${esc(s.openingHours)}</p>`:''}${phone?`<a class="sf-btn sf-btn-wa" href="https://wa.me/${phone}" target="_blank" rel="noopener">${I.wa}<span>Falar com a loja</span></a>`:''}<p class="sf-made"><img src="./assets/veconi-symbol.svg" alt="" width="16" height="16"><span>Loja criada com VECONI</span></p></section></div>`;return;}
+  const messages={'permission-denied':['Sem acesso a esta loja','O link existe, mas o acesso público não foi autorizado.'],'not-found':['Loja não encontrada','Confira se o link recebido está completo ou peça um novo link à loja.'],inactive:['Esta loja não está disponível','Peça à loja o link atualizado.'],network:['Sem conexão com a loja','Verifique sua internet e tente de novo.']}[code]||['Sem conexão com a loja','Verifique sua internet e tente de novo.'];
+  console.error('[Public catalog load]',{code,firestoreCode:error?.code||null,tokenSource:queryToken?'query-v':legacyPathToken?'legacy-path':params.has('loja')?'slug':'missing',online:navigator.onLine});
+  root.innerHTML=`<div class="sf sf-state"><section class="sf-state-card"><img src="./assets/veconi-symbol.svg" alt="" width="44" height="44"><h1>${messages[0]}</h1><p>${messages[1]}</p><button type="button" class="sf-btn sf-btn-ghost" onclick="location.reload()">Tentar de novo</button><p class="sf-made"><span>Loja criada com VECONI</span></p></section></div>`;
+}
+async function start(){
+  try{
+    catalog=await loadPublicCatalog();prepareCatalogIdentity();
+    await DB.localRecords.transaction('readwrite',(store,done)=>{store.put({key:`public-catalog:${visitToken}:cache`,scope:`public-catalog:${visitToken}`,type:'reconstructable-catalog',data:catalog});done(true);}).catch(()=>{});
+    if(await restoreV2().catch(()=>false))return;
+    render();
+  }catch(error){
+    const code=normalizedCatalogErrorCode(error);
+    if(code==='network'){const cached=(await DB.localRecords.read(`public-catalog:${visitToken}:cache`).catch(()=>null))?.data;if(cached?.schemaVersion>=6&&cached.catalogType==='space_store'&&cached.spaceId&&cached.active===true&&(!cached.catalogToken||cached.catalogToken===visitToken)){catalog={...cached,acceptingOrders:false};prepareCatalogIdentity();render();root.querySelector('.sf')?.insertAdjacentHTML('afterbegin','<p class="sf-notice sf-notice-warn" role="status">Sem conexão: mostrando a última versão salva da loja.</p>');return;}}
+    showCatalogError(code,error);
+  }
+}
+// Prévia do painel: só aceita mensagens da própria origem, vindas da janela que embute a loja.
+function startPreview(){
+  root.innerHTML='<div class="catalog-loading"><span class="catalog-logo"><img src="./assets/veconi-symbol.svg" alt=""></span><p>Montando a prévia…</p></div>';
+  addEventListener('message',event=>{
+    if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='veconi-store-preview')return;
+    const data=event.data.catalog;if(!data||!Array.isArray(data.items))return;
+    const y=scrollY_(),sheetY=root.querySelector('.sf-sheet')?.scrollTop||0;
+    catalog={...data,schemaVersion:6,catalogType:'space_store'};prepareCatalogIdentity();
+    if(sheet&&!catalog.items.some(i=>String(i.id)===String(sheet.id)))sheet=null;
+    render();scrollTo(0,y);const s=root.querySelector('.sf-sheet');if(s)s.scrollTop=sheetY;
+  });
+  try{window.parent?.postMessage({type:'veconi-store-preview-ready'},location.origin);}catch{}
+}
+preview?startPreview():start();
+if(!preview){addEventListener('online',()=>catalog&&view==='catalog'&&render());addEventListener('offline',()=>catalog&&view==='catalog'&&render());}
 // Register after the navigation handler: the view must already be "catalog".
-root.addEventListener('click',event=>{if(event.target.closest('[data-view="catalog"]'))refreshPublicAvailability();});
-params.get('demo')==='1'?startDemo():start();
-if('serviceWorker'in navigator&&location.protocol.startsWith('http')&&!['localhost','127.0.0.1'].includes(location.hostname))navigator.serviceWorker.register('./service-worker.js').catch(error=>console.error('[Catalog service worker]',error));
+root.addEventListener('click',event=>{if(!preview&&event.target.closest('[data-go="catalog"],[data-back="catalog"]'))refreshPublicAvailability();});
+if(!preview&&'serviceWorker'in navigator&&location.protocol.startsWith('http')&&!['localhost','127.0.0.1'].includes(location.hostname))navigator.serviceWorker.register('./service-worker.js').catch(error=>console.error('[Catalog service worker]',error));
