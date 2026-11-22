@@ -46,7 +46,12 @@ test('Pedidos Online confirma e cancela pedido fictício no emulador nos dois te
       const item=await s.item('qa-0001');
       const store=await s.publish(await s.draft({productIds:['qa-0001']}),{settings:{...s.settings,checkoutEnabled:true}});
       const payload=s.payload(store,[{catalogItemId:'catalog-qa-0001',quantity:2}],{expectedTotal:20});
-      const {order}=await v.orders.submit({data:payload});
+      await v.orders.submit({data:payload});
+      const order=await s.doc.collection('catalogOrders').doc(payload.id).get();
+      const orderData=order.data();
+      orderData.createdAt=orderData.createdAt.toDate().toISOString();
+      orderData.statusHistory=orderData.statusHistory.map(entry=>({...entry,at:entry.at.toDate().toISOString()}));
+      orderData.reservationExpiresAt=orderData.reservationExpiresAt.toDate().toISOString();
       assert.equal((await item.get()).data().onlineReservedStock,2);
       const {page}=await kit.openAdmin(browser,server.base,{width:390,theme});
       const other=await shop(v);
@@ -65,7 +70,7 @@ test('Pedidos Online confirma e cancela pedido fictício no emulador nos dois te
         window.DB.readForView=()=>({clientes:[],catalogOrders:[current,{...current,id:'qa-foreign',businessId:other.businessId}]});
         window.FirebaseCallable=window.changeFictitiousOrder;
         window.SyncFirebase={applyOnlineOrderResult:o=>{current=o;},refreshOnlineOrderStock:async()=>{}};
-      },{s:{businessId:s.businessId,spaceId:s.spaceId},order,other:{businessId:other.businessId}});
+      },{s:{businessId:s.businessId,spaceId:s.spaceId},order:orderData,other:{businessId:other.businessId}});
       for(const script of operationalScripts)await page.addScriptTag({url:server.base+'/'+script});
       await page.evaluate(()=>{
         document.querySelector('#app').innerHTML=OnlineOrdersUI.render();

@@ -72,8 +72,8 @@ test("apresentação pública preserva enquadramento sem leituras de metadata", 
 
 test("SEO básico e cache bust da loja estão versionados", () => {
   assert.match(html, /meta name="description"/);
-  assert.match(html, /catalogo\.css\?v=300/);
-  assert.match(html, /catalogo-publico\.js\?v=300/);
-  assert.match(html, /loja\/store-kit\.js\?v=300/);
+  assert.match(html, /catalogo\.css\?v=2425/);
+  assert.match(html, /catalogo-publico\.js\?v=2425/);
+  assert.match(html, /loja\/store-kit\.js\?v=2425/);
   assert.match(portal, /document\.title=`\$\{brand\} — Catálogo online`/);
 });
