@@ -205,6 +205,7 @@
     "js/integrity.js",
     "js/lifecycle-manager.js",
     "js/local-records.js",
+    "js/loja/store-kit.js",
     "js/mensagens-mobile.js",
     "js/message-center-v2.js",
     "js/mensagens.js",

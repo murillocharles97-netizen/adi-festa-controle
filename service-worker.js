@@ -48,7 +48,7 @@ ARQUIVOS.push('./css/team-permissions.css','./js/team-permission-model.js','./js
 ARQUIVOS.push('./css/design-system/veconi-theme.css','./js/veconi-brand.js','./assets/veconi-symbol.svg','./assets/veconi-maskable-192-v133.png','./assets/veconi-maskable-512-v133.png','./assets/veconi-apple-touch-icon-180-v133.png','./assets/veconi-favicon-16-v133.png','./assets/veconi-favicon-32-v133.png','./assets/veconi-favicon-48-v133.png','./assets/veconi-favicon-v133.ico');
 ARQUIVOS.push('./functions/src/shared/product-model.js','./functions/src/shared/product-spreadsheet.js');
 ARQUIVOS.push('./js/firebase/product-import-fence.js');
-ARQUIVOS.push('./functions/src/shared/online-store.js','./js/online-store-ui.js','./css/online-store.css','./css/online-store-public.css');
+ARQUIVOS.push('./functions/src/shared/online-store.js','./js/online-store-ui.js','./css/online-store.css','./css/online-store-public.css','./js/loja/store-kit.js');
 ARQUIVOS.push('./js/sale-exchanges.js','./css/sale-exchanges.css','./js/exchange-credit-checkout.js','./css/exchange-credit-checkout.css','./js/exchange-economics.js');
 ARQUIVOS.push('./js/sale-cancellation.js');
 ARQUIVOS.push('./js/receipt-messages.js','./js/receipt-message-ui.js','./css/receipt-messages.css');
