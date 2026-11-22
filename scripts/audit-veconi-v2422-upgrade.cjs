@@ -9,16 +9,19 @@ const puppeteer = require('puppeteer-core');
 
 const root = path.resolve(__dirname, '..');
 const selling = process.argv.includes('--selling');
-const artifactDir = path.join(root, selling ? 'qa-artifacts/v2423' : 'qa-artifacts/v2422');
+const loja = process.argv.includes('--loja');
+const artifactDir = path.join(root, loja ? 'qa-artifacts/loja-v3/homolog' : selling ? 'qa-artifacts/v2423' : 'qa-artifacts/v2422');
 const site = path.resolve(process.env.VECONI_PWA_SITE || path.join(artifactDir, 'public'));
-const oldRef = selling ? '65ea4bb' : 'c643cc5';
+const oldRef = loja ? '2817d50' : selling ? '65ea4bb' : 'c643cc5';
 const syncPanel = { cache: 'veconi-v2421-sync-panel-v1', release: '242', appVersion: '242.1' };
 const quickWins = { cache: 'veconi-v2422-performance-quick-wins-v1', release: '242', appVersion: '242.2' };
-const previous = selling ? quickWins : syncPanel;
-const next = selling ? { cache: 'veconi-v2423-performance-selling-v1', release: '242', appVersion: '242.3' } : quickWins;
+const sellingRelease = { cache: 'veconi-v2423-performance-selling-v1', release: '242', appVersion: '242.3' };
+const previous = loja ? sellingRelease : selling ? quickWins : syncPanel;
+const next = loja ? { ...sellingRelease, cache: 'veconi-loja-v3-qa-only' } : selling ? sellingRelease : quickWins;
 const scriptsAt = (files, version) => files.map(file => '/js/' + file + '.js?v=' + version);
 const quickWinsScripts = ['clientes-mobile', 'customer-metrics', 'crm-segment-engine-v2'];
-const pinned = selling
+const lojaAssets = ['/css/online-store.css', '/css/catalogo.css', '/js/loja/store-kit.js', '/js/online-store-ui.js', '/js/firebase/catalog-bridge.js', '/js/catalogo-publico.js'];
+const pinned = loja ? lojaAssets.map(url => url + '?v=300') : selling
   ? [
       ...scriptsAt(['build-info', 'app', 'barcode', 'checkout', 'checkout-mobile', 'desktop-sales'], '2423'),
       '/css/checkout-mobile.css?v=2423',
@@ -44,6 +47,11 @@ let offline = false;
 function bytes(file, current = candidate) {
   const resolved = path.resolve(site, file);
   if (!resolved.startsWith(site + path.sep) || !fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+  if (loja && current && file === 'service-worker.js') {
+    const worker = fs.readFileSync(resolved, 'utf8');
+    assert.ok(worker.includes(sellingRelease.cache));
+    return Buffer.from(worker.replace(sellingRelease.cache, next.cache));
+  }
   if (current || !changed.has(file)) return fs.readFileSync(resolved);
   if (!oldFiles.has(file)) oldFiles.set(file, execFileSync('git', ['show', oldRef + ':' + file], { cwd: root }));
   return oldFiles.get(file);
@@ -84,24 +92,27 @@ function workerVersion(page) {
 
 async function verify(page) {
   assert.deepEqual(await workerVersion(page), next);
-  const result = await page.evaluate(async ({ scope, queueKey, next, pinned }) => {
+  const result = await page.evaluate(async ({ scope, queueKey, next, pinned, loja }) => {
     const saved = await DB.businessCache.open(scope, [], () => ({}));
     const queue = DB.businessCache.keyValue.peekItem(queueKey);
     await DB.businessCache.release();
     const cache = await caches.open(next.cache);
-    const artifact = await (await cache.match('/index.html')).text();
+    const pages = loja ? ['/index.html', '/catalogo.html'] : ['/index.html'];
+    const artifacts = await Promise.all(pages.map(async file => (await cache.match(file)).text()));
     const hashes = {};
     for (const asset of pinned) {
       const pathname = asset.split('?')[0];
-      const matches = [...artifact.matchAll(/(?:src|href)="(\.\/[^"]+)"/g)]
+      const matches = [...artifacts.join('\n').matchAll(/(?:src|href)="(\.\/[^"]+)"/g)]
         .map(([, url]) => url.slice(1)).filter(url => url.split('?')[0] === pathname);
-      if (matches.length !== 1 || matches[0] !== asset) throw Error('Referência ausente ou duplicada: ' + asset);
+      if (matches.length !== (loja && pathname.endsWith('/store-kit.js') ? 2 : 1) || matches.some(url => url !== asset)) {
+        throw Error('Referência ausente ou duplicada: ' + asset);
+      }
       const response = await cache.match(asset);
       if (!response?.ok) throw Error('Recurso fora do cache: ' + asset);
       hashes[asset] = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
     }
     return { saved, queue, hashes, theme: document.documentElement.dataset.theme, preference: localStorage.getItem('veconi-theme'), caches: await caches.keys() };
-  }, { scope, queueKey, next, pinned });
+  }, { scope, queueKey, next, pinned, loja });
   assert.deepEqual(result.saved, data);
   assert.equal(result.queue, queue);
   assert.equal(result.theme, 'dark');

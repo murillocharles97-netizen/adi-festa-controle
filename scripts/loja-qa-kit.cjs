@@ -18,6 +18,10 @@ function serve(port = 0) {
     const url = new URL(req.url, 'http://localhost');
     let file; try { file = path.resolve(root, '.' + decodeURIComponent(url.pathname)); } catch { return res.writeHead(400).end(); }
     if (url.pathname === '/' ) file = path.join(root, 'catalogo.html');
+    if (/^\/catalogo\/[^/]+\/?$/.test(url.pathname)) {
+      res.writeHead(404, { 'Content-Type': types['.html'] });
+      return fs.createReadStream(path.join(root, '404.html')).pipe(res);
+    }
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return res.writeHead(404).end();
     res.setHeader('Content-Type', types[path.extname(file)] || 'application/octet-stream');
     res.setHeader('Cache-Control', 'no-store');
@@ -73,7 +77,7 @@ const FIREBASE_STUBS = {
   'firebase-functions.js': 'export const getFunctions=()=>({});export const httpsCallable=(f,name)=>async data=>{(window.__QA_CALLS__=window.__QA_CALLS__||[]).push(name);if(!window.__QA_CALL__)throw Object.assign(Error("sem backend"),{code:"functions/unavailable"});return window.__QA_CALL__(name,data);};',
 };
 
-async function openStore(browser, base, { width = 390, height = 844, slug = 'doceria-aurora', doc = null, query = '', offline = false, fresh = true } = {}) {
+async function openStore(browser, base, { width = 390, height = 844, slug = 'doceria-aurora', doc = null, query = '', route, offline = false, fresh = true } = {}) {
   // Cada abertura usa um contexto anônimo: carrinho e dados do cliente não vazam entre cenários.
   const ctx = fresh ? await (browser.createBrowserContext ? browser.createBrowserContext() : browser.createIncognitoBrowserContext()) : browser;
   const page = await ctx.newPage(), errors = [];
@@ -89,7 +93,7 @@ async function openStore(browser, base, { width = 390, height = 844, slug = 'doc
     window.__QA_OPENED__ = [];
     const open = window.open; window.open = (...a) => { window.__QA_OPENED__.push(String(a[0])); return open.apply(window, a); };
   }, slug, doc, offline);
-  await page.goto(`${base}/catalogo.html?loja=${slug}${query}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(base + (route || `/catalogo.html?loja=${slug}${query}`), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.sf, .sf-state', { timeout: 20000 });
   await sleep(400);
   return { page, errors };

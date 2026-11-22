@@ -185,13 +185,16 @@ async function store(browser, base) {
     await page.click('[data-mode="delivery"]'); await kit.sleep(200);
     await page.type('input[name="name"]', 'Maria Teste'); await page.type('textarea[name="address"]', 'Rua Fictícia, 200 — Jardim QA'); await page.click('[data-pay="pix"]'); await kit.sleep(200);
     await capture(page, `loja-finalizar-${w}`, { scope: '.sf' }); await capture(page, `loja-finalizar-completa-${w}`, { full: true, scope: '.sf' });
-    const popup = new Promise(resolve => { const h = t => { if (t.url().includes('wa.me')) { browser.off('targetcreated', h); resolve(t.url()); } }; browser.on('targetcreated', h); setTimeout(() => resolve(''), 5000); });
+    await page.evaluate(()=>addEventListener('click',event=>{
+      const link=event.target.closest('#sf-send-wa');
+      if(link){event.preventDefault();window.__qaWhatsApp=link.href;}
+    },{capture:true,once:true}));
     await page.click('#sf-send-wa');
-    const opened = await popup; await kit.sleep(500);
+    const opened = await page.evaluate(()=>window.__qaWhatsApp); await kit.sleep(500);
     await capture(page, `loja-enviado-whatsapp-${w}`, { scope: '.sf' });
     const url = opened ? new URL(opened) : null, text = url?.searchParams.get('text') || '';
     results.whatsapp.push({ width: w, url: opened, text });
-    check(`loja ${w}: abre wa.me com o número publicado`, url?.host === 'wa.me' && url.pathname === '/5511900000000', opened);
+    check(`loja ${w}: abre WhatsApp com o número publicado`, url?.host === 'api.whatsapp.com' && url.searchParams.get('phone') === '5511900000000', opened);
     for (const part of ['Olá! Gostaria de fazer um pedido pela loja Doceria Aurora.', '2x Bolo de pote (Ninho com morango) — R$ 32,00', '1x Brigadeiro gourmet — R$ 3,50', '2x Cookie com gotas — R$ 14,00', 'Subtotal: R$ 49,50', 'Entrega: Entregar no endereço', 'Endereço: Rua Fictícia, 200 — Jardim QA', 'Taxa de entrega: a combinar', 'Pagamento: Pix', 'Observações: Sem granulado colorido, por favor.', 'Nome: Maria Teste', '*Total dos produtos: R$ 49,50*', 'Aguardo a confirmação da disponibilidade e do pedido. Obrigado!'])
       check(`loja ${w}: mensagem contém "${part}"`, text.includes(part));
     check(`loja ${w}: abrir o WhatsApp não registra pedido`, await page.evaluate(() => !(window.__QA_CALLS__ || []).length && /ainda não foi confirmado/.test(document.body.textContent)));
@@ -243,7 +246,7 @@ async function store(browser, base) {
     await page.type('input[name="name"]', 'Cliente Emulador');
     const href = await page.evaluate(() => document.querySelector('#sf-send-wa').href), u = new URL(href);
     results.whatsapp.push({ source: 'emulador', url: href, text: u.searchParams.get('text') });
-    check('emulador: WhatsApp do documento real e mensagem com a loja publicada', u.pathname === '/5511912345678' && /pela loja Doceria V3 QA/.test(u.searchParams.get('text')), href);
+    check('emulador: WhatsApp do documento real e mensagem com a loja publicada', u.searchParams.get('phone') === '5511912345678' && /pela loja Doceria V3 QA/.test(u.searchParams.get('text')), href);
     check('emulador: documento real sem erros na loja', !errors.length, errors.join(' | '));
     await page.close();
   }
@@ -259,5 +262,5 @@ async function store(browser, base) {
   console.log(`capturas: ${results.captures.length}  checagens: ${results.checks.length - failed.length}/${results.checks.length}  problemas: ${results.problems.length}`);
   for (const p of results.problems.slice(0, 40)) console.log(' -', p.slice(0, 300));
   console.log('desempenho', JSON.stringify(results.performance));
-  process.exitCode = failed.length ? 1 : 0;
+  process.exitCode = results.problems.length ? 1 : 0;
 })();

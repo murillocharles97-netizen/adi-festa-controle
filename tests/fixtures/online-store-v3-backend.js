@@ -32,17 +32,20 @@
       selectedProductIds:select,published:scenario==='published'||scenario==='large'||scenario==='nophone',checkoutEnabled:false,activation:scenario==='draft'?null:{confirmedBy:'qa-owner',confirmedAt:'2026-11-01T12:00:00.000Z',mode:'manual_space_activation'},createdAt:'2026-11-01T12:00:00.000Z',updatedAt:'2026-11-20T12:00:00.000Z'};
     if(scenario==='paused'){s.published=false;}
     s.catalogSettings.checkoutEnabled=false;stores.set('qa-space-a',s);slugs.set(s.slug,{businessId:BUSINESS,storeId:s.id,catalogToken:s.publicToken});
-    if(s.activation)publishDoc(s);
+    if(s.activation){s.publishedProductIds=[...select];publishDoc(s);}
   }
   // Espaço B: outra loja do mesmo negócio — o painel nunca deve misturar.
   stores.set('qa-space-b',{id:'store_qa_b',kind:'space_store',schemaVersion:2,businessId:BUSINESS,spaceId:'qa-space-b',publicToken:'qa_public_token_quiosque_00000000000',slug:'quiosque-qa',revision:1,workspaceGeneration:0,v2Enabled:true,catalogSettings:M.settings({publicName:'Quiosque QA'}),presentation:{products:{},categories:[],banners:[]},selectedProductIds:['qa-b-only'],published:true,checkoutEnabled:false,activation:{confirmedAt:'2026-11-01T12:00:00.000Z'}});
+  function storePublicDoc(s,doc){
+    publicDocs.set(s.publicToken,doc);
+    try{localStorage.setItem(`loja-qa-public:${s.slug}`,JSON.stringify(doc));}catch{}
+    return doc;
+  }
   function publishDoc(s){
     const items=s.selectedProductIds.map(id=>raw.find(p=>p.id===id)).filter(Boolean).map(p=>M.product(p,variants,s.presentation)).sort((a,b)=>a.displayOrder-b.displayOrder);
     const settings=s.catalogSettings,pres=M.publicPresentation(s.presentation);
     const doc={catalogToken:s.publicToken,documentId:s.publicToken,schemaVersion:6,catalogType:'space_store',businessId:s.businessId,spaceId:s.spaceId,visitId:s.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...pres,active:s.published,catalogVisible:s.published,acceptingOrders:s.published&&s.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:s.checkoutEnabled?'active':'paused',workspaceGeneration:0,revision:s.revision,updatedAt:new Date().toISOString()};
-    publicDocs.set(s.publicToken,doc);
-    try{localStorage.setItem(`loja-qa-public:${s.slug}`,JSON.stringify(doc));}catch{}
-    return doc;
+    return storePublicDoc(s,doc);
   }
   const productsFor=spaceId=>spaceId==='qa-space-b'?[M.product({id:'qa-b-only',nome:'Produto exclusivo do quiosque',preco:5,categoria:'Quiosque',estoqueAtual:3})]:raw.map(p=>M.product(p));
   const reception=s=>{const pub=s?.published===true,settings=s?.catalogSettings||{},delivery=settings.pickupEnabled||settings.deliveryEnabled,pay=(settings.paymentMethods||[]).length>0,enabled=pub&&s.checkoutEnabled===true;return {enabled,canEnable:pub&&delivery&&pay,reason:!pub?'not_published':!delivery?'delivery_required':!pay?'payment_required':enabled?'receiving':'paused'};};
@@ -66,11 +69,25 @@
     const existing=stores.get(data.spaceId)||null,action=data.action||'save';
     if(action==='set_order_reception'){
       if((existing.revision||0)!==Number(data.revision))fail('aborted','A loja foi alterada em outro aparelho. Recarregue antes de alterar os pedidos.');
-      existing.checkoutEnabled=data.enabled;existing.catalogSettings.checkoutEnabled=data.enabled;existing.revision++;publishDoc(existing);
+      const live=publicDocs.get(existing.publicToken);if(!live?.active)fail('failed-precondition','Publique a loja.');
+      existing.checkoutEnabled=data.enabled;existing.catalogSettings.checkoutEnabled=data.enabled;existing.revision++;
+      storePublicDoc(existing,{...live,checkoutEnabled:data.enabled,acceptingOrders:data.enabled,status:data.enabled?'active':'paused',
+        publicSettings:{...live.publicSettings,checkoutEnabled:data.enabled},revision:existing.revision});
       return {data:structuredClone({store:existing,orderReception:reception(existing)})};
     }
     if(window.__lojaQA.conflictNext){window.__lojaQA.conflictNext=false;existing.revision++;}
     if((existing?.revision||0)!==Number(data.revision||0))fail('aborted','A loja foi alterada em outro aparelho. Recarregue antes de salvar.');
+    if(action==='publish'){
+      if(data.confirmed!==true)fail('failed-precondition','Confirme a publicação.');
+      const live=publicDocs.get(existing?.publicToken),active=data.published!==false;
+      if(!active||(!existing?.published&&(live||Array.isArray(existing?.publishedProductIds)))){
+        if(!live)fail('failed-precondition','Não foi possível verificar a última publicação desta loja.');
+        const next={...existing,published:active,revision:existing.revision+1};
+        stores.set(data.spaceId,next);
+        storePublicDoc(next,{...live,active,catalogVisible:active,acceptingOrders:active&&next.checkoutEnabled&&live.checkoutEnabled,revision:next.revision});
+        return {data:structuredClone({store:next,replayed:false})};
+      }
+    }
     let settings,slug;try{settings=M.settings(data.settings);slug=M.slug(data.slug);}catch(e){fail('invalid-argument',e.message);}
     if(!settings.publicName)fail('invalid-argument','Informe o nome público da loja.');
     if(action==='save'&&existing&&settings.checkoutEnabled!==existing.checkoutEnabled)fail('failed-precondition','Use o controle de recebimento de pedidos ou confirme uma nova publicação.');
@@ -81,7 +98,7 @@
     for(const id of ids){const p=data.presentation?.products?.[id]||{};presentation.products[id]={...presentation.products[id],featured:p.featured===true,bestseller:p.bestseller===true,order:Math.max(0,Number(p.order)||0),category:String(p.category||'').slice(0,100)};}
     if(Array.isArray(data.presentation?.categories)){const prev=new Map((presentation.categories||[]).map(c=>[c.internalName,c]));for(const c of data.presentation.categories){const n=String(c.internalName||'').trim();if(n)prev.set(n,{...prev.get(n),internalName:n,publicName:String(c.publicName||n),active:c.active!==false,order:Math.max(0,Number(c.order)||0)});}presentation.categories=[...prev.values()];}
     const now=new Date().toISOString(),store={...existing,id:existing?.id||`store_${data.spaceId}`,kind:'space_store',schemaVersion:2,businessId:BUSINESS,spaceId:data.spaceId,publicToken:existing?.publicToken||`qa_public_token_${data.spaceId.replace(/\W/g,'_')}_000000`,slug,catalogSettings:settings,presentation,selectedProductIds:ids,revision:(existing?.revision||0)+1,workspaceGeneration:0,v2Enabled:existing?.v2Enabled===true||action==='publish',activation:existing?.activation||(action==='publish'?{confirmedBy:'qa-owner',confirmedAt:now}:null),createdAt:existing?.createdAt||now,updatedAt:now,published:existing?.published||false,checkoutEnabled:settings.checkoutEnabled};
-    if(action==='publish'){if(data.confirmed!==true)fail('failed-precondition','Confirme a publicação.');store.published=data.published!==false;store.publishedProductIds=ids;}
+    if(action==='publish'){store.published=true;store.publishedProductIds=ids;}
     stores.set(data.spaceId,store);slugs.set(slug,{businessId:BUSINESS,storeId:store.id,catalogToken:store.publicToken});
     if(action==='publish')publishDoc(store);
     return {data:structuredClone({store,replayed:false})};

@@ -25,10 +25,11 @@ test('“a combinar” não vira linha de pagamento; carrinho vazio é recusado;
   const { text } = K.orderMessage({ storeName: 'X\u0007', items: [{ name: 'A\u0000B', quantity: 1, unitPrice: 1 }], note: 'x'.repeat(900) });
   assert.doesNotMatch(text, /[\u0000\u0007]/);assert.ok(text.includes('x'.repeat(500)) && !text.includes('x'.repeat(501)));
 });
-test('URL oficial wa.me com número da loja e texto codificado (emoji, acento, quebra de linha)', () => {
+test('link direto do WhatsApp com número da loja e texto codificado (emoji, acento, quebra de linha)', () => {
   const { text } = K.orderMessage({ storeName: 'Açaí & Cia', items, mode: 'pickup' });
   const url = K.whatsappUrl('(11) 91234-5678', text), parsed = new URL(url);
-  assert.equal(parsed.origin + parsed.pathname, 'https://wa.me/5511912345678');
+  assert.equal(parsed.origin + parsed.pathname, 'https://api.whatsapp.com/send/');
+  assert.equal(parsed.searchParams.get('phone'), '5511912345678');
   assert.equal(parsed.searchParams.get('text'), text);
   assert.ok(url.includes('%F0%9F%9B%92') && url.includes('%0A') && url.includes('%26'));
   assert.throws(() => K.whatsappUrl('', text), /WhatsApp válido/);
@@ -147,15 +148,19 @@ test('uma confirmação parcial de categorias não descarta a alteração local'
   assert.equal(p.T.state.draft.presentation.categories[0].publicName,'Doceria');
 });
 test('publicação duplicada e leitura pública fora de ordem não alteram a confirmação recente', async () => {
-  let settleOld, reads=0;
-  const p = panel({ publicReader: () => new Promise(resolve => { if (++reads === 1) settleOld=resolve; }) });
+  let settleOld, settleCurrent, reads=0;
+  const p = panel({ publicReader: () => new Promise(resolve => { if (++reads === 1) settleOld=resolve;else settleCurrent=resolve; }) });
   await p.ready;
   const old = p.T.state.data.store;
   p.T.toggle('p1');
   await Promise.all([p.T.publish('publish'),p.T.publish('publish')]);
   assert.equal(p.calls.filter(c=>c.data.action==='publish').length,1);
+  const current=p.T.state.data.store;
+  settleCurrent({businessId:current.businessId,spaceId:current.spaceId,workspaceGeneration:current.workspaceGeneration,
+    revision:current.revision,active:true,items:[{productId:'p0',category:'Doces'},{productId:'p1',category:'Bolos'}],publicSettings:current.catalogSettings});
+  await Promise.resolve();
   settleOld({businessId:old.businessId,spaceId:old.spaceId,workspaceGeneration:old.workspaceGeneration,
-    revision:old.revision,items:[],publicSettings:old.catalogSettings});
+    revision:old.revision,active:true,items:[],publicSettings:old.catalogSettings});
   await Promise.resolve();
   assert.deepEqual(p.T.state.live?.items?.map(x=>x.productId),['p0','p1']);
   assert.match(saveText(p), /Publicado às/);
@@ -233,7 +238,7 @@ test('loja pública só mostra o documento publicado e trata loja pausada', () =
   assert.doesNotMatch(portal, /collection\(|getDocs|onlineStores|catalogOrders/);
 });
 test('WhatsApp preserva emojis inteiros no limite de texto e o URI continua válido', () => {
-  const input={storeName:'Doces & cia 🧁',items:[{quantity:1,name:'á'.repeat(119)+'🍫',unitPrice:4.2}],
+  const input={storeName:'Doces & cia 🧁',items:[{quantity:1,name:'á'.repeat(159)+'🍫',unitPrice:4.2}],
     note:'x'.repeat(498)+'🍓',customer:{name:'Ana & João'},mode:'pickup'};
   const order=K.orderMessage(input);
   const href=new URL(K.whatsappUrl('11900000000',order.text));
@@ -241,6 +246,22 @@ test('WhatsApp preserva emojis inteiros no limite de texto e o URI continua vál
   assert.match(order.text,/🍓/);
   assert.match(order.text,/Ana & João/);
   assert.doesNotMatch(order.text,/\uD83C(?:$|[^\uDC00-\uDFFF])/u);
+});
+test('link do WhatsApp considera o tamanho codificado e preserva o resumo integral', () => {
+  const phone='11900000000', chat=K.whatsappChatUrl(phone);
+  const room=4000-K.whatsappUrl(phone,'').length;
+  assert.equal(K.whatsappUrl(phone,'a'.repeat(room)).length,4000);
+  assert.equal(K.whatsappUrl(phone,'a'.repeat(room+1)),'');
+  assert.equal(K.whatsappUrl(phone,'🍓'.repeat(400)),'');
+  assert.equal(new URL(chat).search,'');
+  const variant='Á'.repeat(120)+' 🍓 & Ninho';
+  const order=K.orderMessage({storeName:'Loja QA',mode:'pickup',note:'Café & bolo? 🍰',
+    items:Array.from({length:400},(_,i)=>({name:'Item '+(i+1),variant,quantity:2,unitPrice:2.25}))});
+  assert.equal(K.whatsappUrl(phone,order.text),'');
+  assert.equal(order.text.split('\n').filter(r=>r.startsWith('2x ')).length,400);
+  assert.ok(order.text.includes(`2x Item 400 (${variant}) — R$ 4,50`));
+  assert.match(order.text,/Café & bolo\? 🍰/);
+  assert.equal(order.subtotal,1800);
 });
 test('cores intermediárias personalizadas mantêm o contraste do texto', () => {
   for(const color of ['#777777','#808080']){

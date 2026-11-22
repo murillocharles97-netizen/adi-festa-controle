@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const kit = require('./loja-qa-kit.cjs');
 const model = require('../functions/src/shared/online-store');
+const storeKit = require('../js/loja/store-kit');
 const output = path.resolve('qa-artifacts/loja-v3/independent');
 const results = [];
 const slug = 'vitrine-ficticia';
@@ -50,7 +51,7 @@ async function capture(page,name) {
   await page.screenshot({path:path.join(output,name+'.png')});
 }
 async function adminLayout(browser,base) {
-  for(const width of [360,390,412,1440])for(const theme of ['light','dark']) {
+  for(const width of [360,390,412,768,1440])for(const theme of ['light','dark']) {
     const context=await browser.createBrowserContext();
     try{
       const {page,errors}=await kit.openAdmin(context,base,{width,theme,count:1000,latency:0});
@@ -76,12 +77,20 @@ async function adminLayout(browser,base) {
           const preview=document.querySelector('.lo-fab'),field=document.querySelector('#lo-welcomeText');
           return getComputedStyle(preview).position==='static'&&preview.getBoundingClientRect().bottom<=field.getBoundingClientRect().top;
         }),true);
-        if((width===360&&theme==='dark')||(width===412&&theme==='light')||(width===1440&&theme==='dark')) {
+        if((width===360&&theme==='dark')||(width===412&&theme==='light')||(width===768&&theme==='dark')||width===1440) {
           if(view==='products'){
             await page.$eval('[data-q]',el=>{el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));});
             await page.waitForFunction(()=>document.querySelectorAll('.lo-pcard').length===36);
           }
           await capture(page,`admin-${view}-${theme}-${width}`);
+          if(view==='products'&&width<768){
+            await page.$eval('.lo-pcard',el=>el.scrollIntoView({block:'start'}));
+            await capture(page,`admin-selecao-${theme}-${width}`);
+            await click(page,'.lo-chip[data-scope="in"]');
+            await page.waitForSelector('.lo-pcard.is-on');
+            await page.$eval('.lo-pcard.is-on',el=>el.scrollIntoView({block:'start'}));
+            await capture(page,`admin-produtos-ativos-${theme}-${width}`);
+          }
         }
         views[view]=detail;
       }
@@ -106,7 +115,7 @@ async function whatsapp(browser,base,width,instagram=false) {
   try{
     if(instagram)await page.setUserAgent('Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36 Instagram 350.0');
     await page.evaluateOnNewDocument(()=>addEventListener('click',e=>{
-      if(e.target.closest('a[href^="https://wa.me/"]'))e.preventDefault();
+      if(e.target.closest('a[href^="https://api.whatsapp.com/"],a[href^="https://wa.me/"]'))e.preventDefault();
     },true));
     await page.reload();
     await page.waitForSelector('.sf-card');
@@ -130,8 +139,8 @@ async function whatsapp(browser,base,width,instagram=false) {
     await click(page,'[data-pay="pix"]');
     const href = new URL(await page.$eval('#sf-send-wa',e=>e.href));
     const msg=href.searchParams.get('text');
-    assert.equal(href.hostname,'wa.me');
-    assert.equal(href.pathname,'/5511900000000');
+    assert.equal(href.hostname,'api.whatsapp.com');
+    assert.equal(href.searchParams.get('phone'),'5511900000000');
     for(const part of ['2x Bolo de pote (Morango & Ninho 🍓) — R$ 25,00','1x Brigadeiro & café ☕ — R$ 3,50',
       'Subtotal: R$ 28,50','Rua Fictícia, 44 — Jardim','Pagamento: Pix','Sem açúcar & café ☕','João & Elisa']) assert.ok(msg.includes(part),part);
     assert.equal(msg,await visibleText(page,'[data-msg]'));
@@ -247,16 +256,49 @@ async function merchantFlow(browser,base) {
     await click(page,'[data-act="qr"]');
     assert.ok(await page.waitForSelector('#store-qr img'));
     await page.keyboard.press('Escape');
+    await switchView(page,'design');
+    await page.$eval('#lo-publicName',el=>{
+      el.value='Rascunho reservado';
+      el.dispatchEvent(new Event('input',{bubbles:true}));
+      el.dispatchEvent(new FocusEvent('focusout',{bubbles:true}));
+    });
+    await page.waitForFunction(()=>window.__lojaQA.stores.get('qa-space-a').catalogSettings.publicName==='Rascunho reservado');
+    await switchView(page,'home');
+    await page.waitForSelector('.lo-pending');
+    const live=()=>page.evaluate(()=>window.__lojaQA.publicDocs.values().next().value);
+    assert.equal((await live()).publicName,'Loja fictícia nova');
     await page.$eval('.lo-more',el=>{el.open=true;});
     await click(page,'[data-act="ask-pause"]');
     await click(page,'[data-act="do-pause"]');
     await page.waitForFunction(()=>document.querySelector('.lo-status-paused')&&window.__lojaQA.stores.get('qa-space-a').published===false);
+    assert.equal((await live()).publicName,'Loja fictícia nova');
+    assert.equal((await live()).active,false);
+    const read=await page.evaluateHandle(()=>window.FirebasePublicCatalogReader);
+    await page.evaluate(()=>{window.FirebasePublicCatalogReader=async()=>{throw Error('offline QA');};});
     await click(page,'.lo-head [data-act="ask-publish"]');
     await page.waitForSelector('[data-act="do-publish"]:not(:disabled)');
+    assert.match(await visibleText(page,'.lo-sheet'),/última vitrine publicada/);
+    assert.doesNotMatch(await visibleText(page,'.lo-sheet'),/Rascunho reservado/);
+    await capture(page,'painel-retomar-390');
     await click(page,'[data-act="do-publish"]');
     await page.waitForFunction(()=>document.querySelector('.lo-status-published')&&window.__lojaQA.stores.get('qa-space-a').published);
+    assert.equal((await live()).publicName,'Loja fictícia nova');
+    assert.doesNotMatch(await visibleText(page,'[data-region="save"]'),/Publicado às/);
+    const calls=await page.evaluate(()=>window.__lojaQA.calls.filter(x=>x.action==='publish'));
+    assert.deepEqual(calls.map(x=>x.productIds),[24,null,null]);
+    await page.evaluate(reader=>{window.FirebasePublicCatalogReader=reader;},read);
+    await switchView(page,'products');
+    await page.evaluate(()=>Router.ir('inicio'));
+    await page.evaluate(()=>Router.ir('catalogo'));
+    await page.waitForSelector('.lo-head [data-act="ask-publish"]');
+    await switchView(page,'home');
+    await page.waitForSelector('.lo-pending');
+    assert.match(await visibleText(page,'.lo-pending'),/nome/);
+    await click(page,'.lo-head [data-act="ask-publish"]');
+    await click(page,'[data-act="do-publish"]');
+    await page.waitForFunction(()=>window.__lojaQA.publicDocs.values().next().value.publicName==='Rascunho reservado');
     assert.deepEqual(errors,[]);
-    log('merchant-flow',{created:true,bulkCount:24,featured:true,category:true,shareQr:true,republication:true});
+    log('merchant-flow',{created:true,bulkCount:24,featured:true,category:true,shareQr:true,pausedDraftPrivate:true,resumedDraftPrivate:true,unknownAfterLostRead:true,republication:true});
   } finally { await context.close(); }
 }
 
@@ -274,6 +316,28 @@ async function publicStates(browser,base){
       log('public-state',{state:name});
     }finally{await page.close();}
   }
+}
+
+async function legacyLinks(browser,base) {
+  const doc=storeDoc(24);
+  for(const route of ['/catalogo/'+token,'/catalogo.html?v='+token]){
+    const {page}=await kit.openStore(browser,base,{slug,doc,route});
+    try{
+      assert.equal(new URL(page.url()).searchParams.get('v'),token);
+      assert.match(await visibleText(page,'h1'),/Vitrine fictícia/);
+    }finally{await page.close();}
+  }
+  for(const [route,publication,message] of [
+    ['/catalogo.html?v='+token,{...doc,schemaVersion:5},/não está disponível/],
+    ['/catalogo.html?demo=1',null,/Loja não encontrada/],
+  ]){
+    const {page}=await kit.openStore(browser,base,{slug,doc:publication,route});
+    try{
+      assert.match(await visibleText(page,'h1'),message);
+      assert.equal(await page.$('.sf-add'),null);
+    }finally{await page.close();}
+  }
+  log('legacy-links',{shortPath:true,directToken:true,retiredSchemaUnavailable:true,demoDisabled:true});
 }
 
 async function pendingOrder(browser,base) {
@@ -317,8 +381,8 @@ async function pendingOrder(browser,base) {
   }finally{await page.close();}
 }
 
-async function largeStore(browser,base) {
-  const doc=storeDoc(400), {page}=await kit.openStore(browser,base,{width:390,slug,doc});
+async function largeStore(browser,base,width) {
+  const doc=storeDoc(400), {page,errors}=await kit.openStore(browser,base,{width,slug,doc});
   try{
     const stats=await area(page,'.sf');
     const cart=Object.fromEntries(doc.items.map(item=>[item.variants.length?item.id+'::'+item.variants[0].id:item.id,1]));
@@ -327,15 +391,49 @@ async function largeStore(browser,base) {
     await page.waitForFunction(()=>document.querySelectorAll('.sf-card').length===1&&document.querySelector('.sf-card').textContent.includes('Item QA 400'));
     const searchMs=Math.round(performance.now()-started);
     await page.evaluate(({token,cart})=>localStorage.setItem('adiFesta:catalogCart:'+token,JSON.stringify(cart)),{token,cart});
+    await page.evaluateOnNewDocument(()=>{
+      window.__waVisited=[];
+      window.addEventListener('click',e=>{
+        const a=e.target.closest('a[href^="https://api.whatsapp.com/"],a[href^="https://wa.me/"]');
+        if(a){e.preventDefault();window.__waVisited.push(a.href);}
+      },true);
+    });
     await page.reload();
     await page.waitForSelector('.sf-card');
-    await click(page,'.sf-cart-btn');await click(page,'.sf-actions [data-go="checkout"]');
+    await click(page,'.sf-cart-btn');
+    await page.type('#sf-note','Café & açúcar? 🍓');
+    await click(page,'.sf-actions [data-go="checkout"]');
+    await click(page,'[data-wa-copy]');
+    await page.waitForSelector('#sf-err-name');
     await page.type('[name="name"]','Pessoa QA');
-    const url=new URL(await page.$eval('#sf-send-wa',e=>e.href));
-    const text=url.searchParams.get('text');
+    const text=await visibleText(page,'[data-msg]');
+    assert.equal(await page.$eval('#sf-send-wa',e=>e.hidden&&!e.hasAttribute('href')),true);
     assert.equal(text.split('\n').filter(row=>row.startsWith('1x ')).length,400);
-    assert.match(text,/Item QA 400/);
-    log('public-large',{...stats,searchMs,urlChars:url.href.length,heapMiB:+((await page.metrics()).JSHeapUsedSize/1048576).toFixed(2)});
+    for(const part of ['1x Item QA 400 — R$ 43,40','Bolo de pote (Morango & Ninho 🍓)','Café & açúcar? 🍓','Nome: Pessoa QA'])assert.ok(text.includes(part),part);
+    const rendered=await area(page,'.sf');
+    assert.equal(rendered.scroll,width);
+    await page.$eval('[data-wa-long]',el=>el.scrollIntoView({block:'end'}));
+    await page.waitForFunction(()=>Number(getComputedStyle(document.querySelector('.sf-toast')).opacity)===0);
+    await capture(page,`whatsapp-resumo-longo-${width}`);
+    await page.evaluate(()=>{
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.__qaCopied=text;}}});
+    });
+    await click(page,'[data-wa-copy]');
+    await page.waitForFunction(()=>document.querySelector('[data-wa-status]').textContent.includes('Resumo copiado'));
+    assert.equal(await page.evaluate(()=>window.__qaCopied),text);
+    assert.deepEqual(await page.evaluate(()=>window.__waVisited),[]);
+    await click(page,'[data-wa-long] a');
+    assert.deepEqual(await page.evaluate(()=>window.__waVisited),['https://wa.me/5511900000000']);
+    await page.evaluate(()=>{navigator.clipboard.writeText=async()=>{throw Error('Permissão negada QA');};});
+    await click(page,'[data-wa-copy]');
+    await page.waitForSelector('[data-wa-manual]:not([hidden]) textarea');
+    assert.deepEqual(await page.$eval('[data-wa-manual] textarea',el=>[el.value,el.selectionStart,el.selectionEnd]),[text,0,text.length]);
+    assert.match(await visibleText(page,'[data-wa-status]'),/opção Copiar/);
+    await capture(page,`whatsapp-copia-manual-${width}`);
+    assert.deepEqual(await page.evaluate(()=>window.__QA_CALLS__||[]),[]);
+    assert.deepEqual(errors,[]);
+    log('public-large',{...stats,searchMs,encodedUrlChars:storeKit.whatsappUrl(phone,'').length+encodeURIComponent(text).length,
+      copiedLines:400,manual:true,heapMiB:+((await page.metrics()).JSHeapUsedSize/1048576).toFixed(2)});
   }finally{await page.close();}
 }
 
@@ -350,10 +448,13 @@ async function main(){
       ['whatsapp-360',()=>whatsapp(browser,base,360)],
       ['whatsapp-390',()=>whatsapp(browser,base,390,true)],
       ['whatsapp-412',()=>whatsapp(browser,base,412)],
+      ['whatsapp-tablet',()=>whatsapp(browser,base,768)],
       ['whatsapp-desktop',()=>whatsapp(browser,base,1440)],
       ['registered-pending',()=>pendingOrder(browser,base)],
       ['public-states',()=>publicStates(browser,base)],
-      ['public-large',()=>largeStore(browser,base)],
+      ['legacy-links',()=>legacyLinks(browser,base)],
+      ['public-large',()=>largeStore(browser,base,390)],
+      ['public-large-desktop',()=>largeStore(browser,base,1440)],
     ]){
       if(process.env.VECONI_LOJA_CASE&&!process.env.VECONI_LOJA_CASE.split(',').includes(name))continue;
       try{await run();}catch(error){console.error(name,error.stack);failures.push({name,error:error.message});}
