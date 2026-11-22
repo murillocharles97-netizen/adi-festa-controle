@@ -1,0 +1,60 @@
+# VECONI — Auditoria independente da Loja Online V3
+
+**NO-GO para produção.** O emulador confirmou dois defeitos do backend da V242.3 que também atingem a V3. O salvamento automático aumenta a frequência com que rascunho e vitrine divergem. A interface melhorou, mas essa divergência precisa estar isolada antes da publicação comercial.
+
+## Integração
+
+A `main` remota está em `2817d50`, que é o pai dos cinco commits de `cccc575` a `4a82250`. O diff e o histórico foram revisados na branch local `codex/loja-online-v3-audit`. Nenhum conflito de base foi encontrado. Vender por lotes, busca de Clientes, datas de Clientes e CRM, painel de sincronização, pipeline de vendas, motor financeiro, Functions, Rules e reservas estão com os mesmos arquivos da base.
+
+O painel compartilha os tokens V242, o modelo de loja, a projeção usada pelo servidor e o componente público em um iframe de mesma origem. A prévia apresenta o rascunho atual sem inicializar Firebase. O pacote público contém 280 recursos e a mesma lista de permissões da hospedagem, com a inclusão explícita de `store-kit.js`. As seis URLs da loja usadas no HTML estão no precache. A identidade de cache de produção continua sendo a da V242.3.
+
+## Achados por gravidade
+
+| Gravidade | Achado e evidência | Encaminhamento |
+| --- | --- | --- |
+| P1 | **Pausar expõe conteúdo ainda inédito.** A ação `publish` com `published:false` grava o rascunho no documento público. A leitura anônima em Rules devolveu o nome e o item inéditos nas duas versões. O estado pausado esconde os itens na página, mas pode exibir a marca vinda desse documento. | Aprovar correção no backend. Ao pausar, conservar a última projeção publicada, marcar sua indisponibilidade e atualizar apenas os campos de estado. Proteger os rascunhos e manter link, token, pedidos, reservas e revisão. |
+| P1 | **Pedido registrado é rejeitado antes de publicar uma alteração.** A vitrine permaneceu idêntica depois de retirar um item do rascunho. Um pedido legítimo para esse item falhou porque `onlineOrderService.submit` valida `selectedProductIds` e preferências a partir do rascunho corrente. Nenhuma venda, reserva ou pedido foi criado no teste. O código também consulta preço da apresentação atual. | Aprovar validação do conteúdo pela última publicação, com catálogo, vínculo, revisão e preferências coerentes. Manter autoridade do servidor sobre estoque, espaço, disponibilidade no cadastro, restrições operacionais e idempotência. |
+| P2 | **A confirmação da interface aceitava respostas incompletas.** O salvamento conferia seleção e configurações, e a publicação conferia o booleano. Categorias, ordem, destaques e slug podiam ser descartados sem um erro apropriado. Uma leitura atrasada da vitrine também podia contaminar a revisão exibida. | Corrigido localmente. O painel confronta revisão, conteúdo, apresentação e endereço confirmados. Descarta respostas públicas antigas e indica quando falta confirmar a versão pública. |
+| P2 | **Pedido em confirmação podia perder o caminho de verificação.** Depois de desligar pedidos registrados ou retirar um item, a renderização podia usar o WhatsApp ou levar para o carrinho vazio. | Corrigido localmente. A tela consulta a tentativa durável existente, inclusive com loja visível em modo WhatsApp e item removido. O ensaio após recarga verificou o mesmo ID e token e fez zero chamadas de novo envio. |
+| P2 | **Ativação e catálogo têm limites de origem.** O serviço lê até 1.001 produtos da empresa, antes de filtrar pelo espaço. O mesmo erro `resource-exhausted` pode ocorrer após 100 pedidos. Só 100 entradas de personalização de categoria são processadas por chamada. | O painel agora distingue os limites de produtos e pedidos e detecta resposta parcial de categoria. A seleção limita 400 itens. Paginação e mudanças de contrato dependem de aprovação. |
+| P2 | **Carrinho longo e abertura externa dependem do aplicativo receptor.** Os 400 itens fictícios chegaram completos ao texto local. O URL mediu cerca de 21 mil caracteres nessa massa. A documentação do WhatsApp confirma o formato, mas não garante essa extensão. | Validar com número de teste controlado em Android, WhatsApp Web e navegador embutido. Se necessário, apresentar uma forma explícita de copiar a mensagem inteira antes de abrir a conversa. [Documentação do WhatsApp](https://faq.whatsapp.com/5913398998672934/?locale=pt_BR). |
+| P2 | **O rascunho pendente é mantido em memória durante a edição.** Perder a rede dentro da aba preservou a alteração e permitiu tentar de novo. Encerrar à força o PWA antes da confirmação pode perder a edição. A navegação de saída usa aviso do navegador. | Documentar esse comportamento para testes de campo. Persistência local de rascunho exigiria isolar conta e espaço e validar a revisão na retomada. |
+| P3 | **Acessibilidade e clareza.** O botão flutuante cobria a descrição em 412 px. Redesenhar o cartão perdia o foco. Algumas cores cinza personalizadas ficavam abaixo de 4,5:1. Um emoji cortado no limite podia invalidar o URI. | Corrigido localmente. Prévia inline, foco preservado, contraste de segurança e truncamento por limite sem cortar o par do emoji. |
+
+Os controles de recepção, reservas e pedidos existentes foram examinados com os testes compartilhados de Rules, reserva, sincronização e cobertura emulada. Os clientes veem o documento projetado. Custos, fornecedor, margem, usuários e telefone de comprador ficaram fora da projeção testada. A busca anônima está limitada a leitura por referência, e escrita direta foi negada. A existência de um alias de rascunho pode ser consultada antes da primeira publicação, embora a vitrine ainda não exista nesse ponto. A correção de pausa deve preservar essa distinção com dados publicados.
+
+## Experiência, WhatsApp e personalização
+
+Painel, Produtos e Aparência foram exercitados no claro e no escuro a 360, 390, 412 e 1440 px. O painel mantém a identidade V242 e a prévia ajuda a explicar a diferença entre editar e publicar. Os cartões deixam evidente o estado por produto e suportam busca, lotes, destaque e teclado. Em 360 px alguns atalhos do resumo ainda têm alvos compactos. A rolagem horizontal dos chips e do carrossel é interna ao componente. A vitrine usa a paleta da marca sobre uma superfície clara e oferece as mesmas ações sem um seletor de tema para compradores.
+
+O alcance da personalização é nome, descrição, cores da faixa e do destaque, logo, capa, contato, Instagram, retirada, entrega, horários, categorias, ordem e destaques. O usuário não escolhe a estrutura da página, campos arbitrários, fontes ou taxa fixa. O enquadramento personalizado da imagem fica condicionado aos dados que a projeção pública envia. A prévia reaproveita a interface real, mas a disponibilidade da publicação é confirmada pelo servidor.
+
+No checkout sem pedido registrado, os testes interceptaram a navegação externa. Eles decodificaram a mensagem completa e conferiram destino do espaço, variantes, preço por linha, quantidade, total, observações, endereço, acentos, caracteres especiais e emojis. Antes da abertura, nome e endereço foram validados. Depois dela, o texto pede ao comprador para enviar a mensagem e aguardar confirmação. O teste registrou zero chamadas comerciais ao Firebase. Foi emulado o agente de usuário do Instagram, e a alternância real para o aplicativo ficou fora desse ensaio. Sem número válido, a vitrine indica indisponibilidade e omite o botão de adicionar. A interface prevê verificação da tentativa registrada e valida o limite de 40 linhas e a preferência de pagamento disponível antes de criar uma tentativa nova.
+
+## Links anteriores e desempenho
+
+- A remoção do portal legado elimina trechos que a inicialização normal já não alcançava em catálogos anteriores ao schema 6. A rota de token e a transição por `404.html` permanecem, assim como o status de pedidos já registrados e as Functions antigas. `?demo=1` era um atalho executável com dados e número fixos. O teste que o utilizava saiu na V3. Não foi encontrada referência ativa no frontend ou no workflow publicado do repositório. Tráfego de links externos antigos continua sem confirmação.
+- Com 1.000 produtos na origem simulada, o painel montou 36 cartões, cerca de 800 nós, busca pelo item final e heap de cerca de 7,6 MiB. As amostras de abertura de Produtos ficaram em torno de 73–114 ms e a busca em 164–187 ms, incluindo digitação e debounce. A vitrine pública de 400 produtos montou 4.092 nós, com 3,2 MiB de heap após a busca e fluxo de 160–170 ms no cenário local. Esses valores são amostras de Chromium headless em loopback.
+- A administração acrescenta aproximadamente 24 KB gzip ao carregamento compartilhado de JavaScript e CSS, incluindo a biblioteca usada pela vitrine. O JS público encolheu, mas o total aproximado dos três recursos de JS/CSS da vitrine subiu de 29,5 KB para 31,4 KB gzip. O painel agrupou as escritas de edição e a busca do catálogo não pediu novos documentos. O autosave ainda revalida até 400 produtos e carrega variações no servidor.
+
+## Testes e evidências
+
+| Verificação | V242.3 | V3 |
+| --- | ---: | ---: |
+| Node, JS e CJS em conjunto | 2.228/2.395, 166 falhas e 1 skip | 2.254/2.421, as mesmas 166 falhas e 1 skip |
+| Firestore/Storage Emulator | 44/49 | 50/55, as mesmas 5 falhas |
+| Smoke de Vender, Clientes, CRM, Produtos e Financeiro | 20/20 | 20/20 |
+| Pacote público e contenção estática | Base de 279 recursos | 280 recursos |
+
+As falhas comuns foram comparadas pelo nome. As de Node incluem fixtures que buscam históricos e referências ausentes e harnesses legados de sincronização. As cinco do emulador estão na suíte de finalização por `Vendas + Sync + Rules`, já reproduzidas na base. As seis novas verificações de contrato da Loja V3 passaram. O teste independente de backend confirmou os dois achados P1 e os limites em ambas as versões. O PWA foi atualizado em uma origem de loopback com um nome de cache criado apenas em memória pela fixture. Os seis arquivos versionados da Loja corresponderam aos bytes esperados, e dois documentos fictícios, quatro operações sintéticas, preferência de tema e reabertura offline foram preservados.
+
+As capturas independentes estão em `qa-artifacts/loja-v3/independent`. O ensaio usa `node scripts/audit-loja-online-v3-independent.cjs` com Chrome e Puppeteer. Os resultados comparativos e o caso de backend usam exclusivamente fixtures e Firestore/Storage Emulator.
+
+O navegador independente concluiu 20 cenários sem falhas. O roteiro ampliado do Claude produziu 61 capturas e passou 88/88 verificações após isolar o perfil por caso. A suíte direcionada com Loja e contenção estática passou 102/102. Para reproduzir o diagnóstico dos bloqueios, execute `scripts/audit-loja-online-v3-contract.cjs` pelo Firestore Emulator com projeto `demo-veconi-loja-audit`, passando os caminhos da V242.3 e da candidata. A verificação registra o comportamento observado. Os dois P1 continuam sendo bloqueios de release.
+
+## Plano de release
+
+1. Aprovar os dois ajustes de backend separadamente. Adicionar testes que provem que pausar conserva a publicação anterior, rascunhos ficam privados e pedidos da versão publicada sobrevivem a edições, pausas, retomadas e respostas perdidas conforme o estado confirmado.
+2. Em homologação, validar um espaço com catálogo e histórico fictícios, dois proprietários em contas separadas, gestor limitado, recepção ativa e WhatsApp de teste. Repetir o carrinho longo no Chrome Android, navegador do Instagram e WhatsApp Web. Exercitar tentativa pendente, endereço antigo, pausa e republicação.
+3. Conferir de novo o HEAD da main e a compatibilidade do backend com o frontend V242.3. Quando houver autorização, publicar só os componentes aprovados, carimbar versão e cache novos, testar o PWA instalado e publicar o artefato allowlist pelo GitHub Pages.
+4. Se ocorrer regressão crítica, reverter o frontend em um commit novo com outra identidade de cache. Preservar dados, filas, reservas e links. Um rollback do backend depende de compatibilidade com os documentos e pedidos já criados.

@@ -98,7 +98,10 @@ async function openStore(browser, base, { width = 390, height = 844, slug = 'doc
 async function launch() { return puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--font-render-hinting=none', '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1'] }); }
 
 async function openAdmin(browser, base, { width = 390, height = 844, theme = 'light', scenario = 'published', count = 24, latency = 120, select } = {}) {
-  const page = await browser.newPage(), errors = [];
+  const fresh = typeof browser.createBrowserContext === 'function'
+    ? await browser.createBrowserContext() : null;
+  const page = await (fresh || browser).newPage(), errors = [];
+  if (fresh) page.once('close', () => fresh.close().catch(() => {}));
   page.on('pageerror', e => errors.push(String(e.stack || e.message).split(/\n/).slice(0, 3).join(' | ')));
   // "[BOOT] app mount failed" (mountHome) já acontece no fixture do shell sem este módulo: ignorado.
   page.on('console', m => { if (m.type() === 'error' && !/favicon|ERR_|404|\[BOOT\] app mount failed/.test(m.text())) errors.push(m.text()); });
