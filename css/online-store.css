@@ -290,10 +290,10 @@ html[data-theme="dark"] .lo-tag { background: #3a2f12; color: #f6c453; }
 .lo-stage.is-phone .lo-device iframe { width: 390px; height: 760px; border-radius: 26px; transform: scale(calc(var(--scale) * .86)); }
 .lo-stage.is-desktop .lo-device { width: calc(1280px * var(--scale) * .96 + 8px); height: calc(800px * var(--scale) * .96 + 8px); padding: 4px; border-radius: 10px; }
 .lo-stage.is-desktop .lo-device iframe { width: 1280px; height: 800px; border-radius: 6px; transform: scale(calc(var(--scale) * .96)); }
-.lo-fab { position: fixed; right: 16px; bottom: calc(160px + env(safe-area-inset-bottom)); z-index: 30; display: none; align-items: center; gap: 8px; min-height: 48px; padding: 0 18px; border: 0; border-radius: 99px; background: var(--vf-ink); color: var(--vf-bg); font: inherit; font-size: 14px; font-weight: 750; box-shadow: var(--vf-shadow-2); cursor: pointer; }
+.lo-fab { display: none; margin-bottom: 12px; }
 @media (max-width: 1099px) {
   .lo-layout-design .lo-side { display: none; }
-  .lo-fab { display: inline-flex; }
+  .lo-fab { display: inline-flex; min-height: 44px; }
 }
 
 /* ---------- Barra de salvamento ---------- */

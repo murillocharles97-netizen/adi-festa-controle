@@ -2,8 +2,9 @@
 // Sem rede, sem Firebase e sem dados internos: só apresentação, rascunho e mensagem do pedido.
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.StoreKit=api;})(typeof window==='undefined'?globalThis:window,function(){
   'use strict';
-  const text=(v,max=160)=>String(v??'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').trim().slice(0,max);
-  const line=(v,max=160)=>text(v,max*2).replace(/\s+/g,' ').slice(0,max);
+  const clip=(v,max)=>v.slice(0,max).replace(/[\uD800-\uDBFF]$/,'');
+  const text=(v,max=160)=>clip(String(v??'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').trim(),max);
+  const line=(v,max=160)=>clip(text(v,max*2).replace(/\s+/g,' '),max);
   const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}).replace(/ /g,' ');
 
   /* ---------- Telefone (mesma regra de js/phone.js, sem depender da página) ---------- */
@@ -35,7 +36,11 @@
   function luminance(v){return rgb(v).map(c=>{c/=255;return c<=.03928?c/12.92:((c+.055)/1.055)**2.4;}).reduce((s,c,i)=>s+c*[.2126,.7152,.0722][i],0);}
   function contrast(a,b){const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);}
   const INK='#14191c',WHITE='#ffffff';
-  const onColor=bg=>contrast(bg,WHITE)>=contrast(bg,INK)?WHITE:INK;
+  function onColor(bg){
+    const light=contrast(bg,WHITE),dark=contrast(bg,INK);
+    if(Math.max(light,dark)<4.5)return '#000000';
+    return light>=dark?WHITE:INK;
+  }
   function mix(a,b,t){const x=rgb(a),y=rgb(b);return toHex(x.map((c,i)=>c+(y[i]-c)*t));}
   // Escurece (ou clareia) a cor até ser legível como texto sobre a superfície.
   function readable(color,surface=WHITE,target=4.5){let c=hex(color)||'#0f9f94';const towards=luminance(surface)>.4?'#000000':'#ffffff';for(let i=0;i<20&&contrast(c,surface)<target;i++)c=mix(c,towards,.12);return c;}
@@ -148,7 +153,8 @@
   }
   function whatsappUrl(phone,message){
     if(!validPhone(phone))throw Error('Esta loja ainda não informou um WhatsApp válido.');
-    return `https://wa.me/${phoneDigits(phone)}?text=${encodeURIComponent(message)}`;
+    const safeMessage=String(message).replace(/(?:[\uD800-\uDBFF][\uDC00-\uDFFF])|[\uD800-\uDFFF]/g,part=>part.length===2?part:'\uFFFD');
+    return `https://wa.me/${phoneDigits(phone)}?text=${encodeURIComponent(safeMessage)}`;
   }
 
   return Object.freeze({text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,

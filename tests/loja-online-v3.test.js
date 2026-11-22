@@ -88,7 +88,7 @@ test('situação, preparação e diferenças para a versão publicada', () => {
 });
 
 /* ---------- Painel com DOM real ---------- */
-function panel({ owner = true, products = 4, store = undefined, handler } = {}) {
+function panel({ owner = true, products = 4, store = undefined, handler, publicReader } = {}) {
   const dom = new JSDOM('<main id="app"></main>', { url: 'http://127.0.0.1/', pretendToBeVisual: true, runScripts: 'outside-only' }), w = dom.window, calls = [];
   const list = Array.from({ length: products }, (_, i) => Store.product({ id: `p${i}`, nome: `Produto ${String(i).padStart(4, '0')}`, preco: 10 + i, categoria: i % 2 ? 'Bolos' : 'Doces', estoqueAtual: i % 5, custo: 3 }));
   const base = store === undefined ? { id: 's', slug: 'loja-qa', revision: 4, published: true, activation: { confirmedAt: 'x' }, publicToken: 'qa_token_000000000000000000', checkoutEnabled: false, catalogSettings: Store.settings({ publicName: 'Loja QA', contactPhone: '(11) 91234-5678' }), selectedProductIds: ['p0'], presentation: { products: {}, categories: [] } } : store;
@@ -103,7 +103,8 @@ function panel({ owner = true, products = 4, store = undefined, handler } = {}) 
     server.store = { ...server.store, revision: (server.store?.revision || 0) + 1, slug: data.slug, catalogSettings: Store.settings(data.settings), selectedProductIds: data.productIds, presentation: { ...data.presentation, banners: [] }, published: data.action === 'publish' ? data.published : server.store?.published, activation: server.store?.activation || (data.action === 'publish' ? { confirmedAt: 'now' } : null) };
     return { data: { store: server.store } };
   };
-  w.eval(fs.readFileSync('js/online-store-ui.js', 'utf8').replace('window.OnlineStoreUI={render,bind:()=>load()};', 'window.OnlineStoreUI={render,bind:()=>load()};window.T={state,flush,toggle,star,bulk,publish,previewCatalog,goView,saveBar,mountGrid};'));
+  w.FirebasePublicCatalogReader = publicReader;
+  w.eval(fs.readFileSync('js/online-store-ui.js', 'utf8').replace('window.OnlineStoreUI={render,bind:()=>load()};', 'window.OnlineStoreUI={render,bind:()=>load()};window.T={state,queue,flush,toggle,star,bulk,publish,previewCatalog,goView,saveBar,mountGrid};'));
   w.document.querySelector('#app').innerHTML = w.OnlineStoreUI.render();
   return { w, T: w.T, calls, server, ready: w.OnlineStoreUI.bind(), $: s => w.document.querySelector(s) };
 }
@@ -133,6 +134,31 @@ test('resposta sem a alteração confirmada vira erro, nunca sucesso', async () 
   const p = panel({ handler: (name, data, server) => { if (name === 'saveOnlineStore') { server.store = { ...server.store, revision: server.store.revision + 1 };return { data: { store: server.store } }; } } });await p.ready;
   p.T.toggle('p3');await p.T.flush();
   assert.equal(p.T.state.saveState, 'error');assert.match(p.T.state.saveError, /não confirmou/);
+});
+test('uma confirmação parcial de categorias não descarta a alteração local', async () => {
+  const p = panel({handler: (name, data, {store}) => {
+    if (name === 'saveOnlineStore') return {data:{store:{...store, revision:store.revision+1,
+      catalogSettings:data.settings, selectedProductIds:data.productIds}}};
+  }});
+  await p.ready;
+  p.T.queue({t:'categoryName',name:'Doces',value:'Doceria'});
+  await p.T.flush();
+  assert.match(saveText(p), /Não salvo/);
+  assert.equal(p.T.state.draft.presentation.categories[0].publicName,'Doceria');
+});
+test('publicação duplicada e leitura pública fora de ordem não alteram a confirmação recente', async () => {
+  let settleOld, reads=0;
+  const p = panel({ publicReader: () => new Promise(resolve => { if (++reads === 1) settleOld=resolve; }) });
+  await p.ready;
+  const old = p.T.state.data.store;
+  p.T.toggle('p1');
+  await Promise.all([p.T.publish('publish'),p.T.publish('publish')]);
+  assert.equal(p.calls.filter(c=>c.data.action==='publish').length,1);
+  settleOld({businessId:old.businessId,spaceId:old.spaceId,workspaceGeneration:old.workspaceGeneration,
+    revision:old.revision,items:[],publicSettings:old.catalogSettings});
+  await Promise.resolve();
+  assert.deepEqual(p.T.state.live?.items?.map(x=>x.productId),['p0','p1']);
+  assert.match(saveText(p), /Publicado às/);
 });
 test('conflito com outro aparelho: recarrega e reaplica a alteração uma vez', async () => {
   let first = true;const p = panel({ handler: (name, data, server) => { if (name === 'saveOnlineStore' && first) { first = false;server.store = { ...server.store, revision: 9, catalogSettings: Store.settings({ publicName: 'Mudou em outro aparelho', contactPhone: '(11) 91234-5678' }) };throw Object.assign(Error('alterada'), { code: 'functions/aborted' }); } } });await p.ready;
@@ -205,4 +231,19 @@ test('prévia aceita mensagens só da própria origem e da janela que a embute, 
 test('loja pública só mostra o documento publicado e trata loja pausada', () => {
   assert.match(portal, /if\(data\.active!==true\)throw Object\.assign\(publicCatalogError\('paused'/);
   assert.doesNotMatch(portal, /collection\(|getDocs|onlineStores|catalogOrders/);
+});
+test('WhatsApp preserva emojis inteiros no limite de texto e o URI continua válido', () => {
+  const input={storeName:'Doces & cia 🧁',items:[{quantity:1,name:'á'.repeat(119)+'🍫',unitPrice:4.2}],
+    note:'x'.repeat(498)+'🍓',customer:{name:'Ana & João'},mode:'pickup'};
+  const order=K.orderMessage(input);
+  const href=new URL(K.whatsappUrl('11900000000',order.text));
+  assert.equal(href.searchParams.get('text'),order.text);
+  assert.match(order.text,/🍓/);
+  assert.match(order.text,/Ana & João/);
+  assert.doesNotMatch(order.text,/\uD83C(?:$|[^\uDC00-\uDFFF])/u);
+});
+test('cores intermediárias personalizadas mantêm o contraste do texto', () => {
+  for(const color of ['#777777','#808080']){
+    assert.ok(K.contrast(color,K.onColor(color))>=4.5);
+  }
 });

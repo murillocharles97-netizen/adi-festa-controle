@@ -13,7 +13,7 @@
   const SVG={star:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.8-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.8Z"/></svg>',check:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',grip:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>'};
   const state={key:'',spaceId:'',view:'home',data:null,base:null,draft:null,sel:new Set(),ops:[],inflight:null,flushing:null,saveTimer:0,saveState:'idle',saveError:'',savedAt:0,conflicts:0,
     live:null,unpublished:null,busy:false,sequence:0,receptionConfirm:null,receptionMessage:'',filter:{q:'',scope:'all',category:''},selecting:false,picked:new Set(),results:[],shown:0,sheet:null,device:'phone',errors:{},sortCategory:''};
-  let index=null,observer=null,previewTimer=0,searchTimer=0,toastTimer=0;
+  let index=null,observer=null,previewTimer=0,searchTimer=0,toastTimer=0,liveRead=0;
   const business=()=>window.BusinessContext?.getCurrentBusinessId?.()||window.FirebaseSession?.businessId||window.FirebaseSession?.profile?.businessId||'';
   const spaces=()=>window.SpaceContext?.salesSpaces?.()||[];
   const scope=()=>({businessId:business(),spaceId:state.spaceId,workspaceGeneration:window.WorkspaceRuntime?.capture?.().workspaceGeneration??window.DB?.getWorkspaceGeneration?.()??0});
@@ -49,14 +49,25 @@
     }catch(e){
       if(ticket!==state.sequence)return;
       const el=document.querySelector('#store-v2');
-      if(el)el.innerHTML=`<div class="lo-panel lo-fatal"><h2>Não foi possível abrir a loja deste espaço</h2><p role="alert">${esc(codeOf(e)==='resource-exhausted'?'Este espaço tem mais de 1.000 produtos. A edição da loja para catálogos desse tamanho depende de uma atualização do servidor; nenhum produto foi alterado.':friendly(e))}</p><button type="button" class="lo-btn lo-btn-primary" data-store-retry>Tentar novamente</button></div>`;
+      let detail=friendly(e);
+      if(codeOf(e)==='resource-exhausted'){
+        if(/paginação de pedidos/i.test(e.message||''))detail='Há mais de 100 pedidos neste espaço. A edição da loja depende de uma atualização do servidor.';
+        else if(/este catálogo exige paginação/i.test(e.message||''))detail='A empresa tem mais de 1.000 produtos. O limite conta todos os espaços. Nenhum produto foi alterado.';
+      }
+      if(el)el.innerHTML=`<div class="lo-panel lo-fatal"><h2>Não foi possível abrir a loja deste espaço</h2><p role="alert">${esc(detail)}</p><button type="button" class="lo-btn lo-btn-primary" data-store-retry>Tentar novamente</button></div>`;
       el?.querySelector('[data-store-retry]')?.addEventListener('click',()=>{el.innerHTML='<div class="lo-loading" role="status"><span class="lo-spinner" aria-hidden="true"></span>Carregando…</div>';load();});
     }
   }
   async function readLive(){
-    const s=store(),ticket=state.sequence;
+    const s=store(),ticket=state.sequence,request=++liveRead;
     if(!s?.publicToken||!(s.published||s.activation)||typeof window.FirebasePublicCatalogReader!=='function')return;
-    try{const live=await window.FirebasePublicCatalogReader(s.publicToken);if(ticket!==state.sequence)return;state.live=live&&live.businessId===s.businessId&&live.spaceId===s.spaceId?live:null;if(state.live&&state.unpublished!==true)state.unpublished=(K.publishedDiff(state.base,state.live)||[]).length>0||Number(state.live.revision)!==Number(store().revision);paint('head');paint('save');if(state.view==='home')paint('main');}catch{/* Sem a versão publicada, o painel não afirma que está tudo publicado. */}
+    try{
+      const live=await window.FirebasePublicCatalogReader(s.publicToken);
+      if(ticket!==state.sequence||request!==liveRead||s!==store())return;
+      state.live=live&&live.businessId===s.businessId&&live.spaceId===s.spaceId&&live.workspaceGeneration===s.workspaceGeneration?live:null;
+      if(state.live&&state.unpublished!==true)state.unpublished=(K.publishedDiff(state.base,state.live)||[]).length>0||Number(state.live.revision)!==Number(s.revision);
+      paint('head');paint('save');if(state.view==='home')paint('main');
+    }catch{/* Continua mostrando a última situação confirmada. */}
   }
   function local(){try{const d=window.DB?.carregar?.()||{};return {products:new Map((d.produtos||[]).map(p=>[p.id,p])),variants:(d.variacoesProdutos||[]).filter(v=>!v.deleted&&!v.deletedAt&&v.active!==false)};}catch{return {products:new Map(),variants:[]};}}
   function buildIndex(){
@@ -87,6 +98,16 @@
   }
   function flush(){if(state.flushing)return state.flushing;state.flushing=doFlush().finally(()=>{state.flushing=null;if(state.ops.length&&state.saveState!=='error'){clearTimeout(state.saveTimer);state.saveTimer=setTimeout(flush,250);}});return state.flushing;}
   function sameSet(a,b){if(a.length!==b.length)return false;const s=new Set(a);return b.every(x=>s.has(x));}
+  function confirmsDraft(saved,payload,revision){
+    if(!saved||saved.revision!==revision+1||saved.slug!==payload.slug||
+      !sameSet(saved.selectedProductIds||[],payload.productIds)||
+      Object.keys(payload.settings).some(k=>JSON.stringify(saved.catalogSettings?.[k])!==JSON.stringify(payload.settings[k])))return false;
+    const presentation=K.savePayload(K.draftFromStore(saved)).presentation;
+    const categories=new Map(presentation.categories.map(c=>[c.internalName,c]));
+    return Object.keys(payload.presentation.products).every(id=>
+      JSON.stringify(presentation.products[id])===JSON.stringify(payload.presentation.products[id]))&&
+      payload.presentation.categories.every(c=>JSON.stringify(categories.get(c.internalName))===JSON.stringify(c));
+  }
   async function doFlush(){
     clearTimeout(state.saveTimer);
     if(state.inflight||!state.ops.length||!state.data)return;
@@ -96,11 +117,12 @@
     try{
       const d=K.applyOps(state.base,ops),payload=K.savePayload(d);
       payload.settings=M.settings({...d.settings,checkoutEnabled:store()?.checkoutEnabled===true});
-      const result=await call('saveOnlineStore',{...c,action:'save',revision:store()?.revision||0,...payload});
+      const revision=store()?.revision||0;
+      const result=await call('saveOnlineStore',{...c,action:'save',revision,...payload});
       if(ticket!==state.sequence)return;
       const saved=result?.store;
       // Confirma que o servidor gravou exatamente o que foi enviado (inclusive campos que um servidor antigo descartaria).
-      if(!saved||!sameSet(saved.selectedProductIds||[],payload.productIds)||Object.keys(payload.settings).some(k=>JSON.stringify(saved.catalogSettings?.[k])!==JSON.stringify(payload.settings[k])))
+      if(!confirmsDraft(saved,payload,revision))
         throw Object.assign(Error('O servidor não confirmou todas as alterações. Recarregue a loja para conferir.'),{code:'unconfirmed'});
       state.data.store=saved;state.base=K.draftFromStore(saved,spaceName());state.inflight=null;state.conflicts=0;if(saved.published)state.unpublished=true;
       refreshDraft();state.saveState=state.ops.length?'pending':'saved';state.savedAt=Date.now();state.saveError='';
@@ -126,8 +148,9 @@
   /* ---------- Situação ---------- */
   // Nunca presume que algo está publicado: só uma publicação confirmada (ou a leitura da versão pública) zera a pendência.
   function pendingPublish(){const s=store();if(!s||!s.published)return false;return !!(state.ops.length||state.inflight||state.unpublished===true);}
+  const publicationUnknown=()=>status()==='published'&&state.unpublished===null;
   function diffList(){return state.live?K.publishedDiff(state.draft,state.live)||[]:[];}
-  function readiness(){return K.readiness({settings:state.draft.settings,selectedCount:state.sel.size,state:status(),pending:pendingPublish()});}
+  function readiness(){return K.readiness({settings:state.draft.settings,selectedCount:state.sel.size,state:status(),pending:pendingPublish()||publicationUnknown()});}
 
   /* ---------- Desenho ---------- */
   function draw(){
@@ -164,7 +187,7 @@
     if(state.busy)return `<button type="button" class="lo-btn lo-btn-primary" disabled><span class="lo-spinner" aria-hidden="true"></span>Publicando…</button>`;
     if(st==='draft')return `<button type="button" class="lo-btn lo-btn-primary" data-act="ask-publish" ${dis}>${icon('globe')}<span>Publicar loja</span></button>`;
     if(st==='paused')return `<button type="button" class="lo-btn lo-btn-primary" data-act="ask-publish" ${dis}>${icon('play')}<span>Retomar loja</span></button>`;
-    if(pendingPublish())return `<button type="button" class="lo-btn lo-btn-primary" data-act="ask-publish" ${dis}>${icon('upload-cloud')}<span>Publicar alterações</span></button>`;
+    if(pendingPublish()||publicationUnknown())return `<button type="button" class="lo-btn lo-btn-primary" data-act="ask-publish" ${dis}>${icon('upload-cloud')}<span>Publicar alterações</span></button>`;
     return r.done?`<button type="button" class="lo-btn lo-btn-primary" data-act="share">${icon('send')}<span>Divulgar loja</span></button>`:'';
   }
   function tabs(){
@@ -174,7 +197,7 @@
   function view(){
     if(status()==='new')return `<div data-region="main">${createView()}</div>`;
     const side=state.view==='home'||state.view==='design';
-    return `<div class="lo-layout lo-layout-${state.view}"><div class="lo-main" data-region="main">${mainContent()}</div>${side?`<aside class="lo-side">${previewPanel()}</aside>`:''}</div>${state.view==='design'?`<button type="button" class="lo-fab" data-act="fullpreview">${icon('smartphone')}<span>Ver prévia</span></button>`:''}`;
+    return `${state.view==='design'?`<button type="button" class="lo-btn lo-btn-quiet lo-fab" data-act="fullpreview">${icon('smartphone')}<span>Ver prévia</span></button>`:''}<div class="lo-layout lo-layout-${state.view}"><div class="lo-main" data-region="main">${mainContent()}</div>${side?`<aside class="lo-side">${previewPanel()}</aside>`:''}</div>`;
   }
   function mainContent(){if(status()==='new')return createView();return state.view==='products'?productsView():state.view==='design'?designView():homeView();}
   const initials=name=>String(name||'Loja').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'L';
@@ -204,9 +227,10 @@
     state.busy=true;paint('view');
     try{
       const settings=M.settings({publicName:name,contactPhone:phone?K.formatPhone(phone):'',instagram:brand.instagram||'',address:brand.address||'',primaryColor:K.PALETTES[0].primary,secondaryColor:K.PALETTES[0].secondary,pickupEnabled:true,deliveryEnabled:false});
-      const r=await call('saveOnlineStore',{...c,action:'save',revision:0,slug,settings,productIds:ids,presentation:{products:{},categories:[]}});
+      const payload=K.savePayload({slug,settings,productIds:ids,presentation:{products:{},categories:[]}});
+      const r=await call('saveOnlineStore',{...c,action:'save',revision:0,...payload});
       if(ticket!==state.sequence)return;
-      if(!r?.store||r.store.slug!==slug)throw Error('O servidor não confirmou a criação. Recarregue para conferir.');
+      if(!confirmsDraft(r?.store,payload,0))throw Error('O servidor não confirmou a criação. Recarregue para conferir.');
       state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());state.errors={};refreshDraft();state.view=ids.length?'design':'products';
       toast(ids.length?'Loja criada. Agora deixe a cara da sua marca.':'Loja criada. Escolha os produtos que vão aparecer.');
     }catch(e){if(ticket!==state.sequence)return;if(codeOf(e)==='already-exists')state.errors.createSlug='Esse endereço já pertence a outra loja. Escolha outro.';else toast(friendly(e),true);}
@@ -221,10 +245,10 @@
   function stepsCard(r){
     const d=state.draft.settings,st=status(),n=state.sel.size;
     const info={identity:d.publicName?esc(d.publicName):'Dê um nome para a loja.',products:n?`${n} ${n===1?'produto':'produtos'} na loja`:'Nenhum produto escolhido ainda.',whatsapp:K.validPhone(d.contactPhone)?esc(K.formatPhone(d.contactPhone)):'Informe o número que recebe os pedidos.',
-      publish:st==='published'?(pendingPublish()?'Há alterações esperando publicação.':'Publicada. Envie o link aos clientes.'):st==='paused'?'Loja pausada: o link mostra que ela está indisponível.':'Quando estiver pronta, publique e compartilhe o link.'};
+      publish:st==='published'?(pendingPublish()?'Há alterações esperando publicação.':publicationUnknown()?'Abra a loja para conferir a versão que seus clientes veem.':'Publicada. Envie o link aos clientes.'):st==='paused'?'Loja pausada: o link mostra que ela está indisponível.':'Quando estiver pronta, publique e compartilhe o link.'};
     const action={identity:['design','Personalizar'],products:['products','Escolher produtos'],whatsapp:['design','Configurar']};
     return `<section class="lo-panel lo-steps" aria-labelledby="lo-steps-title"><header class="lo-panel-head"><div><h2 id="lo-steps-title">Prepare sua loja</h2><p>${r.done} de 4 etapas concluídas</p></div><span class="lo-meter" aria-hidden="true"><i style="width:${r.done*25}%"></i></span></header><ol>${r.steps.map((s,i)=>{
-      const next=r.next===s.id,btn=s.id==='publish'?(st==='published'&&!pendingPublish()?`<button type="button" class="lo-btn lo-btn-quiet lo-btn-sm" data-act="share">Compartilhar</button>`:`<button type="button" class="lo-btn ${next?'lo-btn-primary':'lo-btn-quiet'} lo-btn-sm" data-act="ask-publish" ${!owner()||state.busy?'disabled':''}>${st==='paused'?'Retomar':st==='published'?'Publicar alterações':'Publicar'}</button>`):`<button type="button" class="lo-btn ${next?'lo-btn-primary':'lo-btn-quiet'} lo-btn-sm" data-act="view" data-v="${action[s.id][0]}" data-focus="${s.id}">${action[s.id][1]}</button>`;
+      const next=r.next===s.id,btn=s.id==='publish'?(st==='published'&&!pendingPublish()&&!publicationUnknown()?`<button type="button" class="lo-btn lo-btn-quiet lo-btn-sm" data-act="share">Compartilhar</button>`:`<button type="button" class="lo-btn ${next?'lo-btn-primary':'lo-btn-quiet'} lo-btn-sm" data-act="ask-publish" ${!owner()||state.busy?'disabled':''}>${st==='paused'?'Retomar':st==='published'?'Publicar alterações':'Publicar'}</button>`):`<button type="button" class="lo-btn ${next?'lo-btn-primary':'lo-btn-quiet'} lo-btn-sm" data-act="view" data-v="${action[s.id][0]}" data-focus="${s.id}">${action[s.id][1]}</button>`;
       return `<li class="lo-step ${s.done?'is-done':''} ${next?'is-next':''}"><span class="lo-step-n" aria-hidden="true">${s.done?SVG.check:i+1}</span><div class="lo-step-copy"><b>${s.title}<span class="lo-sr">${s.done?' — concluída':' — pendente'}</span></b><small>${info[s.id]}</small></div>${btn}</li>`;}).join('')}</ol></section>`;
   }
   function factsCard(){
@@ -248,7 +272,7 @@
     const r=state.data.orderReception||{enabled:false,canEnable:false,reason:'backend_update_required'},enabled=r.enabled===true,
       name=spaces().find(s=>s.id===state.spaceId)?.name||'este espaço',pending=state.receptionConfirm;
     const reasons={not_published:'Publique esta loja antes de ativar os pedidos.',publication_required:'Atualize a publicação deste espaço antes de ativar os pedidos.',sales_disabled:'Este espaço não está habilitado para vendas.',delivery_required:'Configure entrega ou retirada antes de ativar os pedidos.',payment_required:'Configure uma preferência de pagamento antes de ativar os pedidos.',backend_update_required:'Atualize a conexão da loja para verificar o recebimento de pedidos.'};
-    return `<section class="store-reception" aria-labelledby="store-reception-title"><div class="store-reception-summary"><div><h3 id="store-reception-title">Pedidos registrados no VECONI</h3><span class="lo-status ${enabled?'lo-status-published':'lo-status-draft'}">${enabled?'Recebendo pedidos':'Pedidos pausados'}</span><p>${esc(reasons[r.reason]||(enabled?'Clientes podem finalizar pedidos nesta loja.':'O catálogo está visível, mas novas compras estão pausadas.'))}</p><p class="lo-note">Opcional. Com isso ativo, o pedido é registrado em Pedidos online e reserva estoque por 30 minutos. Sem ele, o cliente envia o pedido pelo WhatsApp e nada é reservado.</p></div><button type="button" class="lo-btn ${enabled?'lo-btn-quiet':'lo-btn-primary'}" data-reception ${state.busy||!state.data.owner||!enabled&&!r.canEnable?'disabled':''}>${enabled?'Pausar pedidos':'Ativar pedidos'}</button></div>${!state.data.owner?'<p>Somente o proprietário pode alterar o recebimento.</p>':''}${pending!==null?`<div class="store-reception-confirm" role="group" aria-labelledby="store-reception-confirm-title"><h3 id="store-reception-confirm-title">${pending?'Ativar':'Pausar'} pedidos em “${esc(name)}”?</h3><p>${pending?'Clientes poderão enviar pedidos e reservar estoque ao finalizar o checkout. Nenhuma cobrança automática será iniciada.':'Novos pedidos serão bloqueados. Pedidos e reservas já existentes continuam seguindo suas regras de atendimento e expiração.'}</p><p>Somente esta loja será alterada. Alterações não salvas de tema e catálogo não serão publicadas.</p><div class="lo-actions"><button type="button" class="lo-btn lo-btn-quiet" data-reception-cancel ${state.busy?'disabled':''}>Voltar</button><button type="button" class="lo-btn lo-btn-primary" data-reception-confirm ${state.busy?'disabled':''}>${state.busy?'Confirmando…':pending?'Confirmar ativação':'Confirmar pausa'}</button></div></div>`:''}<p class="store-reception-message" role="status" aria-live="polite">${esc(state.receptionMessage)}</p></section>`;
+    return `<section class="store-reception" aria-labelledby="store-reception-title"><div class="store-reception-summary"><div><h3 id="store-reception-title">Pedidos registrados no VECONI</h3><span class="lo-status ${enabled?'lo-status-published':'lo-status-draft'}">${enabled?'Recebendo pedidos':'Pedidos pausados'}</span><p>${esc(reasons[r.reason]||(enabled?'Clientes podem finalizar pedidos nesta loja.':'Pedidos registrados pausados. O WhatsApp continua disponível quando configurado.'))}</p><p class="lo-note">Opcional. Com isso ativo, o pedido é registrado em Pedidos online e reserva estoque por 30 minutos. Sem ele, o cliente envia o pedido pelo WhatsApp e nada é reservado.</p></div><button type="button" class="lo-btn ${enabled?'lo-btn-quiet':'lo-btn-primary'}" data-reception ${state.busy||!state.data.owner||!enabled&&!r.canEnable?'disabled':''}>${enabled?'Pausar pedidos':'Ativar pedidos'}</button></div>${!state.data.owner?'<p>Somente o proprietário pode alterar o recebimento.</p>':''}${pending!==null?`<div class="store-reception-confirm" role="group" aria-labelledby="store-reception-confirm-title"><h3 id="store-reception-confirm-title">${pending?'Ativar':'Pausar'} pedidos em “${esc(name)}”?</h3><p>${pending?'Clientes poderão enviar pedidos e reservar estoque ao finalizar o checkout. Nenhuma cobrança automática será iniciada.':'Novos pedidos serão bloqueados. Pedidos e reservas já existentes continuam seguindo suas regras de atendimento e expiração.'}</p><p>Somente esta loja será alterada. Alterações não salvas de tema e catálogo não serão publicadas.</p><div class="lo-actions"><button type="button" class="lo-btn lo-btn-quiet" data-reception-cancel ${state.busy?'disabled':''}>Voltar</button><button type="button" class="lo-btn lo-btn-primary" data-reception-confirm ${state.busy?'disabled':''}>${state.busy?'Confirmando…':pending?'Confirmar ativação':'Confirmar pausa'}</button></div></div>`:''}<p class="store-reception-message" role="status" aria-live="polite">${esc(state.receptionMessage)}</p></section>`;
   }
   async function changeReception(){
     if(state.busy||!state.data.owner||typeof state.receptionConfirm!=='boolean')return;
@@ -278,7 +302,7 @@
   function productsView(){
     if(!index.list.length)return `<section class="lo-panel lo-empty"><h2>Nenhum produto disponível neste espaço</h2><p>Cadastre produtos em Produtos. Eles aparecem aqui para você escolher o que vai para a loja.</p><a class="lo-btn lo-btn-primary" href="#/produtos">${icon('plus')}<span>Cadastrar produtos</span></a></section>`;
     const cats=categories();
-    return `<div class="lo-products ${state.selecting?'is-selecting':''}"><div class="lo-toolbar"><label class="lo-search">${icon('search')}<span class="lo-sr">Buscar produtos</span><input type="search" data-q value="${esc(state.filter.q)}" placeholder="Buscar por nome, código ou categoria" autocomplete="off"></label>
+    return `<div class="lo-products ${state.selecting?'is-selecting':''}"><div class="lo-toolbar"><label class="lo-search">${icon('search')}<span class="lo-sr">Buscar por nome, código ou categoria</span><input type="search" data-q value="${esc(state.filter.q)}" placeholder="Buscar produtos" autocomplete="off"></label>
       <label class="lo-select"><span class="lo-sr">Categoria</span><select data-category><option value="">Todas as categorias</option>${cats.map(c=>`<option ${c===state.filter.category?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
       <div class="lo-toolbar-actions"><button type="button" class="lo-btn lo-btn-quiet" data-act="select-mode" aria-pressed="${state.selecting}">${icon('list-checks')}<span>${state.selecting?'Concluir seleção':'Selecionar vários'}</span></button><button type="button" class="lo-btn lo-btn-quiet" data-act="organize" ${state.sel.size?'':'disabled'}>${icon('arrow-up-down')}<span>Organizar</span></button></div></div>
       <div class="lo-chips" role="group" aria-label="Filtrar produtos" data-region-chips>${chips()}</div>
@@ -322,8 +346,11 @@
     const picked=root.querySelector('[data-count="picked"]');if(picked){picked.textContent=state.picked.size;root.querySelectorAll('[data-act="bulk"]').forEach(b=>b.disabled=!state.picked.size);}
   }
   function patchCard(id){
-    const el=document.querySelector(`#store-v2 .lo-pcard[data-pid="${CSS.escape(id)}"]`);if(!el)return;
-    const p=index.byId.get(id);if(p)el.outerHTML=card(p);
+    const selector=`#store-v2 .lo-pcard[data-pid="${CSS.escape(id)}"]`;
+    const el=document.querySelector(selector),p=index.byId.get(id);if(!el||!p)return;
+    const focused=el.contains(document.activeElement)?document.activeElement.dataset.act:null;
+    el.outerHTML=card(p);
+    if(focused)document.querySelector(selector+` [data-act="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
   }
   function toggle(id){
     if(!guard())return;const on=!state.sel.has(id);
@@ -518,15 +545,18 @@
   function closeSheet(){const opener=state.sheet?.opener;state.sheet=null;paint('sheet');document.body.classList.remove('lo-sheet-open');if(opener?.isConnected)opener.focus();}
   async function publish(kind){
     if(state.busy||!owner())return;
+    const ticket=state.sequence;
     if(!(await settle())){toast('Salve as alterações pendentes antes de publicar.',true);return;}
+    if(ticket!==state.sequence||state.busy||!owner())return;
     if(kind!=='pause'&&!readiness().canPublish){toast('Dê um nome e escolha ao menos um produto antes de publicar.',true);return;}
-    const c=scope(),ticket=state.sequence,d=state.base,payload=K.savePayload(d),wanted=kind!=='pause';
+    const c=scope(),d=state.base,payload=K.savePayload(d),wanted=kind!=='pause';
     state.busy=true;state.sheet=null;document.body.classList.remove('lo-sheet-open');draw();
     try{
       payload.settings=M.settings({...d.settings,checkoutEnabled:store()?.checkoutEnabled===true});
-      const r=await call('saveOnlineStore',{...c,action:'publish',confirmed:true,published:wanted,revision:store()?.revision||0,...payload});
+      const revision=store()?.revision||0;
+      const r=await call('saveOnlineStore',{...c,action:'publish',confirmed:true,published:wanted,revision,...payload});
       if(ticket!==state.sequence)return;
-      if(r?.store?.published!==wanted)throw Error('O servidor não confirmou a publicação. Recarregue a loja para conferir.');
+      if(r?.store?.published!==wanted||!confirmsDraft(r.store,payload,revision))throw Error('O servidor não confirmou a publicação. Recarregue a loja para conferir.');
       state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());refreshDraft();state.unpublished=wanted?false:null;state.saveState=wanted?'published':'paused';state.savedAt=Date.now();
       state.live={...(state.live||{}),revision:r.store.revision,items:state.base.productIds.map(id=>({productId:id,featured:!!state.base.presentation.products[id]?.featured,displayOrder:Number(state.base.presentation.products[id]?.order||0)})),publicSettings:{...state.base.settings},businessId:r.store.businessId,spaceId:r.store.spaceId};
       toast(wanted?'Loja publicada. O link já mostra esta versão.':'Loja pausada. O link mostra que ela está indisponível.');
@@ -648,7 +678,7 @@
     if(value===store()?.slug){state.errors.slug='';toast('Esse já é o endereço atual.');return;}
     queue({t:'slug',value});await flush();
     if(state.saveState==='error'&&/pertence a outra loja|already/i.test(state.saveError)){state.ops=state.ops.filter(o=>o.t!=='slug');refreshDraft();state.saveState='idle';state.errors.slug='Esse endereço já pertence a outra loja. Escolha outro.';paint('save');}
-    else if(state.saveState!=='error'){delete state.errors.slugValue;state.errors.slug='';toast(status()==='published'?'Endereço salvo. Publique as alterações para o novo link funcionar.':'Endereço salvo.');}
+    else if(state.saveState!=='error'){delete state.errors.slugValue;state.errors.slug='';toast(status()==='published'?'Endereço salvo. Os links abrem a versão pública atual.':'Endereço salvo.');}
     paint('main');paint('head');
   }
   async function copyLink(){try{if(!publicUrl())throw Error('Salve a loja primeiro.');await navigator.clipboard.writeText(publicUrl());toast('Link copiado.');}catch(e){toast(e.message||'Não foi possível copiar. Selecione o link e copie manualmente.',true);}}

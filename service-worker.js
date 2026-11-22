@@ -118,3 +118,4 @@ ARQUIVOS.push('./functions/src/shared/operational-privacy-policy.js','./js/opera
 ARQUIVOS.push('./assets/fonts/inter-latin-wght-normal.woff2');
 ARQUIVOS.push('./js/clientes-mobile.js?v=2422','./js/customer-metrics.js?v=2422','./js/crm-segment-engine-v2.js?v=2422');
 ARQUIVOS.push('./js/build-info.js?v=2423','./js/app.js?v=2423','./js/barcode.js?v=2423','./js/checkout.js?v=2423','./js/checkout-mobile.js?v=2423','./js/desktop-sales.js?v=2423','./css/checkout-mobile.css?v=2423');
+ARQUIVOS.push('./css/online-store.css?v=300','./css/catalogo.css?v=300','./js/loja/store-kit.js?v=300','./js/online-store-ui.js?v=300','./js/firebase/catalog-bridge.js?v=300','./js/catalogo-publico.js?v=300');
