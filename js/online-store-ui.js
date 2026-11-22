@@ -133,8 +133,11 @@
   function draw(){
     const root=document.querySelector('#store-v2');if(!root||!state.data||!state.draft)return;
     root.dataset.view=state.view;root.classList.toggle('lo-readonly',!owner());
+    // O aviso em exibição sobrevive ao redesenho (ex.: "Loja publicada" logo após publicar).
+    const prev=root.querySelector('.lo-toast'),keep=prev?.classList.contains('is-on')?{text:prev.textContent,error:prev.classList.contains('is-error')}:null;
     root.innerHTML=`<div data-region="head">${head()}</div>${status()==='new'?'':tabs()}<div class="lo-view" data-region="view">${view()}</div><div data-region="save">${saveBar()}</div><div class="lo-toast" role="status" aria-live="polite"></div><div data-region="sheet">${sheet()}</div>`;
     bind(root);window.lucide?.createIcons?.();afterPaint('all');
+    if(keep){const t=root.querySelector('.lo-toast');t.textContent=keep.text;t.classList.toggle('is-error',keep.error);t.classList.add('is-on');}
   }
   // "main" redesenha o conteúdo sem tocar na prévia (um iframe recarrega se for recriado).
   function paint(name){
@@ -154,7 +157,7 @@
     const mark=d.logoUrl?`<img src="${esc(d.logoUrl)}" alt="">`:`<span>${esc(initials(name))}</span>`;
     return `<header class="lo-head"><div class="lo-head-top"><div class="lo-head-title"><h1>Loja online</h1><p>Sua vitrine com pedidos pelo WhatsApp.</p></div>${many?`<label class="lo-space"><span>Espaço</span><select data-space aria-label="Espaço da loja" ${state.busy||state.inflight?'disabled':''}>${spaces().map(s=>`<option value="${esc(s.id)}" ${s.id===state.spaceId?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label>`:''}</div>
       ${st==='new'?'':`<div class="lo-identity"><span class="lo-mark" style="--mark-bg:${t.band};--mark-fg:${t.onBand}">${mark}</span><div class="lo-identity-copy"><div class="lo-identity-name"><strong>${esc(name)}</strong><span class="lo-status lo-status-${st}">${STATUS[st]}</span>${pending?'<span class="lo-status lo-status-pending">Alterações não publicadas</span>':''}</div>${url?`<span class="lo-link">${icon('link')}<span>${esc(shortUrl(url))}</span></span>`:''}</div>
-      <div class="lo-head-actions">${primaryAction()}${st==='published'||st==='paused'?`<a class="lo-btn lo-btn-quiet" href="${esc(url)}" target="_blank" rel="noopener">${icon('external-link')}<span>Ver loja</span></a>`:`<button type="button" class="lo-btn lo-btn-quiet" data-act="fullpreview">${icon('smartphone')}<span>Ver como cliente</span></button>`}${st==='new'?'':`<button type="button" class="lo-btn lo-btn-quiet" data-act="share">${icon('share-2')}<span>Compartilhar</span></button>`}</div></div>`}</header>`;
+      <div class="lo-head-actions">${primaryAction()}${st==='published'||st==='paused'?`<a class="lo-btn lo-btn-quiet" href="${esc(url)}" target="_blank" rel="noopener">${icon('external-link')}<span>Ver loja</span></a>`:`<button type="button" class="lo-btn lo-btn-quiet" data-act="fullpreview">${icon('smartphone')}<span>Ver como cliente</span></button>`}${st==='new'||/data-act="share"/.test(primaryAction())?'':`<button type="button" class="lo-btn lo-btn-quiet" data-act="share">${icon('share-2')}<span>Compartilhar</span></button>`}</div></div>`}</header>`;
   }
   function primaryAction(){
     const st=status(),r=readiness(),dis=state.busy||!owner()?'disabled':'';
@@ -524,7 +527,7 @@
       const r=await call('saveOnlineStore',{...c,action:'publish',confirmed:true,published:wanted,revision:store()?.revision||0,...payload});
       if(ticket!==state.sequence)return;
       if(r?.store?.published!==wanted)throw Error('O servidor não confirmou a publicação. Recarregue a loja para conferir.');
-      state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());refreshDraft();state.unpublished=wanted?false:null;
+      state.data.store=r.store;state.base=K.draftFromStore(r.store,spaceName());refreshDraft();state.unpublished=wanted?false:null;state.saveState=wanted?'published':'paused';state.savedAt=Date.now();
       state.live={...(state.live||{}),revision:r.store.revision,items:state.base.productIds.map(id=>({productId:id,featured:!!state.base.presentation.products[id]?.featured,displayOrder:Number(state.base.presentation.products[id]?.order||0)})),publicSettings:{...state.base.settings},businessId:r.store.businessId,spaceId:r.store.spaceId};
       toast(wanted?'Loja publicada. O link já mostra esta versão.':'Loja pausada. O link mostra que ela está indisponível.');
       readLive();
@@ -535,7 +538,7 @@
     const link=publicUrl(),sequence=state.sequence;
     try{
       if(!link)throw Error('Salve a loja primeiro.');
-      if(!window.qrcode)await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='./assets/qrcode.min.js';s.onload=resolve;s.onerror=()=>{s.remove();reject(Error('Não foi possível carregar o QR Code.'));};document.head.appendChild(s);});
+      if(!window.qrcode)await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=`${window.OnlineStoreAssetBase||'./'}assets/qrcode.min.js`;s.onload=resolve;s.onerror=()=>{s.remove();reject(Error('Não foi possível carregar o QR Code.'));};document.head.appendChild(s);});
       const node=document.querySelector('#store-qr');if(!node||sequence!==state.sequence)return;
       const code=window.qrcode(0,'M');code.addData(link);code.make();node.innerHTML=code.createImgTag(5,12,'QR Code da loja');
       const image=node.querySelector('img'),download=document.createElement('button');image.style.maxWidth='100%';image.style.height='auto';
@@ -554,6 +557,7 @@
     if(state.ops.length||state.inflight)return `<div class="lo-savebar is-saving" role="status"><span class="lo-spinner" aria-hidden="true"></span><span>${state.inflight?'Salvando no rascunho…':'Alterações pendentes…'}</span></div>`;
     const pending=pendingPublish();
     if(pending)return `<div class="lo-savebar is-publish" role="status">${icon('cloud-check')}<span>${s==='saved'?`Rascunho salvo às ${time}. `:''}O cliente ainda vê a versão anterior.</span><div class="lo-savebar-actions"><button type="button" class="lo-btn lo-btn-sm lo-btn-primary" data-act="ask-publish" ${state.busy?'disabled':''}>Publicar alterações</button></div></div>`;
+    if(s==='published'&&status()==='published')return `<div class="lo-savebar is-saved" role="status">${icon('globe')}<span>Publicado às ${time}. O link já mostra esta versão.</span></div>`;
     return s==='saved'?`<div class="lo-savebar is-saved" role="status">${icon('cloud-check')}<span>Rascunho salvo às ${time}.</span></div>`:'';
   }
 

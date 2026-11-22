@@ -149,7 +149,7 @@ function mainBody(){
   return body;
 }
 function catalogView(){
-  return `${band()}${tools()}${canOrder()?'':`<p class="sf-notice">Esta loja ainda não recebe pedidos pelo site. ${catalog.openingHours?'Consulte o horário de atendimento.':''}</p>`}<div class="sf-layout"><main class="sf-main" id="sf-main">${mainBody()}</main><aside class="sf-aside" aria-label="Seu pedido">${asideCart()}</aside></div>`;
+  return `${band()}${tools()}${canOrder()?'':'<p class="sf-notice">Esta loja ainda não recebe pedidos pelo site. Você pode conferir os produtos e os preços.</p>'}<div class="sf-layout"><main class="sf-main" id="sf-main">${mainBody()}</main><aside class="sf-aside" aria-label="Seu pedido">${asideCart()}</aside></div>`;
 }
 function lineHtml(l,compact=false){
   const max=stockOf(l.item,l.variant);

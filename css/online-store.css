@@ -281,7 +281,7 @@ html[data-theme="dark"] .lo-tag { background: #3a2f12; color: #f6c453; }
 /* ---------- Prévia ---------- */
 .lo-preview { gap: 12px; }
 .lo-seg { display: flex; flex-shrink: 0; gap: 2px; padding: 3px; border: 1px solid var(--vf-line); border-radius: 11px; background: var(--vf-surface-2); }
-.lo-seg button { display: grid; place-items: center; width: 38px; height: 34px; border: 0; border-radius: 8px; background: none; color: var(--vf-text-3); cursor: pointer; }
+.lo-seg button { display: grid; place-items: center; width: 44px; height: 40px; border: 0; border-radius: 8px; background: none; color: var(--vf-text-3); cursor: pointer; }
 .lo-seg button[aria-pressed="true"] { background: var(--vf-surface); color: var(--vf-accent-text); box-shadow: var(--vf-shadow-1); }
 .lo-stage { --scale: .8; display: grid; justify-items: center; padding: 14px; border-radius: 14px; background: var(--vf-surface-2) var(--vf-texture) 0 0 / 24.25px 42px; overflow: hidden; }
 .lo-device { position: relative; overflow: hidden; background: #0d1417; }
