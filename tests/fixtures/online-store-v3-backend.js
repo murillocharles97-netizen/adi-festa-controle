@@ -69,6 +69,7 @@
       const s=stores.get(data.spaceId)||null;
       return {data:structuredClone({...(qa.layout?{storefrontLayoutVersion:1}:{}),store:s,products:productsFor(data.spaceId),orders:[],owner,phase:2,checkoutEnabled:s?.checkoutEnabled===true,orderReception:reception(s)})};
     }
+    if(name==='saveOnlineStore'&&data.action==='layout_support'){if(!qa.layout)fail('invalid-argument','Ação inválida.');return {data:{storefrontLayoutVersion:1}};}
     if(name!=='saveOnlineStore')fail('not-found','Função desconhecida.');
     if(!owner)fail('permission-denied','Somente o proprietário pode configurar esta loja.');
     const existing=stores.get(data.spaceId)||null,action=data.action||'save';

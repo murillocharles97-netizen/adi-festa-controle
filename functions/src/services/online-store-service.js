@@ -4,6 +4,7 @@ const {HttpsError}=require('firebase-functions/v2/https');
 const {assertWritable,validId}=require('./workspace-reset-policy');
 const {computeAccess}=require('./subscription-service');
 const Model=require('../shared/online-store');
+const {readLayout,publicLayout}=require('./storefront-layout');
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const fail=(code,message)=>{throw new HttpsError(code,message)};
 const storeId=spaceId=>`store_${hash(spaceId).slice(0,32)}`;
@@ -71,6 +72,10 @@ function onlineStoreService(db){
   const orderSummary=o=>({id:o.id,publicOrderNumber:o.publicOrderNumber||'',total:Number(o.total||0),orderStatus:o.orderStatus||'',spaceId:o.spaceId||null});
   async function save(request){
     const input=request.data||{},action=input.action||'save';
+    if(action==='layout_support')return db.runTransaction(async tx=>{
+      await context(tx,request,{ownerOnly:true});
+      return {storefrontLayoutVersion:1};
+    });
     if(!['save','publish','activate','set_order_reception'].includes(action))fail('invalid-argument','Ação inválida.');
     const token=randomBytes(24).toString('hex');
     return db.runTransaction(async tx=>{
@@ -138,6 +143,11 @@ function onlineStoreService(db){
       const variantDocs=await tx.get(c.root.collection('productVariants').limit(1001));if(variantDocs.size>1000)fail('resource-exhausted','Variações exigem paginação antes de publicar.');
       const variants=variantDocs.docs.map(serial),timestamp=new Date().toISOString();
       const presentation=existing?.presentation||{products:{},categories:[],banners:[]};
+      if(Object.hasOwn(input.presentation||{},'storefrontLayout')){
+        const legacyImages=new Set((presentation.banners||[]).map(b=>b.imageUrl).filter(Boolean));
+        if(existing?.catalogSettings?.bannerUrl)legacyImages.add(existing.catalogSettings.bannerUrl);
+        presentation.storefrontLayout=readLayout(input.presentation.storefrontLayout,c,legacyImages);
+      }
       if(input.presentation){for(const id of ids){const p=input.presentation.products?.[id]||{};presentation.products[id]={...presentation.products[id],featured:p.featured===true,bestseller:p.bestseller===true,order:Math.max(0,Number(p.order)||0),category:String(p.category||'').slice(0,100)};}}
       if(Array.isArray(input.presentation?.categories)){
         const previous=new Map((presentation.categories||[]).map(c=>[c.internalName,c]));
@@ -163,7 +173,7 @@ function onlineStoreService(db){
         const items=products.map(p=>Model.product(p,variants,presentation)).sort((a,b)=>a.displayOrder-b.displayOrder);
         const publicPresentation=Model.publicPresentation(presentation);
         if(settings.bannerUrl)publicPresentation.banners.unshift({id:'store-brand-banner',title:settings.publicName,subtitle:settings.welcomeText,imageUrl:settings.bannerUrl,active:true,order:-1});
-        tx.set(db.doc(`publicCatalogs/${store.publicToken}`),{catalogToken:store.publicToken,documentId:store.publicToken,schemaVersion:6,catalogType:'space_store',businessId:c.businessId,spaceId:c.spaceId,visitId:store.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...publicPresentation,active:store.published,catalogVisible:store.published,acceptingOrders:store.published&&store.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:store.checkoutEnabled?'active':'paused',workspaceGeneration:c.workspaceGeneration,revision:store.revision,updatedAt:timestamp});
+        tx.set(db.doc(`publicCatalogs/${store.publicToken}`),{catalogToken:store.publicToken,documentId:store.publicToken,schemaVersion:6,catalogType:'space_store',businessId:c.businessId,spaceId:c.spaceId,visitId:store.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...publicPresentation,...(presentation.storefrontLayout?{storefrontLayout:publicLayout(presentation.storefrontLayout)}:{}),active:store.published,catalogVisible:store.published,acceptingOrders:store.published&&store.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:store.checkoutEnabled?'active':'paused',workspaceGeneration:c.workspaceGeneration,revision:store.revision,updatedAt:timestamp});
       }
       return {store,replayed:false};
     });

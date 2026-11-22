@@ -68,6 +68,16 @@
       el?.querySelector('[data-store-retry]')?.addEventListener('click',()=>{el.innerHTML='<div class="lo-loading" role="status"><span class="lo-spinner" aria-hidden="true"></span>Carregando…</div>';load();});
     }
   }
+  async function checkLayoutSupport(data,ticket,c){
+    if(!data.owner||data.layoutChecked||data.storefrontLayoutVersion===1)return;
+    data.layoutChecked=true;
+    try{
+      const result=await call('saveOnlineStore',{...c,action:'layout_support'});
+      if(ticket!==state.sequence || data!==state.data || result.storefrontLayoutVersion!==1)return;
+      data.storefrontLayoutVersion=1;
+      if(state.view==='design')refreshLayoutEditor();
+    }catch(e){if(codeOf(e)!=='invalid-argument')data.layoutChecked=false;}
+  }
   async function readLive(){
     const s=store(),ticket=state.sequence,request=++liveRead;
     if(!s?.publicToken||!(s.published||s.activation)||typeof window.FirebasePublicCatalogReader!=='function')return;
@@ -489,7 +499,7 @@
     if (event.type==='click') {
       if(el.dataset.slideIndex!==undefined) session.index=Number(el.dataset.slideIndex);
       else switch(el.dataset.slideAction) {
-        case 'add': slides.push(K.bannerSlide('easy')); session.index=slides.length-1; break;
+        case 'add': if(slides.length>=24){toast('Cada vitrine comporta até 24 slides.',true);return;}slides.push(K.bannerSlide('easy')); session.index=slides.length-1; break;
         case 'remove': if(index<0||slides.length===1)return; slides.splice(index,1);session.index=Math.min(index,slides.length-1);break;
         case 'up': case 'down': {
           const next=index+(el.dataset.slideAction==='up'?-1:1);
@@ -742,6 +752,7 @@
   function toast(message,error=false){const el=document.querySelector('#store-v2 .lo-toast');if(!el){window.Utils?.toast?.(message,error);return;}el.textContent=message;el.classList.toggle('is-error',!!error);el.classList.add('is-on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('is-on'),error?6000:3200);}
   function goView(v,focus){
     if(state.view===v&&!focus)return;state.view=v;state.selecting=false;state.picked=new Set();paint('view');
+    if(v==='design')void checkLayoutSupport(state.data,state.sequence,scope());
     document.querySelectorAll('#store-v2 .lo-tabs [data-v]').forEach(b=>b.setAttribute('aria-current',b.dataset.v===v?'page':'false'));
     const root=document.querySelector('#store-v2');root.dataset.view=v;
     const target=focus==='whatsapp'?'#lo-contactPhone':focus==='identity'?'#lo-publicName':null;
