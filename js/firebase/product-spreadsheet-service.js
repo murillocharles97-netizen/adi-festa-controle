@@ -24,17 +24,29 @@ function assertContext(scope, { ownOperations = null, queue = true } = {}) {
   // Only ACTIVE queue items block; resolved/archived history is kept forever for audit.
   const active = (window.SyncFirebase?.getQueueDiagnostics?.() || []).filter(item => !ACTIVE_IGNORED.has(item.category) &&
     !(ownOperations && ownOperations.has(String(item.operationId))));
-  if (active.length) throw Error('Sincronize as operações pendentes antes de importar ou exportar.');
+  if (active.length) throw Object.assign(Error('Sincronize as operações pendentes antes de importar ou exportar.'), { code: 'spreadsheet-queue-active' });
 }
-export async function loadCatalog() {
-  const scope = capture(); assertContext(scope);
+// Read-only export only. An item is tolerated ONLY when Sync will never send it again on its own
+// (held for review: not sendable, not retryable, replay blocked). Pending, sending, preparing and
+// RETRYABLE errors still block. Nothing in the queue is read beyond its diagnostics or changed.
+const neverResent = item => item.sendable === false && item.canRetry === false && item.replayBlocked === true &&
+  (item.category === 'manual_review' || item.category === 'quarantined' || item.category === 'error' && Boolean(item.reviewReason));
+function assertExportQueue() {
+  const blocking = (window.SyncFirebase?.getQueueDiagnostics?.() || []).filter(item => !ACTIVE_IGNORED.has(item.category) && !neverResent(item));
+  if (blocking.length) throw Object.assign(Error(`${blocking.length} operação(ões) ainda podem ser enviadas ou reenviadas. Aguarde a sincronização terminar antes de exportar; nada foi alterado.`), { code: 'spreadsheet-export-queue-active' });
+}
+// exportOnly: same company/space/permission checks and the same SERVER reads (getDocsFromServer,
+// memory cache only); the result is marked so it can never feed an import or a code correction.
+export async function loadCatalog({ exportOnly = false } = {}) {
+  const check = scope => { if (exportOnly) { assertContext(scope, { queue: false }); assertExportQueue(); } else assertContext(scope); };
+  const scope = capture(); check(scope);
   const permissions = { cost: window.TeamAccess.has('cost.view'), stock: window.TeamAccess.has('inventory.adjust'), edit: window.TeamAccess.has('products.edit') };
   const [products, financials, variants] = await Promise.all([
     createFirestoreRepository('products').listAllPaged(200),
     permissions.cost ? createFirestoreRepository('productFinancials').listAllPaged(200) : [],
     createFirestoreRepository('productVariants').listAllPaged(200),
   ]);
-  assertContext(scope);
+  check(scope);
   const costs = new Map(financials.map(f => [f.productId || f.id, f]));
   const visible = products.filter(p => Model.inScope(p, scope)).map(p => ({ ...p,
     custo: permissions.cost ? costs.get(p.id)?.custo ?? p.custo ?? null : null,
@@ -45,7 +57,7 @@ export async function loadCatalog() {
   for (const p of byId.values()) for (const barcode of p.alternateBarcodes || []) reservations.push({...p, id:`alternate:${p.id}:${barcode}`, codigo:'', barcode, identifierReservation:true});
   // Whole company (all spaces, inactive, variations): codes must be unique across it.
   const identifierCatalog = { products: products.map(p => ({ ...p, businessId: p.businessId || scope.businessId })), variants };
-  return {scope, permissions, products:visible, matchingProducts:[...visible, ...inactive, ...reservations], identifierCatalog};
+  return {scope, permissions, products:visible, matchingProducts:[...visible, ...inactive, ...reservations], identifierCatalog, ...(exportOnly ? { exportOnly: true } : {})};
 }
 
 // "Corrigir SKU/EAN": sent ONLY to the trusted callable (never through the Sync queue),
@@ -54,6 +66,7 @@ export async function loadCatalog() {
 const UNKNOWN = ['internal', 'unavailable', 'deadline-exceeded', 'unknown', 'aborted'];
 const newOperationId = () => (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
 export async function applyIdentifierCorrections(catalog, preview, onProgress) {
+  if (catalog?.exportOnly) throw Error('Correção de códigos indisponível: há operações em revisão em Sincronização.');
   assertContext(catalog.scope);
   if (preview?.mode !== 'identifiers') throw Error('Prévia de correção de códigos inválida.');
   if (!window.TeamAccess.has('products.edit')) throw Error('Você não tem permissão para editar produtos.');
@@ -122,6 +135,7 @@ export function entryApplied(sheetId, productId) {
     m.observacao === entryNote(sheetId) && !rejected.has(String(m.operationId)));
 }
 export async function applyPreview(catalog, preview, onProgress, { sheetId = '' } = {}) {
+  if (catalog?.exportOnly) throw Error('Importação indisponível: há operações em revisão em Sincronização.');
   assertContext(catalog.scope);
   if (preview.rows.some(row => row.status === 'update' && Object.hasOwn(row.changes, 'entrada'))) {
     try { await prefetchSheetEntries(sheetId); }

@@ -31,8 +31,8 @@
       busy = value;
       box.querySelectorAll('[data-sheet-close]').forEach(b => b.disabled = value);
       q('[data-sheet-export]').disabled = value || !catalog;
-      fileInput.disabled = value || !catalog?.permissions.edit;
-      modeInput.disabled = value || completed || !catalog?.permissions.edit;
+      fileInput.disabled = value || !catalog?.permissions.edit || catalog?.exportOnly === true;
+      modeInput.disabled = value || completed || !catalog?.permissions.edit || catalog?.exportOnly === true;
       q('[data-sheet-confirm]').disabled = value || completed || !(preview?.counts.updates + preview?.counts.creates) || preview?.mode === 'identifiers' && !q('[data-sheet-ack]')?.checked;
     }
     function close() {
@@ -76,15 +76,16 @@
     q('[data-sheet-export]').onclick = async () => {
       if (busy) return; controls(true); preview = null; parsedTable = null; q('[data-sheet-preview]').innerHTML = ''; q('[data-sheet-error]').hidden = true;
       try {
-        catalog = await service.loadCatalog();
+        // Read-only: fresh server data, never assigned to the import catalog.
+        const exported = await service.loadCatalog({ exportOnly: true });
         status('Gerando arquivo .xlsx…');
         const columns = Model.exportColumns || Model.columns;
-        const table = [columns.map(c=>c[0]), ...catalog.products.map(p=>{const values=Model.values(p,catalog.permissions.cost);return columns.map(c=>c[1]==='entrada'?null:values[c[1]]);})];
-        const baseline = catalog.products.map(p=>[p.id, Model.values(p,catalog.permissions.cost).estoqueAtual]).filter(([,stock])=>typeof stock==='number');
-        const result = await worker('export', { table, context: catalog.scope, baseline });
+        const table = [columns.map(c=>c[0]), ...exported.products.map(p=>{const values=Model.values(p,exported.permissions.cost);return columns.map(c=>c[1]==='entrada'?null:values[c[1]]);})];
+        const baseline = exported.products.map(p=>[p.id, Model.values(p,exported.permissions.cost).estoqueAtual]).filter(([,stock])=>typeof stock==='number');
+        const result = await worker('export', { table, context: exported.scope, baseline });
         const url = URL.createObjectURL(new Blob([result.bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })), a = document.createElement('a');
-        a.href = url; a.download = `produtos-veconi-${catalog.scope.businessId.replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().slice(0,10)}.xlsx`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),30000);
-        status(`${catalog.products.length} produtos exportados. Nenhum dado foi alterado.`);
+        a.href = url; a.download = `produtos-veconi-${exported.scope.businessId.replace(/[^a-z0-9_-]/gi,'_')}-${new Date().toISOString().slice(0,10)}.xlsx`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),30000);
+        status(`${exported.products.length} produtos exportados. Nenhum dado foi alterado.`);
       } catch (e) { error(e); } finally { controls(false); }
     };
     fileInput.onchange = async () => {
@@ -149,9 +150,15 @@
     };
     controls(true);
     try {
-      service = await import('./firebase/product-spreadsheet-service.js?v=239'); catalog = await service.loadCatalog();
+      service = await import('./firebase/product-spreadsheet-service.js?v=2431-export'); let importBlock = null;
+      try { catalog = await service.loadCatalog(); }
+      catch (e) {
+        // Only operations held for review (never resent automatically): export stays available, import does not.
+        if (e?.code !== 'spreadsheet-queue-active') throw e;
+        importBlock = e; catalog = await service.loadCatalog({ exportOnly: true });
+      }
       q('[data-sheet-context]').textContent = `${window.SpaceContext.selectionLabel()} · ${catalog.products.length} produtos disponíveis`;
-      status(catalog.permissions.edit ? 'Escolha exportar ou selecione sua planilha para revisar.' : 'Você pode exportar. Importação exige permissão para editar produtos.');
+      status(importBlock ? 'Você pode exportar os produtos confirmados na nuvem. Importação bloqueada: há operações em revisão em Sincronização → Ver detalhes.' : catalog.permissions.edit ? 'Escolha exportar ou selecione sua planilha para revisar.' : 'Você pode exportar. Importação exige permissão para editar produtos.');
     } catch (e) { error(e); status('Não foi possível carregar os produtos.'); }
     finally { controls(false); q('[data-sheet-export]').focus(); }
   }
