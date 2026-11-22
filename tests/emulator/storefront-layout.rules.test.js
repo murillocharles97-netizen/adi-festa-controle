@@ -40,9 +40,13 @@ test('banner media is scoped by bucket, business, space and slot before the revi
     await assert.rejects(s.change(d,{presentation:{storefrontLayout:value}}),{code:'invalid-argument'});
   }
   value.slides[0].imageUrl=asset(s.spaceId);
+  value.home={search:false,placeholder:'Busca futura',featuredTitle:'Título privado'};value.featured=false;
   const result=await s.change(d,{presentation:{storefrontLayout:value}});
   assert.equal(result.revision,d.revision+1);
+  const published=await s.publish(result), doc=await v.publicCatalog(published);
+  assert.deepEqual(doc.storefrontLayout.home,{search:false,placeholder:'',featuredTitle:''});
+  assert.equal(doc.storefrontLayout.slides[0].imageUrl,value.slides[0].imageUrl);
   value.slides[0].target='invalid';
-  await assert.rejects(s.change(result,{presentation:{storefrontLayout:value}}),{code:'invalid-argument'});
+  await assert.rejects(s.change(published,{presentation:{storefrontLayout:value}}),{code:'invalid-argument'});
   await assert.rejects(s.change(d,{presentation:{storefrontLayout:layout()}}),{code:'aborted'});
 });

@@ -405,3 +405,21 @@ html[data-theme="dark"] .lo-toast.is-error { color: #2a0608; }
 .lo-banners .lo-banner-check{display:flex;align-items:center;gap:.55rem;min-height:40px}
 .lo-banner-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px}
 .lo-banners .lo-chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
+
+.lo-banners .lo-banner-stage{display:block;width:100%;height:clamp(240px,22vw,320px);border:0;border-radius:16px;background:#061d20;margin:14px 0 22px}
+.lo-banners fieldset{padding:0;min-width:0}.lo-banners h3{font-size:1.05rem;color:var(--vf-text)}
+.lo-slide-list{display:grid;gap:6px}.lo-slide-row{display:grid;grid-template-columns:80px minmax(0,1fr) auto;align-items:center;gap:12px;text-align:left;color:var(--vf-text);background:var(--vf-surface-2);border:1px solid var(--vf-line);border-radius:12px;font:inherit;font-weight:650;line-height:1.3;padding:5px 12px 5px 5px;min-height:48px;cursor:pointer}
+.lo-slide-row [data-slide-name]{overflow-wrap:anywhere}.lo-slide-row small{color:var(--vf-text-2)}
+.lo-slide-thumb,.lo-template-art{display:grid;place-items:center;overflow:hidden;border-radius:8px;background:radial-gradient(ellipse at 66% 70%,#144e50,#04171b 80%)}
+.lo-slide-thumb{height:42px}.lo-slide-thumb .vv-motif{height:100%;width:auto}.lo-slide-art{width:100%;height:100%;object-fit:cover}
+.lo-template-library{display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:7px}
+.lo-template-library button{min-width:0;border:1px solid var(--vf-line);border-radius:12px;color:var(--vf-text);background:var(--vf-surface-2);padding:4px;font:inherit;font-weight:650;cursor:pointer}
+.lo-template-library button>span:last-child{display:block;font-size:11px;padding:6px 2px}
+.lo-template-art{aspect-ratio:1.65}.lo-template-art .vv-motif{max-width:85%;height:100%;width:auto}
+.lo-banners [aria-pressed=true]{outline:2px solid var(--vf-accent-text);outline-offset:-2px}
+.lo-banners fieldset :is(input:not([type=checkbox]),select){background:var(--vf-surface-2);color:var(--vf-text);border-color:var(--vf-line-strong)}
+#store-v2 .lo-tabs{width:100%}#store-v2 .lo-tabs button{flex:1}
+@media(min-width:1000px){.lo-layout-layout{grid-template-columns:minmax(0,1fr) 360px}}
+@media(max-width:999px){.lo-layout-layout .lo-side{display:none}}
+@media(max-width:500px){#store-v2 .lo-tabs button{font-size:12px;white-space:normal}.lo-banners .lo-banner-stage{height:245px}.lo-template-library{grid-template-columns:repeat(4,minmax(0,1fr))}}

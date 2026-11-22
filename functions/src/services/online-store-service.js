@@ -172,7 +172,8 @@ function onlineStoreService(db){
         tx.set(db.doc(`catalogStoreBindings/${store.publicToken}`),{businessId:c.businessId,spaceId:c.spaceId,storeId:c.ref.id,workspaceGeneration:c.workspaceGeneration,status:'completed'},{merge:true});
         const items=products.map(p=>Model.product(p,variants,presentation)).sort((a,b)=>a.displayOrder-b.displayOrder);
         const publicPresentation=Model.publicPresentation(presentation);
-        if(settings.bannerUrl)publicPresentation.banners.unshift({id:'store-brand-banner',title:settings.publicName,subtitle:settings.welcomeText,imageUrl:settings.bannerUrl,active:true,order:-1});
+        if(presentation.storefrontLayout)publicPresentation.banners=[];
+        else if(settings.bannerUrl)publicPresentation.banners.unshift({id:'store-brand-banner',title:settings.publicName,subtitle:settings.welcomeText,imageUrl:settings.bannerUrl,active:true,order:-1});
         tx.set(db.doc(`publicCatalogs/${store.publicToken}`),{catalogToken:store.publicToken,documentId:store.publicToken,schemaVersion:6,catalogType:'space_store',businessId:c.businessId,spaceId:c.spaceId,visitId:store.id,publicName:settings.publicName,...settings,publicSettings:settings,items,...publicPresentation,...(presentation.storefrontLayout?{storefrontLayout:publicLayout(presentation.storefrontLayout)}:{}),active:store.published,catalogVisible:store.published,acceptingOrders:store.published&&store.checkoutEnabled,serviceModes:[...(settings.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(settings.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],closedBehavior:'view_only',status:store.checkoutEnabled?'active':'paused',workspaceGeneration:c.workspaceGeneration,revision:store.revision,updatedAt:timestamp});
       }
       return {store,replayed:false};

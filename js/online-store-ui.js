@@ -70,13 +70,16 @@
   }
   async function checkLayoutSupport(data,ticket,c){
     if(!data.owner||data.layoutChecked||data.storefrontLayoutVersion===1)return;
-    data.layoutChecked=true;
+    data.layoutChecked=true;data.layoutChecking=true;
     try{
       const result=await call('saveOnlineStore',{...c,action:'layout_support'});
       if(ticket!==state.sequence || data!==state.data || result.storefrontLayoutVersion!==1)return;
       data.storefrontLayoutVersion=1;
-      if(state.view==='design')refreshLayoutEditor();
     }catch(e){if(codeOf(e)!=='invalid-argument')data.layoutChecked=false;}
+    finally{
+      data.layoutChecking=false;
+      if(ticket===state.sequence && data===state.data && state.view==='layout')refreshLayoutEditor();
+    }
   }
   async function readLive(){
     const s=store(),ticket=state.sequence,request=++liveRead;
@@ -126,12 +129,18 @@
   }
   function flush(){if(state.flushing)return state.flushing;state.flushing=doFlush().finally(()=>{state.flushing=null;if(state.ops.length&&state.saveState!=='error'){clearTimeout(state.saveTimer);state.saveTimer=setTimeout(flush,250);}});return state.flushing;}
   function sameSet(a,b){if(a.length!==b.length)return false;const s=new Set(a);return b.every(x=>s.has(x));}
+  // Firestore may return map fields in a different order. Array order is meaningful for slides.
+  function sameLayout(a,b){
+    const canonical=value=>Array.isArray(value)?value.map(canonical):value && typeof value==='object'?
+      Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
+    return JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
+  }
   function confirmsDraft(saved,payload,revision){
     if(!saved||saved.revision!==revision+1||saved.slug!==payload.slug||
       !sameSet(saved.selectedProductIds||[],payload.productIds)||
       Object.keys(payload.settings).some(k=>JSON.stringify(saved.catalogSettings?.[k])!==JSON.stringify(payload.settings[k])))return false;
     const presentation=K.savePayload(K.draftFromStore(saved)).presentation;
-    if(payload.presentation.storefrontLayout && JSON.stringify(presentation.storefrontLayout)!==JSON.stringify(payload.presentation.storefrontLayout))return false;
+    if(payload.presentation.storefrontLayout && !sameLayout(presentation.storefrontLayout,payload.presentation.storefrontLayout))return false;
     const categories=new Map(presentation.categories.map(c=>[c.internalName,c]));
     return Object.keys(payload.presentation.products).every(id=>
       JSON.stringify(presentation.products[id])===JSON.stringify(payload.presentation.products[id]))&&
@@ -147,7 +156,14 @@
       const d=K.applyOps(state.base,ops),payload=K.savePayload(d);
       payload.settings=M.settings({...d.settings,checkoutEnabled:store()?.checkoutEnabled===true});
       const revision=store()?.revision||0;
-      const result=await call('saveOnlineStore',{...c,action:'save',revision,...payload});
+      let result;
+      try{result=await call('saveOnlineStore',{...c,action:'save',revision,...payload});}
+      catch(error){
+        if(codeOf(error)!=='aborted'||!ops.some(op=>op.t==='storefrontLayout'))throw error;
+        const remote=await call('getOnlineStore',c);
+        if(!confirmsDraft(remote?.store,payload,revision))throw error;
+        result=remote;
+      }
       if(ticket!==state.sequence)return;
       const saved=result?.store;
       // Confirma que o servidor gravou exatamente o que foi enviado (inclusive campos que um servidor antigo descartaria).
@@ -166,13 +182,14 @@
   }
   async function rebase(){
     const ticket=state.sequence,c=scope();
-    try{const data=await call('getOnlineStore',c);if(ticket!==state.sequence)return;state.data=data;state.base=K.draftFromStore(data.store,spaceName());buildIndex();refreshDraft();
+    try{const data=await call('getOnlineStore',c);if(ticket!==state.sequence)return;state.data=data;state.base=K.draftFromStore(data.store,spaceName());buildIndex();refreshDraft();layoutSession=null;
+      if(state.view==='layout')void checkLayoutSupport(data,ticket,c);
       toast('A loja foi alterada em outro aparelho. Suas alterações foram reaplicadas sobre a versão mais recente.');draw();await doFlush();}
     catch(e){if(ticket===state.sequence)fail(friendly(e));}
   }
   function fail(message){state.saveState='error';state.saveError=message;paint('save');}
   async function settle(){for(let i=0;i<6&&(state.ops.length||state.inflight||state.flushing);i++){if(state.saveState==='error')break;await flush();}return !state.ops.length&&!state.inflight&&state.saveState!=='error';}
-  function discard(){state.ops=[];state.saveState=state.inflight?'saving':'idle';state.saveError='';for(const key of Object.keys(FIELD_MAX)){delete state.errors[key+'Error'];delete state.errors[key+'Input'];}refreshDraft();draw();toast('Alterações não salvas foram descartadas.');}
+  function discard(){layoutSession=null;state.ops=[];state.saveState=state.inflight?'saving':'idle';state.saveError='';for(const key of Object.keys(FIELD_MAX)){delete state.errors[key+'Error'];delete state.errors[key+'Input'];}refreshDraft();draw();toast('Alterações não salvas foram descartadas.');}
   function guard(){if(!owner()){toast('Somente o proprietário pode alterar a loja.',true);return false;}if(state.busy)return false;return true;}
 
   /* ---------- Situação ---------- */
@@ -222,15 +239,15 @@
     return r.done?`<button type="button" class="lo-btn lo-btn-primary" data-act="share">${icon('send')}<span>Divulgar loja</span></button>`:'';
   }
   function tabs(){
-    const items=[['home','Painel','layout-dashboard'],['products','Produtos','package'],['design','Aparência','palette']];
+    const items=[['home','Painel','layout-dashboard'],['products','Produtos','package'],['layout','Layout e Banners','layers'],['design','Aparência','palette']];
     return `<nav class="lo-tabs" aria-label="Seções da loja">${items.map(([id,label,ic])=>`<button type="button" data-act="view" data-v="${id}" aria-current="${state.view===id?'page':'false'}">${icon(ic)}<span>${label}</span>${id==='products'?`<b data-count="tab">${state.sel.size}</b>`:''}</button>`).join('')}</nav>`;
   }
   function view(){
     if(status()==='new')return `<div data-region="main">${createView()}</div>`;
-    const side=state.view==='home'||state.view==='design';
-    return `${state.view==='design'?`<button type="button" class="lo-btn lo-btn-quiet lo-fab" data-act="fullpreview">${icon('smartphone')}<span>Ver prévia</span></button>`:''}<div class="lo-layout lo-layout-${state.view}"><div class="lo-main" data-region="main">${mainContent()}</div>${side?`<aside class="lo-side">${previewPanel()}</aside>`:''}</div>`;
+    const side=['home','design','layout'].includes(state.view);
+    return `${['design','layout'].includes(state.view)?`<button type="button" class="lo-btn lo-btn-quiet lo-fab" data-act="fullpreview">${icon('smartphone')}<span>Ver prévia</span></button>`:''}<div class="lo-layout lo-layout-${state.view}"><div class="lo-main" data-region="main">${mainContent()}</div>${side?`<aside class="lo-side">${previewPanel()}</aside>`:''}</div>`;
   }
-  function mainContent(){if(status()==='new')return createView();return state.view==='products'?productsView():state.view==='design'?designView():homeView();}
+  function mainContent(){if(status()==='new')return createView();return state.view==='products'?productsView():state.view==='layout'?layoutEditor():state.view==='design'?designView():homeView();}
   const initials=name=>String(name||'Loja').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'L';
   function emptySpaces(){return '<div class="lo-panel lo-fatal"><h2>Nenhum espaço disponível para a loja</h2><p>A loja online é criada por espaço. Peça ao proprietário acesso a um espaço com produtos e vendas.</p></div>';}
 
@@ -467,17 +484,21 @@
     const session = currentLayout(), layout = session.value, secondary = session.index === -1;
     const slide = secondary ? layout.secondary : layout.slides[session.index];
     const field = (key,label,max) => `<label>${label}<input data-slide-field="${key}" maxlength="${max}" value="${esc(slide[key])}"></label>`;
-    return `<section class="lo-panel lo-banners"><header class="lo-panel-head"><div><h2>Layout e Banners</h2><p>${supportsLayout()?'As alterações são salvas no rascunho. Use Publicar para atualizar a vitrine.':'Experimente o layout na prévia desta sessão. A versão atual do servidor ainda não salva os banners.'}</p></div></header>
-    <fieldset ${owner()?'':'disabled'}><div class="lo-chips" aria-label="Escolha o banner">${layout.slides.map((s,i)=>`<button class="lo-chip" data-slide-index="${i}" aria-pressed="${i===session.index}">${i+1} · ${esc(s.title || 'Banner')}${s.active?'':' (oculto)'}</button>`).join('')}<button class="lo-chip" data-slide-index="-1" aria-pressed="${secondary}">Banner secundário</button></div>
-    <label>Modelo rápido<select data-slide-template>${Object.entries(K.bannerTemplates).map(([id,[name]])=>`<option value="${id}" ${slide.template===id?'selected':''}>${esc(name)}</option>`).join('')}</select></label>
+    const home=layout.home||{};
+    const thumb=s=>s.imageUrl?`<img class="lo-slide-art" src="${esc(s.imageUrl)}" alt="">`:`<span class="vv-motif" data-model="${esc(s.template)}"></span>`;
+    const modelNames={robot:'Robô e carrinho',offers:'Ofertas',arrivals:'Novidades',promotion:'Promoções',featured:'Destaques',discover:'Etiquetas',easy:'Cesta'};
+    return `<section class="lo-panel lo-banners"><header class="lo-panel-head"><div><h2>Layout e Banners</h2><p>${state.data.layoutChecking?'Verificando o suporte a banners desta loja…':supportsLayout()?'As alterações são salvas no rascunho. Use Publicar para atualizar a vitrine.':'Experimente o layout na prévia desta sessão. A versão atual do servidor ainda não salva os banners.'}</p></div></header>
+    <iframe class="lo-preview-frame lo-banner-stage" title="Prévia do banner selecionado" src="${esc(previewSrc()+'&banner=1')}"></iframe><fieldset ${owner()&&!state.data.layoutChecking?'':'disabled'}><h3>Carrossel de banners</h3><div class="lo-slide-list" aria-label="Escolha o banner">${layout.slides.map((s,i)=>`<button class="lo-slide-row" data-slide-index="${i}" aria-pressed="${i===session.index}"><span class="lo-slide-thumb">${thumb(s)}</span><span data-slide-name>${esc(s.title||'Banner')}</span><small>${s.active?'Ativo':'Oculto'}</small></button>`).join('')}<button class="lo-chip" data-slide-index="-1" aria-pressed="${secondary}">Banner secundário</button></div>
+    <h3>Modelos rápidos</h3><div class="lo-template-library" aria-label="Modelos rápidos">${Object.entries(modelNames).map(([id,name])=>`<button type="button" data-slide-model="${id}" aria-pressed="${slide.template===id}"><span class="lo-template-art">${thumb({template:id})}</span><span>${name}</span></button>`).join('')}</div>
     ${field('title','Título',100)}${field('description','Descrição',300)}<div class="lo-banner-pair">${field('button','Texto do botão',40)}
     <label>Destino<select data-slide-field="target">${[['catalog','Catálogo'],['featured','Destaques'],['cart','Carrinho'],...(slide.target.startsWith('http')?[[slide.target,'Link publicado']]:[])].map(([id,n])=>`<option value="${esc(id)}" ${slide.target===id?'selected':''}>${n}</option>`).join('')}</select></label></div>
+    <label>Link externo (opcional)<input type="url" data-slide-link maxlength="2000" placeholder="https://" value="${slide.target.startsWith('https://')?esc(slide.target):''}"></label>
     <label>Arte personalizada<input type="file" data-slide-image accept="image/jpeg,image/png,image/webp"></label>
     ${slide.imageUrl?'<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="clear">Voltar à arte do modelo</button>':''}
     <label class="lo-banner-check"><input type="checkbox" data-slide-field="active" ${slide.active?'checked':''}> Exibir este banner</label>
     <div class="lo-actions"><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="add">Adicionar slide</button>
-    ${secondary?'':`<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="up" ${session.index===0?'disabled':''}>Mover antes</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="down" ${session.index===layout.slides.length-1?'disabled':''}>Mover depois</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="remove" ${layout.slides.length===1?'disabled':''}>Remover slide</button>`}</div>
-    <label class="lo-banner-check"><input type="checkbox" data-slide-featured ${layout.featured?'checked':''}> Exibir seção de destaques</label></fieldset></section>`;
+    ${secondary?'':`<button type="button" class="lo-btn lo-btn-quiet" data-slide-action="up" ${session.index===0?'disabled':''}>Mover antes</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="down" ${session.index===layout.slides.length-1?'disabled':''}>Mover depois</button><button type="button" class="lo-btn lo-btn-quiet" data-slide-action="remove" ${layout.slides.length===1?'disabled':''}>Remover slide</button>`}</div><h3>Busca e destaques</h3><label class="lo-banner-check"><input type="checkbox" data-layout-home="search" ${home.search!==false?'checked':''}> Exibir campo de busca na home</label><label>Texto do campo de busca<input maxlength="80" data-layout-home="placeholder" value="${esc(home.placeholder||'')}" placeholder="Buscar produtos"></label><label>Título dos destaques<input maxlength="80" data-layout-home="featuredTitle" value="${esc(home.featuredTitle||'')}" placeholder="Destaques"></label>
+    <label class="lo-banner-check"><input type="checkbox" data-slide-featured ${layout.featured?'checked':''}> Exibir seção de destaques</label><div class="lo-actions"><button type="button" class="lo-btn lo-btn-quiet" data-act="fullpreview">Pré-visualizar loja</button>${supportsLayout()?'<button type="button" class="lo-btn lo-btn-primary" data-slide-action="save">Salvar rascunho</button>':''}</div></fieldset></section>`;
   }
   const supportsLayout = () => state.data?.storefrontLayoutVersion === 1;
   function changedLayout() {
@@ -487,18 +508,23 @@
   function refreshLayoutEditor() {
     const panel=document.querySelector('#store-v2 .lo-banners');
     if(panel) panel.outerHTML=layoutEditor();
-    schedulePreview();
+    mountPreviews();
   }
   async function editLayout(event) {
     const el=event.target.closest('button,input,select');
-    if(!el?.closest('.lo-banners') || !owner() || state.busy) return;
+    if(!el?.closest('.lo-banners') || !owner() || state.busy || state.data.layoutChecking) return;
     if(event.type==='input' && !el.matches('input[type=text],input:not([type])'))return;
     if(event.type==='change' && el.matches('input[type=text],input:not([type])'))return;
     const session=currentLayout(), layout=session.value, slides=layout.slides, index=session.index;
     const slide=index===-1?layout.secondary:slides[index];
     if (event.type==='click') {
+      if(el.dataset.slideModel){
+        const visible=slide.active;Object.assign(slide,K.bannerSlide(el.dataset.slideModel),{active:visible});
+        changedLayout();refreshLayoutEditor();document.querySelector(`[data-slide-model="${slide.template}"]`)?.focus();return;
+      }
       if(el.dataset.slideIndex!==undefined) session.index=Number(el.dataset.slideIndex);
       else switch(el.dataset.slideAction) {
+        case 'save': if(state.saveState==='error')state.saveState='pending';await flush();return;
         case 'add': if(slides.length>=24){toast('Cada vitrine comporta até 24 slides.',true);return;}slides.push(K.bannerSlide('easy')); session.index=slides.length-1; break;
         case 'remove': if(index<0||slides.length===1)return; slides.splice(index,1);session.index=Math.min(index,slides.length-1);break;
         case 'up': case 'down': {
@@ -513,14 +539,20 @@
       refreshLayoutEditor();
       const buttons=document.querySelectorAll('.lo-banners [data-slide-index]');
       [...buttons].find(b=>Number(b.dataset.slideIndex)===session.index)?.focus();
-    } else if (el.hasAttribute('data-slide-template') && event.type==='change') {
-      Object.assign(slide,K.bannerSlide(el.value),{active:slide.active});changedLayout();refreshLayoutEditor();
+    } else if(el.hasAttribute('data-slide-link') && event.type==='change') {
+      const value=el.value.trim();let valid=!value;
+      try{const u=new URL(value);valid=u.protocol==='https:'&&!u.username&&!u.password;}catch{}
+      if(!valid){el.setCustomValidity('Informe um link HTTPS válido.');el.reportValidity();return;}
+      el.setCustomValidity('');slide.target=value||'catalog';changedLayout();refreshLayoutEditor();
+    } else if(el.dataset.layoutHome){
+      layout.home={search:true,placeholder:'',featuredTitle:'',...layout.home,[el.dataset.layoutHome]:el.type==='checkbox'?el.checked:el.value};
+      changedLayout();
     } else if (el.hasAttribute('data-slide-featured')) {
       layout.featured=el.checked;changedLayout();
     } else if (el.dataset.slideField) {
       slide[el.dataset.slideField]=el.type==='checkbox'?el.checked:el.value;
       const tab=document.querySelector(`[data-slide-index="${index}"]`);
-      if(index!==-1&&tab)tab.textContent=`${index+1} · ${slide.title||'Banner'}${slide.active?'':' (oculto)'}`;
+      if(index!==-1&&tab){tab.querySelector('[data-slide-name]').textContent=slide.title||'Banner';tab.querySelector('small').textContent=slide.active?'Ativo':'Oculto';}
       changedLayout();
     } else if(el.hasAttribute('data-slide-image') && event.type==='change') {
       const file=el.files?.[0]; if(!file)return;
@@ -550,7 +582,7 @@
       <section class="lo-panel" id="lo-sec-identity" aria-labelledby="lo-id-title"><header class="lo-panel-head"><div><h2 id="lo-id-title">Identidade</h2><p>O que o cliente vê primeiro.</p></div></header>
         ${fieldHtml({key:'publicName',label:'Nome da loja',value:d.publicName,max:100,required:true,disabled:ro})}
         ${fieldHtml({key:'welcomeText',label:'Descrição curta',value:d.welcomeText,max:300,multiline:true,placeholder:'Ex.: Doces artesanais feitos por encomenda. Entregamos no bairro.',disabled:ro})}
-        ${upload('logo')}${upload('cover')}</section>${layoutEditor()}
+        ${upload('logo')}${upload('cover')}</section>
       <section class="lo-panel" id="lo-sec-style" aria-labelledby="lo-style-title"><header class="lo-panel-head"><div><h2 id="lo-style-title">Estilo</h2><p>Escolha um estilo pronto. O texto se ajusta para continuar legível.</p></div></header>
         <div class="lo-palettes" role="radiogroup" aria-label="Estilo da loja">${K.PALETTES.map(p=>{const t=K.theme({primaryColor:p.primary,secondaryColor:p.secondary});return `<button type="button" class="lo-palette" role="radio" aria-checked="${current===p.id}" data-act="palette" data-id="${p.id}" style="--pb:${t.band};--pf:${t.onBand};--pa:${t.accent};--pt:${t.onAccent}" ${ro?'disabled':''}><span class="lo-palette-band"><b>Aa</b><i></i></span><span class="lo-palette-name">${p.name}</span></button>`;}).join('')}</div>
         <details class="lo-custom lo-custom-colors" ${current==='custom'?'open':''}><summary>Cores personalizadas</summary><div class="lo-colors"><label class="lo-color"><span>Destaque <small>botões e preços</small></span><input type="color" data-color="primaryColor" value="${esc(d.primaryColor||'#0f9f94')}" ${ro?'disabled':''}></label><label class="lo-color"><span>Faixa da marca <small>topo da loja</small></span><input type="color" data-color="secondaryColor" value="${esc(d.secondaryColor||'#0b2730')}" ${ro?'disabled':''}></label></div>${warn?`<p class="lo-warn" role="status">${icon('triangle-alert')}<span>${esc(warn)}</span></p>`:''}</details></section>
@@ -635,28 +667,33 @@
       <div class="lo-stage is-${state.device}" data-stage><div class="lo-device"><iframe class="lo-preview-frame" src="${esc(previewSrc())}" title="Prévia da loja como o cliente vê" loading="lazy"></iframe></div></div>
       <button type="button" class="lo-btn lo-btn-quiet lo-btn-wide" data-act="fullpreview">${icon('maximize-2')}<span>Abrir prévia em tela cheia</span></button></section>`;
   }
-  function previewCatalog(){
+  function previewCatalog(bannerOnly=false){
     const d=state.draft;let s;try{s=M.settings(d.settings);}catch{s={...d.settings};}
-    const items=d.productIds.map(id=>index.byId.get(id)).filter(Boolean).map(p=>{
+    const items=(bannerOnly?[]:d.productIds).map(id=>index.byId.get(id)).filter(Boolean).map(p=>{
       const raw=index.local.products.get(p.id);let item=null;
       if(raw)try{item=M.product(raw,index.local.variants,d.presentation);}catch{item=null;}
       if(!item){const x=pres(p.id);item={...p.src,category:x.category||p.baseCategory,featured:!!x.featured,displayOrder:Number(x.order||0),active:true};}
       return item;});
     let categories=[];try{categories=M.publicPresentation(d.presentation).categories;}catch{}
-    return {preview:true,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],storefrontLayout:currentLayout().value,previewSlide:currentLayout().index,
+    return {preview:true,previewTheme:document.documentElement.dataset.theme,schemaVersion:6,catalogType:'space_store',businessId:business(),spaceId:state.spaceId,...s,publicName:s.publicName||spaceName(),publicSettings:s,items,categories,banners:[],storefrontLayout:currentLayout().value,previewSlide:currentLayout().index,
       serviceModes:[...(s.pickupEnabled?[{id:'pickup',type:'pickup',label:'Retirada',active:true}]:[]),...(s.deliveryEnabled?[{id:'delivery',type:'delivery',label:'Entrega',active:true}]:[])],
       acceptingOrders:state.data.orderReception?.enabled===true,active:true,catalogVisible:true};
   }
   function sendPreview(){
     const frames=document.querySelectorAll('.lo-preview-frame');if(!frames.length||!state.draft)return;
-    const message={type:'veconi-store-preview',catalog:previewCatalog()};
-    frames.forEach(f=>{try{f.contentWindow?.postMessage(message,location.origin);}catch{}});
+    const snapshots=new Map();
+    frames.forEach(f=>{
+      if(!f.getClientRects().length)return;
+      const bannerOnly=f.classList.contains('lo-banner-stage');
+      if(!snapshots.has(bannerOnly))snapshots.set(bannerOnly,previewCatalog(bannerOnly));
+      try{f.contentWindow?.postMessage({type:'veconi-store-preview',catalog:snapshots.get(bannerOnly)},location.origin);}catch{}
+    });
   }
   function schedulePreview(){clearTimeout(previewTimer);previewTimer=setTimeout(sendPreview,140);}
   function mountPreviews(){
     document.querySelectorAll('#store-v2 .lo-preview-frame').forEach(frame=>{if(!frame.dataset.bound){frame.dataset.bound='1';frame.addEventListener('load',sendPreview);}});
     document.querySelectorAll('#store-v2 [data-stage]').forEach(stage=>{
-      const fit=()=>{const w=stage.clientWidth,base=stage.classList.contains('is-desktop')?1280:390;stage.style.setProperty('--scale',String(Math.min(1,w/base)));};
+      const fit=()=>{const w=stage.clientWidth,base=stage.classList.contains('is-desktop')?1280:390;stage.style.setProperty('--scale',String(Math.min(1,w/base)));if(w)schedulePreview();};
       fit();if(!stage.dataset.observed&&'ResizeObserver' in window){stage.dataset.observed='1';new ResizeObserver(fit).observe(stage);}
     });
     schedulePreview();
@@ -751,8 +788,9 @@
   /* ---------- Eventos (delegação: um ouvinte por raiz) ---------- */
   function toast(message,error=false){const el=document.querySelector('#store-v2 .lo-toast');if(!el){window.Utils?.toast?.(message,error);return;}el.textContent=message;el.classList.toggle('is-error',!!error);el.classList.add('is-on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('is-on'),error?6000:3200);}
   function goView(v,focus){
-    if(state.view===v&&!focus)return;state.view=v;state.selecting=false;state.picked=new Set();paint('view');
-    if(v==='design')void checkLayoutSupport(state.data,state.sequence,scope());
+    if(state.view===v&&!focus)return;state.view=v;state.selecting=false;state.picked=new Set();
+    if(v==='layout')void checkLayoutSupport(state.data,state.sequence,scope());
+    paint('view');
     document.querySelectorAll('#store-v2 .lo-tabs [data-v]').forEach(b=>b.setAttribute('aria-current',b.dataset.v===v?'page':'false'));
     const root=document.querySelector('#store-v2');root.dataset.view=v;
     const target=focus==='whatsapp'?'#lo-contactPhone':focus==='identity'?'#lo-publicName':null;

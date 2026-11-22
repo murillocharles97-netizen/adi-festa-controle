@@ -200,6 +200,7 @@
           target:typeof s?.target==='string'?s.target:'catalog',active:s?.active!==false,imageUrl:typeof s?.imageUrl==='string'?s.imageUrl:''};
       };
       return {version:1,slides:configured.slides.filter(Boolean).map(readSlide),featured:configured.featured!==false,
+        ...(configured.home?{home:{search:configured.home.search!==false,placeholder:line(configured.home.placeholder,80),featuredTitle:line(configured.home.featuredTitle,80)}}:{}),
         secondary:configured.secondary?readSlide(configured.secondary):{...bannerSlide('easy'),active:false}};
     }
     const slides = (catalog.banners || []).filter(b => b.active !== false && b.imageUrl &&
@@ -217,7 +218,7 @@
 
   function visibleLayout(value) {
     const layout=storefrontLayout({storefrontLayout:value});
-    return {...layout,slides:layout.slides.filter(s=>s.active),secondary:layout.secondary.active?layout.secondary:null};
+    return {...layout,...(layout.home?{home:{...layout.home,featuredTitle:layout.featured?layout.home.featuredTitle:'',placeholder:layout.home.search?layout.home.placeholder:''}}:{}),slides:layout.slides.filter(s=>s.active),secondary:layout.secondary.active?layout.secondary:null};
   }
   return Object.freeze({bannerTemplates,bannerSlide,storefrontLayout,text,line,money,phoneDigits,validPhone,formatPhone,phoneProblem,PALETTES,hex,contrast,onColor,readable,paletteId,theme,colorWarning,
     slugify,slugProblem,draftFromStore,applyOp,applyOps,savePayload,status,readiness,publishedDiff,PAYMENT_LABELS,orderMessage,whatsappChatUrl,whatsappUrl});

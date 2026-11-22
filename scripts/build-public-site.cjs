@@ -22,7 +22,7 @@ function assertSafePublicFile(file, bytes) {
   if (typeof file !== 'string' || !file || file.includes('\\') || file.includes('\0') || path.posix.normalize(file) !== file || file.startsWith('/') || file.split('/').some(part => part === '..' || part.startsWith('.'))) {
     if (file !== '.nojekyll') throw new Error('Invalid public path');
   }
-  const allowed = ROOT_FILES.has(file) || SHARED_FILES.has(file) ||
+  const allowed = ['assets/storefront-courier.webp','assets/storefront-models.webp'].includes(file) || ROOT_FILES.has(file) || SHARED_FILES.has(file) ||
     /^(?:js\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.js|css\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.css|assets\/[a-zA-Z0-9_.-]+\.(?:png|svg|ico|js|txt)|assets\/fonts\/[a-zA-Z0-9_.-]+\.(?:woff2|txt))$/.test(file);
   if (!allowed || RETIRED_FILES.has(path.posix.basename(file).toLowerCase())) throw new Error('Non-public resource rejected: ' + file);
   if (bytes) {

@@ -1,0 +1,5 @@
+/* Shared between the public stage and the merchant's template picker. */
+.vv-motif{display:block;width:100%;aspect-ratio:1;background-image:url('../assets/storefront-models.webp');background-size:300% 200%;background-position:var(--vx,0%) var(--vy,0%)}
+.vv-motif[data-model=arrivals]{--vx:50%}.vv-motif[data-model=promotion]{--vx:100%}
+.vv-motif[data-model=featured]{--vy:100%}.vv-motif[data-model=discover]{--vx:50%;--vy:100%}.vv-motif[data-model=easy]{--vx:100%;--vy:100%}
+.vv-motif[data-model=robot],.vv-robot{background:url('../assets/storefront-courier.webp') center/contain no-repeat}

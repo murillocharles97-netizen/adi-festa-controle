@@ -42,10 +42,15 @@ function readLayout(input,scope,legacyImages=new Set()){
     return {template:value.template,title:field(value.title,100),description:field(value.description,300),
       button:field(value.button,40),target,active:value.active,imageUrl:image(field(value.imageUrl,2200),scope,legacyImages)};
   }
-  return {version:1,slides:input.slides.map(slide),featured:input.featured,secondary:slide(input.secondary)};
+  let home;
+  if(input.home!==undefined){
+    if(!input.home||typeof input.home.search!=='boolean')invalid('Configuração de busca inválida.');
+    home={search:input.home.search,placeholder:field(input.home.placeholder,80),featuredTitle:field(input.home.featuredTitle,80)};
+  }
+  return {version:1,slides:input.slides.map(slide),featured:input.featured,secondary:slide(input.secondary),...(home?{home}:{})};
 }
 function publicLayout(layout){
   const active=layout.slides.filter(s=>s.active);
-  return {...layout,slides:active,secondary:layout.secondary.active?layout.secondary:{active:false}};
+  return {...layout,...(layout.home?{home:{...layout.home,placeholder:layout.home.search?layout.home.placeholder:'',featuredTitle:layout.featured?layout.home.featuredTitle:''}}:{}),slides:active,secondary:layout.secondary.active?layout.secondary:{active:false}};
 }
 module.exports={readLayout,publicLayout};
