@@ -1458,7 +1458,7 @@
         window.ClientesMobile?.setSearchTerm?.(value);
         window.ClientCloudPagination?.cancel?.();
         clientSearchTimer = setTimeout(() => {
-          if (input.isConnected && Router.atual() === "clientes") window.ClientesMobile?.search(value);
+          if (input.isConnected && input.value === value && Router.atual() === "clientes") window.ClientesMobile?.search(value);
         }, 300);
       } else {
         clearTimeout(stableSearchTimer);
