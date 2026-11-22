@@ -769,11 +769,7 @@
       Utils.toast(`${product.nome} adicionado.`);
       return true;
     }
-    const selector = `[data-add="${CSS.escape(String(product.id))}"]`,
-      button = document.querySelector(selector);
-    if (!button) return false;
-    button.click();
-    return true;
+    return window.Checkout?.selectCatalogProduct?.(product.id) || false;
   };
   function stockSession(summary = { products: 0, units: 0 }) {
     open({

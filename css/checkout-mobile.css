@@ -259,3 +259,9 @@
 /* Keep customer selection above the cart (72), without changing other modals. */
 #modal .checkout-customer-bg{z-index:80}
 
+
+.sale-catalog-more {
+  grid-column: 1 / -1;
+  justify-self: center;
+  min-height: 44px;
+}

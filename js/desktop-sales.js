@@ -99,6 +99,15 @@
     };
   }
 
+  function productSearch(product, variants) {
+    return normalize([
+      product.nome, product.codigo, product.barcode, product.categoria,
+      product.marca || product.brand || "", product.palavrasChave,
+      ...variants.flatMap(variant => [
+        variant.displayName, variant.sku, variant.barcode, ...Object.values(variant.attributeValues || {}),
+      ]),
+    ].join(" "));
+  }
   function productCard(product, options = {}) {
     const addAttribute = options.consignment ? "data-delivery-product" : "data-add",
       qtyAttribute = options.consignment ? "data-delivery-qty" : "data-pos-qty",
@@ -106,22 +115,7 @@
       meta = productMeta(product),
       brand = product.marca || product.brand || "",
       variants = options.variants ?? (window.ProductVariations?.list?.(product.id) || []),
-      search = normalize(
-        [
-          product.nome,
-          product.codigo,
-          product.barcode,
-          product.categoria,
-          brand,
-          product.palavrasChave,
-          ...variants.flatMap((variant) => [
-            variant.displayName,
-            variant.sku,
-            variant.barcode,
-            ...Object.values(variant.attributeValues || {}),
-          ]),
-        ].join(" "),
-      );
+      search = productSearch(product, variants);
     return `<article class="desktop-sale-product pos-product stock-${esc(meta.className)}" ${addAttribute}="${esc(product.id)}" data-search="${esc(search)}" data-category="${esc(normalize(product.categoria))}" data-brand="${esc(normalize(brand))}" data-price="${number(product.preco || product.minPrice)}" data-stock="${stockValue(product)}" title="${esc(product.nome)}">
       <button class="desktop-sale-product-main" type="button" ${addAttribute}="${esc(product.id)}" aria-label="Adicionar ${esc(product.nome)}">
         ${productImage(product, "desktop-sale-product-image")}
@@ -146,11 +140,13 @@
     </button>`;
   }
 
-  function productsHTML(products) {
-    return products.length
-      ? products.map(product => productCard(product)).join("")
-      : `<div class="desktop-sale-empty">${icon("package-open")}<b>Nenhum produto cadastrado</b><small>Cadastre um produto para começar a vender.</small></div>`;
+  function emptyCatalog(filtered) {
+    return `<div class="desktop-sale-empty">${icon("package-open")}${
+      filtered ? '<b>Nenhum produto encontrado</b>' : '<b>Nenhum produto cadastrado</b><small>Cadastre um produto para começar a vender.</small>'
+    }</div>`;
   }
+  const recentHTML = products => products.length ? `<section class="desktop-recent-products"><header><h3>Últimos vendidos</h3></header><div>${products.map(recentCard).join("")}</div></section>` : "";
+
 
   function cartHTML(cart) {
     if (!cart.length)
@@ -194,7 +190,7 @@
       .join("")}`;
   }
 
-  function render({ products, clients, cart = [], totals = {}, recentProducts = [] }) {
+  function render({ products, clients, cart = [], totals = {}, recentProducts = [], gridHTML }) {
     const categories = products.map((product) => product.categoria || ""),
       brands = products.map(
         (product) => product.marca || product.brand || "",
@@ -218,10 +214,10 @@
       </div>
       <div class="desktop-sales-layout">
         <section class="desktop-sales-products" id="pos-grid">
-          ${recentProducts.length ? `<section class="desktop-recent-products"><header><h3>Últimos vendidos</h3></header><div>${recentProducts.slice(0, 5).map(recentCard).join("")}</div></section>` : ""}
+          ${recentHTML(recentProducts)}
           <section class="desktop-sales-catalog">
             <header><h3>Produtos <span id="desktop-sale-count">${products.length} itens</span></h3><span>${icon("layout-grid")} Grade</span></header>
-            <div class="desktop-sales-product-grid" id="desktop-sale-products">${productsHTML(products)}</div>
+            <div class="desktop-sales-product-grid" id="desktop-sale-products">${gridHTML ?? (products.map(product => productCard(product)).join("") || emptyCatalog(false))}</div>
           </section>
         </section>
         <div class="desktop-sales-cart-overlay" data-sale-cart-overlay hidden></div>
@@ -389,10 +385,23 @@
     addEventListener("keydown", shortcutHandler);
   }
 
+  function refreshCatalogControls(products, recent) {
+    const grid = document.querySelector("#pos-grid");
+    const oldRecent = grid?.querySelector(".desktop-recent-products");
+    if (oldRecent) oldRecent.outerHTML = recentHTML(recent);
+    else grid?.insertAdjacentHTML("afterbegin", recentHTML(recent));
+    const category = document.getElementById("pos-category"), brand = document.getElementById("desktop-sale-brand");
+    for (const [select, values] of [
+      [category, products.map(p => p.categoria || "")],
+      [brand, products.map(p => p.marca || p.brand || "")],
+    ]) {
+      const selected = select.value, html = options(values, "Todas", true);
+      select.innerHTML = html;
+      if ([...select.options].some(option => option.value === selected)) select.value = selected;
+    }
+  }
   function refreshProducts() {
-    if (!document.querySelector("[data-desktop-sales]")) return false;
-    window.AppPageRuntime?.mount?.("vender");
-    return true;
+    return window.Checkout?.refreshProducts?.() || false;
   }
 
   function refreshClients() {
@@ -414,6 +423,9 @@
 
   window.DesktopSales = {
     catalogCard: productCard,
+    productSearch,
+    emptyCatalog,
+    refreshCatalogControls,
     isDesktop: () => desktopMedia.matches,
     render,
     bind,

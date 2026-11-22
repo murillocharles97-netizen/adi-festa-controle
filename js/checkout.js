@@ -15,16 +15,13 @@ window.Checkout = (() => {
       window.SpaceEngine?.productAllowsSpace
         ? Boolean(spaceId) && window.SpaceEngine.productAllowsSpace(product, spaceId)
         : true,
-    saleInCurrentSpace = (sale, spaceId = selectedSalesSpaceId()) => {
+    saleInCurrentSpace = (sale, spaceId, knownIds) => {
       if (
         window.SpaceEngine?.isValidSale &&
         !window.SpaceEngine.isValidSale(sale)
       )
         return false;
       if (!window.SpaceEngine?.saleBelongsTo || !spaceId) return true;
-      const knownIds = new Set(
-        (window.SpaceContext?.list?.() || []).map((space) => space.id),
-      );
       return window.SpaceEngine.saleBelongsTo(sale, spaceId, knownIds);
     };
   function availableCustomers() {
@@ -35,9 +32,9 @@ window.Checkout = (() => {
       (!client.businessId || client.businessId === businessId));
   }
   let soldByProduct = new Map();
-  function rebuildSoldIndex() {
+  function rebuildSoldIndex(spaceSales) {
     const next = new Map();
-    Repositories.saleRepository().list().filter((sale) => saleInCurrentSpace(sale)).forEach((sale) =>
+    spaceSales.forEach((sale) =>
       (sale.itens || []).forEach((item) =>
         next.set(
           item.produtoId,
@@ -87,21 +84,16 @@ window.Checkout = (() => {
           ? `<small class="pos-stock-low">${icon}Estoque: ${current} · baixo</small>`
           : `<small class="pos-stock-ok">${icon}Estoque: ${current}</small>`;
   };
+  function mobileSearch(p, variants) {
+    const variation = variants.map(v =>
+      [v.displayName, v.sku, v.barcode, ...Object.values(v.attributeValues || {})].join(" ")
+    ).join(" ") || (p.variationSearchTokens || []).join(" ");
+    return norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variation].join(" "));
+  }
   const card = (p, options = {}) => {
     const variants = options.variants ?? (
-        window.ProductVariations?.isVariable?.(p)
-          ? window.ProductVariations?.list(p.id) || []
-          : []),
-      variantSearch = variants
-        .map((v) =>
-          [
-            v.displayName,
-            v.sku,
-            v.barcode,
-            ...Object.values(v.attributeValues || {}),
-          ].join(" "),
-        )
-        .join(" ") || (p.variationSearchTokens || []).join(" ");
+      window.ProductVariations?.isVariable?.(p) ? window.ProductVariations.list(p.id) : []
+    );
     const mobile = window.matchMedia?.("(max-width:767px)").matches === true;
     const variable = window.ProductVariations?.isVariable?.(p);
     const photo = window.ProductImages?.markup?.(p, { className: "sale-product-photo" }) || `<span class="pos-placeholder">${initials(p.nome)}</span>`;
@@ -118,43 +110,27 @@ window.Checkout = (() => {
       : `${photo}${copy}${renewal}`;
     const addAttribute = options.consignment ? 'data-delivery-product' : 'data-add';
     const stockAttribute = options.consignment ? 'data-delivery-qty' : 'data-pos-qty';
-    return `<article class="pos-product ${mobile ? "mobile-catalog-card" : ""} ${variable ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" ${addAttribute}="${p.id}" data-search="${escapar(norm([p.nome, p.codigo, p.barcode, p.categoria, p.palavrasChave, variantSearch].join(" ")))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" ${stockAttribute}="${p.id}" hidden>0</span>${!mobile && p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${content}<button class="pos-product-hit" type="button" aria-label="Adicionar ${escapar(p.nome)}"></button>${mobile || options.consignment ? "" : `<button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${escapar(p.nome)}"><i data-lucide="ellipsis-vertical"></i></button>`}</article>`;
+    return `<article class="pos-product ${mobile ? "mobile-catalog-card" : ""} ${variable ? "is-variable" : ""} ${recurring ? "is-recurring" : ""}" ${addAttribute}="${p.id}" data-search="${escapar(mobileSearch(p, variants))}" data-category="${escapar(norm(p.categoria))}" title="${escapar(p.nome)}"><span class="pos-qty" ${stockAttribute}="${p.id}" hidden>0</span>${!mobile && p.favorito ? '<span class="pos-favorite" aria-label="Favorito">★</span>' : ""}${content}<button class="pos-product-hit" type="button" aria-label="Adicionar ${escapar(p.nome)}"></button>${mobile || options.consignment ? "" : `<button class="sale-product-actions" type="button" data-sale-product-menu aria-haspopup="dialog" aria-label="Opções de ${escapar(p.nome)}"><i data-lucide="ellipsis-vertical"></i></button>`}</article>`;
   };
   const durationUnitLabel = (unit, value = 2) => ({ days: value === 1 ? "dia" : "dias", weeks: value === 1 ? "semana" : "semanas", months: value === 1 ? "mês" : "meses", years: value === 1 ? "ano" : "anos" }[unit] || (value === 1 ? "dia" : "dias"));
   function view() {
     retireSpaceDraft();
     restoreDraft();
-    rebuildSoldIndex();
-    const ps = products()
-        .list()
-        .filter((p) => p.ativo !== false && productAvailableHere(p)),
-      cs = availableCustomers(),
-      cats = [...new Set(ps.map((p) => p.categoria).filter(Boolean))].sort(),
+    loadCatalog();
+    const ps = catalog.products, cs = availableCustomers(),
+      cats = [...new Set(ps.map(p => p.categoria).filter(Boolean))].sort(),
       spaceBar = window.SpaceContext?.renderBar?.("sales") || "";
-    if (window.DesktopSales?.isDesktop?.()) {
-      const productById = new Map(ps.map((product) => [product.id, product])),
-        seen = new Set(),
-        recentProducts = [];
-      [...Repositories.saleRepository().list().filter((sale) => saleInCurrentSpace(sale))]
-        .reverse()
-        .some((sale) =>
-          [...(sale.itens || [])].reverse().some((item) => {
-            const product = productById.get(item.produtoId);
-            if (!product || seen.has(product.id)) return false;
-            seen.add(product.id);
-            recentProducts.push(product);
-            return recentProducts.length >= 5;
-          }),
-        );
+    if (catalog.desktop) {
       return `${spaceBar}${window.DesktopSales.render({
         products: ps,
         clients: cs,
         cart,
         totals: totals(cart),
-        recentProducts,
+        recentProducts: desktopRecentProducts(),
+        gridHTML: initialCatalog(),
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${ps.map(product => card(product)).join("") || '<div class="empty">Nenhum produto disponível neste espaço</div>'}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option>${window.AdiFestaBuild?.installmentCreationPaused||window.OperationalReadPolicy?.restricted?.()?'':'<option value="crediario">Parcelado</option>'}</select></div>${window.InstallmentCredit?.fields()||''}<select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${initialCatalog()}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option>${window.AdiFestaBuild?.installmentCreationPaused||window.OperationalReadPolicy?.restricted?.()?'':'<option value="crediario">Parcelado</option>'}</select></div>${window.InstallmentCredit?.fields()||''}<select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -172,15 +148,7 @@ window.Checkout = (() => {
         0,
       ),
       total = Number(document.querySelector("#manual-total")?.value || rawTotal);
-    document.querySelectorAll("[data-pos-qty]").forEach((e) => {
-      const q = cart
-        .filter((item) => item.produtoId === e.dataset.posQty)
-        .reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
-      e.hidden = !q;
-      e.dataset.quantity = String(q);
-      e.textContent = q;
-      e.closest(".pos-product")?.classList.toggle("selected", !!q);
-    });
+    paintCatalogQuantities(document);
     const bagLabel = document.querySelector("#pos-bag-label"),
       bagTotal = document.querySelector("#pos-bag-total"),
       cartCount = document.querySelector("#desktop-cart-count"),
@@ -228,83 +196,228 @@ window.Checkout = (() => {
     if(parcelado)window.InstallmentCredit.mountCheckoutPreview(box.querySelector('[data-installment-checkout-preview]'),c,total);
     window.lucide?.createIcons();
   }
-  function filter(event) {
-    const favoriteIds = event?.detail?.favoriteIds && new Set(event.detail.favoriteIds);
-    const q = norm(document.querySelector("#product-search")?.value),
-      cat = document.querySelector("#pos-category")?.value || "",
-      brand = document.querySelector("#desktop-sale-brand")?.value || "",
-      f = document.querySelector("#pos-filter")?.value || "todos",
-      sort = document.querySelector("#pos-sort")?.value || "nome";
-    const cards = [...document.querySelectorAll(".pos-product")],
-      catalog = favoriteIds ? new Map(products().list().map(product => [product.id, product])) : null;
-    cards.forEach((el) => {
-      if (favoriteIds && (f !== "favoritos" || !favoriteIds.has(el.dataset.add))) return;
-      const p = catalog ? catalog.get(el.dataset.add) : products().getById(el.dataset.add),
-        n = Number(window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual),
-        controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false);
-      el.hidden = !(
-        (!q || el.dataset.search.includes(q)) &&
-        (!cat || el.dataset.category === cat) &&
-        (!brand || el.dataset.brand === brand) &&
-        (f === "todos" ||
-          (f === "favoritos" && p.favorito) ||
-          (f === "estoque" && controlsStock && n > 0) ||
-          (f === "baixo" &&
-            controlsStock &&
-            n > 0 &&
-            n <= Number(p.estoqueMinimo || 0)))
-      );
-    });
-    if (!favoriteIds || sort === "favoritos") {
-      cards.sort((a, b) => {
-        const x = catalog ? catalog.get(a.dataset.add) : products().getById(a.dataset.add),
-          y = catalog ? catalog.get(b.dataset.add) : products().getById(b.dataset.add);
-        if (sort === "preco") return x.preco - y.preco;
-        if (sort === "categoria")
-          return String(x.categoria).localeCompare(String(y.categoria));
-        if (sort === "vendidos") return (soldByProduct.get(y.id) || 0) - (soldByProduct.get(x.id) || 0);
-        if (sort === "favoritos" && x.favorito !== y.favorito)
-          return Number(y.favorito) - Number(x.favorito);
-        return x.nome.localeCompare(y.nome);
-      });
-      const grid = document.querySelector("#desktop-sale-products") || document.querySelector("#pos-grid");
-      if (favoriteIds) {
-        let next = null;
-        for (let index = cards.length - 1; index >= 0; index--) {
-          const card = cards[index];
-          if (favoriteIds.has(card.dataset.add) && card.nextElementSibling !== next) grid?.insertBefore(card, next);
-          next = card;
-        }
-      } else cards.forEach(card => grid?.append(card));
+  const CATALOG_BATCH = 36;
+  let catalog, savedCatalogView;
+  const catalogGrid = () => control("desktop-sale-products") || control("pos-grid");
+  const catalogPage = () => document.querySelector("[data-desktop-sales],.pos-page");
+  const catalogControls = ["product-search", "pos-category", "desktop-sale-brand", "pos-filter", "pos-sort"];
+  const control = id => document.getElementById(id);
+
+  function loadCatalog() {
+    const space = selectedSalesSpaceId();
+    const knownIds = new Set((window.SpaceContext?.list?.() || []).map(row => row.id));
+    const spaceSales = Repositories.saleRepository().list().filter(sale => saleInCurrentSpace(sale, space, knownIds));
+    const list = products().list().filter(product => product.ativo !== false && productAvailableHere(product, space));
+    const variants = new Map();
+    for (const variant of DB.carregar().variacoesProdutos || []) {
+      if (!variants.has(variant.parentProductId)) variants.set(variant.parentProductId, []);
+      variants.get(variant.parentProductId).push(variant);
     }
-    dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: cards.filter((card) => !card.hidden).length } }));
+    catalog = {
+      products: list, matches: list, variants, search: new Map(), shown: 0,
+      byId: new Map(list.map(product => [String(product.id), product])),
+      spaceSales, scope: catalogViewScope(), desktop: Boolean(window.DesktopSales?.isDesktop?.()),
+    };
+    rebuildSoldIndex(spaceSales);
   }
-  function refreshProducts() {
-    const grid = document.querySelector("#pos-grid"),
-      category = document.querySelector("#pos-category");
-    if (!grid || window.DesktopSales?.isDesktop?.()) return false;
-    rebuildSoldIndex();
-    const activeProducts = products()
-        .list()
-        .filter((product) => product.ativo !== false && productAvailableHere(product)),
-      categories = [
-        ...new Set(activeProducts.map((product) => product.categoria).filter(Boolean)),
-      ].sort(),
-      selectedCategory = category?.value || "";
-    grid.innerHTML =
-      activeProducts.map(card).join("") ||
-      '<div class="empty">Nenhum produto disponível neste espaço</div>';
-    if (category) {
-      category.innerHTML = `<option value="">Categorias</option>${categories
-        .map((name) => `<option value="${escapar(norm(name))}">${escapar(name)}</option>`)
-        .join("")}`;
-      if ([...category.options].some((option) => option.value === selectedCategory))
-        category.value = selectedCategory;
+
+  function desktopRecentProducts() {
+    const seen = new Set(), recent = [];
+    [...catalog.spaceSales].reverse().some(sale => [...(sale.itens || [])].reverse().some(item => {
+      const product = catalog.byId.get(String(item.produtoId));
+      if (!product || seen.has(product.id)) return false;
+      seen.add(product.id);
+      recent.push(product);
+      return recent.length === 5;
+    }));
+    return recent;
+  }
+
+  function mobileRecentRanks() {
+    const ordered = catalog.spaceSales.map((sale, index) => ({
+      sale, index, at: Date.parse(sale.data || sale.occurredAt || sale.createdAt) || 0,
+    })).sort((a, b) => b.at - a.at || b.index - a.index);
+    const ranks = new Map();
+    for (const { sale } of ordered) for (const item of sale.itens || []) {
+      const id = String(item.produtoId);
+      if (!catalog.byId.has(id) || ranks.has(id)) continue;
+      ranks.set(id, ranks.size);
+      if (ranks.size === 8) return ranks;
     }
-    window.CheckoutMobile?.enhance?.();
-    filter();
-    refresh();
+    return ranks;
+  }
+
+  function catalogVariants(product) {
+    return catalog.desktop || window.ProductVariations?.isVariable?.(product)
+      ? catalog.variants.get(product.id) || [] : [];
+  }
+
+  function catalogCards(from, to) {
+    return catalog.matches.slice(from, to).map(product => {
+      const options = { variants: catalogVariants(product) };
+      return catalog.desktop ? window.DesktopSales.catalogCard(product, options) : card(product, options);
+    }).join("");
+  }
+
+  const moreCatalog = () => catalog.shown < catalog.matches.length
+    ? '<button class="btn btn-light sale-catalog-more" type="button" data-sale-catalog-more>Mostrar mais produtos</button>'
+    : "";
+
+  function initialCatalog() {
+    catalog.shown = Math.min(CATALOG_BATCH, catalog.matches.length);
+    return catalogCards(0, catalog.shown) + moreCatalog() || catalogEmpty(false);
+  }
+
+  function catalogEmpty(filtered, recent = false) {
+    if (catalog.desktop) return window.DesktopSales.emptyCatalog(filtered);
+    if (recent) return '<div class="mobile-sale-empty">Nenhuma venda recente neste espaço.</div>';
+    return filtered
+      ? '<div class="mobile-sale-empty">Nenhum produto encontrado.</div>'
+      : '<div class="empty">Nenhum produto disponível neste espaço</div>';
+  }
+
+  function paintCatalogQuantities(root) {
+    const quantities = new Map();
+    for (const item of cart) quantities.set(String(item.produtoId),
+      (quantities.get(String(item.produtoId)) || 0) + Number(item.quantidade || 0));
+    root.querySelectorAll("[data-pos-qty]").forEach(badge => {
+      const quantity = quantities.get(badge.dataset.posQty) || 0;
+      if (badge.dataset.quantity === String(quantity)) return;
+      badge.hidden = !quantity;
+      badge.dataset.quantity = String(quantity);
+      badge.textContent = quantity;
+      badge.closest(".pos-product")?.classList.toggle("selected", Boolean(quantity));
+    });
+  }
+
+  function loadMoreCatalog(button) {
+    const grid = catalogGrid(), from = catalog.shown;
+    catalog.shown = Math.min(from + CATALOG_BATCH, catalog.matches.length);
+    const fragment = document.createElement("template");
+    fragment.innerHTML = catalogCards(from, catalog.shown) + moreCatalog();
+    const first = fragment.content.firstElementChild;
+    const keyboard = document.activeElement === button;
+    button.replaceWith(fragment.content);
+    paintCatalogQuantities(grid);
+    window.CheckoutMobile?.decorateProducts?.(grid, catalog.byId);
     window.lucide?.createIcons();
+    if (keyboard) first?.querySelector("button")?.focus();
+  }
+
+  function renderCatalog(grid, filtered, recent = false) {
+    grid.innerHTML = catalogCards(0, catalog.shown) + moreCatalog() || catalogEmpty(filtered, recent);
+    paintCatalogQuantities(grid);
+    window.CheckoutMobile?.decorateProducts?.(grid, catalog.byId);
+    window.lucide?.createIcons();
+  }
+
+  function filter(event, { keepLimit = false } = {}) {
+    const grid = catalogGrid();
+    if (!grid || !catalog) return;
+    const q = norm(control("product-search")?.value),
+      category = control("pos-category")?.value || "",
+      brand = control("desktop-sale-brand")?.value || "",
+      mode = control("pos-filter")?.value || "todos",
+      sort = control("pos-sort")?.value || "nome";
+    const onlyRecent = !catalog.desktop && catalogPage()?.dataset.saleView === "recent";
+    const recent = onlyRecent ? mobileRecentRanks() : null;
+    const favorites = new Set();
+    if (mode === "favoritos" || sort === "favoritos") for (const product of catalog.products) {
+      const active = catalog.desktop ? product.favorito : (window.Produtos?.mobileFavoriteValue?.(product) ?? product.favorito);
+      if (active) favorites.add(product.id);
+    }
+    const matches = catalog.products.filter(p => {
+      if (recent && !recent.has(String(p.id))) return false;
+      if (category && norm(p.categoria) !== category) return false;
+      if (brand && norm(p.marca || p.brand) !== brand) return false;
+      if (q) {
+        if (!catalog.search.has(p.id)) {
+          const variants = catalogVariants(p);
+          catalog.search.set(p.id, catalog.desktop ? window.DesktopSales.productSearch(p, variants) : mobileSearch(p, variants));
+        }
+        if (!catalog.search.get(p.id).includes(q)) return false;
+      }
+      if (mode === "todos") return true;
+      if (mode === "favoritos") return favorites.has(p.id);
+      const stock = Number(window.ProductVariations?.isVariable?.(p) ? p.totalStock : p.estoqueAtual);
+      const controlsStock = window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false);
+      return controlsStock && stock > 0 && (mode === "estoque" || (mode === "baixo" && stock <= Number(p.estoqueMinimo || 0)));
+    });
+    matches.sort((a, b) => {
+      if (recent) return recent.get(String(a.id)) - recent.get(String(b.id));
+      if (sort === "preco") return a.preco - b.preco;
+      if (sort === "categoria") return String(a.categoria).localeCompare(String(b.categoria));
+      if (sort === "vendidos") return (soldByProduct.get(b.id) || 0) - (soldByProduct.get(a.id) || 0);
+      if (sort === "favoritos" && favorites.has(a.id) !== favorites.has(b.id)) return favorites.has(b.id) ? 1 : -1;
+      return a.nome.localeCompare(b.nome);
+    });
+    catalog.filtered = true;
+    const focusedFavorite = grid.contains(document.activeElement) && document.activeElement.dataset.fav;
+    const preserve = keepLimit || event?.detail?.favoriteIds;
+    const limit = preserve ? Math.max(CATALOG_BATCH, catalog.shown) : CATALOG_BATCH;
+    catalog.matches = matches;
+    catalog.shown = Math.min(limit, matches.length);
+    renderCatalog(grid, true, onlyRecent && !q);
+    if (focusedFavorite) grid.querySelector(`[data-fav="${CSS.escape(focusedFavorite)}"]`)?.focus({ preventScroll: true });
+    dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: q, visible: matches.length } }));
+  }
+
+  const catalogViewScope = () => JSON.stringify([draftKey(), draftPrincipal()]);
+
+  function captureCatalogView() {
+    if (!catalog || !catalogPage()) return;
+    savedCatalogView = {
+      scope: catalog.scope, scroll: window.scrollY, shown: catalog.shown,
+      controls: catalogControls.map(id => control(id)?.value),
+      mobileView: catalogPage().dataset.saleView, filtered: catalog.filtered,
+    };
+  }
+
+  function restoreCatalogView() {
+    const saved = savedCatalogView, page = catalogPage();
+    if (!saved || !page || saved.scope !== catalogViewScope()) return;
+    catalogControls.forEach((id, index) => {
+      const node = control(id), value = saved.controls[index];
+      if (node && value !== undefined && (!node.options || [...node.options].some(option => option.value === value))) node.value = value;
+    });
+    if (saved.mobileView && !catalog.desktop) page.dataset.saleView = saved.mobileView;
+    const favorite = control("desktop-sale-favorites");
+    if (favorite) favorite.setAttribute("aria-pressed", String(control("pos-filter").value === "favoritos"));
+    if (saved.filtered || saved.shown > catalog.shown) {
+      catalog.shown = saved.shown;
+      if (saved.filtered) filter(null, { keepLimit: true });
+      else {
+        catalog.shown = Math.min(catalog.shown, catalog.matches.length);
+        renderCatalog(catalogGrid(), false);
+      }
+    }
+    if (saved.scroll) requestAnimationFrame(() => {
+      if (page.isConnected && catalogPage() === page) window.scrollTo({ top: saved.scroll, behavior: "instant" });
+    });
+  }
+
+  function refreshProducts(event) {
+    const grid = catalogGrid();
+    if (!grid || !catalog) return false;
+    const { shown, filtered, desktop } = catalog;
+    loadCatalog();
+    catalog.desktop = desktop;
+    catalog.shown = shown;
+    const category = control("pos-category"), selected = category?.value;
+    if (catalog.desktop) {
+      window.DesktopSales.refreshCatalogControls(catalog.products, desktopRecentProducts());
+    } else if (category) {
+      const categories = [...new Set(catalog.products.map(p => p.categoria).filter(Boolean))].sort();
+      category.innerHTML = `<option value="">Categorias</option>${categories.map(name =>
+        `<option value="${escapar(norm(name))}">${escapar(name)}</option>`).join("")}`;
+      if ([...category.options].some(option => option.value === selected)) category.value = selected;
+    }
+    if (filtered || event?.detail?.favoriteIds) filter(event, { keepLimit: true });
+    else {
+      catalog.shown = Math.min(Math.max(CATALOG_BATCH, shown), catalog.matches.length);
+      renderCatalog(grid, false);
+      dispatchEvent(new CustomEvent("sale-products-filtered", { detail: { query: "", visible: catalog.matches.length } }));
+    }
     return true;
   }
   function refreshClients() {
@@ -580,9 +693,10 @@ window.Checkout = (() => {
     const search = document.querySelector("#product-search");
     search.oninput = () => {
       clearTimeout(t);
-      t = setTimeout(filter, 120);
+      t = setTimeout(() => { if (search.isConnected) filter(); }, 120);
     };
     document.querySelector("#clear-product-search").onclick = () => {
+      clearTimeout(t);
       search.value = "";
       filter();
       search.focus();
@@ -829,6 +943,9 @@ window.Checkout = (() => {
     refreshClients();
     closeCartSurface({immediate:true});
     traceSale('[SALE] completed',{operationId:sale.operationId,saleId:sale.id,spaceId:sale.spaceId});
+    queueMicrotask(() => {
+      if (window.Router?.atual?.() === "vender") window.Checkout?.refreshProducts?.();
+    });
     try{Recibos.mostrar(sale,sale.clienteId?clients().getById(sale.clienteId):null);}
     catch{toast('Venda concluída. O recibo não pôde ser aberto, mas a venda foi salva.',true);}
   }
@@ -1077,6 +1194,27 @@ window.Checkout = (() => {
     };
     render();
   }
+  function selectCatalogProduct(id, source = null) {
+    if (Router.atual() !== "vender" || !catalogPage()) return false;
+    const p = products().getById(id);
+    if (!p || p.ativo === false || !productAvailableHere(p)) return false;
+    if (p.productType === "recurring") {
+      openRecurringProduct(p, source);
+      return true;
+    }
+    if (ProductVariations.isVariable(p)) {
+      variablePicker(p, null, source);
+      return true;
+    }
+    const out = getProductStockStatus(p) === "esgotado" && (window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false)) && !p.allowNegativeStock;
+    if (out) {
+      toast("Produto sem estoque.", true);
+      dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: p.id, reason: "out-of-stock", source } }));
+      return true;
+    }
+    addSaleItem(ProductVariations.saleItem(p, null, 1), { source });
+    return true;
+  }
   function standalone() {
     window.PriorSales?.mount?.(()=>{selectedCampaignIds.clear();manual=window.PriorSales.active();discountKind=manual?'historical_manual':null;window.ExchangeCreditCheckout?.reset?.();drawCart();});
     window.SpaceContext?.bind?.(document);
@@ -1085,9 +1223,10 @@ window.Checkout = (() => {
     let timer;
     search.oninput = () => {
       clearTimeout(timer);
-      timer = setTimeout(filter, 120);
+      timer = setTimeout(() => { if (search.isConnected) filter(); }, 120);
     };
     document.querySelector("#clear-product-search").onclick = () => {
+      clearTimeout(timer);
       search.value = "";
       filter();
       search.focus();
@@ -1096,6 +1235,8 @@ window.Checkout = (() => {
       (s) => (document.querySelector(s).onchange = filter),
     );
     document.querySelector("#pos-grid").onclick = (e) => {
+      const more = e.target.closest("[data-sale-catalog-more]");
+      if (more) return loadMoreCatalog(more);
       const fav = e.target.closest("[data-fav]");
       if (fav) {
         e.stopPropagation();
@@ -1113,28 +1254,13 @@ window.Checkout = (() => {
           );
           fav.innerHTML = '<i data-lucide="star"></i>';
           window.lucide?.createIcons();
-          filter();
+          refreshProducts({ detail: { favoriteIds: [fav.dataset.fav] } });
         } else fav.textContent = active ? "★" : "☆";
         return;
       }
       const b = e.target.closest("[data-add]");
       if (!b) return;
-      const p = products().getById(b.dataset.add);
-      if (p.productType === "recurring") {
-        openRecurringProduct(p, b);
-        return;
-      }
-      if (ProductVariations.isVariable(p)) {
-        variablePicker(p, null, b);
-        return;
-      }
-      const out = getProductStockStatus(p) === "esgotado" && (window.productControlsStock?.(p) ?? (!p.semControleEstoque && p.controlaEstoque !== false)) && !p.allowNegativeStock;
-      if (out) {
-        toast("Produto sem estoque.", true);
-        dispatchEvent(new CustomEvent("sale-item-rejected", { detail: { productId: p.id, reason: "out-of-stock", source: b } }));
-        return;
-      }
-      addSaleItem(ProductVariations.saleItem(p, null, 1), { source: b });
+      selectCatalogProduct(b.dataset.add, b);
     };
     const openSummary = document.querySelector("#open-sale-summary"),
       closeSummary = document.querySelector("#close-sale-summary");
@@ -1484,6 +1610,7 @@ window.Checkout = (() => {
     updateBeneficiaryField();
     applyDraftDetails();
     drawCart();
+    restoreCatalogView();
     if (pendingClient) {
       const select = document.querySelector("#sale-client");
       if (select && clients().getById(pendingClient.clientId)) {
@@ -1521,6 +1648,8 @@ window.Checkout = (() => {
     return true;
   }
   function resetSession() {
+    catalog = null;
+    savedCatalogView = null;
     clearDraft();
     cart = [];
     discountKind = null;
@@ -1704,6 +1833,8 @@ window.Checkout = (() => {
   return {
     view,
     catalogCard: card,
+    selectCatalogProduct,
+    captureCatalogView,
     enhance,
     mount,
     prepareClientSale,

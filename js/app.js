@@ -1217,6 +1217,7 @@
       window.ClientesMobile?.cancelPending?.();
       if (route !== "clientes") window.ClientCloudPagination?.leave?.();
     }
+    if (root.dataset.route === "vender") window.Checkout?.captureCatalogView?.();
     if (root.dataset.route === "financeiro" && route !== "financeiro") FinanceiroUI.destroy();
     root.dataset.pageInstance = String(Number(previousInstance) + 1);
     root.dataset.route = route;
