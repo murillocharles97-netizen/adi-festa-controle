@@ -143,17 +143,19 @@
   function orderMessage(input){
     const store=line(input.storeName,100)||'da loja',items=(input.items||[]).filter(i=>Number(i.quantity)>0);
     if(!items.length)throw Error('O carrinho está vazio.');
-    const rows=items.map(i=>{const q=Math.max(1,Math.floor(Number(i.quantity))),name=line(i.name),variant=line(i.variant);return {text:`${q}x ${name}${variant?` (${variant})`:''} — ${money(q*Number(i.unitPrice||0))}`,total:q*Number(i.unitPrice||0)};});
+    const rows=items.map(i=>{const q=Math.max(1,Math.floor(Number(i.quantity))),name=line(i.name),variant=line(i.variant);return {text:`${q}x ${name}${variant?` (${variant})`:''} — ${money(q*Number(i.unitPrice||0))} (${money(i.unitPrice)} cada)`,total:q*Number(i.unitPrice||0)};});
     const subtotal=Math.round(rows.reduce((s,r)=>s+r.total,0)*100)/100,mode=input.mode||null,customer=input.customer||{};
-    const out=[`Olá! Gostaria de fazer um pedido pela loja ${store}.`,'','🛒 *Meu pedido*',...rows.map(r=>r.text),'',`Subtotal: ${money(subtotal)}`];
+    const code=line(input.orderNumber,80);
+    const out=[code?`Pedido #${code} · ${store}`:`Olá! Gostaria de fazer um pedido pela loja ${store}.`,'','🛒 *Meu pedido*',...rows.map(r=>r.text),'',`Subtotal: ${money(subtotal)}`];
     if(mode==='pickup'){out.push('Entrega: Retirada na loja');const address=line(input.pickupAddress,300);if(address)out.push(`Local de retirada: ${address}`);}
     else if(mode==='delivery'){out.push('Entrega: Entregar no endereço');const address=line(customer.address,200);if(address)out.push(`Endereço: ${address}`);out.push('Taxa de entrega: a combinar');}
     const payment=PAYMENT_LABELS[input.payment];if(payment&&input.payment!=='entrega')out.push(`Pagamento: ${payment}`);
     const note=text(input.note,500).replace(/\n{3,}/g,'\n\n');if(note)out.push(`Observações: ${note}`);
     const name=line(customer.name,80);if(name)out.push(`Nome: ${name}`);
+    const phone=line(customer.phone,30);if(phone)out.push(`Telefone: ${phone}`);
     out.push('',`*Total dos produtos: ${money(subtotal)}*`);
     if(mode==='delivery')out.push('A taxa de entrega ainda não está incluída.');
-    out.push('','Aguardo a confirmação da disponibilidade e do pedido. Obrigado!');
+    if(!code)out.push('','Aguardo a confirmação da disponibilidade e do pedido. Obrigado!');
     return {text:out.join('\n'),subtotal};
   }
   // Budget for the encoded URL, leaving room for redirects within the HTTP

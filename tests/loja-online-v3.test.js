@@ -10,7 +10,7 @@ const items = [{ name: 'Bolo de pote', variant: 'Ninho com morango', quantity: 2
 test('mensagem de retirada: itens, variação, subtotal e fechamento, sem frete inventado', () => {
   const { text, subtotal } = K.orderMessage({ storeName: 'Doceria QA', items, mode: 'pickup', pickupAddress: 'Rua Fictícia, 1', customer: { name: 'Maria' }, payment: 'pix', note: 'Sem granulado' });
   assert.equal(subtotal, 35.5);
-  assert.equal(text, ['Olá! Gostaria de fazer um pedido pela loja Doceria QA.', '', '🛒 *Meu pedido*', `2x Bolo de pote (Ninho com morango) — ${money(32)}`, `1x Brigadeiro gourmet — ${money(3.5)}`, '', `Subtotal: ${money(35.5)}`, 'Entrega: Retirada na loja', 'Local de retirada: Rua Fictícia, 1', 'Pagamento: Pix', 'Observações: Sem granulado', 'Nome: Maria', '', `*Total dos produtos: ${money(35.5)}*`, '', 'Aguardo a confirmação da disponibilidade e do pedido. Obrigado!'].join('\n'));
+  assert.equal(text, ['Olá! Gostaria de fazer um pedido pela loja Doceria QA.', '', '🛒 *Meu pedido*', `2x Bolo de pote (Ninho com morango) — ${money(32)} (${money(16)} cada)`, `1x Brigadeiro gourmet — ${money(3.5)} (${money(3.5)} cada)`, '', `Subtotal: ${money(35.5)}`, 'Entrega: Retirada na loja', 'Local de retirada: Rua Fictícia, 1', 'Pagamento: Pix', 'Observações: Sem granulado', 'Nome: Maria', '', `*Total dos produtos: ${money(35.5)}*`, '', 'Aguardo a confirmação da disponibilidade e do pedido. Obrigado!'].join('\n'));
   assert.doesNotMatch(text, /Frete|taxa de entrega/i);
 });
 test('mensagem de entrega: endereço e taxa a combinar, total só dos produtos', () => {

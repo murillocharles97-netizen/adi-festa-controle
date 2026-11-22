@@ -250,13 +250,13 @@ function cartView(){
 }
 function orderInput(){
   const mode=currentMode();
-  return {storeName:catalog.publicName,items:cartLines().map(l=>({name:l.name,variant:l.variantName,quantity:l.qty,unitPrice:l.price})),mode:mode?.type||null,pickupAddress:catalog.pickupAddress,customer:{name:customer.name||'',address:customer.address||''},payment,note};
+  return {storeName:catalog.publicName,items:cartLines().map(l=>({name:l.name,variant:l.variantName,quantity:l.qty,unitPrice:l.price})),mode:mode?.type||null,pickupAddress:catalog.pickupAddress,customer:{name:customer.name||'',phone:customer.phone||'',address:customer.address||''},payment,note};
 }
 function message(extraTop=''){try{const m=K.orderMessage(orderInput());return extraTop?{...m,text:`${extraTop}\n\n${m.text}`}:m;}catch{return {text:'',subtotal:0};}}
 function waHref(text){try{return K.whatsappUrl(storePhone(),text);}catch{return '';}}
-function whatsAppActions(href){
+function whatsAppActions(href,confirmed=false){
   const chat=phoneOk()?K.whatsappChatUrl(storePhone()):'';
-  return `<a class="sf-btn sf-btn-wa sf-btn-wide" id="sf-send-wa" ${href?`href="${esc(href)}"`:'hidden'} target="_blank" rel="noopener">${I.wa}<span>Abrir pedido no WhatsApp</span></a>
+  return `<a class="sf-btn sf-btn-wa sf-btn-wide" ${confirmed?'':'id="sf-send-wa"'} ${href?`href="${esc(href)}"`:'hidden'} target="_blank" rel="noopener">${I.wa}<span>Abrir pedido no WhatsApp</span></a>
     <div class="sf-actions" data-wa-long ${!href&&chat?'':'hidden'}>
       <p class="sf-muted">Para levar todos os itens, copie o resumo completo. Abra o WhatsApp da loja, cole a mensagem e toque em enviar.</p>
       <button type="button" class="sf-btn sf-btn-accent sf-btn-wide" data-wa-copy>Copiar resumo completo</button>
@@ -299,8 +299,13 @@ function sentView(){
 const orderLabel=s=>window.OnlineOrderModel?.labels?.[s]||({recebido:'Recebido',confirmado:'Confirmado',preparando:'Preparando',separando:'Pronto',deslocamento:'Enviado',entregue:'Concluído',cancelado:'Cancelado',expirado:'Expirado'}[s]||s);
 const reservationInfo=order=>order.expiryEligibility==='review_required'?'<p class="sf-muted">A reserva aguarda revisão da loja. Nenhuma liberação foi realizada.</p>':order.orderStatus==='expirado'?'<p class="sf-muted">Reserva liberada: a loja não confirmou em 30 minutos. Revise a disponibilidade antes de fazer um novo pedido.</p>':order.orderStatus==='recebido'&&order.reservationExpiresAt?`<p class="sf-muted">Reserva aguardando confirmação da loja até ${esc(new Date(order.reservationExpiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}))}.</p>`:'';
 function successView(order){
-  const o=order||successOrder||{},text=`Olá! Acabei de fazer o pedido #${o.publicOrderNumber||''} na loja ${catalog.publicName}.`,href=phoneOk()?waHref(text):'';
-  return `${topbar('Pedido recebido')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon sf-ok">${I.check}</span><h2>${o.orderStatus==='expirado'?'Reserva expirada':'Pedido recebido pela loja'}</h2><p>Pedido <b>#${esc(o.publicOrderNumber||'')}</b></p>${reservationInfo(o)}<p class="sf-muted">A loja confirma o atendimento. O pagamento é combinado com ela.</p><div class="sf-actions">${href?`<a class="sf-btn sf-btn-wa sf-btn-wide" href="${esc(href)}" target="_blank" rel="noopener">${I.wa}<span>Avisar a loja pelo WhatsApp</span></a>`:''}<button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-go="orders">Acompanhar meus pedidos</button><button type="button" class="sf-link" data-go="catalog">Voltar à loja</button></div></section></main>`;
+  const o=order||successOrder||{};
+  const text=o.items?.length?K.orderMessage({storeName:catalog.publicName,orderNumber:o.publicOrderNumber,
+    items:o.items.map(i=>({name:i.productNameSnapshot||i.name,variant:i.variantNameSnapshot,quantity:i.quantity,unitPrice:i.unitPrice})),
+    customer:{name:o.customerName,phone:o.customerPhone,address:o.customerLocation},mode:o.serviceModeType,pickupAddress:catalog.pickupAddress,
+    payment:o.paymentPreference,note:o.note}).text:`Pedido #${o.publicOrderNumber||''} · ${catalog.publicName}`;
+  const href=phoneOk()?waHref(text):'';
+  return `${topbar('Pedido recebido')}<main class="sf-page"><section class="sf-panel sf-sent"><span class="sf-sent-icon sf-ok">${I.check}</span><h2>${o.orderStatus==='expirado'?'Reserva expirada':'Pedido recebido pela loja'}</h2><p>Pedido <b>#${esc(o.publicOrderNumber||'')}</b></p>${reservationInfo(o)}<p class="sf-muted">A loja confirma o atendimento. O pagamento é combinado com ela.</p><div class="sf-actions">${phoneOk()?`<details><summary>Resumo do pedido</summary><div class="sf-bubble" data-msg>${esc(text)}</div></details>${whatsAppActions(href,true)}`:''}<button type="button" class="sf-btn sf-btn-ghost sf-btn-wide" data-go="orders">Acompanhar meus pedidos</button><button type="button" class="sf-link" data-go="catalog">Voltar à loja</button></div></section></main>`;
 }
 function ordersView(){
   const list=orders.map(o=>o.data).filter(Boolean).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
@@ -415,8 +420,8 @@ function validateWhatsApp(){
   return false;
 }
 async function copyWhatsApp(){
-  if(!validateWhatsApp())return;
-  const {text}=message(),status=root.querySelector('[data-wa-status]');
+  if(view!=='success'&&!validateWhatsApp())return;
+  const text=view==='success'?root.querySelector('[data-msg]').textContent:message().text,status=root.querySelector('[data-wa-status]');
   if(preview){previewMessage(text);return;}
   const current=()=>status.isConnected&&root.querySelector('[data-msg]')?.textContent===text;
   try{
