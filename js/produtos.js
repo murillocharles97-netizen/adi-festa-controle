@@ -34,6 +34,10 @@ window.Produtos=(()=>{
         throw Object.assign(Error('Use Ajustar estoque para alterar a quantidade deste produto.'),{code:'stock-adjustment-required'});
     }
     const v=window.ProductModel.build(d,atual,{agora,barcode,barcodeType,normalizeProductAccess:window.SpaceEngine?.normalizeProductAccess});
+    // Marca: atributo próprio. A regra da empresa vale só para cadastro novo; edições mantêm a marca atual.
+    const Brand=window.ProductBrand;
+    if(!atual){const marca=Brand?Brand.assertNew(d,db.config):String(d.marca??'').trim();if(marca)v.marca=marca}
+    else if(d.marca!==undefined)v.marca=Brand?Brand.text(d.marca):String(d.marca).trim();
     // Validate origin before adding a new positive-stock record. Capture in
     // diffWrites then makes that choice durable; retry never consults the UI.
     if(!atual&&v.productType!=='variable'&&productControlsStock(v)&&Number(v.estoqueAtual)>0)

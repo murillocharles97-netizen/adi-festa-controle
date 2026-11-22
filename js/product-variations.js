@@ -245,6 +245,8 @@
         product.controlaEstoque !== false;
     if(controlsStock&&variants.some(v=>num(v.stock)>0))
       window.SpaceContext?.stockMovementOrigin?.(product);
+    if (window.ProductBrand) product = { ...product, marca: window.ProductBrand.assertNew(product) };
+    if (!product.marca) delete product.marca;
     let created;
     DB.alterar((data) => {
       const timestamp = now(),

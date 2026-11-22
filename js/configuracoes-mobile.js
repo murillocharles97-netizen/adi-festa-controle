@@ -77,6 +77,12 @@
           subtitle: "Entrega, retirada e fiado",
           operation: true,
         }),
+        ...(window.ProductBrand?.canManage?.() ? [row({
+          iconName: "tag",
+          title: "Produtos",
+          subtitle: window.ProductBrand.summary(),
+          action: "product-rules",
+        })] : []),
         row({
           iconName: "credit-card",
           title: "Integrações e maquininhas",
@@ -257,6 +263,7 @@
           const action = button.dataset.settingsAction;
           if (action === "branding") window.SpaceBranding.open({ general: () => editBusiness() });
           if (action === "whatsapp") editBusiness(true);
+          if (action === "product-rules") window.ProductBrand?.open?.();
           if (action === "account") account();
           if (action === "backup") backup();
           if (action === "workspace-risk") window.WorkspaceResetUI?.risk();

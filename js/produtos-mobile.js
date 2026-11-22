@@ -398,7 +398,7 @@
     };
     const stepBody = () =>
       draft.step === 1
-        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${draft.product.itemKind !== "service" ? "selected" : ""}>Produto</option><option value="service" ${draft.product.itemKind === "service" ? "selected" : ""}>Serviço</option></select></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div><div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label><label class="check"><input name="controlaEstoque" type="checkbox" ${draft.product.semControleEstoque || draft.product.controlaEstoque === false ? "" : "checked"}> Controlar estoque deste produto</label>${window.SpaceContext?.availabilityFields?.(draft.product) || ""}${ProductImages.editorMarkup(imageDraft)}`
+        ? `<div class="field"><label>Nome *</label><input name="nome" value="${esc(draft.product.nome)}" required></div><div class="field"><label>Tipo de item</label><select name="itemKind"><option value="product" ${draft.product.itemKind !== "service" ? "selected" : ""}>Produto</option><option value="service" ${draft.product.itemKind === "service" ? "selected" : ""}>Serviço</option></select></div><div class="field"><label>Categoria</label><input name="categoria" value="${esc(draft.product.categoria)}"></div>${window.ProductBrand?.field?.(draft.product, { isNew: true }) || ""}<div class="field"><label>Descrição</label><textarea name="observacao">${esc(draft.product.observacao)}</textarea></div><label class="check"><input name="favorito" type="checkbox" ${draft.product.favorito ? "checked" : ""}> Favorito</label><label class="check"><input name="controlaEstoque" type="checkbox" ${draft.product.semControleEstoque || draft.product.controlaEstoque === false ? "" : "checked"}> Controlar estoque deste produto</label>${window.SpaceContext?.availabilityFields?.(draft.product) || ""}${ProductImages.editorMarkup(imageDraft)}`
         : draft.step === 2
           ? `<p>Cadastre um ou dois atributos. Separe os valores por vírgula.</p>${draft.attributes.map((attribute, index) => `<section class="wizard-attribute"><div class="field"><label>Atributo ${index + 1}</label><input name="attributeName:${index}" value="${esc(attribute.name)}" placeholder="Ex.: Sabor"></div><div class="field"><label>Valores</label><input name="attributeValues:${index}" value="${esc(attribute.values.join(", "))}" placeholder="Ferrero, Nutella, Prestígio"></div>${index ? `<button type="button" data-remove-attribute="${index}">${icon("trash-2")} Remover atributo</button>` : ""}</section>`).join("")}<button type="button" class="btn btn-light" data-add-attribute ${draft.attributes.length >= 2 ? "disabled" : ""}>${icon("plus")} Adicionar outro atributo</button>`
           : draft.step === 3
@@ -426,6 +426,7 @@
           ...draft.product,
           nome: String(fd.get("nome") || "").trim(),
           categoria: String(fd.get("categoria") || "").trim(),
+          marca: window.ProductBrand ? window.ProductBrand.text(fd.get("marca")) : String(fd.get("marca") || "").trim(),
           observacao: String(fd.get("observacao") || "").trim(),
           itemKind: fd.get("itemKind") === "service" ? "service" : "product",
           favorito: fd.has("favorito"),
@@ -523,6 +524,7 @@
           collect();
           if (draft.step === 1 && !draft.product.nome)
             throw Error("Informe o nome do produto.");
+          if (draft.step === 1) window.ProductBrand?.assertNew?.(draft.product);
           if (draft.step === 2 && !draft.attributes.length)
             throw Error("Informe pelo menos um atributo e seus valores.");
           if (

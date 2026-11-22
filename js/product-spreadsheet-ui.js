@@ -66,6 +66,7 @@
       q('[data-sheet-confirm]').textContent = modeInput.value === 'identifiers' ? 'Corrigir códigos' : 'Confirmar importação';
       if (modeInput.value === 'identifiers') { preview = Model.previewIdentifiers(parsedTable, catalog.identifierCatalog, catalog.scope); limit = 50; renderIdentifierPreview(); controls(false); return; }
       preview = Model.preview(parsedTable, catalog.matchingProducts || catalog.products, catalog.scope, catalog.permissions, modeInput.value, { baseline: parsedBaseline, entryApplied: id => service.entryApplied?.(sheetId, id) });
+      if (window.ProductBrand) preview = window.ProductBrand.applySpreadsheetRule(preview);
       limit = 50; renderPreview(); controls(false);
     }
     modeInput.onchange = () => {

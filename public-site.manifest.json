@@ -231,6 +231,7 @@
     "js/plans.js",
     "js/prior-sales.js",
     "js/product-actions.js",
+    "js/product-brand.js",
     "js/product-images.js",
     "js/product-selection.js",
     "js/product-spreadsheet-ui.js",
