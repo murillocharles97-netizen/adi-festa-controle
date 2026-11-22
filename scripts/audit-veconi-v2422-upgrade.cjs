@@ -8,12 +8,23 @@ const path = require('node:path');
 const puppeteer = require('puppeteer-core');
 
 const root = path.resolve(__dirname, '..');
-const site = path.resolve(process.env.VECONI_PWA_SITE || path.join(root, 'qa-artifacts/v2422/public'));
-const oldRef = 'c643cc5';
-const previous = { cache: 'veconi-v2421-sync-panel-v1', release: '242', appVersion: '242.1' };
-const next = { cache: 'veconi-v2422-performance-quick-wins-v1', release: '242', appVersion: '242.2' };
-const quickWins = ['build-info', 'app', 'clientes-mobile', 'customer-metrics', 'crm-segment-engine-v2'];
-const pinned = quickWins.map(file => '/js/' + file + '.js?v=2422');
+const selling = process.argv.includes('--selling');
+const artifactDir = path.join(root, selling ? 'qa-artifacts/v2423' : 'qa-artifacts/v2422');
+const site = path.resolve(process.env.VECONI_PWA_SITE || path.join(artifactDir, 'public'));
+const oldRef = selling ? '65ea4bb' : 'c643cc5';
+const syncPanel = { cache: 'veconi-v2421-sync-panel-v1', release: '242', appVersion: '242.1' };
+const quickWins = { cache: 'veconi-v2422-performance-quick-wins-v1', release: '242', appVersion: '242.2' };
+const previous = selling ? quickWins : syncPanel;
+const next = selling ? { cache: 'veconi-v2423-performance-selling-v1', release: '242', appVersion: '242.3' } : quickWins;
+const scriptsAt = (files, version) => files.map(file => '/js/' + file + '.js?v=' + version);
+const quickWinsScripts = ['clientes-mobile', 'customer-metrics', 'crm-segment-engine-v2'];
+const pinned = selling
+  ? [
+      ...scriptsAt(['build-info', 'app', 'barcode', 'checkout', 'checkout-mobile', 'desktop-sales'], '2423'),
+      '/css/checkout-mobile.css?v=2423',
+      ...scriptsAt(quickWinsScripts, '2422'),
+    ]
+  : scriptsAt(['build-info', 'app', ...quickWinsScripts], '2422');
 const oldFiles = new Map();
 const changed = new Set(execFileSync('git', ['diff', '--name-only', oldRef], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/));
 const scope = 'adiFestaDB_v1:qa-v2422:qa-owner:owner';
@@ -81,7 +92,10 @@ async function verify(page) {
     const artifact = await (await cache.match('/index.html')).text();
     const hashes = {};
     for (const asset of pinned) {
-      if (!artifact.includes('.' + asset)) throw Error('Referência ausente: ' + asset);
+      const pathname = asset.split('?')[0];
+      const matches = [...artifact.matchAll(/(?:src|href)="(\.\/[^"]+)"/g)]
+        .map(([, url]) => url.slice(1)).filter(url => url.split('?')[0] === pathname);
+      if (matches.length !== 1 || matches[0] !== asset) throw Error('Referência ausente ou duplicada: ' + asset);
       const response = await cache.match(asset);
       if (!response?.ok) throw Error('Recurso fora do cache: ' + asset);
       hashes[asset] = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
@@ -103,7 +117,7 @@ async function main() {
   assert.ok(fs.existsSync(path.join(site, 'index.html')), 'Build the allowlisted package before testing');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + server.address().port + '/qa-upgrade';
-  const userDataDir = fs.mkdtempSync(path.join(root, 'qa-artifacts/v2422/browser-'));
+  const userDataDir = fs.mkdtempSync(path.join(artifactDir, 'browser-'));
   const options = {
     headless: true, userDataDir, protocolTimeout: 30000,
     executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',

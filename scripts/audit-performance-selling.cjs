@@ -13,13 +13,23 @@ if (reference) for (const name of ['js/app.js', 'js/checkout.js', 'js/checkout-m
   files.set('/'+name, execFileSync('git', ['show', baseline+':'+name], { encoding:'utf8' }));
 const functional = process.argv.includes('--functional');
 const capturesOnly = process.argv.includes('--captures');
+const releaseSmoke = process.argv.includes('--release-smoke');
+const publicSite = process.env.VECONI_SELLING_SITE;
 const fixture = routeFixture
   .replace('const n = large ? 2000 : 25, salesCount = large ? 5000 : 50, payCount = large ? 1600 : 20;',
     'const medium = new URLSearchParams(location.search).get("volume") === "medium"; const n = large ? 2000 : medium ? 400 : 25, salesCount = large ? 5000 : medium ? 1200 : 50, payCount = large ? 1600 : medium ? 400 : 20;')
   .replace('preco:10+i%80, custo:7, estoque:20, estoqueAtual:20, estoqueMinimo:2,',
     'preco:10+i%80, custo:7, estoque:20, estoqueAtual:20, estoqueMinimo:2, barcode:"7891234"+String(i).padStart(6,"0"), marca:"Marca QA", palavrasChave:"palavra"+i,');
 const fixtureRoute = '/tests/performance-selling.html';
-const server = assetServer(file => file === fixtureRoute ? fixture : files.get(file) ?? null);
+const server = assetServer(file => {
+  if (file === fixtureRoute) return fixture;
+  if (publicSite && !file.startsWith('/qa-sdk/')) {
+    const published = path.resolve(publicSite, '.' + file);
+    if (!published.startsWith(path.resolve(publicSite) + path.sep) || !fs.existsSync(published)) return null;
+    return fs.readFileSync(published);
+  }
+  return files.get(file) ?? null;
+});
 const profiles = [
   {mobile:false,theme:'light'}, {mobile:false,theme:'dark'},
   {mobile:true,theme:'light'}, {mobile:true,theme:'dark'},
@@ -84,6 +94,10 @@ async function check(page, cdp, profile, volume, run) {
   const size = {small:25,medium:400,large:2000}[volume];
   await take('primeira-abertura', () => navigate(page,'vender'));
   assert.equal(await page.evaluate(()=>document.documentElement.dataset.theme), profile.theme);
+  if (releaseSmoke) {
+    assert.equal(samples[0].cards, Math.min(36, size+6));
+    assert.equal(Boolean(await page.$('[data-sale-catalog-more]')), size+6 > 36);
+  }
   await navigate(page,'inicio');
   await take('segunda-abertura', () => navigate(page,'vender'));
   await take('primeira-interacao', () => page.$eval('#product-search',node=>node.focus()));
@@ -95,7 +109,17 @@ async function check(page, cdp, profile, volume, run) {
   assert.equal(await search(page,''),size+6);
   if (!reference && volume!=='small') {
     await take('rolagem-e-proximo-lote',async()=>{
-      await page.$eval('[data-sale-catalog-more]',node=>{node.scrollIntoView({block:'center'});node.click();});
+      const more = '[data-sale-catalog-more]';
+      if (releaseSmoke) {
+        assert.equal(await page.$eval(more, button => button.textContent.trim()), 'Mostrar mais produtos');
+        assert.ok(await page.$eval(more, button => button.getBoundingClientRect().height >= 44 && button.tabIndex === 0));
+        await page.focus(more);
+        await page.keyboard.press('Enter');
+        assert.ok(await page.evaluate(() => {
+          const item = document.activeElement.closest('.pos-product');
+          return item && [...item.parentElement.querySelectorAll('.pos-product')].indexOf(item) === 36;
+        }), 'foco transferido para o primeiro cartão do novo lote');
+      } else await page.$eval(more,node=>{node.scrollIntoView({block:'center'});node.click();});
       assert.equal(await page.$$eval(grid+' .pos-product',nodes=>nodes.length),72);
     });
     const scroll = await page.evaluate(()=>window.scrollY);
@@ -131,7 +155,9 @@ async function check(page, cdp, profile, volume, run) {
   await click(page,card('p1'));
   await click(page,'#open-sale-summary');
   if (!profile.mobile) await click(page,'#desktop-continue-sale');
-  const payment = ['dinheiro','pix','cartao'][run%3];
+  const payment = releaseSmoke
+    ? profile.theme === 'light' ? 'dinheiro' : profile.mobile ? 'cartao' : 'pix'
+    : ['dinheiro','pix','cartao'][run%3];
   await page.evaluate(method=>{
     const chip=document.querySelector('.mobile-payment-chips [data-payment="'+method+'"]');
     if(chip) return chip.click();
@@ -168,6 +194,12 @@ async function functionalChecks(page, mobile) {
   assert.equal(await page.$(last),null);
   await page.select('#pos-category','categoria 3');
   await wait(page,last);
+  await navigate(page,'inicio');
+  await navigate(page,'vender');
+  assert.equal(await page.$eval('#pos-category',input=>input.value),'categoria 3');
+  assert.equal(await page.$eval('#product-search',input=>input.value),'palavra399');
+  assert.equal(await page.$$eval(grid+' .pos-product',nodes=>nodes.length),1);
+  await wait(page,last);
   await page.select('#pos-category','');
   await search(page,'');
   if(mobile) {
@@ -183,7 +215,18 @@ async function functionalChecks(page, mobile) {
   }
   const draft = () => page.evaluate(()=>Checkout.cartCount());
   assert.equal(await page.$(last),null,'item ainda fora do lote antes da leitura');
-  assert.equal(await page.evaluate(()=>BarcodeWorkflows.addSaleProduct(Produtos.obter('bench-p399'))),true);
+  await page.evaluate(async()=>{
+    const scanner = BarcodeScannerService, original = scanner.startScanner;
+    try {
+      let read;
+      scanner.startScanner = async ({onDetected})=>{read = onDetected;};
+      BarcodeWorkflows.sale();
+      await read({value:'7891234000399',format:'ean_13'});
+    } finally {
+      BarcodeUI.close();
+      scanner.startScanner = original;
+    }
+  });
   assert.equal(await draft(),1);
   await click(page,'#open-sale-summary');
   await click(page,'#cart [data-remove]');
@@ -246,7 +289,7 @@ async function functionalChecks(page, mobile) {
   assert.deepEqual(outcome,{total:10,method:'fiado',variant:'v2',stock:1,projectedBalance:-30});
   const text=await page.$eval(card('p2'),node=>node.textContent);
   assert.match(text,mobile ? /Estoque:\s*4/ : /opções\s*·\s*4 un/);
-  return {variant:true,fiado:true,lateBarcode:true,spaceIsolation:true,stockFence:true,category:true,favoritesOrBrand:true,recent:mobile,postSaleStock:true};
+  return {variant:true,fiado:true,lateBarcode:true,spaceIsolation:true,stockFence:true,category:true,restoredFilter:true,favoritesOrBrand:true,recent:mobile,postSaleStock:true};
 }
 
 async function capture(page, profile) {
@@ -262,6 +305,7 @@ async function main() {
   const base=await listen(server), browser=await launch();
   try {
     for(const profile of profiles) for(const volume of ['small','medium','large']) for(let run=0;run<rounds;run++) {
+      if (releaseSmoke && volume === 'medium') continue;
       if (process.env.PERF_PROFILE && process.env.PERF_PROFILE!==(profile.mobile?'mobile-':'desktop-')+profile.theme) continue;
       if (process.env.PERF_VOLUME && process.env.PERF_VOLUME!==volume) continue;
       const context=await browser.createBrowserContext(), page=await context.newPage(), errors=[];
@@ -283,7 +327,7 @@ async function main() {
         rows.push({...profile,volume,run,fault:error.message,errors});
         console.error(error.stack, errors);
       } finally {
-        save(capturesOnly?'selling-captures.json':functional?'selling-functional.json':reference?'selling-before.json':'selling-after.json',rows);
+        save(releaseSmoke?'selling-release-smoke.json':capturesOnly?'selling-captures.json':functional?'selling-functional.json':reference?'selling-before.json':'selling-after.json',rows);
         await context.close();
       }
     }
