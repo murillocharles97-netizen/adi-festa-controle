@@ -150,7 +150,7 @@
     };
     controls(true);
     try {
-      service = await import('./firebase/product-spreadsheet-service.js?v=2431-export'); let importBlock = null;
+      service = await import('./firebase/product-spreadsheet-service.js?v=2426-export'); let importBlock = null;
       try { catalog = await service.loadCatalog(); }
       catch (e) {
         // Only operations held for review (never resent automatically): export stays available, import does not.
