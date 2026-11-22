@@ -18,9 +18,11 @@ async function main(){
         await page.goto(base+(theme==='dark'?'/?papelaria=1':'/'));
         if(theme==='dark')await click(page,'#theme');
         const f=publicFrame(page);await f.waitForSelector('.vv-robot');
+        await f.waitForFunction(expected=>document.documentElement.dataset.storeTheme===expected,{},theme);
         const animated=()=>f.$eval('.vv-robot',e=>getComputedStyle(e).transform);
         const start=await animated();await pause(210);assert.notEqual(await animated(),start);
-        await click(f,'[data-viva-pause]');await pause(50);const frozen=await animated();await pause(120);assert.equal(await animated(),frozen);
+        await click(f,'[data-viva-pause]');const clock=()=>f.$eval('.vv-robot',async e=>{const a=e.getAnimations()[0];await a.ready;return [a.playState,a.currentTime];});
+        const frozen=await clock();assert.equal(frozen[0],'paused');await pause(160);assert.deepEqual(await clock(),frozen);
         await click(f,'[data-shift="1"]');assert.match(await f.$eval('.vv-caption h2',e=>e.textContent),/Novidades/);
         await f.focus('[data-shift="-1"]');await page.keyboard.press('ArrowLeft');
         assert.ok(await f.$('.vv-robot'));
@@ -35,7 +37,7 @@ async function main(){
         await f.waitForFunction(name=>document.querySelector('.sf-grid')?.textContent.includes(name),{},product);
         await f.$eval('#sf-search',e=>{e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));});
         await f.waitForSelector('.sf-featured');
-        await f.evaluate(()=>scrollTo(0,0));
+        await f.evaluate(()=>scrollTo(0,0));await pause(520);
         const overflow=await f.evaluate(()=>document.documentElement.scrollWidth-innerWidth);assert.ok(overflow<=1);
         if([390,1440].includes(width))await page.screenshot({path:path.join(output,`vitrine-${width}-${theme}.png`)});
         await click(f,'.sf-card [data-add]');await click(f,'.sf-cart-btn');await f.waitForSelector('.vv-drawer .sf-line');await pause(320);
@@ -55,10 +57,11 @@ async function main(){
       }finally{await page.close();}
     }
     const page=await browser.newPage();await page.setViewport({width:1440,height:1000});
-    await page.goto(base);await click(page,'[data-view="editor"]');await page.waitForSelector('[data-v="design"]');
-    await click(page,'[data-v="design"]');await page.waitForSelector('.lo-banners');
+    await page.goto(base);await click(page,'[data-view="editor"]');await page.waitForSelector('[data-v="layout"]');
+    await click(page,'[data-v="layout"]');await page.waitForSelector('.lo-banners');
+    await pause(650);await page.screenshot({path:path.join(output,'layout-desktop.png')});
     await click(page,'[data-slide-action="add"]');
-    await page.select('[data-slide-template]','offers');
+    await click(page,'[data-slide-model=offers]');
     await page.$eval('[data-slide-field="title"]',e=>{e.value='Seleção de domingo';e.dispatchEvent(new Event('input',{bubbles:true}));});
     await click(page,'[data-slide-action="up"]');
     const draft=()=>page.evaluate(()=>__lojaQA.stores.get('qa-space-a').presentation.storefrontLayout);
@@ -72,6 +75,15 @@ async function main(){
     await click(page,'[data-v="home"]');await click(page,'[data-act="ask-publish"]');await click(page,'[data-act="do-publish"]');
     await page.waitForFunction(()=>[...__lojaQA.publicDocs.values()][0].storefrontLayout.slides.some(s=>s.title==='Seleção de domingo'));
     const published=await live();assert.equal(published.slides.length,3);assert.ok(!JSON.stringify(published).includes('Novidades'));
+    await click(page,'[data-v="layout"]');await page.waitForSelector('.lo-banners');
+    await click(page,'[data-slide-index="-1"]');
+    const file=await page.$('[data-slide-image]');await file.uploadFile(path.resolve('assets/storefront-courier.webp'));
+    await page.waitForFunction(()=>__lojaQA.stores.get('qa-space-a').presentation.storefrontLayout.secondary.imageUrl.startsWith('data:image/webp'));
+    // Return to the primary slide for the mobile review after the upload check.
+    await click(page,'[data-slide-index="0"]');await pause(2700);
+    await page.click('#theme');await page.setViewport({width:390,height:844});
+    await page.$eval('.lo-banners',e=>e.scrollIntoView({block:'start'}));await pause(450);
+    await page.screenshot({path:path.join(output,'layout-mobile-dark.png')});
     await page.close();
     fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({rows,draftPublish:true},null,2));console.log('PASS',rows.length,'profiles; draft, preview and explicit publish');
   }finally{await browser.close();server.close();}

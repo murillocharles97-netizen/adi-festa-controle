@@ -347,3 +347,7 @@ html[data-store-theme=dark] :is(.sf-card-img,.sf-product-img,.sf-msg-sheet,.sf-t
 html[data-store-theme=dark] :is(.sf-sheet-x,.sf-add.has-qty,.sf-toast){background:#d1e9ea;color:#132a32}
 html[data-store-theme=dark] .sf-error{color:#ffabb0!important}
 html[data-store-theme=dark] .sf-stock{color:#ffd097}
+
+
+html[data-store-theme=dark] .sf-msg{background:#1b302d;border-color:var(--sf-line)}
+html[data-store-theme=dark] .sf-msg .sf-bubble{background:#20453b;color:#f0f6f4}

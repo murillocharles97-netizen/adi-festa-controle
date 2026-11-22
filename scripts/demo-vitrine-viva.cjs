@@ -10,14 +10,14 @@ const files = new Set([
   'functions/src/shared/online-order.js','functions/src/shared/online-store.js','tests/fixtures/online-store-v3-backend.js',
   'tests/vitrine-viva.fixture.html','tests/fixtures/vitrine-viva-demo.js'
 ]);
-const types = {'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.woff2':'font/woff2','.png':'image/png','.ico':'image/x-icon'};
+const types = {'.html':'text/html','.js':'application/javascript','.css':'text/css','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.png':'image/png','.ico':'image/x-icon'};
 function serve(port=0){
   const server=http.createServer((req,res)=>{
     const url=new URL(req.url,'http://127.0.0.1');
     if(req.method!=='GET' && req.method!=='HEAD')return res.writeHead(405).end();
     const name=url.pathname.slice(1)||'tests/vitrine-viva.fixture.html';
     if(name.startsWith('demo-images/')){res.setHeader('Content-Type','image/svg+xml');return res.end(svgFor(name.slice(11)));}
-    const asset=/^(?:assets|css)\/[a-zA-Z0-9_./-]+\.(?:css|woff2|png|svg|ico|js)$/.test(name);
+    const asset=/^(?:assets|css)\/[a-zA-Z0-9_./-]+\.(?:css|woff2|png|webp|svg|ico|js)$/.test(name);
     if(!asset&&!files.has(name))return res.writeHead(404).end();
     const fullPath=path.resolve(root,name);
     if(!fullPath.startsWith(root+path.sep)||!fs.existsSync(fullPath))return res.writeHead(404).end();

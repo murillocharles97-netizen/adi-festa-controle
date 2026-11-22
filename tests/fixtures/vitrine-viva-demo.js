@@ -4,7 +4,7 @@
   const kit=StoreKit, layout={version:1,slides:[kit.bannerSlide(),kit.bannerSlide('arrivals'),kit.bannerSlide('featured')],
     featured:true,secondary:{...kit.bannerSlide('easy'),title:'Escolha os seus favoritos',button:'Montar carrinho',active:true}};
   if(new URLSearchParams(location.search).has('papelaria')){
-    store.catalogSettings.publicName='Papelaria Prisma';store.catalogSettings.primaryColor='#3466b7';store.catalogSettings.secondaryColor='#142f4f';
+    store.catalogSettings.publicName='Papelaria Prisma';window.__lojaQASpaces[0].name='Papelaria Prisma';store.catalogSettings.primaryColor='#3466b7';store.catalogSettings.secondaryColor='#142f4f';
     Object.assign(publicDoc,store.catalogSettings,{welcomeText:'Papéis, cadernos e acessórios de escrita.'});
     publicDoc.items.forEach((p,i)=>Object.assign(p,{productName:['Caderno pontilhado','Estojo de lona','Papel colorido','Marcador'][i%4]+' '+(i+1),productImage:'',category:'Papelaria'}));
   }
@@ -30,7 +30,7 @@
   function showLive(){
     const live=qa.publicDocs.get(store.publicToken);
     if(!live.active){frame.hidden=true;workspace.hidden=false;workspace.textContent='A loja fictícia está pausada.';return;}
-    frame.contentWindow?.postMessage({type:'veconi-store-preview',catalog:live},location.origin);
+    frame.contentWindow?.postMessage({type:'veconi-store-preview',catalog:{...live,previewTheme:document.documentElement.dataset.theme}},location.origin);
   }
   addEventListener('message',e=>{if(e.origin===location.origin&&e.source===frame.contentWindow&&e.data?.type==='veconi-store-preview-ready')showLive();});
   function show(view){
@@ -38,11 +38,17 @@
     frame.hidden=view!=='public';workspace.hidden=view==='public';
     if(view==='public'){if(!frame.getAttribute('src'))frame.src='/catalogo.html?preview=1';else showLive();return;}
     if(view==='orders'){workspace.innerHTML=OnlineOrdersUI.render();OnlineOrdersUI.bind();return;}
-    workspace.innerHTML=OnlineStoreUI.render();OnlineStoreUI.bind();
+    workspace.innerHTML=OnlineStoreUI.render();OnlineStoreUI.bind().then(()=>{if(!workspace.hidden)workspace.querySelector('[data-v="layout"]')?.click();});
   }
+  document.addEventListener('click',e=>{
+    const a=e.target.closest('a[href]');
+    if(a && new URL(a.href,location.origin).origin!==location.origin){
+      e.preventDefault();if(a.href.includes('catalogo.html'))show('public');
+    }
+  },true);
   document.querySelector('.demo-nav').onclick=e=>{const b=e.target.closest('button');if(!b)return;
     if(b.dataset.view)show(b.dataset.view);
-    else{const dark=document.documentElement.dataset.theme!=='dark';document.documentElement.dataset.theme=dark?'dark':'light';b.textContent=dark?'Tema claro':'Tema escuro';}
+    else{const dark=document.documentElement.dataset.theme!=='dark';document.documentElement.dataset.theme=dark?'dark':'light';b.textContent=dark?'Tema claro':'Tema escuro';if(!frame.hidden)showLive();}
   };
   show('public');
 })();
