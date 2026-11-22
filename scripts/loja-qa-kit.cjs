@@ -3,6 +3,9 @@
 // do painel dentro do shell real da V242. Nenhuma rede externa, autenticação ou escrita real.
 'use strict';
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
+const verifiedPages = process.env.VECONI_VERIFIED_PAGES && path.resolve(process.env.VECONI_VERIFIED_PAGES);
+const storefrontFiles = new Set(['/catalogo.html','/css/catalogo.css','/css/online-store.css','/js/loja/store-kit.js',
+  '/js/online-store-ui.js','/js/catalogo-publico.js','/js/build-info.js','/js/firebase/catalog-bridge.js']);
 let puppeteer; try { puppeteer = require('puppeteer'); } catch { puppeteer = require('puppeteer-core'); }
 const root = path.resolve(__dirname, '..');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace(/\r/g, '');
@@ -32,7 +35,9 @@ function serve(port = 0) {
         .replace(/<nav class="bottom-nav"[\s\S]*?<\/nav>/, bottomNav);
       return res.end(html);
     }
-    fs.createReadStream(file).pipe(res);
+    const fromPages=verifiedPages&&storefrontFiles.has(url.pathname)?path.join(verifiedPages,url.pathname.slice(1)):null;
+    if(fromPages&&!fs.existsSync(fromPages))return res.writeHead(503).end('Missing verified Pages asset');
+    fs.createReadStream(fromPages||file).pipe(res);
   });
   return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}` })));
 }

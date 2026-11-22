@@ -10,18 +10,25 @@ const puppeteer = require('puppeteer-core');
 const root = path.resolve(__dirname, '..');
 const selling = process.argv.includes('--selling');
 const loja = process.argv.includes('--loja');
-const artifactDir = path.join(root, loja ? 'qa-artifacts/loja-v3/homolog' : selling ? 'qa-artifacts/v2423' : 'qa-artifacts/v2422');
+const recoverLoja = process.argv.includes('--loja-rollback');
+const artifactDir = path.join(root, loja || recoverLoja ? 'qa-artifacts/v2424' : selling ? 'qa-artifacts/v2423' : 'qa-artifacts/v2422');
 const site = path.resolve(process.env.VECONI_PWA_SITE || path.join(artifactDir, 'public'));
-const oldRef = loja ? '2817d50' : selling ? '65ea4bb' : 'c643cc5';
+const oldRef = recoverLoja ? process.env.VECONI_PWA_PREVIOUS_REF : loja ? '2817d50' : selling ? '65ea4bb' : 'c643cc5';
+if(!oldRef)throw Error('Set VECONI_PWA_PREVIOUS_REF to the V242.4 release commit');
 const syncPanel = { cache: 'veconi-v2421-sync-panel-v1', release: '242', appVersion: '242.1' };
 const quickWins = { cache: 'veconi-v2422-performance-quick-wins-v1', release: '242', appVersion: '242.2' };
 const sellingRelease = { cache: 'veconi-v2423-performance-selling-v1', release: '242', appVersion: '242.3' };
-const previous = loja ? sellingRelease : selling ? quickWins : syncPanel;
-const next = loja ? { ...sellingRelease, cache: 'veconi-loja-v3-qa-only' } : selling ? sellingRelease : quickWins;
+const lojaRelease = { cache: 'veconi-v2424-loja-online-v3-v1', release: '242', appVersion: '242.4' };
+const previous = recoverLoja ? lojaRelease : loja ? sellingRelease : selling ? quickWins : syncPanel;
+const next = recoverLoja ? { cache: 'veconi-v2425-rollback-loja-v3-v1', release: '242', appVersion: '242.5' }
+  : loja ? lojaRelease : selling ? sellingRelease : quickWins;
 const scriptsAt = (files, version) => files.map(file => '/js/' + file + '.js?v=' + version);
 const quickWinsScripts = ['clientes-mobile', 'customer-metrics', 'crm-segment-engine-v2'];
 const lojaAssets = ['/css/online-store.css', '/css/catalogo.css', '/js/loja/store-kit.js', '/js/online-store-ui.js', '/js/firebase/catalog-bridge.js', '/js/catalogo-publico.js'];
-const pinned = loja ? lojaAssets.map(url => url + '?v=300') : selling
+const pinned = recoverLoja ? [
+  '/js/build-info.js?v=2425', '/js/online-store-ui.js?v=2311-ds2', '/css/online-store.css?v=177',
+  '/js/firebase/catalog-bridge.js?v=95', '/css/catalogo.css?v=123', '/js/catalogo-publico.js?v=171',
+] : loja ? [...lojaAssets.map(url => url + '?v=300'), '/js/build-info.js?v=2424'] : selling
   ? [
       ...scriptsAt(['build-info', 'app', 'barcode', 'checkout', 'checkout-mobile', 'desktop-sales'], '2423'),
       '/css/checkout-mobile.css?v=2423',
@@ -29,6 +36,8 @@ const pinned = loja ? lojaAssets.map(url => url + '?v=300') : selling
     ]
   : scriptsAt(['build-info', 'app', ...quickWinsScripts], '2422');
 const oldFiles = new Map();
+const previousSite = process.env.VECONI_PWA_PREVIOUS_SITE && path.resolve(process.env.VECONI_PWA_PREVIOUS_SITE);
+const verifiedPages = process.env.VECONI_VERIFIED_PAGES && path.resolve(process.env.VECONI_VERIFIED_PAGES);
 const changed = new Set(execFileSync('git', ['diff', '--name-only', oldRef], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/));
 const scope = 'adiFestaDB_v1:qa-v2422:qa-owner:owner';
 const queueKey = 'adiFesta:qa-v2422:qa-owner:owner:syncQueue';
@@ -45,13 +54,18 @@ let candidate = false;
 let offline = false;
 
 function bytes(file, current = candidate) {
+  if(!current&&previousSite){
+    const previousResource=path.resolve(previousSite,file);
+    return previousResource.startsWith(previousSite+path.sep)&&fs.existsSync(previousResource)&&fs.statSync(previousResource).isFile()
+      ? fs.readFileSync(previousResource) : null;
+  }
+  if(current&&verifiedPages){
+    const verifiedResource=path.resolve(verifiedPages,file);
+    if(verifiedResource.startsWith(verifiedPages+path.sep)&&fs.existsSync(verifiedResource)&&fs.statSync(verifiedResource).isFile())
+      return fs.readFileSync(verifiedResource);
+  }
   const resolved = path.resolve(site, file);
   if (!resolved.startsWith(site + path.sep) || !fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
-  if (loja && current && file === 'service-worker.js') {
-    const worker = fs.readFileSync(resolved, 'utf8');
-    assert.ok(worker.includes(sellingRelease.cache));
-    return Buffer.from(worker.replace(sellingRelease.cache, next.cache));
-  }
   if (current || !changed.has(file)) return fs.readFileSync(resolved);
   if (!oldFiles.has(file)) oldFiles.set(file, execFileSync('git', ['show', oldRef + ':' + file], { cwd: root }));
   return oldFiles.get(file);
@@ -92,19 +106,20 @@ function workerVersion(page) {
 
 async function verify(page) {
   assert.deepEqual(await workerVersion(page), next);
-  const result = await page.evaluate(async ({ scope, queueKey, next, pinned, loja }) => {
+  const result = await page.evaluate(async ({ scope, queueKey, next, pinned, storefront }) => {
     const saved = await DB.businessCache.open(scope, [], () => ({}));
     const queue = DB.businessCache.keyValue.peekItem(queueKey);
     await DB.businessCache.release();
     const cache = await caches.open(next.cache);
-    const pages = loja ? ['/index.html', '/catalogo.html'] : ['/index.html'];
+    const pages = storefront ? ['/index.html', '/catalogo.html'] : ['/index.html'];
     const artifacts = await Promise.all(pages.map(async file => (await cache.match(file)).text()));
     const hashes = {};
     for (const asset of pinned) {
       const pathname = asset.split('?')[0];
       const matches = [...artifacts.join('\n').matchAll(/(?:src|href)="(\.\/[^"]+)"/g)]
         .map(([, url]) => url.slice(1)).filter(url => url.split('?')[0] === pathname);
-      if (matches.length !== (loja && pathname.endsWith('/store-kit.js') ? 2 : 1) || matches.some(url => url !== asset)) {
+      const bothPages = storefront && ['/js/loja/store-kit.js', '/js/build-info.js'].includes(pathname);
+      if (matches.length !== (bothPages ? 2 : 1) || matches.some(url => url !== asset)) {
         throw Error('Referência ausente ou duplicada: ' + asset);
       }
       const response = await cache.match(asset);
@@ -112,7 +127,7 @@ async function verify(page) {
       hashes[asset] = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
     }
     return { saved, queue, hashes, theme: document.documentElement.dataset.theme, preference: localStorage.getItem('veconi-theme'), caches: await caches.keys() };
-  }, { scope, queueKey, next, pinned, loja });
+  }, { scope, queueKey, next, pinned, storefront:loja||recoverLoja });
   assert.deepEqual(result.saved, data);
   assert.equal(result.queue, queue);
   assert.equal(result.theme, 'dark');
