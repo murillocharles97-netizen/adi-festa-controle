@@ -14,6 +14,24 @@ function onlineStoreService(db){
     catalog.schemaVersion===6&&catalog.catalogType==='space_store'&&
     catalog.businessId===c.businessId&&catalog.spaceId===c.spaceId&&
     catalog.workspaceGeneration===c.workspaceGeneration;
+  const bindingMatches=(c,binding)=>binding?.businessId===c.businessId&&binding.spaceId===c.spaceId&&
+    binding.storeId===c.ref.id&&binding.workspaceGeneration===c.workspaceGeneration&&binding.status==='completed';
+
+  async function updateAvailability(tx,c,existing,catalogRef,catalog,active){
+    const binding=(await tx.get(db.doc(`catalogStoreBindings/${existing.publicToken}`))).data();
+    if(!liveMatches(c,existing,catalog)||!bindingMatches(c,binding)||existing.v2Enabled!==true||
+      catalog.legacyStoreRetired||!Array.isArray(catalog.items)||
+      catalog.visitId!==c.ref.id||catalog.catalogToken!==existing.publicToken)
+      fail('failed-precondition','Não foi possível verificar a última publicação desta loja.');
+    const acceptingOrders=active&&existing.checkoutEnabled===true&&catalog.checkoutEnabled===true;
+    if(existing.published===active&&catalog.active===active&&catalog.catalogVisible===active&&catalog.acceptingOrders===acceptingOrders)
+      return {store:existing,replayed:true};
+    const updatedAt=new Date().toISOString(),revision=(existing.revision||0)+1;
+    const state={published:active,revision,updatedAt,actorUid:c.uid};
+    tx.update(c.ref,state);
+    tx.update(catalogRef,{active,catalogVisible:active,acceptingOrders,revision,updatedAt});
+    return {store:{...existing,...state},replayed:false};
+  }
   function reception(c,store,catalog){
     const published=store?.v2Enabled===true&&store?.published===true,
       valid=liveMatches(c,store,catalog)&&catalog.active===true&&catalog.catalogVisible===true,
@@ -62,8 +80,7 @@ function onlineStoreService(db){
         const catalogRef=db.doc(`publicCatalogs/${existing.publicToken}`),bindingRef=db.doc(`catalogStoreBindings/${existing.publicToken}`),
           [publicDoc,bindingDoc]=await Promise.all([tx.get(catalogRef),tx.get(bindingRef)]),catalog=publicDoc.data(),binding=bindingDoc.data(),
           current=reception(c,existing,catalog),enabled=input.enabled;
-        if(!liveMatches(c,existing,catalog)||binding?.businessId!==c.businessId||binding?.spaceId!==c.spaceId||
-          binding?.storeId!==c.ref.id||binding?.workspaceGeneration!==c.workspaceGeneration||binding?.status!=='completed')
+        if(!liveMatches(c,existing,catalog)||!bindingMatches(c,binding))
           fail('failed-precondition','Atualize a publicação deste espaço antes de alterar os pedidos.');
         if(enabled&&!current.canEnable)fail('failed-precondition',{
           not_published:'Publique a loja deste espaço antes de receber pedidos.',
@@ -94,6 +111,18 @@ function onlineStoreService(db){
       if(!existing&&!['save','activate'].includes(action))fail('failed-precondition','O proprietário deve ativar a Loja Online V2 explicitamente neste espaço.');
       if(existing&&existing.v2Enabled!==true&&!['save','activate','publish'].includes(action))fail('failed-precondition','Loja Online V2 não ativada neste espaço.');
       if((existing?.revision||0)!==Number(input.revision||0))fail('aborted','A loja foi alterada em outro aparelho. Recarregue antes de salvar.');
+      if(action==='publish'&&(input.published===false||existing.published!==true)){
+        // Both panels send publish:true when reopening a paused store. A first
+        // publication has no snapshot, while a resume reuses the bound snapshot.
+        const catalogRef=existing.publicToken?db.doc(`publicCatalogs/${existing.publicToken}`):null;
+        const catalog=catalogRef?(await tx.get(catalogRef)).data():null;
+        const wasPublished=Array.isArray(existing.publishedProductIds)||
+          (catalogRef&&!catalog&&(await tx.get(db.doc(`catalogStoreBindings/${existing.publicToken}`))).exists);
+        if(input.published===false||catalog||wasPublished){
+          if(!catalogRef||!catalog)fail('failed-precondition','Não foi possível verificar a última publicação desta loja.');
+          return updateAvailability(tx,c,existing,catalogRef,catalog,input.published!==false);
+        }
+      }
       let settings,slug;
       try{settings=Model.settings(input.settings||existing?.catalogSettings);slug=Model.slug(input.slug||existing?.slug);}catch(e){fail('invalid-argument',e.message);}
       if(!settings.publicName)fail('invalid-argument','Informe o nome público da loja.');
@@ -118,10 +147,10 @@ function onlineStoreService(db){
       // Keep the LIVE selection independent of an unpublished draft. Compatibility
       // reads are scoped to this existing V2 public token, never to legacy catalogs.
       if(action==='publish')store.publishedProductIds=ids;
-      else if(existing?.published&&!Array.isArray(existing.publishedProductIds)){
+      else if(existing?.publicToken&&!Array.isArray(existing.publishedProductIds)){
         const live=(await tx.get(db.doc(`publicCatalogs/${existing.publicToken}`))).data();
-        if(live?.schemaVersion===6&&live.catalogType==='space_store'&&live.businessId===c.businessId&&live.spaceId===c.spaceId&&live.workspaceGeneration===c.workspaceGeneration)
-          store.publishedProductIds=[...new Set((live.items||[]).map(item=>item.productId))];
+        if(liveMatches(c,existing,live)&&Array.isArray(live.items))
+          store.publishedProductIds=[...new Set(live.items.map(item=>item.productId))];
       }
       if(action==='publish')store.published=input.published!==false;
       if(Buffer.byteLength(JSON.stringify(store),'utf8')>850000)fail('resource-exhausted','Esta loja excede o limite seguro de configuração. Nada foi truncado; reduza a publicação ou use paginação.');
