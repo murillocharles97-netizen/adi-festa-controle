@@ -327,3 +327,16 @@ svg { flex-shrink: 0; }
 .vv-rest *{animation-play-state:paused!important}
 @media(max-width:600px){.vv-hero{margin:10px auto;width:calc(100% - 20px);border-radius:18px}.vv-caption{width:60%;padding:20px 6px 35px 18px}.vv-caption h2{font-size:clamp(28px,8.5vw,40px)}.vv-slide{min-height:247px}.vv-scene{left:54%}.vv-flight{scale:.68;transform-origin:0 0;left:47%}.vv-action{padding:10px 14px;font-size:13px}.vv-controls{bottom:5px;right:5px}.vv-secondary .vv-caption{padding:18px}}
 @media(prefers-reduced-motion:reduce){.vv-hero *,.vv-secondary *{animation:none!important;transition:none!important}}
+
+
+.vv-cart-underlay{min-height:100dvh;background:var(--sf-bg)}
+.vv-cart-shade{position:fixed;inset:0;background:#111b2c66;z-index:48}
+.vv-drawer{position:fixed;inset:0 0 0 auto;z-index:49;width:min(100%,560px);overflow:auto;overscroll-behavior:contain;background:var(--sf-bg,#f5f7fa);padding-bottom:env(safe-area-inset-bottom);box-shadow:-14px 0 60px #121a2e35;animation:vv-drawer .28s cubic-bezier(.22,.61,.36,1)}
+.vv-drawer .sf-page{min-width:0;width:100%}.sf-card-img img{transition:transform .25s ease-out}
+@media(hover:hover){.sf-card-open:hover .sf-card-img img{scale:1.025}}
+.sf-add.vv-added{animation:vv-added .35s ease-out}.sf-cats button{transition:background .18s,color .18s}
+@supports(animation-timeline:view()){.sf-main .sf-section{animation:vv-rise linear both;animation-timeline:view();animation-range:entry 0% entry 16%}}
+@keyframes vv-rise{from{opacity:.75;translate:0 7px}}
+@keyframes vv-added{50%{scale:1.15}}
+@keyframes vv-drawer{from{transform:translateX(45%);opacity:.45}}
+@media(prefers-reduced-motion:reduce){.vv-drawer,.sf-add.vv-added,.sf-main .sf-section,.sf-sheet{animation:none!important}.sf-card-img img,.sf-cats button{transition:none}}
