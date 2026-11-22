@@ -131,6 +131,67 @@ test('falha de rede: nada aparece como salvo e a alteração continua no rascunh
   assert.ok(p.T.state.draft.productIds.includes('p2'));assert.ok(!p.T.state.base.productIds.includes('p2'));
   fail = false;await p.T.flush();assert.equal(p.T.state.saveState, 'saved');assert.ok(p.T.state.base.productIds.includes('p2'));
 });
+test('uma edição recém-digitada entra na fila e avisa antes de sair', async () => {
+  const p=panel();await p.ready;
+  try{
+    p.T.goView('design');
+    const field=p.$('#lo-publicName');
+    field.value='Loja alterada';
+    field.dispatchEvent(new p.w.Event('input',{bubbles:true}));
+    const leaving=()=>!p.w.dispatchEvent(new p.w.Event('beforeunload',{cancelable:true}));
+    assert.match(saveText(p),/Alterações pendentes/);
+    assert.equal(leaving(),true);
+    assert.equal(p.calls.filter(c=>c.name==='saveOnlineStore').length,0);
+    await p.T.flush();
+    assert.equal(p.server.store.catalogSettings.publicName,'Loja alterada');
+    assert.match(saveText(p),/Rascunho salvo/);
+    assert.equal(leaving(),false);
+  }finally{p.w.close();}
+});
+test('uma confirmação anterior não marca o texto inválido atual como salvo', async () => {
+  let confirmStarted,allowConfirm;
+  const started=new Promise(resolve=>{confirmStarted=resolve;});
+  const release=new Promise(resolve=>{allowConfirm=resolve;});
+  const p=panel({handler:async(name)=>{if(name==='saveOnlineStore'){confirmStarted();await release;}}});await p.ready;
+  try{
+    p.T.goView('design');
+    const field=p.$('#lo-publicName');
+    const enter=value=>{field.value=value;field.dispatchEvent(new p.w.Event('input',{bubbles:true}));field.dispatchEvent(new p.w.Event('change',{bubbles:true}));};
+    enter('Nome válido');
+    const saving=p.T.flush();
+    await started;
+    enter('');
+    allowConfirm();
+    await saving;
+    assert.equal(p.server.store.catalogSettings.publicName,'Nome válido');
+    assert.match(saveText(p),/Corrija o campo destacado/);
+    assert.doesNotMatch(saveText(p),/Rascunho salvo/);
+    assert.equal(p.w.dispatchEvent(new p.w.Event('beforeunload',{cancelable:true})),false);
+  }finally{allowConfirm();p.w.close();}
+});
+test('salvar endereço durante outro envio só confirma após receber o endereço', async () => {
+  const replies=[];
+  const p=panel({handler:async(name,data)=>{
+    if(name==='saveOnlineStore')await new Promise(resolve=>replies.push({slug:data.slug,resolve}));
+  }});await p.ready;
+  const waitFor=async fn=>{for(let i=0;i<50&&!fn();i++)await new Promise(resolve=>setTimeout(resolve,5));assert.ok(fn());};
+  try{
+    p.T.toggle('p1');
+    const first=p.T.flush();
+    await waitFor(()=>replies.length===1);
+    p.$('[data-slug]').value='novo-endereco-qa';
+    p.$('[data-act="save-slug"]').click();
+    replies[0].resolve();
+    await first;
+    await waitFor(()=>replies.length===2||/Endereço salvo/.test(p.$('.lo-toast').textContent));
+    assert.doesNotMatch(p.$('.lo-toast').textContent,/Endereço salvo/);
+    assert.equal(p.server.store.slug,'loja-qa');
+    assert.equal(replies[1].slug,'novo-endereco-qa');
+    replies[1].resolve();
+    await waitFor(()=>/Endereço salvo/.test(p.$('.lo-toast').textContent));
+    assert.equal(p.server.store.slug,'novo-endereco-qa');
+  }finally{replies.forEach(reply=>reply.resolve());p.w.close();}
+});
 test('resposta sem a alteração confirmada vira erro, nunca sucesso', async () => {
   const p = panel({ handler: (name, data, server) => { if (name === 'saveOnlineStore') { server.store = { ...server.store, revision: server.store.revision + 1 };return { data: { store: server.store } }; } } });await p.ready;
   p.T.toggle('p3');await p.T.flush();

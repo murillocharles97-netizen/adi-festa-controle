@@ -41,7 +41,7 @@
   /* ---------- Carregamento ---------- */
   function render(){
     const key=`${business()}:${window.FirebaseSession?.user?.uid||''}`;
-    if(state.key!==key){Object.assign(state,{key,spaceId:'',view:'home',data:null,base:null,draft:null,ops:[],inflight:null,saveState:'idle',saveError:'',live:null,busy:false,receptionConfirm:null,receptionMessage:'',selecting:false,sheet:null});state.picked=new Set();state.sequence++;}
+    if(state.key!==key){Object.assign(state,{key,spaceId:'',view:'home',data:null,base:null,draft:null,ops:[],inflight:null,saveState:'idle',saveError:'',live:null,busy:false,receptionConfirm:null,receptionMessage:'',selecting:false,sheet:null,errors:{}});state.picked=new Set();state.sequence++;}
     if(!spaces().some(s=>s.id===state.spaceId))state.spaceId=spaces().find(s=>s.id===window.SpaceContext?.salesId?.())?.id||spaces()[0]?.id||'';
     return '<section class="lo" id="store-v2" aria-label="Loja online"><div class="lo-loading" role="status"><span class="lo-spinner" aria-hidden="true"></span>Carregando a loja deste espaço…</div></section>';
   }
@@ -102,7 +102,13 @@
 
   /* ---------- Fila de salvamento: nada aparece como salvo sem a confirmação do servidor ---------- */
   function queue(...ops){
-    for(const op of ops){if(op.t==='setting'){const i=state.ops.findIndex(o=>o.t==='setting'&&o.key===op.key);if(i>=0)state.ops.splice(i,1);}state.ops.push(op);}
+    for(const op of ops){
+      if(op.t==='setting'||op.t==='categoryName'){
+        const field=op.t==='setting'?'key':'name',i=state.ops.findIndex(o=>o.t===op.t&&o[field]===op[field]);
+        if(i>=0)state.ops.splice(i,1);
+      }
+      state.ops.push(op);
+    }
     refreshDraft();state.saveState=state.inflight?'saving':'pending';state.saveError='';
     clearTimeout(state.saveTimer);state.saveTimer=setTimeout(flush,SAVE_DELAY);
     paint('save');schedulePreview();
@@ -153,7 +159,7 @@
   }
   function fail(message){state.saveState='error';state.saveError=message;paint('save');}
   async function settle(){for(let i=0;i<6&&(state.ops.length||state.inflight||state.flushing);i++){if(state.saveState==='error')break;await flush();}return !state.ops.length&&!state.inflight&&state.saveState!=='error';}
-  function discard(){state.ops=[];state.saveState=state.inflight?'saving':'idle';state.saveError='';refreshDraft();draw();toast('Alterações não salvas foram descartadas.');}
+  function discard(){state.ops=[];state.saveState=state.inflight?'saving':'idle';state.saveError='';for(const key of Object.keys(FIELD_MAX)){delete state.errors[key+'Error'];delete state.errors[key+'Input'];}refreshDraft();draw();toast('Alterações não salvas foram descartadas.');}
   function guard(){if(!owner()){toast('Somente o proprietário pode alterar a loja.',true);return false;}if(state.busy)return false;return true;}
 
   /* ---------- Situação ---------- */
@@ -431,6 +437,7 @@
   /* ---------- Aparência ---------- */
   function fieldHtml({key,label,value,type='text',max=300,hint='',placeholder='',multiline=false,inputmode='',autocomplete='off',required=false,disabled=false}){
     const err=state.errors[key+'Error']||'',id=`lo-${key}`,desc=[hint?`${id}-hint`:'',`${id}-error`].filter(Boolean).join(' ');
+    value=state.errors[key+'Input']??value;
     const attrs=`id="${id}" name="${key}" data-field="${key}" maxlength="${max}" ${placeholder?`placeholder="${esc(placeholder)}"`:''} ${inputmode?`inputmode="${inputmode}"`:''} autocomplete="${autocomplete}" aria-describedby="${desc}" ${err?'aria-invalid="true"':''} ${required?'required':''} ${disabled?'disabled':''}`;
     return `<div class="lo-field"><label for="${id}">${label}${required?'':' <span class="lo-optional">(opcional)</span>'}</label>${multiline?`<textarea ${attrs} rows="3">${esc(value)}</textarea>`:`<input type="${type}" ${attrs} value="${esc(value)}">`}${max>=120&&multiline?`<small class="lo-counter" data-counter="${key}">${String(value||'').length}/${max}</small>`:''}${hint?`<small id="${id}-hint">${hint}</small>`:''}<small class="lo-error" id="${id}-error" role="alert">${esc(err)}</small></div>`;
   }
@@ -474,19 +481,40 @@
     paint('head');
   }
   const FIELD_MAX={publicName:100,welcomeText:300,contactPhone:30,instagram:100,address:300,openingHours:300,pickupAddress:300,deliveryInstructions:500};
+  const invalidAppearance=()=>Object.keys(FIELD_MAX).some(key=>state.errors[key+'Error']);
   function validateField(key,value){
     if(key==='publicName'&&!String(value).trim())return 'Informe o nome da loja.';
     if(key==='contactPhone'&&String(value).trim())return K.phoneProblem(value);
     return '';
   }
   function onField(el){
+    if(!guard())return;
     const key=el.dataset.field,raw=el.value,value=key==='instagram'?raw.trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/\/$/,''):raw;
     const counter=document.querySelector(`#store-v2 [data-counter="${key}"]`);if(counter)counter.textContent=`${raw.length}/${FIELD_MAX[key]||300}`;
-    const err=validateField(key,value);state.errors[key+'Error']=err;
+    const previousError=state.errors[key+'Error'],err=validateField(key,value);state.errors[key+'Error']=err;
     const errEl=document.querySelector(`#store-v2 #lo-${key}-error`);if(errEl)errEl.textContent=err;el.toggleAttribute('aria-invalid',!!err);
-    if(err){state.saveState=state.ops.length?state.saveState:'invalid';paint('save');return;}
-    if(!guard())return;
-    queue({t:'setting',key,value:key==='contactPhone'&&value.trim()?K.formatPhone(value):value.trim?value.trim():value});
+    if(err){
+      state.errors[key+'Input']=raw;
+      const pending=state.ops.findIndex(o=>o.t==='setting'&&o.key===key);
+      if(pending>=0){state.ops.splice(pending,1);refreshDraft();schedulePreview();}
+      if(err!==previousError||pending>=0)paint('save');
+      return;
+    }
+    delete state.errors[key+'Input'];
+    const normalized=key==='contactPhone'&&value.trim()?K.formatPhone(value):value.trim();
+    if(normalized!==state.draft.settings[key])queue({t:'setting',key,value:normalized});
+    else if(previousError)paint('save');
+  }
+  function onColor(el){
+    const key=el.dataset.color,value=el.value.toLowerCase();
+    if(value===state.draft.settings[key]||!guard())return;
+    queue({t:'setting',key,value});syncPalettes();
+  }
+  function renameCategory(el,restoreEmpty=false){
+    const name=el.dataset.rename,value=el.value.trim();
+    const current=state.draft.presentation.categories.find(c=>c.internalName===name)?.publicName||name;
+    if(value&&value!==current&&owner())queue({t:'categoryName',name,value});
+    else if(!value&&restoreEmpty)el.value=current;
   }
   async function uploadImage(input){
     const file=input.files?.[0],slot=input.dataset.upload;if(!file||!guard())return;
@@ -562,6 +590,7 @@
     if(!(await settle())){toast('Salve as alterações pendentes antes de publicar.',true);return;}
     if(ticket!==state.sequence||state.busy||!owner())return;
     const wanted=kind!=='pause',resume=wanted&&status()==='paused',explicit=wanted&&!resume;
+    if(explicit&&invalidAppearance()){toast('Corrija os campos destacados antes de publicar.',true);return;}
     if(explicit&&!readiness().canPublish){toast('Dê um nome e escolha ao menos um produto antes de publicar.',true);return;}
     const c=scope(),d=state.base,payload=K.savePayload(d);
     state.busy=true;state.sheet=null;document.body.classList.remove('lo-sheet-open');draw();
@@ -608,7 +637,7 @@
     if(status()==='new')return '';
     if(!owner())return `<div class="lo-savebar is-readonly">${icon('lock')}<span>Somente o proprietário pode alterar esta loja. Você está vendo a configuração atual.</span></div>`;
     if(s==='error')return `<div class="lo-savebar is-error" role="alert">${icon('cloud-off')}<span><b>Não salvo.</b> ${esc(state.saveError)}</span><div class="lo-savebar-actions"><button type="button" class="lo-btn lo-btn-sm lo-btn-primary" data-act="retry-save">Tentar de novo</button><button type="button" class="lo-btn lo-btn-sm lo-btn-quiet" data-act="discard">Descartar</button></div></div>`;
-    if(s==='invalid')return `<div class="lo-savebar is-warn" role="status">${icon('pencil')}<span>Corrija o campo destacado para salvar.</span></div>`;
+    if(invalidAppearance())return `<div class="lo-savebar is-warn" role="status">${icon('pencil')}<span>Corrija o campo destacado para salvar.</span></div>`;
     if(state.ops.length||state.inflight)return `<div class="lo-savebar is-saving" role="status"><span class="lo-spinner" aria-hidden="true"></span><span>${state.inflight?'Salvando no rascunho…':'Alterações pendentes…'}</span></div>`;
     const pending=pendingPublish();
     if(pending)return `<div class="lo-savebar is-publish" role="status">${icon('cloud-check')}<span>${s==='saved'?`Rascunho salvo às ${time}. `:''}O cliente ainda vê a versão anterior.</span><div class="lo-savebar-actions"><button type="button" class="lo-btn lo-btn-sm lo-btn-primary" data-act="ask-publish" ${state.busy?'disabled':''}>Publicar alterações</button></div></div>`;
@@ -633,14 +662,16 @@
     root.addEventListener('input',e=>{
       const el=e.target;
       if(el.matches('[data-q]')){clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.filter.q=el.value;mountGrid();},120);return;}
-      if(el.matches('[data-field]')){clearTimeout(el._t);el._t=setTimeout(()=>onField(el),el.tagName==='TEXTAREA'||el.type==='text'?500:300);return;}
-      if(el.matches('[data-color]')){clearTimeout(el._t);el._t=setTimeout(()=>{if(!guard())return;queue({t:'setting',key:el.dataset.color,value:el.value.toLowerCase()});syncPalettes();},200);return;}
+      if(el.matches('[data-field]'))return onField(el);
+      if(el.matches('[data-color]'))return onColor(el);
+      if(el.matches('[data-rename]'))return renameCategory(el);
     });
     root.addEventListener('change',e=>{
       const el=e.target;
       if(el.matches('[data-space]'))return switchSpace(el);
       if(el.matches('[data-category]')){state.filter.category=el.value;mountGrid();return;}
-      if(el.matches('[data-field]')){clearTimeout(el._t);onField(el);return;}
+      if(el.matches('[data-field]'))return onField(el);
+      if(el.matches('[data-color]'))return onColor(el);
       if(el.matches('[data-bool]')){if(!guard()){el.checked=!el.checked;return;}const key=el.dataset.bool,other=key==='pickupEnabled'?'deliveryEnabled':'pickupEnabled';
         if(!el.checked&&store()?.checkoutEnabled&&!state.draft.settings[other]){el.checked=true;toast('Com pedidos registrados ativos, mantenha retirada ou entrega ligada.',true);return;}
         queue({t:'setting',key,value:el.checked});const sub=root.querySelector(`[data-mode-field="${key}"]`);if(sub)sub.hidden=!el.checked;return;}
@@ -651,10 +682,11 @@
     });
     root.addEventListener('submit',e=>{if(e.target.matches('[data-create]')){e.preventDefault();createStore(e.target);}});
     root.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.sheet){e.preventDefault();closeSheet();}else if(e.key==='Tab'&&state.sheet)trapFocus(e);});
-    root.addEventListener('focusout',e=>{const el=e.target;if(el.matches?.('[data-rename]')&&owner()){const v=el.value.trim();const current=state.draft.presentation.categories.find(c=>c.internalName===el.dataset.rename)?.publicName||el.dataset.rename;if(v&&v!==current)queue({t:'categoryName',name:el.dataset.rename,value:v});else if(!v)el.value=current;}});
+    root.addEventListener('focusout',e=>{if(e.target.matches?.('[data-rename]'))renameCategory(e.target,true);});
   }
   function trapFocus(e){const nodes=[...document.querySelectorAll('#store-v2 .lo-sheet :is(button,a,input,select,textarea,iframe,[tabindex="0"]):not([disabled])')];if(!nodes.length)return;const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}
   async function switchSpace(el){
+    if(invalidAppearance()){el.value=state.spaceId;toast('Corrija os campos destacados antes de trocar de espaço.',true);return;}
     if(state.ops.length||state.inflight){if(!(await settle())){el.value=state.spaceId;toast('Salve ou descarte as alterações antes de trocar de espaço.',true);return;}}
     state.spaceId=el.value;state.data=null;state.draft=null;state.base=null;state.ops=[];state.view='home';state.receptionConfirm=null;state.receptionMessage='';state.saveState='idle';state.filter={q:'',scope:'all',category:''};state.errors={};state.live=null;
     const root=document.querySelector('#store-v2');root.innerHTML='<div class="lo-loading" role="status"><span class="lo-spinner" aria-hidden="true"></span>Carregando este espaço…</div>';load();
@@ -702,15 +734,18 @@
     if(!guard())return;const input=document.querySelector('#store-v2 [data-slug]'),value=String(input?.value||'').trim().toLowerCase(),problem=K.slugProblem(value);
     state.errors.slugValue=value;state.errors.slug=problem;if(problem){paint('main');return;}
     if(value===store()?.slug){state.errors.slug='';toast('Esse já é o endereço atual.');return;}
-    queue({t:'slug',value});await flush();
+    const ticket=state.sequence;
+    queue({t:'slug',value});
+    const saved=await settle();
+    if(ticket!==state.sequence||state.errors.slugValue!==value)return;
     if(state.saveState==='error'&&/pertence a outra loja|already/i.test(state.saveError)){state.ops=state.ops.filter(o=>o.t!=='slug');refreshDraft();state.saveState='idle';state.errors.slug='Esse endereço já pertence a outra loja. Escolha outro.';paint('save');}
-    else if(state.saveState!=='error'){delete state.errors.slugValue;state.errors.slug='';toast(status()==='published'?'Endereço salvo. Os links abrem a versão pública atual.':'Endereço salvo.');}
+    else if(saved&&store()?.slug===value){delete state.errors.slugValue;state.errors.slug='';toast(status()==='published'?'Endereço salvo. Os links abrem a versão pública atual.':'Endereço salvo.');}
     paint('main');paint('head');
   }
   async function copyLink(){try{if(!publicUrl())throw Error('Salve a loja primeiro.');await navigator.clipboard.writeText(publicUrl());toast('Link copiado.');}catch(e){toast(e.message||'Não foi possível copiar. Selecione o link e copie manualmente.',true);}}
   // Sair com alterações pendentes: tenta salvar e avisa o navegador.
   globalThis.addEventListener?.('hashchange',()=>{if(state.ops.length)flush();});
-  globalThis.addEventListener?.('beforeunload',e=>{if(state.ops.length||state.inflight){e.preventDefault();e.returnValue='';}});
+  globalThis.addEventListener?.('beforeunload',e=>{if(state.ops.length||state.inflight||invalidAppearance()){e.preventDefault();e.returnValue='';}});
   globalThis.addEventListener?.('online',()=>{if(state.saveState==='error'&&state.ops.length)flush();});
   globalThis.document?.addEventListener?.('visibilitychange',()=>{if(document.hidden&&state.ops.length)flush();});
   window.OnlineStoreUI={render,bind:()=>load()};

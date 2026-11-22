@@ -298,13 +298,13 @@ html[data-theme="dark"] .lo-tag { background: #3a2f12; color: #f6c453; }
 
 /* ---------- Barra de salvamento ---------- */
 .lo-savebar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; width: min(760px, calc(100vw - 32px)); padding: 10px 12px 10px 16px; border: 1px solid var(--vf-line-strong); border-radius: 16px; background: var(--vf-surface); color: var(--vf-text); box-shadow: var(--vf-shadow-2); font-size: 14px; transform: translateX(-50%); }
-.lo-savebar > span { flex: 1 1 220px; min-width: 0; }
+.lo-savebar > span:not(.lo-spinner) { flex: 1 1 220px; min-width: 0; }
 .lo-savebar > svg, .lo-savebar > i { color: var(--vf-accent-text); }
 .lo-savebar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .lo-savebar.is-saved, .lo-savebar.is-readonly, .lo-savebar.is-saving { width: auto; max-width: calc(100vw - 32px); }
-.lo-savebar.is-error { border-color: color-mix(in srgb, var(--vf-neg) 50%, var(--vf-line)); background: color-mix(in srgb, var(--vf-neg-soft) 80%, var(--vf-surface)); }
+.lo-savebar.is-error { border-color: color-mix(in srgb, var(--vf-neg) 50%, var(--vf-line)); background: linear-gradient(var(--vf-neg-soft), var(--vf-neg-soft)), var(--vf-surface); }
 .lo-savebar.is-error > svg, .lo-savebar.is-error > i { color: var(--vf-neg); }
-.lo-savebar.is-warn { background: color-mix(in srgb, var(--vf-warn-soft) 80%, var(--vf-surface)); }
+.lo-savebar.is-warn { background: linear-gradient(var(--vf-warn-soft), var(--vf-warn-soft)), var(--vf-surface); }
 @media (min-width: 1025px) { .lo-savebar { left: calc(50% + 135px); } }
 
 /* ---------- Folhas e diálogos ---------- */
