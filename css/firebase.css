@@ -104,3 +104,58 @@ html.auth-pending #auth-gate.auth-entry-layout:not([hidden]){display:block}
  #auth-gate .auth-benefits{gap:15px}
 }
 @media(prefers-reduced-motion:reduce){#auth-gate *,#auth-gate *::before,#auth-gate *::after{animation:none!important;transition:none!important}}
+
+/* Sync panels share the viewport shell; only the body scrolls on phones. */
+#modal .modal-box.sync-queue-panel > .modal-foot > button {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.25;
+}
+#modal .sync-queue-panel .firebase-sync-grid {
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  overflow-wrap: anywhere;
+}
+.sync-queue-panel .sync-blocked-history article { border-inline-start-color: #ab7020; }
+.sync-queue-panel .cloud-panel-icon.is-history,
+.local-badge[data-sync-status="history"] { background: #fff3df; color: #8f4606; }
+
+@media (max-width: 767px) {
+  #modal .modal-box.sync-queue-panel > .modal-foot {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    max-height: 45dvh;
+    overflow-y: auto;
+  }
+  #modal .modal-box.sync-queue-panel > .modal-foot > button { width: 100%; }
+}
+html[data-theme="dark"] #modal .sync-queue-panel {
+  --line: var(--vf-line);
+  --text: var(--vf-ink);
+  --muted: var(--vf-text-3);
+  color: var(--vf-ink);
+  background: var(--vf-surface);
+}
+html[data-theme="dark"] #modal .sync-queue-panel :is(.modal-head, .modal-foot) {
+  border-color: var(--vf-line);
+  background: var(--vf-surface);
+}
+html[data-theme="dark"] #modal .sync-queue-panel :is(h3, h4, strong, summary, code, .icon-btn) { color: var(--vf-ink); }
+html[data-theme="dark"] #modal .sync-queue-panel :is(.firebase-sync-grid span, .sync-error-list small, .sync-error-metadata dt, .sync-data-state > small) { color: var(--vf-text-3); }
+html[data-theme="dark"] #modal .sync-queue-panel :is(.sync-error-list article, .sync-data-state, .backup-warning, .btn-light) {
+  background: var(--vf-surface-2);
+  border-color: var(--vf-line);
+  color: var(--vf-ink);
+}
+html[data-theme="dark"] #modal .sync-queue-panel .sync-error-list article { border-inline-start-color: var(--vf-neg); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-blocked-history article { border-inline-start-color: var(--vf-warn); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-error-list article > p { color: var(--vf-neg); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-blocked-history article > p { color: var(--vf-warn); }
+html[data-theme="dark"] #modal .sync-queue-panel .cloud-panel-icon.is-history { background: var(--vf-warn-soft); color: var(--vf-warn); }
+html[data-theme="dark"] #modal .sync-queue-panel .btn-primary:not(:disabled) { background: var(--vf-brand); color: var(--vf-on-brand, #061519); }
+
+#modal .modal-box.sync-queue-panel > .modal-foot > button:disabled {
+  background: var(--vf-surface-3);
+  color: var(--vf-text-3);
+  opacity: 1;
+}

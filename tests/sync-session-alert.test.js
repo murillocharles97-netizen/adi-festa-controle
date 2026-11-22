@@ -7,12 +7,14 @@ const section = (start, end) => source.slice(source.indexOf(start), source.index
 test('session hotfix keeps app/SW version and both Sync singleton imports aligned',()=>{
   const read=p=>fs.readFileSync(p,'utf8'),auth=read('js/firebase/auth.js'),ui=read('js/firebase/firebase-ui.js'),index=read('index.html');
   const version=read('js/build-info.js').match(/release:\s*"(\d+)"/)[1];assert.ok(Number(version)>=173);
-  assert.ok(read('service-worker.js').includes(`veconi-v${version}-`));
+  const appVersion=read('js/build-info.js').match(/APP_VERSION = "(\d+(?:\.\d+)?)"/)[1];
+  assert.ok(read('service-worker.js').includes(`veconi-v${appVersion.replace('.', '')}-`));
   assert.match(read('service-worker.js'),new RegExp(`release:\\s*'${version}'`));
   // Visual V242 keeps the published V241 Sync modules byte-for-byte.
   const syncVersion=({'191':'190','242':'241'})[version]||version;
   for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${syncVersion}'`));
-  assert.ok(index.includes(`firebase/auth.js?v=${syncVersion}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${syncVersion}`));
+  const uiVersion=appVersion==='242.1'?'2421':syncVersion;
+  assert.ok(index.includes(`firebase/auth.js?v=${uiVersion}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${uiVersion}`));
 });
 function runtime() {
   const queues = new Map([['qa-business:owner', [{operationId:'persisted-operation', status:'pending', payload:{safe:true}}]]]);

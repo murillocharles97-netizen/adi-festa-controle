@@ -24,8 +24,8 @@ test("fila incompatível é preservada, diagnosticada e nunca descartada", () =>
   assert.match(sync, /legacy-payload-unsupported/);
   assert.match(sync, /queue-owner-mismatch/);
   assert.doesNotMatch(sync, /archiveQueue\("queue_owner_mismatch"\)/);
-  assert.match(ui, /Erros recentes/);
-  assert.match(ui, /Reprocessar todos/);
+  assert.match(ui, /Erros que exigem atenção/);
+  assert.match(ui, /Reprocessar erros elegíveis/);
 });
 
 test("clientes, produtos e configurações compartilham listeners centrais", () => {

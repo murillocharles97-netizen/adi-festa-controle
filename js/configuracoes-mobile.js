@@ -28,9 +28,10 @@
     `<section class="settings-group"><header class="settings-group-heading"><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></header><div class="settings-group-list">${items.join("")}</div></section>`;
 
   function syncPresentation(sync = {}) {
-    const pending = Number(sync.queueTotal ?? sync.pending ?? 0);
-    const errors = Number(sync.errors || 0);
+    const view = window.VeconiSyncPanelView?.(sync);
+    const pending = Number(sync.pending ?? sync.queueTotal ?? 0), errors = view?.errors ?? Number(sync.errors || 0);
     if (!navigator.onLine || sync.status === "offline") return { state: "offline", title: "Sem conexão", subtitle: pending ? `${pending} alteração(ões) salvas no aparelho, aguardando rede.` : "Dados disponíveis neste aparelho." };
+    if (view?.historicalStatus) return { state: "waiting", title: "Histórico bloqueado", subtitle: view.message };
     if (errors || sync.status === "error") return { state: "error", title: "Sincronização precisa de atenção", subtitle: errors ? `${errors} operação(ões) com erro.` : sync.message || "Confira o status da sincronização." };
     if (pending) return { state: "pending", title: "Envio pendente", subtitle: `${pending} alteração(ões) aguardando envio.` };
     if (sync.status === "syncing" || sync.status === "testing") return { state: "syncing", title: "Sincronizando", subtitle: sync.message || "Conferindo dados com a nuvem." };
