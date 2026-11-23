@@ -180,6 +180,7 @@ window.ProductBrand = (() => {
     const items = window.SyncFirebase?.brandRecoveryCandidates?.() || [];
     return items.map((item) => ({ item, products: (item.payload?.writes || []).filter((w) => w?.entityType === "products" && w.operation === "create" && !isService(w.data) && !text(w.data?.marca)).map((w) => ({ id: w.entityId, nome: w.data?.nome || "Produto" })) })).filter((entry) => entry.products.length);
   }
+  const LOCAL_PENDING = "Cadastro confirmado na nuvem. Existe uma alteração pendente neste aparelho.";
   // Recuperação explícita: o servidor confere o recibo da MESMA operação antes de aplicar e audita.
   async function recoverOffline(operationId, brands) {
     if (!online()) throw Object.assign(Error("Sem conexão: nada foi enviado. O cadastro original continua preservado."), { code: "offline" });
@@ -187,7 +188,7 @@ window.ProductBrand = (() => {
     if ((window.SyncFirebase?.brandRecoveryResolved?.() || []).some((row) => row.operationId === operationId)) {
       let resumed;
       try { resumed = await window.SyncFirebase.confirmBrandRecovery(operationId); } catch { resumed = null; }
-      return { operationId, status: resumed?.status === "applied" ? "applied" : "pending", resumed: true };
+      return { operationId, status: resumed?.status === "applied" ? "applied" : "pending", resumed: true, localPending: resumed?.localPending || [] };
     }
     const entry = recoveryCandidates().find((row) => row.item.operationId === operationId);
     if (!entry) throw Error("Este cadastro não está mais pendente de Marca. Nada foi enviado.");
@@ -203,7 +204,7 @@ window.ProductBrand = (() => {
     // Confere SOMENTE o recibo desta operação; nenhuma outra operação da fila é enviada ou alterada.
     let check;
     try { check = await window.SyncFirebase?.confirmBrandRecovery?.(operationId); } catch { check = null; }
-    if (check?.status === "applied") return { operationId, status: "applied", replayed: value?.replayed === true };
+    if (check?.status === "applied") return { operationId, status: "applied", replayed: value?.replayed === true, localPending: check.localPending || [] };
     return { operationId, status: "pending" };
   }
 
@@ -270,7 +271,7 @@ window.ProductBrand = (() => {
     root.querySelectorAll("[data-brand-resume]").forEach((btn) => (btn.onclick = async () => {
       btn.disabled = true;
       const out = await recoverOffline(btn.dataset.brandResume, {}).catch(() => ({ status: "pending" }));
-      render(root, out.status === "applied" ? "Cadastro concluído neste aparelho, conforme o recibo do servidor." : "Confirmação pendente: o recibo ainda não pôde ser conferido. Nada foi reenviado.");
+      render(root, out.status === "applied" ? (out.localPending?.length ? LOCAL_PENDING : "Cadastro concluído neste aparelho, conforme o recibo do servidor.") : "Confirmação pendente: o recibo ainda não pôde ser conferido. Nada foi reenviado.");
     }));
     root.querySelectorAll("[data-brand-recover]").forEach((form) => (form.onsubmit = async (event) => {
       event.preventDefault();
@@ -280,7 +281,7 @@ window.ProductBrand = (() => {
       try {
         const out = await recoverOffline(form.dataset.brandRecover, brands);
         render(root, out.status !== "applied" ? "Confirmação pendente: o recibo desta operação ainda não pôde ser conferido. O original continua preservado; repita quando houver conexão (a mesma operação não é duplicada)."
-          : out.replayed ? "A nuvem já registrava esta operação; nada foi reaplicado. Recibo conferido." : "Cadastro concluído e confirmado pelo recibo do servidor.");
+          : out.localPending?.length ? LOCAL_PENDING : out.replayed ? "A nuvem já registrava esta operação; nada foi reaplicado. Recibo conferido." : "Cadastro concluído e confirmado pelo recibo do servidor.");
       } catch (error) { render(root, `Não concluído: ${error.message}`); }
     }));
   }

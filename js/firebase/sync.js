@@ -1469,9 +1469,12 @@ async function confirmBrandRecovery(operationId){
     operationId,businessId:bid,actorUid:uid,workspaceGeneration:item.workspaceGeneration??0,payloadHash:receipt.payloadHash,
     payloadChecksum:checksumValue(item.payload),productIds,verifiedAt:now()}));
   if(readRecoveryResolution(item)?.channel!=='brand_recovery')return{status:'pending',operationId};
-  applyCloudCollection('products',products.map(p=>({id:p.id,...p.data()})),{authoritative:true});
+  // Edição local pendente do mesmo produto: a cópia local e a edição são preservadas (sem reconciliação nesta versão);
+  // o resultado diferencia "confirmado na nuvem" de "cópia local atualizada".
+  const pendingLocal=pendingIds('products'),localPending=productIds.filter(id=>pendingLocal.has(String(id)));
+  applyCloudCollection('products',products.filter(p=>!pendingLocal.has(String(p.id))).map(p=>({id:p.id,...p.data()})),{authoritative:true});
   await DB.flush?.(); assertOrigin(); updateQueueState();
-  return{status:'applied',operationId,productIds,resumed:Boolean(resumed)};
+  return{status:'applied',operationId,productIds,resumed:Boolean(resumed),localUpdated:localPending.length===0,localPending};
 }
 async function archiveQuarantinedOperation(operationId) {
   if (incidentArchiveTasks.has(operationId)) return incidentArchiveTasks.get(operationId);

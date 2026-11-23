@@ -21,7 +21,7 @@ function harness({ storage = new Map(), queue, crashOnApply = false, receipt = '
     queueKey: () => 'fila:empresa-a:u1', activeBusinessId: () => 'empresa-a', readQueue: () => queue, readQueueStrict: () => queue,
     saveQueue: () => { log.saves++; }, updateQueueState: () => {}, validateUser: async () => {}, now: () => '2026-11-23T00:00:00.000Z',
     checksumValue: (x) => JSON.stringify(x), readPaymentRecoveryReceipt: () => null, readQueueArchive: () => null,
-    queueManualReviewReason: () => '', monetaryRecoveryRequired: () => false, rejectedProductStockUpdate: () => false, favoriteWriteWasRejected: () => false,
+    queueManualReviewReason: () => '', queueQuarantineReason: () => '', isHistoricalProjectionBatch: () => false, monetaryRecoveryRequired: () => false, rejectedProductStockUpdate: () => false, favoriteWriteWasRejected: () => false,
     readQueuedOperationStatus: async (q, { held }) => { log.receipts.push(q.operationId); assert.equal(held, true);
       return { status: receipt, payloadHash: 'a'.repeat(64), assertOriginal: () => {} }; },
     db: {}, doc: (_db, ...p) => p.join('/'),
@@ -32,6 +32,7 @@ function harness({ storage = new Map(), queue, crashOnApply = false, receipt = '
   vm.createContext(c);
   vm.runInContext(span('function recoveryResolutionKey(', 'async function refreshRecoveryResolutions('), c);
   vm.runInContext(fn('function classifyQueueOperation('), c);
+  vm.runInContext(fn('function pendingIds('), c);
   vm.runInContext(span('function brandRecoveryQueue(', 'async function archiveQuarantinedOperation('), c);
   return { c, log, storage, queue };
 }
@@ -65,6 +66,29 @@ test('B3: interrupção exatamente entre gravar brand_recovery e concluir localm
   // Retentativa: idempotente, sem novo registro nem envio.
   const again = await b.c.confirmBrandRecovery('op-alvo');
   assert.equal(again.status, 'applied'); assert.equal(b.log.commits, 0); assert.equal(b.storage.size, 1);
+});
+
+test('V242.7 final: recibo confirma o cadastro, mas há edição local pendente do mesmo produto → não anuncia cópia local atualizada', async () => {
+  const edit = { queueId: 'q-edit', operationId: 'op-edit', businessId: 'empresa-a', userId: 'u1', workspaceGeneration: 0, status: 'pending', syncProtocolVersion: 1,
+    payload: { writes: [{ entityType: 'products', entityId: 'p-op-alvo', operation: 'update', data: { nome: 'Editado neste aparelho' } }] } };
+  const queue = [item('op-alvo'), edit, item('op-outra')];
+  const before = JSON.stringify(queue);
+  const h = harness({ queue });
+  const out = await h.c.confirmBrandRecovery('op-alvo');
+  assert.equal(out.status, 'applied', 'cadastro confirmado na nuvem pelo recibo');
+  assert.equal(out.localUpdated, false, 'a cópia local NÃO foi atualizada');
+  assert.deepEqual(out.localPending, ['p-op-alvo']);
+  assert.deepEqual(h.log.applied, [], 'produto com edição pendente não é sobrescrito pela nuvem');
+  assert.equal(h.log.commits + h.log.saves, 0, 'nada enviado, fila não alterada');
+  assert.equal(JSON.stringify(queue), before, 'edição pendente e demais operações preservadas byte a byte');
+  const record = JSON.parse(h.storage.get(h.c.recoveryResolutionKey(queue[0])));
+  assert.equal(record.channel, 'brand_recovery', 'recibo e histórico preservados');
+  const again = await h.c.confirmBrandRecovery('op-alvo');
+  assert.deepEqual([again.status, again.resumed, again.localUpdated], ['applied', true, false], 'retomada continua honesta, sem reenvio');
+  assert.equal(h.log.commits, 0); assert.equal(h.storage.size, 1);
+  const clean = harness({ queue: [item('op-alvo')] });
+  const ok = await clean.c.confirmBrandRecovery('op-alvo');
+  assert.deepEqual([ok.localUpdated, ok.localPending, clean.log.applied], [true, [], ['p-op-alvo']], 'sem edição pendente: cópia local atualizada');
 });
 
 test('B3: recibo da retomada ainda não conferível → pendente, nada alterado', async () => {

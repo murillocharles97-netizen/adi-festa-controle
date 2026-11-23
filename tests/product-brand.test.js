@@ -33,7 +33,7 @@ function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } 
         if (!item) return { status: 'not_pending', operationId };
         if (!server.applied?.has(operationId)) return { status: 'pending', operationId };
         queue.splice(queue.indexOf(item), 1);
-        return { status: 'applied', operationId };
+        return { status: 'applied', operationId, localPending: server.localPending || [] };
       } },
     FirebaseCallable: async (name, payload) => {
       calls.push({ name, payload: structuredClone(payload) });
@@ -443,6 +443,22 @@ test('B1/B2: sessão expirada durante a reconciliação → continua pendente, n
   other.session.uid = 'outra-conta';
   assert.equal(other.Brand.state().canResend, false, 'outra conta não reenvia a tentativa de outra pessoa');
   await assert.rejects(other.Brand.resendPending(), (e) => e.code === 'brand-rule-pending');
+});
+
+test('V242.7 final: cadastro confirmado na nuvem com edição local pendente → mensagem distinta, sem anunciar atualização local', async () => {
+  const src = read('js/product-brand.js');
+  assert.match(src, /"Cadastro confirmado na nuvem\. Existe uma alteração pendente neste aparelho\."/);
+  assert.match(src, /out\.localPending\?\.length \? LOCAL_PENDING : "Cadastro concluído neste aparelho/, 'retomada: não diz "concluído neste aparelho"');
+  assert.match(src, /out\.localPending\?\.length \? LOCAL_PENDING : out\.replayed/, 'recuperação: não diz "concluído"');
+  for (const resolved of [['op-alvo'], []]) {
+    const queue = [blocked('op-alvo'), blocked('op-outra')];
+    const h = harness({ rule: true, queue, server: { resolved, applied: new Set(['op-alvo']), localPending: ['p-op-alvo'] } });
+    const out = await h.Brand.recoverOffline('op-alvo', { 'p-op-alvo': 'Marca Fictícia' });
+    assert.deepEqual([out.status, out.localPending], ['applied', ['p-op-alvo']]);
+    assert.equal(h.retries.length, 0, 'sem sincronização geral');
+    assert.equal(h.calls.length, resolved.length ? 0 : 1, 'retomada não envia; recuperação envia só esta operação');
+    assert.deepEqual(h.receipts, ['op-alvo']);
+  }
 });
 
 test('B3: recuperação já confirmada e interrompida → retoma só esta operação, sem envio', async () => {
