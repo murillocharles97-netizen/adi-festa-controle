@@ -148,3 +148,25 @@ test('P2: regra lida e alterada pelo servidor; só quem gerencia configurações
  assert.equal((await rules(b,b.owner)).brandRequired,false);
  await rejectsBrand(service.commit(a.request(create(a,a.editor,'x',a.space))));
 });
+
+test('V242.7 P2: tentativa identificada (attemptId) — recibo na mesma transação, leitura consulta a tentativa, reenvio não regrava',async()=>{
+ const a=await setup(),id='a'.repeat(8)+crypto.randomBytes(8).toString('hex');
+ const before=await rules(a,a.owner,{attemptId:id});
+ assert.deepEqual([before.brandRequired,before.attemptId,before.attempt],[false,id,'absent'],'antes da gravação: ausente (não prova falha)');
+ const on=await rules(a,a.owner,{brandRequired:true,attemptId:id});
+ assert.deepEqual([on.brandRequired,on.attemptId,on.attempt,on.replayed],[true,id,'applied',undefined]);
+ const audit=await a.root.collection('auditLogs').doc('product_rules_attempt_'+id).get();
+ assert.equal(audit.data().type,'product_rules_changed');assert.equal(audit.data().attemptId,id);assert.equal(audit.data().actorUid,a.owner);
+ const status=await rules(a,a.seller,{attemptId:id});
+ assert.deepEqual([status.attempt,status.brandRequired],['applied',true],'leitura autorizada confirma a tentativa');
+ await rules(a,a.owner,{brandRequired:false,attemptId:'b'.repeat(24)});
+ const replay=await rules(a,a.owner,{brandRequired:true,attemptId:id});
+ assert.deepEqual([replay.attempt,replay.replayed,replay.brandRequired],['applied',true,false],'reenvio da mesma tentativa não regrava; devolve o valor atual');
+ assert.equal((await read(a,'settings','default')).productRules.brandRequired,false);
+ assert.equal((await a.root.collection('auditLogs').where('type','==','product_rules_changed').get()).size,2,'um audit por tentativa');
+ for(const bad of ['curto','x'.repeat(65),'com espaço aqui 123',12345])await assert.rejects(rules(a,a.owner,{brandRequired:true,attemptId:bad}),e=>e.code==='invalid-argument');
+ const b=await setup();
+ assert.equal((await rules(b,b.owner,{attemptId:id})).attempt,'absent','outra empresa não enxerga a tentativa');
+ await assert.rejects(rules(a,a.editor,{brandRequired:true,attemptId:'c'.repeat(24)}),e=>e.code==='permission-denied');
+ assert.equal((await rules(a,a.owner,{attemptId:'c'.repeat(24)})).attempt,'absent');
+});

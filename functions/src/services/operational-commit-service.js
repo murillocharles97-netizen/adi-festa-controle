@@ -104,20 +104,27 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   }
   // Regra de Marca POR EMPRESA: lida e alterada somente pelo servidor (estado confirmado, sem sucesso local otimista).
   if(request.data?.kind==='product_rules')return db.runTransaction(async tx=>{
-   const d=request.data,set=Object.hasOwn(d,'brandRequired');
+   const d=request.data,set=Object.hasOwn(d,'brandRequired'),attemptId=d.attemptId;
    if(set&&typeof d.brandRequired!=='boolean')fail('Valor da regra inválido.','invalid-argument');
+   // V242.7: tentativa identificada pelo cliente. O recibo é o próprio audit log (id determinístico),
+   // criado na MESMA transação da gravação: presente = gravada; reenvio da mesma tentativa não regrava.
+   if(attemptId!==undefined&&(typeof attemptId!=='string'||!/^[A-Za-z0-9_-]{16,64}$/.test(attemptId)))fail('Identificador de tentativa inválido.','invalid-argument');
    const c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:!set});
    const sref=ref(c.bid,'settings','default'),current=(await tx.get(sref)).data()?.productRules||{};
-   const out=(brandRequired,updatedAt)=>({version:1,businessId:c.bid,workspaceGeneration:gen(c.business),brandRequired,updatedAt:updatedAt||null,confirmed:true});
+   const aref=attemptId?ref(c.bid,'auditLogs','product_rules_attempt_'+attemptId):null,asnap=aref?await tx.get(aref):null;
+   const applied=Boolean(asnap?.exists&&asnap.data()?.type==='product_rules_changed'&&asnap.data()?.attemptId===attemptId);
+   const out=(brandRequired,updatedAt,extra={})=>({version:1,businessId:c.bid,workspaceGeneration:gen(c.business),brandRequired,updatedAt:updatedAt||null,confirmed:true,
+    ...(attemptId?{attemptId,attempt:applied||extra.applied?'applied':'absent'}:{}),...(extra.replayed?{replayed:true}:{})});
    if(!set)return out(current.brandRequired===true,current.updatedAt);
    if(!c.has('settings.manage'))fail('Seu perfil não pode alterar as regras de produtos.');
+   if(applied)return out(current.brandRequired===true,current.updatedAt,{replayed:true});
    const updatedAt=now().toISOString(),revision='server:product_rules:'+updatedAt;
    tx.set(sref,{businessId:c.bid,productRules:{brandRequired:d.brandRequired,updatedAt,updatedBy:c.uid}},{merge:true});
    tx.set(db.doc('businesses/'+c.bid+'/syncMetadata/last-sync'),{businessId:c.bid,workspaceGeneration:gen(c.business),publisher:'operational_server',sourceSessionId:revision,
     ownerId:c.uid,actorUid:c.uid,sourceUid:c.uid,sourceDeviceId:FieldValue.delete(),revision,updatedAt:FieldValue.serverTimestamp(),changedCollections:['settings'],collectionVersions:{settings:revision}},{merge:true});
-   tx.create(ref(c.bid,'auditLogs','product_rules_'+updatedAt.replace(/[^0-9]/g,'')+'_'+c.uid.slice(0,20)),{type:'product_rules_changed',businessId:c.bid,workspaceGeneration:gen(c.business),
-    actorUid:c.uid,brandRequired:d.brandRequired,previousBrandRequired:current.brandRequired===true,createdAt:FieldValue.serverTimestamp()});
-   return out(d.brandRequired,updatedAt);
+   tx.create(aref||ref(c.bid,'auditLogs','product_rules_'+updatedAt.replace(/[^0-9]/g,'')+'_'+c.uid.slice(0,20)),{type:'product_rules_changed',businessId:c.bid,workspaceGeneration:gen(c.business),
+    actorUid:c.uid,brandRequired:d.brandRequired,previousBrandRequired:current.brandRequired===true,...(attemptId?{attemptId}:{}),createdAt:FieldValue.serverTimestamp()});
+   return out(d.brandRequired,updatedAt,{applied:true});
   });
   // Recuperação explícita de cadastro offline recusado por falta de Marca. Usa a MESMA operação e o
   // hash do original: recibo já existente é reconhecido antes (sem duplicar); senão aplica com a marca e audita.

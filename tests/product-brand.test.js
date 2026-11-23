@@ -12,7 +12,7 @@ function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } 
   const data = { produtos: [], movimentacoesEstoque: [], variacoesProdutos: [], config };
   const store = new Map(), calls = [], retries = [], receipts = [], session = { uid: 'u1' };
   const ctx = {
-    console, structuredClone, Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Set, Map, Promise,
+    console, structuredClone, Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Set, Map, Promise, Uint8Array, crypto: globalThis.crypto,
     navigator: { onLine },
     localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
     DB: { carregar: () => data, alterar: (fn) => { const draft = structuredClone(data); fn(draft); Object.assign(data, draft); }, getWorkspaceGeneration: () => 0 },
@@ -24,6 +24,7 @@ function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } 
     SyncFirebase: { brandRecoveryCandidates: () => structuredClone(queue.filter((i) => i.status === 'error' && /exige Marca/.test(i.lastErrorMessage || ''))),
       processSyncQueue: async (o) => { retries.push(o); return {}; },
       sessionUserId: () => session.uid,
+      brandRecoveryResolved: () => (server.resolved || []).map((operationId) => ({ operationId })),
       // Simula sync.confirmBrandRecovery: consulta SÓ o recibo da operação pedida.
       confirmBrandRecovery: async (operationId) => {
         receipts.push(operationId);
@@ -36,18 +37,26 @@ function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } 
       } },
     FirebaseCallable: async (name, payload) => {
       calls.push({ name, payload: structuredClone(payload) });
-      // server.plan: roteiro por chamada { apply: grava antes de falhar?, error }
+      // Servidor simulado como o real: tentativa (attemptId) com recibo atômico; reenvio não regrava.
+      const attempts = (server.attempts ||= new Set());
+      const writeRule = () => {
+        if (payload.attemptId && attempts.has(payload.attemptId)) return true;
+        server.rule = payload.brandRequired; if (payload.attemptId) attempts.add(payload.attemptId); return false;
+      };
+      // server.plan: roteiro por chamada { apply, error, hold, reply, late (servidor conclui depois; resposta perdida) }
       const step = server.plan?.shift?.() || {};
+      if (step.late) { step.late.then(() => { if (Object.hasOwn(payload, 'brandRequired')) writeRule(); }); throw step.error || Object.assign(Error('Resposta perdida'), { code: 'functions/deadline-exceeded' }); }
       if (step.hold) await step.hold;
-      if (step.reply) return { data: step.reply };
-      if (step.apply && Object.hasOwn(payload, 'brandRequired')) server.rule = payload.brandRequired;
+      if (step.reply) return { data: typeof step.reply === 'function' ? step.reply() : step.reply };
+      if (step.apply && Object.hasOwn(payload, 'brandRequired')) writeRule();
       if (step.apply && payload.kind === 'brand_recovery_apply') (server.applied ||= new Set()).add(payload.item.operationId);
       if (step.error) throw step.error;
       if (server.error) throw server.error;
       if (payload.kind === 'brand_recovery_apply') (server.applied ||= new Set()).add(payload.item.operationId);
       if (payload.kind === 'product_rules') {
-        if (Object.hasOwn(payload, 'brandRequired')) server.rule = payload.brandRequired;
-        return { data: server.reply || { version: 1, confirmed: true, businessId: 'empresa-a', workspaceGeneration: 0, brandRequired: server.rule ?? false, updatedAt: '2026-02-01T00:00:00.000Z' } };
+        const write = Object.hasOwn(payload, 'brandRequired'), replayed = write ? writeRule() : false;
+        const id = payload.attemptId ? { attemptId: payload.attemptId, attempt: attempts.has(payload.attemptId) ? 'applied' : 'absent', ...(replayed ? { replayed: true } : {}) } : {};
+        return { data: server.reply || { version: 1, confirmed: true, businessId: 'empresa-a', workspaceGeneration: 0, brandRequired: server.rule ?? false, updatedAt: '2026-02-01T00:00:00.000Z', ...id } };
       }
       return { data: { replayed: false, operationId: payload.item?.operationId } };
     },
@@ -239,11 +248,16 @@ test('P2 final: servidor grava e a resposta se perde → reconcilia pela leitura
   assert.equal(h.Brand.isRequired(), true);
 });
 
-test('P2 final: falha de rede antes da gravação → a leitura do servidor mostra o valor real', async () => {
+test('P2 final: falha de rede antes da gravação → a tentativa não aparece no servidor: pendente (nunca "não alterada"); reenvio da mesma tentativa conclui uma vez', async () => {
   const h = harness({ rule: false, server: { plan: [{ apply: false, error: lost('unavailable') }] } });
-  const out = await h.Brand.setRequired(true);
-  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', false, true]);
-  assert.equal(h.Brand.state().status, 'confirmed');
+  await assert.rejects(h.Brand.setRequired(true), (e) => e.code === 'brand-rule-pending');
+  assert.deepEqual([h.Brand.state().status, h.Brand.state().required, h.Brand.state().canResend], ['pending', null, true]);
+  await assert.rejects(h.Brand.setRequired(false), (e) => e.code === 'brand-rule-pending', 'configuração travada: nova alteração recusada enquanto pendente');
+  const out = await h.Brand.resendPending();
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, false]);
+  const writes = h.calls.filter((c) => Object.hasOwn(c.payload, 'brandRequired'));
+  assert.equal(writes.length, 2); assert.equal(writes[0].payload.attemptId, writes[1].payload.attemptId, 'mesma tentativa');
+  assert.equal(h.server.attempts.size, 1, 'gravada uma única vez');
 });
 
 test('P2 final: resposta e reconciliação inconclusivas → "Confirmação pendente", nunca desligada, até o servidor responder', async () => {
@@ -326,8 +340,8 @@ test('P1 final: sync.js confirma UMA operação pelo recibo e não processa a fi
   const fn = src.slice(src.indexOf('async function confirmBrandRecovery('), src.indexOf('async function archiveQuarantinedOperation('));
   assert.ok(fn.length > 100);
   assert.match(fn, /readQueuedOperationStatus\(item,\{held:true\}\)/, 'consulta somente o recibo desta operação');
-  assert.match(fn, /receipt\.status!=='applied'\)return\{status:'pending'/, 'sem recibo aplicado: pendente');
-  assert.match(fn, /filter\(row=>row\.queueId!==item\.queueId\)/, 'remove só a operação confirmada');
+  assert.match(fn, /if\(receipt\.status!=='applied'\|\|[^\n]*\)return\{status:'pending'/, 'sem recibo aplicado: pendente');
+  assert.doesNotMatch(fn, /saveQueue\(/, 'o original não é descartado: fica preservado como ocorrência resolvida');
   assert.match(fn, /channel:'brand_recovery'/, 'registro rastreável');
   assert.doesNotMatch(fn, /processSyncQueue|commitQueueItem|'commitOperationalSync'/, 'nada é enviado');
   assert.doesNotMatch(read('js/product-brand.js'), /processSyncQueue/, 'a recuperação não sincroniza a fila');
@@ -347,4 +361,98 @@ test('P2 final: leitura antiga em andamento não reconcilia uma alteração com 
   assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, true], 'reconciliado por leitura nova, posterior à tentativa');
   assert.equal(h.calls.length, 3);
   assert.equal(h.Brand.isRequired(), true);
+});
+
+// ---- V242.7: três últimos bloqueios (gravação em andamento, consultas fora de ordem, retomada) ----
+const gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('B1: gravação lenta com resposta perdida → a consulta lê o valor ANTERIOR: continua pendente, sem sucesso nem falha', async () => {
+  const server = gate();
+  const h = harness({ rule: false, server: { rule: false, plan: [{ late: server.p }] } });
+  await assert.rejects(h.Brand.setRequired(true), (e) => e.code === 'brand-rule-pending' && /Confirmação pendente/.test(e.message));
+  const read = h.calls[1].payload;
+  assert.equal(read.attemptId, h.calls[0].payload.attemptId, 'a reconciliação consulta a MESMA tentativa');
+  assert.equal(h.server.rule, false, 'o servidor ainda informa o valor anterior');
+  const st = h.Brand.state();
+  assert.deepEqual([st.status, st.required], ['pending', null], 'valor anterior não prova falha: pendente');
+  assert.equal(h.Brand.mustAsk(), true); assert.equal(h.Brand.isRequired(), false);
+  assert.equal((await h.Brand.refresh({ force: true })).status, 'pending', 'nova consulta antes da conclusão continua pendente');
+  server.open(); await tick(); // o servidor conclui a gravação
+  const after = await h.Brand.refresh({ force: true });
+  assert.deepEqual([after.status, after.required], ['confirmed', true], 'recibo da tentativa encerra a pendência');
+  assert.equal(h.calls.filter((c) => Object.hasOwn(c.payload, 'brandRequired')).length, 1, 'nenhum reenvio automático');
+});
+
+test('B1: gravação concluída por outro aparelho depois NÃO encerra a pendência desta tentativa', async () => {
+  const h = harness({ rule: false, server: { plan: [{ apply: false, error: lost('unavailable') }] } });
+  await assert.rejects(h.Brand.setRequired(true));
+  h.server.rule = true; // outra tentativa (outro aparelho) deixou o mesmo valor
+  assert.equal((await h.Brand.refresh({ force: true })).status, 'pending', 'só o recibo desta tentativa confirma');
+});
+
+test('B2: consultas resolvidas fora de ordem nunca sobrescrevem um estado mais recente', async () => {
+  const g1 = gate(), g2 = gate();
+  const old = { version: 1, confirmed: true, businessId: 'empresa-a', workspaceGeneration: 0, brandRequired: false, updatedAt: '2026-01-01T00:00:00.000Z' };
+  // 1) leitura antes da alteração (segura), 2) alteração confirmada, 3) leitura durante a alteração (segura)
+  const h = harness({ rule: false, server: { plan: [{ hold: g1.p, reply: old }, { hold: g2.p }, { reply: old }] } });
+  const before = h.Brand.refresh({ force: true });
+  const change = h.Brand.setRequired(true);
+  await tick();
+  const during = h.Brand.refresh({ force: true }); // iniciada durante a gravação
+  await tick();
+  g2.open(); const out = await change; // alteração confirmada primeiro
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, false]);
+  g1.open(); await Promise.all([before, during]); // respostas antigas chegam depois
+  assert.deepEqual([h.Brand.state().status, h.Brand.isRequired()], ['confirmed', true], 'respostas antigas descartadas');
+  // 4) duas leituras novas fora de ordem: a mais antiga chega por último e é descartada
+  const g3 = gate();
+  h.server.plan = [{ hold: g3.p, reply: old }];
+  const slow = h.Brand.refresh({ force: true });
+  h.ctx.BusinessContext.get = () => ({ businessId: 'empresa-b' });
+  h.server.plan = [{ reply: { ...old, businessId: 'empresa-b', brandRequired: true } }];
+  assert.equal((await h.Brand.refresh({ force: true })).required, true, 'empresa B confirmada');
+  h.ctx.BusinessContext.get = () => ({ businessId: 'empresa-a' });
+  g3.open(); await slow;
+  assert.equal(h.Brand.isRequired(), true, 'resposta antiga da empresa A (desligada) não sobrescreve a confirmação mais recente');
+});
+
+test('B2: troca de conta durante a consulta descarta a resposta', async () => {
+  const g = gate();
+  const h = harness({ rule: undefined, server: { rule: true, plan: [{ hold: g.p }] } });
+  const pending = h.Brand.refresh({ force: true });
+  h.session.uid = 'outra-conta';
+  g.open(); await pending;
+  assert.deepEqual([h.Brand.state().status, h.Brand.state().required], ['unknown', null], 'nada confirmado para a outra conta');
+});
+
+test('B1/B2: sessão expirada durante a reconciliação → continua pendente, nunca "confirmada"', async () => {
+  const g = gate();
+  const h = harness({ rule: false, server: { plan: [{ apply: true, error: lost() }, { hold: g.p }] } });
+  const change = h.Brand.setRequired(true);
+  await tick(); await tick();
+  h.session.uid = null; // sessão expirou enquanto a leitura de reconciliação estava em andamento
+  g.open();
+  await assert.rejects(change, (e) => e.code === 'brand-rule-pending');
+  assert.equal(h.Brand.state().status, 'pending');
+  const e2 = harness({ rule: false, server: { plan: [{ apply: true, error: lost() }, { error: lost('unauthenticated') }] } });
+  await assert.rejects(e2.Brand.setRequired(true), (e) => e.code === 'brand-rule-pending');
+  assert.equal(e2.Brand.state().status, 'pending', 'leitura recusada (sessão expirada) não confirma nem desfaz');
+  const other = harness({ rule: false, server: { plan: [{ apply: false, error: lost('unavailable') }] } });
+  await assert.rejects(other.Brand.setRequired(true));
+  other.session.uid = 'outra-conta';
+  assert.equal(other.Brand.state().canResend, false, 'outra conta não reenvia a tentativa de outra pessoa');
+  await assert.rejects(other.Brand.resendPending(), (e) => e.code === 'brand-rule-pending');
+});
+
+test('B3: recuperação já confirmada e interrompida → retoma só esta operação, sem envio', async () => {
+  const queue = [blocked('op-alvo'), blocked('op-outra')];
+  const h = harness({ rule: true, queue, server: { resolved: ['op-alvo'], applied: new Set(['op-alvo']) } });
+  const before = JSON.stringify(queue);
+  const out = await h.Brand.recoverOffline('op-alvo', {});
+  assert.deepEqual([out.status, out.resumed], ['applied', true]);
+  assert.equal(h.calls.length, 0, 'nenhum envio ao servidor');
+  assert.deepEqual(h.receipts, ['op-alvo'], 'confere só esta operação');
+  assert.equal(h.retries.length, 0);
+  assert.equal(JSON.stringify(queue.filter((i) => i.operationId !== 'op-alvo')), JSON.stringify(JSON.parse(before).filter((i) => i.operationId !== 'op-alvo')));
 });

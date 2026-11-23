@@ -1070,9 +1070,23 @@ function queueArchiveKey(item) {
   return `${queueKey()}:incidentArchive:${encodeURIComponent(String(item.operationId || "missing"))}`;
 }
 function recoveryResolutionKey(item){return `${queueKey()}:recoveryResolution:${encodeURIComponent(item.operationId||'missing')}`;}
+// V242.7 Marca: cadastro offline recusado por falta de Marca (o original é preservado como evidência).
+function brandRejectedItem(item){
+  return item?.status==='error'&&String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')==='failed-precondition'&&/exige Marca/.test(String(item.lastErrorMessage||''));
+}
+function brandCreateIds(item){return (item.payload?.writes||[]).filter(w=>w.entityType==='products'&&w.operation==='create').map(w=>String(w.entityId));}
 function readRecoveryResolution(item){
   let value;try{value=JSON.parse(localStorage.getItem(recoveryResolutionKey(item))||'null');}catch{return null;}
   if(!value||!Array.isArray(item.payload?.writes))return null;
+  // Recibo "applied" da MESMA operação, conferido no servidor: identidade, empresa, geração, conteúdo e produtos.
+  if(value.channel==='brand_recovery'){
+    const ids=brandCreateIds(item);
+    return value.version===1&&value.status==='applied'&&value.receiptStatus==='applied'&&brandRejectedItem(item)&&
+      value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&
+      value.workspaceGeneration===(item.workspaceGeneration??0)&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&
+      value.payloadChecksum===checksumValue(item.payload)&&Array.isArray(value.productIds)&&ids.length>0&&
+      value.productIds.length===ids.length&&value.productIds.every((id,i)=>id===ids[i])&&Boolean(value.verifiedAt)?value:null;
+  }
   // D5: a stock edit the server rejected atomically never had an effect. The owner
   // closes it with server evidence (no processed marker, product read from the cloud).
   if(value.channel==='rejected_stock_edit')
@@ -1420,12 +1434,19 @@ async function resolveRejectedStockEdit(operationId) {
 }
 // V242.7 Marca: cadastros desta conta recusados por falta de Marca (somente leitura).
 function brandRecoveryQueue(){
-  return readQueue().filter(item=>item.status==='error'&&errorCode({code:item.lastErrorCode})==='failed-precondition'&&
-    /exige Marca/.test(String(item.lastErrorMessage||''))&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&
-    (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&!classifyQueueOperation(item).replayBlocked);
+  return readQueue().filter(item=>brandRejectedItem(item)&&brandRecoveryOwn(item)&&!classifyQueueOperation(item).replayBlocked);
+}
+function brandRecoveryOwn(item){
+  return item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0);
+}
+// Recuperações já confirmadas por recibo (registro brand_recovery válido): a conclusão local pode ser retomada.
+function brandRecoveryResolved(){
+  return readQueue().filter(item=>brandRejectedItem(item)&&brandRecoveryOwn(item)&&readRecoveryResolution(item)?.channel==='brand_recovery');
 }
 // V242.7 Marca: confirma UMA recuperação pelo recibo da própria operação. Não processa nem reenvia a fila.
-// Só com recibo "applied" do mesmo conteúdo a operação sai da fila (com registro rastreável); senão fica pendente.
+// Recibo "applied" do mesmo conteúdo: grava o registro rastreável; o original fica preservado como ocorrência
+// resolvida (nunca reenviado, como os demais canais de resolução) e só então a cópia local é concluída.
+// Interrompido depois do registro, a mesma chamada retoma SOMENTE esta operação, sem novo envio.
 async function confirmBrandRecovery(operationId){
   if(!navigator.onLine)return{status:'pending',operationId};
   await validateUser();
@@ -1434,21 +1455,23 @@ async function confirmBrandRecovery(operationId){
     if(generation!==syncSessionGeneration||currentUser?.uid!==uid||auth.currentUser?.uid!==uid||activeBusinessId()!==bid||queueKey()!==key)
       throw Object.assign(Error('A sessão mudou. Nada foi alterado.'),{code:'sync-session-obsolete'});
   };
-  const item=brandRecoveryQueue().find(entry=>entry.operationId===operationId);
+  const resumed=brandRecoveryResolved().find(entry=>entry.operationId===operationId);
+  const item=resumed||brandRecoveryQueue().find(entry=>entry.operationId===operationId);
   if(!item)return{status:'not_pending',operationId};
   const receipt=await readQueuedOperationStatus(item,{held:true});
   assertOrigin();
-  if(receipt.status!=='applied')return{status:'pending',operationId};
-  const productIds=item.payload.writes.filter(w=>w.entityType==='products'&&w.operation==='create').map(w=>w.entityId);
+  if(receipt.status!=='applied'||(resumed&&readRecoveryResolution(item)?.payloadHash!==receipt.payloadHash))return{status:'pending',operationId};
+  const productIds=brandCreateIds(item);
   const products=await Promise.all(productIds.map(id=>getDocFromServer(doc(db,'businesses',bid,'products',id))));
   assertOrigin(); receipt.assertOriginal();
   if(products.some(p=>!p.exists()))return{status:'pending',operationId};
-  localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({version:1,channel:'brand_recovery',status:'applied',
-    operationId,businessId:bid,actorUid:uid,payloadHash:receipt.payloadHash,payloadChecksum:checksumValue(item.payload),productIds,verifiedAt:now()}));
-  saveQueue(readQueueStrict().filter(row=>row.queueId!==item.queueId));
+  if(!resumed)localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({version:1,channel:'brand_recovery',status:'applied',receiptStatus:'applied',
+    operationId,businessId:bid,actorUid:uid,workspaceGeneration:item.workspaceGeneration??0,payloadHash:receipt.payloadHash,
+    payloadChecksum:checksumValue(item.payload),productIds,verifiedAt:now()}));
+  if(readRecoveryResolution(item)?.channel!=='brand_recovery')return{status:'pending',operationId};
   applyCloudCollection('products',products.map(p=>({id:p.id,...p.data()})),{authoritative:true});
   await DB.flush?.(); assertOrigin(); updateQueueState();
-  return{status:'applied',operationId,productIds};
+  return{status:'applied',operationId,productIds,resumed:Boolean(resumed)};
 }
 async function archiveQuarantinedOperation(operationId) {
   if (incidentArchiveTasks.has(operationId)) return incidentArchiveTasks.get(operationId);
@@ -4577,7 +4600,7 @@ function pendingIds(name, confirmedPaymentOperation = null) {
   for (const item of readQueue()){
     const resolution=readRecoveryResolution(item);
     if (item.operationId!==confirmedPaymentOperation && !readPaymentRecoveryReceipt(item) &&
-        resolution?.channel!=='queued_sale_receipt' && resolution?.channel!=='rejected_stock_edit' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
+        resolution?.channel!=='queued_sale_receipt' && resolution?.channel!=='rejected_stock_edit' && resolution?.channel!=='brand_recovery' && !(name==='clients'&&resolution) && !isHistoricalProjectionBatch(item) &&
         !(name === "settings" && queueQuarantineReason(item) === "settings_permission_required") &&
         !(name === "products" && favoriteWriteWasRejected(item)))
     for (const write of item.payload?.writes || [])
@@ -7637,6 +7660,7 @@ window.SyncFirebase = {
   resolveRejectedStockEdit,
   // V242.7, somente leitura: cadastros desta conta recusados por falta de Marca. Nunca altera a fila.
   brandRecoveryCandidates: () => brandRecoveryQueue().map(item=>structuredClone(item)),
+  brandRecoveryResolved: () => brandRecoveryResolved().map(item=>({operationId:item.operationId,productIds:brandCreateIds(item)})),
   confirmBrandRecovery,
   // Conta da sessão autenticada atual (nula se a sessão local e a do Firebase divergirem).
   sessionUserId: () => currentUser?.uid&&currentUser.uid===auth.currentUser?.uid?currentUser.uid:null,

@@ -20,8 +20,15 @@ window.ProductBrand = (() => {
   const codeOf = (error) => String(error?.code || "").replace(/^functions\//, "");
   // Recusas explícitas do servidor (nada foi gravado). Qualquer outra falha é resultado inconclusivo.
   const DEFINITIVE = new Set(["invalid-argument", "failed-precondition", "permission-denied", "unauthenticated", "already-exists", "not-found", "out-of-range"]);
-  // epoch: cada tentativa de alteração invalida leituras iniciadas antes dela (nunca reconciliam com valor antigo).
-  let session = { bid: "", uid: null, at: 0 }, inflight = null, epoch = 0;
+  // Concorrência: cada consulta recebe um número de sequência. Uma resposta só vale se a consulta começou
+  // depois da última barreira (início E fim de cada alteração), depois do último resultado aceito, sem
+  // alteração em andamento e na mesma empresa/conta/tentativa pendente. Resposta antiga nunca sobrescreve.
+  let session = { bid: "", uid: null, at: 0 }, inflight = null, seq = 0, barrier = 0, accepted = 0, writing = 0;
+  const newAttemptId = () => {
+    try { if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID().replace(/-/g, ""); } catch {}
+    const bytes = new Uint8Array(16); globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  };
   const resetSession = () => { session = { bid: "", uid: null, at: 0 }; };
 
   function readSnapshot(bid = businessId()) {
@@ -35,17 +42,18 @@ window.ProductBrand = (() => {
     if (!bid) return null;
     try {
       const value = JSON.parse(globalThis.localStorage?.getItem?.(pendingKey(bid)) || "null");
-      return value?.version === 1 && value.businessId === bid && typeof value.wanted === "boolean" ? value : null;
+      return value?.version === 2 && value.businessId === bid && typeof value.wanted === "boolean" && /^[A-Za-z0-9_-]{16,64}$/.test(value.attemptId || "") ? value : null;
     } catch { return null; }
   }
-  const writePending = (bid, wanted) => { try { globalThis.localStorage?.setItem?.(pendingKey(bid), JSON.stringify({ version: 1, businessId: bid, wanted, at: new Date().toISOString() })); } catch {} };
+  // Pendência vinculada à tentativa: só o recibo DESTA tentativa no servidor a encerra como gravada.
+  const writePending = (bid, wanted, attemptId, uid) => { try { globalThis.localStorage?.setItem?.(pendingKey(bid), JSON.stringify({ version: 2, businessId: bid, wanted, attemptId, uid, at: new Date().toISOString() })); } catch {} };
   const clearPending = (bid) => { try { globalThis.localStorage?.removeItem?.(pendingKey(bid)); } catch {} };
   // "Confirmada" só vale para a mesma empresa, a mesma conta autenticada e dentro do prazo da sessão.
   const sessionFresh = (bid) => session.bid === bid && session.at > 0 && Date.now() - session.at < SESSION_TTL && !!session.uid && session.uid === userId();
   // Estado real da regra: pendente, confirmado pelo servidor, recebido pela sincronização ou desconhecido.
   function state() {
     const bid = businessId(), snap = readSnapshot(bid), local = config().productRules, pending = readPending(bid);
-    if (pending) return { status: "pending", required: null, wanted: pending.wanted, since: pending.at };
+    if (pending) return { status: "pending", required: null, wanted: pending.wanted, since: pending.at, attemptId: pending.attemptId, canResend: !!pending.uid && pending.uid === userId() };
     const localKnown = local && typeof local.brandRequired === "boolean";
     if (snap && (!localKnown || String(snap.updatedAt || "") >= String(local.updatedAt || ""))) {
       const fresh = sessionFresh(bid);
@@ -100,48 +108,71 @@ window.ProductBrand = (() => {
     refreshFields();
     return state();
   }
-  // Confirma a regra no servidor (leitura autorizada). Falha: rebaixa a sessão e devolve o estado conhecido, sem inventar.
+  // Confirma a regra no servidor (leitura autorizada). Com alteração pendente, consulta o recibo DA TENTATIVA:
+  // só "applied" encerra a pendência; ler o valor anterior nunca prova que a gravação falhou.
   function refresh({ force = false } = {}) {
     const bid = businessId();
     if (!bid || !online() || typeof window.FirebaseCallable !== "function") { if (!online()) resetSession(); return Promise.resolve(state()); }
-    if (!force && !readPending(bid) && sessionFresh(bid) && Date.now() - session.at < 300000) return Promise.resolve(state());
-    if (inflight?.epoch === epoch) return inflight.promise;
-    const mine = { epoch };
-    mine.promise = call({ kind: "product_rules" })
-      .then((reply) => (mine.epoch === epoch ? accept(reply, bid) : state()))
-      .catch(() => { if (mine.epoch === epoch) resetSession(); return state(); })
+    const pending = readPending(bid), attemptId = pending?.attemptId || null, uid = userId();
+    if (!force && !pending && sessionFresh(bid) && Date.now() - session.at < 300000) return Promise.resolve(state());
+    if (inflight && inflight.seq > barrier && !writing && inflight.bid === bid && inflight.uid === uid && inflight.attemptId === attemptId) return inflight.promise;
+    const mine = { seq: ++seq, bid, uid, attemptId };
+    const current = () => mine.seq > barrier && mine.seq > accepted && !writing && businessId() === bid && userId() === uid && (readPending(bid)?.attemptId || null) === attemptId;
+    mine.promise = call({ kind: "product_rules", ...(attemptId ? { attemptId } : {}) })
+      .then((reply) => {
+        if (!current()) return state();
+        const value = reply?.data ?? reply;
+        if (attemptId && (value?.attemptId !== attemptId || value.attempt !== "applied")) return state();
+        accepted = mine.seq;
+        return accept(reply, bid);
+      })
+      .catch(() => { if (current()) resetSession(); return state(); })
       .finally(() => { if (inflight === mine) inflight = null; });
     inflight = mine;
     return mine.promise;
   }
-  // Alteração só conta como salva depois da confirmação do servidor. Resposta inconclusiva:
-  // marca "pendente" e reconcilia com a leitura autorizada; nunca presume sucesso nem falha.
+  // Alteração só conta como salva com o recibo desta tentativa (attemptId) confirmado pelo servidor.
+  // Resposta inconclusiva: fica "pendente" e a configuração travada; a reconciliação consulta o recibo
+  // da tentativa e o reenvio usa a MESMA tentativa (o servidor reconhece e não regrava).
   async function setRequired(required) {
     if (!canManage()) throw window.VeconiPermissionPolicy?.denied?.("settings.manage") || Error("Seu perfil não pode alterar as regras de produtos.");
     if (typeof required !== "boolean") throw Error("Valor da regra inválido.");
     if (!online()) throw Object.assign(Error("Sem conexão: a regra não foi alterada. Conecte-se para alterar e confirmar no servidor."), { code: "offline" });
-    const bid = businessId();
-    epoch += 1;
-    const attempt = epoch;
-    writePending(bid, required);
+    if (writing) throw Object.assign(Error("Uma alteração já está aguardando o servidor."), { code: "brand-rule-pending" });
+    const bid = businessId(), uid = userId(), pending = readPending(bid);
+    if (pending && (pending.wanted !== required || pending.uid !== uid))
+      throw Object.assign(Error("Há uma alteração pendente de confirmação. Conclua-a antes de mudar a regra."), { code: "brand-rule-pending" });
+    const attemptId = pending?.attemptId || newAttemptId(), resend = Boolean(pending);
+    barrier = ++seq; writing += 1;
+    if (!resend) writePending(bid, required, attemptId, uid);
     let reply;
-    try { reply = await call({ kind: "product_rules", brandRequired: required }); }
+    try { reply = await call({ kind: "product_rules", brandRequired: required, attemptId }); }
     catch (error) {
       if (DEFINITIVE.has(codeOf(error))) {
-        clearPending(bid);
         if (codeOf(error) === "unauthenticated") resetSession();
+        if (!resend) {
+          clearPending(bid); refreshFields();
+          throw Object.assign(Error(`${error.message || "O servidor recusou a alteração"}. A regra não foi alterada.`), { code: codeOf(error), definitive: true });
+        }
         refreshFields();
-        throw Object.assign(Error(`${error.message || "O servidor recusou a alteração"}. A regra não foi alterada.`), { code: codeOf(error), definitive: true });
+        throw Object.assign(Error(`${error.message || "O servidor recusou o reenvio"}. A alteração anterior continua aguardando confirmação.`), { code: "brand-rule-pending" });
       }
-    }
-    if (reply !== undefined && attempt === epoch) {
-      try { return { ...accept(reply, bid), reconciled: false }; } catch {}
+    } finally { writing -= 1; barrier = ++seq; }
+    const value = reply?.data ?? reply;
+    if (value?.attemptId === attemptId && value.attempt === "applied" && businessId() === bid && userId() === uid) {
+      try { accepted = barrier; return { ...accept(reply, bid), reconciled: false, replayed: value.replayed === true }; } catch {}
     }
     if (businessId() !== bid) throw Object.assign(Error(PENDING), { code: "brand-rule-pending" });
     const reconciled = await refresh({ force: true });
     if (reconciled.status === "confirmed") return { ...reconciled, reconciled: true };
     refreshFields();
     throw Object.assign(Error(PENDING), { code: "brand-rule-pending" });
+  }
+  // Reenvio explícito da MESMA tentativa pendente (idempotente no servidor).
+  function resendPending() {
+    const pending = readPending();
+    if (!pending) return Promise.reject(Object.assign(Error("Não há alteração pendente."), { code: "not-pending" }));
+    return setRequired(pending.wanted);
   }
 
   // Cadastros offline recusados por falta de Marca (somente leitura da fila; o original nunca é editado).
@@ -152,6 +183,12 @@ window.ProductBrand = (() => {
   // Recuperação explícita: o servidor confere o recibo da MESMA operação antes de aplicar e audita.
   async function recoverOffline(operationId, brands) {
     if (!online()) throw Object.assign(Error("Sem conexão: nada foi enviado. O cadastro original continua preservado."), { code: "offline" });
+    // Recibo já confirmado e registrado, conclusão local interrompida: retoma SOMENTE esta operação, sem envio.
+    if ((window.SyncFirebase?.brandRecoveryResolved?.() || []).some((row) => row.operationId === operationId)) {
+      let resumed;
+      try { resumed = await window.SyncFirebase.confirmBrandRecovery(operationId); } catch { resumed = null; }
+      return { operationId, status: resumed?.status === "applied" ? "applied" : "pending", resumed: true };
+    }
     const entry = recoveryCandidates().find((row) => row.item.operationId === operationId);
     if (!entry) throw Error("Este cadastro não está mais pendente de Marca. Nada foi enviado.");
     const clean = {};
@@ -201,9 +238,11 @@ window.ProductBrand = (() => {
   }
   function render(root, notice = "") {
     const current = state(), locked = current.required === null || !online() || !canManage();
-    const pending = recoveryCandidates();
+    const pending = recoveryCandidates(), resumable = window.SyncFirebase?.brandRecoveryResolved?.() || [];
+    const resend = current.status === "pending" && current.canResend && online() && canManage() ? `<p><button class="btn" type="button" data-brand-resend>Reenviar a mesma alteração</button> O servidor reconhece esta tentativa e não grava duas vezes.</p>` : "";
+    const resume = resumable.length ? `<hr><h4>Cadastros confirmados pelo servidor</h4><p>O recibo já foi conferido; falta concluir a cópia deste aparelho. Nada é reenviado.</p>${resumable.map((row) => `<button class="btn" type="button" data-brand-resume="${esc(row.operationId)}">Concluir neste aparelho</button>`).join(" ")}` : "";
     const recovery = pending.length ? `<hr><h4>Cadastros recusados por falta de Marca</h4><p>Criados sem conexão antes da exigência. O original continua preservado; o servidor confere o recibo antes de concluir.</p>${pending.map(({ item, products }) => `<form data-brand-recover="${esc(item.operationId)}">${products.map((p) => `<div class="field"><label>Marca de ${esc(p.nome)} *</label><input name="${esc(p.id)}" maxlength="${MAX}" required></div>`).join("")}<button class="btn" type="submit">Concluir cadastro com a marca</button></form>`).join("")}` : "";
-    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-brand-rules"><header class="modal-head"><div><small>Configurações</small><h3>Produtos</h3></div><button class="icon-btn" type="button" data-brand-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body"><label class="check" style="display:flex;gap:10px;align-items:center;padding:10px 0"><input type="checkbox" data-brand-required ${current.required === true ? "checked" : ""} ${locked ? "disabled" : ""}> <span><b>Exigir marca no cadastro</b></span></label><p data-brand-state>${esc(describe(current))}</p><p>Vale para todos os espaços da empresa. Novos produtos físicos só podem ser cadastrados com a marca preenchida; serviços não exigem marca. Produtos antigos continuam disponíveis e podem ser editados normalmente.</p><p data-brand-notice role="status">${esc(notice)}</p>${recovery}</div><footer class="modal-foot"><button class="btn btn-light" type="button" data-brand-close>Fechar</button></footer></section></div>`;
+    root.innerHTML = `<div class="modal-bg"><section class="modal-box product-brand-rules"><header class="modal-head"><div><small>Configurações</small><h3>Produtos</h3></div><button class="icon-btn" type="button" data-brand-close aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body"><label class="check" style="display:flex;gap:10px;align-items:center;padding:10px 0"><input type="checkbox" data-brand-required ${current.required === true ? "checked" : ""} ${locked ? "disabled" : ""}> <span><b>Exigir marca no cadastro</b></span></label><p data-brand-state>${esc(describe(current))}</p><p>Vale para todos os espaços da empresa. Novos produtos físicos só podem ser cadastrados com a marca preenchida; serviços não exigem marca. Produtos antigos continuam disponíveis e podem ser editados normalmente.</p>${resend}<p data-brand-notice role="status">${esc(notice)}</p>${resume}${recovery}</div><footer class="modal-foot"><button class="btn btn-light" type="button" data-brand-close>Fechar</button></footer></section></div>`;
     window.lucide?.createIcons?.();
     root.querySelectorAll("[data-brand-close]").forEach((b) => (b.onclick = () => { root.innerHTML = ""; if (window.Router?.atual?.() === "configuracoes") window.Router.ir("configuracoes"); }));
     const input = root.querySelector("[data-brand-required]");
@@ -222,6 +261,17 @@ window.ProductBrand = (() => {
         render(root, error.code === "brand-rule-pending" ? PENDING : `Não alterada: ${error.message || "erro ao salvar"}`);
       }
     };
+    const resendBtn = root.querySelector("[data-brand-resend]");
+    if (resendBtn) resendBtn.onclick = async () => {
+      resendBtn.disabled = true;
+      try { await resendPending(); render(root, "Alteração confirmada pelo servidor."); }
+      catch (error) { render(root, error.code === "brand-rule-pending" ? error.message : `Não alterada: ${error.message || "erro ao salvar"}`); }
+    };
+    root.querySelectorAll("[data-brand-resume]").forEach((btn) => (btn.onclick = async () => {
+      btn.disabled = true;
+      const out = await recoverOffline(btn.dataset.brandResume, {}).catch(() => ({ status: "pending" }));
+      render(root, out.status === "applied" ? "Cadastro concluído neste aparelho, conforme o recibo do servidor." : "Confirmação pendente: o recibo ainda não pôde ser conferido. Nada foi reenviado.");
+    }));
     root.querySelectorAll("[data-brand-recover]").forEach((form) => (form.onsubmit = async (event) => {
       event.preventDefault();
       const brands = Object.fromEntries([...form.querySelectorAll("input")].map((i) => [i.name, i.value]));
@@ -246,5 +296,5 @@ window.ProductBrand = (() => {
     for (const name of ["operational-remote-invalidation", "firebase-sync-status"]) addEventListener(name, () => { refreshFields(); if (online() && window.SyncFirebase?.isReady?.()) refresh(); });
     globalThis.document?.addEventListener?.("change", (event) => { if (event.target?.name === "itemKind") refreshFields(); });
   }
-  return { MAX, text, state, isRequired, mustAsk, assertNew, applySpreadsheetRule, setRequired, refresh, recoveryCandidates, recoverOffline, field, refreshFields, summary, open, canManage, canOpen };
+  return { MAX, text, state, isRequired, mustAsk, assertNew, applySpreadsheetRule, setRequired, resendPending, refresh, recoveryCandidates, recoverOffline, field, refreshFields, summary, open, canManage, canOpen };
 })();
