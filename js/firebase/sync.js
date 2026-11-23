@@ -7603,6 +7603,10 @@ window.SyncFirebase = {
   refreshQueueStatus,
   archiveQuarantinedOperation,
   resolveRejectedStockEdit,
+  // V242.7, somente leitura: cadastros desta conta recusados por falta de Marca. Nunca altera a fila.
+  brandRecoveryCandidates: () => readQueue().filter(item=>item.status==='error'&&errorCode({code:item.lastErrorCode})==='failed-precondition'&&
+    /exige Marca/.test(String(item.lastErrorMessage||''))&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&
+    (item.workspaceGeneration??0)===(DB.getWorkspaceGeneration?.()??0)&&!classifyQueueOperation(item).replayBlocked).map(item=>structuredClone(item)),
   getRetainedSaleRecoveryCount: () => readQueue().filter(item=>saleQueueRequiresReview(item)&&item.userId===currentUser?.uid&&item.businessId===activeBusinessId()&&(item.workspaceGeneration??0)===DB.getWorkspaceGeneration()).length,
   // Read-only recovery source. Never normalize, acknowledge or save this queue.
   recoverySnapshot: () => {

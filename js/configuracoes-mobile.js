@@ -77,7 +77,7 @@
           subtitle: "Entrega, retirada e fiado",
           operation: true,
         }),
-        ...(window.ProductBrand?.canManage?.() ? [row({
+        ...(window.ProductBrand?.canOpen?.() ? [row({
           iconName: "tag",
           title: "Produtos",
           subtitle: window.ProductBrand.summary(),
