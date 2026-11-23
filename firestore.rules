@@ -406,6 +406,18 @@ service cloud.firestore {
           )
         );
     }
+    // Marca: texto opcional de até 80 caracteres. Regra POR EMPRESA em settings/default.productRules.brandRequired,
+    // aplicada só a produtos físicos novos; serviços não exigem. Sem documento de configuração, a regra está desligada.
+    function validProductBrand(product) {
+      return !('marca' in product) || (product.marca is string && product.marca.size() <= 80);
+    }
+    function satisfiesCompanyBrandRule(businessId, product) {
+      let settings = /databases/$(database)/documents/businesses/$(businessId)/settings/default;
+      return product.get('itemKind', 'product') == 'service'
+        || (product.get('marca', '') is string && product.get('marca', '').trim().size() > 0)
+        || !exists(settings)
+        || get(settings).data.get('productRules', {}).get('brandRequired', false) != true;
+    }
     function preservesProductSpaceScope(product, persistedProduct) {
       return !product.diff(persistedProduct).affectedKeys().hasAny([
         'spaceAccessMode', 'allowedSpaceIds', 'defaultSpaceId', 'spaceScopeVersion'
@@ -1289,7 +1301,9 @@ service cloud.firestore {
           && (!memberExists(businessId) || permissionGranted(businessId, 'products.edit'))
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
-          && validProductSpaceScope(request.resource.data, businessId);
+          && validProductSpaceScope(request.resource.data, businessId)
+          && validProductBrand(request.resource.data)
+          && satisfiesCompanyBrandRule(businessId, request.resource.data);
         allow update: if !request.resource.data.keys().hasAny(['serviceCostConfig']) && unchangedStock() && canAccessProduct(businessId,resource.data)
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['spreadsheetImportOperationId']) || planAllowsFeature(businessId,'spreadsheetImport'))
           && (preservesProductSpaceScope(request.resource.data,resource.data) || canAssignProductScope(businessId,request.resource.data))
@@ -1308,6 +1322,7 @@ service cloud.firestore {
           && request.resource.data.businessId == businessId
           && (!request.resource.data.keys().hasAny(['custo', 'cost']) || legacySensitiveFieldsAllowed(businessId))
           && validProductItemKind(request.resource.data)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['marca']) || validProductBrand(request.resource.data))
           && (
             preservesProductSpaceScope(request.resource.data, resource.data)
             || validProductSpaceScope(request.resource.data, businessId)

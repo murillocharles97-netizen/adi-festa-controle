@@ -78,7 +78,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
   await c.space(p.spaceId);
   return p;
  }
- async function commit(request,{priorSale=null,paymentRecovery=null}={}){
+ async function commit(request,{priorSale=null,paymentRecovery=null,brandRecovery=null}={}){
   if(request.data?.kind==='message_space_template_save')return db.runTransaction(async tx=>{
    const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0});
    return require('./message-space-template-service').handle({tx,c,ref,d,now:now(),write:true});
@@ -101,6 +101,34 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(d.kind==='payment_recovery_apply'&&(d.confirmed!==true||!/^[a-f0-9]{64}$/.test(d.reviewHash||'')))fail('Confirme explicitamente a revisão atual antes de recuperar.','failed-precondition');
    require('./payment-recovery-policy').shape(original);
    return commit(request,{paymentRecovery:{dryRun:d.kind==='payment_recovery_review',originalHash:d.originalPayloadHash,expectedReviewHash:d.reviewHash||null}});
+  }
+  // Regra de Marca POR EMPRESA: lida e alterada somente pelo servidor (estado confirmado, sem sucesso local otimista).
+  if(request.data?.kind==='product_rules')return db.runTransaction(async tx=>{
+   const d=request.data,set=Object.hasOwn(d,'brandRequired');
+   if(set&&typeof d.brandRequired!=='boolean')fail('Valor da regra inválido.','invalid-argument');
+   const c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:!set});
+   const sref=ref(c.bid,'settings','default'),current=(await tx.get(sref)).data()?.productRules||{};
+   const out=(brandRequired,updatedAt)=>({version:1,businessId:c.bid,workspaceGeneration:gen(c.business),brandRequired,updatedAt:updatedAt||null,confirmed:true});
+   if(!set)return out(current.brandRequired===true,current.updatedAt);
+   if(!c.has('settings.manage'))fail('Seu perfil não pode alterar as regras de produtos.');
+   const updatedAt=now().toISOString(),revision='server:product_rules:'+updatedAt;
+   tx.set(sref,{businessId:c.bid,productRules:{brandRequired:d.brandRequired,updatedAt,updatedBy:c.uid}},{merge:true});
+   tx.set(db.doc('businesses/'+c.bid+'/syncMetadata/last-sync'),{businessId:c.bid,workspaceGeneration:gen(c.business),publisher:'operational_server',sourceSessionId:revision,
+    ownerId:c.uid,actorUid:c.uid,sourceUid:c.uid,sourceDeviceId:FieldValue.delete(),revision,updatedAt:FieldValue.serverTimestamp(),changedCollections:['settings'],collectionVersions:{settings:revision}},{merge:true});
+   tx.create(ref(c.bid,'auditLogs','product_rules_'+updatedAt.replace(/[^0-9]/g,'')+'_'+c.uid.slice(0,20)),{type:'product_rules_changed',businessId:c.bid,workspaceGeneration:gen(c.business),
+    actorUid:c.uid,brandRequired:d.brandRequired,previousBrandRequired:current.brandRequired===true,createdAt:FieldValue.serverTimestamp()});
+   return out(d.brandRequired,updatedAt);
+  });
+  // Recuperação explícita de cadastro offline recusado por falta de Marca. Usa a MESMA operação e o
+  // hash do original: recibo já existente é reconhecido antes (sem duplicar); senão aplica com a marca e audita.
+  if(!brandRecovery&&request.data?.kind==='brand_recovery_apply'){
+   const d=request.data,original=d.item,writes=original?.payload?.writes,brands=d.brands;
+   if(d.confirmed!==true||!Array.isArray(writes)||String(original?.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'')!=='failed-precondition')fail('Confirme a recuperação de um cadastro recusado por falta de Marca.','failed-precondition');
+   if(!brands||typeof brands!=='object'||Array.isArray(brands))fail('Informe a marca de cada produto.','invalid-argument');
+   const pending=writes.filter(w=>w?.entityType==='products'&&w.operation==='create'&&w.data&&typeof w.data==='object'&&(w.data.itemKind??'product')!=='service'&&!String(w.data.marca??'').trim()),ids=Object.keys(brands);
+   if(!pending.length||ids.length!==pending.length||pending.some(w=>!Object.hasOwn(brands,w.entityId)))fail('A recuperação só completa a Marca dos produtos novos sem marca desta operação.','invalid-argument');
+   const clean={};for(const id of ids){const v=typeof brands[id]==='string'?brands[id].trim().replace(/\s+/g,' '):'';if(!v||v.length>80)fail('Marca inválida (texto de até 80 caracteres).','invalid-argument');clean[id]=v;}
+   return commit(request,{brandRecovery:{brands:clean}});
   }
   if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,fiadoScopedReceiptVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
@@ -156,6 +184,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      fail('O recebimento anterior precisa ser conferido antes de outra tentativa.','failed-precondition');
    }
    if(paymentRecovery&&(!c.has('customers.receiveDebt')||!c.has('customers.view')))fail('Sem autorização para revisar este recebimento.');
+   // Recuperação de Marca: só depois do recibo (acima). Acrescenta a marca informada aos produtos novos do original.
+   if(brandRecovery){if(!c.has('products.edit'))fail('Sem permissão para editar produto.');for(const w of attemptWrites)if(w.entityType==='products'&&w.operation==='create'&&Object.hasOwn(brandRecovery.brands,w.entityId))w.data.marca=brandRecovery.brands[w.entityId];}
    const priorFailure=String(item.lastErrorCode||'').replace(/^(?:functions|firestore)\//,'');
    if(priorFailure==='failed-precondition'&&String(item.lastErrorMessage||'').includes('Configuração original de custo indisponível')&&attemptWrites.some(w=>w.entityType==='sales'&&w.operation==='create'))
     fail('Esta venda original aguarda revisão de configuração; não será reenviada ou recalculada.','failed-precondition');
@@ -278,6 +308,12 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.paymentRecovery={version:1,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),auditId:recoveryAudit.id};
     tx.create(recoveryAudit,{type:'original_payment_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),reviewHash:recoveryHash,...recoveryFacts,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
+   }
+   if(brandRecovery){
+    if(!marker)fail('Marcador canônico ausente.','failed-precondition');
+    const audit=ref(c.bid,'auditLogs','brand_recovery_'+item.operationId);
+    marker.data.brandRecovery={version:1,auditId:audit.id,productIds:Object.keys(brandRecovery.brands)};
+    tx.create(audit,{type:'brand_required_recovery',businessId:c.bid,workspaceGeneration:gen(c.business),actorUid:c.uid,operationId:item.operationId,originalPayloadHash:hash,brands:brandRecovery.brands,originalFailure:priorFailure,createdAt:FieldValue.serverTimestamp()});
    }
    for(const p of plan.values()){
     // The browser cannot opt an archived financial source into the new epoch.
@@ -550,10 +586,10 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     const parent=col==='products'?{...before,...patch}:await effective('products',patch.parentProductId||before?.parentProductId);await scopeProduct(c,parent,null);
     const metadata=changed(patch,before,Object.keys(patch)).filter(k=>!envelope.includes(k)&&!stockFields.includes(k)&&!['atualizadoEm','custo','cost'].includes(k));
     if((metadata.length||!before)&&!c.has('products.edit'))fail('Sem permissão para editar produto.');
-    // Marca: atributo opcional. Regra POR EMPRESA (settings/default.productRules.brandRequired) só para produto NOVO.
+    // Marca: atributo opcional. Regra POR EMPRESA (settings/default.productRules.brandRequired) só para produto físico NOVO; serviços não exigem.
     // Retentativas já confirmadas retornam antes, pelo recibo em processedOperations.
     if(col==='products'&&Object.hasOwn(patch,'marca')&&(typeof patch.marca!=='string'||patch.marca.length>80))fail('Marca inválida (texto de até 80 caracteres).','invalid-argument');
-    if(col==='products'&&!before&&!String(patch.marca??'').trim()&&(await tx.get(ref(c.bid,'settings','default'))).data()?.productRules?.brandRequired===true)fail('Esta empresa exige Marca ao cadastrar produtos. Informe a marca e tente novamente.','failed-precondition');
+    if(col==='products'&&!before&&(patch.itemKind??'product')!=='service'&&!String(patch.marca??'').trim()&&(await tx.get(ref(c.bid,'settings','default'))).data()?.productRules?.brandRequired===true)fail('Esta empresa exige Marca ao cadastrar produtos. Informe a marca; cadastros criados sem conexão são concluídos em Configurações → Produtos.','failed-precondition');
     if(col==='productVariants'&&before&&patch.parentProductId&&patch.parentProductId!==before.parentProductId)fail('Variação não pode mudar de produto.');
     if(col==='products'&&(!before||changed(patch,before,['spaceAccessMode','allowedSpaceIds','defaultSpaceId']).length)){
      const scoped={...before,...patch},ids=scoped.allowedSpaceIds;
