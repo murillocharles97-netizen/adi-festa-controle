@@ -310,3 +310,57 @@ Comparação nome a nome com a base `326cd18` (`node --test tests/*.test.js test
 - **Sugestões de continuação (fora do escopo):**
   - perfil do cliente mais rápido, com métricas de CRM calculadas só para o cliente aberto;
   - `fiado-conditions.js`: avisar a lista só quando as condições mudarem, o que evita uma renderização extra por evento financeiro. Combinar com o Codex, porque é área de cobrança.
+
+## 8. Publicação V242.8
+
+O responsável pela VECONI autorizou publicar esta melhoria sem a auditoria do Codex. A homologação no Android físico fica com ele, depois da publicação, e não está concluída.
+
+### Release
+
+- **Branch:** `claude/release-v2428-clientes-fluidez`, a partir de `origin/main` `326cd18`. Os quatro commits aprovados entraram por fast-forward, com os mesmos SHAs e sem conflito.
+- **Commit de versão:** `debc208`.
+  - `APP_VERSION` passa a 242.8; `release` e `clientRelease` continuam 242.
+  - `CACHE` passa a `veconi-v2428-clientes-fluidez-v1`, e `GET_VERSION` informa 242.8.
+  - `?v=2428-fluidez` vale para os oito arquivos alterados e para as entradas da sincronização: `auth.js`, `firebase-ui.js` e `sync.js`. O teste de identidade da release exige essa marcação.
+  - `build-info.js` recebe `?v=2428` no `index.html` e no `catalogo.html`.
+  - Cada URL versionada está no precache.
+- **Fora da release:** Functions, Rules, protocolo de sincronização (1), formato dos pacotes (4), `public-site.manifest.json`, mensagens e cobrança.
+
+### Verificações na candidata
+
+- **Comandos:** `npm run lint`, `npm run build`, `npm run build:public` (284 arquivos permitidos) e `npm run test:public-containment` (56 de 56) passaram.
+- **Versão:** `tests/sync-version-identity.test.js` passou (5 de 5). O teste de precache das entradas versionadas, em `sync-session-alert`, também passou. `scripts/release-version-check.cjs` respondeu "OK: versão 242.8".
+- **Suíte completa:**
+
+  | | Base `326cd18` | Candidata |
+  |---|---:|---:|
+  | Testes | 2472 | 2480 |
+  | Falhas | 166 | 164 |
+
+  Nenhuma falha é nova, na comparação nome a nome. As duas que deixaram de falhar são as de `clientes-performance-v2291`.
+- **Contrato financeiro:** o `onsubmit` do recebimento em `fiados.js` é idêntico, byte a byte, ao da base. Os testes direcionados passaram: recebimento novo (4 de 4), lista estável (4 de 4) e recibo do dono (6 de 6).
+- **Navegador:** `audit-clientes-fluidez`, com dados fictícios, em Android 390 px (CPU 4×) e desktop 1366 px. Uma amostra.
+
+  | Medida (Android) | Resultado |
+  |---|---|
+  | Abrir Clientes, até o 1º cartão | 1,18 s |
+  | Abrir Clientes, até pintar | 2,0 s |
+  | Abrir o recebimento | 0,55 s |
+  | Confirmar até o recibo do servidor | 2,5 s |
+  | Cartões recriados, animações e piscadas, nos 11 eventos automáticos | 0 |
+  | Mudança de espaço | uma remontagem, sem animação |
+
+  - Busca, foco, cursor, rolagem, modal preenchido e filtro "Devendo" ficaram preservados no celular e no desktop.
+  - Os recebimentos integral, parcial (saldo restante de R$ 12,16) e com parcelas futuras funcionaram, inclusive marcando e desmarcando a antecipação.
+  - Na falha de conexão, o formulário ficou aberto, mostrou o erro e não deu sucesso.
+  - Com a resposta pendente, apareceu "Aguardando confirmação" e nenhum sucesso antes do recibo.
+- **Pacote público servido localmente:** os hosts externos estavam bloqueados. As 233 requisições de mesma origem responderam 200, incluindo as 12 URLs versionadas 2428. O único erro de console foi o CDN do Firebase bloqueado. O service worker instalou `veconi-v2428-clientes-fluidez-v1` com as 304 entradas do precache.
+
+### Rollback
+
+- **Compatibilidade:** a release só muda o frontend. IndexedDB, filas, recibos, protocolo e formato dos pacotes são os mesmos da 242.7. O service worker não apaga caches nem dados locais. Voltar o código antigo, portanto, não invalida operações pendentes nem pagamentos registrados na 242.8, que usam o mesmo contrato.
+- **Procedimento:** publicar uma release nova que reverte o código. Não force a `main` de volta: é proibido, e o nome do cache não mudaria.
+  1. No repositório sanitizado, rodar `git fetch origin` e criar uma worktree a partir da `origin/main` atual.
+  2. Rodar `git revert --no-edit c6d0c0d 6db3b45 580de3f d611228`, nessa ordem. Isso devolve o código e os testes de `326cd18`, mas mantém o commit de versão.
+  3. Subir a versão para 242.9, com `CACHE` `veconi-v2429-<assunto>-v1`, `GET_VERSION` igual e `?v=` novos para os arquivos revertidos e as entradas da sincronização, como em `debc208`.
+  4. Rodar as verificações obrigatórias e publicar por fast-forward, pelo mecanismo autorizado.
