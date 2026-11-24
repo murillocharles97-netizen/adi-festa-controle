@@ -4,18 +4,55 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('js/firebase/sync.js', 'utf8');
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-test('session hotfix keeps app/SW version and both Sync singleton imports aligned',()=>{
-  const read=p=>fs.readFileSync(p,'utf8'),auth=read('js/firebase/auth.js'),ui=read('js/firebase/firebase-ui.js'),index=read('index.html');
-  const version=read('js/build-info.js').match(/release:\s*"(\d+)"/)[1];assert.ok(Number(version)>=173);
-  const appVersion=read('js/build-info.js').match(/APP_VERSION = "(\d+(?:\.\d+)?)"/)[1];
-  assert.ok(read('service-worker.js').includes(`veconi-v${appVersion.replace('.', '')}-`));
-  assert.match(read('service-worker.js'),new RegExp(`release:\\s*'${version}'`));
-  // Visual V242 keeps the published V241 Sync modules byte-for-byte.
-  const syncVersion=({'191':'190','242':'241'})[version]||version;
-  for(const entry of [auth,ui])assert.ok(entry.includes(`import './sync.js?v=${syncVersion}'`));
-  // V242 hotfixes after the visual release retain the V242.1 auth and sync panel.
-  const uiVersion=version==='242'&&appVersion!=='242'?'2421':syncVersion;
-  assert.ok(index.includes(`firebase/auth.js?v=${uiVersion}`));assert.ok(index.includes(`firebase/firebase-ui.js?v=${uiVersion}`));
+test('session hotfix keeps app/SW version and both Sync singleton imports aligned', () => {
+  const read = file => fs.readFileSync(file, 'utf8');
+  const build = read('js/build-info.js');
+  const version = build.match(/release:\s*"(\d+)"/)[1];
+  const appVersion = build.match(/APP_VERSION = "(\d+(?:\.\d+)?)"/)[1];
+  const releaseTag = appVersion.replace('.', '');
+  assert.ok(Number(version) >= 173);
+
+  const listeners = {};
+  const precache = vm.runInNewContext(`${read('service-worker.js')}\nARQUIVOS`, {
+    self: { addEventListener: (name, handler) => { listeners[name] = handler; } },
+  });
+  let reported;
+  listeners.message({ data: 'GET_VERSION', ports: [{ postMessage: value => { reported = value; } }] });
+  assert.equal(reported.release, version);
+  assert.equal(reported.appVersion, appVersion);
+  assert.ok(reported.cache.startsWith(`veconi-v${releaseTag}-`));
+
+  const modules = ['auth.js', 'firebase-ui.js'];
+  const syncImports = modules.map(file => {
+    const imports = [...read(`js/firebase/${file}`).matchAll(/^\s*import\s+['"](\.\/sync\.js(?:\?v=[\w-]+)?)['"];?/gm)];
+    assert.equal(imports.length, 1, `${file} must load a single Sync module`);
+    return imports[0][1];
+  });
+  assert.equal(syncImports[0], syncImports[1], 'both entry points must load the same Sync module URL');
+
+  const htmlSources = [...read('index.html').matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/g)].map(m => m[1]);
+  const htmlScript = file => {
+    const paths = htmlSources.filter(src => src.split('?')[0] === `./js/${file}`);
+    assert.equal(paths.length, 1, `HTML must load ${file} exactly once`);
+    return paths[0];
+  };
+  const entryUrls = modules.map(file => htmlScript(`firebase/${file}`));
+  const minor = Number(appVersion.split('.')[1] || '0');
+  if (Number(version) < 242 || (version === '242' && minor <= 6)) {
+    // V191 reuses Sync V190. V242 through V242.6 reuse Sync V241 and, after the visual release, UI V242.1.
+    const syncVersion = ({ '191': '190', '242': '241' })[version] || version;
+    const uiVersion = version === '242' && minor > 0 ? '2421' : syncVersion;
+    assert.equal(syncImports[0], `./sync.js?v=${syncVersion}`);
+    assert.deepEqual(entryUrls, modules.map(file => `./js/firebase/${file}?v=${uiVersion}`));
+    return;
+  }
+
+  const syncUrl = `./js/firebase/${syncImports[0].slice(2)}`;
+  for (const url of [...entryUrls, syncUrl, htmlScript('build-info.js')]) {
+    const pin = url.split('?v=')[1];
+    assert.match(pin || '', new RegExp(`^${releaseTag}(?:-[\\w-]+)?$`), `${url} must use the current release tag`);
+    assert.ok(precache.includes(url), `${url} must be precached under the exact versioned URL`);
+  }
 });
 function runtime() {
   const queues = new Map([['qa-business:owner', [{operationId:'persisted-operation', status:'pending', payload:{safe:true}}]]]);
