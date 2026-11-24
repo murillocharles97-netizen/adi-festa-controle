@@ -13,7 +13,16 @@ window.ProductBrand = (() => {
   const snapshotKey = (bid) => `veconi:productRules:v1:${bid}`;
   const MESSAGE = "Esta empresa exige Marca ao cadastrar produtos. Informe a marca.";
   const UNKNOWN = "Não foi possível confirmar se esta empresa exige Marca. Informe a marca ou conecte-se para confirmar a regra.";
-  let session = { bid: "", at: 0 }, inflight = null;
+  const PENDING = "Confirmação pendente: não foi possível saber se o servidor gravou a alteração. Novos produtos pedem a marca até a confirmação.";
+  const SESSION_TTL = 600000;
+  const pendingKey = (bid) => `veconi:productRules:pending:v1:${bid}`;
+  const userId = () => window.SyncFirebase?.sessionUserId?.() || null;
+  const codeOf = (error) => String(error?.code || "").replace(/^functions\//, "");
+  // Recusas explícitas do servidor (nada foi gravado). Qualquer outra falha é resultado inconclusivo.
+  const DEFINITIVE = new Set(["invalid-argument", "failed-precondition", "permission-denied", "unauthenticated", "already-exists", "not-found", "out-of-range"]);
+  // epoch: cada tentativa de alteração invalida leituras iniciadas antes dela (nunca reconciliam com valor antigo).
+  let session = { bid: "", uid: null, at: 0 }, inflight = null, epoch = 0;
+  const resetSession = () => { session = { bid: "", uid: null, at: 0 }; };
 
   function readSnapshot(bid = businessId()) {
     if (!bid) return null;
@@ -22,12 +31,24 @@ window.ProductBrand = (() => {
       return value?.version === 1 && value.businessId === bid && typeof value.brandRequired === "boolean" ? value : null;
     } catch { return null; }
   }
-  // Estado real da regra: confirmado pelo servidor, recebido pela sincronização ou desconhecido.
+  function readPending(bid = businessId()) {
+    if (!bid) return null;
+    try {
+      const value = JSON.parse(globalThis.localStorage?.getItem?.(pendingKey(bid)) || "null");
+      return value?.version === 1 && value.businessId === bid && typeof value.wanted === "boolean" ? value : null;
+    } catch { return null; }
+  }
+  const writePending = (bid, wanted) => { try { globalThis.localStorage?.setItem?.(pendingKey(bid), JSON.stringify({ version: 1, businessId: bid, wanted, at: new Date().toISOString() })); } catch {} };
+  const clearPending = (bid) => { try { globalThis.localStorage?.removeItem?.(pendingKey(bid)); } catch {} };
+  // "Confirmada" só vale para a mesma empresa, a mesma conta autenticada e dentro do prazo da sessão.
+  const sessionFresh = (bid) => session.bid === bid && session.at > 0 && Date.now() - session.at < SESSION_TTL && !!session.uid && session.uid === userId();
+  // Estado real da regra: pendente, confirmado pelo servidor, recebido pela sincronização ou desconhecido.
   function state() {
-    const bid = businessId(), snap = readSnapshot(bid), local = config().productRules;
+    const bid = businessId(), snap = readSnapshot(bid), local = config().productRules, pending = readPending(bid);
+    if (pending) return { status: "pending", required: null, wanted: pending.wanted, since: pending.at };
     const localKnown = local && typeof local.brandRequired === "boolean";
     if (snap && (!localKnown || String(snap.updatedAt || "") >= String(local.updatedAt || ""))) {
-      const fresh = session.bid === bid && session.at > 0;
+      const fresh = sessionFresh(bid);
       return { status: fresh ? "confirmed" : "cached", required: snap.brandRequired, updatedAt: snap.updatedAt || null, confirmedAt: snap.confirmedAt };
     }
     if (localKnown) return { status: "synced", required: local.brandRequired, updatedAt: local.updatedAt || null };
@@ -74,26 +95,53 @@ window.ProductBrand = (() => {
     if (businessId() !== bid) throw Object.assign(Error("A empresa ativa mudou. Nada foi considerado salvo."), { code: "brand-rule-unconfirmed" });
     const snap = { version: 1, businessId: bid, brandRequired: value.brandRequired, updatedAt: value.updatedAt || null, confirmedAt: new Date().toISOString() };
     try { globalThis.localStorage?.setItem?.(snapshotKey(bid), JSON.stringify(snap)); } catch {}
-    session = { bid, at: Date.now() };
+    clearPending(bid);
+    session = { bid, uid: userId(), at: Date.now() };
     refreshFields();
     return state();
   }
-  // Confirma a regra no servidor. Offline: devolve o estado conhecido, sem inventar.
+  // Confirma a regra no servidor (leitura autorizada). Falha: rebaixa a sessão e devolve o estado conhecido, sem inventar.
   function refresh({ force = false } = {}) {
     const bid = businessId();
-    if (!bid || !online() || typeof window.FirebaseCallable !== "function") return Promise.resolve(state());
-    if (!force && session.bid === bid && Date.now() - session.at < 300000) return Promise.resolve(state());
-    if (inflight) return inflight;
-    inflight = call({ kind: "product_rules" }).then((reply) => accept(reply, bid)).catch(() => state()).finally(() => { inflight = null; });
-    return inflight;
+    if (!bid || !online() || typeof window.FirebaseCallable !== "function") { if (!online()) resetSession(); return Promise.resolve(state()); }
+    if (!force && !readPending(bid) && sessionFresh(bid) && Date.now() - session.at < 300000) return Promise.resolve(state());
+    if (inflight?.epoch === epoch) return inflight.promise;
+    const mine = { epoch };
+    mine.promise = call({ kind: "product_rules" })
+      .then((reply) => (mine.epoch === epoch ? accept(reply, bid) : state()))
+      .catch(() => { if (mine.epoch === epoch) resetSession(); return state(); })
+      .finally(() => { if (inflight === mine) inflight = null; });
+    inflight = mine;
+    return mine.promise;
   }
-  // Alteração só conta como salva depois da confirmação do servidor.
+  // Alteração só conta como salva depois da confirmação do servidor. Resposta inconclusiva:
+  // marca "pendente" e reconcilia com a leitura autorizada; nunca presume sucesso nem falha.
   async function setRequired(required) {
     if (!canManage()) throw window.VeconiPermissionPolicy?.denied?.("settings.manage") || Error("Seu perfil não pode alterar as regras de produtos.");
     if (typeof required !== "boolean") throw Error("Valor da regra inválido.");
     if (!online()) throw Object.assign(Error("Sem conexão: a regra não foi alterada. Conecte-se para alterar e confirmar no servidor."), { code: "offline" });
     const bid = businessId();
-    return accept(await call({ kind: "product_rules", brandRequired: required }), bid);
+    epoch += 1;
+    const attempt = epoch;
+    writePending(bid, required);
+    let reply;
+    try { reply = await call({ kind: "product_rules", brandRequired: required }); }
+    catch (error) {
+      if (DEFINITIVE.has(codeOf(error))) {
+        clearPending(bid);
+        if (codeOf(error) === "unauthenticated") resetSession();
+        refreshFields();
+        throw Object.assign(Error(`${error.message || "O servidor recusou a alteração"}. A regra não foi alterada.`), { code: codeOf(error), definitive: true });
+      }
+    }
+    if (reply !== undefined && attempt === epoch) {
+      try { return { ...accept(reply, bid), reconciled: false }; } catch {}
+    }
+    if (businessId() !== bid) throw Object.assign(Error(PENDING), { code: "brand-rule-pending" });
+    const reconciled = await refresh({ force: true });
+    if (reconciled.status === "confirmed") return { ...reconciled, reconciled: true };
+    refreshFields();
+    throw Object.assign(Error(PENDING), { code: "brand-rule-pending" });
   }
 
   // Cadastros offline recusados por falta de Marca (somente leitura da fila; o original nunca é editado).
@@ -112,11 +160,14 @@ window.ProductBrand = (() => {
       if (!marca) throw Object.assign(Error(`Informe a marca de "${product.nome}". Nada foi enviado.`), { code: "brand-required" });
       clean[product.id] = marca;
     }
-    const reply = await call({ kind: "brand_recovery_apply", item: entry.item, brands: clean, confirmed: true });
-    const value = reply?.data ?? reply;
-    // O original da fila é reconhecido pelo mesmo recibo no próximo envio manual.
-    await window.SyncFirebase?.processSyncQueue?.({ force: true, manualRetry: true })?.catch?.(() => null);
-    return { operationId, replayed: value?.replayed === true };
+    let value = null;
+    try { const reply = await call({ kind: "brand_recovery_apply", item: entry.item, brands: clean, confirmed: true }); value = reply?.data ?? reply; }
+    catch (error) { if (DEFINITIVE.has(codeOf(error))) throw error; }
+    // Confere SOMENTE o recibo desta operação; nenhuma outra operação da fila é enviada ou alterada.
+    let check;
+    try { check = await window.SyncFirebase?.confirmBrandRecovery?.(operationId); } catch { check = null; }
+    if (check?.status === "applied") return { operationId, status: "applied", replayed: value?.replayed === true };
+    return { operationId, status: "pending" };
   }
 
   // Campo do formulário. data-brand-new marca cadastro novo: só ele acompanha a regra.
@@ -141,6 +192,7 @@ window.ProductBrand = (() => {
   };
   function describe(current) {
     const when = (iso) => { try { return new Date(iso).toLocaleString("pt-BR"); } catch { return iso; } };
+    if (current.status === "pending") return PENDING;
     if (current.status === "confirmed" && online()) return "Confirmada pelo servidor agora.";
     if (current.status === "confirmed") return "Confirmada pelo servidor nesta sessão. Sem conexão no momento: a regra não pode ser alterada.";
     if (current.status === "cached") return `Última confirmação do servidor: ${when(current.confirmedAt)}.${online() ? "" : " Sem conexão no momento."}`;
@@ -160,12 +212,14 @@ window.ProductBrand = (() => {
       input.disabled = true;
       root.querySelector("[data-brand-notice]").textContent = "Salvando… aguardando confirmação do servidor.";
       try {
-        await setRequired(wanted);
-        window.Utils?.toast?.(wanted ? "Confirmado: marca obrigatória para novos produtos." : "Confirmado: marca voltou a ser opcional.");
-        render(root, "Alteração confirmada pelo servidor.");
+        const out = await setRequired(wanted);
+        const msg = out.required ? "marca obrigatória para novos produtos" : "marca opcional";
+        window.Utils?.toast?.(`Confirmado pelo servidor: ${msg}.`, out.required !== wanted);
+        render(root, !out.reconciled ? "Alteração confirmada pelo servidor."
+          : out.required === wanted ? "A resposta se perdeu, mas o servidor confirmou a alteração." : `A resposta se perdeu; o servidor informa agora: ${msg}. Abra novamente para conferir.`);
       } catch (error) {
         window.Utils?.toast?.(error.message || "Não foi possível salvar.", true);
-        render(root, `Não confirmada: ${error.message || "erro ao salvar"}. A regra continua como antes.`);
+        render(root, error.code === "brand-rule-pending" ? PENDING : `Não alterada: ${error.message || "erro ao salvar"}`);
       }
     };
     root.querySelectorAll("[data-brand-recover]").forEach((form) => (form.onsubmit = async (event) => {
@@ -175,7 +229,8 @@ window.ProductBrand = (() => {
       form.querySelector("button").disabled = true;
       try {
         const out = await recoverOffline(form.dataset.brandRecover, brands);
-        render(root, out.replayed ? "A nuvem já registrava esta operação; nada foi reaplicado." : "Cadastro concluído e confirmado pelo servidor.");
+        render(root, out.status !== "applied" ? "Confirmação pendente: o recibo desta operação ainda não pôde ser conferido. O original continua preservado; repita quando houver conexão (a mesma operação não é duplicada)."
+          : out.replayed ? "A nuvem já registrava esta operação; nada foi reaplicado. Recibo conferido." : "Cadastro concluído e confirmado pelo recibo do servidor.");
       } catch (error) { render(root, `Não concluído: ${error.message}`); }
     }));
   }

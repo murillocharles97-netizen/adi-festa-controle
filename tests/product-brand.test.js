@@ -10,21 +10,41 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
 function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } = {}) {
   const config = rule === undefined ? {} : { productRules: { brandRequired: rule, updatedAt: '2026-01-01T00:00:00.000Z' } };
   const data = { produtos: [], movimentacoesEstoque: [], variacoesProdutos: [], config };
-  const store = new Map(), calls = [], retries = [];
+  const store = new Map(), calls = [], retries = [], receipts = [], session = { uid: 'u1' };
   const ctx = {
     console, structuredClone, Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Set, Map, Promise,
     navigator: { onLine },
-    localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) },
+    localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
     DB: { carregar: () => data, alterar: (fn) => { const draft = structuredClone(data); fn(draft); Object.assign(data, draft); }, getWorkspaceGeneration: () => 0 },
     BusinessContext: { get: () => ({ businessId: 'empresa-a' }) },
     AdiFestaBuild: { release: 242 },
     Utils: { uuid: (() => { let n = 0; return () => `id-${++n}`; })(), toast() {} },
     TeamAccess: { has: (p) => (perms ? perms.includes(p) : true) },
     SpaceContext: { list: () => [{ id: 'loja' }, { id: 'feira' }], activeId: () => 'loja' },
-    SyncFirebase: { brandRecoveryCandidates: () => structuredClone(queue), processSyncQueue: async (o) => { retries.push(o); return {}; } },
+    SyncFirebase: { brandRecoveryCandidates: () => structuredClone(queue.filter((i) => i.status === 'error' && /exige Marca/.test(i.lastErrorMessage || ''))),
+      processSyncQueue: async (o) => { retries.push(o); return {}; },
+      sessionUserId: () => session.uid,
+      // Simula sync.confirmBrandRecovery: consulta SÓ o recibo da operação pedida.
+      confirmBrandRecovery: async (operationId) => {
+        receipts.push(operationId);
+        if (server.receiptError) throw server.receiptError;
+        const item = queue.find((i) => i.operationId === operationId);
+        if (!item) return { status: 'not_pending', operationId };
+        if (!server.applied?.has(operationId)) return { status: 'pending', operationId };
+        queue.splice(queue.indexOf(item), 1);
+        return { status: 'applied', operationId };
+      } },
     FirebaseCallable: async (name, payload) => {
       calls.push({ name, payload: structuredClone(payload) });
+      // server.plan: roteiro por chamada { apply: grava antes de falhar?, error }
+      const step = server.plan?.shift?.() || {};
+      if (step.hold) await step.hold;
+      if (step.reply) return { data: step.reply };
+      if (step.apply && Object.hasOwn(payload, 'brandRequired')) server.rule = payload.brandRequired;
+      if (step.apply && payload.kind === 'brand_recovery_apply') (server.applied ||= new Set()).add(payload.item.operationId);
+      if (step.error) throw step.error;
       if (server.error) throw server.error;
+      if (payload.kind === 'brand_recovery_apply') (server.applied ||= new Set()).add(payload.item.operationId);
       if (payload.kind === 'product_rules') {
         if (Object.hasOwn(payload, 'brandRequired')) server.rule = payload.brandRequired;
         return { data: server.reply || { version: 1, confirmed: true, businessId: 'empresa-a', workspaceGeneration: 0, brandRequired: server.rule ?? false, updatedAt: '2026-02-01T00:00:00.000Z' } };
@@ -37,7 +57,7 @@ function harness({ rule, perms = null, onLine = true, server = {}, queue = [] } 
   vm.runInContext(read('functions/src/shared/product-model.js'), ctx);
   vm.runInContext(read('js/product-brand.js'), ctx);
   vm.runInContext(read('js/produtos.js'), ctx);
-  return { ctx, data, calls, retries, server, Brand: ctx.ProductBrand, Produtos: ctx.Produtos };
+  return { ctx, data, calls, retries, receipts, session, queue, store, server, Brand: ctx.ProductBrand, Produtos: ctx.Produtos };
 }
 const novo = (extra = {}) => ({ nome: 'Copo térmico', preco: 20, categoria: 'Utilidades', ...extra });
 const inSpace = (id) => ({ spaceAccessMode: 'single_space', allowedSpaceIds: [id], defaultSpaceId: id });
@@ -112,7 +132,8 @@ test('P2: offline, erro ou resposta não confirmada não anunciam sucesso nem mu
   const err = harness({ rule: false, server: { error: Object.assign(Error('Sem permissão'), { code: 'permission-denied' }) } });
   await assert.rejects(err.Brand.setRequired(true)); assert.equal(err.Brand.isRequired(), false);
   const bad = harness({ rule: false, server: { reply: { version: 1, confirmed: true, businessId: 'outra', brandRequired: true } } });
-  await assert.rejects(bad.Brand.setRequired(true), (e) => e.code === 'brand-rule-unconfirmed'); assert.equal(bad.Brand.isRequired(), false);
+  await assert.rejects(bad.Brand.setRequired(true), (e) => e.code === 'brand-rule-pending'); assert.equal(bad.Brand.isRequired(), false);
+  assert.equal(bad.Brand.state().status, 'pending'); assert.equal(bad.Brand.mustAsk(), true, 'pendente nunca vira desligada');
   const viewer = harness({ rule: false, perms: ['products.edit'] });
   await assert.rejects(viewer.Brand.setRequired(true)); assert.equal(viewer.calls.length, 0);
 });
@@ -165,8 +186,9 @@ test('P1 recuperação offline: envia a MESMA operação ao servidor com a marca
   const sent = h.calls.at(-1).payload;
   assert.deepEqual([sent.kind, sent.confirmed, sent.item.operationId, sent.brands], ['brand_recovery_apply', true, 'op-offline', { p1: 'Acme' }]);
   assert.deepEqual(sent.item.payload, original.payload, 'o original é enviado sem alteração; o servidor acrescenta a marca');
-  assert.equal(JSON.stringify(h.retries), JSON.stringify([{ force: true, manualRetry: true }]));
-  assert.equal(out.replayed, false);
+  assert.equal(h.retries.length, 0, 'nenhuma sincronização global da fila');
+  assert.deepEqual([out.status, out.replayed], ['applied', false]);
+  assert.deepEqual(h.receipts, ['op-offline'], 'só o recibo desta operação foi consultado');
   const offline = harness({ rule: true, queue: [original], onLine: false });
   await assert.rejects(offline.Brand.recoverOffline('op-offline', { p1: 'Acme' }), (e) => e.code === 'offline');
 });
@@ -178,7 +200,7 @@ test('integração: formulários, assistente de variantes, configurações, plan
   assert.match(read('js/product-variations.js'), /marca: window\.ProductBrand\.assertNew\(product\)/);
   assert.match(read('js/configuracoes-mobile.js'), /action: "product-rules"/);
   assert.match(read('js/product-spreadsheet-ui.js'), /ProductBrand\.applySpreadsheetRule\(preview\)/);
-  assert.match(read('js/firebase/sync.js'), /brandRecoveryCandidates: \(\) => readQueue\(\)\.filter\([^]*?\.map\(item=>structuredClone\(item\)\)/);
+  assert.match(read('js/firebase/sync.js'), /brandRecoveryCandidates: \(\) => brandRecoveryQueue\(\)\.map\(item=>structuredClone\(item\)\)/);
   assert.doesNotMatch(read('js/product-brand.js'), /DB\.alterar/, 'a regra nunca é gravada localmente');
   const manifest = JSON.parse(read('public-site.manifest.json'));
   assert.ok(manifest.files.includes('js/product-brand.js'), 'arquivo no manifesto público');
@@ -197,4 +219,132 @@ test('servidor: regra depois do recibo, serviços isentos, Rules com a mesma reg
   assert.ok(sheet.indexOf('markers[index]?.exists') < sheet.indexOf('if (brandRequired)'), 'planilha: recibo antes da regra');
   const rules = read('firestore.rules');
   assert.match(rules, /&& satisfiesCompanyBrandRule\(businessId, request\.resource\.data\);/);
+});
+
+// ---- V242.7: bloqueios finais (estado real da configuração e recuperação isolada) ----
+const lost = (code = 'deadline-exceeded') => Object.assign(Error('Resposta perdida'), { code: `functions/${code}` });
+
+test('P2 final: confirmação recebida normalmente fica "confirmada" sem reconciliação', async () => {
+  const h = harness({ rule: false });
+  const out = await h.Brand.setRequired(true);
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, false]);
+  assert.equal(h.calls.length, 1);
+});
+
+test('P2 final: servidor grava e a resposta se perde → reconcilia pela leitura autorizada, sem presumir', async () => {
+  const h = harness({ rule: false, server: { plan: [{ apply: true, error: lost() }] } });
+  const out = await h.Brand.setRequired(true);
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, true], 'o estado vem do servidor, não da suposição');
+  assert.deepEqual(h.calls.map((c) => [c.payload.kind, Object.hasOwn(c.payload, 'brandRequired')]), [['product_rules', true], ['product_rules', false]], 'a reconciliação é só leitura');
+  assert.equal(h.Brand.isRequired(), true);
+});
+
+test('P2 final: falha de rede antes da gravação → a leitura do servidor mostra o valor real', async () => {
+  const h = harness({ rule: false, server: { plan: [{ apply: false, error: lost('unavailable') }] } });
+  const out = await h.Brand.setRequired(true);
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', false, true]);
+  assert.equal(h.Brand.state().status, 'confirmed');
+});
+
+test('P2 final: resposta e reconciliação inconclusivas → "Confirmação pendente", nunca desligada, até o servidor responder', async () => {
+  const h = harness({ rule: false, server: { plan: [{ apply: true, error: lost() }, { error: lost('unavailable') }] } });
+  await assert.rejects(h.Brand.setRequired(true), (e) => e.code === 'brand-rule-pending' && /Confirmação pendente/.test(e.message));
+  const st = h.Brand.state();
+  assert.deepEqual([st.status, st.required, st.wanted], ['pending', null, true]);
+  assert.equal(h.Brand.mustAsk(), true);
+  assert.equal(h.Brand.summary(), 'Regra de marca não confirmada');
+  assert.throws(() => h.Produtos.salvar(novo()), (e) => e.code === 'brand-rule-unknown', 'pendente pede a marca');
+  assert.doesNotThrow(() => h.Produtos.salvar(novo({ itemKind: 'service', nome: 'Corrida do Táxi' })), 'serviço segue sem marca');
+  const after = await h.Brand.refresh();
+  assert.deepEqual([after.status, after.required], ['confirmed', true], 'a leitura autorizada resolve a pendência');
+  assert.equal([...h.store.keys()].some((k) => k.includes(':pending:')), false, 'pendência removida após a confirmação');
+});
+
+test('P2 final: recusa explícita do servidor não vira pendência nem sucesso', async () => {
+  for (const code of ['permission-denied', 'invalid-argument', 'unauthenticated']) {
+    const h = harness({ rule: false, server: { plan: [{ error: lost(code) }] } });
+    await assert.rejects(h.Brand.setRequired(true), (e) => e.definitive === true && /não foi alterada/.test(e.message));
+    assert.equal(h.calls.length, 1, 'sem reconciliação');
+    assert.equal(h.Brand.state().status, 'synced'); assert.equal(h.Brand.isRequired(), false);
+  }
+});
+
+test('P2 final: sessão expirada não mantém o rótulo "confirmada"', async () => {
+  const h = harness({ rule: true, server: { rule: true } });
+  assert.equal((await h.Brand.refresh({ force: true })).status, 'confirmed');
+  h.session.uid = null; // sessão do Firebase encerrada/expirada
+  assert.equal(h.Brand.state().status, 'cached');
+  assert.equal(h.Brand.isRequired(), true, 'a regra conhecida continua valendo');
+  h.session.uid = 'u1';
+  h.server.plan = [{ error: lost('unauthenticated') }];
+  assert.equal((await h.Brand.refresh({ force: true })).status, 'cached', 'leitura recusada rebaixa a confirmação');
+  const other = harness({ rule: true, server: { rule: true } });
+  await other.Brand.refresh({ force: true });
+  other.session.uid = 'outra-conta';
+  assert.equal(other.Brand.state().status, 'cached', 'outra conta não herda a confirmação');
+});
+
+const blocked = (id, extra = {}) => ({ operationId: id, businessId: 'empresa-a', userId: 'u1', status: 'error', lastErrorCode: 'failed-precondition',
+  lastErrorMessage: 'Esta empresa exige Marca…', payload: { writes: [{ entityType: 'products', entityId: `p-${id}`, operation: 'create', data: { nome: id } }] }, ...extra });
+
+test('P1 final: recuperação com outras operações rejeitadas na fila → nenhuma outra é enviada ou alterada', async () => {
+  const queue = [blocked('op-alvo'), blocked('op-outra-marca'),
+    blocked('op-venda', { lastErrorMessage: 'Estoque insuficiente', payload: { writes: [{ entityType: 'sales', entityId: 's1', operation: 'create', data: {} }] } }),
+    blocked('op-revisao', { status: 'review', lastErrorMessage: 'Recebimento em revisão' })];
+  const before = JSON.stringify(queue.filter((i) => i.operationId !== 'op-alvo'));
+  const h = harness({ rule: true, queue });
+  const out = await h.Brand.recoverOffline('op-alvo', { 'p-op-alvo': 'Acme' });
+  assert.equal(out.status, 'applied');
+  assert.deepEqual(h.calls.map((c) => [c.payload.kind, c.payload.item?.operationId]), [['brand_recovery_apply', 'op-alvo']], 'um único envio, da operação escolhida');
+  assert.deepEqual(h.receipts, ['op-alvo']);
+  assert.equal(h.retries.length, 0, 'sem processamento geral da fila');
+  assert.equal(JSON.stringify(h.queue), before, 'as demais operações continuam idênticas');
+});
+
+test('P1 final: resposta perdida, rede, recibo inacessível e retentativa da mesma recuperação', async () => {
+  const item = blocked('op-x');
+  const a = harness({ rule: true, queue: [structuredClone(item)], server: { plan: [{ apply: true, error: lost() }] } });
+  assert.equal((await a.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' })).status, 'applied', 'aplicado + resposta perdida: o recibo confirma');
+  const b = harness({ rule: true, queue: [structuredClone(item)], server: { plan: [{ apply: false, error: lost('unavailable') }] } });
+  assert.equal((await b.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' })).status, 'pending', 'sem recibo: pendente, nunca sucesso presumido');
+  assert.equal(JSON.stringify(b.queue), JSON.stringify([item]), 'original intacto');
+  const c = harness({ rule: true, queue: [structuredClone(item)], server: { receiptError: lost('unavailable') } });
+  assert.equal((await c.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' })).status, 'pending', 'recibo inacessível: pendente');
+  assert.equal((await b.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' })).status, 'applied', 'retentativa reconhecida pelo recibo');
+  const sent = b.calls.filter((x) => x.payload.kind === 'brand_recovery_apply');
+  assert.equal(sent.length, 2);
+  assert.equal(JSON.stringify(sent[0].payload.item), JSON.stringify(sent[1].payload.item), 'retentativa reenvia o mesmo original');
+  await assert.rejects(b.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' }), /não está mais pendente/, 'depois de confirmada, nada é reenviado');
+  assert.equal(b.retries.length + a.retries.length + c.retries.length, 0);
+  const d = harness({ rule: true, queue: [structuredClone(item)], server: { plan: [{ error: lost('failed-precondition') }] } });
+  await assert.rejects(d.Brand.recoverOffline('op-x', { 'p-op-x': 'Acme' }));
+  assert.equal(d.receipts.length, 0, 'recusa explícita: sem sucesso nem consulta');
+});
+
+test('P1 final: sync.js confirma UMA operação pelo recibo e não processa a fila', () => {
+  const src = read('js/firebase/sync.js');
+  const fn = src.slice(src.indexOf('async function confirmBrandRecovery('), src.indexOf('async function archiveQuarantinedOperation('));
+  assert.ok(fn.length > 100);
+  assert.match(fn, /readQueuedOperationStatus\(item,\{held:true\}\)/, 'consulta somente o recibo desta operação');
+  assert.match(fn, /receipt\.status!=='applied'\)return\{status:'pending'/, 'sem recibo aplicado: pendente');
+  assert.match(fn, /filter\(row=>row\.queueId!==item\.queueId\)/, 'remove só a operação confirmada');
+  assert.match(fn, /channel:'brand_recovery'/, 'registro rastreável');
+  assert.doesNotMatch(fn, /processSyncQueue|commitQueueItem|'commitOperationalSync'/, 'nada é enviado');
+  assert.doesNotMatch(read('js/product-brand.js'), /processSyncQueue/, 'a recuperação não sincroniza a fila');
+});
+
+test('P2 final: leitura antiga em andamento não reconcilia uma alteração com resposta perdida', async () => {
+  let release;
+  const hold = new Promise((r) => { release = r; });
+  const stale = { version: 1, confirmed: true, businessId: 'empresa-a', workspaceGeneration: 0, brandRequired: false, updatedAt: '2026-01-15T00:00:00.000Z' };
+  const h = harness({ rule: false, server: { plan: [{ hold, reply: stale }, { apply: true, error: lost() }] } });
+  const old = h.Brand.refresh({ force: true }); // leitura iniciada ANTES da alteração
+  const change = h.Brand.setRequired(true);
+  await new Promise((r) => setTimeout(r, 0));
+  release();
+  const [oldState, out] = await Promise.all([old, change]);
+  assert.equal(oldState.required, true, 'o valor antigo (desligada) da leitura anterior é descartado');
+  assert.deepEqual([out.status, out.required, out.reconciled], ['confirmed', true, true], 'reconciliado por leitura nova, posterior à tentativa');
+  assert.equal(h.calls.length, 3);
+  assert.equal(h.Brand.isRequired(), true);
 });
