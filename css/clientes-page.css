@@ -19,9 +19,15 @@
 .payment-confirmation-dialog [data-payment-feedback].error{color:var(--danger,#b42318)}
 .payment-confirmation-dialog :focus-visible{outline:3px solid #009e99;outline-offset:3px}
 .receipt-payment-dialog [data-receive-restore][hidden]{display:none!important}
-.receipt-payment-dialog .payment-kind{display:flex;flex-wrap:wrap;gap:12px}
-.receipt-payment-dialog .payment-kind label{display:flex;align-items:center;gap:8px;min-height:44px}
-.receipt-payment-dialog .payment-kind input[type=radio]{width:20px;height:20px;min-height:0;margin:0;padding:0;flex:none}
+.receipt-payment-dialog .receive-value-hint{display:block;margin:6px 0 12px;color:var(--vf-text-2,#647188);font-size:13px;line-height:1.4}
+.receipt-payment-dialog .receive-outcome{margin:4px 0 14px;padding:12px 14px;border:1px solid var(--vf-line,#dbe5e7);border-radius:14px;background:var(--vf-surface-2,#f5f9f9);color:var(--vf-ink,#0b2730)}
+.receipt-payment-dialog .receive-outcome p{margin:0;font-size:14px;line-height:1.5}
+.receipt-payment-dialog .receive-outcome p+p{margin-top:4px}
+.receipt-payment-dialog .receive-outcome-kind b{color:var(--vf-pos,#0a7655);font-size:15px}
+.receipt-payment-dialog .receive-outcome[data-kind=partial] .receive-outcome-kind b{color:var(--vf-warn,#8f4606)}
+.receipt-payment-dialog .receive-outcome[data-kind=invalid]{border-color:var(--danger,#b42318)}
+.receipt-payment-dialog .receive-outcome[data-kind=invalid] .receive-outcome-kind b{color:var(--danger,#b42318)}
+.receipt-payment-dialog .receive-outcome [data-receive-after],.receipt-payment-dialog .receive-outcome [data-receive-open]{font-variant-numeric:tabular-nums}
 .receipt-payment-dialog [data-receive-feedback]{color:var(--danger,#b42318);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
 @media(max-width:520px){.payment-confirmation-dialog .modal-head,.payment-confirmation-dialog .modal-body{padding:16px}.payment-confirmation-dialog .payment-success .actions{display:grid;grid-template-columns:1fr}.payment-confirmation-dialog .modal-body{padding-bottom:max(16px,env(safe-area-inset-bottom))}}
 #modal .customer-space-field {
