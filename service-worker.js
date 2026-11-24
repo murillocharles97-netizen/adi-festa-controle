@@ -14,6 +14,7 @@ ARQUIVOS.push('./js/operation-mode.js','./js/customer-metrics.js','./js/crm-dash
 ARQUIVOS.push('./js/desktop-dashboard.js','./css/desktop-dashboard.css');
 ARQUIVOS.push('./js/desktop-sales.js','./css/desktop-sales.css','./js/desktop-settings.js','./css/desktop-settings.css');
 ARQUIVOS.push('./js/build-info.js','./js/business-cache.js','./js/local-records.js','./js/message-sequence.js','./js/message-sequence-ui.js','./js/integrity.js');
+ARQUIVOS.push('./js/sync-findings.js?v=24210-estab','./js/export-center.js?v=24210-estab');
 ARQUIVOS.push('./js/workspace-generation.js','./js/workspace-runtime.js');
 ARQUIVOS.push('./js/workspace-writer.js','./js/firebase/workspace-firestore.js');
 ARQUIVOS.push('./js/workspace-callables.js');

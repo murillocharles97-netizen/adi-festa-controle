@@ -211,8 +211,10 @@ async function migrateLegacy(user,profile,business,mode='automatic'){
 }
 
 function downloadBackup(){
-  const backup=DB.criarBackup(),link=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));
-  link.href=url;link.download=`backup-${backup.businessId}-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const backup=DB.criarBackup(),filename=`backup-${backup.businessId}-${new Date().toISOString().slice(0,10)}.json`;
+  if(window.VeconiExport?.download)return window.VeconiExport.download(backup,filename);
+  const link=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));
+  link.href=url;link.download=filename;link.style.display='none';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 function plansScreen(authenticated=true){
   screen(window.PlansUI.render({publicMode:!authenticated,authMode:authenticated}));

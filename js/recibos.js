@@ -228,7 +228,7 @@ window.Modais=(()=>{
   async function downloadReceipt(){
     if(!active||active.busy)return;active.busy=true;feedback('Preparando recibo…');
     const original=active;
-    try{const blob=await generateSaleReceiptBlob(original);if(!isCurrentDocument(original))return;const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`recibo-${publicSaleNumber(active.sale)}.png`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);active.receiptStatus='downloaded';active.lastAction='manual_download';feedback('Download manual iniciado.')}catch(error){feedback(error.message||'Não foi possível gerar o recibo.',true)}finally{if(active===original)active.busy=false}
+    try{const blob=await generateSaleReceiptBlob(original);if(!isCurrentDocument(original))return;const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=`recibo-${publicSaleNumber(active.sale)}.png`;anchor.style.display='none';document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);active.receiptStatus='downloaded';active.lastAction='manual_download';feedback('Download manual iniciado.')}catch(error){feedback(error.message||'Não foi possível gerar o recibo.',true)}finally{if(active===original)active.busy=false}
   }
   async function shareText(message){
     const phone=normalizeSalePhone(active.customer?.telefone);

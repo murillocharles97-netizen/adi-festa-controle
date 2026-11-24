@@ -18,6 +18,8 @@ import {
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 import '../integrity.js?v=233';
+import '../sync-findings.js?v=24210-estab';
+import '../export-center.js?v=24210-estab';
 import {prepareProductImportFence} from './product-import-fence.js';
 
 // Compatibility API for synchronous domain code; backed by structured IDB rows.
@@ -6495,6 +6497,121 @@ function queueOperationDiagnostic(item) {
     })),
   };
 }
+// Força-tarefa V242.10: one read-only classification feeds the Sync screen, the
+// support exports and the recovery batch (js/sync-findings.js).
+function syncFindings() {
+  const finder = globalThis.SyncFindings;
+  if (!finder?.build) return {schema: 0, compared: false, comparedAt: "", findings: [], counts: {}, byReason: {}, synced: []};
+  const businessId = activeBusinessId(),
+    audit = state.dataAudit && state.dataAudit.businessId === businessId ? state.dataAudit : null,
+    raw = audit && lastDataAuditRaw && lastDataAuditRaw.businessId === businessId ? lastDataAuditRaw.raw : null,
+    index = new Map();
+  for (const [name, entry] of Object.entries(raw || {}))
+    index.set(name, new Map((entry.remoteItems || []).map((item) => [String(item.id), item])));
+  let queue = [], retained = [], saleReport = [];
+  try { queue = queueDiagnostics(); } catch { queue = []; }
+  try { retained = typeof retainedClientBalances === "function" ? retainedClientBalances() : []; } catch { retained = []; }
+  try { saleReport = audit ? onlyLocalSaleReport() : []; } catch { saleReport = []; }
+  return finder.build({audit, queue, retained, saleReport, remoteById: (name, id) => index.get(name)?.get(String(id)) || null});
+}
+function lastServerConfirmation() {
+  return state.lastSync || "";
+}
+// Support files never carry names, phones, e-mails, tokens or credentials; the
+// backup is the owner's own full copy and is labelled as personal data.
+async function supportExport(kind, options = {}) {
+  const finder = globalThis.SyncFindings;
+  if (!finder?.build) throw Object.assign(Error("A exportação desta versão não foi carregada. Atualize o aplicativo."), {code: "export-unavailable"});
+  const businessId = activeBusinessId(), stamp = new Date().toISOString().slice(0, 19).replaceAll(":", "-"),
+    findings = syncFindings(),
+    meta = {appVersion: globalThis.VECONI_BUILD?.appVersion || "", businessId, generatedAt: now(), lastServerConfirmation: lastServerConfirmation(), stateTitle: String(options.stateTitle || "")};
+  if (kind === "summary") return {kind, content: finder.summaryText(findings, meta), filename: `resumo-sync-${businessId}-${stamp}.txt`, mime: "text/plain", personal: false};
+  if (kind === "divergences") return {kind, content: finder.divergenceReport(findings, meta), filename: `divergencias-sync-${businessId}-${stamp}.json`, mime: "application/json", personal: false};
+  if (kind === "backup") {
+    if (window.TeamAccess && (!window.TeamAccess.has?.("settings.manage") || !window.TeamAccess.has?.("performance.history")))
+      throw Object.assign(Error("Seu acesso não permite baixar o backup completo desta empresa."), {code: "permission-denied"});
+    return {kind, content: DB.criarBackup(), filename: `backup-${businessId}-${stamp}.json`, mime: "application/json", personal: true};
+  }
+  const diagnostic = await exportLocalDiagnostic();
+  return {kind: "diagnostic", content: finder.redact({...diagnostic, divergences: finder.divergenceReport(findings, meta)}), filename: `diagnostico-sync-${businessId}-${stamp}.json`, mime: "application/json", personal: false};
+}
+// Safe recovery, one by one or in batch. Revalidates against the server before
+// deciding, skips anything the new comparison no longer proves, never sends the
+// same operation twice in a batch, takes one backup before the first write, and
+// stops when the session changes. Blocked originals are never part of a batch.
+async function runSafeRecoveryBatch(keys = [], options = {}) {
+  if (runSafeRecoveryBatch.active) throw Object.assign(Error("Uma recuperação já está em andamento neste aparelho."), {code: "recovery-batch-busy"});
+  // Claimed before the first await: two taps cannot start two batches.
+  const batch = runSafeRecoveryBatch.active = {backupId: null, startedAt: now()};
+  try { await validateUser(); } catch (error) { if (runSafeRecoveryBatch.active === batch) runSafeRecoveryBatch.active = null; throw error; }
+  if (!currentUser || readOnlyMode || !navigator.onLine) {
+    if (runSafeRecoveryBatch.active === batch) runSafeRecoveryBatch.active = null;
+    throw Object.assign(Error("A recuperação exige conexão e uma sessão ativa. Nada foi enviado."), {code: "unavailable"});
+  }
+  const generation = syncSessionGeneration, uid = currentUser.uid, businessId = activeBusinessId(),
+    progress = typeof options.onProgress === "function" ? options.onProgress : () => {},
+    assertCurrent = () => {
+      if (generation !== syncSessionGeneration || uid !== currentUser?.uid || businessId !== activeBusinessId())
+        throw Object.assign(Error("A sessão mudou durante a recuperação. Nada mais foi enviado."), {code: "sync-session-retired"});
+    },
+    wanted = new Set((Array.isArray(keys) ? keys : []).map(String)), results = [];
+  try {
+    await compareDeviceWithCloud();
+    assertCurrent();
+    const before = syncFindings(),
+      plan = before.findings.filter((f) => f.kind === "recoverable" && (!wanted.size || wanted.has(f.key))),
+      seen = new Set(), unique = [];
+    for (const key of wanted)
+      if (!plan.some((f) => f.key === key)) results.push({key, status: "no_longer_recoverable", message: "A nova comparação não confirmou esta recuperação. Nada foi enviado."});
+    for (const f of plan) {
+      const identity = f.operationId || `${f.entity}:${f.documentId}`;
+      if (seen.has(identity)) { results.push({key: f.key, status: "skipped_duplicate", message: "Mesma operação já incluída neste lote."}); continue; }
+      seen.add(identity); unique.push(f);
+    }
+    const total = unique.length, report = (f, status, message, extra = {}) => { results.push({key: f.key, action: f.action, entity: f.entity, documentId: f.documentId, operationId: f.operationId, status, message, ...extra}); progress({done: results.length, total, last: results[results.length - 1]}); };
+    const queueWide = unique.filter((f) => f.action === "retry" || f.action === "check_receipt");
+    if (queueWide.length) {
+      try {
+        await synchronizeNow({manualRetry: true});
+        assertCurrent();
+        const queue = readQueue();
+        for (const f of queueWide) {
+          const item = queue.find((row) => String(row.operationId) === String(f.operationId)), category = item ? classifyQueueOperation(item).category : "confirmed";
+          if (category === "confirmed" || category === "resolved") report(f, "confirmed", "Confirmada pelo servidor.");
+          else if (category === "error") report(f, "failed", String(item.lastErrorMessage || "A nuvem não confirmou.").slice(0, 240));
+          else report(f, "still_pending", "Continua salva neste aparelho e será conferida na próxima sincronização.");
+        }
+      } catch (error) {
+        if (error.code === "sync-session-retired") throw error;
+        for (const f of queueWide) report(f, "failed", String(error.message || "Não foi possível sincronizar.").slice(0, 240));
+      }
+    }
+    for (const f of unique.filter((row) => row.action === "recover_sale")) {
+      assertCurrent();
+      try {
+        const result = await recoverOnlyLocalSale(f.documentId);
+        report(f, result?.idempotent ? "already_confirmed" : "recovered", result?.idempotent ? "Já estava registrada na nuvem; nada foi duplicado." : "Registrada e confirmada na nuvem.");
+      } catch (error) {
+        if (error.code === "sync-session-retired") throw error;
+        report(f, "failed", String(error.message || "O servidor não confirmou a recuperação.").slice(0, 240));
+      }
+    }
+    const local = unique.filter((row) => row.action === "recover_local");
+    if (local.length) {
+      assertCurrent();
+      try { await recoverMissingNonFinancial(); for (const f of local) report(f, "queued", "Publicação enviada para a fila com o mesmo identificador."); }
+      catch (error) { if (error.code === "sync-session-retired") throw error; for (const f of local) report(f, "failed", String(error.message || "Não foi possível preparar a publicação.").slice(0, 240)); }
+    }
+    await compareDeviceWithCloud().catch(() => null);
+    return {startedAt: batch.startedAt, finishedAt: now(), backupId: batch.backupId, results, before: before.counts, after: syncFindings().counts};
+  } catch (error) {
+    if (error.code === "sync-session-retired") results.push({status: "stopped", message: error.message});
+    error.recoveryResults = results;
+    throw error;
+  } finally {
+    if (runSafeRecoveryBatch.active === batch) runSafeRecoveryBatch.active = null;
+  }
+}
 async function exportLocalDiagnostic() {
   await validateUser();
   const businessId = activeBusinessId(),
@@ -6566,6 +6683,10 @@ async function exportLocalDiagnostic() {
       // Optional evidence: the export itself must never fail because of it.
       try { return retainedClientBalances().map(({clientName, ...row}) => row); } catch { return null; }
     })(),
+    syncFindings: (() => {
+      if (typeof syncFindings !== "function") return null;
+      try { const f = syncFindings(); return {compared: f.compared, comparedAt: f.comparedAt, counts: f.counts, byReason: f.byReason}; } catch { return null; }
+    })(),
     orphanOperations: saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count,
     saleIntegrity: saleIntegrityDiagnostics(),
     paymentIntegrity: paymentIntegrityDiagnostics(),
@@ -6601,21 +6722,32 @@ async function exportLocalDiagnostic() {
   };
 }
 function downloadJsonFile(value, filename) {
+  // The link stays attached and the URL alive for 60 s: Android download managers
+  // read the blob after the click. Returns what really happened (js/export-center.js).
+  if (globalThis.VeconiExport?.download) return globalThis.VeconiExport.download(value, filename);
   const url = URL.createObjectURL(
       new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
     ),
     link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { ok: true, method: "download", confirmed: false, filename };
 }
 function automaticRecoveryBackup() {
+  // A recovery batch takes one backup before its first write; its items reuse it.
+  const batch = typeof runSafeRecoveryBatch === "function" ? runSafeRecoveryBatch.active : null;
+  if (batch?.backupId) return batch.backupId;
   const backup = DB.criarBackup();
   downloadJsonFile(
     backup,
     `backup-antes-recuperacao-${activeBusinessId()}-${Date.now()}.json`,
   );
+  if (batch) batch.backupId = backup.backupId;
   return backup.backupId;
 }
 const currentAuditOrThrow = () => {
@@ -7815,6 +7947,10 @@ window.SyncFirebase = {
   compare: compareLocalAndCloud,
   compareDeviceWithCloud,
   retainedClientBalances,
+  syncFindings,
+  supportExport,
+  runSafeRecoveryBatch,
+  lastServerConfirmation,
   exportLocalDiagnostic,
   downloadJsonFile,
   onlyLocalSaleReport,

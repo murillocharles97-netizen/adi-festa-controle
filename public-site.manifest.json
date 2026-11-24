@@ -206,6 +206,8 @@
     "js/google-registration-ui.js",
     "js/home-mobile.js",
     "js/integrity.js",
+    "js/sync-findings.js",
+    "js/export-center.js",
     "js/lifecycle-manager.js",
     "js/local-records.js",
     "js/loja/store-kit.js",

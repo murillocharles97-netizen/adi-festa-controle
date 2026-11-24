@@ -78,6 +78,59 @@ button.avatar:focus-visible{outline:3px solid #009e91;outline-offset:3px}
 #modal .sync-queue-panel :is(.sync-count-comparison > article.is-warn, .sync-retained-balances > article) { border-inline-start-color: var(--vf-warn, #8f4606); }
 #modal .sync-queue-panel :is(.sync-count-comparison, .sync-retained-balances) > article p { margin: .2rem 0 0; font-variant-numeric: tabular-nums; }
 #modal .sync-queue-panel .sync-retained-balances > article small { display: block; margin-top: .2rem; color: var(--vf-text-3, #546f77); }
+/* V242.10 sections: decision, safe recovery, waiting, synced, explained, exports. */
+#modal .sync-queue-panel .sync-findings-stack { display: grid; gap: .9rem; margin: 0 0 1rem; }
+#modal .sync-queue-panel .sync-findings {
+  --sync-tone: var(--vf-line-strong, #c3d3d6);
+  padding: .85rem 1rem;
+  border: 1px solid var(--vf-line, #dbe5e7);
+  border-inline-start: 4px solid var(--sync-tone);
+  border-radius: 14px;
+  background: var(--vf-surface, #fff);
+}
+#modal .sync-queue-panel .sync-findings:is(.is-attention, .is-blocked) { --sync-tone: var(--vf-warn, #8f4606); }
+#modal .sync-queue-panel .sync-findings:is(.is-recoverable, .is-pending) { --sync-tone: var(--vf-info, #1d5b96); }
+#modal .sync-queue-panel .sync-findings.is-synced { --sync-tone: var(--vf-pos, #0a7655); }
+#modal .sync-queue-panel .sync-findings > h4,
+#modal .sync-queue-panel .sync-findings > summary { display: flex; align-items: baseline; gap: .5rem; margin: 0; font-size: 1rem; color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel .sync-findings > summary { cursor: pointer; font-weight: 600; }
+#modal .sync-queue-panel .sync-findings > summary:focus-visible { outline: 2px solid var(--vf-brand-deep, #0b9c8f); outline-offset: 3px; border-radius: 4px; }
+#modal .sync-queue-panel .sync-findings-count { font-size: .85rem; font-weight: 700; color: var(--vf-text-2, #3f5d66); font-variant-numeric: tabular-nums; }
+#modal .sync-queue-panel .sync-findings-intro { margin: .3rem 0 0; max-width: 64ch; font-size: .9rem; color: var(--vf-text-2, #3f5d66); line-height: 1.45; }
+#modal .sync-queue-panel .sync-finding { margin-top: .75rem; padding-top: .65rem; border-top: 1px solid var(--vf-line, #dbe5e7); }
+#modal .sync-queue-panel .sync-finding > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .75rem; }
+#modal .sync-queue-panel .sync-finding > header > b { color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel .sync-finding > header > span { font-size: .82rem; color: var(--vf-text-3, #546f77); font-variant-numeric: tabular-nums; }
+#modal .sync-queue-panel .sync-finding > p { margin: .25rem 0 0; max-width: 64ch; font-size: .88rem; color: var(--vf-text-2, #3f5d66); line-height: 1.45; }
+#modal .sync-queue-panel .sync-finding > ul,
+#modal .sync-queue-panel .sync-batch-results { display: grid; gap: .35rem; margin: .5rem 0 0; padding: 0; list-style: none; }
+#modal .sync-queue-panel .sync-finding li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .35rem .75rem; min-height: 2.25rem; font-size: .86rem; color: var(--vf-text-2, #3f5d66); font-variant-numeric: tabular-nums; }
+#modal .sync-queue-panel .sync-finding li > span { min-width: 0; overflow-wrap: anywhere; }
+#modal .sync-queue-panel .sync-finding li.is-more { min-height: 0; color: var(--vf-text-3, #546f77); }
+#modal .sync-queue-panel .sync-finding .btn-sm { min-height: 2.25rem; padding: .3rem .75rem; }
+#modal .sync-queue-panel .sync-batch { display: grid; gap: .35rem; margin-top: .7rem; }
+#modal .sync-queue-panel .sync-batch > .btn { justify-self: start; }
+#modal .sync-queue-panel .sync-batch > p { margin: 0; font-size: .86rem; color: var(--vf-text-2, #3f5d66); line-height: 1.4; }
+#modal .sync-queue-panel :is(.sync-batch-status, .sync-export-status):empty { display: none; }
+#modal .sync-queue-panel :is(.sync-batch-status, .sync-export-status) { font-weight: 600; color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel :is(.sync-batch-status, .sync-export-status).is-error { color: var(--vf-neg, #a1262b); }
+#modal .sync-queue-panel .sync-batch-results li { font-size: .86rem; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel .sync-batch-results li.is-failed b { color: var(--vf-neg, #a1262b); }
+#modal .sync-queue-panel .sync-synced { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin: .45rem 0 0; padding: 0; list-style: none; }
+#modal .sync-queue-panel .sync-synced li { color: var(--vf-text-2, #3f5d66); font-variant-numeric: tabular-nums; }
+#modal .sync-queue-panel .sync-synced b { color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel .sync-export { margin: 0 0 1rem; padding: .85rem 1rem; border: 1px solid var(--vf-line, #dbe5e7); border-radius: 14px; background: var(--vf-surface-2, #f4f8f8); }
+#modal .sync-queue-panel .sync-export > h4 { margin: 0; font-size: 1rem; color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel .sync-export > p { margin: .3rem 0 0; max-width: 64ch; font-size: .88rem; color: var(--vf-text-2, #3f5d66); line-height: 1.45; }
+#modal .sync-queue-panel .sync-export-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+#modal .sync-queue-panel .sync-export-actions > .btn { white-space: normal; line-height: 1.25; }
+#modal .sync-queue-panel .sync-export-manual { display: grid; gap: .3rem; margin-top: .6rem; font-size: .86rem; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel .sync-export-manual[hidden] { display: none; }
+#modal .sync-queue-panel .sync-export-manual textarea { width: 100%; font: .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#modal .sync-queue-panel .sync-export [data-recovery-export-slot] { margin-top: .75rem; }
+#modal .sync-queue-panel .sync-technical-all { margin: 0; padding-top: .4rem; border-top: 1px solid var(--vf-line, #dbe5e7); }
+#modal .sync-queue-panel .sync-technical-all > summary { cursor: pointer; padding: .55rem 0; font-weight: 600; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel .sync-technical-all > summary:focus-visible { outline: 2px solid var(--vf-brand-deep, #0b9c8f); outline-offset: 2px; border-radius: 4px; }
 /* Dark theme for the existing integrity cards and Fiado audit text in this panel. */
 html[data-theme="dark"] #modal .sync-queue-panel .sync-data-state-grid article { background: var(--vf-surface-2); border-color: var(--vf-line); }
 html[data-theme="dark"] #modal .sync-queue-panel .sync-data-state-grid article > b { color: var(--vf-pos); }
@@ -86,6 +139,8 @@ html[data-theme="dark"] #modal .sync-queue-panel .sync-financial-audit > p { col
 @media (max-width: 560px) {
   #modal .sync-queue-panel .sync-overview-checks { grid-template-columns: 1fr; }
   #modal .sync-queue-panel .sync-action { grid-template-columns: 1fr; }
+  #modal .sync-queue-panel .sync-findings, #modal .sync-queue-panel .sync-export { padding: .75rem .8rem; }
+  #modal .sync-queue-panel .sync-export-actions > .btn, #modal .sync-queue-panel .sync-batch > .btn { width: 100%; justify-self: stretch; }
 }
 /* V203 login: presentation only; existing Auth, bootstrap and session handlers remain canonical. */
 #auth-gate[hidden],#auth-gate [hidden]{display:none!important}

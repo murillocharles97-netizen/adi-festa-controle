@@ -223,7 +223,7 @@ async function openRecoveryExport(){
       current();if(!archive||!panel.querySelector('[data-export-key-saved]').checked)throw Error('Guarde o código de proteção antes de salvar.');
       const filename=`veconi-recuperacao-${Date.now()}.json`;
       if(typeof window.SyncFirebase?.downloadJsonFile==='function')window.SyncFirebase.downloadJsonFile(archive.file,filename);
-      else{const url=URL.createObjectURL(new Blob([JSON.stringify(archive.file,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      else{const url=URL.createObjectURL(new Blob([JSON.stringify(archive.file,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=filename;link.style.display='none';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
       feedback.setAttribute('role','status');feedback.textContent='Download solicitado. Confira o arquivo em Downloads. Envie-o somente ao suporte autorizado e entregue o código separadamente. Os originais continuam no aparelho; nenhuma venda foi recuperada.';save.textContent='Salvar novamente';
     }catch(error){fail(error);}
   };

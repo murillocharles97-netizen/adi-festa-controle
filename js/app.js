@@ -1028,6 +1028,12 @@
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
+    const filename = `${prefixo}-${slug}-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.json`;
+    if (window.VeconiExport?.download) {
+      const result = window.VeconiExport.download(backup, filename);
+      toast(result.message, !result.ok);
+      return result;
+    }
     const a = document.createElement("a"),
       url = URL.createObjectURL(
         new Blob([JSON.stringify(backup, null, 2)], {
@@ -1035,9 +1041,12 @@
         }),
       );
     a.href = url;
-    a.download = `${prefixo}-${slug}-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.json`;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
   function mostrarResultadoRestauracao(relatorio) {
     $("#modal").innerHTML =
