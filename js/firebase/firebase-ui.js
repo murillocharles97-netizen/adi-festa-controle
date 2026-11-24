@@ -311,7 +311,7 @@ function findingRowHtml(finding){
     finding.cloudBalance!==undefined&&finding.cloudBalance!==null?'Nuvem: '+balanceText(finding.cloudBalance):'',
     finding.createdAt?shortTime(finding.createdAt):''].filter(Boolean);
   let action='';
-  if(finding.action==='open_sale'&&finding.entity==='sales'&&finding.documentId)action='<button class="btn btn-light btn-sm" type="button" data-finding-sale="'+escape(finding.documentId)+'">Ver e decidir</button>';
+  if(finding.action==='open_sale'&&finding.entity==='sales'&&finding.documentId)action=(finding.reason==='service_configuration_missing'&&finding.customerId?'<button class="btn btn-light btn-sm" type="button" data-finding-close="'+escape(finding.documentId)+'">Encerrar sem efeitos</button>':'')+'<button class="btn btn-light btn-sm" type="button" data-finding-sale="'+escape(finding.documentId)+'">Ver e decidir</button>';
   else if(FINDING_ACTION_LABEL[finding.action])action='<button class="btn btn-light btn-sm" type="button" data-finding-recover="'+escape(finding.key)+'">'+escape(FINDING_ACTION_LABEL[finding.action])+'</button>';
   else if(finding.action==='refresh')action='<button class="btn btn-light btn-sm" type="button" data-finding-refresh>Atualizar da nuvem</button>';
   else if(finding.action==='open_blocked')action='<button class="btn btn-light btn-sm" type="button" data-open-blocked>Ver detalhes</button>';
@@ -379,6 +379,12 @@ async function runRecoveryBatch(root,keys,filter){
   }catch(error){say(error.message||'A recuperação não terminou. Nada além do que aparece abaixo foi enviado.',true);show(error.recoveryResults||[]);}
   finally{buttons.forEach(button=>{if(button.isConnected)button.disabled=false;});}
 }
+async function closeOldSaleWithoutEffects(button,filter){
+  if(!window.confirm('Encerrar esta venda antiga sem efeitos?\n\nEla não será registrada na nuvem e não gera receita, baixa de estoque nem dívida. O saldo do cliente na nuvem fica exatamente como está. A VECONI baixa um backup antes, e o original e o erro continuam guardados neste aparelho para auditoria.'))return;
+  button.disabled=true;
+  try{const result=await window.SyncFirebase.closeOnlyLocalSaleWithoutEffects(button.dataset.findingClose);notify(result?.idempotent?'Esta venda já estava encerrada.':'Venda antiga encerrada sem efeitos. O saldo do cliente não mudou.');openQueueDetails(filter);}
+  catch(error){notify(error.message||'Não foi possível encerrar agora. Nada foi alterado.',true);button.disabled=false;}
+}
 function mountSyncFindings(root,overview,filter){
   // Without the V242.10 Sync API (an older cached sync.js) the previous screen stays as it was.
   const body=root.querySelector('.modal-body'),head=body?.querySelector('.sync-overview');
@@ -393,6 +399,7 @@ function mountSyncFindings(root,overview,filter){
   root.querySelector('[data-recover-all]')?.addEventListener('click',()=>runRecoveryBatch(root,[],filter));
   root.querySelectorAll('[data-finding-recover]').forEach(button=>button.onclick=()=>runRecoveryBatch(root,[button.dataset.findingRecover],filter));
   root.querySelectorAll('[data-finding-sale]').forEach(button=>button.onclick=()=>openOnlyLocalSaleDetails(button.dataset.findingSale,filter));
+  root.querySelectorAll('[data-finding-close]').forEach(button=>button.onclick=()=>closeOldSaleWithoutEffects(button,filter));
   root.querySelectorAll('[data-finding-refresh]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{await window.SyncFirebase.refreshSafelyFromServer();notify('Dados da nuvem atualizados com segurança.');openQueueDetails(filter)}catch(error){notify(error.message||'Não foi possível atualizar da nuvem agora.',true);button.disabled=false}});
 }
 function retainedBalancesHtml(rows=[]){

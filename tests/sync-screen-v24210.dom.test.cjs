@@ -107,3 +107,21 @@ test('versão sem classificação continua com as ações anteriores (compatibil
   assert.ok(s.root.querySelector('.sync-overview [data-export-diagnostic]'));
   s.close();
 });
+
+test('corrida recusada oferece "Encerrar sem efeitos" com confirmação; recusar não envia nada', async () => {
+  const s = screen(), calls = [];
+  s.w.SyncFirebase.closeOnlyLocalSaleWithoutEffects = async (id) => { calls.push(id); return {idempotent: false}; };
+  const button = s.root.querySelector('.sync-findings.is-blocked [data-finding-close="fx-ride-1"]');
+  assert.ok(button, 'a ação aparece na linha bloqueada');
+  assert.equal(s.root.querySelector('.sync-findings.is-recoverable [data-finding-close]'), null, 'nunca no lote');
+  s.w.confirm = () => false;
+  button.click(); await settle();
+  assert.deepEqual(calls, []);
+  let question = '';
+  s.w.confirm = (text) => { question = text; return true; };
+  button.click(); await settle();
+  assert.deepEqual(calls, ['fx-ride-1']);
+  assert.match(question, /saldo do cliente na nuvem fica exatamente como está/);
+  assert.match(question, /backup/);
+  s.close();
+});

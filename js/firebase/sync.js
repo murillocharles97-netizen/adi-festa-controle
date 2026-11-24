@@ -5272,7 +5272,12 @@ function startCloudSubscriptions() {
     try {
       publishState('reading');
       const cloudNames=changed.filter(name=>CLOUD_NAMES.includes(name)&&!REALTIME_NAMES.has(name)&&allowed(name));
-      if(cloudNames.length)await pullCloudCollections({force:true,names:cloudNames});
+      // V242.10: a server-side balance regularization updates the customer without
+      // bumping updatedAt, so an incremental read (updatedAt >= cursor) cannot see it.
+      // When a signal says balances were adjusted, read the customers completely.
+      const adjustedBalances=cloudNames.includes('clients')&&changed.includes('balanceAdjustments');
+      if(cloudNames.length)await pullCloudCollections({force:true,names:adjustedBalances?cloudNames.filter(name=>name!=='clients'):cloudNames});
+      if(adjustedBalances&&isCurrent())await pullCloudCollections({force:true,full:true,names:['clients']});
       if(!isCurrent())return;
       if(changed.includes('businessProfile'))await refreshBusinessContext();
       if(!isCurrent())return;
@@ -6987,6 +6992,23 @@ async function reconcileOnlyLocalSaleBalance(saleId, correctOpenDebt, reason) {
   localStorage.setItem(orphanReviewKey(),JSON.stringify(reviews));
   return {...result,originalOperationId:sale.operationId,correctOpenDebt:Math.abs(Math.min(0,result.balanceAfter))};
 }
+// V242.10, owner decision: close an old original the cloud rejected, without
+// registering it and without moving any balance. It is the audited reconciliation
+// (legacy_reconciliation:<sale>) with the customer's CURRENT cloud balance as the
+// target, so the recorded adjustment is zero. A backup is taken first; the original
+// packet and its error stay on this device; a second call is idempotent.
+async function closeOnlyLocalSaleWithoutEffects(saleId, reason = "Venda antiga recusada pela nuvem; encerrada sem efeitos por decisão do proprietário.") {
+  await compareDeviceWithCloud();
+  const id = String(saleId || ""), preview = onlyLocalSaleReport().find((item) => item.saleId === id);
+  if (!preview) throw Error("Esta venda não está mais pendente neste aparelho. Compare com a nuvem de novo.");
+  if (preview.resolved) return { idempotent: true, saleId: id, resolutionId: preview.resolutionId || "" };
+  if (!preview.customerId) throw Error("Venda sem cliente: use a revisão detalhada. Nada foi alterado.");
+  const balance = Number(preview.remoteCurrentBalance);
+  if (preview.remoteCurrentBalance === null || preview.remoteCurrentBalance === undefined || !Number.isFinite(balance))
+    throw Error("O cliente desta venda não foi confirmado na nuvem. Nada foi alterado.");
+  if (balance > 0) throw Error("O cliente tem crédito na nuvem: use a revisão detalhada. Nada foi alterado.");
+  return reconcileOnlyLocalSaleBalance(id, Math.abs(roundedMoney(balance)), reason);
+}
 async function recoverMissingNonFinancial() {
   const audit = currentAuditOrThrow(),
     businessId = activeBusinessId(),
@@ -8004,6 +8026,7 @@ window.SyncFirebase = {
   downloadJsonFile,
   onlyLocalSaleReport,
   recoverOnlyLocalSale,
+  closeOnlyLocalSaleWithoutEffects,
   reconcileOnlyLocalSaleBalance,
   reviewOnlyLocalSale,
   recoverMissingNonFinancial,
