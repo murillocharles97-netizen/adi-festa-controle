@@ -5,6 +5,16 @@ const vm = require('node:vm');
 
 const syncSource = fs.readFileSync('js/firebase/sync.js', 'utf8');
 const sourcePart = (start, end) => syncSource.slice(syncSource.indexOf(start), syncSource.indexOf(end, syncSource.indexOf(start)));
+// Extracts one top-level declaration (function or const) from sync.js, verbatim.
+const declaration = (name) => {
+  const text = syncSource.replace(/\r\n/g, '\n');
+  const starts = [`\nasync function ${name}(`, `\nfunction ${name}(`, `\nconst ${name} =`];
+  const at = starts.map(s => text.indexOf(s)).filter(i => i >= 0)[0];
+  if (at === undefined) throw Error(`declaration not found: ${name}`);
+  const next = text.slice(at + 1).search(/\n(?:async function |function |const |let |export )/);
+  return text.slice(at + 1, next < 0 ? undefined : at + 1 + next);
+};
+const LATER_PIPELINE_DECLARATIONS = ['isHistoricalProjectionBatch', 'settingsQueueRequiresPermission', ];
 
 async function harness() {
   const memory = new Map();
@@ -81,11 +91,30 @@ async function harness() {
   context.ProductVariations = { get: () => null };
   vm.runInContext(sourcePart('const readQueue =', 'const queueErrorBreakdown ='), context);
   vm.runInContext(sourcePart('function queueWrites(', 'function changedFields('), context);
+  // createSaleOperation checks queue dependencies and proves service configurations
+  // since V2xx/V241 (both are no-ops for these product-only sales).
+  context.sanitizeForFirestore ||= (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  if (!context.checksumValue) vm.runInContext(sourcePart('const stableComparable =', 'const containsInvalidFirestoreValue'), context);
+  vm.runInContext(sourcePart('function queueQuarantineReason(', 'function preserveQueueQuarantine('), context);
+  // Receipts check the customer's preserved payment reviews first (V2xx).
+  vm.runInContext(sourcePart('function paymentQueueRequiresReview(', 'function assertFiadoReceiptQueueClear('), context);
+  context.archivedFiadoRecord ||= () => false;
+  // No recovery decisions or archives exist in this fixture.
+  context.readRecoveryResolution ||= () => null; context.readPaymentRecoveryReceipt ||= () => null; context.readQueueArchive ||= () => null; context.readQueueReview ||= () => null; context.saleQueueRequiresReview ||= () => false;
+  // Real top-level declarations of sync.js that the sale pipeline gained after V146.
+  for (const name of LATER_PIPELINE_DECLARATIONS) if (!(name in context)) vm.runInContext(declaration(name), context);
   vm.runInContext(sourcePart('function assertSaleTracked(', 'async function prepareCustomerForSale('), context);
   context.SyncFirebase = vm.runInContext('({ isReady: () => true, createSaleOperation, createPaymentOperation, assertSaleTracked, assertPaymentTracked })', context);
+  // vendas.js refuses to price a cart without the cents policy (V2xx money policy).
+  vm.runInContext(fs.readFileSync('js/sale-money.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/vendas.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/fiados.js', 'utf8'), context);
+  // js/recibos.js measures the viewport once at load (V2xx). Give it a page only for
+  // that moment: vendas.js treats a present document as the real app.
+  const hadDocument = 'document' in context;
+  if (!hadDocument) context.document = { querySelector: () => null };
   vm.runInContext(fs.readFileSync('js/recibos.js', 'utf8'), context);
+  if (!hadDocument) delete context.document;
   const sale = (id, amount) => context.Vendas.registrar({ id, operationId: `op-${id}`,
     spaceId: 'loja', clienteId: 'client', status: 'fiado', formaPagamento: 'fiado',
     itens: [{ produtoId: 'product', quantidade: 1, precoOriginal: amount,
@@ -110,7 +139,10 @@ test('aceite sem reload: 100 + 20 + 30 - 40 = 110 no saldo, WhatsApp e total abe
   assert.equal(queue().length, 3);
   const clientsPage = fs.readFileSync('js/clientes-page.js', 'utf8');
   const app = fs.readFileSync('js/app.js', 'utf8');
-  assert.match(clientsPage, /function topDebtors\(\).*Clientes\.listar\(\)/);
+  // Top debtors read the live local clients (view().clientes) since the clients screen
+  // rewrite; it used to call Clientes.listar(). Same guarantee: no stale copy.
+  assert.match(clientsPage, /function topDebtors\(\).*rows\(\)/);
+  assert.match(clientsPage, /rows=\(\)=>view\(\)\.clientes/);
   assert.match(app, /addEventListener\("financial-state-updated"/);
   assert.match(app, /window\.ClientesPage\?\.refresh\?\.\(\)/);
 });
@@ -198,8 +230,10 @@ test('detecção local assinala venda sem fila mesmo quando pendentes chega a ze
   memory.set('test-sync-queue', '[]');
   assert.equal(vm.runInContext('queueCounts().pending', context), 0);
   const integrity = vm.runInContext('saleIntegrityDiagnostics()', context);
-  assert.equal(integrity.count, 1);
-  assert.equal(integrity.localWithoutQueue[0].saleId, 'orphan');
+  // Since the evidence-based audit, a sale without queue is never declared absent from
+  // the cloud before a comparison proves it: it stays listed as not yet verified.
+  assert.deepEqual(JSON.parse(JSON.stringify(integrity.verificationPending)), [{saleId: 'orphan', operationId: 'op-orphan', category: 'remote_presence_not_verified'}]);
+  assert.equal(integrity.localWithoutQueue.length, 0);
 });
 
 test('envio ignora preparação e a tela diferencia órfãs de zero pendentes', async () => {

@@ -14,7 +14,8 @@ function runtime(options={}) {
     localStorage:{setItem(key,value){if(options.metadataQuota)throw Object.assign(Error('quota'),{name:'QuotaExceededError'});writes.push([key,value]);}},
     lastAttemptKey:()=> 'attempt', lastSyncKey:()=> 'sync', lastCompleteKey:()=> 'complete',
     emit:patch=>Object.assign(context.state,patch),updateQueueState(){},
-    queueCounts:()=>({total:0,pending:0,errors:0}), activeBusinessId:()=> 'qa-business',
+    // queueCounts() reports active operations since the queue classification (D3).
+    queueCounts:()=>({total:0,active:0,pending:0,errors:0}), activeBusinessId:()=> 'qa-business',
     validateUser:async()=>{},testFirestoreConnection:async()=>{},migrateScopedQueueCompatibility:()=>({}),validateQueueOwnership(){},
     processSyncQueue:async()=>{trace.push('push');return {sent:0,collections:[]};},
     pullCloudCollections:async()=>{trace.push('pull');if(options.pullError)throw options.pullError;return 3;},
@@ -23,11 +24,14 @@ function runtime(options={}) {
     reportError:(error)=>{reports.push(error.syncDetail);context.state.syncFailure=error.syncDetail;},
     performDeviceComparison:async()=>{if(options.auditError)throw Object.assign(Error('Missing permissions'),{code:'permission-denied'});return {integrity:{level:options.divergent?'ATENCAO':'OK',actionable:!!options.divergent}};},
     manualSyncPromise:null,automaticSyncPromise:null,cloudPaused:false,lastError:'',lastErrorCode:'',
+    syncSessionGeneration:1,currentUser:{uid:'qa-owner'}, namespace:()=>'qa-owner:qa-business',
   };
   vm.createContext(context);
   vm.runInContext(section('function traceSync(', 'const now =')+
     section('function describeSyncResult(', 'async function runAutomaticSync(')+
-    section('async function compareDeviceWithCloud(', 'async function performDeviceComparison('), context);
+    section('async function compareDeviceWithCloud(', 'async function performDeviceComparison(')+
+    // Real session/space fence used by manual sync since V2xx.
+    section('function captureCloudReadScope(', 'function salesReadScope('), context);
   return {context,writes,reports,trace};
 }
 test('manual vazio conclui e grava timestamp; duplo toque compartilha uma execução',async()=>{

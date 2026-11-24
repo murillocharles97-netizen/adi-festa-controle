@@ -68,6 +68,8 @@ function runtime() {
     readSyncTime:()=>'',lastSyncKey:()=>'',lastAttemptKey:()=>'',lastCompleteKey:()=>'',
     emit:patch=>Object.assign(c.state,patch),stopAutoSync(){},stopCloudSubscriptions(){stops++},startCloudSubscriptions(){starts++},startAutoSync(){},
     migrateOwnerBusinessQueue(){},migrateLegacyQueue(){},migrateScopedQueueCompatibility(){},validateQueueOwnership(){},installOfflineFirstStorage(){},resumePreparedSales(){},updateQueueState(){},
+    // Module state setUser resets on every session change (sync.js top-level lets).
+    queueRetryTimer:null,queueRetryWakes:new Map(),
     listenerRegistry:new Map(),repositories:{},
     activeBusinessId:()=>c.state.userProfile?.businessId||'qa-business',
     window:{BusinessContext:{get:()=>({access:{readOnly:false}})}},

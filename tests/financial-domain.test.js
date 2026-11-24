@@ -55,6 +55,9 @@ function runtime() {
       reverterVendaNoBanco() {},
     },
     dispatchEvent() {},
+    // Domain modules subscribe to app events when they load (V2xx); no events fire here.
+    addEventListener() {},
+    removeEventListener() {},
     CustomEvent: function () {},
     PhoneUtils: {
       normalizeBrazilianPhone: (value) => String(value || "").replace(/\D/g, ""),
@@ -138,11 +141,12 @@ test("status financeiro compartilhado preserva o sinal oficial", () => {
   const { context } = runtime();
   assert.deepEqual(
     structuredClone(context.Clientes.financialStatus({ saldo: -84 })),
-    { saldo: -84, status: "debt", debt: 84, credit: 0 },
+    // futureCents (installments not yet due) joined the status with the installment credit.
+    { saldo: -84, futureCents: 0, status: "debt", debt: 84, credit: 0 },
   );
   assert.deepEqual(
     structuredClone(context.Clientes.financialStatus({ saldo: 17 })),
-    { saldo: 17, status: "credit", debt: 0, credit: 17 },
+    { saldo: 17, futureCents: 0, status: "credit", debt: 0, credit: 17 },
   );
   assert.equal(context.Clientes.financialStatus({ saldo: 0 }).status, "zero");
 });

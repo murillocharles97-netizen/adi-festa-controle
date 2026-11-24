@@ -50,8 +50,14 @@ async function harness(initialDebt = 100) {
   context.DB.__firebaseSyncWrapped = true;
   context.SyncFirebase = { isReady: () => true };
   context.Produtos = { obter: (id) => context.DB.carregar().produtos.find((item) => item.id === id) };
+  // vendas.js refuses to price a cart without the cents policy (V2xx money policy).
+  vm.runInContext(fs.readFileSync('js/sale-money.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/vendas.js', 'utf8'), context);
+  // js/recibos.js measures the viewport once at load (V2xx). Give it a page only for that
+  // moment: vendas.js treats a present document as the real app.
+  context.document = { querySelector: () => null };
   vm.runInContext(fs.readFileSync('js/recibos.js', 'utf8'), context);
+  delete context.document;
   const sell = (id, amount) => context.Vendas.registrar({ id, operationId: `op-${id}`,
     spaceId: 'loja', clienteId: 'nat', status: 'fiado',
     itens: [{ produtoId: 'item', nome: 'Produto', quantidade: 1,
@@ -88,7 +94,9 @@ test('Nat: 312,84 + 14 + 25 = 351,84 no mesmo aparelho, WhatsApp usa os snapshot
     balanceBefore: b.saldoAnterior, balanceAfter: b.saldoAtual });
   assert.match(message, /Saldo anterior:\nR\$ 326,84/);
   assert.match(message, /Total em aberto:\nR\$ 351,84/);
-  assert.match(fs.readFileSync('js/recibos.js', 'utf8'), /Total em aberto agora:.*sale\.saldoAtual/);
+  // The label became part of a template ("…agora"}: ${…}) in the receipt redesign; the
+  // amount still comes from the sale's own snapshot.
+  assert.match(fs.readFileSync('js/recibos.js', 'utf8'), /Total em aberto agora"?\}?:.*sale\.saldoAtual/);
 });
 
 test('offline: duas vendas mantêm projeção local e deltas distintos na fila até convergir', async () => {

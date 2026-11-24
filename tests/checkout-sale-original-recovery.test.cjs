@@ -30,6 +30,10 @@ function localWorkspace({blocked=false,mode='normal'}={}){
     localStorage:{getItem:key=>key==='queue'?queue:null,setItem(_key,value){queue=value;}},
   });
   c.DB.salvar=h.replace;c.DB.__firebaseSyncWrapped=true;
+  // Real checksum used by the service configuration proof (V241); the Firestore
+  // sanitizer is an import, replaced by its JSON-equivalent for plain test data.
+  c.sanitizeForFirestore=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
+  vm.runInContext(section('const stableComparable =','const containsInvalidFirestoreValue'),c);
   vm.runInContext(section('const readQueue =','function monetaryRecoveryRequired('),c);
   vm.runInContext(section('function monetaryRecoveryRequired(','async function assertCancellationQueueClear('),c);
   vm.runInContext(section('function paymentQueueRequiresReview(','function assertFiadoReceiptQueueClear('),c);
@@ -240,6 +244,8 @@ test('checkout finds the existing sale before checking stock and retains its IDs
     setSubmissionState:(kind,message)=>states.push({kind,message}),refreshClients(){},closeCartSurface(){},traceSale(){},
     clients:()=>({getById:()=>null}),Recibos:{mostrar:row=>receipts.push(row.id)},
     FirebaseSession:{user:{uid:c.currentUser.uid}},
+    // finishSavedSale schedules the catalog refresh with queueMicrotask (V2xx).
+    queueMicrotask,
   });
   w.raw([w.stockIncident,{...packet,status:'local_preparing'}]);
   vm.runInContext(checkoutSection('  function draftKey()', '  function applyDraftDetails()'),c);

@@ -154,8 +154,10 @@ test('ack da fila não remove venda só por marcador de início ou transação s
     },
     roundedMoney: (value) => Number(Number(value || 0).toFixed(2)),
     sameFinancialMoney: moneyEqual,
-    balanceEffectId: (type, id) => `${type}:${id}` };
+    balanceEffectId: (type, id) => `${type}:${id}`, window: {} };
   vm.createContext(context);
+  // Reads go through readOperationalDocument since the operational read policy (V2xx).
+  vm.runInContext(sourcePart('async function readOperationalDocument(', 'async function saveCustomerDirectory('), context);
   vm.runInContext(sourcePart('async function verifySaleQueueCommit(', 'function rollbackPaymentConflict('), context);
   const queued = { operationId: 'operation-1', payload: { writes: [
     { entityType: 'sales', operation: 'create', entityId: 'sale-1',
@@ -188,9 +190,11 @@ test('guard bloqueia somente cliente da órfã conhecida e libera após revisão
       : { exists: () => true, data: () => ({ saldo: 0, financialVersion: 3 }) },
     doc: (_db, ...parts) => parts.join('/'), db: {},
     activeBusinessId: () => 'company', financialVersionOf: (client) => client.financialVersion,
-    applyCloudCollection: () => {}, processSyncQueue: async () => {},
+    applyCloudCollection: () => {}, processSyncQueue: async () => {}, window: {},
   };
   vm.createContext(context);
+  // Reads go through readOperationalDocument since the operational read policy (V2xx).
+  vm.runInContext(sourcePart('async function readOperationalDocument(', 'async function saveCustomerDirectory('), context);
   vm.runInContext(sourcePart('async function prepareCustomerForSale(', 'async function confirmCreditSale('), context);
   await assert.rejects(context.prepareCustomerForSale('bruna'),
     (error) => error.code === 'customer-credit-orphan' && error.saleId === 'old-sale');
@@ -206,7 +210,9 @@ test('carrinho mostra um aviso com ação de comparar e não tenta reenviar fila
   assert.match(checkout, /setSubmissionState\("conflict", message\)/);
   assert.match(checkout, /data-resolve-sale/);
   assert.match(checkout, /activeConflict && document\.querySelector\("#sale-payment-method"\)\?\.value === "fiado"/);
-  assert.match(ui, /else retryAll\.remove\(\)/);
+  // Same guarantee since V2xx: with nothing sendable the retry button stays disabled
+  // and has no handler (it used to be removed).
+  assert.match(ui, /else\{retryAll\.disabled=true;[^}]*retryAll\.onclick=null;\}/);
   assert.doesNotMatch(ui, /data-recover-financial/);
   assert.match(ui, /resolve-sale-conflict/);
 });
