@@ -11,6 +11,82 @@ button.avatar:focus-visible{outline:3px solid #009e91;outline-offset:3px}
 .sale-conflict-actions{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.6rem}.sale-conflict-actions button{border:1px solid currentColor;border-radius:8px;padding:.45rem .7rem;background:#fff;color:#9f2633;font-weight:800}.sale-conflict-actions button:first-child{background:#9f2633;color:#fff}.sale-submit-feedback.error:has(.sale-conflict-actions){display:block}
 .sync-financial-audit{margin-top:1rem;padding-top:1rem;border-top:1px solid #dfe7e5}.sync-financial-audit>p{margin:.75rem 0;color:#526176}.sync-financial-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}.sync-financial-preview article{display:grid;gap:.2rem;padding:.7rem;border:1px solid #dce5e3;border-left:4px solid #1caf8c;border-radius:10px;background:#fff}.sync-financial-preview article.is-warning{border-left-color:#e39a21}.sync-financial-preview span,.sync-financial-preview small{font-size:.8rem;color:#637086}@media(max-width:767px){.sync-financial-preview{grid-template-columns:1fr}}
 
+/* Sync overview: one plain-language state first, technical detail afterwards. */
+#modal .sync-queue-panel .sync-overview {
+  --sync-tone: var(--vf-line-strong, #c3d3d6);
+  margin: 0 0 1rem;
+  padding: 1rem 1rem 1rem 1.1rem;
+  border: 1px solid var(--vf-line, #dbe5e7);
+  border-inline-start: 4px solid var(--sync-tone);
+  border-radius: 14px;
+  background: var(--vf-surface, #fff);
+  color: var(--vf-ink, #0b2730);
+}
+#modal .sync-queue-panel .sync-overview.is-confirmed { --sync-tone: var(--vf-pos, #0a7655); }
+#modal .sync-queue-panel .sync-overview.is-updating { --sync-tone: var(--vf-info, #1d5b96); }
+#modal .sync-queue-panel .sync-overview:is(.is-differences, .is-review, .is-unconfirmed) { --sync-tone: var(--vf-warn, #8f4606); }
+#modal .sync-queue-panel .sync-overview > h4 { margin: 0; font-size: 1.08rem; line-height: 1.3; color: var(--vf-ink, #0b2730); }
+#modal .sync-queue-panel .sync-overview > p { margin: .35rem 0 0; max-width: 62ch; color: var(--vf-text-2, #3f5d66); line-height: 1.45; }
+#modal .sync-queue-panel .sync-overview-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .6rem 1rem;
+  margin: .9rem 0 0;
+  padding: 0;
+}
+#modal .sync-queue-panel .sync-overview-checks > div {
+  --check-tone: var(--vf-line, #dbe5e7);
+  display: grid;
+  gap: .1rem;
+  min-width: 0;
+  padding-inline-start: .65rem;
+  border-inline-start: 2px solid var(--check-tone);
+}
+#modal .sync-queue-panel .sync-overview-checks > .is-ok { --check-tone: var(--vf-pos, #0a7655); }
+#modal .sync-queue-panel .sync-overview-checks > .is-warn { --check-tone: var(--vf-warn, #8f4606); }
+#modal .sync-queue-panel .sync-overview-checks > .is-info { --check-tone: var(--vf-info, #1d5b96); }
+#modal .sync-queue-panel .sync-overview-checks dt { font-size: .8rem; color: var(--vf-text-3, #546f77); }
+#modal .sync-queue-panel .sync-overview-checks dd { margin: 0; font-weight: 600; color: var(--vf-ink, #0b2730); overflow-wrap: anywhere; }
+#modal .sync-queue-panel .sync-actions {
+  display: grid;
+  gap: .65rem;
+  margin-top: 1rem;
+  padding-top: .9rem;
+  border-top: 1px solid var(--vf-line, #dbe5e7);
+}
+#modal .sync-queue-panel .sync-action {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  align-items: center;
+  gap: .3rem .85rem;
+}
+#modal .sync-queue-panel .sync-action > .btn { width: 100%; white-space: normal; line-height: 1.25; }
+#modal .sync-queue-panel .sync-action > p,
+#modal .sync-queue-panel .sync-action-note { margin: 0; font-size: .86rem; color: var(--vf-text-2, #3f5d66); line-height: 1.4; }
+#modal .sync-queue-panel .sync-action.is-unavailable { grid-template-columns: 1fr; gap: .2rem; }
+#modal .sync-queue-panel .sync-action.is-unavailable > b { font-size: .9rem; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel .sync-technical-summary { margin: 0 0 1rem; }
+#modal .sync-queue-panel .sync-technical-summary > summary { cursor: pointer; padding: .45rem 0; font-weight: 600; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel .sync-technical-summary > summary:focus-visible { outline: 2px solid var(--vf-brand-deep, #0b9c8f); outline-offset: 2px; border-radius: 4px; }
+#modal .sync-queue-panel :is(.sync-count-comparison, .sync-retained-balances) > p { margin: .35rem 0 .2rem; color: var(--vf-text-2, #3f5d66); }
+#modal .sync-queue-panel :is(.sync-count-comparison, .sync-retained-balances) > article {
+  margin-top: .65rem;
+  padding: .1rem 0 .1rem .7rem;
+  border-inline-start: 3px solid var(--vf-line-strong, #c3d3d6);
+}
+#modal .sync-queue-panel .sync-count-comparison > article.is-ok { border-inline-start-color: var(--vf-pos, #0a7655); }
+#modal .sync-queue-panel :is(.sync-count-comparison > article.is-warn, .sync-retained-balances > article) { border-inline-start-color: var(--vf-warn, #8f4606); }
+#modal .sync-queue-panel :is(.sync-count-comparison, .sync-retained-balances) > article p { margin: .2rem 0 0; font-variant-numeric: tabular-nums; }
+#modal .sync-queue-panel .sync-retained-balances > article small { display: block; margin-top: .2rem; color: var(--vf-text-3, #546f77); }
+/* Dark theme for the existing integrity cards and Fiado audit text in this panel. */
+html[data-theme="dark"] #modal .sync-queue-panel .sync-data-state-grid article { background: var(--vf-surface-2); border-color: var(--vf-line); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-data-state-grid article > b { color: var(--vf-pos); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-data-state-grid article :is(span, strong) { color: var(--vf-text-2); }
+html[data-theme="dark"] #modal .sync-queue-panel .sync-financial-audit > p { color: var(--vf-text-2); }
+@media (max-width: 560px) {
+  #modal .sync-queue-panel .sync-overview-checks { grid-template-columns: 1fr; }
+  #modal .sync-queue-panel .sync-action { grid-template-columns: 1fr; }
+}
 /* V203 login: presentation only; existing Auth, bootstrap and session handlers remain canonical. */
 #auth-gate[hidden],#auth-gate [hidden]{display:none!important}
 html.auth-pending #auth-gate:not([hidden]){box-sizing:border-box;position:relative;width:100%;min-height:100vh;min-height:100dvh;height:auto;max-height:none;overflow:visible;padding:max(28px,env(safe-area-inset-top)) max(28px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(28px,env(safe-area-inset-left));background:radial-gradient(ellipse at -12% -10%,#00b8b250,transparent 48%),radial-gradient(ellipse at 100% 110%,#008c8b35,transparent 46%),linear-gradient(130deg,#062c34,#03181f 62%,#073039);color:#142b3d}

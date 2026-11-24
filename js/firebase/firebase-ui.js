@@ -193,13 +193,114 @@ function syncPanelView(state = {}, entries = state.details?.queueErrors || []) {
 }
 window.VeconiSyncPanelView = syncPanelView;
 
+// Sync overview: the screen opens with one plain-language state and the checks behind
+// it. "Tudo confirmado" needs this session's read-only comparison, never just an
+// empty queue. Actions appear only when they can actually run.
+const shortTime=value=>{const date=new Date(value||'');return value&&!Number.isNaN(date.getTime())?date.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';};
+const plural=(count,one,many)=>count+' '+(count===1?one:many);
+const balanceText=value=>value===null||value===undefined?'não lido nesta sessão':Number(value)<0?money(-Number(value))+' em aberto':Number(value)>0?money(value)+' de crédito':'zerado';
+function readRetainedBalances(comparison){
+  try{return window.SyncFirebase?.retainedClientBalances?.()||comparison?.retainedBalances||[];}catch{return comparison?.retainedBalances||[];}
+}
+function syncOverview(state={},items=[],view=syncPanelView(state,items)){
+  const details=state.details||{},audit=details.dataAudit||state.dataAudit||null,comparison=details.comparison||state.comparison||null,
+    integrity=state.integrityStatus||details.integrityStatus||'not_checked',
+    waiting=Number(view.pending||0)+Number(state.processing||0)+Number(state.preparing||0),
+    review=items.filter(item=>['error','manual_review','quarantined'].includes(item.category)).length,
+    blocked=readRetainedBalances(comparison).filter(row=>row.blockedOnly),retained=blocked.filter(row=>row.difference),
+    unread=blocked.some(row=>row.difference===null),
+    collections=Object.values(audit?.collections||{}),sum=pick=>collections.reduce((total,item)=>total+pick(item),0),
+    onlyLocal=sum(item=>(item.onlyLocal||[]).filter(row=>row.classification==='B'&&row.category!=='confirmed_legacy_fixture').length),
+    onlyRemote=sum(item=>item.onlyRemote?.length||0),divergent=sum(item=>item.divergent?.length||0),
+    balance=audit?.financial?.balanceScope,compared=integrity==='completed'&&Boolean(audit),
+    differences=compared?onlyLocal+onlyRemote+divergent+(balance&&!balance.operationalMatches&&!retained.length?1:0):0,
+    updating=state.status==='syncing'||integrity==='checking'||state.remoteReadRefresh?.status==='reading',
+    when=shortTime(audit?.generatedAt);
+  const key=updating?'updating':waiting?'unconfirmed':differences||retained.length?'differences':review?'review':compared?'confirmed':'unconfirmed';
+  const copy={
+    updating:['Atualizando dados','A VECONI está enviando ou conferindo informações. Espere terminar antes de decidir qualquer correção.'],
+    differences:['Diferenças encontradas','O aparelho e a nuvem não coincidem em alguns registros ou saldos. Nada foi corrigido automaticamente; confira os detalhes abaixo.'],
+    review:['Operações antigas precisando de revisão',plural(review,'operação foi recusada pela nuvem e está bloqueada','operações foram recusadas pela nuvem e estão bloqueadas')+', sem reenvio. Os originais continuam neste aparelho para conferência.'],
+    confirmed:['Tudo confirmado','Nada aguarda envio e a comparação'+(when?' de '+when:'')+' não encontrou diferenças.'],
+    unconfirmed:['Dados do aparelho ainda não confirmados na nuvem',waiting
+      ?plural(waiting,'alteração deste aparelho ainda não foi confirmada','alterações deste aparelho ainda não foram confirmadas')+' pela nuvem. Elas continuam salvas aqui.'
+      :integrity==='failed'?'A comparação com a nuvem não terminou. Os dados continuam salvos neste aparelho; tente comparar de novo.'
+      :'Nada aguarda envio, mas a comparação com a nuvem ainda não foi feita nesta sessão. Use Comparar com a nuvem para confirmar.'],
+  }[key];
+  const checks=[
+    {label:'Envio deste aparelho',value:waiting?plural(waiting,'alteração aguardando','alterações aguardando'):'Nada aguardando envio',tone:waiting?'warn':'ok'},
+    {label:'Operações antigas',value:review?plural(review,'bloqueada para revisão','bloqueadas para revisão'):'Nenhuma bloqueada',tone:review?'warn':'ok'},
+    {label:'Comparação com a nuvem',value:integrity==='checking'?'Em andamento':compared?(differences?plural(differences,'diferença encontrada','diferenças encontradas'):'Registros iguais'+(when?' em '+when:'')):integrity==='failed'?'Não terminou':'Ainda não feita nesta sessão',
+      tone:integrity==='checking'?'info':compared?(differences?'warn':'ok'):integrity==='failed'?'warn':'muted'},
+    {label:'Saldos de clientes',value:retained.length?plural(retained.length,'cliente com saldo retido','clientes com saldo retido'):unread?'Compare com a nuvem para conferir':'Nenhum saldo retido',
+      tone:retained.length?'warn':unread?'muted':'ok'},
+  ];
+  return {key,title:copy[0],text:copy[1],checks,waiting,review,differences,retained,compared,integrity};
+}
+function syncActionRow(attribute,label,description,primary=false){
+  return '<div class="sync-action"><button class="btn '+(primary?'btn-primary':'btn-light')+'" type="button" '+attribute+'>'+escape(label)+'</button><p>'+escape(description)+'</p></div>';
+}
+function syncOverviewHtml(overview){
+  const actions=[];
+  if(navigator.onLine!==false)actions.push(syncActionRow('data-compare-cloud','Comparar com a nuvem','Lê a nuvem e confere registro por registro. Não altera nada.',!overview.compared&&!overview.waiting));
+  if(overview.review)actions.push(syncActionRow('data-open-blocked','Consultar operações bloqueadas','Mostra cada operação recusada, o erro original e o que ficou preservado.'));
+  actions.push(syncActionRow('data-export-diagnostic','Exportar diagnóstico técnico','Salva no aparelho um arquivo técnico para o suporte, sem os dados completos dos clientes.'));
+  actions.push('<div data-recovery-export-slot><p class="sync-action-note">Conferindo se há vendas originais elegíveis para recuperação…</p></div>');
+  return '<section class="sync-overview is-'+escape(overview.key)+'" aria-labelledby="sync-overview-title"><h4 id="sync-overview-title">'+escape(overview.title)+'</h4><p>'+escape(overview.text)+'</p>'+
+    '<dl class="sync-overview-checks">'+overview.checks.map(check=>'<div class="is-'+escape(check.tone)+'"><dt>'+escape(check.label)+'</dt><dd>'+escape(check.value)+'</dd></div>').join('')+'</dl>'+
+    '<div class="sync-actions" role="group" aria-label="Ações disponíveis">'+actions.join('')+'</div></section>';
+}
+function recoveryExportActionHtml(count){
+  if(count===null)return syncActionRow('data-export-recovery','Exportar originais para recuperação supervisionada','Abre a lista de vendas originais retidas que podem ir para o suporte autorizado.');
+  if(count>0)return syncActionRow('data-export-recovery','Exportar originais para recuperação supervisionada',plural(count,'venda original retida pode ir','vendas originais retidas podem ir')+' para o suporte autorizado em arquivo protegido. Nada é reenviado.');
+  return '<div class="sync-action is-unavailable"><b>Exportar originais para recuperação supervisionada</b><p>Indisponível nesta conta e aparelho: não há venda original retida por falta de permissão. Esse arquivo não é uma cópia geral dos dados; para isso, use Exportar diagnóstico técnico.</p></div>';
+}
+async function fillRecoveryExportSlot(slot){
+  const api=window.SaleRecoveryExport;
+  if(typeof api?.candidateCount!=='function'){slot.innerHTML=recoveryExportActionHtml(null);return;}
+  try{const count=await api.candidateCount();if(slot.isConnected)slot.innerHTML=recoveryExportActionHtml(Number(count)||0);}
+  catch{if(slot.isConnected)slot.innerHTML='<p class="sync-action-note">Não foi possível conferir agora se há vendas originais elegíveis. Nada foi alterado.</p>';}
+}
+function countComparisonHtml(comparison,scope){
+  if(!comparison)return '';
+  const local=comparison.local||{},remote=comparison.remote||{},basis=comparison.basis||{},rows=[],
+    audited=name=>!comparison.scope?.collections||comparison.scope.collections.includes(name),
+    plain=(label,device,cloud)=>'<article class="is-warn"><b>'+escape(label)+'</b><p>Neste aparelho: '+escape(device)+'. Na nuvem: '+escape(cloud)+'.</p></article>';
+  for(const [name,label,device,cloud] of [['clients','Clientes',local.clientes,remote.clients],['products','Produtos',local.produtos,remote.products]])
+    if(audited(name)&&device!==cloud)rows.push(plain(label,device,cloud));
+  for(const [name,label,device,cloud] of [['sales','Vendas',local.vendas,remote.sales],['payments','Pagamentos',local.pagamentos,remote.payments]]){
+    if(!audited(name))continue;
+    const part=basis[name];
+    if(!part){if(device!==cloud)rows.push(plain(label,device,cloud));continue;}
+    const cloudComparable=part.remoteComparable??cloud,same=part.comparable===cloudComparable,
+      aside=[part.archivedLegacyFiado?part.archivedLegacyFiado+' do Fiado antigo encerrado':'',part.heldByQueue?plural(part.heldByQueue,'retida na fila deste aparelho','retidas na fila deste aparelho'):''].filter(Boolean);
+    rows.push('<article class="is-'+(same?'ok':'warn')+'"><b>'+escape(label)+'</b><p>Guardadas neste aparelho: '+escape(part.total)+(aside.length?'. Ficam fora da comparação '+escape(aside.join(' e ')):'')+'.</p>'+
+      '<p>Comparáveis: '+escape(part.comparable)+' no aparelho e '+escape(cloudComparable)+' na nuvem'+(part.remoteArchivedLegacyFiado?', sem '+escape(part.remoteArchivedLegacyFiado)+' do Fiado antigo encerrado':'')+'. '+(same?'Iguais.':'Diferentes: compare registro por registro antes de qualquer correção.')+'</p></article>');
+  }
+  const localDebt=scope?.localActiveDebt??local.fiado,remoteDebt=scope?.remoteActiveDebt??remote.fiado,retained=Number(comparison.retainedDebtDifference||0);
+  if(comparison.scope?.financialAudited!==false&&Math.abs(Number(localDebt||0)-Number(remoteDebt||0))>=0.01)
+    rows.push('<article class="is-warn"><b>Fiado ativo</b><p>Neste aparelho: '+escape(money(localDebt))+'. Na nuvem: '+escape(money(remoteDebt))+'.</p>'+(retained?'<p>'+escape(money(Math.abs(retained)))+' dessa diferença vem de saldo de cliente retido neste aparelho, explicado abaixo.</p>':'')+'</article>');
+  return '<section class="sync-data-state sync-count-comparison"><h4>Contagens do aparelho e da nuvem</h4><p>O aparelho guarda histórico que a nuvem não lista mais, como o Fiado antigo encerrado, e operações retidas na fila. Por isso os totais guardados não indicam perda: compare os números comparáveis.</p>'+rows.join('')+'</section>';
+}
+function retainedBalancesHtml(rows=[]){
+  if(!rows.length)return '';
+  return '<section class="sync-data-state sync-retained-balances" aria-label="Saldos retidos neste aparelho"><h4>Saldo de cliente retido neste aparelho</h4>'+
+    '<p>Enquanto uma operação bloqueada do cliente não for revisada, este aparelho mantém o saldo local dele e não aplica o saldo da nuvem. O valor da nuvem já inclui o que o servidor confirmou, como regularizações e recebimentos. Não registre outro ajuste para compensar.</p>'+
+    rows.map(row=>'<article><b>'+escape(row.clientName||'Cliente '+String(row.clientId).slice(0,8))+'</b><p>Neste aparelho: '+escape(balanceText(row.localBalance))+'. Na nuvem: '+escape(balanceText(row.cloudBalance))+'.</p><small>'+
+      escape(plural(row.operations.length,'operação bloqueada','operações bloqueadas')+(row.operations[0]?.createdAt?', desde '+shortTime(row.operations[0].createdAt):'')+'. Nenhuma correção automática.')+'</small></article>').join('')+'</section>';
+}
+
 function openQueueDetails(filter={}){
-  const state=window.SyncFirebase.refreshQueueStatus?.()||lastState||{},details=state.details||{},items=window.SyncFirebase.getQueueDiagnostics?.()||[],view=syncPanelView(state,items),errors=items.filter(item=>!isHistoricalServiceRejection(item)&&(item.activeError===true||item.activeError===undefined&&item.status==='error'&&!item.reviewRequired)),processing=items.filter(item=>item.status==='syncing').length,root=document.querySelector('#modal');
-  root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box modal-wide sync-diagnostics-modal sync-queue-panel viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-queue-title"><header class="modal-head"><h3 id="sync-queue-title">Sincronização dos dados</h3><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body viewport-scroll"><div class="firebase-sync-grid"><span>Pendências enviáveis</span><strong>${escape(view.pending)}</strong><span>Erros que exigem atenção</span><strong>${escape(view.errors)}</strong><span>Histórico bloqueado</span><strong>${view.historical.length}</strong><span>Processando</span><strong>${escape(processing)}</strong><span>Última tentativa</span><strong>${escape(formattedTime(details.lastAttemptAt))}</strong><span>Última sincronização completa</span><strong>${escape(formattedTime(details.lastCompleteSyncAt||state.lastSync))}</strong><span>Listener remoto</span><strong>${details.listenerConnected?'Ativo':'Inativo'}</strong><span>BusinessId</span><strong>${escape(details.userBusinessId||'—')}</strong><span>Build</span><strong>${escape(window.AdiFestaBuild?.shortCommit||'local')}</strong><span>Projeto</span><strong>${escape(details.projectId||'—')}</strong></div><section class="sync-error-list sync-active-errors"><h4>Erros que exigem atenção</h4>${errors.length?errors.slice(0,50).map(item=>`<article><b>${escape(item.entityType)} · ${escape(item.action)}</b><small>${escape(formattedTime(item.createdAt))}</small><p>${escape(item.errorCode||'erro')}: ${escape(item.errorMessage||'A operação precisa de atenção.')}</p><code>${escape(item.operationId.slice(0,10))}… · ${escape(item.origin)}</code></article>`).join(''):'<p>Nenhum erro ativo exige atenção na fila.</p>'}</section></div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-light" type="button" data-open-technical>Ver diagnóstico técnico</button><button class="btn btn-primary" type="button" data-retry-all disabled>Nenhuma operação enviável</button></footer></section></div>`;
+  const state=window.SyncFirebase.refreshQueueStatus?.()||lastState||{},details=state.details||{},items=window.SyncFirebase.getQueueDiagnostics?.()||[],view=syncPanelView(state,items),errors=items.filter(item=>!isHistoricalServiceRejection(item)&&(item.activeError===true||item.activeError===undefined&&item.status==='error'&&!item.reviewRequired)),processing=items.filter(item=>item.status==='syncing').length,root=document.querySelector('#modal'),overview=syncOverview(state,items,view);
+  root.innerHTML=`<div class="modal-bg viewport-modal"><section class="modal-box modal-wide sync-diagnostics-modal sync-queue-panel viewport-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-queue-title"><header class="modal-head"><h3 id="sync-queue-title">Sincronização dos dados</h3><button class="icon-btn close" type="button" aria-label="Fechar"><i data-lucide="x"></i></button></header><div class="modal-body viewport-scroll">${syncOverviewHtml(overview)}<details class="sync-technical-summary"><summary>Detalhes técnicos da fila</summary><div class="firebase-sync-grid"><span>Pendências enviáveis</span><strong>${escape(view.pending)}</strong><span>Erros que exigem atenção</span><strong>${escape(view.errors)}</strong><span>Histórico bloqueado</span><strong>${view.historical.length}</strong><span>Processando</span><strong>${escape(processing)}</strong><span>Última tentativa</span><strong>${escape(formattedTime(details.lastAttemptAt))}</strong><span>Última sincronização completa</span><strong>${escape(formattedTime(details.lastCompleteSyncAt||state.lastSync))}</strong><span>Listener remoto</span><strong>${details.listenerConnected?'Ativo':'Inativo'}</strong><span>BusinessId</span><strong>${escape(details.userBusinessId||'—')}</strong><span>Build</span><strong>${escape(window.AdiFestaBuild?.shortCommit||'local')}</strong><span>Projeto</span><strong>${escape(details.projectId||'—')}</strong></div></details><section class="sync-error-list sync-active-errors"><h4>Erros que exigem atenção</h4>${errors.length?errors.slice(0,50).map(item=>`<article><b>${escape(item.entityType)} · ${escape(item.action)}</b><small>${escape(formattedTime(item.createdAt))}</small><p>${escape(item.errorCode||'erro')}: ${escape(item.errorMessage||'A operação precisa de atenção.')}</p><code>${escape(item.operationId.slice(0,10))}… · ${escape(item.origin)}</code></article>`).join(''):'<p>Nenhum erro ativo exige atenção na fila.</p>'}</section></div><footer class="modal-foot"><button class="btn btn-light close" type="button">Fechar</button><button class="btn btn-light" type="button" data-open-technical>Ver diagnóstico técnico</button><button class="btn btn-primary" type="button" data-retry-all disabled>Nenhuma operação enviável</button></footer></section></div>`;
   if (view.historical.length) {
     root.querySelector('.sync-error-list').insertAdjacentHTML('beforebegin',
       '<details class="sync-data-state sync-blocked-history"><summary>Histórico bloqueado · ' + view.historical.length +
-      '</summary><p>Reenvio bloqueado. Os registros, erros e evidências originais continuam neste aparelho.</p><div class="sync-error-list">' +
+      '</summary><p>Reenvio bloqueado. Os registros, erros e evidências originais continuam neste aparelho.</p>' +
+      (view.historical.some(item => item.reviewReason === 'service_configuration_missing')
+        ? '<p>Vendas de serviço recusadas antes de qualquer gravação: a nuvem não registrou essas vendas, nem baixa de estoque, saldo ou receita delas. O reenvio fica bloqueado para não recalcular o custo com a configuração atual. Recuperar com o custo original ou encerrar sem efeitos depende de decisão do responsável.</p>'
+        : '') +
+      '<div class="sync-error-list">' +
       view.historical.map(renderQueueError).join('') + '</div></details>');
   }
   root.querySelector('.sync-diagnostics-modal .firebase-sync-grid')?.insertAdjacentHTML('beforeend',`<span>Pendências comprovadas / somente locais</span><strong>${escape(state.orphanOperations||0)}</strong>`);
@@ -230,13 +331,14 @@ function openQueueDetails(filter={}){
   if(quarantined.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning" role="status"><b>${quarantined.length} operação(ões) em quarentena</b><p>Registro preservado para análise. Envio e alteração automática estão bloqueados, inclusive ao sincronizar manualmente.</p></section>`);
   if(retainedSales.length)errorSection?.insertAdjacentHTML('beforebegin',`<section class="backup-warning" role="status"><b>${retainedSales.length} venda(s) preservada(s) — aguardando revisão</b><p>O reenvio dessas operações está bloqueado, inclusive na sincronização manual. Seus registros e erros originais foram mantidos neste aparelho para evitar baixa ou receita duplicada.</p></section>`);
   const dataAudit=details.dataAudit||state.dataAudit||null,scope=dataAudit?.financial?.balanceScope;
-  const comparison=details.comparison||state.comparison,local=comparison?.local||{},remote=comparison?.remote||{},mismatches=comparison&&!comparison.ok?[['Clientes',local.clientes,remote.clients],['Produtos',local.produtos,remote.products],['Vendas',local.vendas,remote.sales],['Pagamentos',local.pagamentos,remote.payments],['Fiado ativo',money(scope?.localActiveDebt??local.fiado),money(scope?.remoteActiveDebt??remote.fiado)]].filter(([,device,cloud],index)=>device!==cloud&&(index===4?comparison.scope?.financialAudited!==false:!comparison.scope?.collections||comparison.scope.collections.includes(['clients','products','sales','payments'][index]))):[];
-  if(mismatches.length){errorSection?.insertAdjacentHTML('beforebegin',`<section class="sync-error-list"><h4>Contagens técnicas — não indicam falha de transferência</h4>${mismatches.map(([label,device,cloud])=>`<article><b>${escape(label)}</b><p>Aparelho: ${escape(device)} · Nuvem: ${escape(cloud)}</p></article>`).join('')}</section>`)}
+  const comparison=details.comparison||state.comparison;
+  // Raw totals measure different universes; show comparable numbers and retained balances.
+  errorSection?.insertAdjacentHTML('beforebegin',countComparisonHtml(comparison,scope)+retainedBalancesHtml(overview.retained));
   errorSection?.insertAdjacentHTML('beforebegin',dataAuditHtml(dataAudit));
   if(dataAudit?.collections?.sales?.onlyLocal?.length)
     errorSection?.insertAdjacentHTML('beforebegin',onlyLocalSalesHtml(filter));
   const footer=root.querySelector('.modal-foot');
-  footer.insertAdjacentHTML('afterbegin','<button class="btn btn-light" type="button" data-export-recovery>Exportar arquivo de recuperação</button><button class="btn btn-light" type="button" data-export-diagnostic>Exportar diagnóstico</button><button class="btn btn-light" type="button" data-compare-cloud>Comparar com a nuvem</button>');
+  // Compare, diagnostic and recovery export live in the overview actions, each with its purpose.
   if(dataAudit?.products?.onlyLocal||dataAudit?.clients?.onlyLocal)footer.insertAdjacentHTML('afterbegin','<button class="btn btn-primary" type="button" data-recover-local>Recuperar dados locais ausentes</button>');
   if(dataAudit?.collections?.sales?.onlyLocal?.length)footer.insertAdjacentHTML('afterbegin','<button class="btn btn-light" type="button" data-export-only-local>Exportar auditoria das vendas</button>');
   // V157 audit is read-only. No bulk financial repair CTA for historical effects.
@@ -248,7 +350,9 @@ function openQueueDetails(filter={}){
   if(items.some(item=>item.canRetry===true)){retryAll.disabled=false;retryAll.textContent=errors.some(item=>item.canRetry)?'Reprocessar erros elegíveis':'Sincronizar pendentes';retryAll.onclick=async()=>{await manualSync();openQueueDetails(filter)}}
   else{retryAll.disabled=true;retryAll.textContent=view.errors?'Reenvio bloqueado — conferir evidências':manual.length?'Aguardando revisão':'Nenhuma operação enviável';retryAll.onclick=null;}
   root.querySelector('[data-export-diagnostic]').onclick=exportDiagnostic;
-  root.querySelector('[data-compare-cloud]').onclick=event=>compareCloudData(event.currentTarget);
+  const compareButton=root.querySelector('[data-compare-cloud]');if(compareButton)compareButton.onclick=event=>compareCloudData(event.currentTarget);
+  root.querySelector('[data-open-blocked]')?.addEventListener('click',()=>{const target=root.querySelector('.sync-blocked-history')||root.querySelector('.sync-active-errors');if(!target)return;if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({block:'start'});(target.querySelector('summary')||target).focus?.();});
+  const recoverySlot=root.querySelector('[data-recovery-export-slot]');if(recoverySlot)void fillRecoveryExportSlot(recoverySlot);
   root.querySelector('[data-export-only-local]')?.addEventListener('click',exportOnlyLocalSales);
   root.querySelector('[data-sale-show-all]')?.addEventListener('click',()=>openQueueDetails());
   root.querySelectorAll('[data-sale-detail]').forEach(button=>button.onclick=()=>openOnlyLocalSaleDetails(button.dataset.saleDetail,filter));

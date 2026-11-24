@@ -270,7 +270,7 @@
   function updateSync(event) {
     const state = event?.detail || window.SyncFirebaseState || {};
     const view = window.VeconiSyncPanelView?.(state), pending = Number(state.pending || 0);
-    const label = state.status === "offline" ? "Offline" : view?.historicalStatus ? pending ? `${pending} pendente(s) · histórico bloqueado` : "Histórico bloqueado" : state.status === "error" ? "Sincronização a conferir" : pending > 0 ? `${pending} pendente(s)` : state.status === "success" ? "Sincronizado" : navigator.onLine ? "Dados no aparelho" : "Offline";
+    const label = state.status === "offline" ? "Offline" : view?.historicalStatus ? pending ? `${pending} pendente(s) · histórico bloqueado` : "Histórico bloqueado" : state.status === "error" ? "Sincronização a conferir" : pending > 0 ? `${pending} pendente(s)` : state.status === "success" ? (state.integrityStatus === "completed" && state.dataAudit && !state.dataAudit.integrity?.actionable ? "Sincronizado" : "Envio confirmado") : navigator.onLine ? "Dados no aparelho" : "Offline";
     document.querySelectorAll("[data-mobile-sync-label]").forEach((item) => (item.textContent = label));
   }
 

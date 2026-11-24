@@ -46,7 +46,13 @@ window.FiadoSpaceRegularization = (() => {
         await window.InstallmentCredit.refresh(clientId);
         window.Clientes.prepareList();
         dispatchEvent(new CustomEvent('fiado-account-updated',{detail:{clientId}}));
-      }catch{if(present())status.textContent+=' A lista será atualizada após a próxima consulta ao servidor.';}
+      }catch(error){
+        // A queued operation of this client keeps the local projection. The server
+        // value above is final: never suggest a second, compensating adjustment.
+        if(present())status.textContent+=error?.code==='pending-client-write'
+          ?' Este aparelho tem uma operação deste cliente pendente ou bloqueada na fila e continua mostrando o saldo anterior até ela ser resolvida. O saldo acima já está confirmado no servidor: não registre outro ajuste para compensar. Veja Sincronização dos dados.'
+          :' A lista será atualizada após a próxima consulta ao servidor.';
+      }
     }
     const difference=()=>{const value=Number(form.elements.total.value),cents=Math.round(value*100),valid=form.elements.total.value!==''&&Number.isFinite(value)&&value>=0&&Math.abs(value*100-cents)<0.000001;
       const delta=cents-(quote?.currentDebtCents||0);

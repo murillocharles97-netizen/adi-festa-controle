@@ -252,6 +252,7 @@ const state = {
   syncTrace: [],
   integrityStatus: "not_checked",
   integrityFailure: null,
+  integrityDeferredReason: "",
 };
 
 // Bounded diagnostics: never include document payloads, emails or credentials.
@@ -1042,6 +1043,49 @@ function archivedFiadoAuditItem(name,item,archivedSales){
 function withoutArchivedFiado(name,items,archivedSales,archived){
   const kept=[];for(const item of items||[]){if(archivedFiadoAuditItem(name,item,archivedSales)){archived[name]=(archived[name]||0)+1;continue;}kept.push(item);}
   return kept;
+}
+// Count universes. This device keeps records the server no longer lists: a
+// closed legacy Fiado removed by its authorized closure is not a tombstone, so
+// a pull never deletes it. Operations still held by the queue are not on the
+// server either. The same archive rule applies to both sides (as in the full
+// audit); compare like with like and report each part; never infer loss.
+function comparableRecords(data,name,remoteDocuments=null){
+  const items=sourceItems(data,name),held=pendingIds(name),none=new Set();
+  let archivedLegacyFiado=0,heldByQueue=0;
+  for(const item of items){
+    if(archivedFiadoAuditItem(name,item,none))archivedLegacyFiado++;
+    else if(held.has(String(item.id)))heldByQueue++;
+  }
+  const remote=Array.isArray(remoteDocuments)?remoteDocuments.filter(item=>!item?.deletedAt):null,
+    remoteArchived=remote?remote.filter(item=>archivedFiadoAuditItem(name,item,none)).length:null;
+  return {total:items.length,archivedLegacyFiado,heldByQueue,comparable:items.length-archivedLegacyFiado-heldByQueue,
+    remoteTotal:remote?remote.length:null,remoteArchivedLegacyFiado:remoteArchived,remoteComparable:remote?remote.length-remoteArchived:null};
+}
+// A queued client write makes every pull skip that client's server document
+// (see reconcileLocalAndCloud), so an operation that can no longer be sent
+// freezes the local balance. Report the device value next to the last server
+// read of this session. Read-only: nothing is applied, sent or repaired here.
+function retainedClientBalances(){
+  const held=pendingIds('clients');if(!held.size)return [];
+  const businessId=activeBusinessId(),queue=readQueue(),
+    local=new Map((DB.carregar().clientes||[]).map(client=>[String(client.id),client]));
+  return [...held].sort().map(clientId=>{
+    const client=local.get(clientId),server=canonicalClientSnapshots.get(canonicalClientSnapshotKey(businessId,clientId)),
+      operations=queue.filter(item=>(item.payload?.writes||[]).some(write=>write.entityType==='clients'&&String(write.entityId)===clientId))
+        .map(item=>{const c=classifyQueueOperation(item);return{operationId:String(item.operationId||''),category:c.category,
+          sendable:c.sendable===true,errorCode:String(item.lastErrorCode||''),createdAt:item.createdAtLocal||item.createdAt||''};}),
+      localBalance=client?roundedMoney(client.saldo):null,cloudBalance=server?roundedMoney(server.balance):null;
+    return{clientId,clientName:String(client?.nome||''),localBalance,cloudBalance,cloudReadAt:server?.readAt||'',
+      difference:localBalance!==null&&cloudBalance!==null?roundedMoney(localBalance-cloudBalance):null,
+      blockedOnly:operations.length>0&&operations.every(operation=>!operation.sendable),operations};
+  });
+}
+// Diagnostic-only classification of financial records: opaque IDs and flags,
+// no names or amounts. Enough to tell history, queue and server origin apart.
+function financialDiagnosticFields(name,item,held){
+  return {clientId:String(item.clienteId||item.clientId||item.customerId||''),spaceId:String(item.spaceId||item.financialSpaceId||''),
+    archivedLegacyFiado:archivedFiadoAuditItem(name,item,new Set()),heldByQueue:held.has(String(item.id)),
+    serverRegularization:item.spaceRegularizationVersion===1};
 }
 async function assertFiadoReceiptWriter(businessId,workspaceGeneration,scopedReceiptVersion) {
   if(navigator.onLine===false||typeof window.FirebaseCallable!=='function')
@@ -6458,10 +6502,14 @@ async function exportLocalDiagnostic() {
     queue = readQueue(),
     profile = state.userProfile || {},
     entities = {};
-  for (const name of AUDIT_NAMES)
-    entities[name] = sourceItems(data, name).map((item) =>
-      auditRecord(item, "local", name),
-    );
+  for (const name of AUDIT_NAMES) {
+    const items = sourceItems(data, name), plain = () => items.map((item) => auditRecord(item, "local", name));
+    if (!FINANCIAL_AUDIT_NAMES.has(name)) { entities[name] = plain(); continue; }
+    // The extra flags are optional evidence; keep the previous shape if they fail.
+    try { const held = pendingIds(name); entities[name] = items.map((item) => ({...auditRecord(item, "local", name), ...financialDiagnosticFields(name, item, held)})); }
+    catch { entities[name] = plain(); }
+  }
+  const comparison = state.comparison || null;
   return {
     diagnosticVersion: 6,
     operationalProtocol: structuredClone(state.operationalProtocol||{status:'not_verified'}),
@@ -6501,6 +6549,23 @@ async function exportLocalDiagnostic() {
     syncTrace: state.syncTrace,
     integrityStatus: state.integrityStatus,
     integrityFailure: state.integrityFailure,
+    integrityDeferredReason: state.integrityDeferredReason || null,
+    // Raw totals measure different universes: the device keeps history and
+    // queued operations the server does not list. Compare `basis.*.comparable`.
+    countComparison: comparison ? {
+      local: {clients: comparison.local?.clientes ?? null, products: comparison.local?.produtos ?? null,
+        sales: comparison.local?.vendas ?? null, payments: comparison.local?.pagamentos ?? null, activeDebt: comparison.local?.fiado ?? null},
+      remote: {clients: comparison.remote?.clients ?? null, products: comparison.remote?.products ?? null,
+        sales: comparison.remote?.sales ?? null, payments: comparison.remote?.payments ?? null, activeDebt: comparison.remote?.fiado ?? null},
+      basis: comparison.basis || null,
+      retainedDebtDifference: comparison.retainedDebtDifference ?? null,
+      countsMatch: comparison.countsMatch, balancesMatch: comparison.balancesMatch, ok: comparison.ok,
+    } : null,
+    retainedClientBalances: (() => {
+      if (typeof retainedClientBalances !== "function") return [];
+      // Optional evidence: the export itself must never fail because of it.
+      try { return retainedClientBalances().map(({clientName, ...row}) => row); } catch { return null; }
+    })(),
     orphanOperations: saleIntegrityDiagnostics().count + paymentIntegrityDiagnostics().count,
     saleIntegrity: saleIntegrityDiagnostics(),
     paymentIntegrity: paymentIntegrityDiagnostics(),
@@ -6857,6 +6922,18 @@ async function cleanupConfirmedLegacyFixtures(prefetched) {
 }
 async function compareLocalAndCloud() {
   const local = localSummary(),
+    // Computed only here (manual Sync), never on each emit. Optional in isolated harnesses.
+    pulled = name => lastFullPullForAudit?.businessId === activeBusinessId() && lastFullPullForAudit.sessionScope === namespace()
+      ? lastFullPullForAudit.entries.find(entry => entry.name === name)?.documents || null : null,
+    // Explanatory parts only: a failure here falls back to raw totals, never fails Sync.
+    explain = compute => { try { return {value: compute()}; } catch (error) { return {value: null, error: String(error?.message || error).slice(0, 160)}; } },
+    basisResult = typeof comparableRecords === "function" ? explain(() => {
+      const data = DB.carregar();
+      return {sales: comparableRecords(data, "sales", pulled("sales")), payments: comparableRecords(data, "payments", pulled("payments"))};
+    }) : {value: null},
+    retainedResult = typeof retainedClientBalances === "function" ? explain(retainedClientBalances) : {value: []},
+    basis = basisResult.value,
+    retained = retainedResult.value || [],
     remote = {
       clients: state.cloudCounts.clients ?? 0,
       products: state.cloudCounts.products ?? 0,
@@ -6867,14 +6944,22 @@ async function compareLocalAndCloud() {
       fiadoIncludingHistory: Number(state.cloudFinancial.fiadoIncludingHistory ?? state.cloudFinancial.fiado ?? 0),
     };
   const checks={clients:local.clientes===remote.clients,products:local.produtos===remote.products,
-      sales:local.vendas===remote.sales,payments:local.pagamentos===remote.payments},
+      sales:(basis?.sales.comparable??local.vendas)===(basis?.sales.remoteComparable??remote.sales),
+      payments:(basis?.payments.comparable??local.pagamentos)===(basis?.payments.remoteComparable??remote.payments)},
     auditedCollections=Object.keys(checks).filter(name=>canPullSource(name)),
     financialAudited=canPullSource('payments')&&canPullSource('clients'),
     countsMatch=auditedCollections.every(name=>checks[name]),
     balancesMatch = !financialAudited || Math.abs(local.fiado - remote.fiado) < 0.01,
+    debt = value => Math.max(0, -Number(value || 0)),
+    retainedDebtDifference = roundedMoney(retained.filter(row => row.difference !== null)
+      .reduce((total, row) => total + debt(row.localBalance) - debt(row.cloudBalance), 0)),
     comparison = {
       local,
       remote,
+      basis,
+      retainedBalances: retained,
+      retainedDebtDifference,
+      explanationErrors: [basisResult.error, retainedResult.error].filter(Boolean),
       scope:{collections:auditedCollections,financialAudited},
       countsMatch,
       balancesMatch,
@@ -7025,8 +7110,13 @@ async function runManualSync({manualRetry = false} = {}) {
     received,
   });
   // Manual audit only. Reuse this pull's server documents; never add a listener
-  // or an automatic full financial audit on each background sync.
-  if (result.dataSynced) {
+  // or an automatic full financial audit on each background sync. Operations
+  // that can no longer be sent (blocked history) must not postpone this
+  // read-only comparison forever; anything still sendable or in flight does.
+  const nothingSendable = counts.pending === 0 && !counts.processing && !counts.preparing &&
+    !counts.awaitingReceipt && !state.syncFailure;
+  if (result.dataSynced || nothingSendable) {
+    emit({integrityDeferredReason: ""});
     try {
       const audit=await compareDeviceWithCloud({prefetched: lastFullPullForAudit});
       assertCloudReadScope(readScopeToken);
@@ -7036,8 +7126,13 @@ async function runManualSync({manualRetry = false} = {}) {
       assertCloudReadScope(readScopeToken);
       result.integrityStatus = "failed";
     }
-    emit({status:result.syncFailure?'error':result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
-    traceSync("completed", {dataSynced: true, integrityStatus: result.integrityStatus,integrityLevel:result.integrity?.level||'unknown',integrityMatches:result.integrity?!result.integrity.actionable:null});
+    // Blocked errors keep their status and message: a clean audit never turns them green.
+    if (result.dataSynced)
+      emit({status:result.syncFailure?'error':result.integrity?.actionable?'waiting':'success',message:describeSyncResult(result)});
+    traceSync("completed", {dataSynced: result.dataSynced, integrityStatus: result.integrityStatus,integrityLevel:result.integrity?.level||'unknown',integrityMatches:result.integrity?!result.integrity.actionable:null});
+  } else {
+    result.integrityStatus = "not_checked";
+    emit({integrityDeferredReason: state.syncFailure ? "sync_failure" : "operations_waiting_to_send"});
   }
   return result;
 }
@@ -7084,7 +7179,7 @@ async function runAutomaticSync() {
       emit({
         status: state.syncFailure ? "error" : complete ? "success" : counts.errors ? "error" : "waiting",
         message: state.syncFailure ? describeSyncResult({syncFailure:state.syncFailure}) : complete
-          ? preservedQueueMessage(counts) || "Todos os dados estão sincronizados."
+          ? preservedQueueMessage(counts) || "Alterações deste aparelho confirmadas na nuvem."
           : describeSyncResult({
               sent: push.sent,
               pending: counts.pending,
@@ -7437,6 +7532,7 @@ function setUser(user, profile = null, business = null, {reason = "session_updat
     syncTrace: [],
     integrityStatus: "not_checked",
     integrityFailure: null,
+    integrityDeferredReason: "",
     snapshotMetadata: {},
     clientProjection: null,
     lastSync: profile?.businessId
@@ -7718,6 +7814,7 @@ window.SyncFirebase = {
   subscribeRecentActivityEvents,
   compare: compareLocalAndCloud,
   compareDeviceWithCloud,
+  retainedClientBalances,
   exportLocalDiagnostic,
   downloadJsonFile,
   onlyLocalSaleReport,
