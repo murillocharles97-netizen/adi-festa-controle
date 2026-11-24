@@ -75,3 +75,42 @@ Branch `claude/sync-diagnostico-saldos`, a partir da `main` `e45a934` (V242.8). 
 
 - Pode ir como release de correção separada, sem o trabalho de cobrança em lote. Versão e cache ficam para a release.
 - Rollback: reverter os commits desta branch e publicar uma versão nova. Nada no formato local muda, então filas e recibos continuam compatíveis.
+
+## Release V242.9 (preparada, não publicada)
+
+- **Branch:** `claude/release-v2429-sync-comparacao`, a partir da `origin/main` `e45a934` (V242.8, a versão publicada).
+- **Integração:** `claude/sync-diagnostico-saldos` por fast-forward, sem reescrever os commits.
+- **Versão:**
+  - `APP_VERSION` passa a 242.9 e `hotfix` a `sync-comparacao-v2429`; `release` e `clientRelease` continuam 242;
+  - o `CACHE` é `veconi-v2429-sync-comparacao-v1`, e `GET_VERSION` informa 242.9.
+- **`?v=2429-sync`:** `css/firebase.css`, `js/fiado-space-regularization.js`, `js/mobile-navigation.js`, `js/sale-recovery-ui.js` (importado só por `firebase-ui.js`) e os pontos de entrada da sincronização (`auth.js`, `firebase-ui.js` e `sync.js`). `build-info.js` recebe `?v=2429` no `index.html` e no `catalogo.html`.
+- **Precache:** as 8 URLs versionadas estão no precache, com 308 entradas, sem duplicatas, todas existentes.
+- **Fora da release:**
+  - `public-site.manifest.json`, porque não há arquivo novo;
+  - Functions, Rules, protocolo e formato da fila;
+  - a cobrança em lote do Codex.
+
+| Verificação da candidata | Resultado |
+|---|---|
+| `npm run lint` e `npm run build` | 566 arquivos |
+| `tests/sync-version-identity.test.js` | 5/5 |
+| Versionamento da sessão em `tests/sync-session-alert.test.js` | Aprovado. As outras 7 falhas do arquivo são as mesmas da V242.8. |
+| `scripts/release-version-check.cjs` | OK: 242.9 (compatibilidade 242) |
+| Suíte completa | 2502 testes, 164 falhas, os mesmos nomes da base `e45a934`. Nenhuma falha nova. |
+| `build:public` e `test:public-containment` | 284 arquivos; 56/56 |
+| Pacote público servido localmente, a 390 e 1366 px | 233/233 respostas 200, incluindo as 8 URLs versionadas. O service worker ativou `veconi-v2429-sync-comparacao-v1` com 308 entradas. Os únicos erros vêm do host externo bloqueado no teste. |
+
+### Rollback
+
+1. Criar um worktree a partir da `origin/main` atual.
+2. Reverter o commit de código: `git revert --no-edit <commit fix(sync) desta release>`. O commit de documentação pode ficar.
+3. Publicar como 242.10, com o cache `veconi-v24210-<assunto>-v1` e um `?v=` novo nos mesmos arquivos e nos pontos de entrada da sincronização.
+4. Rodar as verificações e publicar com push fast-forward, sem forçar a `main`.
+
+Nada no formato local, na fila ou nos recibos muda nesta release, então o rollback não invalida operações pendentes nem dados do aparelho.
+
+### Depois de publicar
+
+- Confirmar `GET_VERSION` e `build-info.js` publicados.
+- Homologar no Android físico: uma sincronização manual, a tela "Sincronização dos dados" e "Saldo de cliente retido" com os dados reais, e um diagnóstico exportado novo.
+- Nenhuma correção de dados real faz parte desta release.
