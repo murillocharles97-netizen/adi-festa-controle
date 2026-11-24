@@ -192,9 +192,9 @@ Prioridade: registrar vendas novas com confiança. O passado que exige recupera�
 
 ### Rollback
 
-1. Reverter os commits da força-tarefa sem forçar a `main`:
+1. Reverter os commits da força-tarefa sem forçar a `main`, num único commit:
    ```
-   git revert --no-edit <commit-da-release>..<commit-da-release>~N
+   git revert --no-commit 2c93126..HEAD && git commit -m "Revert V242.10"
    ```
 2. Publicar como 242.11, com cache `veconi-v24211-rollback-v1`.
 
