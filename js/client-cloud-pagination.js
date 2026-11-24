@@ -63,9 +63,13 @@
     if (!renderer || !list) return;
     moreObserver?.disconnect();
     moreObserver = null;
-    list.innerHTML = controller.items.length
-      ? (context.mobile && window.ClientesMobile?.renderCards?.(controller.items) || controller.items.map((client, index) => renderer(client, index)).join(""))
-      : `<div class="empty-state"><i data-lucide="users"></i><strong>Nenhum cliente encontrado</strong><span>Tente ajustar a busca ou os filtros.</span></div>`;
+    const empty = `<div class="empty-state"><i data-lucide="users"></i><strong>Nenhum cliente encontrado</strong><span>Tente ajustar a busca ou os filtros.</span></div>`;
+    controller.shown = controller.items.slice();
+    // Mobile: keyed update, so unchanged cards are kept (no flicker, no replayed animation).
+    if (!(context.mobile && window.ClientesMobile?.patchCards?.(list, controller.items, empty)))
+      list.innerHTML = controller.items.length
+        ? (context.mobile && window.ClientesMobile?.renderCards?.(controller.items) || controller.items.map((client, index) => renderer(client, index)).join(""))
+        : empty;
     context.page.querySelectorAll("#load-more-clients,#mobile-load-sentinel,[data-client-cloud-more]").forEach((item) => item.remove());
     if (context.mobile) list.querySelectorAll(".mobile-swipe-shell").forEach((card) => window.ClientesMobile?.bindCard?.(card));
     if (controller.hasMore) {
@@ -215,6 +219,13 @@
       if (!context || context.page !== page) return;
       if (scoped || detail.financial || window.Clientes?.localListBalances?.()) {
         if (document.querySelector('#modal')?.children.length) { refreshAfterModal = refresh; return; }
+        if (window.ClientesMobile?.owns?.()) {
+          // The mobile page is patched in place (it keeps the cloud page on screen)
+          // and the cloud page is then read again, as the rebuilt page used to do.
+          window.ClientesPage?.refresh?.();
+          if (!scoped) { delete context.page.dataset.clientCloudBound; activate(true, { fresh: true, reason: detail.source || "clients-financial-changed" }); }
+          return;
+        }
         if (!scoped) controllers.delete(keyOf(context));
         window.ClientesPage?.refresh?.();
         return;
@@ -267,6 +278,14 @@
       refresh?.();
     },
     mode: () => current()?.mode || "default",
+    // Cloud rows on screen for the current page and query, so a local update of
+    // the mounted page keeps them instead of flipping back to the local list.
+    items: () => {
+      const context = current();
+      if (!context || !["search", "default"].includes(context.page.dataset.clientCloudMode)) return null;
+      const shown = controllers.get(keyOf(context))?.shown;
+      return shown?.length ? shown : null;
+    },
     resume,
     snapshot: () => diagnostic("snapshot"),
   };

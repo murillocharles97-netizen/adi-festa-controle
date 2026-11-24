@@ -63,6 +63,11 @@
 }
 @media(max-width:390px){.mobile-client-main{grid-template-columns:43px minmax(0,1fr) auto 22px;gap:8px}.mobile-client-avatar{width:43px;height:43px}.mobile-client-balance{min-width:82px}.mobile-client-balance strong{font-size:15px}.mobile-client-kpis{grid-template-columns:repeat(3,160px)}.mobile-sort-row>small{display:none}.mobile-sort-row label{width:100%}.mobile-sheet-options{grid-template-columns:1fr}}
 @keyframes mobileCardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+/* V242.7: the entrance plays once per mounted screen. The delay comes from the
+   card position, so the card markup only depends on its data; updated, searched
+   and appended cards appear without fading in again. */
+.mobile-client-list>.mobile-swipe-shell:nth-child(2){--delay:28ms}.mobile-client-list>.mobile-swipe-shell:nth-child(3){--delay:56ms}.mobile-client-list>.mobile-swipe-shell:nth-child(4){--delay:84ms}.mobile-client-list>.mobile-swipe-shell:nth-child(5){--delay:112ms}.mobile-client-list>.mobile-swipe-shell:nth-child(6){--delay:140ms}.mobile-client-list>.mobile-swipe-shell:nth-child(7){--delay:168ms}.mobile-client-list>.mobile-swipe-shell:nth-child(8){--delay:196ms}.mobile-client-list>.mobile-swipe-shell:nth-child(9){--delay:224ms}.mobile-client-list>.mobile-swipe-shell:nth-child(10){--delay:252ms}.mobile-client-list>.mobile-swipe-shell:nth-child(11){--delay:280ms}.mobile-client-list>.mobile-swipe-shell:nth-child(12){--delay:308ms}.mobile-client-list>.mobile-swipe-shell:nth-child(n+13){--delay:336ms}
+.clients-mobile-page[data-cards-settled] .mobile-swipe-shell{animation:none}
 @keyframes mobileSpin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.mobile-swipe-shell{animation:none}.mobile-filter-sheet,.mobile-filter-overlay{transition:none}}
 

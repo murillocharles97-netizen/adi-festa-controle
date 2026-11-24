@@ -71,7 +71,22 @@ window.ClientesPage=(()=>{
     try { return renderList(); } finally { renderPass=null; }
   }
   function renderList(){const scope=window.SpaceContext?.viewScope?.();if(scope!==selectionScope){selectionScope=scope;state.selected.clear();state.selecting=false;state.drawer=false;}const list=filtered(),visible=list.slice(0,state.limit);return `<div class="clients-page">${window.SpaceContext?.renderBar?.("clients")||""}${Clientes.originalAccountAction?.()||""}${header()}${controls()}${topDebtors()}<section class="professional-client-grid" id="client-list">${visible.map((c,i)=>card(c,i)).join('')||empty()}</section>${list.length>visible.length?`<button class="btn btn-light load-clients" id="load-more-clients">Carregar mais ${Math.min(20,list.length-visible.length)} clientes</button>`:''}${Clientes.unassignedMarkup?.()||""}${drawer()}${selectionBar()}</div>`}
-  function refresh(){const app=$('#app');if(!app||Router.atual()!=='clientes'||!$('.clients-page',app))return;const scroll=scrollY;app.innerHTML=window.ClientesPage.render();const page=$('.clients-page',app);if(page)page.dataset.clientsBound='true';window.ClientesPage.bind();scrollTo({top:scroll});window.lucide?.createIcons()}
+  function refresh(){
+    // The mounted mobile screen updates in place (see clientes-mobile.js).
+    if(window.ClientesMobile?.owns?.())return window.ClientesMobile.refresh();
+    const app=$('#app');if(!app||Router.atual()!=='clientes'||!$('.clients-page',app))return;
+    // Desktop rebuild: keep the field being typed in (search), its caret and the scroll.
+    const scroll=scrollY,active=document.activeElement,focusId=active&&app.contains(active)&&active.id&&active.matches('input,select,textarea')?active.id:'';
+    let caret=null;try{if(focusId&&typeof active.selectionStart==='number')caret=[active.selectionStart,active.selectionEnd,active.selectionDirection]}catch{}
+    const typed=focusId&&active.matches('input,textarea')?active.value:null;
+    app.innerHTML=window.ClientesPage.render();const page=$('.clients-page',app);if(page)page.dataset.clientsBound='true';window.ClientesPage.bind();scrollTo({top:scroll});window.lucide?.createIcons();
+    const field=focusId&&document.getElementById(focusId);
+    if(field&&app.contains(field)){
+      // Text typed during the search debounce is not lost by an automatic update.
+      if(typed!==null&&field.value!==typed){field.value=typed;field.dispatchEvent(new Event('input',{bubbles:true}))}
+      field.focus({preventScroll:true});if(caret)try{field.setSelectionRange(...caret)}catch{}
+    }
+  }
   const formModal=(title,body,onSave,label='Salvar')=>{const root=$('#modal');root.innerHTML=`<div class="modal-bg"><section class="modal-box"><header class="modal-head"><h3>${title}</h3><button class="icon-btn close">${icon('x')}</button></header><form><div class="modal-body">${body}</div><footer class="modal-foot"><button type="button" class="btn btn-light close">Cancelar</button><button class="btn btn-primary">${label}</button></footer></form></section></div>`;$$('.close',root).forEach(b=>b.onclick=Modais.fechar);$('form',root).onsubmit=async e=>{e.preventDefault();const form=e.target;if(form.dataset.saving)return;form.dataset.saving='1';try{const saved=await onSave(new FormData(form),form);await DB.flush?.();if(saved===false){refresh();return}if(form.isConnected){Modais.fechar();refresh()}}catch(err){Utils.toast(err.message,true)}finally{delete form.dataset.saving}};window.lucide?.createIcons()};
   function registrationContext() {
     Clientes.assertCanCreate();
