@@ -70,3 +70,30 @@ test('a regularização do servidor realmente não atualiza updatedAt (motivo da
   const repository = fs.readFileSync('js/firebase/firestore-repository.js', 'utf8');
   assert.match(repository, /where\('updatedAt','>=',value\)/);
 });
+
+test('aparelho offline durante a regularização: ao voltar, o aviso acumulado dispara a releitura completa', () => {
+  // Real signal handler body from startCloudSubscriptions.
+  const start = "const unsubscribe=syncSignalRepository.subscribeById('last-sync',(signal,metadata)=>{";
+  const body = section(start, '},error=>{').slice(start.length);
+  const enqueued = new Map();
+  const context = vm.createContext({
+    String, Object, CustomEvent: class {}, window: {}, businessId: 'fx-shop', generation: 0,
+    isCurrent: () => true, rememberSnapshotMetadata() {}, emit() {}, persist() {}, publishState() {}, schedule() {}, fail() {},
+    DEFAULT_PULL_NAMES: ['sales'], signalCollections: {get size() { return enqueued.size; }, [Symbol.iterator]: () => enqueued.keys()},
+    enqueue: (name, revision) => enqueued.set(name, revision),
+    // What this device read before going offline.
+    readSignalVersions: () => ({clients: 'server:fx-sale-before', balanceAdjustments: 'server:fx-old-adjustment', balanceEvents: 'server:fx-sale-before', sales: 'server:fx-sale-before'}),
+  });
+  vm.runInContext(`this.handler=(signal,metadata)=>{${body}};`, context);
+  // Production shape: collectionVersions is merged across operations; a later sale did
+  // not erase the regularization's versions for clients and balanceAdjustments.
+  context.handler({businessId: 'fx-shop', workspaceGeneration: 0, revision: 'server:fx-later-sale', changedCollections: ['sales', 'clients'],
+    collectionVersions: {clients: 'server:fx-later-sale', balanceAdjustments: 'server:fx-regularization', balanceEvents: 'server:fx-regularization', sales: 'server:fx-later-sale'}}, {});
+  const changed = [...enqueued.keys()];
+  assert.ok(changed.includes('balanceAdjustments') && changed.includes('clients'), JSON.stringify(changed));
+  const cloudNames = changed;
+  const adjustedBalances = cloudNames.includes('clients') && changed.includes('balanceAdjustments');
+  assert.equal(adjustedBalances, true, 'the download step reads customers completely');
+  const download = section('async function download() {', 'const time=now();');
+  assert.match(download, /const adjustedBalances=cloudNames\.includes\('clients'\)&&changed\.includes\('balanceAdjustments'\);/);
+});
