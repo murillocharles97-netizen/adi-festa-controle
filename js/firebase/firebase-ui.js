@@ -1,4 +1,4 @@
-import './sync.js?v=241';
+import './sync.js?v=2427-marca';
 import '../sale-recovery-client.js?v=236.2';
 import '../sale-recovery-ui.js?v=236.2';
 import '../sale-monetary-analysis-ui.js?v=215';
