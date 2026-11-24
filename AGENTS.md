@@ -1,6 +1,6 @@
 # VECONI — instruções para agentes (Claude e Codex)
 
-Regras comuns a todas as sessões de IA neste repositório. O Codex lê este arquivo direto; o Claude Code o importa pelo `CLAUDE.md`. Documentação de produto e de cada release fica em `README.md`, `SAAS_MULTIEMPRESA.md` e `docs/`.
+Regras comuns a todas as sessões de IA neste repositório. O Codex lê este arquivo direto; o Claude Code o importa pelo `CLAUDE.md`. **Claude e Codex têm as mesmas responsabilidades e permissões.** Documentação de produto e de cada release fica em `README.md`, `SAAS_MULTIEMPRESA.md` e `docs/`.
 
 ## Produto e stack
 
@@ -16,7 +16,7 @@ Regras comuns a todas as sessões de IA neste repositório. O Codex lê este arq
 - Pacote público: `npm run build:public` e `npm run test:public-containment`.
 - Rules no Emulator: `npm run test:emulator`. Functions no Emulator: `npm run test:functions-emulator`.
 - Auditorias de navegador (Puppeteer): scripts `test:*-browser` do `package.json` e `scripts/audit-*.cjs`.
-- Versão da release: `node --test tests/sync-version-identity.test.js` e `scripts/release-version-check.cjs`.
+- Versão da release: `node --test tests/sync-version-identity.test.js` e `node scripts/release-version-check.cjs` (compara com a versão publicada, somente leitura).
 
 ## Repositório público
 
@@ -30,25 +30,36 @@ Use dados fictícios. Material com dados reais fica fora do repositório, com ac
 
 ## Produção e dados reais
 
-- Não altere dados reais sem autorização explícita do responsável, dada na conversa para aquela operação.
+- **Deploy em produção, publicação de Functions, de Rules e qualquer alteração em dados reais exigem autorização explícita do responsável pela VECONI para aquela operação.** Autorização anterior não vale para a próxima operação, e atualizar estas instruções não autoriza deploy.
 - Leitura de produção só quando pedida, e somente leitura.
 - Operações financeiras (saldos, recebimentos, caixa, estoque, Fiado) exigem prévia, backup, gravação condicionada à versão do documento e execução única.
 - Não confunda abrir o WhatsApp, gerar uma mensagem ou salvar um rascunho com operação confirmada no servidor.
 
-## Publicação
+## Desenvolvimento em paralelo
 
-- A `main` é protegida e só a Deploy Key publica. Não desproteja a `main`, não procure credenciais e não publique sem GO explícito.
-- Os comandos de publicação são executados pelo responsável. Prepare o comando ou script, sem expor credenciais.
-- Ordem quando há backend: Functions, depois Rules, depois frontend. Toda candidata traz plano de rollback.
+- Todo desenvolvimento usa branch e worktree isolados, partindo da `main` remota atual (`git fetch origin` e conferir `origin/main` antes de começar). Sem merge na `main` fora de uma release autorizada.
+- Não sobrescreva trabalho de outro agente nem altere worktrees ou branches de outra sessão sem coordenação com o responsável.
+- Um escritor por arquivo. Antes de alterar arquivo que outra sessão está alterando, avise o responsável.
+- Quando o responsável atribui uma área a um agente (por exemplo, assinaturas, cobrança e Mercado Pago), o outro não altera essa área sem combinar antes.
+- Branches de desenvolvimento podem acrescentar ao `service-worker.js` (lista `ARQUIVOS`) e ao `public-site.manifest.json` os arquivos novos que criaram, e apontar no `index.html` os scripts novos. A versão do app e do cache fica para a release.
 
-## Trabalho paralelo
+## Releases
 
-- Cada tarefa usa sua própria branch e worktree, partindo da `main` atual (confira o HEAD antes de começar). Sem merge na `main` sem autorização.
-- Áreas: o Codex é dono de assinaturas, cobrança e integração com Mercado Pago. As outras sessões não alteram esses fluxos.
-- Um escritor por arquivo. Antes de alterar arquivo que outra sessão ou o Codex também está alterando, avise o responsável.
-- Arquivos compartilhados de release: `index.html` (parâmetros `?v=` e tags de script), `service-worker.js` (nome do cache e lista `ARQUIVOS`), `js/build-info.js` (versão do app) e `public-site.manifest.json`.
-  - Uma sessão pode acrescentar ao `service-worker.js` e ao manifesto os arquivos novos que criou, e apontar no `index.html` os scripts novos.
-  - **A versão do app e do cache só muda na integração da release**, por quem integra (hoje o Codex). As candidatas deixam a versão como está e dizem no relatório quais arquivos precisam de novo `?v=`.
+Claude e Codex podem preparar, integrar e publicar releases, com as mesmas permissões. Preparar inclui `APP_VERSION` em `js/build-info.js`, o nome `CACHE` e o `GET_VERSION` do `service-worker.js`, o precache (`ARQUIVOS`), os `?v=` e as tags de script do `index.html` e o `public-site.manifest.json`.
+
+1. **Um responsável por release.** Cada release tem um único agente responsável pela integração e publicação, Claude ou Codex.
+2. **Conferir antes de começar:**
+   - a `main` remota (`git fetch origin`, `git log -1 origin/main`);
+   - a versão publicada (`node scripts/release-version-check.cjs`);
+   - se outro agente já prepara a mesma publicação: branches `*/release-v*` locais e remotas (`git branch -a --list "*release-v*"`), worktrees (`git worktree list`) e as notas de coordenação. Na dúvida, pergunte ao responsável antes de seguir.
+3. **Versão e cache únicos.** A branch da release se chama `<agente>/release-v<versão sem ponto>-<assunto>` (por exemplo `claude/release-v2428-loja-online`) e marca a versão como em uso. Antes de escolher a nova versão, confirme que nenhuma outra branch já a usa: `git grep -l -F "appVersion: '<nova versão>'" $(git for-each-ref --format='%(refname)' refs/heads refs/remotes/origin) -- service-worker.js` não pode listar nenhuma branch além da sua. O nome do cache (`veconi-v<versão sem ponto>-<assunto>`) também não pode se repetir. Duas branches nunca publicam a mesma versão.
+4. **Integração** a partir da `origin/main` atual, juntando as branches aprovadas sem reescrever o histórico delas.
+5. **Verificações obrigatórias:** `npm run lint`, `npm run build`, `npm test` sem falha nova em relação à base, `npm run build:public`, `npm run test:public-containment`, `tests/sync-version-identity.test.js`, `scripts/release-version-check.cjs` e, quando a release toca backend, os testes de Emulator aplicáveis. Mudança no protocolo de sincronização só com `--protocol-change` e justificativa.
+6. **Plano de rollback** em toda release. Ele preserva IndexedDB, filas de sincronização, recibos e dados dos clientes: voltar o frontend nunca apaga dados locais nem invalida operações pendentes.
+7. **Publicação só com autorização explícita** daquela release. Ordem quando há backend: Functions, depois Rules, depois frontend. Use o mecanismo de publicação já autorizado, sem desproteger a `main` e sem exibir ou copiar credenciais.
+8. **Proibido:** force push, `git reset --hard` ou outro reset destrutivo, e alterar uma `main` local divergente para facilitar a publicação. Se a `main` remota andou, refaça a integração sobre ela.
+9. **Assumir uma release.** Se o agente responsável estiver ocupado, o outro pode assumir a preparação ou a publicação depois de confirmar o estado atual (branch, commits, testes, versão publicada) e que não há publicação concorrente em andamento.
+10. **Depois de publicar:** confirmar que o site entrega a nova versão (`GET_VERSION` e `js/build-info.js` publicados) e registrar commit, versão, cache e rollback no relatório.
 
 ## Testes
 
@@ -67,13 +78,13 @@ Use dados fictícios. Material com dados reais fica fora do repositório, com ac
 
 ## Passagem de tarefa
 
-Para trabalho que outra sessão ou o Codex vai continuar ou revisar, entregue:
+Para trabalho que outro agente vai continuar, revisar ou publicar, entregue:
 
 - **Objetivo e critério de conclusão.**
 - **Estado conferido:** branch, commit base, commits, se há mudança não commitada.
 - **Evidências:** comandos executados, resultados e falhas comparadas com a base.
 - **Pendências e bloqueios:** o que falta, do que depende e o que não foi verificado.
 - **Recursos em uso:** worktrees, portas, emuladores, pastas fora do repositório.
-- **Publicação:** arquivos de versão a atualizar, ordem de deploy, rollback e recomendação GO ou NO-GO.
+- **Publicação:** versão e cache pretendidos, arquivos de versão afetados, ordem de deploy, rollback e recomendação GO ou NO-GO.
 
 Quem retoma confere arquivos, Git e testes de verdade: o relatório é contexto, não prova.
