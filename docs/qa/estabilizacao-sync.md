@@ -152,3 +152,58 @@ Regra transversal: nenhuma operação é descartada nem considerada sincronizada
 - Android físico: sem ADB.
 - Dados reais aplicados: NO-GO.
 - Publicação: NO-GO.
+
+## Release V242.10
+
+Prioridade: registrar vendas novas com confiança. O passado que exige recuperação complexa fica de fora.
+
+### Incluído nesta release
+
+- Tudo o que está acima.
+- **"Encerrar sem efeitos"** para as vendas de serviço recusadas antes da V241:
+  - usa a conciliação auditada com o saldo atual da nuvem como alvo, então o ajuste registrado é zero;
+  - pede confirmação e faz backup antes;
+  - mantém o original e o erro no aparelho;
+  - é idempotente e nunca entra no lote.
+- **Releitura completa dos clientes** quando um aviso de sincronização inclui ajustes de saldo:
+  - a regularização feita no servidor não atualiza `updatedAt`, por isso a leitura incremental não a via em outros aparelhos;
+  - também vale para o aparelho que estava offline: o mapa de versões em produção é acumulado, e o aviso pendente fica salvo.
+- **Versão:** 242.10, cache `veconi-v24210-estabilizacao-v1`.
+- **Arquivos com `?v=24210-estab`, todos no precache:** `sync.js`, `firebase-ui.js`, `auth.js` (só a importação), `app.js`, `recibos.js`, `installment-credit.js`, `sale-recovery-ui.js`, `css/firebase.css`, `sync-findings.js`, `export-center.js`.
+
+### Verificações da release
+
+| Verificação | Resultado |
+|---|---|
+| Suíte unitária | 2552 testes, 116 falhas; nenhuma nova em relação à V242.9, comparando nome a nome |
+| Emulator completo | 511 testes; 85 falhas contra 86 na V242.9, nenhuma nova. As antigas são de gravação direta pelo navegador, bloqueada pelas regras desde a V202, ou de harness. |
+| Vendas Pix, dinheiro, cartão e fiado | 36 de 36 |
+| Ajuste e regularização de saldo | 14 de 14 |
+| Estoque | 31 de 31 |
+| Serviços e corridas | 33 de 33 |
+| Sincronização, offline e duplicidade | 80 de 80 |
+| Tela e exportação | 15 de 15 |
+| Recebimento de fiado | 29 de 31 (as 2 falhas antigas só procuram texto de código) |
+| Isolamento de Espaços | 41 de 42 (a falha antiga só procura texto de código) |
+| Versão e identidade dos módulos | `release-version-check` OK; `sync-session-alert` 8 de 8 |
+| Precache | 311 entradas, sem duplicatas; os 11 endereços versionados presentes |
+| Pacote público | 286 arquivos; isolamento 56 de 56 |
+| Teste local do pacote (390 e 1366 px) | 235 requisições com 200; service worker ativo com o cache novo; build 242.10; único erro de console = servidor externo bloqueado pelo teste |
+
+### Rollback
+
+1. Reverter os commits da força-tarefa sem forçar a `main`:
+   ```
+   git revert --no-edit <commit-da-release>..<commit-da-release>~N
+   ```
+2. Publicar como 242.11, com cache `veconi-v24211-rollback-v1`.
+
+Nenhum formato de fila, recibo ou dado salvo mudou. Voltar não invalida operações pendentes, e as decisões já registradas no servidor continuam válidas.
+
+### Pendências para a próxima versão
+
+- **Functions:** a regularização de saldo deve gravar `updatedAt`. Perfis sem permissão de ver ajustes só veem a regularização depois de "Sincronizar agora".
+- **Motor comercial gerado:** está desatualizado em relação ao `sync.js` (`--check`). Já estava assim na V242.9; exige revisão e deploy de Functions.
+- **Download do backup na tela de login:** o arquivo está congelado pelo teste da V203.
+- **Limpeza de dados de QA e estoque negativo antigo:** exigem GO específico.
+- **Harnesses antigos:** 4 da arquitetura de recuperação anterior à V202 e 4 de saldo consecutivo.

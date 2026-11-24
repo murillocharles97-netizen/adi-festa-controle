@@ -1,6 +1,6 @@
-import './sync.js?v=2429-sync';
+import './sync.js?v=24210-estab';
 import '../sale-recovery-client.js?v=236.2';
-import '../sale-recovery-ui.js?v=2429-sync';
+import '../sale-recovery-ui.js?v=24210-estab';
 import '../sale-monetary-analysis-ui.js?v=215';
 
 let unsubscribe=null,lastState=null;
