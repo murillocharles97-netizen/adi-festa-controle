@@ -157,9 +157,16 @@ window.InstallmentCredit = (() => {
       }
     });
   }
-  function paint(id){
-    const client=clientFor(id);if(!client)return;
+  // A batch prepares the local list balances once; each card then reads the same
+  // projection instead of recomputing every Fiado calendar of the base per card.
+  function paintAll(ids){
+    if(!ids.length)return;
     if(window.Clientes?.localListBalances?.())window.Clientes.prepareList();
+    for(const id of ids)paint(id,{prepared:true});
+  }
+  function paint(id,options){
+    const client=clientFor(id);if(!client)return;
+    if(options?.prepared!==true&&window.Clientes?.localListBalances?.())window.Clientes.prepareList();
     updateVisibleTotals();
     for(const card of document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card]')){
       if((card.dataset.clientId||card.dataset.mobileCard)!==id)continue;
@@ -188,7 +195,7 @@ window.InstallmentCredit = (() => {
     if((route&&route!=='clientes')||!hydrateList()||!available())return;
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
-      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);queue.forEach(paint);
+      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);paintAll(queue);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
         while(queue.length&&scope()===origin&&window.Router?.atual?.()===route){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
@@ -199,12 +206,12 @@ window.InstallmentCredit = (() => {
   }
   function scheduleHydration(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;hydrateVisible();});}
   function expireDisplayedProofs() {
-    for (const id of summariesForScope().keys()) {
-      if (confirmedAccount(id)) continue;
+    const expired = [...summariesForScope().keys()].filter(id => !confirmedAccount(id));
+    for (const id of expired) {
       summaries.delete(id);
       confirmedAt.delete(id);
-      paint(id);
     }
+    paintAll(expired);
   }
   function recheck(id) {
     const scoped = window.Clientes?.scopedScreen?.();
@@ -222,7 +229,7 @@ window.InstallmentCredit = (() => {
     confirmedAt.clear();
     failedAt.clear();
     clientEpochs.clear();
-    displayed.forEach(paint);
+    paintAll(displayed);
     if(!scoped||regularizedOwnerList())scheduleHydration();
   }
   function revisit() {

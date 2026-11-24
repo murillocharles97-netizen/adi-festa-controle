@@ -9,7 +9,11 @@
   };
   function adapt(){
     const operation=window.OperationMode?.get?.();if(!operation||window.OperationMode?.can?.('viewCRM')===false)return;
-    const credit=operation.creditMode==='enabled',occasional=operation.creditMode==='occasional',loyalty=operation.modules.loyalty,summary=window.CRMDashboard?.snapshot?.(),db=DB.carregar(),clients=(db.clientes||[]).filter(c=>c.ativo!==false),metrics=new Map((summary?.results||db.metricasClientes||[]).map(x=>[x.client?.id||x.id,x.metric||x])),profiles=clients.map(c=>({client:c,metrics:metrics.get(c.id)||{totalSpent:Number(c.totalComprado||0),purchaseCount:Number(c.quantidadeVendas||0),daysSinceLastPurchase:999,activity:'no_data',availableRewards:0}})),revenue=profiles.reduce((s,p)=>s+p.metrics.totalSpent,0),purchases=profiles.reduce((s,p)=>s+p.metrics.purchaseCount,0);
+    const credit=operation.creditMode==='enabled',occasional=operation.creditMode==='occasional',loyalty=operation.modules.loyalty;
+    // V242.7: the CRM snapshot covers the whole base (seconds on a mid-range phone
+    // with thousands of sales). Only the non-Fiado layout and the reward badges use
+    // it, so a Fiado screen no longer computes it on every bind.
+    const needsMetrics=!credit||loyalty,summary=needsMetrics?window.CRMDashboard?.snapshot?.():null,db=DB.carregar(),clients=(db.clientes||[]).filter(c=>c.ativo!==false),metrics=needsMetrics?new Map((summary?.results||db.metricasClientes||[]).map(x=>[x.client?.id||x.id,x.metric||x])):new Map(),profiles=needsMetrics?clients.map(c=>({client:c,metrics:metrics.get(c.id)||{totalSpent:Number(c.totalComprado||0),purchaseCount:Number(c.quantidadeVendas||0),daysSinceLastPurchase:999,activity:'no_data',availableRewards:0}})):[],revenue=profiles.reduce((s,p)=>s+p.metrics.totalSpent,0),purchases=profiles.reduce((s,p)=>s+p.metrics.purchaseCount,0);
     const actions=document.querySelector('.client-head .head-actions');
     if(actions&&!actions.querySelector('[data-go="crm"]'))actions.insertAdjacentHTML('afterbegin',`<button class="btn btn-light" data-go="crm">${icon('contact-round')} CRM</button>`);
     document.querySelectorAll('[data-go="crm"]').forEach(b=>b.onclick=()=>Router.ir('crm'));
@@ -40,12 +44,19 @@
     }
     if(loyalty)document.querySelectorAll('.professional-client-card').forEach(card=>{const metric=metrics.get(card.dataset.clientId);if(metric?.availableRewards>0&&!card.querySelector('.smart-reward'))card.querySelector('header')?.insertAdjacentHTML('beforeend',`<span class="smart-reward">${icon('gift')} Recompensa disponível</span>`)});
     document.querySelectorAll('.professional-client-card,.mobile-client-card').forEach(card=>{
+      // Bound once per card; on mobile the list click handler already opens the
+      // profile, so a second click listener would build the profile twice.
+      if(card.__smartBound)return;card.__smartBound=true;
       card.tabIndex=0;card.setAttribute('role','button');
-      card.addEventListener('click',event=>{if(event.target.closest('button,input,label,a'))return;const id=card.dataset.clientId||card.dataset.mobileCard;if(id)base.profile(id)});
+      if(!card.matches('.mobile-client-card'))card.addEventListener('click',event=>{if(event.target.closest('button,input,label,a'))return;const id=card.dataset.clientId||card.dataset.mobileCard;if(id)base.profile(id)});
       card.addEventListener('keydown',event=>{if((event.key==='Enter'||event.key===' ')&&!event.target.closest('button,input')){event.preventDefault();base.profile(card.dataset.clientId||card.dataset.mobileCard)}});
     });
-    document.querySelectorAll('[data-smart-sale]').forEach(button=>button.onclick=()=>window.ClientesMobile?.startSale?.(button.dataset.smartSale));window.lucide?.createIcons();
+    document.querySelectorAll('[data-smart-sale]').forEach(button=>button.onclick=()=>window.ClientesMobile?.startSale?.(button.dataset.smartSale));
+    // createIcons() rebuilds every icon of the page; run it only for new icons.
+    if(document.querySelector('i[data-lucide]'))window.lucide?.createIcons();
   }
   base.bind=function(){const value=originalBind();queueMicrotask(adapt);return value};
+  // The mobile screen patches cards in place; new cards get the same adaptation.
+  base.afterPatch=()=>adapt();
   addEventListener('operation-settings-changed',()=>{if(Router.atual()==='clientes')base.refresh()});
 })();
