@@ -83,3 +83,68 @@ test('planilha: com a regra ativa, criação sem coluna Marca é recusada sem gr
  assert.equal((await c.root.collection('stockMovements').where('observacao','==','Estoque inicial — importação VECONI').get()).size,0);
  const replay=await sheet.createProducts(req([{nome:'Planilha livre',codigo:'SHEET-1'}]));assert.equal(replay.results[0].replayed,true,'recibo anterior à ativação continua valendo');
 });
+
+// ---- Auditoria Codex V242.7: P1 Rules, P1 recuperação offline, P2 regra confirmada, serviços ----
+const direct=(c,uid,id,extra={})=>sdk.setDoc(c.doc(uid,'products',id),{id,businessId:c.bid,nome:'Direto '+id,preco:10,estoqueAtual:0,spaceAccessMode:'single_space',allowedSpaceIds:[c.space],defaultSpaceId:c.space,spaceScopeVersion:1,...extra});
+test('P1 Rules: escrita direta autenticada sem Marca é recusada com a regra ativa, mesmo sem documento de controle da importação',async()=>{
+ const a=await setup(),b=await setup();await rule(a,true);
+ assert.equal((await a.root.collection('productImportIdentifiers').doc('catalog-revision').get()).exists,false,'sem documento de controle');
+ await assertFails(direct(a,a.editor,'d-sem'));
+ await assertFails(direct(a,a.editor,'d-branco',{marca:'   '}));
+ await assertFails(direct(a,a.editor,'d-objeto',{marca:{x:1}}));
+ await assertFails(direct(a,a.editor,'d-longa',{marca:'x'.repeat(81)}));
+ await assertSucceeds(direct(a,a.editor,'d-com',{marca:'Acme'}));
+ await assertSucceeds(direct(a,a.editor,'d-servico',{itemKind:'service',nome:'Corrida do Táxi'}));
+ await assertFails(direct(a,a.seller,'d-sem-permissao',{marca:'Acme'}));
+ await assertSucceeds(direct(b,b.editor,'b-sem'),'empresa B não exige');
+ const fresh=await setup();await assertSucceeds(direct(fresh,fresh.editor,'f-sem'),'sem settings/default a regra está desligada');
+ await assertSucceeds(sdk.updateDoc(a.doc(a.editor,'products','qa-product'),{nome:'Antigo editado'}),'produto antigo sem marca segue editável');
+});
+test('serviços sem Marca continuam aceitos no cadastro comum com a regra ativa',async()=>{
+ const c=await setup();await rule(c,true);
+ await service.commit(c.request(create(c,c.owner,'svc',c.space,{itemKind:'service',nome:'Corrida do Táxi',controlaEstoque:false})));
+ const svc=await read(c,'products','svc');assert.equal(svc.itemKind,'service');assert.equal(svc.marca,undefined);
+});
+const rejected=item=>({...item,status:'error',lastErrorCode:'failed-precondition',lastErrorMessage:'Esta empresa exige Marca ao cadastrar produtos. Informe a marca e tente novamente.'});
+const recover=(c,item,brands,extra={})=>service.commit({auth:{uid:item.userId},data:{businessId:c.bid,kind:'brand_recovery_apply',item,brands,confirmed:true,...extra}});
+test('P1 recuperação: cadastro offline anterior à ativação é concluído com a marca informada, uma única vez e auditado',async()=>{
+ const c=await setup(),item=create(c,c.editor,'offline',c.space,{estoqueAtual:3,estoque:3,totalStock:3});
+ await rule(c,true);
+ await rejectsBrand(service.commit(c.request(item)));
+ const original=rejected(item);
+ await assert.rejects(recover(c,original,{offline:'Acme'},{confirmed:false}),e=>e.code==='failed-precondition');
+ await assert.rejects(recover(c,original,{outro:'Acme'}),e=>e.code==='invalid-argument');
+ await assert.rejects(recover(c,original,{offline:'  '}),e=>e.code==='invalid-argument');
+ await assert.rejects(recover(c,{...original,lastErrorCode:'permission-denied'},{offline:'Acme'}),e=>e.code==='failed-precondition');
+ assert.equal(await read(c,'products','offline'),undefined,'nenhuma tentativa inválida gravou');
+ const done=await recover(c,original,{offline:' Acme  Ltda '});assert.notEqual(done.replayed,true);
+ const p=await read(c,'products','offline');assert.equal(p.marca,'Acme Ltda');assert.equal(p.estoqueAtual,3);
+ const marker=await read(c,'processedOperations',item.operationId);assert.equal(marker.brandRecovery.version,1);assert.deepEqual(marker.brandRecovery.productIds,['offline']);
+ const audit=await read(c,'auditLogs','brand_recovery_'+item.operationId);assert.equal(audit.type,'brand_required_recovery');assert.equal(audit.brands.offline,'Acme Ltda');assert.equal(audit.originalFailure,'failed-precondition');
+ const again=await recover(c,original,{offline:'Acme Ltda'});assert.equal(again.replayed,true,'repetir a recuperação reconhece o recibo');
+ const queued=await service.commit(c.request(item));assert.equal(queued.replayed,true,'o original da fila é reconhecido pelo mesmo recibo');
+ assert.equal((await c.root.collection('processedOperations').get()).size,1);
+ assert.equal((await c.root.collection('stockMovements').where('produtoId','==','offline').get()).size,1,'sem movimento duplicado');
+ assert.equal((await read(c,'products','offline')).estoqueAtual,3);
+});
+test('P1 recuperação: operação já confirmada (resposta perdida) não é reaplicada nem alterada',async()=>{
+ const c=await setup(),item=create(c,c.editor,'confirmado',c.space);
+ await service.commit(c.request(item));await rule(c,true);
+ const r=await recover(c,rejected(item),{confirmado:'Acme'});assert.equal(r.replayed,true);
+ assert.equal((await read(c,'products','confirmado')).marca,undefined,'nada alterado');
+ assert.equal((await c.root.collection('auditLogs').doc('brand_recovery_'+item.operationId).get()).exists,false);
+});
+const rules=(c,uid,data={})=>service.commit({auth:{uid},data:{businessId:c.bid,kind:'product_rules',...data}});
+test('P2: regra lida e alterada pelo servidor; só quem gerencia configurações altera; outra empresa não muda',async()=>{
+ const a=await setup(),b=await setup();
+ assert.deepEqual([(await rules(a,a.owner)).brandRequired,(await rules(a,a.owner)).confirmed],[false,true],'sem documento: desligada e confirmada');
+ await assert.rejects(rules(a,a.editor,{brandRequired:true}),e=>e.code==='permission-denied');
+ await assert.rejects(rules(a,a.owner,{brandRequired:'sim'}),e=>e.code==='invalid-argument');
+ const on=await rules(a,a.owner,{brandRequired:true});assert.equal(on.brandRequired,true);assert.ok(on.updatedAt);
+ assert.equal((await read(a,'settings','default')).productRules.brandRequired,true);
+ assert.deepEqual((await read(a,'syncMetadata','last-sync')).changedCollections,['settings']);
+ assert.equal((await a.root.collection('auditLogs').where('type','==','product_rules_changed').get()).size,1);
+ assert.equal((await rules(a,a.seller)).brandRequired,true,'qualquer membro lê o estado confirmado');
+ assert.equal((await rules(b,b.owner)).brandRequired,false);
+ await rejectsBrand(service.commit(a.request(create(a,a.editor,'x',a.space))));
+});
