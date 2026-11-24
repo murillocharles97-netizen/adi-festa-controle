@@ -1155,7 +1155,56 @@ function readRecoveryResolution(item){
   if(value.channel==='financial_maintenance')return value.status==='resolved'&&/^[a-f0-9]{64}$/.test(value.auditHash||'')&&value.resolvedAt&&value.resolvedByUid&&value.operationId===item.operationId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})&&sale.length===1&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId?value:null;
   return ['already_recreated','recovered','closed_without_effects'].includes(value.status)&&value.resolvedAt&&value.resolvedByUid&&/^[a-f0-9]{64}$/.test(value.contentHash||'')&&/^[a-f0-9]{64}$/.test(value.payloadHash||'')&&sale.length===1&&value.operationId===item.operationId&&value.saleId===sale[0].entityId&&value.spaceId===sale[0].data?.spaceId&&value.businessId===item.businessId&&value.actorUid===item.userId&&value.workspaceGeneration===(item.workspaceGeneration??0)&&value.payloadChecksum===checksumValue(item.payload||{})?value:null;
 }
+// Força-tarefa V242.10: a reconciliation or recovery done through financial maintenance
+// is first recorded only on the device that ran it. If that local record is lost
+// (storage failure, cleanup, restored backup), the original would stay blocked and
+// its customer retained although the server already decided it. Recognise the
+// decision again from SERVER evidence only: the exact sale, operation, company,
+// generation and space, plus the processed marker with its audit hash. Never
+// sends, never changes the original packet, and any doubt leaves it blocked.
+async function refreshMaintenanceResolutions(isCurrent){
+  if(!currentUser||typeof getDocFromServer!=='function')return 0;
+  const bid=activeBusinessId(),generation=DB.getWorkspaceGeneration?.()??0,hex=/^[a-f0-9]{64}$/;
+  const held=readQueue().filter(item=>item.status==='error'&&item.userId===currentUser.uid&&item.businessId===bid&&
+    (item.workspaceGeneration??0)===generation&&!readRecoveryResolution(item)&&
+    Array.isArray(item.payload?.writes)&&item.payload.writes.length>=1&&
+    item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create').length===1).slice(0,20);
+  let recognised=0;
+  for(const item of held){
+    if(!isCurrent())return recognised;
+    const sale=item.payload.writes.find(w=>w.entityType==='sales'&&w.operation==='create'),saleId=String(sale.entityId||''),reconciliationId='legacy_reconciliation:'+saleId.replaceAll('/','_');
+    try{
+      const [adjustment,reconciliationMarker,remoteSale,saleMarker]=await Promise.all([
+        getDocFromServer(doc(db,'businesses',bid,'balanceAdjustments',reconciliationId)),
+        getDocFromServer(doc(db,'businesses',bid,'processedOperations',reconciliationId)),
+        getDocFromServer(doc(db,'businesses',bid,'sales',saleId)),
+        getDocFromServer(doc(db,'businesses',bid,'processedOperations',String(item.operationId))),
+      ]);
+      if(!isCurrent()||bid!==activeBusinessId())return recognised;
+      const a=adjustment.exists()?adjustment.data():null,m=reconciliationMarker.exists()?reconciliationMarker.data():null,
+        s=remoteSale.exists()?remoteSale.data():null,sm=saleMarker.exists()?saleMarker.data():null;
+      let evidence=null;
+      if(a&&m&&a.resolutionStatus==='resolved_by_reconciliation'&&String(a.resolvedSaleId)===saleId&&String(a.resolvedOperationId)===String(item.operationId)&&
+        a.businessId===bid&&(a.workspaceGeneration??0)===generation&&a.spaceId===sale.data?.spaceId&&a.resolvedAt&&a.actorUid&&
+        m.status==='processed'&&m.eventKind==='balance_reconciliation'&&m.businessId===bid&&(m.workspaceGeneration??0)===generation&&hex.test(m.maintenanceRequestHash||''))
+        evidence={auditHash:m.maintenanceRequestHash,resolutionId:reconciliationId,resolvedByUid:a.actorUid,resolvedAt:a.resolvedAt,serverDecision:'resolved_by_reconciliation'};
+      else if(s&&sm&&s.recoverySource==='reviewed_only_local_sale'&&String(s.operationId)===String(item.operationId)&&s.businessId===bid&&
+        (s.workspaceGeneration??0)===generation&&s.spaceId===sale.data?.spaceId&&s.recoveredAt&&s.recoveredByUid&&
+        sm.status==='processed'&&sm.eventKind==='sale'&&sm.businessId===bid&&hex.test(sm.maintenanceRequestHash||''))
+        evidence={auditHash:sm.maintenanceRequestHash,resolutionId:String(item.operationId),resolvedByUid:s.recoveredByUid,resolvedAt:s.recoveredAt,serverDecision:'recovered'};
+      if(!evidence)continue;
+      const live=readQueue().find(q=>q.operationId===item.operationId);
+      if(!live||checksumValue(live.payload)!==checksumValue(item.payload)||readRecoveryResolution(live))continue;
+      localStorage.setItem(recoveryResolutionKey(item),JSON.stringify({channel:'financial_maintenance',status:'resolved',operationId:item.operationId,saleId,businessId:bid,
+        spaceId:sale.data.spaceId,actorUid:item.userId,workspaceGeneration:item.workspaceGeneration??0,payloadChecksum:checksumValue(item.payload),...evidence,
+        source:'server_evidence',verifiedAt:now()}));
+      recognised++;
+    }catch{/* Unreadable evidence never resolves, resends or alters an original. */}
+  }
+  return recognised;
+}
 async function refreshRecoveryResolutions(isCurrent){
+  try{if(typeof refreshMaintenanceResolutions==='function'&&await refreshMaintenanceResolutions(isCurrent)&&isCurrent()&&typeof updateQueueState==='function')updateQueueState();}catch{/* evidence is optional */}
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
   const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
   const monetary=i=>i.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(i,'sale_total_mismatch','Total não corresponde aos itens.')??i.lastErrorMessage==='Total não corresponde aos itens.')&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
