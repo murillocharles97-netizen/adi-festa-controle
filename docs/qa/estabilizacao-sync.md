@@ -381,4 +381,4 @@ Não exigem mais nenhuma ação.
 | Emulator completo | 511 testes, 86 falhas, os mesmos nomes da V242.9 |
 | Versão e precache | `release-version-check` OK (242.11); `sync-session-alert` 8 de 8; 311 entradas sem duplicatas; os 9 endereços versionados presentes |
 | Pacote público | 286 arquivos; isolamento 56 de 56; teste local com 235 requisições 200 e service worker ativo no cache novo |
-| Dados reais (somente leitura) | apuração do servidor dá R$ 1.469,00 exigíveis no Espaço de origem do cliente regularizado; só esse cliente muda de resultado |
+| Dados reais (somente leitura) | apuração do servidor dá exatamente o saldo cadastral do cliente regularizado, exigível no Espaço de origem; só esse cliente muda de resultado |
