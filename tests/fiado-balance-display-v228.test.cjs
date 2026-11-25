@@ -33,12 +33,20 @@ for(const mobile of [false,true])test(`cold ${mobile?'mobile':'desktop'} list lo
   assert.equal(JSON.stringify(h.rows()),original);assert.equal(h.commits(),0);
  }finally{h.close();}
 });
+// V242.12: offline, the proof no longer authorizes anything (strict status is unverified),
+// but the card keeps the last confirmed value marked as out of date instead of blanking it.
+// Nothing is persisted: every boot starts without a value until the server confirms it.
 test('restart, automatic space readiness and reconnect rehydrate instead of trusting persisted or stale totals',async()=>{
  for(let boot=0;boot<2;boot++){const f=fixture(),{w,h}=f;try{
-  w.SpaceContext.salesId=()=>null;f.mount();w.document.dispatchEvent(new w.Event('DOMContentLoaded'));w.dispatchEvent(new w.Event('veconi-spaces-ready'));await tick();
+  w.SpaceContext.salesId=()=>null;f.mount();
+  assert.match(w.document.querySelector('.client-balance').textContent,/a conferir/i,'no value carried across a restart');
+  w.document.dispatchEvent(new w.Event('DOMContentLoaded'));w.dispatchEvent(new w.Event('veconi-spaces-ready'));await tick();
   assert.equal(w.Clientes.financialStatus(f.client).debt,527);
-  f.setOffline(true);assert.equal(w.Clientes.financialStatus(f.client).status,'unverified');await tick();assert.match(w.document.querySelector('.client-balance').textContent,/a conferir/i);
-  f.setOffline(false);await tick();assert.equal(w.Clientes.financialStatus(f.client).debt,527);assert.equal(h.commits(),0);
+  f.setOffline(true);assert.equal(w.Clientes.financialStatus(f.client).status,'unverified');await tick();
+  const offline=w.document.querySelector('.client-balance');
+  assert.match(offline.textContent,/527,00/);assert.equal(offline.querySelector('[data-balance-freshness]')?.dataset.balanceFreshness,'stale');assert.match(offline.textContent,/sem conexão/);
+  f.setOffline(false);await tick();assert.equal(w.Clientes.financialStatus(f.client).debt,527);
+  assert.equal(w.document.querySelector('.client-balance [data-balance-freshness]'),null,'fresh again after reconnecting');assert.equal(h.commits(),0);
  }finally{h.close();}}
 });
 test('failed or contradictory proof stays unverified, with bounded retries and no legacy inference',async()=>{

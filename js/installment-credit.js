@@ -32,8 +32,15 @@ window.InstallmentCredit = (() => {
   const scope=()=>JSON.stringify([DB.getBusinessId(),DB.getWorkspaceGeneration?.()??0,window.TeamAccess?.captureSession?.(),window.SpaceContext?.viewScope?.()]);
   const clientFor=id=>accountIndex(DB.carregar()).byId.get(id);
   const summaries=new Map(), confirmedAt=new Map(), pending=new Map(), failedAt=new Map(), clientEpochs=new Map();
-  const DISPLAY_TTL=60000, RETRY_DELAY=15000;
-  let summaryScope, previewRequest, proofEpoch=0;
+  // V242.12: the last server-confirmed account of each client, kept for DISPLAY only.
+  // It survives the 60 s proof window and connectivity changes so a confirmed balance
+  // is not blanked while it is being revalidated. It never authorizes a receipt, a
+  // charge or a sale: those read confirmedAccount() or refresh(), as before.
+  const held=new Map(), appliedSeq=new Map(), inflight=new Map();
+  // A routine revalidation (30 s cycle + answer) normally ends inside NOTE_GRACE, so the
+  // cards only say "atualizando" or "desatualizado" when it is slow, fails or is offline.
+  const DISPLAY_TTL=60000, RETRY_DELAY=15000, NOTE_GRACE=35000;
+  let summaryScope, previewRequest, proofEpoch=0, requestSeq=0;
   function assertAccount(client,a){
     const balance=Number(client?.saldo??0);
     if(!client||!a||a.clientId!==client.id||![1,2].includes(a.version)||
@@ -46,7 +53,7 @@ window.InstallmentCredit = (() => {
     return a;
   }
   function summariesForScope(){
-    const current=scope();if(summaryScope!==current){summaries.clear();confirmedAt.clear();summaryScope=current;}return summaries;
+    const current=scope();if(summaryScope!==current){summaries.clear();confirmedAt.clear();held.clear();appliedSeq.clear();summaryScope=current;}return summaries;
   }
   function account(id){
     if(!has(id))return null;
@@ -64,6 +71,30 @@ window.InstallmentCredit = (() => {
     if(navigator.onLine===false||Date.now()-(confirmedAt.get(id)||0)>=DISPLAY_TTL)return null;
     try{return cached?.asOf===InstallmentPlan.today()?assertAccount(clientFor(id),cached):null;}catch{return null;}
   }
+  // Display only: the proof inside its window, else the last confirmed account of this
+  // scope while it still matches the client exactly (same financial version and balance,
+  // same day). A client whose balance moved since then shows nothing until revalidated.
+  function displayAccount(id){
+    const fresh=confirmedAccount(id);if(fresh)return fresh;
+    if(!needsProof(id))return null;
+    summariesForScope();const entry=held.get(id);if(!entry)return null;
+    try{return entry.account.asOf===InstallmentPlan.today()?assertAccount(clientFor(id),entry.account):null;}catch{return null;}
+  }
+  function freshness(id){
+    if(confirmedAccount(id))return 'fresh';
+    const busy=(inflight.get(id)||0)>0;
+    if(!displayAccount(id))return busy?'refreshing':null;
+    if(navigator.onLine!==false&&Date.now()-held.get(id).at<DISPLAY_TTL+NOTE_GRACE)return 'fresh';
+    return busy?'refreshing':'stale';
+  }
+  function freshnessNote(id){
+    const state=freshness(id);if(state!=='refreshing'&&state!=='stale')return '';
+    const at=held.get(id)?.at,time=at?new Date(at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
+    const text=state==='refreshing'?'atualizando…':navigator.onLine===false?'sem conexão'+(time?' · confirmado às '+time:''):(time?'confirmado às '+time+' · ':'')+'desatualizado';
+    return `<small class="balance-freshness" data-balance-freshness="${state}">${esc(text)}</small>`;
+  }
+  const sameAccount=(a,b)=>Boolean(a&&b)&&a.financialVersion===b.financialVersion&&a.dueCents===b.dueCents&&a.futureCents===b.futureCents&&
+    a.totalCents===b.totalCents&&a.creditCents===b.creditCents&&a.asOf===b.asOf&&JSON.stringify(a.entries)===JSON.stringify(b.entries);
   function salePreview(client, total, terms, current) {
     assertAccount(client,current);
     if (current.creditCents) throw Error('Cliente com crédito. Confira a apuração antes de projetar o saldo.');
@@ -107,30 +138,49 @@ window.InstallmentCredit = (() => {
     const ticket=window.TeamAccess?.captureSession?.(),origin=scope(),businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
     const epoch=proofEpoch, revision=clientEpochs.get(id)||0,client=clientFor(id),key=JSON.stringify([epoch,revision,origin,id,client?.financialVersion,client?.saldo,InstallmentPlan.today()]);
     if(pending.has(key))return pending.get(key);
+    const seq=++requestSeq;let changed=false;
+    inflight.set(id,(inflight.get(id)||0)+1);
     const request=(async()=>{
       if(navigator.onLine===false||!window.FirebaseCallable)throw Error('Conecte-se para conferir o saldo no servidor. A operação foi preservada.');
       window.TeamAccess?.assertSession?.(ticket);
       const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{kind:'fiado_account',businessId,workspaceGeneration,clientId:id,fiadoHistoryVersion:1});
       window.TeamAccess?.assertSession?.(ticket);
       const result=reply.data??reply;
-      if(proofEpoch!==epoch||(clientEpochs.get(id)||0)!==revision||scope()!==origin||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
+      // Superseded: something financial or the session changed while the request ran.
+      // The answer is discarded; this is not a failure and is retried without penalty.
+      if(proofEpoch!==epoch||(clientEpochs.get(id)||0)!==revision||scope()!==origin)
+        throw Object.assign(Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.'),{code:'fiado-proof-superseded'});
+      if(result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration||result.account?.clientId!==id)
         throw Error('A sessão mudou ou o servidor não confirmou esta conta. A operação foi preservada.');
       const confirmed=assertAccount(clientFor(id),result.account);
       if(confirmed.asOf!==InstallmentPlan.today())throw Error('Confira a data do aparelho e consulte o saldo novamente.');
-      if(needsProof(id)){summariesForScope().set(id,confirmed);confirmedAt.set(id,Date.now());}
-      window.dispatchEvent?.(new CustomEvent('fiado-account-updated',{detail:{clientId:id}}));
+      // An answer never overwrites the one of a request started after it.
+      if(needsProof(id)&&seq>=(appliedSeq.get(id)||0)){
+        const previous=held.get(id)?.account;
+        appliedSeq.set(id,seq);
+        summariesForScope().set(id,confirmed);confirmedAt.set(id,Date.now());held.set(id,{account:confirmed,at:Date.now()});
+        window.Clientes?.prepareStrictList?.();
+        changed=!sameAccount(previous,confirmed);
+      }
       return confirmed;
-    })().finally(()=>{if(pending.get(key)===request)pending.delete(key);});
+    })().finally(()=>{
+      if(pending.get(key)===request)pending.delete(key);
+      const left=(inflight.get(id)||1)-1;if(left>0)inflight.set(id,left);else inflight.delete(id);
+      // Only a new or different value repaints totals and lists; the same value only
+      // updates the freshness note of the cards that show it.
+      if(changed)window.dispatchEvent?.(new CustomEvent('fiado-account-updated',{detail:{clientId:id}}));
+      else if(typeof document!=='undefined')paint(id,{light:true});
+    });
     pending.set(key,request);
     return request;
   }
-  function customerSummary(id,confirmed){const a=confirmed||confirmedAccount(id);if(!a || window.Clientes?.scopedScreen?.() && !window.Clientes.accountBelongsTo(a,window.SpaceContext.activeId()))return '';return `<section class="receipt-debt" data-fiado-account data-fiado-client="${esc(id)}"><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>Apurado no servidor em ${esc(a.asOf)}</small>${button(id)}</section>`;}
+  function customerSummary(id,confirmed){const a=confirmed||displayAccount(id);if(!a || window.Clientes?.scopedScreen?.() && !window.Clientes.accountBelongsTo(a,window.SpaceContext.activeId()))return '';return `<section class="receipt-debt" data-fiado-account data-fiado-client="${esc(id)}"><h3>Conta de Fiado</h3><p>Exigível agora: <b>${money(a.dueCents)}</b></p><p>Parcelas futuras: <b>${money(a.futureCents)}</b></p><p>Total ainda devido: <b>${money(a.totalCents)}</b></p><p>Próximos vencimentos: ${a.entries.filter(e=>e.dueDate>a.asOf).slice(0,3).map(e=>esc(e.dueDate)+' · '+money(e.remainingCents)).join('; ')||'nenhum'}</p><small>Apurado no servidor em ${esc(a.asOf)}</small>${confirmed?'':freshnessNote(id)}${button(id)}</section>`;}
   function mountCustomer(id){
     const host=document.querySelector('#modal .modal-body,#modal .viewport-scroll,#modal .crm-profile-scroll');
     if(!host||!needsProof(id))return;
     host.insertAdjacentHTML('afterbegin',customerSummary(id)||`<p data-fiado-account data-fiado-client="${esc(id)}" role="status">Consultando exigível e parcelas futuras…</p>`);
     const section=host.querySelector('[data-fiado-account]');
-    refresh(id).catch(()=>{if(section.isConnected&&!confirmedAccount(id))section.textContent='Exigível a conferir. Conecte-se e tente consultar o saldo novamente.';});
+    refresh(id).catch(()=>{if(section.isConnected&&!displayAccount(id))section.textContent='Exigível a conferir. Conecte-se e tente consultar o saldo novamente.';});
   }
   function balanceText(id,amountOnly=false){
     const client=clientFor(id),f=client&&window.Clientes?.financialStatus(client);
@@ -157,17 +207,12 @@ window.InstallmentCredit = (() => {
       }
     });
   }
-  // A batch prepares the local list balances once; each card then reads the same
-  // projection instead of recomputing every Fiado calendar of the base per card.
-  function paintAll(ids){
-    if(!ids.length)return;
-    if(window.Clientes?.localListBalances?.())window.Clientes.prepareList();
-    for(const id of ids)paint(id,{prepared:true});
-  }
+  // light: freshness notes and the same values only. No totals render, no list reprojection.
   function paint(id,options){
     const client=clientFor(id);if(!client)return;
-    if(options?.prepared!==true&&window.Clientes?.localListBalances?.())window.Clientes.prepareList();
-    updateVisibleTotals();
+    const light=options?.light===true;
+    if(!light&&window.Clientes?.localListBalances?.())window.Clientes.prepareList();
+    if(!light)updateVisibleTotals();
     for(const card of document.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card]')){
       if((card.dataset.clientId||card.dataset.mobileCard)!==id)continue;
       const mobile=!!card.dataset.mobileCard,renderer=mobile?window.ClientesMobile?.renderCard:window.ClientesPage?.renderCard;
@@ -185,7 +230,12 @@ window.InstallmentCredit = (() => {
       if(markup){shell.innerHTML=markup;if(section.outerHTML!==shell.firstElementChild.outerHTML)section.replaceWith(shell.firstElementChild);}
       else if(section.textContent!=='Exigível a conferir. Verifique a conexão e a origem do saldo.')section.textContent='Exigível a conferir. Verifique a conexão e a origem do saldo.';
     }
+    noted.set(id,freshness(id));
   }
+  // The freshness note also changes with time (slow answer, grace ended): each hydration
+  // pass repaints only the held values whose note is no longer the one on screen.
+  const noted=new Map();
+  function renote(){for(const id of [...held.keys()])if(noted.get(id)!==freshness(id))paint(id,{light:true});}
   function visibleIds(){return [...new Set([...(window.document?.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]') || [])].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>needsProof(id));}
   const regularizedOwnerList = () => window.Clientes?.localListBalances?.() && visibleIds().some(id=>clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
   // Regularized historical debts are proven by the server account; load them for the
@@ -194,15 +244,19 @@ window.InstallmentCredit = (() => {
   const hydrateList = () => window.Clientes?.localListBalances?.() ? regularizedOwnerList() : !window.Clientes?.scopedScreen?.() || regularizedVisible();
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
+    if(typeof document!=='undefined')renote();
     const route=window.Router?.atual?.();
     if((route&&route!=='clientes')||!hydrateList()||!available())return;
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
-      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);paintAll(queue);
+      // No repaint before asking: the cards already show the held value or the reason.
+      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
         while(queue.length&&scope()===origin&&window.Router?.atual?.()===route){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
-          try{await refresh(id);failedAt.delete(key);}catch{failedAt.set(key,Date.now());}
+          const request=refresh(id);paint(id,{light:true});
+          // A superseded answer is retried at once, not after the failure delay.
+          try{await request;failedAt.delete(key);}catch(error){if(error?.code==='fiado-proof-superseded')rerun=true;else failedAt.set(key,Date.now());}
         }
       }));
     }finally{hydrating=false;if(rerun){rerun=false;scheduleHydration();}}
@@ -210,11 +264,14 @@ window.InstallmentCredit = (() => {
   function scheduleHydration(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;hydrateVisible();});}
   function expireDisplayedProofs() {
     const expired = [...summariesForScope().keys()].filter(id => !confirmedAccount(id));
+    if (!expired.length) return;
     for (const id of expired) {
       summaries.delete(id);
       confirmedAt.delete(id);
     }
-    paintAll(expired);
+    window.Clientes?.prepareStrictList?.();
+    // The held value stays on screen, marked as no longer fresh, while it is revalidated.
+    for (const id of expired) paint(id,{light:true});
   }
   function recheck(id) {
     const scoped = window.Clientes?.scopedScreen?.();
@@ -222,17 +279,20 @@ window.InstallmentCredit = (() => {
       clientEpochs.set(id,(clientEpochs.get(id)||0)+1);
       summariesForScope().delete(id);
       confirmedAt.delete(id);
+      window.Clientes?.prepareStrictList?.();
       paint(id);
       if(!scoped||regularizedOwnerList())scheduleHydration();
       return;
     }
-    const displayed = scoped ? [...summariesForScope().keys()] : visibleIds();
+    const displayed = scoped ? [...new Set([...summariesForScope().keys(),...held.keys()])] : visibleIds();
     proofEpoch++;
     summariesForScope().clear();
     confirmedAt.clear();
     failedAt.clear();
     clientEpochs.clear();
-    paintAll(displayed);
+    window.Clientes?.prepareStrictList?.();
+    // Held values stay visible, each still checked against the current client record.
+    if(displayed.length){if(window.Clientes?.localListBalances?.())window.Clientes.prepareList();updateVisibleTotals();for(const shown of displayed)paint(shown,{light:true});}
     if(!scoped||regularizedOwnerList())scheduleHydration();
   }
   function revisit() {
@@ -306,7 +366,9 @@ window.InstallmentCredit = (() => {
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')revisit();});
     function observeList(){
       const app=document.querySelector('#app');
-      if(app)new MutationObserver(()=>{if(hydrateList())scheduleHydration();}).observe(app,{childList:true,subtree:true});
+      // Coalesced: one check per burst of DOM changes on Clientes, not one per mutation.
+      let observed=null;
+      if(app)new MutationObserver(()=>{if(observed||window.Router?.atual?.()!=='clientes')return;observed=setTimeout(()=>{observed=null;if(hydrateList())scheduleHydration();},150);}).observe(app,{childList:true,subtree:true});
       scheduleHydration();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeList,{once:true});else observeList();
@@ -341,5 +403,5 @@ window.InstallmentCredit = (() => {
   };
   document.addEventListener('input',updatePreview);
   document.addEventListener('change',updatePreview);
-  return {has,account,confirmedAccount,hydrateVisible,lookupButton,balanceText,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
+  return {has,account,confirmedAccount,displayAccount,freshness,freshnessNote,hydrateVisible,lookupButton,balanceText,refresh,assertAccount,customerSummary,mountCustomer,available,fields,read,restore,update,summary,text,button,open,csv,salePreview,mountCheckoutPreview};
 })();

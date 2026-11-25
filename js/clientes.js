@@ -3,14 +3,18 @@ window.Clientes=(()=>{
   const baseView = () => DB.readForView?.() || DB.carregar();
   const listar = () => baseView().clientes;
   const obter = id => listar().find(c => c.id === id);
-  let lastView, displayCache, displayEpoch = 0;
+  // V242.12: 'display' feeds the cards and totals and may keep the last server-confirmed
+  // account while it is revalidated; 'strict' (charges, messages) never does.
+  let lastView, displayEpoch = 0;
+  const caches = {display: null, strict: null};
   // Presentation only. These balances never authorize a financial write.
   const localListBalances = () => window.Router?.atual?.() === 'clientes' &&
     Boolean(window.SpaceContext?.activeId && window.SpaceContext?.homeSpaces) &&
     window.BusinessContext?.get?.().role === 'owner' &&
     window.TeamAccess?.has?.('customers.view') === true && window.TeamAccess?.has?.('customers.receiveDebt') === true &&
     !window.OperationalReadPolicy?.restricted?.();
-  const prepareList = () => { displayEpoch++; displayCache = null; lastView = null; };
+  const prepareList = () => { displayEpoch++; caches.display = caches.strict = null; lastView = null; };
+  const prepareStrictList = () => { caches.strict = null; };
   function legacyFiadoClosed() {
     const context = window.BusinessContext?.get?.();
     const marker = context?.business?.fiadoLegacyClosed;
@@ -32,7 +36,8 @@ window.Clientes=(()=>{
     const saldo = Math.round((Number(client.saldo) || 0) * 100) / 100;
     return {saldo, futureCents: 0, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero', debt: Math.max(0, -saldo), credit: Math.max(0, saldo)};
   }
-  function listBalances(data = baseView()) {
+  function listBalances(data = baseView(), mode = 'strict') {
+    const displayCache = caches[mode];
     const context = window.SpaceContext, bid = DB.getBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
     const selected = context?.activeId?.(), closed = legacyFiadoClosed(), minute = Math.floor(Date.now() / 60000);
     const day = displayCache?.minute === minute ? displayCache.day : window.InstallmentPlan.today();
@@ -70,7 +75,8 @@ window.Clientes=(()=>{
         const p = parts.get(id) || {dueCents: 0, futureCents: 0};
         p.dueCents += due; p.futureCents += future; parts.set(id, p);
       };
-      const confirmed = window.InstallmentCredit?.confirmedAccount?.(client.id);
+      const credit = window.InstallmentCredit, proof = mode === 'display' && credit?.displayAccount || credit?.confirmedAccount;
+      const confirmed = proof?.(client.id);
       if (confirmed) {
         const due = confirmed.entries.filter(e => e.dueDate <= day).reduce((n,e) => n + e.remainingCents, 0);
         const future = confirmed.entries.filter(e => e.dueDate > day).reduce((n,e) => n + e.remainingCents, 0);
@@ -126,11 +132,11 @@ window.Clientes=(()=>{
       }
       accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book});
     }
-    return displayCache = {data, bid, generation, day, minute, accounts, selected, closed};
+    return caches[mode] = {data, bid, generation, day, minute, accounts, selected, closed};
   }
   function listSummary() {
     if (!localListBalances()) return null;
-    const state = listBalances(); let dueCents = 0, futureCents = 0, debtors = 0, unknown = 0;
+    const state = listBalances(baseView(), 'display'); let dueCents = 0, futureCents = 0, debtors = 0, unknown = 0;
     for (const client of baseView().clientes || []) {
       if (client.ativo === false || client.active === false || client.deletedAt) continue;
       const closed = closedOpeningStatus(client);
@@ -151,7 +157,7 @@ window.Clientes=(()=>{
     !window.OperationalReadPolicy?.restricted?.();
   function spaceReceivable(spaceId) {
     if (!spaceId || !receivableAccess() || !window.InstallmentPlan?.today) return null;
-    const state = listBalances(); let dueCents = 0, futureCents = 0, debtors = 0;
+    const state = listBalances(baseView(), 'display'); let dueCents = 0, futureCents = 0, debtors = 0;
     const unknownIds = [];
     for (const client of baseView().clientes || []) {
       if (client.ativo === false || client.active === false || client.deletedAt) continue;
@@ -172,7 +178,7 @@ window.Clientes=(()=>{
     if (lastView?.data !== data || lastView.scope !== scope || lastView.epoch !== displayEpoch) {
       const result = context.contextualData(data, 'clients');
       if (localListBalances()) {
-        const state = listBalances(data), included = new Map(result.clientes.map(c => [c.id, c]));
+        const state = listBalances(data, 'display'), included = new Map(result.clientes.map(c => [c.id, c]));
         for (const client of data.clientes || []) {
           const part = state.accounts.get(client.id)?.parts.get(state.selected);
           if (!included.has(client.id) && part && part.dueCents + part.futureCents > 0)
@@ -201,25 +207,26 @@ window.Clientes=(()=>{
     if (scope !== context.viewScope() || !viewClient(id) || !accountBelongsTo(account, space)) throw Object.assign(Error(spaceAccountMessage), {code:'fiado-space-unverified'});
     return account;
   }
-  function listFinancialStatus(client) {
+  function listFinancialStatus(client, options = {}) {
     if (client?.customerDirectoryOnly) return financialStatus(client);
     const closed = closedOpeningStatus(client);
     if (closed) return closed;
     if (localListBalances()) {
-      const state = listBalances(), account = state.accounts.get(client?.id), p = account?.parts.get(state.selected);
+      const state = listBalances(baseView(), options.display ? 'display' : 'strict'), account = state.accounts.get(client?.id), p = account?.parts.get(state.selected);
       if (!account || account.calendarUnknown || (!p || p.dueCents + p.futureCents === 0) && account.unknownCents) return unknown();
       const credit = !scopedScreen() && account.bookCents > 0 ? account.bookCents : 0;
       const saldo = (credit - (p?.dueCents || 0)) / 100;
       return {saldo, futureCents: p?.futureCents || 0, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero',
         debt: Math.max(0, -saldo), credit: credit / 100, displayOnly: true, partial: account.unknownCents > 0};
     }
-    return financialStatus(client);
+    return financialStatus(client, scopedScreen(), options);
   }
-  function financialStatus(client, scoped = scopedScreen()) {
+  function financialStatus(client, scoped = scopedScreen(), options = {}) {
     if (client?.customerDirectoryOnly) return unknown('O saldo precisa ser consultado no espaço de origem.');
     if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
       return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
-    const account = (window.InstallmentCredit?.confirmedAccount || window.InstallmentCredit?.account)?.(client?.id);
+    const credit = window.InstallmentCredit;
+    const account = (options.display && credit?.displayAccount || credit?.confirmedAccount || credit?.account)?.(client?.id);
     const closed = !account && closedOpeningStatus(client);
     if (closed) return closed;
     if (scoped) {
@@ -275,5 +282,5 @@ window.Clientes=(()=>{
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
     });
-  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,listSummary,spaceReceivable,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,prepareStrictList,listSummary,spaceReceivable,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

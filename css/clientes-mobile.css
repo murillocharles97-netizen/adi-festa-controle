@@ -91,3 +91,6 @@
 button.mobile-client-status,button.badge.balance-badge{border:0;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px;min-height:32px}
 .fiado-lookup-status{display:block;margin-top:4px;font-size:.78rem;color:var(--vf-text-2,#3f5d66)}
 .fiado-lookup-status.is-error{color:var(--vf-neg,#a1262b)}
+/* V242.12: a confirmed balance that is being revalidated or is out of date keeps its value and says so. */
+.balance-freshness{display:block;margin-top:2px;font-size:.72rem;line-height:1.25;color:var(--vf-text-2,#3f5d66)}
+.balance-freshness[data-balance-freshness="stale"]{color:var(--vf-warn,#7a4d00)}
