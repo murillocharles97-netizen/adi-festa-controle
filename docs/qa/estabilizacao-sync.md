@@ -207,3 +207,94 @@ Nenhum formato de fila, recibo ou dado salvo mudou. Voltar não invalida operaç
 - **Download do backup na tela de login:** o arquivo está congelado pelo teste da V203.
 - **Limpeza de dados de QA e estoque negativo antigo:** exigem GO específico.
 - **Harnesses antigos:** 4 da arquitetura de recuperação anterior à V202 e 4 de saldo consecutivo.
+
+## Homologação da V242.10 no Android — correções locais (V242.11, não publicada)
+
+### Cliente com dívida histórica regularizada mostrando "A conferir"
+
+**Causa (reproduzida com a apuração real do servidor, somente leitura):**
+1. A conta de Fiado desses clientes é apurada no servidor (`fiado-history-proof`), que exige um evento financeiro confirmado para todo ajuste.
+2. A conciliação auditada que encerra uma venda antiga sem efeitos (`legacy_reconciliation:<venda>`, valor 0) não gera evento por definição.
+3. A apuração falhava com `source-without-confirmed-effect`. O app nunca recebia a conta confirmada e o card ficava "A conferir"; o recebimento de Fiado desse cliente também ficava bloqueado.
+
+**Correção (`functions/src/shared/fiado-history-proof.js`):**
+- só essa conciliação, comprovadamente neutra, dispensa evento: padrão do identificador, tipo, subtipo, resolução, valor zero e saldo inalterado;
+- qualquer outro ajuste continua exigindo evento confirmado;
+- a cadeia de eventos continua tendo de fechar com o saldo atual.
+
+**Resultados:**
+- Na apuração com os dados reais, só um cliente muda de resultado: passa de "sem prova" para o exigível correto.
+- Clientes sem histórico apurado no servidor não são afetados pela conciliação neutra.
+
+**Requer deploy de Functions** (`getOperationalSyncReceipt` e `commitOperationalSync`). Não publicado.
+
+### "Consultar saldo" sem resposta
+
+- Na lista filtrada por Espaço, o botão retornava em silêncio quando o cliente não estava na visão ou o perfil não tinha permissão, e só avisava a falha por toast.
+- Na lista geral e na Central de Fiado, "Consultar saldo" era uma etiqueta sem ação.
+
+**Agora:**
+- todo toque responde com "Consultando…", o valor confirmado pelo servidor ou o motivo;
+- a dívida regularizada visível é consultada sozinha também nas listas filtradas por Espaço;
+- o saldo local nunca é usado.
+
+### "45 diferenças sem explicação"
+
+- **Causa principal:** documentos de custo (produtos, variações, vendas) que existem só na nuvem eram contados como diferença sem olhar o registro de origem. Na conta auditada, são custos de 23 produtos inativos, 6 produtos de QA, 2 variações de QA e vendas desfeitas ou de QA.
+- **Clientes de QA da V200:** os 7 que aparecem como divergentes são registros de teste.
+
+**Agora:**
+- o custo herda o motivo do seu registro;
+- um custo sem registro de origem continua exigindo atenção;
+- registros de QA são reconhecidos também quando divergentes ou só no aparelho, e nunca são oferecidos para recuperação.
+
+Simulação na forma da conta auditada: 35 sem explicação passam a 0, e as 43 linhas continuam listadas com o motivo.
+
+### "3 recuperáveis" contra "0 pendências somente locais"
+
+- O indicador da tela principal (pendências somente locais) conta só vendas e recebimentos.
+- O da tela detalhada inclui cadastros (clientes, produtos, variações) que existem só no aparelho.
+- As 3 corridas de 19/11 estão encerradas no servidor (conciliações de valor zero) e aparecem como "explicadas".
+- Os 3 recuperáveis não são vendas. Se forem registros de teste, a nova versão os mostra como QA e não os recupera. Caso contrário, o relatório das divergências exportado do aparelho mostra quais são, só com identificadores.
+
+### Plano de limpeza dos resíduos de QA (aguarda GO; nada executado)
+
+**Inventário somente leitura** na empresa real:
+- 15 vendas de QA (12 pagas, R$ 379,24 de faturamento fictício; 3 canceladas);
+- 15 produtos de QA, 2 variações e 8 clientes de QA (2 com R$ 39,00 em aberto dentro do total do Fiado).
+
+**Dependentes:**
+
+| Coleção | Documentos |
+|---|---|
+| Movimentações de estoque | 32 |
+| Eventos de atividade | 25 |
+| Custos de vendas | 20 |
+| Pedidos do catálogo | 14 |
+| Reservas de pedido online | 14 |
+| Aberturas do Fiado | 8 |
+| Custos de produtos | 6 |
+| Reservas de estoque online | 6 |
+| Marcadores de operação | 4 |
+| Custos de variações | 2 |
+| Recuperações e revisões | 2 + 2 |
+| Logs de auditoria | 2 |
+| Membro | 1 |
+
+**Passos propostos:**
+1. Inventário final assinado (IDs e hash de cada documento) e backup somente desses documentos.
+2. Para cada raiz, conferir que nenhuma venda, recebimento ou ajuste real referencia o registro.
+3. Remover pelo servidor, numa operação auditada por lote pequeno: um documento de auditoria com o hash do backup, sem tocar em registros reais. Os saldos de QA saem do total do Fiado e as vendas de QA, do faturamento.
+4. Reconferir o livro de saldos (abertura mais eventos igual ao saldo) e as contagens antes de liberar.
+5. Rollback: restaurar os documentos do backup do passo 1.
+
+Isso não interfere nas vendas novas. É uma correção de relatórios e totais.
+
+### Interferência nas operações de amanhã
+
+| Área | Situação |
+|---|---|
+| Vendas (Pix, dinheiro, cartão, fiado), estoque e ajustes | Não são afetados por essas divergências, que são só de comparação |
+| Fiado dos clientes das 3 corridas | Liberado: as conciliações ficam registradas como revisadas |
+| Recebimento de Fiado do cliente com dívida regularizada | **Bloqueado em produção** até o deploy da correção das Functions |
+| Exibição do saldo desse cliente | Depende da PWA V242.11 mais o mesmo deploy |
