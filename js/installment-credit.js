@@ -188,7 +188,10 @@ window.InstallmentCredit = (() => {
   }
   function visibleIds(){return [...new Set([...(window.document?.querySelectorAll('#app .clients-page [data-client-id],#app .clients-page [data-mobile-card],#modal [data-fiado-client]') || [])].map(el=>el.dataset.clientId||el.dataset.mobileCard||el.dataset.fiadoClient))].filter(id=>needsProof(id));}
   const regularizedOwnerList = () => window.Clientes?.localListBalances?.() && visibleIds().some(id=>clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
-  const hydrateList = () => window.Clientes?.localListBalances?.() ? regularizedOwnerList() : !window.Clientes?.scopedScreen?.();
+  // Regularized historical debts are proven by the server account; load them for the
+  // visible cards in a Space-scoped list too, so the balance appears without a tap.
+  const regularizedVisible = () => visibleIds().some(id=>clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
+  const hydrateList = () => window.Clientes?.localListBalances?.() ? regularizedOwnerList() : !window.Clientes?.scopedScreen?.() || regularizedVisible();
   let hydrating=false,scheduled=false,rerun=false;
   async function hydrateVisible(){
     const route=window.Router?.atual?.();
@@ -233,33 +236,52 @@ window.InstallmentCredit = (() => {
     if(!scoped||regularizedOwnerList())scheduleHydration();
   }
   function revisit() {
-    if(window.Clientes?.scopedScreen?.()){expireDisplayedProofs();if(regularizedOwnerList())scheduleHydration();}
+    if(window.Clientes?.scopedScreen?.()){expireDisplayedProofs();if(regularizedOwnerList()||regularizedVisible())scheduleHydration();}
     else recheck();
   }
   function lookupButton(id, financial) {
     if (!window.Clientes?.scopedScreen?.() || !available() || financial.status !== 'unverified' || financial.reason) return '';
     return `<button type="button" class="btn btn-light btn-sm" data-fiado-lookup="${esc(id)}">Consultar saldo</button>`;
   }
+  // V242.11: a tap always answers (busy, result or reason), in the scoped client list,
+  // the company list, the Fiado center and the profile. It never shows a local balance:
+  // the amount comes from the server-confirmed account only.
   async function lookup(button) {
-    const id=button.dataset.fiadoLookup,origin=scope();
-    if (!available() || !window.Clientes?.scopedScreen?.() || !window.Clientes.viewClient(id)) return;
-    button.disabled=true;
+    const id=button.dataset.fiadoLookup,origin=scope(),scoped=window.Clientes?.scopedScreen?.(),label=button.textContent;
+    const answer=(text,error=false)=>{
+      if(!button.isConnected)return;
+      button.title=text;button.setAttribute('aria-label',text);
+      window.Utils?.toast?.(text,error);
+      const status=button.parentElement?.querySelector('[data-fiado-lookup-status]')||Object.assign(document.createElement('small'),{className:'fiado-lookup-status'});
+      status.dataset.fiadoLookupStatus='';status.setAttribute('role','status');status.textContent=text;status.classList.toggle('is-error',error);
+      if(!status.isConnected)button.insertAdjacentElement('afterend',status);
+    };
+    if (!available()) return answer('Seu perfil não pode consultar o Fiado. Peça ao responsável.',true);
+    if (scoped ? !window.Clientes?.viewClient?.(id) : !clientFor(id)) return answer('Este cliente não aparece no Espaço ativo. Troque o Espaço ou consulte pelo Fiado da empresa.',true);
+    if (navigator.onLine===false) return answer('Sem conexão. Conecte-se para consultar o saldo no servidor.',true);
+    button.disabled=true;button.setAttribute('aria-busy','true');
     button.textContent='Consultando…';
     try {
-      if (!confirmedAccount(id)) await refresh(id);
+      const account=confirmedAccount(id)||await refresh(id);
+      if (button.isConnected && scope()===origin) {
+        answer(account.dueCents||account.futureCents?'Saldo confirmado no servidor: '+money(account.dueCents)+' exigível'+(account.futureCents?' e '+money(account.futureCents)+' em parcelas futuras':'')+'.':account.creditCents?'Crédito confirmado no servidor: '+money(account.creditCents)+'.':'Sem saldo exigível confirmado no servidor.');
+        const card=button.closest('.fiado-card');
+        if(card){const value=card.querySelector('.balance b');if(value)value.textContent=money(account.dueCents);}
+      }
     } catch (error) {
       if (button.isConnected && scope()===origin)
-        window.Utils?.toast?.(error.message || 'Não foi possível consultar o saldo. Tente novamente.',true);
+        answer(error.message || 'Não foi possível consultar o saldo. Tente novamente.',true);
     } finally {
       if (button.isConnected) {
-        button.disabled=false;
-        button.textContent='Consultar saldo';
+        button.disabled=false;button.removeAttribute('aria-busy');
+        button.textContent=label||'Consultar saldo';
       }
     }
   }
   if(typeof window.addEventListener==='function'){
     document.addEventListener('click',event=>{
-      const button=event.target.closest?.('#app .clients-page [data-fiado-lookup]');
+      const button=event.target.closest?.('#app [data-fiado-lookup],#modal [data-fiado-lookup]');
+      if(button)event.stopPropagation?.();
       if(button&&!button.disabled)void lookup(button);
     });
     window.addEventListener('fiado-account-updated',event=>paint(event.detail.clientId));

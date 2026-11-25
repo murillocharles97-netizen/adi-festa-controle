@@ -86,3 +86,8 @@
   .mobile-client-actions{grid-template-columns:1.22fr 1fr 42px;gap:6px}.mobile-client-actions button{height:38px;font-size:11px}
 }
 @media(max-width:390px){.mobile-client-kpis{grid-template-columns:repeat(3,154px)}.mobile-client-main{grid-template-columns:41px minmax(0,1fr) auto 22px;gap:7px}.mobile-client-avatar{width:41px;height:41px}.mobile-client-balance{min-width:78px}.mobile-client-balance strong{font-size:14px}}
+
+/* V242.11: "Consultar saldo" is an action; it keeps the badge look and is tappable. */
+button.mobile-client-status,button.badge.balance-badge{border:0;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px;min-height:32px}
+.fiado-lookup-status{display:block;margin-top:4px;font-size:.78rem;color:var(--vf-text-2,#3f5d66)}
+.fiado-lookup-status.is-error{color:var(--vf-neg,#a1262b)}
