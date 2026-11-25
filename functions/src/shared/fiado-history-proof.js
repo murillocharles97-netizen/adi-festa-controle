@@ -5,6 +5,17 @@ const Plan=require('./installment-plan');
 const {prior}=require('./fiado-opening-balance');
 const neutralReconciliation=a=>{try{return String(a.id||'').startsWith('legacy_reconciliation:')&&a.operationId===a.id&&a.tipo==='ajuste_saldo'&&a.adjustmentType==='reconciliation'&&
   a.subtipo==='reconciliacao_operacao_legada'&&a.resolutionStatus==='resolved_by_reconciliation'&&cents(a.valor)===0&&cents(a.saldoAnterior)===cents(a.saldoNovo);}catch{return false;}};
+// Proven neutral reconciliation: the audited closing of an old original that moved no
+// balance (see neutralReconciliation), with its processed server marker in this
+// company/generation and no effect ever recorded for it. Shared by the account proof and
+// the receipt route so both apply exactly the same exception.
+function provenNeutralReconciliation(a,{markers,events,businessId,generation=0}){
+  if(!a||!neutralReconciliation(a))return false;
+  const m=markers.get(a.operationId);
+  return Boolean(m&&m.status==='processed'&&m.eventKind==='balance_reconciliation'&&
+    (!m.businessId||m.businessId===businessId)&&(m.workspaceGeneration??0)===generation&&(!a.businessId||a.businessId===businessId)&&(a.workspaceGeneration??0)===generation&&
+    !events.some(e=>e.sourceDocumentId===a.id||e.operationId===a.operationId));
+}
 const cents=value=>{if(typeof value!=='number'||!Number.isFinite(value))throw Error('invalid-money');const n=Math.round(value*100);if(!Number.isSafeInteger(n)||Math.abs(value*100-n)>0.00001)throw Error('non-cent-snapshot');return n;};
 const clientId=r=>r.clienteId||r.clientId||r.customerId;
 const time=value=>{const ms=Date.parse(value);if(!Number.isFinite(ms))throw Error('invalid-application-time');return ms;};
@@ -26,11 +37,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   Plan.date(day);const balance=cents(client.saldo||0);
   if(balance>0)throw Error('positive-credit-requires-specific-proof');
   const markers=new Map(collections.processedOperations.map(m=>[m.id,m]));
-  // Proven neutral: the server marker of this reconciliation exists and is processed in
-  // this company/generation, and no effect was ever recorded for it.
-  const provenNeutral=a=>{const m=markers.get(a.operationId);return Boolean(m&&m.status==='processed'&&m.eventKind==='balance_reconciliation'&&
-    (!m.businessId||m.businessId===businessId)&&(m.workspaceGeneration??0)===generation&&(!a.businessId||a.businessId===businessId)&&(a.workspaceGeneration??0)===generation&&
-    !events.some(e=>e.sourceDocumentId===a.id||e.operationId===a.operationId));};
+  const provenNeutral=a=>provenNeutralReconciliation(a,{markers,events,businessId,generation});
   const sourceMaps={sales:new Map(sales.map(s=>[s.id,s])),payments:new Map(payments.map(p=>[p.id,p])),balanceAdjustments:new Map(adjustments.map(a=>[a.id,a]))};
   const validated=[],invalid=[];
   for(const event of events){
@@ -87,7 +94,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
    // (legacy_reconciliation:<sale>, value 0, before === after) has no event by design:
    // the server writes an effect only when the balance changes. It proves nothing and
    // moves nothing; every other source still needs its confirmed effect.
-   if(col==='balanceAdjustments'&&neutralReconciliation(source)&&provenNeutral(source))continue;
+   if(col==='balanceAdjustments'&&provenNeutral(source))continue;
    if(!validated.some(e=>e.col===col&&e.sourceId===source.id))throw Error('source-without-confirmed-effect');
   }
   let future=0;const activeSales=sales.filter(s=>s.active!==false&&!s.deletedAt&&!s.cancelledAt&&!s.desfeita&&s.formaPagamento==='fiado');
@@ -116,4 +123,4 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   return{...result,financialProof:true,backendCompatible,currentBackendEligible:backendCompatible,account,confirmedEffects:chain,anchor:proofAnchor,effectsAfterAnchor:chain.length,reason:backendCompatible?'confirmed-compatible':'confirmed-aggregate-but-current-backend-incompatible'};
  }catch(error){return{...result,reason:error.message,details:[...new Set(reasons)],issues};}
 }
-module.exports={prove};
+module.exports={prove,provenNeutralReconciliation};

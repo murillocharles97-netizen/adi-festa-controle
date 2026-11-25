@@ -4,7 +4,7 @@ const {createHash}=require('node:crypto');
 const {HttpsError}=require('firebase-functions/v2/https');
 const Account=require('../shared/fiado-account');
 const History=require('../shared/fiado-history-account');
-const {prove}=require('../shared/fiado-history-proof');
+const {prove,provenNeutralReconciliation}=require('../shared/fiado-history-proof');
 const Plan=require('../shared/installment-plan');
 const {restricted}=require('../shared/operational-privacy-policy');
 const {readHistoryInput}=require('./fiado-history-service');
@@ -62,7 +62,9 @@ function checkEvidence({businessId,generation,client,collections,opening},day,sc
     if(!closed(payment)&&!eventsBySource.has('payment_received:'+payment.id)||
        payment.status==='confirmed'&&closed(payment)&&!operationIds.has(payment.resolutionOperationId))return 'history_review';
   }
-  if(balanceAdjustments.some(row=>!Opening.prior(opening,'balanceAdjustments',row.id)&&!eventsBySource.has('balance_adjustment:'+row.id)))return 'history_review';
+  // Same exception as the account proof: only a proven neutral reconciliation may lack an effect.
+  if(balanceAdjustments.some(row=>!Opening.prior(opening,'balanceAdjustments',row.id)&&!eventsBySource.has('balance_adjustment:'+row.id)&&
+    !provenNeutralReconciliation(row,{markers,events:balanceEvents,businessId,generation})))return 'history_review';
 
   const byPayment=new Map(),bySale=new Map();
   for(const row of paymentAllocations){
