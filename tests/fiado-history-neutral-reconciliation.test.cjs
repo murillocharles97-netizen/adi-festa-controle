@@ -25,6 +25,12 @@ const neutral = (extra = {}) => ({id: 'legacy_reconciliation:fx-ride', operation
   clienteId: C, clientId: C, spaceId: S, tipo: 'ajuste_saldo', subtipo: 'reconciliacao_operacao_legada', adjustmentType: 'reconciliation',
   motivo: 'Operação antiga não sincronizada', resolutionStatus: 'resolved_by_reconciliation', resolvedSaleId: 'fx-ride', resolvedOperationId: 'fx-ride-op',
   saldoAnterior: -150, saldoNovo: -150, valor: 0, createdAt: T2, resolvedAt: T2, ...extra});
+const reconciliationMarker = (extra = {}) => ({id: 'legacy_reconciliation:fx-ride', status: 'processed', eventKind: 'balance_reconciliation', businessId: B, workspaceGeneration: 0, processedAt: T2, ...extra});
+function withNeutral(state, adjustment = neutral(), marker = reconciliationMarker()) {
+  state.collections.balanceAdjustments.push(adjustment);
+  if (marker) state.collections.processedOperations.push(marker);
+  return state;
+}
 function withPayment(state, amount = 50) {
   const before = state.client.saldo, after = before + amount;
   state.client = {...state.client, saldo: after, financialVersion: state.client.financialVersion + 1};
@@ -44,13 +50,12 @@ test('dívida histórica regularizada por Espaço é exigível no Espaço de ori
 });
 
 test('conciliação neutra de venda antiga não bloqueia mais a conta (causa do "A conferir")', () => {
-  const state = base(); state.collections.balanceAdjustments.push(neutral());
-  const account = project(state);
+  const account = project(withNeutral(base()));
   assert.equal(account.dueCents, 15000, 'mesmo valor: a conciliação não move saldo');
 });
 
 test('recebimento parcial depois da conciliação neutra reduz o exigível uma única vez', () => {
-  const state = withPayment((() => { const s = base(); s.collections.balanceAdjustments.push(neutral()); return s; })(), 50);
+  const state = withPayment(withNeutral(base()), 50);
   const account = project(state);
   assert.equal(account.dueCents, 10000);
   assert.equal(account.financialVersion, 2);
@@ -65,12 +70,23 @@ test('qualquer ajuste que move saldo continua exigindo evento confirmado', () =>
     'ajuste comum sem evento': {id: 'fx-manual-2', operationId: 'fx-manual-2', businessId: B, workspaceGeneration: 0, clienteId: C, tipo: 'ajuste_saldo', valor: 0, saldoAnterior: -150, saldoNovo: -150, createdAt: T2},
   };
   for (const [name, adjustment] of Object.entries(cases)) {
-    const state = base(); state.collections.balanceAdjustments.push(adjustment);
+    const state = withNeutral(base(), adjustment, reconciliationMarker({id: adjustment.operationId}));
     assert.throws(() => project(state), /source-without-confirmed-effect/, name);
   }
 });
 
 test('saldo cadastral diferente da cadeia de eventos continua recusado', () => {
-  const state = base({saldo: -200}); state.collections.balanceAdjustments.push(neutral());
+  const state = withNeutral(base({saldo: -200}));
   assert.throws(() => project(state), /ledger-current-balance-mismatch/);
+});
+
+test('conciliação neutra só vale com o marcador processado do servidor e sem efeito registrado', () => {
+  const cases = {
+    'sem marcador': [neutral(), null],
+    'marcador não processado': [neutral(), reconciliationMarker({status: 'pending'})],
+    'marcador de outro tipo': [neutral(), reconciliationMarker({eventKind: 'balance_adjustment'})],
+    'marcador de outra empresa': [neutral(), reconciliationMarker({businessId: 'fx-other'})],
+  };
+  for (const [name, [adjustment, marker]] of Object.entries(cases))
+    assert.throws(() => project(withNeutral(base(), adjustment, marker)), /source-without-confirmed-effect/, name);
 });

@@ -26,6 +26,11 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
   Plan.date(day);const balance=cents(client.saldo||0);
   if(balance>0)throw Error('positive-credit-requires-specific-proof');
   const markers=new Map(collections.processedOperations.map(m=>[m.id,m]));
+  // Proven neutral: the server marker of this reconciliation exists and is processed in
+  // this company/generation, and no effect was ever recorded for it.
+  const provenNeutral=a=>{const m=markers.get(a.operationId);return Boolean(m&&m.status==='processed'&&m.eventKind==='balance_reconciliation'&&
+    (!m.businessId||m.businessId===businessId)&&(m.workspaceGeneration??0)===generation&&(!a.businessId||a.businessId===businessId)&&(a.workspaceGeneration??0)===generation&&
+    !events.some(e=>e.sourceDocumentId===a.id||e.operationId===a.operationId));};
   const sourceMaps={sales:new Map(sales.map(s=>[s.id,s])),payments:new Map(payments.map(p=>[p.id,p])),balanceAdjustments:new Map(adjustments.map(a=>[a.id,a]))};
   const validated=[],invalid=[];
   for(const event of events){
@@ -82,7 +87,7 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
    // (legacy_reconciliation:<sale>, value 0, before === after) has no event by design:
    // the server writes an effect only when the balance changes. It proves nothing and
    // moves nothing; every other source still needs its confirmed effect.
-   if(col==='balanceAdjustments'&&neutralReconciliation(source))continue;
+   if(col==='balanceAdjustments'&&neutralReconciliation(source)&&provenNeutral(source))continue;
    if(!validated.some(e=>e.col===col&&e.sourceId===source.id))throw Error('source-without-confirmed-effect');
   }
   let future=0;const activeSales=sales.filter(s=>s.active!==false&&!s.deletedAt&&!s.cancelledAt&&!s.desfeita&&s.formaPagamento==='fiado');

@@ -41,7 +41,9 @@ async function readHistoryInput({tx,c,ref,clientId,client,checkRowAccess=true,us
   if(row.businessId&&row.businessId!==c.bid||(row.workspaceGeneration??0)!==(c.business.workspaceGeneration??0))fail('Histórico de outra empresa ou geração.');
 
  }
- const operations=[...new Set(collections.balanceEvents.map(e=>e.operationId).filter(Boolean))];if(operations.length>1000)fail('Histórico de marcadores excede o limite seguro.');
+ // Markers of effects, plus the markers of audited reconciliations that have no effect
+ // by design: the proof accepts such a reconciliation only with its processed marker.
+ const operations=[...new Set([...collections.balanceEvents.map(e=>e.operationId),...collections.balanceAdjustments.filter(a=>String(a.id||'').startsWith('legacy_reconciliation:')).map(a=>a.operationId)].filter(Boolean))];if(operations.length>1000)fail('Histórico de marcadores excede o limite seguro.');
  collections.processedOperations=[];for(let offset=0;offset<operations.length;offset+=100){const ids=operations.slice(offset,offset+100);if(ids.some(id=>typeof id!=='string'||id.includes('/')))fail('Marcador inválido.');const docs=await tx.getAll(...ids.map(id=>ref(c.bid,'processedOperations',id)));for(const d of docs)if(d.exists)collections.processedOperations.push({...normalize(d.data()),id:d.id});}
  const raw={businessId:c.bid,generation:c.business.workspaceGeneration??0,client:{...normalize(client),id:clientId},collections,complete:true,stable:true};
  let input=raw;
