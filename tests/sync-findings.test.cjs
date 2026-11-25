@@ -134,3 +134,32 @@ test('o classificador é somente leitura: não tem acesso a fila, banco ou rede'
   const source = fs.readFileSync('js/sync-findings.js', 'utf8');
   assert.doesNotMatch(source, /localStorage|indexedDB|fetch\(|FirebaseCallable|saveQueue|DB\.|setItem/);
 });
+
+test('custos herdam o motivo do registro de origem; custo sem origem continua exigindo atenção', () => {
+  const remote = {
+    products: {'fx-p-active': {active: true}, 'fx-p-off': {active: false}},
+    productFinancials: {'fx-p-off': {productId: 'fx-p-off'}, 'qa_v170_cost': {productId: 'qa_v170_cost'}, 'fx-p-gone': {productId: 'fx-p-gone'}},
+    sales: {'fx-s-aug': {status: 'pago'}, 'fx-s-undone': {deletedAt: '2026-10-19T10:00:00Z', active: false}},
+    saleFinancials: {'fx-s-aug': {saleId: 'fx-s-aug'}, 'fx-s-undone': {saleId: 'fx-s-undone'}},
+  };
+  const only = ids => ids.map(id => ({documentId: id, active: null, deleted: false}));
+  const result = F.build({remoteById: (n, id) => remote[n]?.[id] || null, audit: {generatedAt: 'x', collections: {
+    productFinancials: {equal: [], onlyLocal: [], divergent: [], onlyRemote: only(['fx-p-off', 'qa_v170_cost', 'fx-p-gone'])},
+    saleFinancials: {equal: [], onlyLocal: [], divergent: [], onlyRemote: only(['fx-s-aug', 'fx-s-undone'])},
+  }}});
+  const reason = id => result.findings.find(f => f.documentId === id).reason;
+  assert.equal(reason('fx-p-off'), 'inactive_not_kept');
+  assert.equal(reason('qa_v170_cost'), 'qa_residue');
+  assert.equal(reason('fx-p-gone'), 'cloud_only', 'sem registro de origem na nuvem: atenção');
+  assert.equal(reason('fx-s-aug'), 'legacy_without_space');
+  assert.equal(reason('fx-s-undone'), 'inactive_not_kept');
+});
+
+test('cliente de teste divergente ou só no aparelho é resíduo de QA, nunca recuperável', () => {
+  const result = F.build({audit: {generatedAt: 'x', collections: {clients: {equal: [], onlyRemote: [],
+    divergent: [{documentId: 'qa_cancel_v200_fx', hasPendingLocal: false, fields: ['saldo']}, {documentId: 'fx-real', hasPendingLocal: false, fields: ['nome']}],
+    onlyLocal: [{documentId: 'qa-local-fx', classification: 'B'}]}}}});
+  const by = Object.fromEntries(result.findings.map(f => [f.documentId, f.reason]));
+  assert.deepEqual(by, {'qa_cancel_v200_fx': 'qa_residue', 'fx-real': 'divergent', 'qa-local-fx': 'qa_residue'});
+  assert.equal(result.counts.recoverable, 0);
+});

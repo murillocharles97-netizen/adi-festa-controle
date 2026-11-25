@@ -12,6 +12,8 @@
     stockMovementFinancials: 'Custos de estoque', stockMovements: 'Movimentações de estoque', transaction: 'Operações',
   });
   const FINANCIAL = new Set(['sales', 'payments', 'balanceAdjustments']);
+  const PROJECTION_PARENT = Object.freeze({productFinancials: 'products', variantFinancials: 'productVariants', saleFinancials: 'sales', stockMovementFinancials: 'stockMovements'});
+  const PROJECTION_KEY = Object.freeze({productFinancials: 'productId', variantFinancials: 'variantId', saleFinancials: 'saleId', stockMovementFinancials: 'stockMovementId'});
   const REASONS = Object.freeze({
     inactive_not_kept: {kind: 'explained', title: 'Cadastro inativo que só existe na nuvem', text: 'O aparelho guarda apenas cadastros ativos. Não há nada a corrigir.'},
     qa_residue: {kind: 'explained', title: 'Registro de teste antigo', text: 'Foi criado por testes de versões anteriores dentro da empresa. Não altera saldos; removê-lo exige autorização específica.'},
@@ -98,10 +100,22 @@
           continue;
         }
         if (fromSale) { add(fromSale, {entity, documentId: row.documentId, operationId: row.operationId, extra: {recoveryMode: sale.recoveryMode || '', amount: money(sale.amount), customerId: sale.customerId || '', reasonDetail: sale.reason || ''}}); continue; }
+        // Test fixtures are never published from a device: listed with their reason.
+        if (QA_ID.test(str(row.documentId))) { add('qa_residue', {entity, documentId: row.documentId}); continue; }
         add(FINANCIAL.has(entity) ? 'local_only_unqueued' : 'recover_local', {entity, documentId: row.documentId, operationId: row.operationId});
       }
       for (const row of item.onlyRemote || []) {
         const raw = remote(entity, row.documentId) || {}, inactive = row.active === false || raw.active === false || raw.ativo === false || row.deleted;
+        // A cost projection (product/variant/sale financials) inherits the state of its
+        // record: the device keeps the costs of what it keeps (V242.11).
+        if (PROJECTION_PARENT[entity]) {
+          const parentEntity = PROJECTION_PARENT[entity], parentId = str(raw[PROJECTION_KEY[entity]] || row.documentId), parent = remote(parentEntity, parentId);
+          const why = QA_ID.test(parentId) ? 'qa_residue' : !parent ? 'cloud_only'
+            : parent.active === false || parent.ativo === false || parent.deletedAt ? 'inactive_not_kept'
+            : parentEntity === 'sales' && !parent.spaceId && !parent.financialSpaceId ? 'legacy_without_space' : 'cloud_only';
+          add(why, {entity, documentId: row.documentId, operationId: row.operationId, extra: {parentEntity, parentId}});
+          continue;
+        }
         if (QA_ID.test(str(row.documentId))) add('qa_residue', {entity, documentId: row.documentId});
         else if (entity === 'clients' && inactive && money(raw.saldo) !== 0) add('inactive_client_balance', {entity, documentId: row.documentId, extra: {cloudBalance: money(raw.saldo)}});
         else if (inactive) add('inactive_not_kept', {entity, documentId: row.documentId});
@@ -109,8 +123,10 @@
         else add('cloud_only', {entity, documentId: row.documentId, operationId: row.operationId});
       }
       for (const row of item.divergent || []) {
-        const id = str(row.documentId), held = entity === 'clients' && retained.some(r => str(r.clientId) === id && r.blockedOnly);
-        add(row.hasPendingLocal ? 'local_change_waiting' : held ? 'client_retained' : 'divergent', {entity, documentId: id, operationId: row.operationId, extra: {fields: (row.fields || []).slice(0, 8)}});
+        const id = str(row.documentId), held = entity === 'clients' && retained.some(r => str(r.clientId) === id && r.blockedOnly),
+          parentId = PROJECTION_PARENT[entity] ? str((remote(entity, id) || {})[PROJECTION_KEY[entity]] || id) : id;
+        add(row.hasPendingLocal ? 'local_change_waiting' : held ? 'client_retained' : QA_ID.test(id) || QA_ID.test(parentId) ? 'qa_residue' : 'divergent',
+          {entity, documentId: id, operationId: row.operationId, extra: {fields: (row.fields || []).slice(0, 8)}});
       }
     }
     for (const row of retained) if (row.blockedOnly && row.difference) add('client_retained', {entity: 'clients', documentId: row.clientId, extra: {localBalance: row.localBalance, cloudBalance: row.cloudBalance, difference: row.difference, operations: (row.operations || []).map(op => str(op.operationId || op))}});
