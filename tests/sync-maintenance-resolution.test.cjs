@@ -100,3 +100,42 @@ test('a revalidação roda antes das demais conferências da fila e é somente l
   const refresh = section('async function refreshRecoveryResolutions(', 'function readQueueArchive(');
   assert.ok(refresh.indexOf('refreshMaintenanceResolutions') < refresh.indexOf("typeof window.FirebaseCallable!=='function'"));
 });
+
+// V242.12: each lookup is four server reads; it used to repeat on every queue pass.
+test('original sem decisão no servidor não é relido a cada passagem da fila', async () => {
+  const h = harness({docs: {}});
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true), 0);
+  assert.equal(h.reads.length, 4);
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true), 0);
+  assert.equal(h.reads.length, 4, 'a segunda passagem não lê de novo');
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true, {force: true}), 0);
+  assert.equal(h.reads.length, 8, 'a sincronização manual consulta de novo');
+  const now = Date.now;
+  try {
+    Date.now = () => now() + 11 * 60000;
+    await h.api.refreshMaintenanceResolutions(() => true);
+    assert.equal(h.reads.length, 12, 'depois do intervalo a decisão é procurada de novo');
+  } finally { Date.now = now; }
+});
+
+test('falha de rede ou pacote alterado não contam como consultados', async () => {
+  const offline = harness({fail: true});
+  await offline.api.refreshMaintenanceResolutions(() => true);
+  await offline.api.refreshMaintenanceResolutions(() => true);
+  assert.equal(offline.reads.length, 8, 'leitura incompleta é tentada de novo na próxima passagem');
+  const h = harness({docs: {}});
+  await h.api.refreshMaintenanceResolutions(() => true);
+  h.queue[0] = {...h.queue[0], payload: {...h.queue[0].payload, writes: [{...h.queue[0].payload.writes[0], data: {...h.queue[0].payload.writes[0].data, valorFinal: 1}}]}};
+  await h.api.refreshMaintenanceResolutions(() => true);
+  assert.equal(h.reads.length, 8, 'outro conteúdo é outra consulta');
+});
+
+test('decisão registrada depois da primeira consulta é reconhecida na sincronização manual', async () => {
+  const docs = {};
+  const h = harness({docs});
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true), 0);
+  Object.assign(docs, reconciliation());
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true), 0, 'passagem automática dentro do intervalo');
+  assert.equal(await h.api.refreshMaintenanceResolutions(() => true, {force: true}), 1);
+  assert.ok(h.api.readRecoveryResolution(h.queue[0]));
+});

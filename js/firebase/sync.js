@@ -1162,13 +1162,20 @@ function readRecoveryResolution(item){
 // decision again from SERVER evidence only: the exact sale, operation, company,
 // generation and space, plus the processed marker with its audit hash. Never
 // sends, never changes the original packet, and any doubt leaves it blocked.
-async function refreshMaintenanceResolutions(isCurrent){
+// V242.12: an original whose server decision was not found is looked up again only
+// after MAINTENANCE_RECHECK_MS or on a manual retry, not on every queue pass (each
+// lookup is four server reads and delayed the sending of new sales on slow networks).
+const MAINTENANCE_RECHECK_MS=10*60*1000,maintenanceEvidenceChecked=new Map();
+async function refreshMaintenanceResolutions(isCurrent,options={}){
   if(!currentUser||typeof getDocFromServer!=='function')return 0;
   const bid=activeBusinessId(),generation=DB.getWorkspaceGeneration?.()??0,hex=/^[a-f0-9]{64}$/;
+  if(options.force)maintenanceEvidenceChecked.clear();
+  const checkKey=item=>[bid,generation,item.operationId,checksumValue(item.payload||{})].join('|');
   const held=readQueue().filter(item=>item.status==='error'&&item.userId===currentUser.uid&&item.businessId===bid&&
     (item.workspaceGeneration??0)===generation&&!readRecoveryResolution(item)&&
     Array.isArray(item.payload?.writes)&&item.payload.writes.length>=1&&
-    item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create').length===1).slice(0,20);
+    item.payload.writes.filter(w=>w.entityType==='sales'&&w.operation==='create').length===1&&
+    Date.now()-(maintenanceEvidenceChecked.get(checkKey(item))||0)>=MAINTENANCE_RECHECK_MS).slice(0,20);
   let recognised=0;
   for(const item of held){
     if(!isCurrent())return recognised;
@@ -1181,6 +1188,8 @@ async function refreshMaintenanceResolutions(isCurrent){
         getDocFromServer(doc(db,'businesses',bid,'processedOperations',String(item.operationId))),
       ]);
       if(!isCurrent()||bid!==activeBusinessId())return recognised;
+      // Recorded only after a complete read: a network failure is retried on the next pass.
+      maintenanceEvidenceChecked.set(checkKey(item),Date.now());
       const a=adjustment.exists()?adjustment.data():null,m=reconciliationMarker.exists()?reconciliationMarker.data():null,
         s=remoteSale.exists()?remoteSale.data():null,sm=saleMarker.exists()?saleMarker.data():null;
       let evidence=null;
@@ -1203,8 +1212,8 @@ async function refreshMaintenanceResolutions(isCurrent){
   }
   return recognised;
 }
-async function refreshRecoveryResolutions(isCurrent){
-  try{if(typeof refreshMaintenanceResolutions==='function'&&await refreshMaintenanceResolutions(isCurrent)&&isCurrent()&&typeof updateQueueState==='function')updateQueueState();}catch{/* evidence is optional */}
+async function refreshRecoveryResolutions(isCurrent,options={}){
+  try{if(typeof refreshMaintenanceResolutions==='function'&&await refreshMaintenanceResolutions(isCurrent,options)&&isCurrent()&&typeof updateQueueState==='function')updateQueueState();}catch{/* evidence is optional */}
   if(typeof window.FirebaseCallable!=='function'||!window.SaleRecoveryClient)return;
   const clientDependency=i=>i.lastErrorCode==='permission-denied'&&i.payload?.writes?.length===1&&i.payload.writes[0].entityType==='clients'&&i.payload.writes[0].operation==='create';
   const monetary=i=>i.lastErrorCode==='invalid-argument'&&(globalThis.VeconiSyncRejection?.isReason?.(i,'sale_total_mismatch','Total não corresponde aos itens.')??i.lastErrorMessage==='Total não corresponde aos itens.')&&(i.payload?.writes||[]).some(w=>w.entityType==='sales'&&w.operation==='create');
@@ -4400,7 +4409,7 @@ async function processSyncQueue(options = {}) {
     if(!force&&state.operationalProtocol?.queueRecoveryVersion===1&&readQueue().some(item=>item.status==='pending'&&
       item.lastErrorCode==='resource-exhausted'&&Date.parse(item.lastAttemptAt)+retryDelay(item.attempts||0,item.lastErrorCode)>Date.now()))
       return {sent:0,collections:[],quotaBackoff:true};
-    await refreshRecoveryResolutions(current);
+    await refreshRecoveryResolutions(current,{force:manualRetry});
     assertSession();
     let sent = 0,
       reviewHeld = 0,
