@@ -219,7 +219,8 @@ window.InstallmentCredit = (() => {
       if(!renderer)continue;
       const shell=document.createElement('div');shell.innerHTML=renderer(client,0);
       for(const selector of mobile?['.mobile-client-balance']:['.client-balance','.client-status']){
-        const old=card.querySelector(selector),next=shell.querySelector(selector);if(old&&next&&old.outerHTML!==next.outerHTML)old.replaceWith(next);
+        // A block with a lookup in progress is left to lookup(), which answers and repaints it.
+        const old=card.querySelector(selector),next=shell.querySelector(selector);if(old&&next&&old.outerHTML!==next.outerHTML&&!old.querySelector('[data-fiado-lookup][aria-busy="true"]'))old.replaceWith(next);
       }
       const selector=mobile?'[data-mobile-receive]':'[data-receive-client]',old=card.querySelector(selector),next=shell.querySelector(selector);
       if(old&&next)old.disabled=next.disabled;
@@ -337,6 +338,8 @@ window.InstallmentCredit = (() => {
         button.textContent=label||'Consultar saldo';
       }
     }
+    // The confirmed value replaces the button on the card; an error stays where it was shown.
+    if (confirmedAccount(id) && scope()===origin && typeof document!=='undefined') paint(id,{light:true});
   }
   if(typeof window.addEventListener==='function'){
     document.addEventListener('click',event=>{
