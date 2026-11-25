@@ -18,7 +18,7 @@ import {
 } from "./firestore-utils.js";
 import { setUsageScreen, usageSnapshot } from "./usage-monitor.js";
 import '../integrity.js?v=233';
-import '../sync-findings.js?v=24210-estab';
+import '../sync-findings.js?v=24211-fiado';
 import '../export-center.js?v=24210-estab';
 import {prepareProductImportFence} from './product-import-fence.js';
 

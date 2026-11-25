@@ -19,7 +19,7 @@
   //   payloadVersion 4, schemaVersion 3) and never changed retroactively.
   // Bump APP_VERSION (and the service-worker CACHE/GET_VERSION) in every release;
   // tests/sync-version-identity.test.js fails when they disagree.
-  const APP_VERSION = "242.10";
+  const APP_VERSION = "242.11";
   window.AdiFestaBuild = Object.freeze({
     commit,
     shortCommit,
@@ -27,7 +27,7 @@
     appVersion: APP_VERSION,
     release: "242", // = APP_VERSION major; literal kept for existing release checks
     installmentCreationPaused: false,
-    hotfix: "estabilizacao-v24210",
+    hotfix: "fiado-historico-v24211",
     billingCheckoutPaused: false,
     priorSalesPaused: false,
     performanceViewsPaused: false,
