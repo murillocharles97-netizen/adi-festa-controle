@@ -1,4 +1,4 @@
-import './sync.js?v=24211-fiado';
+import './sync.js?v=24212-saldo';
 import '../sale-recovery-client.js?v=236.2';
 import '../sale-recovery-ui.js?v=24210-estab';
 import '../sale-monetary-analysis-ui.js?v=215';
