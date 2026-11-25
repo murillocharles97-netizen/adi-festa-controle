@@ -3,6 +3,8 @@
 const Account=require('./fiado-account');
 const Plan=require('./installment-plan');
 const {prior}=require('./fiado-opening-balance');
+const neutralReconciliation=a=>{try{return String(a.id||'').startsWith('legacy_reconciliation:')&&a.operationId===a.id&&a.tipo==='ajuste_saldo'&&a.adjustmentType==='reconciliation'&&
+  a.subtipo==='reconciliacao_operacao_legada'&&a.resolutionStatus==='resolved_by_reconciliation'&&cents(a.valor)===0&&cents(a.saldoAnterior)===cents(a.saldoNovo);}catch{return false;}};
 const cents=value=>{if(typeof value!=='number'||!Number.isFinite(value))throw Error('invalid-money');const n=Math.round(value*100);if(!Number.isSafeInteger(n)||Math.abs(value*100-n)>0.00001)throw Error('non-cent-snapshot');return n;};
 const clientId=r=>r.clienteId||r.clientId||r.customerId;
 const time=value=>{const ms=Date.parse(value);if(!Number.isFinite(ms))throw Error('invalid-application-time');return ms;};
@@ -76,6 +78,11 @@ function prove(input,day=Plan.today(),{checkTraditionalChain=false}={}){
    const at=source.financialAppliedAt||source.data||source.createdAt;
    if(!opening&&(!at||time(at)<start))continue;
    if(col==='sales'&&source.formaPagamento!=='fiado')continue;
+   // An audited reconciliation that closed an old original without moving the balance
+   // (legacy_reconciliation:<sale>, value 0, before === after) has no event by design:
+   // the server writes an effect only when the balance changes. It proves nothing and
+   // moves nothing; every other source still needs its confirmed effect.
+   if(col==='balanceAdjustments'&&neutralReconciliation(source))continue;
    if(!validated.some(e=>e.col===col&&e.sourceId===source.id))throw Error('source-without-confirmed-effect');
   }
   let future=0;const activeSales=sales.filter(s=>s.active!==false&&!s.deletedAt&&!s.cancelledAt&&!s.desfeita&&s.formaPagamento==='fiado');
