@@ -298,3 +298,87 @@ Isso não interfere nas vendas novas. É uma correção de relatórios e totais.
 | Fiado dos clientes das 3 corridas | Liberado: as conciliações ficam registradas como revisadas |
 | Recebimento de Fiado do cliente com dívida regularizada | **Bloqueado em produção** até o deploy da correção das Functions |
 | Exibição do saldo desse cliente | Depende da PWA V242.11 mais o mesmo deploy |
+
+## Release V242.11 (preparada, não publicada)
+
+São duas partes independentes, cada uma com aprovação e rollback próprios.
+
+### Backend: Functions
+
+**Exceção estrita.** A conta de Fiado e a rota de recebimento usam a mesma função, `provenNeutralReconciliation`. Ela aceita sem evento financeiro somente uma conciliação que cumpra tudo isto:
+- é `legacy_reconciliation:<venda>`, com `operationId` igual ao id;
+- `ajuste_saldo`, `reconciliation`, `reconciliacao_operacao_legada` e `resolved_by_reconciliation`;
+- valor zero e saldo anterior igual ao novo;
+- tem marcador `processedOperations` processado, do tipo `balance_reconciliation`, da mesma empresa e geração;
+- nenhum evento registrado para ela.
+
+Todo o resto continua como antes:
+- todo outro ajuste, venda ou recebimento continua exigindo evento confirmado;
+- a cadeia continua tendo de fechar com o saldo atual.
+
+**Publicação mínima necessária: 2 funções.**
+
+| Function | Publicada em | O que mudaria |
+|---|---|---|
+| `getOperationalSyncReceipt` (consulta da conta) | 21/11 | os 3 arquivos da correção + 6 já na `main` e já em produção na `commitOperationalSync`: `operational-commit-service` (regra de Marca), `online-order-service`, `online-stock-reservation`, `online-store-service`, `product-spreadsheet-service`, `storefront-layout` (novo) |
+| `commitOperationalSync` (recebimento) | 24/11 | só os 3 arquivos da correção |
+
+- Os 3 arquivos da correção: `fiado-history-proof`, `fiado-history-service` e `fiado-receipt-route`.
+- As dependências (`package.json`) são idênticas ao que está publicado.
+- **Opcional, a mesma correção em fluxos raros desse tipo de cliente:** `authorizeOperationalSaleRead`, `previewPriorSale`, `confirmPriorSale`, `getPreservedPaymentRecognition`, `commitFinancialMaintenance`, `previewSaleCancellation`, `confirmSaleCancellation`.
+- **Rollback do backend:** republicar as 2 funções a partir dos pacotes publicados, guardados fora do repositório, ou a partir de `9767085`, só para essas funções. Republicar a `getOperationalSyncReceipt` antiga também desfaz o alinhamento da regra de Marca.
+
+### Frontend: PWA
+
+- **Versão:** 242.11, cache `veconi-v24211-fiado-historico-v1`.
+- **Arquivos com `?v=24211-fiado`:**
+  - `installment-credit`;
+  - `app`;
+  - `clientes-mobile` (js e css);
+  - `sync-findings`;
+  - as entradas de sincronização: `auth`, `firebase-ui` e `sync`.
+- **O que muda:**
+  - "Consultar saldo" sempre responde;
+  - a dívida regularizada carrega sozinha;
+  - os custos e os registros de QA aparecem com o motivo.
+- **Funcionamento independente:**
+  - Sem o backend, o app continua seguro: mostra o motivo da recusa em vez de ficar mudo.
+  - O backend funciona também com a V242.10.
+  - Ordem recomendada: Functions primeiro, depois PWA.
+- **Rollback do frontend:** reverter os commits do app desde `9767085`, sem forçar a `main`, e publicar como 242.12 com cache `veconi-v24212-rollback-v1`.
+
+### 45 diferenças no Android contra 35 na simulação
+
+A simulação não reproduz o aparelho por inteiro:
+- partiu do último diagnóstico exportado (V242.8, 24/11 15h24) e da nuvem atual;
+- cobriu só o que dá para reconstruir sem o aparelho: custos de produtos, variações e vendas, e os 7 clientes de QA.
+
+As outras 10 dependem do que só o aparelho tem: registros criados ou alterados depois daquele diagnóstico e coleções sem cópia no PC.
+
+Na V242.11, cada diferença aparece individualmente na tela, com o motivo, e o relatório das divergências lista uma por uma, só com identificadores. O que continuar em "Exigem atenção" depois da atualização é o que precisa ser olhado.
+
+### As 3 corridas antigas
+
+Encerradas no servidor. Cada uma tem:
+- ajuste `resolved_by_reconciliation` de valor zero;
+- marcador `balance_reconciliation` processado;
+- nenhuma venda criada.
+
+Não exigem mais nenhuma ação.
+
+### Verificações da V242.11
+
+| Verificação | Resultado |
+|---|---|
+| Vendas Pix, dinheiro, cartão e fiado | 36 de 36 |
+| Recebimentos e dívida histórica | 23 de 23 (rota real de recebimento e apuração do servidor, com dados fictícios) |
+| Ajustes e encerramentos | 14 de 14 |
+| Estoque | 31 de 31 |
+| Serviços e corridas | 33 de 33 |
+| Sincronização, offline e duplicidade | 97 de 97 |
+| Isolamento de Espaços | 39 de 39 |
+| Suíte unitária completa | 2569 testes, 116 falhas, nenhuma nova em relação à V242.9 |
+| Emulator completo | 511 testes, 86 falhas, os mesmos nomes da V242.9 |
+| Versão e precache | `release-version-check` OK (242.11); `sync-session-alert` 8 de 8; 311 entradas sem duplicatas; os 9 endereços versionados presentes |
+| Pacote público | 286 arquivos; isolamento 56 de 56; teste local com 235 requisições 200 e service worker ativo no cache novo |
+| Dados reais (somente leitura) | apuração do servidor dá R$ 1.469,00 exigíveis no Espaço de origem do cliente regularizado; só esse cliente muda de resultado |
