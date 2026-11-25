@@ -142,17 +142,20 @@ comportamento é coberto por `tests/sync-maintenance-resolution.test.cjs`.
 | V242.10 e V242.11 | 20 em cada passagem (240 no total) | cerca de 1,55 s em cada passagem |
 | V242.12 | 20 na 1ª passagem, nenhuma nas seguintes, 20 depois de 10 min e 20 na manual (60 no total) | 0 nas passagens sem leitura |
 
-### Custos que já existiam desde a V242.9 (fora desta release)
+### Próximas prioridades de desempenho (não iniciadas)
 
-O perfil de CPU com 2.000 clientes mostrou três custos que não mudaram entre as versões:
+O perfil de CPU com 2.000 clientes mostrou três custos que já existiam na V242.9 e não
+mudaram entre as versões. Eles ficam fora desta release, na ordem aprovada. Nenhum deles
+começa antes da homologação da V242.12 no Android.
 
-- a cópia completa dos dados locais em cada gravação (`business-cache.js` `ordered` e
-  `clone`, cerca de 1,9 s em 90 s);
-- a ordenação de Cobranças, que recalcula o saldo a cada comparação (cerca de 1,8 s para
-  abrir);
-- o cálculo do Dashboard no celular.
-
-Ficam como próximos passos separados.
+1. **Eliminar a cópia completa dos dados a cada venda.** `business-cache.js` (`ordered` e
+   `clone`) copia a base local inteira em cada gravação: cerca de 1,9 s de CPU em 90 s de
+   uso, com cerca de 0,5 s por venda com 2.000 clientes.
+2. **Otimizar a ordenação e os cálculos da Central de Cobranças.** A ordenação recalcula o
+   saldo de cada cliente a cada comparação, e abrir Cobranças leva cerca de 1,8 s com
+   2.000 clientes.
+3. **Otimizar o Dashboard mobile.** O cálculo do Dashboard no celular (`home-mobile.js`)
+   aparece entre os maiores custos do perfil.
 
 ## Verificações
 
