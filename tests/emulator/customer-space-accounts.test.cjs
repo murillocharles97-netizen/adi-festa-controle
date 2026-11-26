@@ -7,6 +7,7 @@ if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) throw
 const {initializeApp, deleteApp} = require('firebase-admin/app'), {getFirestore} = require('firebase-admin/firestore');
 const {operationalCommitService} = require('../../functions/src/services/operational-commit-service');
 const {customerAccountService} = require('../../functions/src/services/customer-account-service');
+const {loadApprovedAccounts} = require('../helpers/selective-account-load.cjs');
 const {customerAccountBackfillService} = require('../../functions/src/services/customer-account-backfill-service');
 const {customerBalanceAdjustmentService} = require('../../functions/src/services/customer-balance-adjustment-service');
 
@@ -23,7 +24,7 @@ async function setup() {
   for (const id of [A, B]) await db.doc('financialSpaces/' + id).set({id, businessId: bid, linkedBusinessId: bid, active: true, type: 'business', ownerUid: owner, capabilities: {sales: true, finance: true}});
   for (const clientId of ['c-reg', 'c-zero', 'c-open'])
     await root.collection('clients').doc(clientId).set({id: clientId, businessId: bid, nome: 'Pessoa QA ' + clientId, saldo: 0, financialVersion: 0, workspaceGeneration: 0, active: true, ativo: true, customerSpaceIds: [A, B]});
-  const svc = operationalCommitService(db), shadow = customerAccountService(db, {verify: false}), backfill = customerAccountBackfillService(db), adjust = customerBalanceAdjustmentService(db);
+  const svc = operationalCommitService(db), shadow = customerAccountService(db, {verify: false}), adjust = customerBalanceAdjustmentService(db);
   const regularize = async (clientId, total, spaceId) => {
     const r = (kind, extra = {}) => ({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, spaceId, clientId, kind, ...extra}});
     const q = await svc.receipt(r('fiado_space_regularization_preview'));
@@ -32,10 +33,7 @@ async function setup() {
   };
   await regularize('c-reg', 15000, A); await regularize('c-reg', 7000, B);
   await root.collection('clients').doc('c-open').update({saldo: -190});
-  const load = async (runId = 'run-' + crypto.randomUUID()) => {
-    let cursor = null;
-    do { const r = await backfill.handle({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, kind: 'customer_account_backfill_apply', runId, confirmed: true, backupConfirmed: true, cursor}}); cursor = r.nextCursor; } while (cursor);
-  };
+  const load = () => loadApprovedAccounts(db, bid, owner, 'run-' + crypto.randomUUID());
   const published = async () => Object.fromEntries((await root.collection('customerSpaceAccounts').get()).docs.map(d => [d.id, d.data()]).sort(([a], [b]) => a.localeCompare(b)));
   const command = async (data) => {
     const req = (kind, extra) => ({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, kind, ...extra}});
@@ -55,7 +53,10 @@ test('a carga publica só contas prontas, um documento por Espaço', async () =>
 });
 
 test('o comando de ajuste atualiza o Espaço publicado; zerar deixa o Espaço com zero', async () => {
-  const c = await setup(); await c.load();
+  const c = await setup();
+  await c.regularize('c-zero', 1000, c.B);
+  await c.regularize('c-zero', 0, c.B);
+  await c.load();
   await c.command({clientId: 'c-reg', spaceId: c.A, mode: 'set', targetDebtCents: 0});
   await c.command({clientId: 'c-zero', spaceId: c.B, mode: 'increase', amountCents: 2500});
   const docs = await c.published();
@@ -75,6 +76,10 @@ test('cada evento do razão atualiza o Espaço publicado pela conta sombra', asy
 test('conta que deixa de estar pronta tem os documentos retirados', async () => {
   const c = await setup(); await c.load();
   await c.root.collection('clients').doc('c-reg').update({saldo: -999});
-  await c.load();
+  const service = customerAccountBackfillService(db, {projectionScope: c.bid + ':0'});
+  const result = await service.handle({auth: {uid: c.owner}, data: {
+    kind: 'customer_account_backfill_catchup', businessId: c.bid, workspaceGeneration: 0, clientIds: ['c-reg']
+  }});
+  assert.equal(result.items[0].status, 'needs_review');
   assert.ok(!Object.keys(await c.published()).some(id => id.startsWith('c-reg__')), 'nenhum saldo antigo fica publicado');
 });

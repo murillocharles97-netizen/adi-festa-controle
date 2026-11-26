@@ -56,6 +56,8 @@ function customerBalanceAdjustmentService(db, {now = () => new Date()} = {}) {
       fail('failed-precondition', 'Cliente indisponível nesta empresa.');
     if (!account || account.workspaceGeneration !== generation || account.schemaVersion !== Account.SCHEMA_VERSION || !account.baseline || !READY.includes(account.status))
       fail('failed-precondition', 'A conta por Espaço deste cliente ainda não foi preparada. Faça a carga das contas antes de ajustar.');
+    if (account.backfill?.selective && account.clientFinancialVersion !== (client.financialVersion ?? 0))
+      fail('failed-precondition', 'A conta por Espaço aguarda conferência da versão financeira. Nada foi alterado.');
     if (account.debtCents + (account.baseline.unexplainedCents || 0) !== -cents(client.saldo || 0))
       fail('failed-precondition', 'A conta por Espaço não confere com o saldo cadastral. Nada foi alterado.');
     const linked = [...(client.customerSpaceIds || []), ...(client.customerSpaceIds?.length ? [] : [client.spaceId])].filter(Boolean);

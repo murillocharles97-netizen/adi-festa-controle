@@ -30,7 +30,10 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
   async function history(tx, bid, generation, clientId, client) {
     let input;
     try { input = await readHistoryInput({tx, c: server(bid, generation), ref, clientId, client, checkRowAccess: false}); }
-    catch (error) { return {unreadable: true, reason: String(error.message || error).slice(0, 200)}; }
+    catch (error) {
+      if ([4, 8, 10, 13, 14, 'deadline-exceeded', 'resource-exhausted', 'aborted', 'internal', 'unavailable'].includes(error.code)) throw error;
+      return {unreadable: true, reason: String(error.message || error).slice(0, 200)};
+    }
     const scoped = Boolean(client.fiadoOpeningBalance || client.fiadoHistoryActivation?.spaceRegularization?.version === 1);
     try { return {input, scoped, projection: History.project(input, Plan.today(now()), {scoped}), reason: null}; }
     catch (error) { return {input, scoped, projection: null, reason: String(error.message || error).slice(0, 200)}; }
@@ -46,7 +49,7 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
       const [accountSnap, markerSnap] = await Promise.all([tx.get(accountRef), tx.get(markerRef)]);
       if (markerSnap.exists) {
         const transactional = markerSnap.data()?.source === 'transactional', last = Date.parse(accountSnap.data()?.verification?.at || '');
-        return {status: 'duplicate', audit: verify && transactional && (sampled(eventId, auditEvery) || !Number.isFinite(last) || now().getTime() - last > auditMaxAgeMs)};
+        return {status: 'duplicate', audit: verify && (markerSnap.data()?.verificationPending === true || transactional && (sampled(eventId, auditEvery) || !Number.isFinite(last) || now().getTime() - last > auditMaxAgeMs))};
       }
       const at = now().toISOString(), stored = accountSnap.data();
       if (!stored || stored.workspaceGeneration !== generation || stored.schemaVersion !== Account.SCHEMA_VERSION) {
@@ -69,7 +72,7 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
         // The triggering event was committed before this read, so the base already holds it.
         tx.set(accountRef, {...account, updatedAt: at});
         Account.writeSpaceDocs(tx, ref, businessId, stored, account, at);
-        tx.set(markerRef, {eventId, at, inBaseline: true});
+        tx.set(markerRef, {eventId, at, inBaseline: true, verificationPending: verify});
         return {status: 'baseline', account};
       }
       if (!stored.baseline) { tx.set(markerRef, {eventId, at, inBaseline: false, recordedOnly: true}); return {status: 'needs_review'}; }
@@ -77,19 +80,20 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
       const account = Account.apply(stored, event);
       tx.set(accountRef, {...account, updatedAt: at});
       Account.writeSpaceDocs(tx, ref, businessId, stored, account, at);
-      tx.set(markerRef, {eventId, at, inBaseline: false, owedCents: -Account.cents(event.balanceDelta), spaceId: Account.spaceOf(event)});
+      tx.set(markerRef, {eventId, at, inBaseline: false, owedCents: -Account.cents(event.balanceDelta), spaceId: Account.spaceOf(event), verificationPending: verify});
       return {status: 'applied', account};
     });
-    if (verify && ['baseline', 'applied'].includes(outcome.status) || outcome.audit) outcome.verification = await verifyClient(businessId, clientId);
+    if (verify && ['baseline', 'applied'].includes(outcome.status) || outcome.audit) outcome.verification = await verifyClient(businessId, clientId, eventId);
     return outcome;
   }
-  async function verifyClient(businessId, clientId) {
+  async function verifyClient(businessId, clientId, eventId = null) {
     return db.runTransaction(async tx => {
       const business = (await tx.get(db.doc(`businesses/${businessId}`))).data(), generation = business?.workspaceGeneration ?? 0;
       const accountRef = ref(businessId, 'customerAccounts', clientId), account = (await tx.get(accountRef)).data();
       const client = (await tx.get(ref(businessId, 'clients', clientId))).data();
       if (!account || !client) return {status: 'missing'};
       const h = await history(tx, businessId, generation, clientId, client);
+      if (eventId) tx.update(accountRef.collection('appliedEvents').doc(eventId), {verificationPending: false});
       if (h.unreadable || !account.baseline) {
         const verification = {status: 'needs_review', at: now().toISOString(), reason: h.reason || 'sem-base'};
         tx.update(accountRef, {verification});

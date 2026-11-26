@@ -8,7 +8,7 @@ if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) throw
 const {initializeApp, deleteApp} = require('firebase-admin/app'), {getFirestore} = require('firebase-admin/firestore');
 const {operationalCommitService} = require('../../functions/src/services/operational-commit-service');
 const {customerAccountService} = require('../../functions/src/services/customer-account-service');
-const {customerAccountBackfillService} = require('../../functions/src/services/customer-account-backfill-service');
+const {customerAccountBackfillService, applyLoadedEvent} = require('../../functions/src/services/customer-account-backfill-service');
 const {harness, bridge} = require('../helpers/fiado-cancellation-harness.cjs');
 
 // Etapa 5: an operation the account does not follow in its own transaction (the trigger path).
@@ -35,7 +35,7 @@ async function setup() {
   for (const [clientId, spec] of Object.entries(CLIENTS))
     await root.collection('clients').doc(clientId).set({id: clientId, businessId: bid, nome: 'Pessoa QA ' + clientId, saldo: 0, financialVersion: 0, workspaceGeneration: 0, active: true, ativo: true,
       customerSpaceIds: spec.spaces === 'a' ? [A] : [A, B]});
-  const svc = operationalCommitService(db), backfill = customerAccountBackfillService(db), shadow = customerAccountService(db);
+  const svc = operationalCommitService(db), backfill = customerAccountBackfillService(db, {loadScope: bid+ ':0', projectionScope: bid+ ':0'}), shadow = customerAccountService(db);
   const regularize = async (clientId, total, spaceId = A) => {
     const r = (kind, extra = {}) => ({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, spaceId, clientId, kind, ...extra}});
     const q = await svc.receipt(r('fiado_space_regularization_preview'));
@@ -97,50 +97,135 @@ test('regras aprovadas resolvem a atribuição sem tocar o que já é comprovado
   assert.equal(items['c5-unexplained'].status, 'needs_opening');
 });
 
-test('gravação: só o proprietário, com confirmação, cópia e regras explícitas', async () => {
-  const c = await setup(), runId = 'run-' + crypto.randomUUID();
-  await assert.rejects(c.call('customer_account_backfill_preview', {}, c.seller), e => e.code === 'permission-denied');
-  await assert.rejects(c.call('customer_account_backfill_apply', {runId, confirmed: true, backupConfirmed: true}, c.seller), e => e.code === 'permission-denied');
-  await assert.rejects(c.call('customer_account_backfill_apply', {runId, confirmed: true}), e => e.code === 'invalid-argument');
-  await assert.rejects(c.call('customer_account_backfill_apply', {runId, backupConfirmed: true}), e => e.code === 'invalid-argument');
-  await assert.rejects(c.call('customer_account_backfill_preview', {rules: ['inventada']}), e => e.code === 'invalid-argument');
-  await assert.rejects(c.call('customer_account_backfill_preview', {rules: ['fallback_space'], fallbackSpaceId: 'space-' + crypto.randomUUID()}));
+
+test('carga exige aprovação vigente por cliente e recusa empresa, geração e Espaço divergentes', async () => {
+  const c = await setup(), runId = 'run-' + crypto.randomUUID(), clientId = 'c2-regularized';
+  const {items} = await c.all('customer_account_backfill_preview');
+  const approval = items[clientId].approval;
+  assert.ok(approval);
+  assert.equal(items['c5-unexplained'].approval, null);
+  assert.equal(items['c6-credit'].approval, null);
+  const args = {runId, pageId: 'page-1', confirmed: true, backupConfirmed: true, items: [approval]};
+  await assert.rejects(c.call('customer_account_backfill_apply', args, c.seller), {code:'permission-denied'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, backupConfirmed: false}), {code:'invalid-argument'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, items: []}), {code:'invalid-argument'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, rules: ['single_linked_space']}), {code:'invalid-argument'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, workspaceGeneration: 1}), {code:'failed-precondition'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, businessId: 'qa-other-company'}), {code:'failed-precondition'});
+  await db.doc('financialSpaces/' + c.B).update({linkedBusinessId:'qa-other-company'});
+  const rejected = await c.call('customer_account_backfill_apply', args);
+  assert.equal(rejected.items[0].reason, 'espaco-fora-do-escopo');
   assert.equal(await c.size('customerAccounts'), 0);
+  await assert.rejects(c.call('customer_account_backfill_preview', {rules:['inventada']}), {code:'invalid-argument'});
+  await assert.rejects(c.call('customer_account_backfill_preview', {rules:['fallback_space'], fallbackSpaceId:'qa-missing-space'}));
 });
 
-test('gravação grava contas e relatório, repete sem mudar e preserva os dados existentes', async () => {
-  const c = await setup(), before = await c.snapshot(), runId = 'run-' + crypto.randomUUID(), args = {runId, confirmed: true, backupConfirmed: true, rules: ['single_linked_space']};
-  const first = await c.all('customer_account_backfill_apply', args);
-  assert.ok(Object.values(first.items).every(i => i.change === 'created'));
-  assert.equal(await c.size('customerAccounts'), 6);
-  const account = await c.read('customerAccounts', 'c3-legacy-one');
-  assert.equal(account.status, 'ready_by_rule'); assert.deepEqual(account.spaces, {[c.A]: 8000}); assert.equal(account.backfill.runId, runId);
-  assert.equal((await c.read('customerAccounts', 'c5-unexplained')).status, 'needs_opening');
-  assert.equal((await c.root.collection('customerAccountBackfills').doc(runId).collection('items').get()).size, 6);
-  const report = await c.read('customerAccountBackfills', runId);
-  assert.ok(report.finishedAt); assert.equal(report.actorUid, c.owner); assert.deepEqual(report.rules, ['single_linked_space']);
-  const again = await c.all('customer_account_backfill_apply', args);
-  assert.ok(Object.values(again.items).every(i => i.change === 'unchanged'), JSON.stringify(Object.values(again.items).map(i => i.change)));
-  await assert.rejects(c.call('customer_account_backfill_apply', {...args, rules: []}), e => e.code === 'already-exists');
-  assert.equal(await c.snapshot(), before, 'clientes, vendas, pagamentos, ajustes e eventos intactos');
+test('carga seletiva recupera a mesma página após resposta perdida e concorrência', async () => {
+  const c = await setup(), before = await c.snapshot(), clientId = 'c2-regularized', runId = 'run-' + crypto.randomUUID();
+  const {items} = await c.all('customer_account_backfill_preview');
+  const approval = items[clientId].approval;
+  const args = {runId, pageId:'page-1', confirmed:true, backupConfirmed:true, items:[approval]};
+  const accountRef = c.root.collection('customerAccounts').doc(clientId);
+  const prior = {debtCents: 1, spaces: {}, workspaceGeneration: 0, clientId};
+  await accountRef.set(prior);
+  const fault = failingTransaction(db, 3);
+  const service = customerAccountBackfillService(fault, {loadScope: c.bid + ':0'});
+  await assert.rejects(service.handle({auth:{uid:c.owner},data:{kind:'customer_account_backfill_apply',businessId:c.bid,...args}}), /QA interrupted/);
+  const run = c.root.collection('customerAccountBackfills').doc(runId);
+  assert.equal((await run.get()).data().pages, 0);
+  assert.equal((await run.collection('items').doc(clientId).get()).data().result.status,'applied');
+  const afterFirst = await accountRef.get();
+  const [resumed, concurrent] = await Promise.all([
+    c.call('customer_account_backfill_apply', args), c.call('customer_account_backfill_apply', args)
+  ]);
+  assert.deepEqual(concurrent, resumed);
+  assert.equal(resumed.items[0].status, 'applied');
+  assert.equal(resumed.items[0].previous.debtCents, 1);
+  assert.equal((await run.get()).data().pages, 1);
+  assert.equal((await run.get()).data().applied, 1);
+  assert.equal((await accountRef.get()).updateTime.isEqual(afterFirst.updateTime), true);
+  assert.equal(await c.size('customerAccounts'), 1);
+  assert.equal((await run.collection('items').get()).size, 1);
+  assert.equal((await run.collection('pages').get()).size, 1);
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, pageId:'duplicate-client'}), {code:'already-exists'});
+  await assert.rejects(c.call('customer_account_backfill_apply', {...args, items:[{...approval, proofHash:'0'.repeat(64)}]}), {code:'already-exists'});
+  assert.equal(await c.snapshot(), before);
 });
 
-test('conta sombra existente é substituída com a versão anterior no relatório; eventos seguintes continuam', async () => {
+test('uma movimentação após a prévia gera revisão e preserva os demais aprovados', async () => {
   const c = await setup();
-  const events = (await c.root.collection('balanceEvents').get()).docs.filter(d => d.data().customerId === 'c2-regularized' || d.data().clientId === 'c2-regularized');
-  for (const e of events) await c.shadow.applyEvent(c.bid, e.id, e.data());
-  await c.root.collection('customerAccounts').doc('c2-regularized').update({debtCents: 1});
-  const runId = 'run-' + crypto.randomUUID();
-  const {items} = await c.all('customer_account_backfill_apply', {runId, confirmed: true, backupConfirmed: true});
-  assert.equal(items['c2-regularized'].change, 'replaced'); assert.equal(items['c2-regularized'].previous.debtCents, 1);
-  assert.equal((await c.read('customerAccounts', 'c2-regularized')).debtCents, 22000);
-  await untracked(() => c.regularize('c2-regularized', 9000));
-  const newest = (await c.root.collection('balanceEvents').get()).docs.map(d => ({id: d.id, data: d.data()})).filter(e => e.data.customerId === 'c2-regularized' && !events.some(x => x.id === e.id));
-  assert.equal(newest.length, 1);
-  const applied = await c.shadow.applyEvent(c.bid, newest[0].id, newest[0].data);
-  assert.equal(applied.status, 'applied'); assert.equal(applied.verification.status, 'match', JSON.stringify(applied.verification.differences));
-  const after = await c.read('customerAccounts', 'c2-regularized');
-  assert.deepEqual(after.spaces, {[c.A]: 9000, [c.B]: 7000}); assert.equal(after.status, 'ready', 'a classificação da carga é preservada');
+  await c.regularize('c1-zero', 5000);
+  const {items} = await c.all('customer_account_backfill_preview');
+  await c.regularize('c2-regularized', 9000);
+  const result = await c.call('customer_account_backfill_apply', {runId:'qa-stale', pageId:'page-1', confirmed:true, backupConfirmed:true,
+    items:[items['c1-zero'].approval,items['c2-regularized'].approval]});
+  assert.deepEqual(result.items.map(row=>row.status),['applied','needs_review']);
+  assert.equal(result.items[1].reason,'previa-alterada');
+  assert.equal(await c.read('customerAccounts','c2-regularized'),undefined);
+});
+
+function failingTransaction(database, ordinal) {
+  let count = 0;
+  return new Proxy(database,{get(target,key) {
+    if(key==='runTransaction')return (...args)=>++count===ordinal ?
+      Promise.reject(new Error('QA interrupted')) : target.runTransaction(...args);
+    const value=target[key];
+    return typeof value==='function'?value.bind(target):value;
+  }});
+}
+
+test('projeção selecionada recompõe eventos da janela e suporta concorrência e reentrega', async () => {
+  const c = await setup(), clientId = 'c2-regularized', projectionScope = c.bid + ':0';
+  const {items} = await c.all('customer_account_backfill_preview');
+  await c.call('customer_account_backfill_apply', {runId:'qa-gap',pageId:'page-1',confirmed:true,backupConfirmed:true,items:[items[clientId].approval]});
+  const before = await c.read('customerAccounts',clientId);
+  const existing = new Set((await c.root.collection('balanceEvents').get()).docs.map(d=>d.id));
+  await untracked(() => c.regularize(clientId, 9000));
+  const event = (await c.root.collection('balanceEvents').get()).docs.find(d=>!existing.has(d.id));
+  assert.ok(event);
+  assert.equal((await applyLoadedEvent(db,c.bid,event.id,{projectionScope:null})).status,'disabled');
+  assert.equal((await c.read('customerAccounts',clientId)).clientFinancialVersion,before.clientFinancialVersion);
+  const route = await c.svc.receipt({auth:{uid:c.owner},data:{kind:'fiado_receipt_route',
+    businessId:c.bid, workspaceGeneration:0, clientId, spaceId:c.A, scopedReceiptVersion:1, receiptProofVersion:2}});
+  assert.equal(route.mode,'space');
+  assert.equal(route.dueCents,9000);
+  assert.notEqual(route.source,'customer_account');
+  await assert.rejects(applyLoadedEvent(failingTransaction(db,1),c.bid,event.id,{projectionScope}), /QA interrupted/);
+  const args = {clientIds:[clientId,'c5-unexplained']};
+  const results = await Promise.all([
+    c.call('customer_account_backfill_catchup',args),
+    applyLoadedEvent(db,c.bid,event.id,{projectionScope}),
+    applyLoadedEvent(db,c.bid,event.id,{projectionScope})
+  ]);
+  assert.equal(results[0].items[1].status,'outside-cohort');
+  const account = await c.read('customerAccounts',clientId);
+  assert.deepEqual(account.spaces,{[c.A]:9000,[c.B]:7000});
+  assert.equal(account.clientFinancialVersion,(await c.read('clients',clientId)).financialVersion);
+  const markers=c.root.collection('customerAccounts').doc(clientId).collection('appliedEvents');
+  assert.equal((await markers.get()).size, 1);
+  assert.equal(await c.size('customerAccounts'),1);
+  assert.equal((await applyLoadedEvent(db,'qa-other-company',event.id,{projectionScope})).status,'disabled');
+  assert.equal((await c.call('customer_account_backfill_catchup',args)).items[0].status,'current');
+  assert.deepEqual(await c.read('customerAccounts',clientId),account);
+});
+
+test('a retentativa do gatilho retoma a verificação interrompida sem aplicar o valor novamente', async () => {
+  const c = await setup(), clientId = 'c2-regularized';
+  const {items} = await c.all('customer_account_backfill_preview');
+  await c.call('customer_account_backfill_apply', {runId:'qa-retry',pageId:'page-1',confirmed:true,backupConfirmed:true,items:[items[clientId].approval]});
+  const existing = new Set((await c.root.collection('balanceEvents').get()).docs.map(d=>d.id));
+  await untracked(() => c.regularize(clientId, 9000));
+  const event = (await c.root.collection('balanceEvents').get()).docs.find(d=>!existing.has(d.id));
+  const faulty = customerAccountService(failingTransaction(db,2));
+  await assert.rejects(faulty.applyEvent(c.bid,event.id,event.data()),/QA interrupted/);
+  const before=await c.read('customerAccounts',clientId), version=(await c.read('clients',clientId)).financialVersion;
+  assert.ok(before.clientFinancialVersion<version);
+  const resumed=await c.shadow.applyEvent(c.bid,event.id,event.data());
+  assert.equal(resumed.status,'duplicate');
+  assert.equal(resumed.verification.status,'match');
+  const account=await c.read('customerAccounts',clientId);
+  assert.equal(account.clientFinancialVersion,version);
+  assert.equal(account.debtCents,before.debtCents);
 });
 
 test('histórico ilegível vai para revisão sem parar a página, e o gatilho da conta sombra não fica tentando de novo', async () => {

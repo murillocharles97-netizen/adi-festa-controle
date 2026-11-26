@@ -150,7 +150,7 @@ async function accountRoute({tx,c,ref,client,clientId,spaceId,day,scope,generati
   if(!ACCOUNT_RECEIPT_ENABLED||!scoped||client.fiadoHistoryVersion!==1||bookBalanceCents>=0)return null;
   const stored=(await tx.get(ref(c.bid,'customerAccounts',clientId))).data(),check=stored?.verification,debt=stored?.spaces?.[spaceId];
   if(!stored||stored.schemaVersion!==CustomerAccount.SCHEMA_VERSION||stored.workspaceGeneration!==generation||stored.clientId!==clientId||
-     !CustomerAccount.PUBLISHED.has(stored.status)||!stored.baseline||stored.unattributedCents!==0||stored.debtCents!==-bookBalanceCents||
+     !CustomerAccount.PUBLISHED.has(stored.status)||!stored.baseline||stored.clientFinancialVersion!==version||stored.unattributedCents!==0||stored.debtCents!==-bookBalanceCents||
      !Number.isSafeInteger(debt)||debt<=0||check?.receiptRisk)return null;
   // Etapa 5: the account kept in the same transaction as every operation, current with the client;
   // otherwise the last verification, if it proved this very version.

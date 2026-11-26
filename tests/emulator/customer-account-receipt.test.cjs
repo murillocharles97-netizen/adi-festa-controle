@@ -8,7 +8,7 @@ if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) throw
 const {initializeApp, deleteApp} = require('firebase-admin/app'), {getFirestore} = require('firebase-admin/firestore');
 const {operationalCommitService} = require('../../functions/src/services/operational-commit-service');
 const {customerAccountService} = require('../../functions/src/services/customer-account-service');
-const {customerAccountBackfillService} = require('../../functions/src/services/customer-account-backfill-service');
+const {loadApprovedAccounts} = require('../helpers/selective-account-load.cjs');
 const {customerBalanceAdjustmentService} = require('../../functions/src/services/customer-balance-adjustment-service');
 const {decideReceiptRoute} = require('../../functions/src/services/fiado-receipt-route');
 const {createOriginEvidenceHandler} = require('../../functions/src/fiado-origin-evidence-handler');
@@ -57,7 +57,7 @@ async function setup() {
   for (const [clientId, saldo] of [['c-reg', 0], ['c-open', -190]])
     await root.collection('clients').doc(clientId).set({id: clientId, businessId: bid, nome: 'Pessoa QA ' + clientId, saldo, financialVersion: 0, workspaceGeneration: 0, active: true, ativo: true, customerSpaceIds: [A, B]});
   const meter = metered(db), svc = operationalCommitService(meter.db), plain = operationalCommitService(db);
-  const shadow = customerAccountService(db, {verify: true}), backfill = customerAccountBackfillService(db), adjustments = customerBalanceAdjustmentService(db);
+  const shadow = customerAccountService(db, {verify: true}), adjustments = customerBalanceAdjustmentService(db);
   const ref = (b, col, id) => db.doc(`businesses/${b}/${col}/${id}`);
   const req = (kind, extra = {}) => ({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, kind, ...extra}});
   const regularize = async (clientId, total, spaceId) => {
@@ -72,10 +72,7 @@ async function setup() {
   const quote = await openingApi('openingPreview', {balances});
   await openingApi('openingConfirm', {requestId: crypto.randomUUID(), confirmed: true, queueChecked: true, reviewHash: quote.reviewHash, balances});
   await regularize('c-reg', 15000, A); await regularize('c-reg', 7000, B);
-  const load = async () => {
-    let cursor = null; const runId = 'run-' + crypto.randomUUID();
-    do { cursor = (await backfill.handle(req('customer_account_backfill_apply', {runId, confirmed: true, backupConfirmed: true, cursor}))).nextCursor; } while (cursor);
-  };
+  const load = () => loadApprovedAccounts(db, bid, owner, 'run-' + crypto.randomUUID());
   // What the trigger does in production: apply each new event and verify the account.
   const sync = async () => { for (const d of (await root.collection('balanceEvents').get()).docs) await shadow.applyEvent(bid, d.id, d.data()); };
   const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1, receiptProofVersion: 2}));

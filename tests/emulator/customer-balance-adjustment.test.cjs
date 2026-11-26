@@ -8,7 +8,8 @@ if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) throw
 const {initializeApp, deleteApp} = require('firebase-admin/app'), {getFirestore} = require('firebase-admin/firestore');
 const {operationalCommitService} = require('../../functions/src/services/operational-commit-service');
 const {customerAccountService} = require('../../functions/src/services/customer-account-service');
-const {customerAccountBackfillService} = require('../../functions/src/services/customer-account-backfill-service');
+const {planCustomer} = require('../../functions/src/services/customer-account-backfill-service');
+const {loadApprovedAccounts} = require('../helpers/selective-account-load.cjs');
 const {customerBalanceAdjustmentService} = require('../../functions/src/services/customer-balance-adjustment-service');
 const {readHistoryInput} = require('../../functions/src/services/fiado-history-service');
 const History = require('../../functions/src/shared/fiado-history-account');
@@ -64,9 +65,14 @@ async function setup() {
   };
   await legacyAdjust('c-simple', -80);
   await regularize('c-reg', 15000, A); await regularize('c-reg', 7000, B);
-  const load = customerAccountBackfillService(db);
-  let cursor = null;
-  do { const r = await load.handle({auth: {uid: owner}, data: {businessId: bid, workspaceGeneration: 0, kind: 'customer_account_backfill_apply', runId: 'run-' + bid, confirmed: true, backupConfirmed: true, rules: ['single_linked_space'], cursor}}); cursor = r.nextCursor; } while (cursor);
+  await loadApprovedAccounts(db, bid, owner, 'run-' + bid);
+  // Model the old, already-prepared accounts this adjustment contract also supports.
+  for (const clientId of ['c-zero','c-simple']) await db.runTransaction(async tx => {
+    const ref = (b,col,id) => db.doc('businesses/'+b+'/'+col+'/'+id);
+    const client = (await tx.get(ref(bid,'clients',clientId))).data();
+    const result = await planCustomer({tx,ref,businessId:bid,generation:0,clientId,client,rules:['single_linked_space']});
+    tx.set(ref(bid,'customerAccounts',clientId),{...result.account,status:result.status,clientFinancialVersion:client.financialVersion});
+  });
   const req = (kind, data, uid = owner) => ({auth: {uid}, data: {businessId: bid, workspaceGeneration: 0, kind, ...data}});
   const preview = (data, uid) => adjustments.preview(req('customer_balance_adjustment_preview', data, uid));
   const adjust = async (data, uid = owner) => {
