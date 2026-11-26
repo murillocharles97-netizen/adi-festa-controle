@@ -1,6 +1,6 @@
 'use strict';
 const Plan=require('./installment-plan'),Account=require('./fiado-account'),{prove}=require('./fiado-history-proof');
-const order=(a,b)=>a.dueDate.localeCompare(b.dueDate)||a.createdAt.localeCompare(b.createdAt)||String(a.saleId||a.historyEventId).localeCompare(String(b.saleId||b.historyEventId))||(a.number??-1)-(b.number??-1);
+const order=(a,b)=>a.dueDate.localeCompare(b.dueDate)||a.createdAt.localeCompare(b.createdAt)||String(a.historyEventId||a.saleId).localeCompare(String(b.historyEventId||b.saleId))||(a.number??-1)-(b.number??-1);
 const origin=row=>row.spaceId||row.financialSpaceId||null;
 function project(input,day=Plan.today(),{scoped=false}={}){
  const proof=prove(input,day);if(!proof.financialProof)throw Error('Histórico financeiro sem prova suficiente: '+proof.reason+(proof.details?.length?' ('+proof.details.join(', ')+')':''));
@@ -18,7 +18,7 @@ function project(input,day=Plan.today(),{scoped=false}={}){
   const source=({sales,payments,balanceAdjustments:adjustments}[effect.col]).find(s=>s.id===effect.sourceId);
   if(effect.col==='sales'&&source.installmentPlan)continue;
   if(effect.col==='sales'&&effect.delta>0){const original=entries.find(e=>e.historyEventId==='credit_sale:'+source.id);if(!original||original.remainingCents<effect.delta)throw Error('Reversão de dívida histórica já recebida exige revisão.');original.remainingCents-=effect.delta;continue;}
-  if(effect.delta<0){const dueDate=Account.commercialDay(source);if(dueDate>day)throw Error('Obrigação histórica com data futura exige revisão.');entries.push({saleId:null,number:null,historyEventId:effect.id,dueDate,createdAt:source.data||source.financialAppliedAt,remainingCents:-effect.delta,spaceId:scoped?origin(source):source.spaceId||null});}
+  if(effect.delta<0){const dueDate=Account.commercialDay(source);if(dueDate>day)throw Error('Obrigação histórica com data futura exige revisão.');entries.push({saleId:scoped&&effect.col==='sales'?source.id:null,number:null,historyEventId:effect.id,dueDate,createdAt:source.data||source.financialAppliedAt,remainingCents:-effect.delta,spaceId:scoped?origin(source):source.spaceId||null});}
   else if(effect.delta>0){let amount=effect.delta;if(effect.col==='payments'){
     const planIds=new Set(sales.filter(s=>s.installmentPlan).map(s=>s.id));
     const allocations=collections.paymentAllocations.filter(a=>a.paymentId===source.id&&(scoped||planIds.has(a.saleId)));

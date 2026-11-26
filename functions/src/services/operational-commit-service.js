@@ -16,6 +16,9 @@ const SaleMoney=require('../shared/sale-money');
 const {validateFlexibleServices}=require('./flexible-service-validation');
 const INSTALLMENT_CREATION_ENABLED = true; // Compatible rollback pauses only new plans.
 const HISTORY_ACTIVATION_ENABLED = true; // Containment retains already activated accounts and receipts.
+// Etapa 1: false keeps new customers in the traditional chain; customers already
+// opened by Space stay as they are.
+const NATIVE_SPACE_ACCOUNT_ENABLED = true;
 const {paymentConfirmationRead}=require('./payment-confirmation-read');
 const {decideReceiptRoute,assertReceiptRoute}=require('./fiado-receipt-route');
 const Rejection=require('../shared/sync-rejection');
@@ -25,6 +28,9 @@ const cents=n=>{if(typeof n!=='number'||!Number.isFinite(n)||!Number.isSafeInteg
 const canonical=v=>JSON.stringify((function sort(x){return Array.isArray(x)?x.map(sort):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,sort(x[k])])):x;})(v));
 const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
 const gen=v=>v?.workspaceGeneration??0;
+// Etapa 1: a customer never touched by a financial operation, in no per-Space regime yet.
+const nativeCandidate=client=>client.fiadoHistoryVersion===undefined&&!client.fiadoOpeningBalance&&!client.fiadoHistoryActivation&&
+  client.hasInstallmentFiado!==true&&Number(client.saldo||0)===0&&(client.financialVersion??0)===0&&client.active!==false&&client.ativo!==false&&!client.deletedAt;
 const financialFields=['saldo','financialVersion','openBalance','financialRevision','financialReconciledAt'];
 const stockFields=['estoqueAtual','estoque','totalStock','stock','onlineReservedStock','onlineOrderFinalizationId','hasAvailableStock'];
 const counterFields=['totalComprado','quantidadeVendas','ultimaCompra','legacyBalance','legacyBalanceRemaining','campaignFinanceVersion','fiadoHistoryVersion','fiadoHistoryActivation'];
@@ -311,6 +317,42 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
      }
     }
    }
+   // Etapa 1: an untouched customer's first Fiado sale opens the per-Space account (the same
+   // regime a regularization sets), in this transaction, so a new customer never enters the
+   // traditional chain. Any prior source or a sale without Space keeps the customer as before;
+   // the migration (Etapa 2) handles existing customers. Installment sales open it too (Etapa 3).
+   const firstFiado=NATIVE_SPACE_ACCOUNT_ENABLED&&!paymentRecovery&&!brandRecovery&&attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&
+    (w.data.formaPagamento==='fiado'||w.data.status==='fiado'));
+   if(firstFiado){
+    const id=firstFiado.data.clienteId||firstFiado.data.clientId,space=firstFiado.data.spaceId||null;
+    const entry=typeof id==='string'&&id&&!id.includes('/')?plan.get(ref(c.bid,'clients',id).path):null;
+    const client=entry?(await tx.get(ref(c.bid,'clients',id))).data():null;
+    if(client&&nativeCandidate(client)&&space&&(!firstFiado.data.financialSpaceId||firstFiado.data.financialSpaceId===space)){
+     let input=null;
+     try{input=await require('./fiado-history-service').readHistoryInput({tx,c:{bid:c.bid,business:c.business,owner:true,has:()=>true,member:null,space:async()=>({})},
+      ref,clientId:id,client,checkRowAccess:false});}catch{input=null;}
+     if(input&&!input.opening&&['payments','balanceAdjustments','balanceEvents','paymentAllocations'].every(k=>!input.collections[k].length)&&
+      input.collections.sales.every(s=>s.formaPagamento!=='fiado'&&s.status!=='fiado')){
+      entry.data.fiadoHistoryVersion=1;
+      entry.data.fiadoHistoryActivation={...(client.fiadoHistoryActivation||{}),spaceRegularization:{version:1,operationId:item.operationId,at:new Date(now()).toISOString(),origin:'native'}};
+      if(marker)marker.data.nativeSpaceAccount={version:1,clientId:id,spaceId:space};
+     }
+    }
+   }
+   // Etapa 5 (reads end here): the per-Space account follows this operation in the same transaction.
+   const accountWriters=[];
+   {const Account=require('../shared/customer-account'),events=[...plan.values()].filter(p=>p.ref.parent.id==='balanceEvents').map(p=>({...p.data,id:p.ref.id})),byClient=new Map();
+    for(const e of events){const id=Account.clientOf(e);if(!byClient.has(id))byClient.set(id,[]);byClient.get(id).push(e);}
+    const after=(col,id)=>{if(typeof col!=='string'||typeof id!=='string'||!id||id.includes('/'))return null;const path=ref(c.bid,col,id).path,b=before.get(path);return {...(b?.exists?b.data():{}),...(plan.get(path)?.data||{}),id};};
+    for(const [cid,list] of byClient){
+     if(!cid||cid.includes('/'))continue;
+     const path=ref(c.bid,'clients',cid).path,b=before.get(path),versionBefore=Number((b?.exists?b.data():{}).financialVersion||0),versionAfter=Number(plan.get(path)?.data?.financialVersion);
+     const changes=list.sort((x,y)=>String(x.id).localeCompare(String(y.id))).map(e=>({event:e,source:after(e.sourceCollection,e.sourceDocumentId),
+      allocations:e.sourceCollection==='payments'?[...plan.values()].filter(p=>p.ref.parent.id==='paymentAllocations'&&p.data.paymentId===e.sourceDocumentId).map(p=>p.data):[]}));
+     const native=plan.get(path)?.data?.fiadoHistoryActivation?.spaceRegularization?.origin==='native'&&!(b?.exists?b.data():{}).fiadoHistoryActivation;
+     const w=await require('./customer-account-ledger-service').prepare({tx,ref,businessId:c.bid,generation:gen(c.business),clientId:cid,versionBefore,versionAfter,changes,at:new Date(now()).toISOString(),create:native});
+     if(w)accountWriters.push(w);
+    }}
    if(paymentRecovery){
     if(!marker)fail('Marcador canônico ausente.','failed-precondition');
     marker.data.paymentRecovery={version:1,originalPayloadHash:hash,effectivePayloadHash:digest(item.payload),auditId:recoveryAudit.id};
@@ -330,6 +372,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
     }
     tx.set(p.ref,{...p.data,workspaceGeneration:gen(c.business)},{merge:true});
    }
+   for(const write of accountWriters)write(tx);
    const names=[...new Set([...plan.values()].map(p=>p.ref.parent.id).filter(n=>n!=='processedOperations'&&n!=='customerPhoneKeys'))];
    if(names.length){
     const revision='server:'+item.operationId;
@@ -711,7 +754,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(['fiado_space_regularization_preview','fiado_space_regularization_status'].includes(d.kind))
     return require('./fiado-space-regularization').handler({tx,c,ref,d,now:now()});
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
-   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion});
+   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion,useAccount:true});
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
    if(d.kind==='payment_recovery_status')return require('./payment-recovery-policy').status({tx,c,d:{...d,operationId:operationalId(d.operationId,'Operação'),paymentId:operationalId(d.paymentId,'Recebimento'),clientId:validId(d.clientId,'Cliente')},ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');

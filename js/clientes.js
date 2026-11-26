@@ -36,6 +36,38 @@ window.Clientes=(()=>{
     const saldo = Math.round((Number(client.saldo) || 0) * 100) / 100;
     return {saldo, futureCents: 0, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero', debt: Math.max(0, -saldo), credit: Math.max(0, saldo)};
   }
+  // Fase 4: balance by Space published by the server (customerSpaceAccounts), for DISPLAY.
+  // For the owner, who sees every Space, the sum must match the registered balance; while it
+  // does not (one side has not synced yet), the screens keep their previous sources.
+  function sharedAccount(client) {
+    const store = window.CustomerSpaceAccounts, shared = store?.forClient?.(client?.id);
+    // Etapa 1: nothing owed means no published document. With the server snapshot live on
+    // this device, a zero registered balance needs no account lookup to be shown.
+    if (!shared) return store?.ready?.() === true && client && Number(client.saldo || 0) === 0
+      ? {spaces: {}, unattributedCents: 0, totalCents: 0, complete: Boolean(store.scope?.()?.complete), live: true} : null;
+    if (shared.complete && shared.totalCents !== -Math.round((Number(client?.saldo) || 0) * 100)) return null;
+    return shared;
+  }
+  // The published balance is a total per Space; future installments come from the local calendars.
+  function futureBySpace(clientId, data, day) {
+    const out = {};
+    for (const sale of data.vendas || []) {
+      if ((sale.clienteId || sale.clientId) !== clientId || !sale.installmentPlan || sale.deletedAt || sale.active === false || sale.desfeita || sale.cancelledAt) continue;
+      const space = sale.spaceId || sale.financialSpaceId || null; if (!space) continue;
+      try { out[space] = (out[space] || 0) + window.InstallmentPlan.rows(sale, day).filter(r => r.dueDate > day).reduce((n, r) => n + r.remainingCents, 0); } catch { /* calendar unreadable: no future split */ }
+    }
+    return out;
+  }
+  function sharedStatus(client) {
+    const shared = sharedAccount(client); if (!shared) return null;
+    const scoped = scopedScreen(), active = window.SpaceContext?.activeId?.(), day = window.InstallmentPlan.today(), future = futureBySpace(client.id, baseView(), day);
+    const ids = scoped ? (active ? [active] : []) : Object.keys(shared.spaces);
+    const net = ids.reduce((n, id) => n + (shared.spaces[id] || 0), 0) + (scoped ? 0 : shared.unattributedCents);
+    const fut = Math.min(Math.max(0, net), ids.reduce((n, id) => n + (future[id] || 0), 0));
+    const due = Math.max(0, net - fut), credit = Math.max(0, -net), saldo = (credit - due) / 100;
+    return {saldo, futureCents: fut, status: saldo < 0 ? 'debt' : saldo > 0 ? 'credit' : 'zero', debt: due / 100, credit: credit / 100, displayOnly: true, shared: true,
+      partial: !scoped && shared.unattributedCents > 0, live: shared.live};
+  }
   function listBalances(data = baseView(), mode = 'strict') {
     const displayCache = caches[mode];
     const context = window.SpaceContext, bid = DB.getBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
@@ -75,6 +107,13 @@ window.Clientes=(()=>{
         const p = parts.get(id) || {dueCents: 0, futureCents: 0};
         p.dueCents += due; p.futureCents += future; parts.set(id, p);
       };
+      const shared = mode === 'display' ? sharedAccount(client) : null;
+      if (shared) {
+        const future = futureBySpace(client.id, data, day);
+        for (const [space, net] of Object.entries(shared.spaces)) { const fut = Math.min(Math.max(0, net), future[space] || 0); add(space, Math.max(0, net - fut), fut); }
+        if (shared.unattributedCents > 0) unknownCents += shared.unattributedCents;
+        accounts.set(client.id, {parts, unknownCents, calendarUnknown: false, bookCents: book, shared: true}); continue;
+      }
       const credit = window.InstallmentCredit, proof = mode === 'display' && credit?.displayAccount || credit?.confirmedAccount;
       const confirmed = proof?.(client.id);
       if (confirmed) {
@@ -139,7 +178,7 @@ window.Clientes=(()=>{
     const state = listBalances(baseView(), 'display'); let dueCents = 0, futureCents = 0, debtors = 0, unknown = 0;
     for (const client of baseView().clientes || []) {
       if (client.ativo === false || client.active === false || client.deletedAt) continue;
-      const closed = closedOpeningStatus(client);
+      const closed = !sharedAccount(client) && closedOpeningStatus(client);
       if (closed) { if (state.selected === 'business_adi-festa') { dueCents += Math.round(closed.debt * 100); debtors += Number(closed.debt > 0); } continue; }
       const a = state.accounts.get(client.id); if (!a) continue;
       const p = a.parts.get(state.selected);
@@ -162,7 +201,7 @@ window.Clientes=(()=>{
     for (const client of baseView().clientes || []) {
       if (client.ativo === false || client.active === false || client.deletedAt) continue;
       const linked = (client.customerSpaceIds || [client.spaceId]).includes(spaceId);
-      const closed = closedOpeningStatus(client);
+      const closed = !sharedAccount(client) && closedOpeningStatus(client);
       if (closed) { if (spaceId === 'business_adi-festa') { dueCents += Math.round(closed.debt * 100); debtors += Number(closed.debt > 0); } continue; }
       const a = state.accounts.get(client.id); if (!a) continue;
       const p = a.parts.get(spaceId);
@@ -209,6 +248,7 @@ window.Clientes=(()=>{
   }
   function listFinancialStatus(client, options = {}) {
     if (client?.customerDirectoryOnly) return financialStatus(client);
+    if (options.display) { const shared = sharedStatus(client); if (shared) return shared; }
     const closed = closedOpeningStatus(client);
     if (closed) return closed;
     if (localListBalances()) {
@@ -225,6 +265,7 @@ window.Clientes=(()=>{
     if (client?.customerDirectoryOnly) return unknown('O saldo precisa ser consultado no espaço de origem.');
     if (scoped && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.()))
       return unknown('Seu perfil não pode consultar o Fiado neste espaço.');
+    if (options.display) { const shared = sharedStatus(client); if (shared) return shared; }
     const credit = window.InstallmentCredit;
     const account = (options.display && credit?.displayAccount || credit?.confirmedAccount || credit?.account)?.(client?.id);
     const closed = !account && closedOpeningStatus(client);
@@ -273,7 +314,7 @@ window.Clientes=(()=>{
   }))};
   const ajustarSaldo=(clienteId,saldoNovo,motivo)=>{if(window.TeamAccess&&!window.TeamAccess.has('customers.adjustBalance'))throw Error('Você não tem permissão para ajustar saldos.');let movimento;const operationId=Utils.uuid();DB.alterar(db=>{const cliente=db.clientes.find(c=>c.id===clienteId);if(!cliente)throw Error('Cliente não encontrado');const saldoAnterior=Number(cliente.saldo||0),financialVersionAnterior=Math.max(0,Number(cliente.financialVersion||0));cliente.saldo=Number(saldoNovo);cliente.financialVersion=financialVersionAnterior+1;cliente.atualizadoEm=new Date().toISOString();movimento={id:operationId,operationId,clienteId,clienteNome:cliente.nome,tipo:'ajuste_saldo',saldoAnterior,saldoNovo:cliente.saldo,expectedFinancialVersion:financialVersionAnterior,financialVersionAfter:cliente.financialVersion,motivo:motivo||'',data:cliente.atualizadoEm,...(window.TeamAccess?.actor?.()||{})};db.movimentacoes.push(movimento)});return movimento};
   let refreshScheduled = false;
-  for (const name of ['fiado-account-updated','financial-state-updated','cloud-data-updated','veconi-space-context-changed','veconi-spaces-ready','business-context-changed','firebase-session-cleared'])
+  for (const name of ['fiado-account-updated','financial-state-updated','cloud-data-updated','customer-accounts-updated','veconi-space-context-changed','veconi-spaces-ready','business-context-changed','firebase-session-cleared'])
     window.addEventListener(name, () => {
       prepareList();
       // The mounted app handles route/space changes, and the pager coalesces cloud updates.
@@ -282,5 +323,5 @@ window.Clientes=(()=>{
       refreshScheduled = true;
       queueMicrotask(() => { refreshScheduled = false; if (localListBalances() && document.querySelector('#app .clients-page')) window.ClientesPage?.refresh?.(); });
     });
-  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,prepareStrictList,listSummary,spaceReceivable,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
+  return{listar,obter,viewData,viewClient,scopedScreen,closedOpeningStatus,confirmSpaceAccount,accountBelongsTo,unassignedMarkup,originalAccountAction,legacyFiadoClosed,salvar,excluir,setActive,importar,ajustarSaldo,normalizePhone,financialStatus,listFinancialStatus,localListBalances,prepareList,prepareStrictList,sharedAccount,sharedStatus,listSummary,spaceReceivable,canEdit,canCreate,assertCanEdit,assertCanCreate,assertCanSave};
 })();

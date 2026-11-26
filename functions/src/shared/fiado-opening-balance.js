@@ -38,7 +38,9 @@ function calendars(input,day,spaceIds){
  return {totals,proof:proof.sort((a,b)=>a.saleId.localeCompare(b.saleId))};
 }
 
-function createPlan(input,{day,spaceIds,balances,reason}){
+// allowZero (Etapa 4): a general opening may start a customer at zero, e.g. when the old
+// history does not prove and nothing is owed; the cut leaves the old records outside the account.
+function createPlan(input,{day,spaceIds,balances,reason,allowZero=false}){
  const {client,collections,businessId,generation}=input;
  if(!input.complete||!input.stable||!active(client)||client.fiadoOpeningBalance)
   throw Error('A conta não está disponível para confirmação de saldo.');
@@ -65,7 +67,7 @@ function createPlan(input,{day,spaceIds,balances,reason}){
    traditionalCents:totalCents-calendar.totalCents};
  });
  const confirmedCents=parts.reduce((sum,part)=>sum+part.totalCents,0);
- if(!Number.isSafeInteger(confirmedCents)||confirmedCents<=0)throw Error('Informe um saldo inicial maior que zero.');
+ if(!Number.isSafeInteger(confirmedCents)||confirmedCents<0||confirmedCents===0&&!allowZero)throw Error('Informe um saldo inicial maior que zero.');
  const deltaCents=confirmedCents-bookCents;
  const explanation=typeof reason==='string'?reason.trim():'';
  if(explanation.length>300||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(explanation))

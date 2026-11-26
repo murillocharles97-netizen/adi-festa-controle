@@ -9,6 +9,7 @@
     { id: "contact", group: "main", label: "Registrar contato", description: "Registrar ligação, visita ou mensagem", icon: "phone-call" },
     { id: "receive", group: "financial", label: "Receber pagamento", icon: "circle-dollar-sign", requiresDebt: true },
     { id: "adjust", group: "financial", label: "Regularizar saldo", description: "Conferir o total devedor deste espaço", icon: "scale" },
+    { id: "account-setup", group: "financial", label: "Conta por Espaço", description: "Migrar ou abrir a conta do cliente por Espaço", icon: "layers" },
     { id: "charge", group: "financial", label: "Registrar cobrança", icon: "send", requiresPhone: true },
     { id: "promise", group: "financial", label: "Promessa de pagamento", icon: "calendar-check" },
     { id: "history", group: "registration", label: "Histórico", description: "Compras, pagamentos e contatos", icon: "history" },
@@ -18,11 +19,15 @@
   const groupLabels = { main: "Principais", financial: "Financeiro", registration: "Cadastro", danger: "Perigo" };
   const digits = (value) => String(value || "").replace(/\D/g, "");
   const inactive = client => client.ativo === false || client.active === false;
-  const actionLabel = (action, client) => action.id === 'delete' && inactive(client) ? 'Reativar cliente' : action.label;
+  // Etapa 4: only for the owner, and only for a customer still outside the per-Space account.
+  const shown = (action, client) => (action.id !== "adjust" || window.CustomerBalanceAdjustment?.available?.() || window.FiadoSpaceRegularization?.available()) &&
+    (action.id !== "account-setup" || window.CustomerAccountSetup?.needed?.(client) === true);
+  const actionLabel = (action, client) => action.id === 'delete' && inactive(client) ? 'Reativar cliente' :
+    action.id === 'adjust' && window.CustomerBalanceAdjustment?.available?.() ? 'Ajustar saldo' : action.label;
 
   function disabled(action, client) {
     return Boolean(
-      ({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id] && window.TeamAccess && !window.TeamAccess.has({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id])) ||
+      ({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance','account-setup':'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id] && window.TeamAccess && !window.TeamAccess.has({sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance','account-setup':'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action.id])) ||
       (action.requiresDebt && Number(client?.saldo || 0) >= 0) ||
         (action.requiresPhone && digits(client?.telefone).length < 10),
     );
@@ -30,7 +35,7 @@
 
   function flatMenu(client) {
     return actions
-      .filter((action) => action.id !== "profile" && (action.id !== "adjust" || window.FiadoSpaceRegularization?.available()))
+      .filter((action) => action.id !== "profile" && shown(action, client))
       .map(
         (action) =>
           `<button ${action.danger ? 'class="danger"' : ""} type="button" data-client-action="${action.id}" data-client-action-id="${esc(client.id)}" ${disabled(action, client) ? "disabled" : ""}>${icon(action.icon)} ${actionLabel(action,client)}</button>`,
@@ -50,7 +55,7 @@
         <div class="client-action-scroll ${financialPrimary ? "credit-mode" : "simple-mode"}">
           ${Object.keys(groupLabels)
             .map((group) => {
-              const items = actions.filter((action) => action.group === group && (action.id !== "adjust" || window.FiadoSpaceRegularization?.available()));
+              const items = actions.filter((action) => action.group === group && shown(action, client));
               return `<section class="client-action-group group-${group}"><h3>${groupLabels[group]}</h3>${items
                 .map(
                   (action) =>
@@ -95,7 +100,7 @@
   }
 
   async function run(action, clientId) {
-    const permission={sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action];
+    const permission={sale:'sales.create',contact:'customers.edit',receive:'customers.receiveDebt',adjust:'customers.adjustBalance','account-setup':'customers.adjustBalance',charge:'customers.edit',promise:'customers.edit',edit:'customers.edit',delete:'customers.archive'}[action];
     if(permission&&window.TeamAccess&&!window.TeamAccess.has(permission))return Utils.toast(window.TeamAccess.failure?.(permission)?.message||window.VeconiPermissionPolicy.MESSAGE,true);
     const page = window.ClientesPage;
     const client = Clientes.scopedScreen?.() ? Clientes.viewClient(clientId) : Clientes.obter(clientId);
@@ -106,6 +111,7 @@
     if (action === "contact") return window.CRMClienteUI?.contactForm?.(clientId);
     if (action === "receive") return page?.receive?.(clientId);
     if (action === "adjust") return page?.adjust?.(clientId);
+    if (action === "account-setup") return window.CustomerAccountSetup?.open?.(clientId);
     if (action === "charge") {
       console.info("[CHARGE] whatsapp clicked");
       if (digits(client.telefone).length < 10) return Utils.toast("Cadastre um telefone válido para enviar a cobrança.", true);

@@ -93,11 +93,15 @@ async function handler({tx,c,ref,d,now,write=false}){
  if((afterTotals[spaceId]||0)!==d.targetDebtCents||new Set([...Object.keys(beforeTotals),...Object.keys(afterTotals)]).size>30||
   [...new Set([...Object.keys(beforeTotals),...Object.keys(afterTotals)])].some(s=>s!==spaceId&&(beforeTotals[s]||0)!==(afterTotals[s]||0)))
   fail('failed-precondition','A diferença afetaria outra conta. Nenhum saldo foi alterado.');
+ // Etapa 5: the per-Space account follows the regularization in this transaction.
+ const accountWriter=await require('./customer-account-ledger-service').prepare({tx,ref,businessId:c.bid,generation,clientId,versionBefore:version,versionAfter:version+1,
+  changes:[{event,source:adjustment}],at});
  // All reads and validations finish before the first write.
  tx.create(ref(c.bid,'balanceAdjustments',operationId),adjustment);
  tx.create(ref(c.bid,'balanceEvents',eventId),event);
  tx.create(ref(c.bid,'processedOperations',operationId),processed);
  tx.update(clientRef,{saldo:newBalance,financialVersion:version+1,fiadoHistoryVersion:1,fiadoHistoryActivation:nextClient.fiadoHistoryActivation,atualizadoEm:at});
+ if(accountWriter)accountWriter(tx);
  const names=['clients','balanceAdjustments','balanceEvents'],revision='server:'+operationId;
  tx.set(ref(c.bid,'syncMetadata','last-sync'),{businessId:c.bid,workspaceGeneration:generation,
   publisher:'operational_server',sourceSessionId:revision,sourceOperationId:operationId,

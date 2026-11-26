@@ -1442,6 +1442,36 @@ service cloud.firestore {
       match /fiadoOpeningBalances/{clientId} {
         allow read, write: if false;
       }
+      // Conta por Espaço, Fase 1 (modo sombra): escrita só pelo servidor e ainda sem leitura
+      // pelos aparelhos. A leitura por Espaço será definida quando a conta passar a ser usada.
+      match /customerAccounts/{clientId} {
+        allow read, write: if false;
+        match /appliedEvents/{eventId} {
+          allow read, write: if false;
+        }
+      }
+      // Fase 4: saldo por cliente e Espaço, publicado pelo servidor para exibição. Lê quem
+      // vê dados financeiros, somente nos Espaços que acessa; a parte sem Espaço, só o
+      // proprietário. Nenhum aparelho grava.
+      match /customerSpaceAccounts/{documentId} {
+        allow read: if canReadCollection(businessId, 'balanceEvents') && scopedFinancialDocument(businessId, resource.data);
+        allow write: if false;
+      }
+      // Fase 2: relatório da carga das contas; só o servidor grava e lê.
+      // Etapa 2: registro de cada migração para a conta por Espaço; só o servidor grava e lê.
+      match /customerAccountMigrations/{clientId} {
+        allow read, write: if false;
+      }
+      // Etapa 6: resultado da última auditoria de cada conta; só o servidor grava e lê.
+      match /customerAccountAudits/{clientId} {
+        allow read, write: if false;
+      }
+      match /customerAccountBackfills/{runId} {
+        allow read, write: if false;
+        match /items/{clientId} {
+          allow read, write: if false;
+        }
+      }
       match /financialIncomeRoutes/{documentId} {
         // Projection receipts are server-owned; clients cannot move/replay income.
         allow read: if isOwner(businessId);

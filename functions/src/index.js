@@ -31,6 +31,12 @@ const {attemptStatePatch,isTerminalAttempt}=require('./services/billing-attempt-
 const {billingCheckoutReservation,providerKey,contractId,stopped}=require('./services/billing-checkout-reservation-service');
 const {recoverCheckoutProvider,validateCheckoutProvider,verifyStoppedContract,unresolved}=require('./services/billing-checkout-provider-service');
 const {financialIncomeService}=require('./services/financial-income-service');
+const {customerAccountService}=require('./services/customer-account-service');
+const {customerAccountBackfillService}=require('./services/customer-account-backfill-service');
+const {customerBalanceAdjustmentService}=require('./services/customer-balance-adjustment-service');
+const {customerAccountMigrationService}=require('./services/customer-account-migration-service');
+const {customerAccountOpeningService}=require('./services/customer-account-opening-service');
+const {customerAccountAuditService}=require('./services/customer-account-audit-service');
 const {activityEventService}=require('./services/activity-event-service');
 const {teamAccessService}=require('./services/team-access-service');
 const {saleCostService}=require('./services/sale-cost-service');
@@ -58,6 +64,21 @@ exports.getOperationalSyncReceipt=onCall(RECOVERY_OPTIONS,request=>operationalCo
 exports.getPreservedPaymentRecognition=onCall(RECOVERY_OPTIONS,request=>operationalCommits.recognizePreservedPayment(request));
 const financialMaintenance=require('./services/financial-maintenance-service').financialMaintenanceService(db);
 exports.commitFinancialMaintenance=onCall(RECOVERY_OPTIONS,request=>financialMaintenance.commit(request));
+// Conta por Espaço: carga auditada (Fase 2) e comando único de ajuste de saldo (Fase 3).
+exports.manageCustomerAccounts=onCall({region:REGION,memory:'512MiB',timeoutSeconds:300,maxInstances:4},request=>{
+ const kind=request.data?.kind,adjustments=customerBalanceAdjustmentService(db);
+ if(kind==='customer_balance_adjustment_preview')return adjustments.preview(request);
+ if(kind==='customer_balance_adjustment_history')return adjustments.history(request);
+ if(kind==='customer_balance_adjustment')return adjustments.commit(request);
+ if(kind==='customer_account_migration_preview')return customerAccountMigrationService(db).preview(request);
+ if(kind==='customer_account_migration')return customerAccountMigrationService(db).commit(request);
+ if(kind==='customer_account_opening_preview')return customerAccountOpeningService(db).preview(request);
+ if(kind==='customer_account_opening')return customerAccountOpeningService(db).commit(request);
+ if(kind==='customer_account_audit')return customerAccountAuditService(db).audit(request);
+ if(kind==='customer_account_reconcile')return customerAccountAuditService(db).reconcile(request);
+ if(kind==='customer_account_readiness')return customerAccountAuditService(db).readiness(request);
+ return customerAccountBackfillService(db).handle(request);
+});
 const saleCancellations=require('./services/sale-cancellation-service').saleCancellationService(db,{allowNewCancellations:true,projectFinancial:(businessId,saleId,sale)=>financialIncomeService(db).projectSale(businessId,saleId,sale)});
 exports.previewSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.preview(request));
 exports.confirmSaleCancellation=onCall(RECOVERY_OPTIONS,request=>saleCancellations.confirm(request));
@@ -771,6 +792,8 @@ const projectActivity=(sourceCollection,idParam)=>async event=>{
 exports.projectSaleActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/sales/{saleId}'},projectActivity('sales','saleId'));
 exports.projectPaymentActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/payments/{paymentId}'},projectActivity('payments','paymentId'));
 exports.projectBalanceAdjustmentActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/balanceAdjustments/{adjustmentId}'},projectActivity('balanceAdjustments','adjustmentId'));
+// Conta por Espaço, Fase 1 (modo sombra): projeta cada evento do razão e confere com o histórico. Nada lê esta conta ainda.
+exports.projectCustomerAccount=onDocumentCreated({document:'businesses/{businessId}/balanceEvents/{eventId}',region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:10,retry:true},event=>customerAccountService(db).applyEvent(event.params.businessId,event.params.eventId,event.data.data()));
 exports.projectStockMovementActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/stockMovements/{movementId}'},projectActivity('stockMovements','movementId'));
 exports.projectCampaignActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/campaignEvents/{eventId}'},projectActivity('campaignEvents','eventId'));
 exports.projectCustomerSubscriptionActivity=onDocumentWritten({...ACTIVITY_TRIGGER_OPTIONS,document:'businesses/{businessId}/customerSubscriptionEvents/{eventId}'},projectActivity('customerSubscriptionEvents','eventId'));

@@ -251,7 +251,8 @@ window.InstallmentCredit = (() => {
     if(hydrating){rerun=true;return;}hydrating=true;
     try{
       // No repaint before asking: the cards already show the held value or the reason.
-      const origin=scope(), queue=visibleIds().filter(id=>!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1);
+      // Fase 4: a customer with a published balance by Space needs no account lookup to be shown.
+      const origin=scope(), queue=visibleIds().filter(id=>(!window.Clientes?.scopedScreen?.()&&!window.Clientes?.localListBalances?.()||clientFor(id)?.fiadoHistoryActivation?.spaceRegularization?.version===1)&&!window.Clientes?.sharedAccount?.(clientFor(id)));
       await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{
         while(queue.length&&scope()===origin&&window.Router?.atual?.()===route){const id=queue.shift(),key=JSON.stringify([scope(),id,clientFor(id)?.financialVersion,clientFor(id)?.saldo,InstallmentPlan.today()]);
           if(confirmedAccount(id)||navigator.onLine===false||Date.now()-(failedAt.get(key)||0)<RETRY_DELAY)continue;
@@ -348,6 +349,14 @@ window.InstallmentCredit = (() => {
       if(button&&!button.disabled)void lookup(button);
     });
     window.addEventListener('fiado-account-updated',event=>paint(event.detail.clientId));
+    // Fase 4: published balances arrived. A few customers repaint their cards; a first snapshot
+    // refreshes the list once (in place on mobile, keeping search and scroll).
+    window.addEventListener('customer-accounts-updated',event=>{
+      const ids=event.detail?.clientIds||[];
+      if(!document.querySelector('#app .clients-page'))return;
+      if(ids.length>12){window.Clientes?.prepareList?.();window.ClientesPage?.refresh?.();return;}
+      for(const id of ids)paint(id);
+    });
     window.addEventListener('financial-state-updated',event=>recheck(event.detail?.clientId));
     window.addEventListener('cloud-data-updated',event=>{
       const collection=event.detail?.collection;

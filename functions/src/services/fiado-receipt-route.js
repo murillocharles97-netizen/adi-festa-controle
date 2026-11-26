@@ -9,6 +9,11 @@ const Plan=require('../shared/installment-plan');
 const {restricted}=require('../shared/operational-privacy-policy');
 const {readHistoryInput}=require('./fiado-history-service');
 const Opening=require('../shared/fiado-opening-balance');
+const CustomerAccount=require('../shared/customer-account');
+const Ledger=require('../shared/customer-account-ledger');
+const {Filter}=require('firebase-admin/firestore');
+// Fase 4c — false: every receipt goes back to the full history route below.
+const ACCOUNT_RECEIPT_ENABLED=true;
 
 const active=row=>row.active!==false&&!row.deletedAt&&!row.cancelledAt&&!row.desfeita;
 const owns=(row,bid,generation)=>row&&(!row.businessId||row.businessId===bid)&&(row.workspaceGeneration??0)===generation;
@@ -95,7 +100,81 @@ function checkEvidence({businessId,generation,client,collections,opening},day,sc
   return null;
 }
 
-async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false,scopedReceiptVersion,forConfirmation=false}){
+// Fase 4c — what this route checks in a proven history, recorded with each verification
+// of the per-Space account (customer-account-service), so a later receipt can rely on
+// the account without reading the history again.
+function receiptFacts(input,projection,day){
+  const sales=input.collections.sales.filter(row=>active(row)&&row.formaPagamento==='fiado'),client=input.client;
+  const scheduled=client.hasInstallmentFiado===true||client.fiadoHistoryVersion===1||sales.some(row=>row.installmentPlan);
+  let receiptRisk;
+  try{receiptRisk=checkEvidence(input,day,scheduled);}catch{receiptRisk='history_review';}
+  // Etapa 1: the open items of each Space, in the order the history consumes them, so a
+  // receipt through the account allocates to the same sales as the full route.
+  const items=(projection?.entries||[]).map(e=>({saleId:e.saleId||null,number:Number.isInteger(e.number)?e.number:null,
+    historyEventId:e.historyEventId||null,dueDate:e.dueDate,createdAt:String(e.createdAt||''),remainingCents:e.remainingCents,spaceId:e.spaceId||null}));
+  return {receiptRisk,hasInstallments:Boolean(projection?.hasInstallments)||sales.some(row=>row.installmentPlan),
+    futureCents:projection?.futureCents??null,receiptCheckedOn:day,items};
+}
+
+// Rows the history check would stop on that may appear without a new financial version:
+// receipts and sales still pending, in conflict or under review, under any client field.
+const PENDING_STATUS=['pending','pending_sync','conflict','error','adjustment_required','not_applied','manual_review','quarantined','rejected','failed'];
+const PENDING_APPLICATION=['pending','not_applied','conflict','adjustment_required'];
+async function pendingRows(tx,c,ref,clientId){
+  const checks=[];
+  for(const col of ['payments','sales'])for(const field of ['clienteId','clientId','customerId'])
+    checks.push(tx.get(ref(c.bid,col,'__none__').parent.where(field,'==',clientId)
+      .where(Filter.or(Filter.where('status','in',PENDING_STATUS),Filter.where('applicationStatus','in',PENDING_APPLICATION))).limit(1)));
+  return (await Promise.all(checks)).some(snapshot=>!snapshot.empty);
+}
+
+// Fase 4c — the receipt from the per-Space account, without rebuilding the history.
+// Only for Space-scoped accounts (confirmed opening, regularization or activation), with or
+// without installments (Etapa 3), and only when the account's last verification proved it equal to the
+// history, Space by Space, at the client's current financial version, with this route's
+// evidence checks clear. Then the full route would return these same open items of the
+// Space, all due, so the receipt allocates to the same sales (Etapa 1). Anything else
+// returns null and the full route decides, as before.
+async function accountRoute({tx,c,ref,client,clientId,spaceId,day,scope,generation,bookBalanceCents,version,includeAccount}){
+  const scoped=client.fiadoOpeningBalance?.version===1||client.fiadoHistoryActivation?.spaceRegularization?.version===1;
+  if(!ACCOUNT_RECEIPT_ENABLED||!scoped||client.fiadoHistoryVersion!==1||bookBalanceCents>=0)return null;
+  const stored=(await tx.get(ref(c.bid,'customerAccounts',clientId))).data(),check=stored?.verification,debt=stored?.spaces?.[spaceId];
+  if(!stored||stored.schemaVersion!==CustomerAccount.SCHEMA_VERSION||stored.workspaceGeneration!==generation||stored.clientId!==clientId||
+     !CustomerAccount.PUBLISHED.has(stored.status)||!stored.baseline||stored.unattributedCents!==0||stored.debtCents!==-bookBalanceCents||
+     !Number.isSafeInteger(debt)||debt<=0||check?.receiptRisk)return null;
+  // Etapa 5: the account kept in the same transaction as every operation, current with the client;
+  // otherwise the last verification, if it proved this very version.
+  const ledger=stored.ledgerVersion===Ledger.LEDGER_VERSION&&stored.ledger&&stored.clientFinancialVersion===version?stored.ledger:null;
+  const verified=check?.status==='match'&&check.scoped===true&&check.financialVersion===version&&check.receiptRisk===null&&typeof check.hasInstallments==='boolean';
+  if(!ledger&&!verified)return null;
+  // Same fence as the full route: an installment flag without any installment sale is reviewed.
+  const anyPlan=ledger?Object.values(ledger.plans||{}).some(p=>p.active):check.hasInstallments===true;
+  if(client.hasInstallmentFiado===true&&!anyPlan&&!client.fiadoOpeningBalance)return null;
+  // The items proven by the verification: they must add up to the Space debt. Installments
+  // (Etapa 3) keep their due dates and amounts; anything else is already due.
+  const entries=(ledger?Ledger.entries(ledger,day):Array.isArray(check.items)?check.items:[]).filter(e=>e.spaceId===spaceId).map(e=>({...e}));
+  if(!entries.length||entries.reduce((n,e)=>n+e.remainingCents,0)!==debt||
+     entries.some(e=>!Number.isSafeInteger(e.remainingCents)||e.remainingCents<=0||!/^\d{4}-\d{2}-\d{2}$/.test(e.dueDate||'')||
+       e.number!==null&&(!Number.isInteger(e.number)||!e.saleId)||e.number===null&&!(e.dueDate<=day)))return null;
+  const dueCents=entries.filter(e=>e.dueDate<=day).reduce((n,e)=>n+e.remainingCents,0),futureCents=debt-dueCents;
+  const hasInstallments=entries.some(e=>Number.isInteger(e.number));
+  try{
+    if(await pendingRows(tx,c,ref,clientId))return null;
+  }catch(error){
+    // If the optional indexed probe is not ready, the original history check still decides.
+    if(error.code===9||error.code==='failed-precondition')return null;
+    throw error;
+  }
+  const account={version:2,historyProofVersion:1,clientId,asOf:day,financialVersion:version,dueCents,futureCents,totalCents:debt,creditCents:0,
+    hasInstallments,entries,scopedReceiptVersion:1,source:'customer_account'};
+  const quoteHash=hash([scope,c.uid,'space','customer_account',version,day,debt,
+    entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents]),
+    client.fiadoOpeningBalance?.hash||client.fiadoHistoryActivation?.reviewHash||null]);
+  return {...scope,mode:'space',quoteHash,financialVersion:version,asOf:day,dueCents,futureCents,totalCents:debt,
+    scopedReceiptVersion:1,scopedAccount:account,source:'customer_account',...(includeAccount?{bookBalanceCents,account}:{})};
+}
+
+async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false,scopedReceiptVersion,forConfirmation=false,useAccount=false}){
   const generation=c.business.workspaceGeneration??0;
   const scope={receiptRouteVersion:1,businessId:c.bid,workspaceGeneration:generation,clientId,spaceId};
   const owner=c.owner&&c.business.ownerId===c.uid;
@@ -113,6 +192,10 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     version=client.financialVersion??0;
     if(!Number.isSafeInteger(version)||version<0)return blocked('history_review');
     const day=Plan.today(now);
+    if(useAccount&&!forConfirmation&&scopedReceiptVersion===1){
+      const fromAccount=await accountRoute({tx,c,ref,client,clientId,spaceId,day,scope,generation,bookBalanceCents,version,includeAccount});
+      if(fromAccount)return fromAccount;
+    }
     // Read evidence internally. Only the result for the authorized route leaves the server.
     const input=await readHistoryInput({tx,c,ref,clientId,client,checkRowAccess:false});
     if(input.opening&&!forConfirmation&&scopedReceiptVersion!==1)return blocked('history_review');
@@ -197,7 +280,10 @@ async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
      payment.clientId!==payment.clienteId||payment.installmentSaleId||payment.confirmedConflictId||
      !payment.spaceId||payment.financialSpaceId!==payment.spaceId||
      !Number.isFinite(payment.expectedBalance)||!Number.isFinite(payment.valor))return invalid();
-  const result=await decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true,scopedReceiptVersion:intent.scopedReceiptVersion});
+  const route=useAccount=>decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true,scopedReceiptVersion:intent.scopedReceiptVersion,useAccount});
+  // The quote may come from either source: the account (Fase 4c) or the full history.
+  let result=await route(true);
+  if(result.source==='customer_account'&&result.quoteHash!==intent.quoteHash)result=await route(false);
   if(result.scopedReceiptVersion!==intent.scopedReceiptVersion||result.mode!==intent.mode||result.quoteHash!==intent.quoteHash||payment.expectedFinancialVersion!==result.financialVersion||
      money(payment.expectedBalance)!==result.bookBalanceCents||result.mode==='space'&&payment.spaceId!==result.spaceId||
      result.mode==='original'&&payment.fiadoSchedule)return invalid();
@@ -228,4 +314,4 @@ async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
   return result.scopedReceiptVersion===1?result.account:null;
 }
 
-module.exports={decideReceiptRoute,assertReceiptRoute};
+module.exports={decideReceiptRoute,assertReceiptRoute,receiptFacts,pendingRows,ACCOUNT_RECEIPT_ENABLED};
