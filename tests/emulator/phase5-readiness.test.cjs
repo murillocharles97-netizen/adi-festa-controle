@@ -63,14 +63,14 @@ async function setup() {
     return sale;
   };
   const receive = async (clientId, space, reais) => {
-    const r = await plainSvc.receipt(req('fiado_receipt_route', {clientId, spaceId: space, scopedReceiptVersion: 1})), w = receipts.harness({businessId: bid, spaceId: space, uid: owner});
+    const r = await plainSvc.receipt(req('fiado_receipt_route', {clientId, spaceId: space, scopedReceiptVersion: 1, receiptProofVersion: 2})), w = receipts.harness({businessId: bid, spaceId: space, uid: owner});
     try {
       Object.assign(w.rows(), {clientes: [await read('clients', clientId)], vendas: (await docs('sales', 'clienteId', clientId)).map(plain), pagamentos: [],
         alocacoesPagamento: (await docs('paymentAllocations', 'clientId', clientId)).map(plain)});
       w.w.SyncFirebase.assertFiadoReceiptQueueClear = () => true;
       const payment = w.w.Fiados.receber(clientId, reais, 'Pix fictício de QA', {spaceId: space, paymentMethod: 'pix', receiptRoute: r, fiadoAccount: r.scopedAccount});
       await plainSvc.commit({auth: {uid: owner}, data: {businessId: bid, clientRelease: 238, item: {operationId: payment.operationId, businessId: bid, userId: owner, workspaceGeneration: 0, payloadVersion: 4,
-        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, scopedReceiptVersion: 1}, writes: w.writes()}}}});
+        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, receiptProofVersion: r.receiptProofVersion, scopedReceiptVersion: 1}, writes: w.writes()}}}});
     } finally { w.close(); }
   };
   const lookup = clientId => svc.receipt(req('fiado_account', {clientId, fiadoHistoryVersion: 1}));

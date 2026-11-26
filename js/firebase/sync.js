@@ -1098,6 +1098,7 @@ async function assertFiadoReceiptWriter(businessId,workspaceGeneration,scopedRec
   const result=reply.data??reply;
   if(result?.fiadoReceiptRouteVersion!==1||scopedReceiptVersion===1&&result.fiadoScopedReceiptVersion!==1||result.businessId!==businessId||result.workspaceGeneration!==workspaceGeneration)
     throw Object.assign(Error('O servidor ainda não confirmou a versão segura de recebimentos. Tente novamente mais tarde.'),{code:'fiado-writer-unavailable'});
+  return result;
 }
 function saleQueueRequiresReview(item) {
   // Previously denied sales may have been re-entered by another operator.

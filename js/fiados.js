@@ -186,7 +186,8 @@ window.Fiados = (() => {
     if (window.SyncFirebase?.createPaymentOperation)
       window.SyncFirebase.createPaymentOperation(before, nextData, pagamento, options.receiptRoute?{
         version:1,mode:options.receiptRoute.mode,spaceId:options.receiptRoute.spaceId,quoteHash:options.receiptRoute.quoteHash,
-        ...(options.receiptRoute.scopedReceiptVersion===1?{scopedReceiptVersion:1}:{})
+        ...(options.receiptRoute.scopedReceiptVersion===1?{scopedReceiptVersion:1}:{}),
+        ...(options.receiptRoute.receiptProofVersion===2?{receiptProofVersion:2}:{})
       }:undefined);
     else if (typeof document !== "undefined")
       throw Error("O pipeline de recebimentos não está pronto. Nenhum pagamento foi salvo.");
@@ -291,7 +292,7 @@ window.Fiados = (() => {
     return account;
   }
 
-  async function readReceiptRoute(clientId,scope,session) {
+  async function readReceiptRoute(clientId,scope,session,receiptProofVersion) {
     assertRouteScope(scope,session);
     if(!window.SyncFirebase?.assertFiadoReceiptQueueClear||navigator.onLine===false||typeof window.FirebaseCallable!=='function')
       throw Error('Conecte-se e aguarde a fila local carregar para conferir o recebimento.');
@@ -299,7 +300,7 @@ window.Fiados = (() => {
     const businessId=DB.getBusinessId(),workspaceGeneration=DB.getWorkspaceGeneration?.()??0;
     const spaceId=window.SpaceContext.requireSalesSpace();
     const reply=await window.FirebaseCallable('getOperationalSyncReceipt',{
-      kind:'fiado_receipt_route',businessId,workspaceGeneration,clientId,spaceId,scopedReceiptVersion:1
+      kind:'fiado_receipt_route',businessId,workspaceGeneration,clientId,spaceId,scopedReceiptVersion:1,receiptProofVersion
     });
     assertRouteScope(scope,session);
     window.SyncFirebase.assertFiadoReceiptQueueClear(clientId);
@@ -308,7 +309,8 @@ window.Fiados = (() => {
       route.clientId!==clientId||route.spaceId!==spaceId)
       throw Error('O servidor não confirmou a conta para este espaço. Tente novamente após sincronizar.');
     if(route.mode==='blocked')throw Error(routeMessages[route.reason]||routeMessages.history_review);
-    if(!['space','original'].includes(route.mode)||!/^[a-f0-9]{64}$/.test(route.quoteHash||'')||
+    if(route.receiptProofVersion!==undefined&&route.receiptProofVersion!==receiptProofVersion||
+      !['space','original'].includes(route.mode)||!/^[a-f0-9]{64}$/.test(route.quoteHash||'')||
       !Number.isSafeInteger(route.financialVersion)||
       (route.scopedReceiptVersion!==1&&!Number.isSafeInteger(route.bookBalanceCents)))
       throw Error(routeMessages.history_review);
@@ -316,9 +318,19 @@ window.Fiados = (() => {
     return route;
   }
 
+  async function prepareReceiptRoute(clientId,scope,session) {
+    const route=await readReceiptRoute(clientId,scope,session,2);
+    if(route.receiptProofVersion!==2)return route;
+    const writer=await window.SyncFirebase.assertFiadoReceiptWriter(route.businessId,route.workspaceGeneration,route.scopedReceiptVersion);
+    assertRouteScope(scope,session);
+    window.SyncFirebase.assertFiadoReceiptQueueClear(clientId);
+    if(writer?.fiadoReceiptProofVersion===2)return route;
+    return readReceiptRoute(clientId,scope,session,1);
+  }
+
   function readCardReceiptRoute(clientId) {
     assertCanReceive();
-    return readReceiptRoute(clientId,window.SpaceContext.viewScope(),window.TeamAccess.captureSession());
+    return prepareReceiptRoute(clientId,window.SpaceContext.viewScope(),window.TeamAccess.captureSession());
   }
 
   async function openCardReceive(clientId,{onRecorded}={}) {
@@ -326,7 +338,7 @@ window.Fiados = (() => {
     try{
       assertCanReceive();
       const scope=window.SpaceContext.viewScope(),session=window.TeamAccess.captureSession();
-      const receiptRoute=await readReceiptRoute(clientId,scope,session);
+      const receiptRoute=await prepareReceiptRoute(clientId,scope,session);
       if(request!==receiptRouteRequest)return;
       return await openReceive(clientId,{onRecorded,receiptRoute,
         routeCurrent:()=>request===receiptRouteRequest,
@@ -353,10 +365,12 @@ window.Fiados = (() => {
           const scheduled=window.InstallmentCredit?.has(clientId);
           if(receiptRoute){
             const scope=originalScope||spaceScope;
-            const current=await readReceiptRoute(clientId,scope,session);
+            const current=await readReceiptRoute(clientId,scope,session,receiptRoute.receiptProofVersion??1);
             if(current.mode!==receiptRoute.mode||current.quoteHash!==receiptRoute.quoteHash)
               throw Error('O saldo ou a origem mudou. Reabra a conta antes de confirmar.');
-            await window.SyncFirebase.assertFiadoReceiptWriter(current.businessId,current.workspaceGeneration,current.scopedReceiptVersion);
+            const writer=await window.SyncFirebase.assertFiadoReceiptWriter(current.businessId,current.workspaceGeneration,current.scopedReceiptVersion);
+            if(current.receiptProofVersion===2&&writer?.fiadoReceiptProofVersion!==2)
+              throw Error('O servidor mudou desde a conferência. Reabra o recebimento antes de confirmar.');
             assertRouteScope(scope,session);
             if(originalScope&&scheduled)throw Error(routeMessages.history_review);
           }

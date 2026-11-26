@@ -61,10 +61,10 @@ async function setup() {
     return sale;
   };
   const undoLast = async space => { const h = await load(space), u = h.undo(h.data().vendas.at(-1).id); await commitPacket(u.packet); return u.removed; };
-  const route = (spaceId) => svc.receipt(req('fiado_receipt_route', {clientId: who.id, spaceId, scopedReceiptVersion: 1}));
+  const route = (spaceId) => svc.receipt(req('fiado_receipt_route', {clientId: who.id, spaceId, scopedReceiptVersion: 1, receiptProofVersion: 2}));
   const fullRoute = spaceId => db.runTransaction(async tx => {
     const c = await svc.authorize(tx, req('fiado_receipt_route'), {businessId: bid, userId: owner, workspaceGeneration: 0}, {readOnly: true});
-    return decideReceiptRoute({tx, c, ref, clientId: who.id, spaceId, now: new Date(), scopedReceiptVersion: 1});
+    return decideReceiptRoute({tx, c, ref, clientId: who.id, spaceId, now: new Date(), scopedReceiptVersion: 1, receiptProofVersion: 2});
   }, {readOnly: true});
   const receive = async (space, reais, advance = false) => {
     const r = await route(space), h = receipts.harness({businessId: bid, spaceId: space, uid: owner});
@@ -74,7 +74,7 @@ async function setup() {
       h.w.SyncFirebase.assertFiadoReceiptQueueClear = () => true;
       const payment = h.w.Fiados.receber(who.id, reais, 'Pix fictício de QA', {spaceId: space, paymentMethod: 'pix', receiptRoute: r, allowAdvance: advance, fiadoAccount: r.scopedAccount});
       await svc.commit({auth: {uid: owner}, data: {businessId: bid, clientRelease: 238, item: {operationId: payment.operationId, businessId: bid, userId: owner, workspaceGeneration: 0, payloadVersion: 4,
-        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, scopedReceiptVersion: 1}, writes: h.writes()}}}});
+        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, receiptProofVersion: r.receiptProofVersion, scopedReceiptVersion: 1}, writes: h.writes()}}}});
       return {route: r, payment};
     } finally { h.close(); }
   };

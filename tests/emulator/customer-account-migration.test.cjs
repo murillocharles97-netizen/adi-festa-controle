@@ -52,10 +52,10 @@ async function setup() {
       payload: {eventKind: 'sale', fiadoHistoryVersion: 1, writes: sales.bridge(h.c.diffWrites(before, h.data()))}}}});
     return sale;
   };
-  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1}));
+  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1, receiptProofVersion: 2}));
   const fullRoute = (clientId, spaceId) => db.runTransaction(async tx => {
     const c = await svc.authorize(tx, req('fiado_receipt_route'), {businessId: bid, userId: owner, workspaceGeneration: 0}, {readOnly: true});
-    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1});
+    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1, receiptProofVersion: 2});
   }, {readOnly: true});
   const receive = async (clientId, space, reais) => {
     const r = await route(clientId, space);
@@ -66,7 +66,7 @@ async function setup() {
       h.w.SyncFirebase.assertFiadoReceiptQueueClear = () => true;
       const payment = h.w.Fiados.receber(clientId, reais, 'Pix fictício de QA', {spaceId: space, paymentMethod: 'pix', receiptRoute: r, ...(r.scopedAccount ? {fiadoAccount: r.scopedAccount} : {})});
       await svc.commit({auth: {uid: owner}, data: {businessId: bid, clientRelease: 238, item: {operationId: payment.operationId, businessId: bid, userId: owner, workspaceGeneration: 0, payloadVersion: 4,
-        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, scopedReceiptVersion: r.scopedReceiptVersion},
+        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, receiptProofVersion: r.receiptProofVersion, scopedReceiptVersion: r.scopedReceiptVersion},
           writes: h.writes()}}}});
       return {route: r, payment};
     } finally { h.close(); }

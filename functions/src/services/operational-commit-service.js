@@ -20,7 +20,7 @@ const HISTORY_ACTIVATION_ENABLED = true; // Containment retains already activate
 // opened by Space stay as they are.
 const NATIVE_SPACE_ACCOUNT_ENABLED = true;
 const {paymentConfirmationRead}=require('./payment-confirmation-read');
-const {decideReceiptRoute,assertReceiptRoute}=require('./fiado-receipt-route');
+const {decideReceiptRoute,assertReceiptRoute,RECEIPT_PROOF_VERSION}=require('./fiado-receipt-route');
 const Rejection=require('../shared/sync-rejection');
 // Same code and message as always (old PWAs unchanged); details.reason/category are additive.
 const fail=(message,code='permission-denied')=>{throw new HttpsError(code,message,Rejection.details(message,code));};
@@ -143,7 +143,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    const clean={};for(const id of ids){const v=typeof brands[id]==='string'?brands[id].trim().replace(/\s+/g,' '):'';if(!v||v.length>80)fail('Marca inválida (texto de até 80 caracteres).','invalid-argument');clean[id]=v;}
    return commit(request,{brandRecovery:{brands:clean}});
   }
-  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,fiadoScopedReceiptVersion:1,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
+  if(request.data?.kind==='sync_protocol')return db.runTransaction(async tx=>{const d=request.data,c=await context(tx,request,{businessId:d.businessId,userId:request.auth?.uid,workspaceGeneration:d.workspaceGeneration??0},{readOnly:true});return{businessId:c.bid,workspaceGeneration:gen(c.business),protocolVersion:1,fiadoHistoryWriteVersion:1,fiadoReceiptRouteVersion:1,fiadoScopedReceiptVersion:1,fiadoReceiptProofVersion:RECEIPT_PROOF_VERSION,paymentRecoveryVersion:1,historyActivationEnabled:HISTORY_ACTIVATION_ENABLED,newInstallmentsEnabled:INSTALLMENT_CREATION_ENABLED};});
   const item=JSON.parse(JSON.stringify(request.data?.item||{}));
   if(Buffer.byteLength(JSON.stringify(item))>750*1024)fail('Operação excede o limite seguro.','invalid-argument');
   operationalId(item.operationId,'Operação');
@@ -754,7 +754,7 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    if(['fiado_space_regularization_preview','fiado_space_regularization_status'].includes(d.kind))
     return require('./fiado-space-regularization').handler({tx,c,ref,d,now:now()});
    if(d.kind==='fiado_account')return {businessId:c.bid,workspaceGeneration:gen(c.business),account:await require('./fiado-account-service').loadFiadoAccount({tx,c,ref,clientId:validId(d.clientId,'Cliente'),now:now(),includeTraditional:d.fiadoHistoryVersion===1,historyProofVersion:d.fiadoHistoryVersion===1?1:0})};
-   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion,useAccount:true});
+   if(d.kind==='fiado_receipt_route')return decideReceiptRoute({tx,c,ref,clientId:validId(d.clientId,'Cliente'),spaceId:validId(d.spaceId,'Espaço'),now:now(),scopedReceiptVersion:d.scopedReceiptVersion,receiptProofVersion:d.receiptProofVersion,useAccount:true});
    if(d.kind==='payment_confirmation')return paymentConfirmationRead({tx,c,d,ref,now:now()});
    if(d.kind==='payment_recovery_status')return require('./payment-recovery-policy').status({tx,c,d:{...d,operationId:operationalId(d.operationId,'Operação'),paymentId:operationalId(d.paymentId,'Recebimento'),clientId:validId(d.clientId,'Cliente')},ref});
    if(!c.has('sales.create')&&!c.has('sales.cancel'))fail('Sem acesso operacional.');

@@ -54,10 +54,10 @@ async function setup() {
   };
   const sell = async (clientId, space, reais) => { const p = await prepareSale(clientId, space, reais); await svc.commit(p.request); return p.sale; };
   const sync = async () => { for (const d of (await root.collection('balanceEvents').get()).docs) await shadow.applyEvent(bid, d.id, d.data()); };
-  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1}));
+  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1, receiptProofVersion: 2}));
   const fullRoute = (clientId, spaceId) => db.runTransaction(async tx => {
     const c = await svc.authorize(tx, req('fiado_receipt_route'), {businessId: bid, userId: owner, workspaceGeneration: 0}, {readOnly: true});
-    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1});
+    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1, receiptProofVersion: 2});
   }, {readOnly: true});
   const project = clientId => db.runTransaction(async tx => {
     const client = await read('clients', clientId);
@@ -70,7 +70,7 @@ async function setup() {
     h.w.SyncFirebase.assertFiadoReceiptQueueClear = () => true;
     const payment = h.w.Fiados.receber(clientId, reais, 'Pix fictício de QA', {spaceId: space, paymentMethod: 'pix', receiptRoute: r, fiadoAccount: r.scopedAccount});
     const request = {auth: {uid: owner}, data: {businessId: bid, clientRelease: 238, item: {operationId: payment.operationId, businessId: bid, userId: owner, workspaceGeneration: 0, payloadVersion: 4,
-      payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, scopedReceiptVersion: 1}, writes: h.writes()}}}};
+      payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId: space, quoteHash: r.quoteHash, receiptProofVersion: r.receiptProofVersion, scopedReceiptVersion: 1}, writes: h.writes()}}}};
     h.close();
     return {payment, request};
   };

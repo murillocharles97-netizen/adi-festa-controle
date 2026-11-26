@@ -78,10 +78,10 @@ async function setup() {
   };
   // What the trigger does in production: apply each new event and verify the account.
   const sync = async () => { for (const d of (await root.collection('balanceEvents').get()).docs) await shadow.applyEvent(bid, d.id, d.data()); };
-  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1}));
+  const route = (clientId, spaceId) => svc.receipt(req('fiado_receipt_route', {clientId, spaceId, scopedReceiptVersion: 1, receiptProofVersion: 2}));
   const fullRoute = (clientId, spaceId) => meter.db.runTransaction(async tx => {
     const c = await plain.authorize(tx, req('fiado_receipt_route'), {businessId: bid, userId: owner, workspaceGeneration: 0}, {readOnly: true});
-    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1});
+    return decideReceiptRoute({tx, c, ref, clientId, spaceId, now: new Date(), scopedReceiptVersion: 1, receiptProofVersion: 2});
   }, {readOnly: true});
   const read = async (col, id) => (await root.collection(col).doc(id).get()).data();
   const size = async col => (await root.collection(col).get()).size;
@@ -93,14 +93,14 @@ async function setup() {
       h.w.SyncFirebase.assertFiadoReceiptQueueClear = () => true;
       const payment = h.w.Fiados.receber(clientId, reais, 'Pix fictício de QA', {spaceId, paymentMethod: 'pix', receiptRoute: r, fiadoAccount: r.scopedAccount});
       const request = {auth: {uid: owner}, data: {businessId: bid, clientRelease: 238, item: {operationId: payment.operationId, businessId: bid, userId: owner, workspaceGeneration: 0, payloadVersion: 4,
-        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId, quoteHash: r.quoteHash, scopedReceiptVersion: 1}, writes: h.writes()}}}};
+        payload: {eventKind: 'payment', fiadoHistoryVersion: 1, fiadoReceiptRoute: {version: 1, mode: r.mode, spaceId, quoteHash: r.quoteHash, receiptProofVersion: r.receiptProofVersion, scopedReceiptVersion: 1}, writes: h.writes()}}}};
       return {payment, result: await svc.commit(request)};
     } finally { h.close(); }
   };
   return {bid, owner, A, B, root, meter, load, sync, regularize, route, fullRoute, read, size, receive, adjustments, req};
 }
 const same = (fast, full) => {
-  for (const key of ['mode', 'dueCents', 'futureCents', 'totalCents', 'financialVersion', 'asOf', 'scopedReceiptVersion']) assert.deepEqual(fast[key], full[key], key);
+  for (const key of ['mode', 'quoteHash', 'receiptProofVersion', 'dueCents', 'futureCents', 'totalCents', 'financialVersion', 'asOf', 'scopedReceiptVersion']) assert.deepEqual(fast[key], full[key], key);
 };
 
 test('rota pela conta: mesmo exigível da reconstrução, por Espaço, na abertura e na regularização', async () => {
@@ -116,13 +116,20 @@ test('rota pela conta: mesmo exigível da reconstrução, por Espaço, na abertu
 test('sondagem da conta sem índice cai no histórico completo com o mesmo exigível', async () => {
   const c = await setup();
   await c.load();
-  assert.equal((await c.route('c-reg', c.A)).source,'customer_account');
-  c.meter.failNextQuery(Object.assign(Error('Índice de QA indisponível'),{code:9}));
+  const fast = await c.route('c-reg', c.A);
+  assert.equal(fast.source,'customer_account');
+  const indexUnavailable = () => c.meter.failNextQuery(Object.assign(Error('Índice de QA indisponível'),{code:9}));
+  indexUnavailable();
   const expected = await c.route('c-reg', c.A);
   assert.equal(expected.source,undefined);
   assert.deepEqual(expected,await c.fullRoute('c-reg', c.A));
+  assert.equal(expected.quoteHash,fast.quoteHash);
   assert.equal(expected.dueCents,15000);
   assert.equal(await c.size('payments'),0);
+  indexUnavailable();
+  const receipt = await c.receive('c-reg', c.A, 10, fast);
+  assert.notEqual(receipt.result.replayed,true);
+  assert.equal(await c.size('payments'),1);
 });
 
 test('leituras da rota pela conta não crescem com o histórico', async () => {

@@ -128,6 +128,7 @@ async function setup({origin='legacy',role='owner',permissions=grants,version=2,
     }).then(({data})=>{
       assert.equal(data.fiadoReceiptRouteVersion,1);
       if(scopedReceiptVersion===1)assert.equal(data.fiadoScopedReceiptVersion,1);
+      return data;
     });
     const modal=()=>w.document.querySelector('#modal form');
     const open=()=>w.Fiados.openCardReceive(clientId);
@@ -722,6 +723,82 @@ test('ordinary subscribers create and receive new credit in two spaces without t
  }
  assert.equal((await qa.clientRef.get()).data().saldo,-18);
  assert.equal((await qa.root.collection('fiadoOpeningBalances').get()).size,0);
+});
+
+
+const v24212Source=process.env.VECONI_QA_V24212_SOURCE;
+const publishedCompatibility={skip:!v24212Source};
+const loadV24212=()=>require(path.resolve(v24212Source,'src/services/operational-commit-service')).operationalCommitService(db);
+const protocolReply=(implementation,auth,data)=>data.kind==='sync_protocol'?implementation.commit({auth,data}):implementation.receipt({auth,data});
+
+test('V242.12 preview and original offline packet are confirmed once after updating the writer',publishedCompatibility,async()=>{
+ const qa=await setup(),old=loadV24212();
+ await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ const sale=await newCreditSale(qa);
+ await callCommit(sale.request);
+ const scope={kind:'fiado_receipt_route',businessId:qa.businessId,workspaceGeneration:0,clientId,spaceId:qa.spaceId,scopedReceiptVersion:1};
+ const previous=await old.receipt({auth:qa.auth,data:scope});
+ assert.equal(previous.scopedAccount.entries[0].saleId,null);
+ const current=await qa.route({scopedReceiptVersion:1});
+ assert.deepEqual(current,previous);
+ let beforeUpgrade=true;
+ const view=await qa.ui(qa.spaceId,{pwaRef:'f84d34f',transport:async(name,data)=>({data:beforeUpgrade
+   ? await protocolReply(old,qa.auth,data)
+   : name==='commitOperationalSync'?await callCommit({auth:qa.auth,data}):await service.receipt({auth:qa.auth,data})})});
+ const pending=await qa.ui(qa.spaceId,{pwaRef:'f84d34f',transport:async(_name,data)=>({data:await protocolReply(old,qa.auth,data)})});
+ try{
+  await pending.open();await pending.submit(5);
+  const persisted=JSON.stringify(pending.request());
+  await view.open();beforeUpgrade=false;
+  await view.submit(5);
+  const request=JSON.parse(persisted);
+  assert.equal(request.data.item.payload.fiadoReceiptRoute.quoteHash,previous.quoteHash);
+  assert.equal(view.request().data.item.payload.fiadoReceiptRoute.quoteHash,previous.quoteHash);
+  assert.equal((await callCommit(request)).replayed,false);
+  assert.equal((await callCommit(request)).replayed,true);
+  await assert.rejects(callCommit(view.request()),{code:'failed-precondition'});
+  assert.equal(JSON.stringify(request),persisted);
+  assert.equal((await qa.root.collection('payments').get()).size,1);
+  assert.equal((await qa.clientRef.get()).data().saldo,-9);
+ }finally{view.h.close();pending.h.close();}
+});
+
+test('V242.13 frontend negotiates the published writer without replacing the approved preview',publishedCompatibility,async()=>{
+ const qa=await setup(),old=loadV24212();
+ await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ await callCommit((await newCreditSale(qa)).request);
+ const view=await qa.ui(qa.spaceId,{transport:async(name,data)=>({data:name==='commitOperationalSync'
+   ? await protocolReply(old,qa.auth,data) : await service.receipt({auth:qa.auth,data})})});
+ try{
+  await view.open();await view.submit(5);
+  const request=view.request(),intent=request.data.item.payload.fiadoReceiptRoute;
+  assert.equal(intent.receiptProofVersion,undefined,'the writer only supports the historic proof');
+  assert.equal((await old.commit(request)).replayed,false);
+  assert.equal((await old.commit(request)).replayed,true);
+  assert.equal((await qa.root.collection('payments').get()).size,1);
+ }finally{view.h.close();}
+});
+
+test('new proof does not downgrade a pending packet and is rejected after the balance changes',publishedCompatibility,async()=>{
+ const qa=await setup(),old=loadV24212();
+ await qa.clientRef.update({saldo:0,financialVersion:0,legacyBalance:0,legacyBalanceRemaining:0});
+ await callCommit((await newCreditSale(qa)).request);
+ const first=await qa.ui(),second=await qa.ui();
+ try{
+  await first.open();await first.submit(5);
+  const request=first.request(),envelope=JSON.stringify(request.data.item);
+  assert.equal(request.data.item.payload.fiadoReceiptRoute.receiptProofVersion,2);
+  await assert.rejects(old.commit(request),{code:'failed-precondition'});
+  assert.equal((await qa.root.collection('payments').get()).size,0);
+  await second.open();await second.submit(6);
+  const winning=second.request();
+  assert.equal((await callCommit(winning)).replayed,false);
+  await assert.rejects(callCommit(request),{code:'failed-precondition'});
+  assert.equal((await callCommit(winning)).replayed,true);
+  assert.equal((await old.commit(winning)).replayed,true,'rollback sees the original server receipt');
+  assert.equal((await qa.root.collection('payments').get()).size,1);
+  assert.equal(JSON.stringify(request.data.item),envelope);
+ }finally{first.h.close();second.h.close();}
 });
 
 async function newCreditSale(qa,spaceId=qa.spaceId,sellOptions){

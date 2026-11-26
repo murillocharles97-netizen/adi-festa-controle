@@ -14,6 +14,16 @@ const Ledger=require('../shared/customer-account-ledger');
 const {Filter}=require('firebase-admin/firestore');
 // Fase 4c — false: every receipt goes back to the full history route below.
 const ACCOUNT_RECEIPT_ENABLED=true;
+const RECEIPT_PROOF_VERSION=2;
+
+function modernQuote(scope,uid,mode,bookBalanceCents,account,cutoff){
+  const {financialVersion,version,asOf,dueCents,futureCents,totalCents,entries}=account;
+  return hash(['fiado-receipt-proof',RECEIPT_PROOF_VERSION,scope,uid,mode,bookBalanceCents,
+    financialVersion,version,asOf,dueCents,futureCents,totalCents,cutoff,
+    entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents])]);
+}
+const proofCutoff=client=>client.fiadoOpeningBalance?.hash||
+  (client.fiadoHistoryActivation?.originLinksDigest?client.fiadoHistoryActivation.reviewHash:null)||null;
 
 const active=row=>row.active!==false&&!row.deletedAt&&!row.cancelledAt&&!row.desfeita;
 const owns=(row,bid,generation)=>row&&(!row.businessId||row.businessId===bid)&&(row.workspaceGeneration??0)===generation;
@@ -167,18 +177,18 @@ async function accountRoute({tx,c,ref,client,clientId,spaceId,day,scope,generati
   }
   const account={version:2,historyProofVersion:1,clientId,asOf:day,financialVersion:version,dueCents,futureCents,totalCents:debt,creditCents:0,
     hasInstallments,entries,scopedReceiptVersion:1,source:'customer_account'};
-  const quoteHash=hash([scope,c.uid,'space','customer_account',version,day,debt,
-    entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents]),
-    client.fiadoOpeningBalance?.hash||client.fiadoHistoryActivation?.reviewHash||null]);
+  const quoteHash=modernQuote(scope,c.uid,'space',bookBalanceCents,account,proofCutoff(client));
   return {...scope,mode:'space',quoteHash,financialVersion:version,asOf:day,dueCents,futureCents,totalCents:debt,
-    scopedReceiptVersion:1,scopedAccount:account,source:'customer_account',...(includeAccount?{bookBalanceCents,account}:{})};
+    scopedReceiptVersion:1,receiptProofVersion:RECEIPT_PROOF_VERSION,scopedAccount:account,source:'customer_account',...(includeAccount?{bookBalanceCents,account}:{})};
 }
 
-async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false,scopedReceiptVersion,forConfirmation=false,useAccount=false}){
+async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=false,scopedReceiptVersion,forConfirmation=false,useAccount=false,receiptProofVersion=1}){
   const generation=c.business.workspaceGeneration??0;
   const scope={receiptRouteVersion:1,businessId:c.bid,workspaceGeneration:generation,clientId,spaceId};
   const owner=c.owner&&c.business.ownerId===c.uid;
   const blocked=reason=>({...scope,mode:'blocked',reason:owner||['access_unavailable','space_unavailable'].includes(reason)?reason:'origin_unverified'});
+  if(![1,RECEIPT_PROOF_VERSION].includes(receiptProofVersion))return blocked('history_review');
+  const modern=receiptProofVersion===RECEIPT_PROOF_VERSION;
   if(!c.has('customers.view')||!c.has('customers.receiveDebt')||restricted(c.member)||!forConfirmation&&!c.access.canMutate)
     return blocked('access_unavailable');
   const currentSpace=await c.space(spaceId);
@@ -192,7 +202,7 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     version=client.financialVersion??0;
     if(!Number.isSafeInteger(version)||version<0)return blocked('history_review');
     const day=Plan.today(now);
-    if(useAccount&&!forConfirmation&&scopedReceiptVersion===1){
+    if(modern&&useAccount&&!forConfirmation&&scopedReceiptVersion===1){
       const fromAccount=await accountRoute({tx,c,ref,client,clientId,spaceId,day,scope,generation,bookBalanceCents,version,includeAccount});
       if(fromAccount)return fromAccount;
     }
@@ -209,7 +219,7 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     // Keep the traditional writer's source and allocation contract. V2 is only
     // used when its existing proof and receipt contract both apply.
     if(client.fiadoHistoryVersion===1){
-      account=History.project(input,day);
+      account=History.project(input,day,{legacyReceipt:!modern&&!forConfirmation});
     }else{
       if(sales.some(row=>row.clienteId!==clientId||!['fiado','applied'].includes(row.status||'fiado')||
         !row.spaceId&&row.financialSpaceId))return blocked('history_review');
@@ -227,7 +237,7 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     if(forConfirmation&&!scoped)return blocked('origin_unverified');
     if(origins.length>1&&!scoped)return blocked('mixed_origins');
     if(scoped){
-      if(account.version===2)account=History.project(input,day,{scoped:true});
+      if(account.version===2)account=History.project(input,day,{scoped:true,legacyReceipt:!modern&&!forConfirmation});
       else{
         const saleOrigins=new Map(input.collections.sales.map(s=>[s.id,origin(s)]));
         const paymentOrigins=new Map(input.collections.payments.map(p=>[p.id,origin(p)]));
@@ -257,10 +267,11 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
     }else return blocked('origin_unverified');
 
     const {asOf,dueCents,futureCents,totalCents}=account;
-    const quoteHash=hash([scope,c.uid,mode,scoped?null:bookBalanceCents,version,account.version,asOf,dueCents,futureCents,totalCents,
+    const quoteHash=modern?modernQuote(scope,c.uid,mode,bookBalanceCents,account,proofCutoff(client)):hash([scope,c.uid,mode,scoped?null:bookBalanceCents,version,account.version,asOf,dueCents,futureCents,totalCents,
       account.entries.map(row=>[row.spaceId,row.saleId,row.historyEventId,row.number,row.dueDate,row.remainingCents]),
       ...(input.opening?[input.opening.hash]:scoped&&client.fiadoHistoryActivation?.originLinksDigest?[client.fiadoHistoryActivation.reviewHash]:[])]);
     return {...scope,mode,quoteHash,financialVersion:version,asOf,dueCents,futureCents,totalCents,
+      ...(modern?{receiptProofVersion:RECEIPT_PROOF_VERSION}:{}),
       ...(scoped?{scopedReceiptVersion:1,scopedAccount:account}:{}),
       ...(!scoped||includeAccount?{bookBalanceCents}:{}),
       ...(mode==='original'?{origins,hasUnknown}:{}),...(includeAccount?{account}:{})};
@@ -275,13 +286,14 @@ async function decideReceiptRoute({tx,c,ref,clientId,spaceId,now,includeAccount=
 async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
   const invalid=()=>{throw new HttpsError('failed-precondition','A conta ou a origem do recebimento mudou. Confira a operaÃ§Ã£o original na SincronizaÃ§Ã£o antes de receber novamente.',{reason:'fiado-receipt-route-changed'});};
   if(!payment||!intent||typeof intent!=='object'||intent.version!==1||
+     intent.receiptProofVersion!==undefined&&intent.receiptProofVersion!==RECEIPT_PROOF_VERSION||
      !['space','original'].includes(intent.mode)||intent.scopedReceiptVersion!==undefined&&intent.scopedReceiptVersion!==1||!/^[a-f0-9]{64}$/.test(intent.quoteHash||'')||
      typeof intent.spaceId!=='string'||typeof payment.clienteId!=='string'||
      payment.clientId!==payment.clienteId||payment.installmentSaleId||payment.confirmedConflictId||
      !payment.spaceId||payment.financialSpaceId!==payment.spaceId||
      !Number.isFinite(payment.expectedBalance)||!Number.isFinite(payment.valor))return invalid();
-  const route=useAccount=>decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true,scopedReceiptVersion:intent.scopedReceiptVersion,useAccount});
-  // The quote may come from either source: the account (Fase 4c) or the full history.
+  const route=useAccount=>decideReceiptRoute({tx,c,ref,now,clientId:payment.clienteId,spaceId:intent.spaceId,includeAccount:true,scopedReceiptVersion:intent.scopedReceiptVersion,receiptProofVersion:intent.receiptProofVersion,useAccount});
+  // Revalidate the negotiated proof, using history if the projection no longer matches.
   let result=await route(true);
   if(result.source==='customer_account'&&result.quoteHash!==intent.quoteHash)result=await route(false);
   if(result.scopedReceiptVersion!==intent.scopedReceiptVersion||result.mode!==intent.mode||result.quoteHash!==intent.quoteHash||payment.expectedFinancialVersion!==result.financialVersion||
@@ -314,4 +326,4 @@ async function assertReceiptRoute({intent,payment,writes,tx,c,ref,now}){
   return result.scopedReceiptVersion===1?result.account:null;
 }
 
-module.exports={decideReceiptRoute,assertReceiptRoute,receiptFacts,pendingRows,ACCOUNT_RECEIPT_ENABLED};
+module.exports={decideReceiptRoute,assertReceiptRoute,receiptFacts,pendingRows,ACCOUNT_RECEIPT_ENABLED,RECEIPT_PROOF_VERSION};
