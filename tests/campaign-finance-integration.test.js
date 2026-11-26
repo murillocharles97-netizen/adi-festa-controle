@@ -46,7 +46,7 @@ function activeCampaign(engine, input) {
 function creditSale(id, amount, date = "2026-08-10T12:00:00.000Z") {
   return {
     id, operationId: id, businessId: "business-a", clienteId: "client", clientId: "client",
-    clienteNome: "Cliente", status: "fiado", data: date, valorFinal: amount,
+    clienteNome: "Cliente", formaPagamento: "fiado", status: "fiado", data: date, valorFinal: amount,
     creditOriginalAmount: amount, creditPaidAmount: 0, creditRemainingAmount: amount, creditSettled: false,
     itens: [{ produtoId: "monster", quantidade: 1, precoOriginal: amount, precoFinalUnitario: amount, subtotalFinal: amount }],
   };

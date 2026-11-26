@@ -31,7 +31,7 @@ function dashboardHarness({ready=false,error='',rows=[]}={}){
     navigator:{onLine:true},FirebaseSession:{user:{uid:'owner'}},BusinessContext:{get:()=>({businessId:'biz',role:'owner',spaceAccess:'all',business:{workspaceGeneration:0}})},
     DB:{carregar:()=>data,getBusinessId:()=> 'biz'},
     Utils:{hoje:value=>new Date(value).toDateString()===new Date().toDateString(),dinheiro:value=>`BRL ${value}`,escapar:String},
-    TeamAccess:{has:key=>['cost.view','profit.view','reports.view'].includes(key)},SpaceContext:{contextualData:d=>d,ALL_SPACES:'all_spaces',list:()=>[{id:'a',businessId:'biz',name:'A'}]},
+    TeamAccess:{has:key=>['cost.view','profit.view','reports.view','performance.history'].includes(key)},SpaceContext:{contextualData:d=>d,ALL_SPACES:'all_spaces',list:()=>[{id:'a',businessId:'biz',name:'A'}]},
     ExchangeEconomics:{state:()=>({ready,error}),forData:()=>rows,total:()=>0,statusMessage:()=>ready?'Confirmado':'Ajustes não confirmados'},
     OperationMode:{enabled:()=>false},document:{querySelector:()=>({})},matchMedia:()=>({matches:true,addEventListener(){}}),
     MutationObserver:class{observe(){}},getProductStockStatus:()=>'',queueMicrotask(){},addEventListener(){},setTimeout,clearTimeout};
