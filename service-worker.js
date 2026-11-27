@@ -67,6 +67,29 @@ function isRetiredStaticFile(url) {
 async function currentCacheMatch(request, options) {
   return (await caches.open(CACHE)).match(request, options);
 }
+let pinnedAssets;
+function isPinnedAsset(url) {
+  if (!url.searchParams.has('v')) return false;
+  pinnedAssets ??= new Set(ARQUIVOS.filter(file => file.includes('?v='))
+    .map(file => new URL(file, location.href).href));
+  return pinnedAssets.has(url.href);
+}
+async function fetchPinnedAsset(request) {
+  const cached = await currentCacheMatch(request).catch(() => null);
+  // Do not let an unresponsive network hide an exact precached script or stylesheet.
+  const controller = cached ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), 2000) : null;
+  try {
+    const response = await fetch(request, {cache: 'no-store', signal: controller?.signal});
+    if (!response.ok) return cached || response;
+    await caches.open(CACHE).then(cache => cache.put(request, response.clone())).catch(() => {});
+    return controller?.signal.aborted ? cached : response;
+  } catch (_) {
+    return cached || Response.error();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 ARQUIVOS.push('./css/space-branding.css','./js/space-branding.js');
 ARQUIVOS.push('./css/consignments.css','./js/consignment-ui.js','./js/consignment-pdf.js');
 self.addEventListener('install', event => event.waitUntil(
@@ -87,6 +110,11 @@ self.addEventListener('fetch', event => {
     return;
   }
   if (event.request.method !== 'GET') return;
+  const pinnedAsset = ['script', 'style'].includes(event.request.destination) && isPinnedAsset(url);
+  if (pinnedAsset) {
+    event.respondWith(fetchPinnedAsset(event.request));
+    return;
+  }
   const networkFirst = event.request.mode === 'navigate' || ['script', 'style'].includes(event.request.destination);
   if (networkFirst) {
     event.respondWith(fetch(event.request, {cache: 'no-store'}).then(async response => {
