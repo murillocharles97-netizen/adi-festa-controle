@@ -400,25 +400,41 @@
   function relatorios() {
     return window.PerformanceDashboard?.render?.() || vazio("Desempenho indisponível");
   }
-  function cobrancaCard(c) {
-    const tel = Utils.somenteNumeros(c.telefone),
-      ultima = Cobrancas.ultimaCliente(c.id),
-      status = Cobrancas.statusCliente(c);
+  const chargePageSize = 24;
+  let chargeView;
+  const chargeScope = () => JSON.stringify([
+    location.hash, DB.getBusinessId?.(), DB.getPrincipal?.(), DB.getWorkspaceGeneration?.(), window.SpaceContext?.viewScope?.(),
+  ]);
+
+  function cobrancaCard({ cliente: c, ultima, status }) {
+    const tel = Utils.somenteNumeros(c.telefone);
     return `<article class="entity-card charge-card"><div class="entity-head"><div><h3>${escapar(c.nome)}</h3><p>${escapar(c.telefone) || "Sem telefone"}</p></div><span class="badge ${status === "enviado hoje" ? "badge-paid" : "badge-debt"}">${status}</span></div><div class="entity-stats"><div class="entity-stat"><small>Valor em aberto</small><strong>${dinheiro(window.Clientes?.financialStatus?.(c).debt??Math.abs(c.saldo))}</strong></div><div class="entity-stat"><small>Última compra</small><strong>${c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString("pt-BR") : "—"}</strong></div><div class="entity-stat"><small>Última cobrança</small><strong>${ultima ? dataHora(ultima.data) : "Nunca"}</strong></div></div><div class="actions"><button class="btn btn-whatsapp btn-sm" data-batch-whatsapp="${c.id}" ${tel.length < 10 ? "disabled" : ""}>${icon("message-circle")} Enviar cobrança</button><button class="btn btn-light btn-sm" data-copy-batch="${c.id}">${icon("copy")} Copiar mensagem</button><button class="btn btn-light btn-sm" data-ignore-charge="${c.id}">${icon("ban")} Ignorar hoje</button></div></article>`;
   }
+  function renderChargePage(view) {
+    const start = view.page * chargePageSize;
+    return view.rows.slice(start, start + chargePageSize).map(cobrancaCard).join("") ||
+      vazio("Nenhum cliente neste filtro");
+  }
   function cobrancas() {
-    const filtro =
-        new URLSearchParams(location.hash.split("?")[1] || "").get("filtro") ||
-        "naoHoje",
-      lista = Cobrancas.listar(filtro),
-      total = lista.reduce((s, c) => s + Math.abs(Number(c.saldo || 0)), 0);
+    const filtro = new URLSearchParams(location.hash.split("?")[1] || "").get("filtro") || "naoHoje";
+    const scope = chargeScope();
+    const rows = Cobrancas.preparar(filtro);
+    const pages = Math.max(1, Math.ceil(rows.length / chargePageSize));
+    const page = chargeView?.scope === scope ? Math.min(chargeView.page, pages - 1) : 0;
+    chargeView = { scope, rows, page, pages };
+    const total = rows.reduce((sum, { cliente }) => sum + Math.abs(Number(cliente.saldo || 0)), 0);
     return (
       cabecalho(
         "Cobrança em lote",
         "Fluxo manual e seguro para cobrar clientes pelo WhatsApp.",
         `<button class="btn btn-primary" id="send-next">${icon("send")} Enviar próximo</button><button class="btn btn-light" data-go="clientes">${icon("arrow-left")} Clientes</button>`,
       ) +
-      `<section class="panel warning-panel"><div class="modal-body"><b>Use com cuidado.</b> O WhatsApp pode bloquear contas que enviam mensagens repetidas em excesso. Este app apenas abre uma conversa por vez; você confirma manualmente cada cobrança.</div></section><section class="metrics" style="margin:16px 0">${metric("Clientes na fila", lista.length, "com débito", "users")}${metric("Total listado", dinheiro(total), "em aberto", "hand-coins")}</section><div class="toolbar charge-filters"><button class="btn btn-light btn-sm" data-charge-filter="todos">Todos com débito</button><button class="btn btn-light btn-sm" data-charge-filter="nunca">Nunca cobrados</button><button class="btn btn-light btn-sm" data-charge-filter="naoHoje">Não cobrados hoje</button><button class="btn btn-light btn-sm" data-charge-filter="acima10">Acima de R$ 10</button><button class="btn btn-light btn-sm" data-charge-filter="acima50">Acima de R$ 50</button><button class="btn btn-light btn-sm" data-charge-filter="semTelefone">Sem telefone</button></div><section class="entity-grid" id="charge-list">${lista.map(cobrancaCard).join("") || vazio("Nenhum cliente neste filtro")}</section>`
+      `<section class="panel warning-panel"><div class="modal-body"><b>Use com cuidado.</b> O WhatsApp pode bloquear contas que enviam mensagens repetidas em excesso. Este app apenas abre uma conversa por vez; você confirma manualmente cada cobrança.</div></section><section class="metrics" style="margin:16px 0">${metric("Clientes na fila", rows.length, "com débito", "users")}${metric("Total listado", dinheiro(total), "em aberto", "hand-coins")}</section><div class="toolbar charge-filters"><button class="btn btn-light btn-sm" data-charge-filter="todos">Todos com débito</button><button class="btn btn-light btn-sm" data-charge-filter="nunca">Nunca cobrados</button><button class="btn btn-light btn-sm" data-charge-filter="naoHoje">Não cobrados hoje</button><button class="btn btn-light btn-sm" data-charge-filter="acima10">Acima de R$ 10</button><button class="btn btn-light btn-sm" data-charge-filter="acima50">Acima de R$ 50</button><button class="btn btn-light btn-sm" data-charge-filter="semTelefone">Sem telefone</button></div><section class="entity-grid" id="charge-list" tabindex="-1" aria-label="Clientes para cobrança">${renderChargePage(chargeView)}</section>` +
+      (pages > 1 ? `<nav class="toolbar" aria-label="Páginas de cobranças">
+        <button type="button" class="btn btn-light" id="charge-previous"${page === 0 ? " disabled" : ""}>Anterior</button>
+        <span id="charge-page" aria-live="polite">Página ${page + 1} de ${pages}</span>
+        <button type="button" class="btn btn-light" id="charge-next"${page === pages - 1 ? " disabled" : ""}>Próxima</button>
+      </nav>` : "")
     );
   }
   function mostrarCobrancasCliente(id) {
@@ -614,6 +630,24 @@
       );
   }
   function bindCobrancas() {
+    const list = $("#charge-list"), view = chargeView;
+    if (!list || !view) return;
+    const previous = $("#charge-previous"), next = $("#charge-next"), pageLabel = $("#charge-page");
+    if (previous && next && pageLabel) {
+      const changePage = (step) => {
+        if (chargeView !== view || chargeScope() !== view.scope) return;
+        view.page += step;
+        list.innerHTML = renderChargePage(view);
+        pageLabel.textContent = `Página ${view.page + 1} de ${view.pages}`;
+        previous.disabled = view.page === 0;
+        next.disabled = view.page === view.pages - 1;
+        window.lucide?.createIcons();
+        list.focus();
+        list.scrollIntoView({ block: "start" });
+      };
+      previous.onclick = () => changePage(-1);
+      next.onclick = () => changePage(1);
+    }
     $$("[data-charge-filter]").forEach(
       (b) =>
         (b.onclick = () =>
@@ -625,7 +659,7 @@
         return toast("Nenhum próximo cliente com débito e telefone", true);
       abrirWhatsCobranca(c, true);
     };
-    $("#charge-list").onclick = (e) => {
+    list.onclick = (e) => {
       const b = e.target.closest("button");
       if (!b) return;
       if (b.dataset.copyBatch) {
@@ -1219,6 +1253,7 @@
     window.SyncFirebase?.setScreen?.(route);
     syncResponsiveNavigation();
     const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
+    if (route !== "cobrancas" || deniedRoute) chargeView = null;
     if (root.dataset.route === "clientes") {
       clearTimeout(clientSearchTimer);
       if (clientSpaceFrame !== null) cancelAnimationFrame(clientSpaceFrame);
