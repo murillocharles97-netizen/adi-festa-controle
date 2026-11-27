@@ -5,7 +5,7 @@ window.Clientes=(()=>{
   const obter = id => listar().find(c => c.id === id);
   // V242.12: 'display' feeds the cards and totals and may keep the last server-confirmed
   // account while it is revalidated; 'strict' (charges, messages) never does.
-  let lastView, displayEpoch = 0;
+  let lastView, calendarData, calendars, displayEpoch = 0;
   const caches = {display: null, strict: null};
   // Presentation only. These balances never authorize a financial write.
   const localListBalances = () => window.Router?.atual?.() === 'clientes' &&
@@ -13,7 +13,7 @@ window.Clientes=(()=>{
     window.BusinessContext?.get?.().role === 'owner' &&
     window.TeamAccess?.has?.('customers.view') === true && window.TeamAccess?.has?.('customers.receiveDebt') === true &&
     !window.OperationalReadPolicy?.restricted?.();
-  const prepareList = () => { displayEpoch++; caches.display = caches.strict = null; lastView = null; };
+  const prepareList = () => { displayEpoch++; caches.display = caches.strict = null; lastView = calendarData = null; };
   const prepareStrictList = () => { caches.strict = null; };
   function legacyFiadoClosed() {
     const context = window.BusinessContext?.get?.();
@@ -40,19 +40,30 @@ window.Clientes=(()=>{
   // For the owner, who sees every Space, the sum must match the registered balance; while it
   // does not (one side has not synced yet), the screens keep their previous sources.
   function sharedAccount(client) {
-    const store = window.CustomerSpaceAccounts, shared = store?.forClient?.(client?.id);
-    // Etapa 1: nothing owed means no published document. With the server snapshot live on
-    // this device, a zero registered balance needs no account lookup to be shown.
-    if (!shared) return store?.ready?.() === true && client && Number(client.saldo || 0) === 0
-      ? {spaces: {}, unattributedCents: 0, totalCents: 0, complete: Boolean(store.scope?.()?.complete), live: true} : null;
-    if (shared.complete && shared.totalCents !== -Math.round((Number(client?.saldo) || 0) * 100)) return null;
+    if (scopedScreen() && (window.TeamAccess?.has?.('customers.receiveDebt') === false || window.OperationalReadPolicy?.restricted?.())) return null;
+    const version = window.SyncFirebase?.confirmedClientFinancialVersion?.(client);
+    if (!Number.isSafeInteger(version)) return null;
+    const shared = window.CustomerSpaceAccounts?.forClient?.(client.id, version);
+    if (!shared || shared.complete && shared.totalCents !== -Math.round(client.saldo * 100)) return null;
+    const space = window.SpaceContext?.activeId?.();
+    if (!shared.complete && (!scopedScreen() || !space || !Object.hasOwn(shared.spaces, space))) return null;
     return shared;
   }
   // The published balance is a total per Space; future installments come from the local calendars.
   function futureBySpace(clientId, data, day) {
+    if (calendarData !== data) {
+      calendarData = data;
+      calendars = new Map();
+      for (const sale of data.vendas || []) {
+        if (!sale.installmentPlan || sale.deletedAt || sale.active === false || sale.desfeita || sale.cancelledAt) continue;
+        const id = sale.clienteId || sale.clientId;
+        const rows = calendars.get(id) || [];
+        rows.push(sale);
+        calendars.set(id, rows);
+      }
+    }
     const out = {};
-    for (const sale of data.vendas || []) {
-      if ((sale.clienteId || sale.clientId) !== clientId || !sale.installmentPlan || sale.deletedAt || sale.active === false || sale.desfeita || sale.cancelledAt) continue;
+    for (const sale of calendars.get(clientId) || []) {
       const space = sale.spaceId || sale.financialSpaceId || null; if (!space) continue;
       try { out[space] = (out[space] || 0) + window.InstallmentPlan.rows(sale, day).filter(r => r.dueDate > day).reduce((n, r) => n + r.remainingCents, 0); } catch { /* calendar unreadable: no future split */ }
     }

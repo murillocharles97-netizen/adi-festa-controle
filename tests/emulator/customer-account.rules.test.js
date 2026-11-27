@@ -68,6 +68,11 @@ test('saldo publicado: proprietário lê tudo; outros, só os Espaços que acess
     for (const [id, spaceId] of [['qa-client__' + space, space], ['qa-client__' + spaceB, spaceB], ['qa-client__sem-espaco', null]])
       await setDoc(doc(db, 'businesses', bid, 'customerSpaceAccounts', id), {businessId: bid, workspaceGeneration: 0, clientId: 'qa-client', spaceId, debtCents: 1000, status: 'ready'});
   });
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'businesses', bid, 'customerSpaceAccounts', 'old-generation'), {
+      businessId: bid, workspaceGeneration: 9, clientId: 'qa-client', spaceId: space, debtCents: 1000, financialVersion: 6
+    });
+  });
   const accounts = db => collection(db, 'businesses', bid, 'customerSpaceAccounts');
   const owner = env.authenticatedContext('qa-account-owner').firestore();
   assert.equal((await getDocs(query(accounts(owner), where('workspaceGeneration', '==', 0)))).size, 3);
@@ -76,6 +81,8 @@ test('saldo publicado: proprietário lê tudo; outros, só os Espaços que acess
   await assertFails(getDocs(query(accounts(restricted), where('workspaceGeneration', '==', 0))));
   await assertFails(getDoc(doc(restricted, 'businesses', bid, 'customerSpaceAccounts', 'qa-client__' + spaceB)));
   await assertFails(getDoc(doc(restricted, 'businesses', bid, 'customerSpaceAccounts', 'qa-client__sem-espaco')));
+  await assertFails(getDoc(doc(restricted, 'businesses', bid, 'customerSpaceAccounts', 'old-generation')));
+  await assertFails(getDoc(doc(owner, 'businesses', bid, 'customerSpaceAccounts', 'old-generation')));
   const manager = env.authenticatedContext('qa-account-manager').firestore();
   assert.equal((await getDocs(query(accounts(manager), where('spaceId', 'in', [space, spaceB]), where('workspaceGeneration', '==', 0)))).size, 2);
   await assertFails(getDoc(doc(manager, 'businesses', bid, 'customerSpaceAccounts', 'qa-client__sem-espaco')));

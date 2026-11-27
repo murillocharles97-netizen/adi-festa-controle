@@ -1454,7 +1454,9 @@ service cloud.firestore {
       // vê dados financeiros, somente nos Espaços que acessa; a parte sem Espaço, só o
       // proprietário. Nenhum aparelho grava.
       match /customerSpaceAccounts/{documentId} {
-        allow read: if canReadCollection(businessId, 'balanceEvents') && scopedFinancialDocument(businessId, resource.data);
+        allow read: if canReadCollection(businessId, 'balanceEvents')
+          && resource.data.workspaceGeneration == get(/databases/$(database)/documents/businesses/$(businessId)).data.get('workspaceGeneration', 0)
+          && scopedFinancialDocument(businessId, resource.data);
         allow write: if false;
       }
       // Fase 2: relatório da carga das contas; só o servidor grava e lê.

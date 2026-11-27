@@ -5,8 +5,8 @@
 import {db} from './firebase-config.js';
 import {collection, onSnapshot, query, where} from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
-let current = '', stops = [];
-function stop() { for (const unsubscribe of stops.splice(0)) try { unsubscribe(); } catch { /* already closed */ } current = ''; }
+let current = '', subscription = 0, stops = [];
+function stop() { subscription++; for (const unsubscribe of stops.splice(0)) try { unsubscribe(); } catch { /* already closed */ } current = ''; }
 function allowed() {
   const has = window.TeamAccess?.has;
   return typeof has === 'function' && (has('financial.view') || has('customers.receiveDebt') || has('customers.adjustBalance'));
@@ -23,6 +23,7 @@ function start() {
   const next = JSON.stringify([uid, businessId, generation, context.role, grants, owner, spaces]);
   if (next === current) return;
   stop(); current = next;
+  const subscriptionId = subscription;
   store.reset({uid, businessId, generation, complete: owner, grants, spaces});
   const base = collection(db, 'businesses', businessId, 'customerSpaceAccounts');
   const groups = owner ? [null] : Array.from({length: Math.ceil(spaces.length / 30)}, (_, i) => spaces.slice(i * 30, i * 30 + 30));
@@ -31,7 +32,7 @@ function start() {
     const generationFilter = where('workspaceGeneration', '==', generation);
     const q = group ? query(base, where('spaceId', 'in', group), generationFilter) : query(base, generationFilter);
     stops.push(onSnapshot(q, {includeMetadataChanges: true}, snapshot => {
-      if (current !== next || snapshot.metadata.hasPendingWrites) return;
+      if (subscription !== subscriptionId || snapshot.metadata.hasPendingWrites) return;
       const fromCache = snapshot.metadata.fromCache;
       const replace = !fromCache && !confirmed.has(index);
       if (fromCache) confirmed.delete(index); else confirmed.add(index);
@@ -39,7 +40,7 @@ function start() {
         : snapshot.docChanges().map(change => ({type: change.type, id: change.doc.id, data: change.doc.data()}));
       store.apply(businessId, changes, {fromServer: confirmed.size === groups.length, replaceSpaces: replace ? group : undefined});
     }, () => {
-      if (current === next) { stop(); store.reset(null); }
+      if (subscription === subscriptionId) { stop(); store.reset(null); }
     }));
   }
 }

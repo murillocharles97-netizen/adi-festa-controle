@@ -25,6 +25,7 @@ function fixture() {
   w.Cobrancas = {ultimaCliente: () => null, historicoCliente: () => []}; w.Router = {atual: () => 'clientes'};
   w.CustomerSubscriptions = {view: {forClient: () => [], hasUnassigned: () => false, loadForClient: async () => []}, effectiveStatus: () => 'active'};
   w.Modais = {fechar: () => {}}; w.DB.readForView = w.DB.carregar; w.SyncFirebase.isReady = () => true;
+  w.SyncFirebase.confirmedClientFinancialVersion = client => client?.customerDirectoryOnly ? null : client?.financialVersion;
   w.eval(fs.readFileSync('js/customer-space-accounts.js', 'utf8'));
   for (const file of ['js/clientes.js', 'js/client-filter-rules.js', 'js/mensagens.js', 'js/clientes-page.js', 'js/clientes-mobile.js']) w.eval(fs.readFileSync(file, 'utf8'));
   const mount = () => { w.document.querySelector('#app').innerHTML = `<section class="clients-page" data-clients-bound="true"><div id="client-list">${w.ClientesPage.renderCard(client, 0)}</div></section>`; };
@@ -32,8 +33,8 @@ function fixture() {
   const publish = (rows, {complete = true, live = true} = {}) => {
     const store = w.CustomerSpaceAccounts;
     if (!store.scope()) store.reset({uid: 'qa-owner', businessId: w.DB.getBusinessId(), generation: 0, complete, spaces: rows.map(([id])=>id)});
-    store.apply(w.DB.getBusinessId(), rows.map(([space, debtCents]) => ({type: 'added', id: `${client.id}__${space || 'sem-espaco'}`,
-      data: {businessId: w.DB.getBusinessId(), workspaceGeneration: 0, clientId: client.id, spaceId: space, debtCents, status: 'ready'}})), {fromServer: live});
+    store.apply(w.DB.getBusinessId(), rows.map(([space, debtCents, financialVersion = client.financialVersion]) => ({type: 'added', id: `${client.id}__${space || 'sem-espaco'}`,
+      data: {businessId: w.DB.getBusinessId(), workspaceGeneration: 0, clientId: client.id, spaceId: space, debtCents, financialVersion, status: 'ready'}})), {fromServer: live});
   };
   return {h, w, client, mount, balance, publish, calls: () => calls};
 }
@@ -81,8 +82,27 @@ test('crédito publicado aparece como crédito; quem não vê todos os Espaços 
     assert.equal(status.status, 'credit'); assert.equal(status.credit, 25);
     f.w.CustomerSpaceAccounts.reset(null);
     f.client.saldo = -3047;
+    f.w.SpaceContext.scopesCustomers = () => true;
+    f.w.SpaceContext.activeId = () => 'qa-space';
     f.publish([['qa-space', 100000]], {complete: false});
     assert.equal(f.w.Clientes.financialStatus(f.client, undefined, {display: true}).debt, 1000, 'sem a soma completa, mostra o que o Espaço publica');
+  } finally { f.h.close(); }
+});
+
+test('acesso parcial descarta versão antiga, saldo sem confirmação e Espaço fora da seleção', () => {
+  const f = fixture();
+  try {
+    f.w.SpaceContext.scopesCustomers = () => true;
+    f.w.SpaceContext.activeId = () => 'qa-space';
+    f.publish([['qa-space', 100000, 12]], {complete: false});
+    assert.equal(f.w.Clientes.sharedAccount(f.client), null);
+    f.publish([['qa-space', 100000, 13]], {complete: false});
+    assert.equal(f.w.Clientes.sharedAccount(f.client).spaces['qa-space'], 100000);
+    f.w.SpaceContext.activeId = () => 'qa-other-space';
+    assert.equal(f.w.Clientes.sharedAccount(f.client), null);
+    f.w.SpaceContext.activeId = () => 'qa-space';
+    f.w.SyncFirebase.confirmedClientFinancialVersion = () => null;
+    assert.equal(f.w.Clientes.sharedAccount(f.client), null);
   } finally { f.h.close(); }
 });
 
@@ -99,16 +119,13 @@ test('Ajustar saldo novo só aparece com o saldo do servidor ativo neste aparelh
   } finally { f.h.close(); }
 });
 
-test('Etapa 1: cliente por Espaço sem dívida não consulta a conta quando o saldo do servidor está ativo', async () => {
+test('a ausência de documento publicado não é usada para comprovar saldo zero', async () => {
   const f = fixture();
   try {
     f.client.saldo = 0;
     f.w.CustomerSpaceAccounts.reset({uid: 'qa-owner', businessId: f.w.DB.getBusinessId(), generation: 0, complete: true});
     f.w.CustomerSpaceAccounts.apply(f.w.DB.getBusinessId(), [], {fromServer: true});
-    f.mount(); f.w.document.dispatchEvent(new f.w.Event('DOMContentLoaded')); await tick();
-    await f.w.InstallmentCredit.hydrateVisible(); await tick();
-    assert.equal(f.calls(), 0, 'nenhuma consulta de conta');
-    assert.equal(f.w.Clientes.financialStatus(f.client, undefined, {display: true}).status, 'zero');
+    assert.equal(f.w.Clientes.sharedAccount(f.client), null);
     f.w.CustomerSpaceAccounts.reset(null);
     assert.equal(f.w.Clientes.sharedAccount(f.client), null, 'sem o saldo do servidor, volta à fonte de antes');
   } finally { f.h.close(); }

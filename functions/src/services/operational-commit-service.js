@@ -46,7 +46,7 @@ const sameValue=(a,b)=>canonical(a?.toDate?.().toISOString()??a)===canonical(b?.
 // The caller supplies an intent/old offline envelope, NEVER an Admin write plan.
 // The existing transaction arithmetic is buffered; these independent guards
 // validate every actual read/write before ANY Admin write is flushed.
-function operationalCommitService(db,{now=()=>new Date()}={}){
+function operationalCommitService(db,{now=()=>new Date(),nativeAccountScope=undefined}={}){
  const ref=(bid,col,id)=>db.doc(`businesses/${bid}/${col}/${id}`);
  async function context(tx,request,item,{readOnly=false}={}){
   const uid=request.auth?.uid;if(!uid)fail('Entre na sua conta.','unauthenticated');
@@ -321,7 +321,8 @@ function operationalCommitService(db,{now=()=>new Date()}={}){
    // regime a regularization sets), in this transaction, so a new customer never enters the
    // traditional chain. Any prior source or a sale without Space keeps the customer as before;
    // the migration (Etapa 2) handles existing customers. Installment sales open it too (Etapa 3).
-   const firstFiado=NATIVE_SPACE_ACCOUNT_ENABLED&&!paymentRecovery&&!brandRecovery&&attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&
+   const nativeInScope=nativeAccountScope===undefined||nativeAccountScope===c.bid+':'+gen(c.business);
+   const firstFiado=NATIVE_SPACE_ACCOUNT_ENABLED&&nativeInScope&&!paymentRecovery&&!brandRecovery&&attemptWrites.find(w=>w.entityType==='sales'&&w.operation==='create'&&
     (w.data.formaPagamento==='fiado'||w.data.status==='fiado'));
    if(firstFiado){
     const id=firstFiado.data.clienteId||firstFiado.data.clientId,space=firstFiado.data.spaceId||null;

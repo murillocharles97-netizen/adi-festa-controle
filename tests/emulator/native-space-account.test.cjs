@@ -19,7 +19,7 @@ let app, db, seq = 0;
 test.before(() => { app = initializeApp({projectId: 'demo-veconi-native-account'}, 'native-account'); db = getFirestore(app); });
 test.after(async () => { await db.terminate(); await deleteApp(app); });
 
-async function setup() {
+async function setup({pilot = true} = {}) {
   const bid = 'native-' + crypto.randomUUID(), owner = 'owner-' + (++seq), root = db.doc('businesses/' + bid), A = 'space-a-' + bid, B = 'space-b-' + bid;
   await root.set({businessId: bid, ownerId: owner, active: true, workspaceGeneration: 0, legacyAccessDisabled: true, subscription: {planId: 'internal', status: 'active'}});
   await db.doc('users/' + owner).set({uid: owner, businessId: bid, active: true, role: 'owner'});
@@ -28,7 +28,7 @@ async function setup() {
   for (const id of [A, B]) await db.doc('financialSpaces/' + id).set({id, businessId: bid, linkedBusinessId: bid, active: true, type: 'business', ownerUid: owner, capabilities: {sales: true, finance: true, inventory: true}});
   const client = (id, extra = {}) => root.collection('clients').doc(id).set({id, businessId: bid, nome: 'Pessoa QA ' + id, saldo: 0, financialVersion: 0, workspaceGeneration: 0, active: true, ativo: true, customerSpaceIds: [A, B], ...extra});
   await client('c-new'); await client('c-touched', {financialVersion: 2}); await client('c-reg');
-  const svc = operationalCommitService(db), shadow = customerAccountService(db, {verify: true});
+  const svc = operationalCommitService(db, {nativeAccountScope: pilot ? bid + ':0' : 'qa-other-company:0'}), shadow = customerAccountService(db, {verify: true});
   const ref = (b, col, id) => db.doc(`businesses/${b}/${col}/${id}`);
   const read = async (col, id) => (await root.collection(col).doc(id).get()).data();
   const docs = async (col, field, value) => (await root.collection(col).where(field, '==', value).get()).docs.map(d => ({...d.data(), id: d.id}));
@@ -108,6 +108,16 @@ test('cliente novo: a primeira venda Fiado abre a conta por Espaço; cliente já
   const touched = await c.read('clients', 'c-touched');
   assert.equal(touched.fiadoHistoryVersion, undefined, 'cliente com versão financeira anterior não muda de regime');
   assert.equal(touched.fiadoHistoryActivation, undefined);
+});
+
+test('fora do piloto, a primeira venda Fiado preserva o gravador atual', async () => {
+  const c = await setup({pilot: false});
+  const sale = await c.sell('c-new', c.A, 30);
+  const client = await c.read('clients', 'c-new');
+  assert.equal(client.saldo, -30);
+  assert.equal(client.fiadoHistoryActivation, undefined);
+  assert.equal(await c.read('customerAccounts', 'c-new'), undefined);
+  assert.ok(await c.read('processedOperations', sale.operationId));
 });
 
 test('recebimento parcial e total alocam às vendas do Espaço na ordem, marcam a venda paga e mantêm a paridade', async () => {

@@ -54,8 +54,9 @@ const saleRecoveries=require('./services/sale-recovery-service').saleRecoverySer
 const RECOVERY_OPTIONS={region:REGION,memory:'256MiB',timeoutSeconds:60,maxInstances:3};
 exports.readOperationalWorkspace=onCall(RECOVERY_OPTIONS,request=>require('./services/operational-read-service').operationalReadService(db).read(request));
 exports.authorizeOperationalSaleRead=onCall(RECOVERY_OPTIONS,request=>require('./services/operational-read-service').operationalReadService(db).authorize(request));
-const operationalCommits=require('./services/operational-commit-service').operationalCommitService(db);
-const priorSales=require('./services/prior-sale-service').priorSaleService(db,{enabled:process.env.PRIOR_SALES_ENABLED!=='false'});
+const nativeAccountScope=process.env.VECONI_ACCOUNT_NATIVE_SCOPE ?? null;
+const operationalCommits=require('./services/operational-commit-service').operationalCommitService(db,{nativeAccountScope});
+const priorSales=require('./services/prior-sale-service').priorSaleService(db,{enabled:process.env.PRIOR_SALES_ENABLED!=='false',nativeAccountScope});
 exports.previewPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.preview(request));
 exports.confirmPriorSale=onCall(RECOVERY_OPTIONS,request=>priorSales.confirm(request));
 const {operationalCallable}=require('./shared/operational-callable');

@@ -127,7 +127,7 @@ function projectedAccount(proof, backfill) {
   const {planned, approval} = proof;
   return {...planned.account, status: planned.status, backfill, verification: planned.verification,
     ledger: planned.ledger, ledgerVersion: Ledger.LEDGER_VERSION, clientFinancialVersion: approval.financialVersion,
-    selectiveProofHash: approval.proofHash, updatedAt: planned.at};
+    selectiveProofHash: approval.proofHash, spaceProjectionVersion: 1, updatedAt: planned.at};
 }
 
 async function refreshLoadedAccount({tx, db, businessId, generation, clientId, now, eventId}) {
@@ -150,7 +150,7 @@ async function refreshLoadedAccount({tx, db, businessId, generation, clientId, n
     return {status: 'needs_review', reason: proof.reason};
   }
   const marker = markerRef ? await tx.get(markerRef) : null;
-  if (existing.selectiveProofHash !== proof.approval.proofHash || !Account.PUBLISHED.has(existing.status)) {
+  if (existing.selectiveProofHash !== proof.approval.proofHash || existing.spaceProjectionVersion !== 1 || !Account.PUBLISHED.has(existing.status)) {
     const account = projectedAccount(proof, existing.backfill);
     tx.set(accountRef, account);
     Account.writeSpaceDocs(tx, ref, businessId, existing, account, account.updatedAt);
@@ -268,7 +268,7 @@ function customerAccountBackfillService(db, {now = () => new Date(), loadScope =
           const prior = existing.data();
           if (prior) row.previous = {debtCents: prior.debtCents ?? null, spaces: prior.spaces || {}, financialVersion: prior.clientFinancialVersion ?? null};
           const account = projectedAccount(proof, {selective: true, runId, pageId, at: proof.planned.at});
-          if (prior?.selectiveProofHash !== approval.proofHash || prior?.status !== account.status) {
+          if (prior?.selectiveProofHash !== approval.proofHash || prior?.spaceProjectionVersion !== 1 || prior?.status !== account.status) {
             tx.set(accountRef, account);
             Account.writeSpaceDocs(tx, ref, businessId, prior, account, account.updatedAt);
           }

@@ -73,6 +73,26 @@ test('cada evento do razão atualiza o Espaço publicado pela conta sombra', asy
   assert.equal((await c.published())['c-reg__' + c.A].debtCents, 9000);
 });
 
+test('recomposição atualiza uma projeção sem versão sem repetir a carga original', async () => {
+  const c = await setup(); await c.load();
+  const {FieldValue} = require('firebase-admin/firestore');
+  const accountRef = c.root.collection('customerAccounts').doc('c-reg');
+  await accountRef.update({spaceProjectionVersion: FieldValue.delete()});
+  const documents = await c.root.collection('customerSpaceAccounts').get();
+  await Promise.all(documents.docs.map(doc => doc.ref.update({financialVersion: FieldValue.delete()})));
+  const service = customerAccountBackfillService(db, {projectionScope: c.bid + ':0'});
+  const call = () => service.handle({auth: {uid: c.owner}, data: {
+    kind: 'customer_account_backfill_catchup', businessId: c.bid, workspaceGeneration: 0, clientIds: ['c-reg']
+  }});
+  assert.equal((await call()).items[0].status, 'current');
+  const version = (await c.root.collection('clients').doc('c-reg').get()).data().financialVersion;
+  assert.ok(Object.values(await c.published()).every(row => row.financialVersion === version));
+  const refreshed = await accountRef.get();
+  await call();
+  assert.ok(refreshed.updateTime.isEqual((await accountRef.get()).updateTime));
+  assert.equal((await c.root.collection('customerAccountBackfills').get()).size, 1);
+});
+
 test('conta que deixa de estar pronta tem os documentos retirados', async () => {
   const c = await setup(); await c.load();
   await c.root.collection('clients').doc('c-reg').update({saldo: -999});

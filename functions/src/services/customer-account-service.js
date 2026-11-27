@@ -71,7 +71,7 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
         const account = {...planned.account, status: planned.status, ledger, ledgerVersion: ledger ? Ledger.LEDGER_VERSION : null, clientFinancialVersion: Number(client.financialVersion || 0)};
         // The triggering event was committed before this read, so the base already holds it.
         tx.set(accountRef, {...account, updatedAt: at});
-        Account.writeSpaceDocs(tx, ref, businessId, stored, account, at);
+        Account.writeSpaceDocs(tx, ref, businessId, stored, account, at, null);
         tx.set(markerRef, {eventId, at, inBaseline: true, verificationPending: verify});
         return {status: 'baseline', account};
       }
@@ -79,7 +79,7 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
       if (Account.includedInBaseline(stored, event)) { tx.set(markerRef, {eventId, at, inBaseline: true}); return {status: 'in_baseline'}; }
       const account = Account.apply(stored, event);
       tx.set(accountRef, {...account, updatedAt: at});
-      Account.writeSpaceDocs(tx, ref, businessId, stored, account, at);
+      Account.writeSpaceDocs(tx, ref, businessId, stored, account, at, null);
       tx.set(markerRef, {eventId, at, inBaseline: false, owedCents: -Account.cents(event.balanceDelta), spaceId: Account.spaceOf(event), verificationPending: verify});
       return {status: 'applied', account};
     });
@@ -108,6 +108,7 @@ function customerAccountService(db, {now = () => new Date(), enabled = SHADOW_EN
       // Etapa 6: the open items kept by the transactions must equal the proven ones, item by item.
       const kept = account.ledgerVersion === Ledger.LEDGER_VERSION && account.ledger && account.clientFinancialVersion === version ? Ledger.entries(account.ledger, Plan.today(now())) : null;
       verification.itemsCheck = proven && kept ? (Ledger.same(kept, h.projection.entries) ? 'match' : 'divergent') : null;
+      Account.writeSpaceDocs(tx, ref, businessId, account, account, verification.at, proven && verification.receiptRisk === null ? version : null);
       const finding = verification.status === 'mismatch' ? 'account_mismatch' : verification.itemsCheck === 'divergent' ? 'items_divergent' : null;
       tx.update(accountRef, {verification, ledger: proven ? Ledger.fromProjection(h.projection, h.input) : null, ledgerVersion: proven ? Ledger.LEDGER_VERSION : null,
         clientFinancialVersion: version});

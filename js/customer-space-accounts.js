@@ -63,11 +63,15 @@ window.CustomerSpaceAccounts = (() => {
   // Balance of one customer by Space, in cents (> 0 owes, < 0 credit). `complete` means this
   // viewer sees every Space and the part without Space (the owner), so the sum can be checked
   // against the registered balance.
-  function forClient(clientId) {
-    if (!scope) return null;
+  function forClient(clientId, financialVersion) {
+    if (!scope || !live || !Number.isSafeInteger(financialVersion) || financialVersion < 0) return null;
     const map = rows.get(String(clientId)); if (!map?.size) return null;
     const spaces = {}; let unattributedCents = 0;
-    for (const [space, row] of map) { if (space === NONE) unattributedCents += row.debtCents; else if (row.debtCents) spaces[space] = row.debtCents; }
+    for (const [space, row] of map) {
+      if (row.financialVersion !== financialVersion) return null;
+      if (space === NONE) unattributedCents += row.debtCents;
+      else spaces[space] = row.debtCents;
+    }
     const totalCents = Object.values(spaces).reduce((n, v) => n + v, 0) + unattributedCents;
     return {spaces, unattributedCents, totalCents, complete: scope.complete, live};
   }

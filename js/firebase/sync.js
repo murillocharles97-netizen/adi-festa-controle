@@ -1965,17 +1965,33 @@ function rememberCanonicalClients(documents, metadata = {}) {
     const clientId = String(client?.id || "").trim(),
       balance = Number(client?.saldo);
     if (!clientId || !Number.isFinite(balance) || client.deletedAt) continue;
-    canonicalClientSnapshots.set(canonicalClientSnapshotKey(businessId, clientId), {
+    const key = canonicalClientSnapshotKey(businessId, clientId);
+    const generation = client.workspaceGeneration ?? 0, version = financialVersionOf(client);
+    const previous = canonicalClientSnapshots.get(key);
+    if (generation !== (DB.getWorkspaceGeneration?.() ?? 0) || (client.businessId && client.businessId !== businessId) ||
+        previous?.workspaceGeneration === generation && previous.financialVersion > version) continue;
+    canonicalClientSnapshots.set(key, {
       businessId,
       clientId,
       balance: roundedMoney(balance),
-      financialVersion: Math.max(0, Number(client.financialVersion || 0)),
+      financialVersion: version,
+      workspaceGeneration: generation,
       updatedAt: client.updatedAt || client.atualizadoEm || "",
       readAt,
       source: metadata.source,
     });
   }
 }
+function confirmedClientFinancialVersion(client) {
+  const uid = currentUser?.uid, businessId = activeBusinessId(), generation = DB.getWorkspaceGeneration?.() ?? 0;
+  if (!uid || uid !== auth.currentUser?.uid || navigator.onLine === false || !client?.id || client.customerDirectoryOnly || client.deletedAt || client.active === false || client.ativo === false ||
+      (client.businessId && client.businessId !== businessId) || (client.workspaceGeneration ?? 0) !== generation ||
+      !Number.isSafeInteger(client.financialVersion) || !Number.isFinite(client.saldo)) return null;
+  const saved = canonicalClientSnapshots.get(canonicalClientSnapshotKey(businessId, client.id));
+  return saved?.workspaceGeneration === generation && saved.financialVersion === client.financialVersion &&
+    sameFinancialMoney(client.saldo, saved.balance) ? saved.financialVersion : null;
+}
+
 function recentCanonicalClientSnapshot(businessId, clientId, localClient) {
   const snapshot = canonicalClientSnapshots.get(
     canonicalClientSnapshotKey(businessId, clientId),
@@ -8011,6 +8027,7 @@ window.SyncFirebase = {
   pushPendingOperations: processSyncQueue,
   pullCloudCollections,
   readCanonicalClient,
+  confirmedClientFinancialVersion,
   publishConfirmedMessage,
   ensureClientProjection,
   queryClientsPage,

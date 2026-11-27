@@ -90,7 +90,7 @@ function compare(account, {client, projection, scoped, unexplainedCents = accoun
 const SPACE_COLLECTION = 'customerSpaceAccounts', UNATTRIBUTED_ID = 'sem-espaco';
 const PUBLISHED = new Set(['ready', 'ready_by_rule']);
 const spaceDocId = (clientId, spaceId) => `${clientId}__${spaceId || UNATTRIBUTED_ID}`;
-function spaceWrites(before, after, {at}) {
+function spaceWrites(before, after, {at, financialVersion = after.clientFinancialVersion ?? null}) {
   const published = account => Boolean(account && PUBLISHED.has(account.status) && account.baseline);
   const ids = account => published(account) ? [...Object.keys(account.spaces || {}), ...(account.unattributedCents ? [null] : [])] : [];
   const previous = ids(before), next = ids(after), writes = {set: [], remove: []};
@@ -98,11 +98,11 @@ function spaceWrites(before, after, {at}) {
   const value = space => space ? after.spaces[space] || 0 : after.unattributedCents || 0;
   for (const space of [...new Set([...previous, ...next])].sort((a, b) => String(a).localeCompare(String(b))))
     writes.set.push({id: spaceDocId(after.clientId, space), data: {schemaVersion: SCHEMA_VERSION, businessId: after.businessId, workspaceGeneration: after.workspaceGeneration,
-      clientId: after.clientId, spaceId: space, debtCents: value(space), status: after.status, accountEventCount: after.eventCount, accountUpdatedAt: at}});
+      clientId: after.clientId, spaceId: space, debtCents: value(space), status: after.status, financialVersion, accountEventCount: after.eventCount, accountUpdatedAt: at}});
   return writes;
 }
-function writeSpaceDocs(tx, ref, businessId, before, after, at) {
-  const writes = spaceWrites(before, after, {at});
+function writeSpaceDocs(tx, ref, businessId, before, after, at, financialVersion) {
+  const writes = spaceWrites(before, after, {at, financialVersion});
   for (const row of writes.set) tx.set(ref(businessId, SPACE_COLLECTION, row.id), row.data);
   for (const id of writes.remove) tx.delete(ref(businessId, SPACE_COLLECTION, id));
   return writes;
