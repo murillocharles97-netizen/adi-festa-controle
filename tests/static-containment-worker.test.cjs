@@ -6,19 +6,25 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../service-worker.js'), 'utf8');
 const origin = 'https://veconi.invalid';
 const expectedCache=source.match(/const CACHE='([^']+)'/)[1];
+const startupPath = source.match(/'\.(\/js\/business-cache\.js\?v=[^']+)'/)[1];
 const expectedRelease=fs.readFileSync(require('node:path').join(__dirname,'../js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
-function harness({offline = false} = {}) {
+function harness({offline = false, unavailable = false, stall = false} = {}) {
   const events = {}, calls = [], cache = new Map();
   let claims = 0, skipped = 0;
   const cacheApi = {
     addAll: async requests => { calls.push(['addAll', requests]); },
-    match: async request => cache.get(typeof request === 'string' ? request : request.url),
+    match: async (request, options) => {
+      const key = typeof request === 'string' ? request : request.url;
+      if (cache.has(key) || !options?.ignoreSearch) return cache.get(key);
+      return Array.from(cache).find(([url]) => url.split('?')[0] === key.split('?')[0])?.[1];
+    },
     put: async (request, response) => cache.set(request.url, response),
   };
   const context = {
-    URL, Response,
+    URL, Response, AbortController, clearTimeout,
+    setTimeout: callback => setTimeout(callback, 15),
     Request: class extends Request { constructor(input, init) { super(new URL(input, origin), init); } },
-    location: {origin},
+    location: {origin, href: origin + '/service-worker.js'},
     self: {addEventListener: (name, handler) => { events[name] = handler; }, clients: {claim: async () => { claims++; }}, skipWaiting: () => { skipped++; }},
     caches: {
       open: async name => { calls.push(['open', name]); return cacheApi; },
@@ -26,7 +32,15 @@ function harness({offline = false} = {}) {
       delete: async () => { throw Error('Must not delete user storage'); },
       keys: async () => { throw Error('Must not enumerate or erase previous caches'); },
     },
-    fetch: async request => { calls.push(['fetch', request.url]); if (offline) throw Error('offline'); return new Response('CURRENT_PUBLIC_RESOURCE'); },
+    fetch: async (request, options) => {
+      calls.push(['fetch', request.url]);
+      if (offline) throw Error('offline');
+      if (unavailable) return new Response('', {status: 503});
+      if (stall) return new Promise((_, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal.reason), {once: true});
+      });
+      return new Response('CURRENT_PUBLIC_RESOURCE');
+    },
   };
   vm.runInNewContext(source, context);
   return {
@@ -84,6 +98,35 @@ test('normal script requests still use network and cache the current response', 
   const h = harness();
   assert.equal(await (await h.request('/js/app.js')).text(), 'CURRENT_PUBLIC_RESOURCE');
   assert.ok(h.cache.has(origin + '/js/app.js'));
+});
+test('a stalled startup script falls back to the exact pinned copy', {timeout: 1000}, async () => {
+  const h = harness({stall: true});
+  const path = startupPath;
+  h.cache.set(origin + path, new Response('PINNED_STARTUP'));
+  assert.equal(await (await h.request(path)).text(), 'PINNED_STARTUP');
+});
+test('an unavailable pinned script uses its exact cached copy', async () => {
+  const h = harness({unavailable: true});
+  const path = startupPath;
+  h.cache.set(origin + path, new Response('PINNED_STARTUP'));
+  assert.equal(await (await h.request(path)).text(), 'PINNED_STARTUP');
+});
+test('a pinned script still gets the fresh response when the network works', async () => {
+  const h = harness();
+  const path = startupPath;
+  h.cache.set(origin + path, new Response('PINNED_STARTUP'));
+  assert.equal(await (await h.request(path)).text(), 'CURRENT_PUBLIC_RESOURCE');
+  assert.equal(await h.cache.get(origin + path).text(), 'CURRENT_PUBLIC_RESOURCE');
+});
+test('a missing script pin never borrows the cache entry for another pin', async () => {
+  const h = harness({offline: true});
+  h.cache.set(origin + '/js/business-cache.js?v=older', new Response('DIFFERENT_PIN'));
+  assert.equal((await h.request(startupPath)).type, 'error');
+});
+test('older scripts with an unversioned precache entry still open offline', async () => {
+  const h = harness({offline: true});
+  h.cache.set(origin + '/js/storage.js', new Response('LEGACY_PRECACHE'));
+  assert.equal(await (await h.request('/js/storage.js?v=234')).text(), 'LEGACY_PRECACHE');
 });
 test('normal images keep current-cache-first behavior', async () => {
   const h = harness();

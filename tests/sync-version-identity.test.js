@@ -12,12 +12,12 @@ function build() {
 
 test('versão do app é única: release inteiro derivado dela e igual no Service Worker', () => {
   const b = build();
-  assert.match(b.appVersion, /^\d{3}(?:\.\d+)?$/);
+  assert.match(b.appVersion, /^\d{3}(?:\.\d+){0,2}$/);
   assert.equal(b.release, b.appVersion.split('.')[0]);
   assert.ok(Number.isInteger(Number(b.release)) && Number(b.release) >= 227, 'o servidor publicado exige clientRelease inteiro >= 202 e usa >= 227 para contratos atuais');
   const worker = read('service-worker.js');
-  assert.match(worker, new RegExp(`postMessage\\(\\{cache: CACHE, release: '${b.release}', appVersion: '${b.appVersion.replace('.', '\\.')}'\\}\\)`));
-  assert.match(worker, new RegExp(`const CACHE='veconi-v${b.appVersion.replace('.', '')}-`), 'o nome do cache acompanha a versão do app');
+  assert.ok(worker.includes(`postMessage({cache: CACHE, release: '${b.release}', appVersion: '${b.appVersion}'})`));
+  assert.ok(worker.includes(`const CACHE='veconi-v${b.appVersion.replaceAll('.', '')}-`), 'o nome do cache acompanha a versão do app');
 });
 
 test('o app mostra a versão real ao usuário e no diagnóstico', () => {
@@ -62,4 +62,6 @@ test('verificação de release: bloqueia versão não atualizada e aceita a pró
   assert.match(protocol.problems.join(), /PAYLOAD_VERSION mudou/);
   assert.equal(check({ local, worker, sync: sync.replace('PAYLOAD_VERSION = 4,', 'PAYLOAD_VERSION = 5,'), published: published229, protocolChange: true }).ok, true);
   assert.equal(newer('232', '231.1'), true); assert.equal(newer('231.1', '231.1'), false); assert.equal(newer('231.2', '231.10'), false);
+  assert.equal(newer('242.14.1', '242.14'), true);
+  assert.equal(newer('242.15', '242.14.1'), true);
 });

@@ -4,7 +4,7 @@
 // Usage: node scripts/release-version-check.cjs [--published <build-info.js file or URL>]
 // Default: reads the public https://veconi.app.br/js/build-info.js (read-only; no user data).
 // Blocks (exit 1) when:
-//   - appVersion is not "NNN" or "NNN.N"; release ≠ integer major of appVersion;
+//   - appVersion is not "NNN", "NNN.N" or "NNN.N.N"; release ≠ integer major of appVersion;
 //   - the service worker does not report the same release/appVersion, or its CACHE
 //     name does not carry the appVersion;
 //   - appVersion is not newer than the published one (a release that forgot to bump);
@@ -22,10 +22,10 @@ function newer(a, b) { const x = parse(a), y = parse(b); for (let i = 0; i < Mat
 
 function check({ local, worker, sync, published, protocolChange = false }) {
   const problems = [], b = readBuild(local);
-  if (!/^\d{3}(?:\.\d+)?$/.test(String(b.appVersion || ''))) problems.push(`appVersion inválida: ${b.appVersion}`);
+  if (!/^\d{3}(?:\.\d+){0,2}$/.test(String(b.appVersion || ''))) problems.push(`appVersion inválida: ${b.appVersion}`);
   if (String(b.release) !== String(b.appVersion || '').split('.')[0]) problems.push(`release (${b.release}) ≠ versão principal de appVersion (${b.appVersion}).`);
   if (!worker.includes(`release: '${b.release}', appVersion: '${b.appVersion}'`)) problems.push('O Service Worker informa outra versão (GET_VERSION).');
-  if (!new RegExp(`const CACHE='veconi-v${String(b.appVersion).replace('.', '')}-`).test(worker)) problems.push('O nome do cache do Service Worker não acompanha a versão do app.');
+  if (!worker.includes(`const CACHE='veconi-v${String(b.appVersion).replaceAll('.', '')}-`)) problems.push('O nome do cache do Service Worker não acompanha a versão do app.');
   if (published) {
     const p = readBuild(published), publishedVersion = p.appVersion || p.release;
     if (!newer(b.appVersion, publishedVersion)) problems.push(`appVersion ${b.appVersion} não é posterior à publicada (${publishedVersion}). Atualize a versão antes de publicar.`);

@@ -8,8 +8,8 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   const read = file => fs.readFileSync(file, 'utf8');
   const build = read('js/build-info.js');
   const version = build.match(/release:\s*"(\d+)"/)[1];
-  const appVersion = build.match(/APP_VERSION = "(\d+(?:\.\d+)?)"/)[1];
-  const releaseTag = appVersion.replace('.', '');
+  const appVersion = build.match(/APP_VERSION = "(\d+(?:\.\d+){0,2})"/)[1];
+  const releaseTag = appVersion.replaceAll('.', '');
   assert.ok(Number(version) >= 173);
 
   const listeners = {};
@@ -49,10 +49,12 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
 
   const syncUrl = `./js/firebase/${syncImports[0].slice(2)}`;
   const buildUrl = htmlScript('build-info.js');
+  const catalogSources = [...read('catalogo.html').matchAll(/<script\b[^>]*\bsrc=["'](\.\/js\/build-info\.js(?:\?[^"']+)?)["']/g)].map(match => match[1]);
+  assert.deepEqual(catalogSources, [buildUrl], 'the app and catalog must load the same build identity');
   for (const url of [...entryUrls, syncUrl, buildUrl]) {
     const pin = url.split('?v=')[1];
-    // V242.14 changes Cobranças and the cache, leaving the Sync entry points from V242.13.
-    if (appVersion === '242.14' && url !== buildUrl) assert.equal(pin, '24213-conta');
+    // V242.14 and its startup patch retain the Sync entry points from V242.13.
+    if (version === '242' && minor === 14 && url !== buildUrl) assert.equal(pin, '24213-conta');
     else assert.match(pin || '', new RegExp(`^${releaseTag}(?:-[\\w-]+)?$`), `${url} must use the current release tag`);
     assert.ok(precache.includes(url), `${url} must be precached under the exact versioned URL`);
   }

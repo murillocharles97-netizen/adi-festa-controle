@@ -19,7 +19,7 @@
   //   payloadVersion 4, schemaVersion 3) and never changed retroactively.
   // Bump APP_VERSION (and the service-worker CACHE/GET_VERSION) in every release;
   // tests/sync-version-identity.test.js fails when they disagree.
-  const APP_VERSION = "242.14";
+  const APP_VERSION = "242.14.1";
   window.AdiFestaBuild = Object.freeze({
     commit,
     shortCommit,
