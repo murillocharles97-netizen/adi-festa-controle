@@ -48,9 +48,12 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   }
 
   const syncUrl = `./js/firebase/${syncImports[0].slice(2)}`;
-  for (const url of [...entryUrls, syncUrl, htmlScript('build-info.js')]) {
+  const buildUrl = htmlScript('build-info.js');
+  for (const url of [...entryUrls, syncUrl, buildUrl]) {
     const pin = url.split('?v=')[1];
-    assert.match(pin || '', new RegExp(`^${releaseTag}(?:-[\\w-]+)?$`), `${url} must use the current release tag`);
+    // V242.14 changes Cobranças and the cache, leaving the Sync entry points from V242.13.
+    if (appVersion === '242.14' && url !== buildUrl) assert.equal(pin, '24213-conta');
+    else assert.match(pin || '', new RegExp(`^${releaseTag}(?:-[\\w-]+)?$`), `${url} must use the current release tag`);
     assert.ok(precache.includes(url), `${url} must be precached under the exact versioned URL`);
   }
 });
