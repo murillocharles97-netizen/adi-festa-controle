@@ -7,7 +7,8 @@ const { routeFixture } = require('./audit-performance-runtime-c643cc5.cjs');
 const { assetServer, launch, setup, metrics, delta, listen, save, out } = require('./performance-lab-helpers.cjs');
 
 const reference = process.argv.includes('--baseline');
-const baseline = '65ea4bb';
+const baseline = process.env.PERF_BASE_REF || '65ea4bb';
+const legacyReference = reference && baseline === '65ea4bb';
 const files = new Map();
 if (reference) for (const name of ['js/app.js', 'js/checkout.js', 'js/checkout-mobile.js', 'js/desktop-sales.js', 'js/barcode.js', 'css/checkout-mobile.css'])
   files.set('/'+name, execFileSync('git', ['show', baseline+':'+name], { encoding:'utf8' }));
@@ -48,6 +49,7 @@ async function measure(page, cdp, phase, action) {
       nodes:app.querySelectorAll('*').length,
       cards:grid?.querySelectorAll('.pos-product').length || 0,
       visible:grid?.querySelectorAll('.pos-product:not([hidden])').length || 0,
+      customerOptions:app.querySelector('#sale-client')?.options.length || 0,
       long:window.__lab.long.filter(entry=>entry.at>=started).map(entry=>entry.ms),
     };
   }, started);
@@ -107,7 +109,7 @@ async function check(page, cdp, profile, volume, run) {
   });
   await take('busca-sem-resultado',async () => assert.equal(await search(page,'inexistente qa'),0));
   assert.equal(await search(page,''),size+6);
-  if (!reference && volume!=='small') {
+  if (!legacyReference && volume!=='small') {
     await take('rolagem-e-proximo-lote',async()=>{
       const more = '[data-sale-catalog-more]';
       if (releaseSmoke) {
@@ -178,7 +180,7 @@ async function check(page, cdp, profile, volume, run) {
     assert.equal(result.sale.valorFinal,12);
     assert.equal(result.sale.financialSpaceId,'fixture-space');
     assert.equal(result.stock,17);
-    if(!reference) assert.match(await page.$eval(card('p1'),node=>node.textContent),/Estoque:\s*17/);
+    if(!legacyReference) assert.match(await page.$eval(card('p1'),node=>node.textContent),/Estoque:\s*17/);
     assert.equal(result.cart,0);
   });
   return samples;
@@ -202,6 +204,10 @@ async function functionalChecks(page, mobile) {
   await wait(page,last);
   await page.select('#pos-category','');
   await search(page,'');
+  await page.select('#pos-sort','vendidos');
+  const bestSellers = await page.$$eval(grid+' .pos-product', nodes => nodes.slice(0,8).map(node=>node.dataset.add));
+  assert.equal(bestSellers.length,8);
+  await page.select('#pos-sort','nome');
   if(mobile) {
     await click(page,'[data-sale-filter="recent"]');
     assert.ok((await page.$$eval(grid+' .pos-product',nodes=>nodes.length))<=8);
@@ -253,8 +259,27 @@ async function functionalChecks(page, mobile) {
   await click(page,'[data-add-variants]');
   assert.equal(await draft(),1);
   await click(page,'#open-sale-summary');
+  if (mobile) {
+    await page.setOfflineMode(true);
+    await click(page,'#open-client-picker');
+    await page.$eval('#client-picker-search', input => {
+      input.value='Cliente QA 00399';
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    const result='[data-choose-client="bench-c399"]';
+    await wait(page,result);
+    await click(page,result);
+    assert.equal(await page.$eval('#sale-client',node=>node.value),'bench-c399');
+    await navigate(page,'inicio');
+    await navigate(page,'vender');
+    assert.equal(await page.$eval('#sale-client',node=>node.value),'bench-c399');
+    assert.equal(await draft(),1);
+    await page.setOfflineMode(false);
+    await click(page,'#open-sale-summary');
+  }
   await page.evaluate(()=>{
     const customer=document.querySelector('#sale-client');
+    customer.focus();
     customer.value='c1';
     customer.dispatchEvent(new Event('change',{bubbles:true}));
     const discount=document.querySelector('#discount-value');
@@ -289,7 +314,7 @@ async function functionalChecks(page, mobile) {
   assert.deepEqual(outcome,{total:10,method:'fiado',variant:'v2',stock:1,projectedBalance:-30});
   const text=await page.$eval(card('p2'),node=>node.textContent);
   assert.match(text,mobile ? /Estoque:\s*4/ : /opções\s*·\s*4 un/);
-  return {variant:true,fiado:true,lateBarcode:true,spaceIsolation:true,stockFence:true,category:true,restoredFilter:true,favoritesOrBrand:true,recent:mobile,postSaleStock:true};
+  return {variant:true,fiado:true,lateBarcode:true,spaceIsolation:true,stockFence:true,category:true,restoredFilter:true,favoritesOrBrand:true,recent:mobile,bestSellers,clientDraft:mobile,postSaleStock:true};
 }
 
 async function capture(page, profile) {
@@ -327,7 +352,7 @@ async function main() {
         rows.push({...profile,volume,run,fault:error.message,errors});
         console.error(error.stack, errors);
       } finally {
-        save(releaseSmoke?'selling-release-smoke.json':capturesOnly?'selling-captures.json':functional?'selling-functional.json':reference?'selling-before.json':'selling-after.json',rows);
+        save(process.env.PERF_SELLING_OUTPUT || (releaseSmoke?'selling-release-smoke.json':capturesOnly?'selling-captures.json':functional?'selling-functional.json':reference?'selling-before.json':'selling-after.json'),rows);
         await context.close();
       }
     }

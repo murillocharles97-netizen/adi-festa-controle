@@ -230,7 +230,7 @@
       if (!page.isConnected || Router.atual() !== 'vender' || window.SpaceContext?.viewScope?.() !== scope) return;
       if (context.clientId) {
         const select = $('#sale-client', page);
-        select.value = context.clientId;
+        window.Checkout.setSaleCustomer(context.clientId, select);
         select.dispatchEvent(new Event('change'));
       }
       if (context.repeat) for (const item of context.items) {

@@ -31,10 +31,10 @@ window.Checkout = (() => {
       client.ativo !== false && client.active !== false && !client.deletedAt &&
       (!client.businessId || client.businessId === businessId));
   }
-  let soldByProduct = new Map();
-  function rebuildSoldIndex(spaceSales) {
+  function soldIndex() {
+    if (catalog.sold) return catalog.sold;
     const next = new Map();
-    spaceSales.forEach((sale) =>
+    catalogSales().forEach((sale) =>
       (sale.itens || []).forEach((item) =>
         next.set(
           item.produtoId,
@@ -42,7 +42,7 @@ window.Checkout = (() => {
         ),
       ),
     );
-    soldByProduct = next;
+    return catalog.sold = next;
   }
   const initials = (n) =>
     String(n || "?")
@@ -117,20 +117,20 @@ window.Checkout = (() => {
     retireSpaceDraft();
     restoreDraft();
     loadCatalog();
-    const ps = catalog.products, cs = availableCustomers(),
+    const ps = catalog.products,
       cats = [...new Set(ps.map(p => p.categoria).filter(Boolean))].sort(),
       spaceBar = window.SpaceContext?.renderBar?.("sales") || "";
     if (catalog.desktop) {
       return `${spaceBar}${window.DesktopSales.render({
         products: ps,
-        clients: cs,
+        clients: availableCustomers(),
         cart,
         totals: totals(cart),
         recentProducts: desktopRecentProducts(),
         gridHTML: initialCatalog(),
       })}`;
     }
-    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${initialCatalog()}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden"><option value="">Venda avulsa</option>${cs.map((c) => `<option value="${c.id}">${escapar(c.nome)}</option>`).join("")}</select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option>${window.AdiFestaBuild?.installmentCreationPaused||window.OperationalReadPolicy?.restricted?.()?'':'<option value="crediario">Parcelado</option>'}</select></div>${window.InstallmentCredit?.fields()||''}<select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
+    return `<div class="pos-page">${spaceBar}<div class="pos-head"><h2>Nova venda</h2><p>Toque nos produtos para adicionar à sacola.</p></div><div class="prior-sale-entry" data-prior-entry>${window.PriorSales?.actionMarkup?.()||''}</div><section class="pos-tools"><div class="pos-search-wrap"><i data-lucide="search"></i><input class="search" id="product-search" autocomplete="off" placeholder="Buscar produto, código ou categoria"><button class="icon-btn" id="clear-product-search"><i data-lucide="x"></i></button><button type="button" data-scan-sale aria-label="Ler código de barras"><i data-lucide="scan-barcode"></i></button></div><select id="pos-category"><option value="">Categorias</option>${cats.map((c) => `<option value="${escapar(norm(c))}">${escapar(c)}</option>`).join("")}</select><select id="pos-filter"><option value="todos">Todos</option><option value="favoritos">Favoritos</option><option value="estoque">Em estoque</option><option value="baixo">Estoque baixo</option></select><select id="pos-sort"><option value="favoritos">Favoritos primeiro</option><option value="nome">Nome</option><option value="vendidos">Mais vendidos</option><option value="categoria">Categoria</option><option value="preco">Preço</option></select></section><section class="pos-grid" id="pos-grid">${initialCatalog()}</section><div class="pos-summary-overlay" data-sale-cart-overlay hidden></div><section class="pos-summary" id="pos-summary" role="dialog" aria-modal="true" aria-labelledby="sale-summary-title" aria-hidden="true" hidden><div class="pos-summary-head"><div><h3 id="sale-summary-title">Carrinho</h3><p>Revise os itens, cliente e pagamento.</p></div><button class="icon-btn" id="close-sale-summary" aria-label="Fechar carrinho"><i data-lucide="x"></i></button></div><div id="cart"></div><div class="discount-grid"><div class="field"><label>Desconto em R$</label><input id="discount-value" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div class="field"><label>Desconto em %</label><input id="discount-percent" type="number" inputmode="decimal" min="0" max="100" step=".01" value="0"></div></div><div class="field"><label>Valor final da venda</label><input id="manual-total" type="number" inputmode="decimal" min="0" step=".01" value="0"></div><div id="sale-totals"></div><div class="pos-client-card" id="selected-client-card"></div><select id="sale-client" class="visually-hidden" data-deferred-customers="true"><option value="">Venda avulsa</option></select><button class="btn btn-light pos-client-select" id="open-client-picker"><i data-lucide="users"></i><span>Selecionar cliente ou venda avulsa</span></button><div class="field sale-payment-method-field"><label>Forma de pagamento</label><select id="sale-payment-method"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="cartao_presencial" hidden disabled>Maquininha integrada</option><option value="fiado">Fiado</option>${window.AdiFestaBuild?.installmentCreationPaused||window.OperationalReadPolicy?.restricted?.()?'':'<option value="crediario">Parcelado</option>'}</select></div>${window.InstallmentCredit?.fields()||''}<select id="sale-status" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="pago">Pago agora</option><option value="fiado">Fiado</option></select><div id="debt-preview"></div><div class="field"><label>Observação</label><textarea id="sale-note" placeholder="Opcional"></textarea></div><div class="sale-submit-feedback" id="sale-submit-feedback" role="status" aria-live="polite" hidden></div><button class="btn btn-primary" id="finish-sale" data-sale-state="normal"><i data-lucide="check"></i> Concluir venda</button></section><button class="pos-bag is-empty" id="open-sale-summary" aria-controls="pos-summary" aria-expanded="false" aria-label="Sacola vazia"><i data-lucide="shopping-bag"></i><span class="visually-hidden" id="pos-bag-label">Nenhum item selecionado</span><b class="visually-hidden" id="pos-bag-total">${dinheiro(0)}</b></button></div>`;
   }
   const state = () =>
     [...document.querySelectorAll("[data-item-qty]")].reduce(
@@ -205,8 +205,6 @@ window.Checkout = (() => {
 
   function loadCatalog() {
     const space = selectedSalesSpaceId();
-    const knownIds = new Set((window.SpaceContext?.list?.() || []).map(row => row.id));
-    const spaceSales = Repositories.saleRepository().list().filter(sale => saleInCurrentSpace(sale, space, knownIds));
     const list = products().list().filter(product => product.ativo !== false && productAvailableHere(product, space));
     const variants = new Map();
     for (const variant of DB.carregar().variacoesProdutos || []) {
@@ -216,14 +214,20 @@ window.Checkout = (() => {
     catalog = {
       products: list, matches: list, variants, search: new Map(), shown: 0,
       byId: new Map(list.map(product => [String(product.id), product])),
-      spaceSales, scope: catalogViewScope(), desktop: Boolean(window.DesktopSales?.isDesktop?.()),
+      space, scope: catalogViewScope(), desktop: Boolean(window.DesktopSales?.isDesktop?.()),
     };
-    rebuildSoldIndex(spaceSales);
+  }
+
+  function catalogSales() {
+    if (catalog.spaceSales) return catalog.spaceSales;
+    const knownIds = new Set((window.SpaceContext?.list?.() || []).map(row => row.id));
+    return catalog.spaceSales = Repositories.saleRepository().list()
+      .filter(sale => saleInCurrentSpace(sale, catalog.space, knownIds));
   }
 
   function desktopRecentProducts() {
     const seen = new Set(), recent = [];
-    [...catalog.spaceSales].reverse().some(sale => [...(sale.itens || [])].reverse().some(item => {
+    [...catalogSales()].reverse().some(sale => [...(sale.itens || [])].reverse().some(item => {
       const product = catalog.byId.get(String(item.produtoId));
       if (!product || seen.has(product.id)) return false;
       seen.add(product.id);
@@ -234,7 +238,7 @@ window.Checkout = (() => {
   }
 
   function mobileRecentRanks() {
-    const ordered = catalog.spaceSales.map((sale, index) => ({
+    const ordered = catalogSales().map((sale, index) => ({
       sale, index, at: Date.parse(sale.data || sale.occurredAt || sale.createdAt) || 0,
     })).sort((a, b) => b.at - a.at || b.index - a.index);
     const ranks = new Map();
@@ -321,6 +325,7 @@ window.Checkout = (() => {
       sort = control("pos-sort")?.value || "nome";
     const onlyRecent = !catalog.desktop && catalogPage()?.dataset.saleView === "recent";
     const recent = onlyRecent ? mobileRecentRanks() : null;
+    const sold = sort === "vendidos" && !recent ? soldIndex() : null;
     const favorites = new Set();
     if (mode === "favoritos" || sort === "favoritos") for (const product of catalog.products) {
       const active = catalog.desktop ? product.favorito : (window.Produtos?.mobileFavoriteValue?.(product) ?? product.favorito);
@@ -347,7 +352,7 @@ window.Checkout = (() => {
       if (recent) return recent.get(String(a.id)) - recent.get(String(b.id));
       if (sort === "preco") return a.preco - b.preco;
       if (sort === "categoria") return String(a.categoria).localeCompare(String(b.categoria));
-      if (sort === "vendidos") return (soldByProduct.get(b.id) || 0) - (soldByProduct.get(a.id) || 0);
+      if (sold) return (sold.get(b.id) || 0) - (sold.get(a.id) || 0);
       if (sort === "favoritos" && favorites.has(a.id) !== favorites.has(b.id)) return favorites.has(b.id) ? 1 : -1;
       return a.nome.localeCompare(b.nome);
     });
@@ -424,6 +429,15 @@ window.Checkout = (() => {
     const select = document.querySelector("#sale-client");
     if (!select) return false;
     const selected = select.value;
+    if (select.dataset?.deferredCustomers) {
+      if (selected) {
+        const client = availableCustomers().find(c => String(c.id) === selected);
+        if (client) select.options[select.selectedIndex].textContent = client.nome;
+        else select.value = "";
+      }
+      selectedClient();
+      return true;
+    }
     select.innerHTML = `<option value="">Venda avulsa</option>${availableCustomers()
       .map(
         (client) =>
@@ -437,6 +451,17 @@ window.Checkout = (() => {
   }
   const row = (c) =>
     `<button class="client-choice" data-choose-client="${c.id}"><div><b>${escapar(c.nome)}</b><small>${escapar(c.telefone) || "Sem telefone"}${c.ultimaCompra ? ` · Última compra: ${new Date(c.ultimaCompra).toLocaleDateString("pt-BR")}` : ""}</small></div>${balance(c)}</button>`;
+  function setSaleCustomer(id, select = document.querySelector("#sale-client")) {
+    if (!select) return false;
+    if (id && select.dataset?.deferredCustomers) {
+      const client = availableCustomers().find(c => String(c.id) === String(id));
+      if (!client) { select.value = ""; return false; }
+      if (![...select.options].some(option => option.value === String(id)))
+        select.add(new Option(client.nome, String(id)));
+    }
+    select.value = id || "";
+    return select.value === String(id || "");
+  }
   function picker(onSelected = null, options = {}) {
     const pickerOrigin = {
       businessId: DB.getBusinessId(),
@@ -511,9 +536,13 @@ window.Checkout = (() => {
       if (!currentPicker()) return;
       const b = e.target.closest("[data-choose-client]");
       if (b) {
-        if (b.dataset.chooseClient && !availableCustomers().some(c => c.id === b.dataset.chooseClient)) { toast('O cliente não está mais disponível neste espaço.', true); close(); return; }
-        const sel = document.querySelector("#sale-client");
-        sel.value = b.dataset.chooseClient;
+        const sel = document.querySelector("#sale-client"), id = b.dataset.chooseClient;
+        if ((id && !sel?.dataset?.deferredCustomers && !availableCustomers().some(c => c.id === id)) ||
+            !setSaleCustomer(id, sel)) {
+          toast('O cliente não está mais disponível neste espaço.', true);
+          close();
+          return;
+        }
         sel.dispatchEvent(new Event("change"));
         if (sel.value) DB.rememberRecentClient(sel.value);
         close();
@@ -849,7 +878,8 @@ window.Checkout = (() => {
     const client = document.querySelector("#sale-client"), payment = document.querySelector("#sale-payment-method"),
       status = document.querySelector("#sale-status"), note = document.querySelector("#sale-note"),
       discountValue = document.querySelector("#discount-value"), discountPercent = document.querySelector("#discount-percent");
-    if (client && [...client.options].some((option) => option.value === draftDetails.clientId)) client.value = draftDetails.clientId;
+    if (client && (client.dataset?.deferredCustomers || [...client.options].some(option => option.value === draftDetails.clientId)))
+      setSaleCustomer(draftDetails.clientId, client);
     if (payment) payment.value = draftDetails.paymentMethod || "pix";
     if (status) status.value = ["fiado","crediario"].includes(payment?.value) ? "fiado" : "pago";
     window.InstallmentCredit?.restore(draftDetails.installmentTerms);
@@ -1216,6 +1246,11 @@ window.Checkout = (() => {
     return true;
   }
   function standalone() {
+    const customer = document.querySelector("#sale-client");
+    if (customer?.dataset?.deferredCustomers) customer.addEventListener("focus", () => {
+      delete customer.dataset.deferredCustomers;
+      refreshClients();
+    }, { once: true });
     window.PriorSales?.mount?.(()=>{selectedCampaignIds.clear();manual=window.PriorSales.active();discountKind=manual?'historical_manual':null;window.ExchangeCreditCheckout?.reset?.();drawCart();});
     window.SpaceContext?.bind?.(document);
     const search = document.querySelector("#product-search");
@@ -1614,7 +1649,7 @@ window.Checkout = (() => {
     if (pendingClient) {
       const select = document.querySelector("#sale-client");
       if (select && clients().getById(pendingClient.clientId)) {
-        select.value = pendingClient.clientId;
+        setSaleCustomer(pendingClient.clientId, select);
         select.dispatchEvent(new Event("change", { bubbles: true }));
         document.querySelector("#product-search")?.focus();
       }
@@ -1640,7 +1675,7 @@ window.Checkout = (() => {
     pendingClient = { clientId, source };
     if (Router.atual() === "vender" && document.querySelector("#sale-client")) {
       const select = document.querySelector("#sale-client");
-      select.value = clientId;
+      setSaleCustomer(clientId, select);
       select.dispatchEvent(new Event("change", { bubbles: true }));
       pendingClient = null;
       document.querySelector("#product-search")?.focus();
@@ -1848,6 +1883,7 @@ window.Checkout = (() => {
     filterProducts: filter,
     refreshProducts,
     refreshClients,
+    setSaleCustomer,
     availableCustomers,
     retireSpaceDraft,
     resumeAfterReconciliation,
