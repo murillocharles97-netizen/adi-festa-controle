@@ -51,30 +51,67 @@
   }
   // Collections are records, not JSON blobs. Position preserves legacy ordering,
   // including duplicate/missing IDs; nothing is dropped during migration.
+  const fieldKey = (area, field) => area + ':' + field;
+  function encodeField(scope, area, field, value) {
+    const rows = new Map(), root = JSON.stringify([scope, area, field]);
+    const raw = value;
+    if (area === 'sync') {
+      try { value = JSON.parse(raw); } catch { /* retain strings as-is */ }
+    }
+    const array = Array.isArray(value);
+    rows.set(root, {key: root, scope, area, field, kind: array ? 'array' : 'value',
+      ...(array ? {} : {value}),
+      ...(area === 'sync' ? {json: typeof value !== 'string' || raw !== value} : {})});
+    if (!array) return rows;
+    const seen = new Map();
+    value.forEach((item, position) => {
+      const id = String(item?.id ?? item?.queueId ?? item?.operationId ?? `position:${position}`), occurrence = seen.get(id) || 0;
+      seen.set(id, occurrence + 1);
+      const key = JSON.stringify([scope, area, field, id, occurrence]);
+      rows.set(key, {key, scope, area, field, kind: 'item', position, value: item});
+    });
+    return rows;
+  }
   function encode(scope, data, values) {
     const rows = new Map();
-    const put = (area, field, value) => {
-      const root = JSON.stringify([scope, area, field]);
-      rows.set(root, {key: root, scope, area, field, kind: Array.isArray(value) ? 'array' : 'value',
-        ...(Array.isArray(value) ? {} : {value: clone(value)})});
-      if (!Array.isArray(value)) return;
-      const seen = new Map();
-      value.forEach((item, position) => {
-        const id = String(item?.id ?? item?.queueId ?? item?.operationId ?? `position:${position}`), occurrence = seen.get(id) || 0;
-        seen.set(id, occurrence + 1);
-        const key = JSON.stringify([scope, area, field, id, occurrence]);
-        rows.set(key, {key, scope, area, field, kind: 'item', position, value: clone(item)});
-      });
-    };
-    for (const [field, value] of Object.entries(data)) put('data', field, value);
-    for (const [field, value] of values) {
-      let parsed;
-      try { parsed = JSON.parse(value); } catch { parsed = value; }
-      // Retain the Storage API's string semantics without storing arrays as JSON.
-      put('sync', field, parsed);
-      rows.get(JSON.stringify([scope, 'sync', field])).json = typeof parsed !== 'string' || value !== parsed;
-    }
+    for (const [area, fields] of [['data', Object.entries(data)], ['sync', values]])
+      for (const [field, value] of fields)
+        for (const [key, row] of encodeField(scope, area, field, value)) rows.set(key, row);
     return rows;
+  }
+
+  // Compare owned structured clones. A reference alone is never used to trust
+  // mutable business objects from DB.carregar() or from a caller of stage().
+  function sameSnapshot(left, right, depth = 0) {
+    if (Object.is(left, right)) return true;
+    if (depth > 30 || !left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+    if (left instanceof Date && right instanceof Date) return Object.is(left.getTime(), right.getTime());
+    const array = Array.isArray(left);
+    if (array !== Array.isArray(right)) return false;
+    if (array ? left.length !== right.length :
+      Object.getPrototypeOf(left) !== Object.prototype || Object.getPrototypeOf(right) !== Object.prototype) return false;
+    const keys = Object.keys(left);
+    if (keys.length !== Object.keys(right).length) return false;
+    for (const key of keys)
+      if (!Object.hasOwn(right, key) || !sameSnapshot(left[key], right[key], depth + 1)) return false;
+    return true;
+  }
+  // The map key already covers scope, area, field, ID and occurrence. Compare
+  // the rest of the row identity and its value without serializing the object.
+  const rowStamp = row => row.kind === 'item' ? row.position : row.kind + ':' + row.json;
+
+  function loadBaseline(rows, metaKey, loaded) {
+    const baseline = new Map();
+    for (const row of rows) {
+      if (row.key === metaKey) continue;
+      const key = fieldKey(row.area, row.field);
+      if (!baseline.has(key)) baseline.set(key, {
+        value: row.area === 'sync' ? loaded.values.get(row.field) : loaded.data[row.field],
+        rows: new Map()
+      });
+      baseline.get(key).rows.set(row.key, {stamp: rowStamp(row), value: row.value});
+    }
+    return baseline;
   }
   function decode(rows) {
     const data = {}, values = new Map(), grouped = new Map();
@@ -123,12 +160,42 @@
     }
   }
   async function commit(current) {
-    const next = encode(current.scope, current.data, current.values), changed = [], removed = [];
-    for (const [key, row] of next) if (fingerprint(row) !== current.baseline.get(key)) changed.push(row);
-    for (const key of current.baseline.keys()) if (!next.has(key)) removed.push(key);
-    if (!changed.length && !removed.length && !current.metaDirty) return;
+    const baseline = new Map(), changed = [], removed = [];
+    const data = current.data, sameData = current.committedData === data;
+    let records = 0;
+    for (const [area, fields] of [['data', Object.entries(data)], ['sync', current.values]]) {
+      for (const [field, value] of fields) {
+        const key = fieldKey(area, field), previous = current.baseline.get(key);
+        if (previous && (area === 'data' && sameData || sameSnapshot(value, previous.value))) {
+          if (area === 'data') data[field] = previous.value;
+          baseline.set(key, previous);
+          records += previous.rows.size;
+          continue;
+        }
+        const rows = new Map();
+        for (const [id, row] of encodeField(current.scope, area, field, value)) {
+          const entry = previous?.rows.get(id), stamp = rowStamp(row);
+          if (entry?.stamp === stamp && sameSnapshot(row.value, entry.value)) {
+            rows.set(id, entry);
+          } else {
+            rows.set(id, {stamp, value: row.value});
+            changed.push(row);
+          }
+        }
+        if (previous) for (const id of previous.rows.keys()) if (!rows.has(id)) removed.push(id);
+        baseline.set(key, {value, rows});
+        records += rows.size;
+      }
+    }
+    for (const [key, previous] of current.baseline)
+      if (!baseline.has(key)) for (const id of previous.rows.keys()) removed.push(id);
+    if (!changed.length && !removed.length && !current.metaDirty) {
+      current.baseline = baseline;
+      current.committedData = data;
+      return;
+    }
     const revision = current.revision + 1, meta = {key: current.metaKey, scope: current.scope, kind: 'meta',
-      revision, updatedAt: new Date().toISOString(), migration: clone(current.migration), records: next.size};
+      revision, updatedAt: new Date().toISOString(), migration: clone(current.migration), records};
     await DB.localRecords.transaction('readwrite', (store, done, fail) => {
       const epoch = store.get(`workspace-generation:${current.businessId}`);
       epoch.onsuccess = () => {
@@ -144,10 +211,12 @@
         };
       };
     });
-    current.baseline = new Map([...next].map(([key,row]) => [key, fingerprint(row)]));
+    current.baseline = baseline;
+    current.committedData = data;
+    current.recordCount = records;
     current.revision = revision;
     current.metaDirty = false;
-    current.lastCommit = {at: meta.updatedAt, written: changed.length, removed: removed.length, records: next.size};
+    current.lastCommit = {at: meta.updatedAt, written: changed.length, removed: removed.length, records};
     notify({type: 'revision', scope: current.scope, revision});
   }
   function flush(current = session) {
@@ -253,7 +322,7 @@
       throw failure('local-cache-corrupt', 'A estrutura do cache local precisa de revisão. Nenhum dado foi apagado.');
     const current = {key, scope, metaKey, businessId, workspaceGeneration, data: meta ? loaded.data : empty(), values: loaded.values,
       revision: meta?.revision || 0, migration: meta?.migration || null,
-      baseline: new Map(rows.filter(row => row.key !== metaKey).map(row => [row.key, fingerprint(row)])),
+      baseline: loadBaseline(rows, metaKey, loaded), recordCount: meta?.records || 0,
       dirty: false, metaDirty: false, error: null, running: null, scheduled: false, unlock, inventoryBefore: inventory()};
     const sourceKey = (meta?.migration?.sourceKey && localStorage.getItem(meta.migration.sourceKey) !== null)
       ? meta.migration.sourceKey : !meta ? candidates.find(candidate => legacyKey(candidate) && localStorage.getItem(candidate) !== null) : null;
@@ -295,16 +364,17 @@
       if (!ownedKey(key)) throw failure('unowned-storage-key', 'Chave de armazenamento fora do escopo VECONI.');
       const current = requireSession();
       if (String(key).includes(':syncQueue') && !String(key).startsWith(current.key.replace('adiFestaDB_v1:', 'adiFesta:') + ':syncQueue')) throw retiredError();
-      current.values.set(key, String(value)); schedule(current);
+      const next = String(value);
+      if (current.values.get(key) !== next) { current.values.set(key, next); schedule(current); }
     },
-    removeItem(key) { const current = requireSession(); if (!ownedKey(key)) throw failure('unowned-storage-key', 'Chave fora do escopo.'); if (String(key).includes(':syncQueue') && !String(key).startsWith(current.key.replace('adiFestaDB_v1:', 'adiFesta:') + ':syncQueue')) throw retiredError(); current.values.set(key, 'null'); schedule(current); },
+    removeItem(key) { keyValue.setItem(key, 'null'); },
   };
   async function diagnostic() {
     let estimate = null;
     try { const value = await navigator.storage?.estimate?.(); if (value) estimate = {usage: value.usage, quota: value.quota, percent: value.quota ? +(100*value.usage/value.quota).toFixed(2) : null}; } catch { /* optional metadata */ }
     return {backend: 'IndexedDB', database: DATABASE, store: STORE, layout: 'document-records-v1',
       retention: {businessRecords: 'protected; no automatic eviction',snapshots: 'current revision only',messageSequences: 'existing 30-day GC; unsent events retained'},
-      records: session?.baseline.size || 0, obsolete: Boolean(session?.obsolete), preserved: Boolean(session?.preserved), migration: session?.migration ? {...session.migration, sourceKey: 'adiFestaDB_v1:<scoped>'} : null,
+      records: session?.recordCount || 0, obsolete: Boolean(session?.obsolete), preserved: Boolean(session?.preserved), migration: session?.migration ? {...session.migration, sourceKey: 'adiFestaDB_v1:<scoped>'} : null,
       lastCommit: session?.lastCommit || null, pending: Boolean(session?.dirty || session?.running), errorCode: session?.error?.code || null,
       legacyKeysBefore: session?.inventoryBefore || [], legacyKeysNow: inventory(), estimate};
   }
