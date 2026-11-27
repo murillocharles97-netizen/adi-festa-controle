@@ -16,7 +16,8 @@
   const icon=name=>`<i data-lucide="${name}"></i>`;
   const esc=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const norm=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  const money=value=>Number(value||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const currency=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'});
+  const money=value=>currency.format(Number(value||0));
   const localDate=value=>{if(!value)return null;const text=String(value),date=/^\d{4}-\d{2}-\d{2}$/.test(text)?new Date(`${text}T12:00:00`):new Date(value);return Number.isNaN(date.getTime())?null:date};
   const dateValue=value=>localDate(value)?.getTime()||0;
   const dateLabel=value=>localDate(value)?.toLocaleDateString('pt-BR')||'Nunca';

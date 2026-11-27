@@ -13,8 +13,10 @@
 
   function matchesSearch(client, query) {
     const text = normalize(query);
-    if (!text) return true;
-    const phone = digits(query);
+    return !text || includesSearch(client, text, digits(query));
+  }
+
+  function includesSearch(client, text, phone) {
     const searchable = normalize(
       `${client?.nome || ""} ${client?.apelido || ""} ${client?.telefone || ""} ` +
         `${client?.telefone2 || ""} ${client?.observacoes || client?.observacao || ""}`,
@@ -40,10 +42,11 @@
   }
 
   function filter(clients, options = {}) {
+    const query = options.query || "", text = normalize(query), phone = text ? digits(query) : "";
     return (clients || []).filter(
       (client) =>
         (options.includeInactive || client?.ativo !== false) &&
-        matchesSearch(client, options.query || "") &&
+        (!text || includesSearch(client, text, phone)) &&
         matchesStatus(client, options.status || "todos", options),
     );
   }
