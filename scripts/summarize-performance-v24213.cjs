@@ -33,7 +33,7 @@ function grouped(rows, keyOf) {
 
 const runtime = read(process.env.PERF_RUNTIME_OUTPUT || 'v24213-runtime.json');
 const startup = read(process.env.PERF_STARTUP_OUTPUT || 'v24213-startup.json');
-const storage = read('v24213-storage.json');
+const storage = read(process.env.PERF_STORAGE_OUTPUT || 'v24213-storage.json');
 const report = {runtime:{},startup:{}};
 for (const [label, rows] of grouped(runtime,row => row.theme+'-'+row.volume)) {
   const validNavigations = rows.flatMap(row => row.navigations).filter(row => !row.error && !row.errors.length);
@@ -47,6 +47,7 @@ for (const [label, rows] of grouped(runtime,row => row.theme+'-'+row.volume)) {
   const persisted = get => interval((measuredStorage.length ? measuredStorage : rows).map(r => get(r.persistence)));
   report.runtime[label] = {n:rows.length,counts:rows[0].counts,nav,
     storage:{n:measuredStorage.length || rows.length,ms:persisted(r=>r.oneChange.ms),sync:persisted(r=>r.oneChange.synchronousMs),
+      tbt:persisted(r=>tasks(r.oneChange.long)),heap:persisted(r=>r.heapUsedMB),
       transaction:persisted(r=>r.oneChange.transactions === 1 ? r.oneChange.storageMs : NaN),
       written:persisted(r=>r.oneChange.commit?.written),records:persisted(r=>r.oneChange.commit?.records),
       noChange:persisted(r=>r.noChange.ms),

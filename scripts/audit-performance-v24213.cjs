@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const { routeFixture } = require('./audit-performance-runtime-c643cc5.cjs');
 const { assetServer, launch, setup, metrics, delta, profiler, listen, save } = require('./performance-lab-helpers.cjs');
 
@@ -17,7 +18,13 @@ const fixture = routeFixture.replace(anchor, `
     data: iso(i % 30 + 1), status: 'ignorado'
   }));
 ` + anchor);
-const server = assetServer(url => url === '/tests/perf-v24213.html' ? fixture : null);
+const baseRef = process.env.PERF_BASE_REF;
+const baselineModules = new Map();
+if (baseRef) {
+  for (const file of ['js/app.js', 'js/cobrancas.js', 'js/business-cache.js'])
+    baselineModules.set('/' + file, execFileSync('git', ['show', baseRef + ':' + file], {encoding:'utf8'}));
+}
+const server = assetServer(url => url === '/tests/perf-v24213.html' ? fixture : baselineModules.get(url) ?? null);
 const rounds = Number(process.env.PERF_ROUNDS || 3);
 const storageOnly = process.env.PERF_STORAGE_ONLY === '1';
 const target = process.env.PERF_RUNTIME_OUTPUT || (storageOnly ? 'v24213-storage.json' : 'v24213-runtime.json');
@@ -26,7 +33,8 @@ const profiles = [
   {mobile:true, theme:'light', volume:'small'},
   {mobile:true, theme:'dark', volume:'large'},
 ];
-const routes = ['clientes', 'cobrancas', 'inicio', 'vender', 'produtos', 'historico', 'relatorios'];
+const routes = ['clientes', 'cobrancas', 'inicio', 'vender', 'produtos', 'historico', 'relatorios']
+  .filter(route => !process.env.PERF_ROUTES || process.env.PERF_ROUTES.split(',').includes(route));
 
 async function navigate(page, route) {
   return page.evaluate(async route => {
@@ -80,7 +88,10 @@ async function storage(page) {
       DB.alterar(data => { data.produtos[0].nome = changedName; });
       const synchronousMs = performance.now() - start;
       await DB.flush();
-      oneChange = {ms:performance.now()-start, synchronousMs, storageMs, transactions};
+      const savedAt = performance.now();
+      oneChange = {ms:savedAt-start, synchronousMs, storageMs, transactions};
+      await new Promise(resolve => setTimeout(resolve,0));
+      oneChange.long = window.__lab.long.filter(e => e.at >= start && e.at < savedAt);
       oneChange.commit = (await DB.businessCache.diagnostic()).lastCommit;
       const noChangeStarted = performance.now(), before = transactions;
       DB.alterar(() => {});
@@ -208,7 +219,8 @@ async function main() {
           }));
           assert.equal(counts.theme, profile.theme);
           if (storageOnly) {
-            const persistence = await storage(page);
+            const before = await metrics(cdp);
+            const persistence = {...await storage(page),...delta(before,await metrics(cdp))};
             assert.ok(persistence.reopenOk);
             assert.equal(persistence.oneChange.transactions,1);
             assert.equal(persistence.noChange.transactions,0);
@@ -261,4 +273,5 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { fixture };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
