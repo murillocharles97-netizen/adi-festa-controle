@@ -50,6 +50,9 @@ async function checkCharges(browser, base, width, theme) {
       await navigate('naoHoje');
       const first = ids(), expected = Cobrancas.listar('naoHoje').map(c=>c.id);
       const totals = app.querySelector('.metrics').textContent;
+      const money = Utils.dinheiro(expected.reduce((sum,id) => sum +
+        Math.abs(Number(snapshot.clientes.find(c=>c.id===id).saldo||0)),0));
+      const totalMatches = totals.includes(money) && totals.includes(String(expected.length));
       const next = app.querySelector('#charge-next');
       next.click();
       const second = ids(), label = app.querySelector('#charge-page').textContent;
@@ -64,9 +67,23 @@ async function checkCharges(browser, base, width, theme) {
       const all = [...first];
       if (full) while (!next.disabled) { next.click(); all.push(...ids()); }
       await navigate('acima50');
-      return {first:first.length,second:second.length,label,totalsSame,focus,scopeBlocked,firstRestored,parity,
-        pageWidth:document.documentElement.scrollWidth,viewport:innerWidth,theme:document.documentElement.dataset.theme,
-        filterOk:ids().join(',')===Cobrancas.listar('acima50').slice(0,24).map(c=>c.id).join(','),
+      const filterOk=ids().join(',')===Cobrancas.listar('acima50').slice(0,24).map(c=>c.id).join(',');
+      const pageWidth=document.documentElement.scrollWidth;
+      let searchOutsideFirst = true;
+      if (full) {
+        const id=expected.at(-1), client=snapshot.clientes.find(row=>row.id===id);
+        const changed=new Promise(resolve=>addEventListener('hashchange',resolve,{once:true}));
+        Router.ir('clientes');
+        await changed;
+        const input=app.querySelector('#mobile-client-search');
+        input.value=client.nome;
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        for (let i=0; i<40 && !app.querySelector('[data-mobile-card="'+CSS.escape(id)+'"]'); i++)
+          await new Promise(resolve=>setTimeout(resolve,50));
+        searchOutsideFirst=!first.includes(id) && !!app.querySelector('[data-mobile-card="'+CSS.escape(id)+'"]');
+      }
+      return {first:first.length,second:second.length,label,totalsSame,totalMatches,focus,scopeBlocked,firstRestored,parity,
+        pageWidth,viewport:innerWidth,theme:document.documentElement.dataset.theme,filterOk,searchOutsideFirst,
         allReachable:!full || all.join(',')===expected.join(',')};
     },width === 390 && theme === 'light');
     assert.equal(result.first,24);
@@ -74,7 +91,7 @@ async function checkCharges(browser, base, width, theme) {
     assert.equal(result.focus,'charge-list');
     assert.equal(result.theme,theme);
     assert.match(result.label,/^Página 2 de /);
-    for (const key of ['totalsSame','scopeBlocked','firstRestored','filterOk','allReachable'])
+    for (const key of ['totalsSame','totalMatches','scopeBlocked','firstRestored','filterOk','allReachable','searchOutsideFirst'])
       assert.ok(result[key],[width,theme,key].join(' '));
     assert.ok(result.pageWidth<=result.viewport,[width,theme,result.pageWidth].join(' '));
     assert.ok(result.parity.every(Boolean));
