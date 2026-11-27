@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../service-worker.js'), 'utf8');
 const origin = 'https://veconi.invalid';
 const expectedCache=source.match(/const CACHE='([^']+)'/)[1];
+const startupPath = source.match(/'\.(\/js\/business-cache\.js\?v=[^']+)'/)[1];
 const expectedRelease=fs.readFileSync(require('node:path').join(__dirname,'../js/build-info.js'),'utf8').match(/release:\s*"(\d+)"/)[1];
 function harness({offline = false, unavailable = false, stall = false} = {}) {
   const events = {}, calls = [], cache = new Map();
@@ -100,19 +101,19 @@ test('normal script requests still use network and cache the current response', 
 });
 test('a stalled startup script falls back to the exact pinned copy', {timeout: 1000}, async () => {
   const h = harness({stall: true});
-  const path = '/js/business-cache.js?v=24214-perf';
+  const path = startupPath;
   h.cache.set(origin + path, new Response('PINNED_STARTUP'));
   assert.equal(await (await h.request(path)).text(), 'PINNED_STARTUP');
 });
 test('an unavailable pinned script uses its exact cached copy', async () => {
   const h = harness({unavailable: true});
-  const path = '/js/business-cache.js?v=24214-perf';
+  const path = startupPath;
   h.cache.set(origin + path, new Response('PINNED_STARTUP'));
   assert.equal(await (await h.request(path)).text(), 'PINNED_STARTUP');
 });
 test('a pinned script still gets the fresh response when the network works', async () => {
   const h = harness();
-  const path = '/js/business-cache.js?v=24214-perf';
+  const path = startupPath;
   h.cache.set(origin + path, new Response('PINNED_STARTUP'));
   assert.equal(await (await h.request(path)).text(), 'CURRENT_PUBLIC_RESOURCE');
   assert.equal(await h.cache.get(origin + path).text(), 'CURRENT_PUBLIC_RESOURCE');
@@ -120,7 +121,7 @@ test('a pinned script still gets the fresh response when the network works', asy
 test('a missing script pin never borrows the cache entry for another pin', async () => {
   const h = harness({offline: true});
   h.cache.set(origin + '/js/business-cache.js?v=older', new Response('DIFFERENT_PIN'));
-  assert.equal((await h.request('/js/business-cache.js?v=24214-perf')).type, 'error');
+  assert.equal((await h.request(startupPath)).type, 'error');
 });
 test('older scripts with an unversioned precache entry still open offline', async () => {
   const h = harness({offline: true});
