@@ -42,11 +42,8 @@
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
-  const money = (value) =>
-    Number(value || 0).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+  const currency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const money = (value) => currency.format(Number(value || 0));
   const initials = (name) =>
     String(name || "?")
       .trim()
@@ -186,20 +183,17 @@
     return list;
   }
   function counts() {
-    const list = (products().produtos || []).filter(
-      (product) => product.ativo !== false,
-    );
-    return {
-      all: list.length,
-      favorites: list.filter((p) => p.favorito).length,
-      available: list.filter((p) =>
-        ["disponivel", "sem-controle"].includes(status(p)),
-      ).length,
-      low: list.filter((p) => status(p) === "baixo").length,
-      out: list.filter((p) => status(p) === "esgotado").length,
-      simple: list.filter((p) => !window.ProductVariations?.isVariable(p)).length,
-      variable: list.filter((p) => window.ProductVariations?.isVariable(p)).length,
-    };
+    const totals = { all: 0, favorites: 0, available: 0, low: 0, out: 0, simple: 0, variable: 0 };
+    const stockGroups = { disponivel: "available", "sem-controle": "available", baixo: "low", esgotado: "out" };
+    for (const product of products().produtos || []) {
+      if (product.ativo === false) continue;
+      totals.all++;
+      if (product.favorito) totals.favorites++;
+      const group = stockGroups[status(product)];
+      if (group) totals[group]++;
+      totals[window.ProductVariations?.isVariable(product) ? "variable" : "simple"]++;
+    }
+    return totals;
   }
   function chip(key, label, count, iconName = "") {
     return `<button class="product-filter-chip ${state.filter === key ? "active" : ""}" type="button" data-product-filter="${key}">${iconName ? icon(iconName) : ""}<span>${label}</span><b>${count}</b></button>`;

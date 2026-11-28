@@ -4,7 +4,8 @@
   if(!base)return;
   const desktopRender=base.render.bind(base),desktopBind=base.bind.bind(base);
   const mq=matchMedia('(max-width: 767px)');
-  const state={query:'',filter:'todos',sort:'maiorDebito',limit:20,sheet:false,scrollPosition:0};
+  const listBatchSize=10;
+  const state={query:'',filter:'todos',sort:'maiorDebito',limit:listBatchSize,sheet:false,scrollPosition:0};
   let observer=null, searchTimer=null, scrollFrame=null;
   const activePage = () => Router.atual() === 'clientes' && document.querySelector('#app .clients-mobile-page');
   function cancelPending() {
@@ -218,7 +219,7 @@
   function refreshMobile(reset=false){
     const page=activePage();
     if(!page)return;
-    cancelPending();if(reset)state.limit=20;
+    cancelPending();if(reset)state.limit=listBatchSize;
     settle(page);patchPage(page,renderMobile());observeMore();
     if(reset)window.ClientCloudPagination?.refresh?.();
   }
@@ -238,7 +239,7 @@
   function applySmartMode(){if(window.OperationalReadPolicy?.restricted?.())return;if(window.OperationMode?.enabled?.('creditSales'))return;const db=allData(),kpis=document.querySelector('.mobile-client-kpis'),profiles=(db.clientes||[]).filter(c=>c.ativo!==false).map(c=>CRMCliente.build(c.id,{data:db})).filter(Boolean);if(kpis){const active=profiles.filter(p=>(p.metrics.daysWithoutPurchase??999)<=30).length,revenue=profiles.reduce((sum,p)=>sum+p.metrics.totalSpent,0),purchases=profiles.reduce((sum,p)=>sum+p.metrics.purchaseCount,0),inactive=profiles.filter(p=>(p.metrics.daysWithoutPurchase??999)>60).length;kpis.innerHTML=`<article>${icon('users')}<span><small>Clientes ativos</small><strong>${active}</strong><em>últimos 30 dias</em></span></article><article>${icon('circle-dollar-sign')}<span><small>Receita da base</small><strong class="kpi-money-value">${money(revenue)}</strong><em>histórico</em></span></article><article>${icon('calculator')}<span><small>Ticket médio</small><strong class="kpi-money-value">${money(purchases?revenue/purchases:0)}</strong><em>por compra</em></span></article><article>${icon('user-x')}<span><small>Sem comprar</small><strong>${inactive}</strong><em>há mais de 60 dias</em></span></article>`}document.querySelectorAll('[data-mobile-filter="debito"],[data-mobile-filter="credito"],[data-mobile-filter="nunca"]').forEach(x=>x.hidden=true);document.querySelectorAll('[data-swipe-client]').forEach(shell=>{const client=db.clientes.find(c=>c.id===shell.dataset.swipeClient),profile=client&&CRMCliente.build(client.id,{data:db});if(!profile)return;const status=shell.querySelector('.mobile-client-status'),balance=shell.querySelector('.mobile-client-balance strong'),caption=shell.querySelector('.mobile-client-balance small'),receive=shell.querySelector('.mobile-receive');status.className=`mobile-client-status ${profile.metrics.activity==='active'?'credit':'zero'}`;status.textContent=CRMCliente.formatActivity(profile.metrics.activity).replace('Cliente ','');balance.textContent=money(profile.metrics.totalSpent);caption.textContent='em compras';const facts=shell.querySelectorAll('.mobile-client-facts>span');if(facts[1]){facts[1].querySelector('small').textContent='Último contato';facts[1].querySelector('b').textContent=profile.metrics.lastContact?relative(profile.metrics.lastContact):'Nunca'}if(receive){receive.disabled=false;receive.dataset.mobileSale=client.id;delete receive.dataset.mobileReceive;receive.innerHTML=`${icon('shopping-bag')} Nova venda`}shell.querySelector('.swipe-charge')?.remove()})}
   function setSearchTerm(query) {
     state.query = String(query ?? '');
-    state.limit = 20;
+    state.limit = listBatchSize;
     const label = activePage()?.querySelector('#mobile-client-search')?.closest('label');
     const clear = label?.querySelector('.mobile-search-clear');
     if (!state.query) clear?.remove();
@@ -307,7 +308,7 @@
       pending.disconnect();
       withClientView(()=>{
         const list=filtered(), root=page.querySelector('#mobile-client-list'), start=root.children.length;
-        const next=list.slice(start,start+20);
+        const next=list.slice(start,start+listBatchSize);
         state.limit=start+next.length;
         settle(page);
         forget(changes.takeRecords());
@@ -372,7 +373,7 @@
     return true;
   }
   function restoreActiveState(){searchClients(state.query,{cloud:false});restoreScroll(activePage());return{...state}}
-  window.ClientesMobile={cancelPending,owns:()=>mq.matches&&!!activePage(),patchCards,renderCards:clients=>withClientView(()=>clients.map(card).join('')),applyFilter(filter='todos',sort='maiorDebito'){state.filter=filter;state.sort=sort;state.query='';state.limit=20;state.sheet=false;state.scrollPosition=0},applyRenewalAttention(){state.filter='renovacao';state.sort='renovacao';state.query='';state.limit=20;state.sheet=false;state.scrollPosition=0},setSearchTerm,search:searchClients,restoreActiveState,refresh:refreshMobile,startSale:id=>perform('sale',id),charge:id=>perform('charge',id),renewalAttention,renderCard:card,bindCard:bindSwipe,getState:()=>({...state})};
+  window.ClientesMobile={cancelPending,owns:()=>mq.matches&&!!activePage(),patchCards,renderCards:clients=>withClientView(()=>clients.map(card).join('')),applyFilter(filter='todos',sort='maiorDebito'){state.filter=filter;state.sort=sort;state.query='';state.limit=listBatchSize;state.sheet=false;state.scrollPosition=0},applyRenewalAttention(){state.filter='renovacao';state.sort='renovacao';state.query='';state.limit=listBatchSize;state.sheet=false;state.scrollPosition=0},setSearchTerm,search:searchClients,restoreActiveState,refresh:refreshMobile,startSale:id=>perform('sale',id),charge:id=>perform('charge',id),renewalAttention,renderCard:card,bindCard:bindSwipe,getState:()=>({...state})};
   window.AppLifecycle?.onBackground?.(()=>{if(mq.matches&&Router.atual()==='clientes')state.scrollPosition=scrollY});
   addEventListener('message-history-updated',()=>{if(mq.matches&&Router.atual()==='clientes'&&!document.querySelector('.message-center-page'))refreshMobile()});
   mq.addEventListener('change',()=>{if(location.hash.includes('/clientes'))base.refresh()});
