@@ -45,8 +45,9 @@
     if (!openNow && document.querySelector("#modal > *, .product-sheet-overlay.open, .message-overlay")) return;
     if (openNow && !event.target.closest?.("#sidebar")) return;
     const safeLeft = cssPixels("--safe-left");
+    if (!openNow && event.clientX > safeLeft + gesture.EDGE_ZONE) return;
     const horizontalOwner = !openNow && ownsHorizontalGesture(event.target);
-    if (!openNow && (event.clientX > safeLeft + gesture.EDGE_ZONE || horizontalOwner)) return;
+    if (horizontalOwner) return;
     pointerState = {
       pointerId: event.pointerId,
       pointerType: event.pointerType || "touch",
@@ -92,19 +93,23 @@
   }
 
   function resetTouch() {
+    if (!touchState) return;
     touchState = null;
+    document.removeEventListener("touchmove", onTouchMove, true);
   }
 
   function onTouchStart(event) {
     lastTouchAt = Date.now();
-    if (!gesture || !isMobile() || event.touches.length !== 1) return resetTouch();
+    resetTouch();
+    if (!gesture || !isMobile() || event.touches.length !== 1) return;
     const touch = event.touches[0],
       openNow = Boolean(sidebar()?.classList.contains("open"));
     if (!openNow && document.querySelector("#modal > *, .product-sheet-overlay.open, .message-overlay")) return;
     if (openNow && !event.target.closest?.("#sidebar")) return;
-    const safeLeft = cssPixels("--safe-left"),
-      horizontalOwner = !openNow && ownsHorizontalGesture(event.target);
-    if (!openNow && (touch.clientX > safeLeft + gesture.EDGE_ZONE || horizontalOwner)) return;
+    const safeLeft = cssPixels("--safe-left");
+    if (!openNow && touch.clientX > safeLeft + gesture.EDGE_ZONE) return;
+    const horizontalOwner = !openNow && ownsHorizontalGesture(event.target);
+    if (horizontalOwner) return;
     touchState = {
       identifier: touch.identifier,
       pointerType: "touch",
@@ -117,6 +122,7 @@
       horizontalOwner,
       vertical: false,
     };
+    document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
   }
 
   function onTouchMove(event) {
@@ -127,9 +133,8 @@
     touchState.lastY = touch.clientY;
     const deltaX = touch.clientX - touchState.startX,
       deltaY = touch.clientY - touchState.startY;
-    if (!touchState.vertical && Math.abs(deltaY) > Math.abs(deltaX) + 8 && Math.abs(deltaY) > 10)
-      touchState.vertical = true;
-    if (touchState.vertical) return;
+    if (Math.abs(deltaY) > Math.abs(deltaX) + 8 && Math.abs(deltaY) > 10)
+      return resetTouch();
     const correctDirection = touchState.drawerOpen ? deltaX < 0 : deltaX > 0;
     if (correctDirection && gesture.horizontalIntent(deltaX, deltaY)) event.preventDefault();
   }
@@ -155,9 +160,9 @@
     document.addEventListener("pointerup", onPointerEnd, { passive: true });
     document.addEventListener("pointercancel", resetPointer, { passive: true });
     // O Safari em PWA pode cancelar Pointer Events iniciados na borda. Touch
-    // Events em capture preservam o gesto real sem disputar o scroll vertical.
+    // Events em capture preservam o gesto. O move cancelável só é instalado
+    // durante toques elegíveis para abrir ou fechar o menu.
     document.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
-    document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
     document.addEventListener("touchcancel", resetTouch, { passive: true, capture: true });
   }

@@ -679,7 +679,6 @@
   }
   function bind(route) {
     $$("[data-go]").forEach((b) => (b.onclick = () => Router.ir(b.dataset.go)));
-    window.SpaceContext?.bind?.($("#app"));
     if (route === "inicio" && !window.MobileHome?.isMobile())
       window.DesktopDashboard?.bind?.();
     if (route === "clientes") {
@@ -1240,20 +1239,8 @@
       ? link.setAttribute("tabindex", "-1")
       : link.removeAttribute("tabindex");
   }
-  function render(route) {
-    window.AppBootDiagnostics?.count?.("routeRenderCount", { route });
-    const renderStartedAt = performance.now();
-    const deniedRoute = typeof window.TeamAccess?.canRoute === "function" && !window.TeamAccess.canRoute(route);
-    if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
-    // Renovações uses the customerSubscriptions plan feature (same gate as the checkout renewal).
-    if (route === "renovacoes" && window.PlanLimitService?.canUseFeature?.("customerSubscriptions")?.ok === false) {
-      window.PlansUI?.openProModal?.("customerSubscriptions", window.PlanLimitService.canUseFeature("customerSubscriptions"));
-      route = "inicio";
-    }
-    window.SyncFirebase?.setScreen?.(route);
-    syncResponsiveNavigation();
-    const root = $("#app"), previousInstance = root.dataset.pageInstance || "0";
-    if (route !== "cobrancas" || deniedRoute) chargeView = null;
+  function leavePage(root, route) {
+    if (route !== "cobrancas") chargeView = null;
     if (root.dataset.route === "clientes") {
       clearTimeout(clientSearchTimer);
       if (clientSpaceFrame !== null) cancelAnimationFrame(clientSpaceFrame);
@@ -1261,15 +1248,13 @@
       window.ClientesMobile?.cancelPending?.();
       if (route !== "clientes") window.ClientCloudPagination?.leave?.();
     }
+    if (root.dataset.route === "produtos") clearTimeout(stableSearchTimer);
     if (root.dataset.route === "vender") window.Checkout?.captureCatalogView?.();
-    if (root.dataset.route === "financeiro" && route !== "financeiro") FinanceiroUI.destroy();
-    root.dataset.pageInstance = String(Number(previousInstance) + 1);
-    root.dataset.route = route;
+    if (root.dataset.route === "financeiro" && route !== "financeiro") window.FinanceiroUI?.destroy();
+  }
+  function updateRouteChrome(route) {
+    syncResponsiveNavigation();
     document.querySelector(".topbar")?.classList.toggle("settings-topbar", route === "configuracoes");
-    root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]() +
-      (route === 'configuracoes' ? window.Consignments.entry() : route === 'inicio' ? '<section class="panel consignment-entry" data-consignment-daily hidden></section>' : '');
-    root.dataset.spaceViewScope = window.SpaceContext?.viewScope?.() || "";
-    window.SpaceContext?.bind?.(root);
     const mobileTitle = matchMedia("(max-width:767px)").matches
       ? { crm: "CRM", catalogo: "Catálogo", pedidos: "Pedidos" }[route]
       : "";
@@ -1300,15 +1285,54 @@
                           day: "2-digit",
                           month: "long",
                         });
-    $$("[data-route]").forEach((a) =>
-      a.classList.toggle("active", a.dataset.route === route),
-    );
-    $$("[data-mobile-route]").forEach((a) =>
-      a.classList.toggle("active", a.dataset.mobileRoute === route),
-    );
-    window.MobileNavigation?.update?.(route);
-    window.BarcodePrimaryFab?.update?.();
+    $$("#sidebar [data-route], [data-mobile-route]").forEach((link) => {
+      const current = (link.dataset.mobileRoute || link.dataset.route) === route;
+      link.classList.toggle("active", current);
+      if (current) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    window.MobileNavigation?.syncActiveGroup?.(route);
     fecharMenu();
+  }
+  function renderNewIcons() {
+    if (!window.lucide?.createIcons) return;
+    const icons = $$("[data-lucide]:not(svg)");
+    if (!icons.length) return;
+    icons.forEach(icon => icon.setAttribute("data-route-icon", icon.getAttribute("data-lucide")));
+    window.lucide.createIcons({ nameAttr: "data-route-icon" });
+    $$("[data-route-icon]").forEach(icon => icon.removeAttribute("data-route-icon"));
+  }
+  function render(route) {
+    window.AppBootDiagnostics?.count?.("routeRenderCount", { route });
+    const renderStartedAt = performance.now();
+    const deniedRoute = typeof window.TeamAccess?.canRoute === "function" && !window.TeamAccess.canRoute(route);
+    if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
+    // Renovações uses the customerSubscriptions plan feature (same gate as the checkout renewal).
+    if (route === "renovacoes" && window.PlanLimitService?.canUseFeature?.("customerSubscriptions")?.ok === false) {
+      window.PlansUI?.openProModal?.("customerSubscriptions", window.PlanLimitService.canUseFeature("customerSubscriptions"));
+      route = "inicio";
+    }
+    const root = $("#app"), prepared = root.dataset.loadingRoute === route;
+    if (!root.dataset.loadingRoute) leavePage(root, route);
+    if (deniedRoute) chargeView = null;
+    if (!prepared) updateRouteChrome(route);
+    delete root.dataset.loadingRoute;
+    root.removeAttribute("aria-busy");
+    root.dataset.pageInstance = String(Number(root.dataset.pageInstance || "0") + 1);
+    root.dataset.route = route;
+    window.SyncFirebase?.setScreen?.(route);
+    root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]() +
+      (route === 'configuracoes' ? window.Consignments.entry() : route === 'inicio' ? '<section class="panel consignment-entry" data-consignment-daily hidden></section>' : '');
+    root.dataset.spaceViewScope = window.SpaceContext?.viewScope?.() || "";
+    window.SpaceContext?.bind?.(root);
+    window.MobileNavigation?.update?.(route);
+    window.BarcodePrimaryFab?.update?.({ hydrateIcons: false });
+    if (deniedRoute) {
+      window.PlansUI?.syncNavigation?.();
+      window.TeamAccess?.syncNavigation?.();
+      renderNewIcons();
+      return;
+    }
     aplicarInputModes($("#app"));
     bind(route);
     if (route === "consignados" && !deniedRoute) window.Consignments.mount(root);
@@ -1322,11 +1346,10 @@
     if (route === "historico") window.ActivityCenter?.bind?.();
     if (route === "renovacoes" && !deniedRoute) window.RenovacoesUI?.bind?.();
     if (route === "planos") window.PlansUI.bind($("#app"));
-    window.PlansUI?.syncLegacyNotice?.();
     if (route === "cupons") window.CouponsAdmin?.bind?.();
     window.PlansUI?.syncNavigation?.();
     window.TeamAccess?.syncNavigation?.();
-    window.lucide?.createIcons();
+    renderNewIcons();
     window.AppBootDiagnostics?.phase?.("route rendered", {
       route,
       durationMs: Math.round(performance.now() - renderStartedAt),
@@ -1410,10 +1433,15 @@
       route: Router.atual(),
     });
     // Clientes e Consignados atualizam seus próprios dados sem remontar formulários.
-    if (["clientes", "consignados"].includes(Router.atual())) return;
+    if (navigation || ["clientes", "consignados"].includes(Router.atual())) return;
+    const hash = location.hash;
     cloudRenderPending = true;
     clearTimeout(cloudRenderTimer);
     cloudRenderTimer = setTimeout(() => {
+      if (hash !== location.hash || navigation) {
+        cloudRenderPending = false;
+        return;
+      }
       const active = document.activeElement,
         editing =
           active &&
@@ -1507,7 +1535,9 @@
         }, 300);
       } else {
         clearTimeout(stableSearchTimer);
-        stableSearchTimer = setTimeout(() => window.ProdutosMobile?.search(value), 300);
+        stableSearchTimer = setTimeout(() => {
+          if (input.isConnected && input.value === value && Router.atual() === "produtos") window.ProdutosMobile?.search(value);
+        }, 300);
       }
     },
     true,
@@ -1520,6 +1550,7 @@
     window.PwaUpdate.register().catch(error => console.error("[Service worker registration]", error));
   let appRouterStarted = false,
     pageRuntime = null,
+    navigation = null,
     financialModulePromise = null,
     financialMountToken = 0;
   function showAppMountError(error) {
@@ -1528,9 +1559,11 @@
       message: error?.message || "Falha ao montar a interface",
     });
     const root = $("#app");
+    delete root.dataset.loadingRoute;
+    root.removeAttribute("aria-busy");
     root.innerHTML = `<section class="empty-state boot-recovery"><i data-lucide="triangle-alert"></i><h2>Não conseguimos abrir o aplicativo.</h2><p>Seu login e seus dados continuam preservados.</p><div class="actions"><button class="btn btn-primary" data-retry-app-mount>Tentar novamente</button><button class="btn btn-light" data-logout-app-mount>Sair da conta</button></div></section>`;
     root.querySelector("[data-retry-app-mount]").onclick = () => {
-      appRouterStarted ? mountRoute(Router.atual()) : Router.iniciar(mountRoute);
+      appRouterStarted ? mountRoute(Router.atual()) : Router.iniciar(navigateRoute);
       appRouterStarted = true;
     };
     root.querySelector("[data-logout-app-mount]").onclick = () =>
@@ -1538,6 +1571,7 @@
     window.lucide?.createIcons();
   }
   function mountRoute(route) {
+    if (navigation) return false;
     const mountToken = ++financialMountToken;
     if (window.PlansUI && !window.PlansUI.guardRoute(route)) route = "inicio";
     if (route === "financeiro" && (!window.FinanceiroUI || !window.FinancialSpaceService)) {
@@ -1571,6 +1605,57 @@
     }
     return pageRuntime?.mount(route) ?? false;
   }
+  function cancelNavigation() {
+    if (!navigation) return;
+    cancelAnimationFrame(navigation.frame);
+    clearTimeout(navigation.timer);
+    navigation = null;
+  }
+  function navigateRoute(route) {
+    cancelNavigation();
+    financialMountToken++;
+    clearTimeout(cloudRenderTimer);
+    cloudRenderPending = false;
+    const root = $("#app");
+    if (root.dataset.route === route || window.TeamAccess?.canRoute?.(route) === false)
+      return mountRoute(route);
+    const timing = window.AppBootDiagnostics?.beginNavigation?.(route);
+    const spaceScope = window.SpaceContext?.viewScope?.();
+    leavePage(root, route);
+    delete root.dataset.route;
+    delete root.dataset.spaceViewScope;
+    root.dataset.loadingRoute = route;
+    root.setAttribute("aria-busy", "true");
+    updateRouteChrome(route);
+    const grid = ["vender", "produtos", "inicio"].includes(route);
+    root.innerHTML = `<section class="route-skeleton${grid ? ' route-skeleton-grid' : ''}" aria-hidden="true"><div class="route-skeleton-toolbar"></div><div class="route-skeleton-content"><div></div><div></div><div></div><div></div></div></section>`;
+    const hash = location.hash, user = window.FirebaseSession?.user?.uid,
+      business = DB.getBusinessId?.(), principal = DB.getPrincipal?.(), generation = DB.getWorkspaceGeneration?.();
+    const task = navigation = {};
+    // Give the destination chrome a frame before running the synchronous view.
+    const afterShell = () => {
+      task.timer = setTimeout(() => {
+        if (task !== navigation) return;
+        navigation = null;
+        if (hash !== location.hash || user !== window.FirebaseSession?.user?.uid ||
+            business !== DB.getBusinessId?.() || principal !== DB.getPrincipal?.() ||
+            generation !== DB.getWorkspaceGeneration?.()) {
+          delete root.dataset.loadingRoute;
+          root.removeAttribute("aria-busy");
+          root.replaceChildren();
+          return;
+        }
+        // A change of Espaço can occur while the shell is visible. The mount reads the current view.
+        timing?.shell();
+        if (route === "vender" && spaceScope !== window.SpaceContext?.viewScope?.())
+          remountSpaceRoute(route);
+        else if (mountRoute(route)) timing?.useful();
+      }, 0);
+    };
+    task.frame = requestAnimationFrame(() => {
+      task.frame = requestAnimationFrame(afterShell);
+    });
+  }
   pageRuntime = window.PageRuntime.create({
     render,
     snapshot: () => ({
@@ -1591,10 +1676,20 @@
   addEventListener("firebase-auth-ready", () => {
     if (!appRouterStarted) {
       appRouterStarted = true;
-      Router.iniciar(mountRoute);
-    } else mountRoute(Router.atual());
+      Router.iniciar(navigateRoute);
+    } else navigateRoute(Router.atual());
   });
   addEventListener("firebase-session-cleared", () => {
+    cancelNavigation();
+    financialMountToken++;
+    clearTimeout(cloudRenderTimer);
+    cloudRenderPending = false;
+    const root = $("#app");
+    if (root.dataset.loadingRoute) {
+      delete root.dataset.loadingRoute;
+      root.removeAttribute("aria-busy");
+      root.replaceChildren();
+    }
     carrinho = [];
     $("#modal").innerHTML = "";
     document.body.classList.remove("sale-sheet-open");
@@ -1603,5 +1698,8 @@
     if(Router.atual()==='inicio'&&!window.MobileHome&&!window.DesktopDashboard)mountRoute('inicio');
   });
   addEventListener("clientes-import-csv", importarCSV);
-  window.AppPageRuntime = pageRuntime;
+  window.AppPageRuntime = Object.freeze({
+    mount: (route) => navigation || Router.atual() !== route ? false : pageRuntime.mount(route),
+    snapshot: pageRuntime.snapshot,
+  });
 })();

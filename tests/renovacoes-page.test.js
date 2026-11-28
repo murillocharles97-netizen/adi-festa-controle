@@ -228,7 +228,7 @@ test("acesso restrito, sem venda, sem Central, lista longa e conta vazia têm es
 test("rota, permissão, menu e cache PWA incluem Renovações sem tocar planos da VECONI", () => {
   const router = fs.readFileSync("js/router.js", "utf8"), access = fs.readFileSync("js/team-access.js", "utf8"),
     app = fs.readFileSync("js/app.js", "utf8"), html = fs.readFileSync("index.html", "utf8"), worker = fs.readFileSync("service-worker.js", "utf8");
-  assert.match(router, /'clientes','renovacoes'/);
+  assert.match(router, /'clientes',\s*'renovacoes'/);
   assert.match(access, /renovacoes: "customers\.view"/);
   assert.match(app, /renovacoes: \(\) => window\.RenovacoesUI/);
   assert.match(app, /canUseFeature\?\.\("customerSubscriptions"\)/);

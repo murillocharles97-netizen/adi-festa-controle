@@ -711,7 +711,7 @@
     isActive: BarcodeScannerService.isActive,
   };
 
-  function updatePrimaryFab() {
+  function updatePrimaryFab({ hydrateIcons = true } = {}) {
     const fab = document.querySelector("#mobile-client-fab");
     if (!fab) return;
     const route =
@@ -732,10 +732,12 @@
       },
     };
     const config = actions[route] || actions.inicio;
+    if (fab.dataset.primaryAction === config.action && fab.getAttribute("aria-label") === config.label &&
+        fab.querySelector("[data-lucide]")?.getAttribute("data-lucide") === config.icon) return;
     fab.dataset.primaryAction = config.action;
     fab.setAttribute("aria-label", config.label);
     fab.innerHTML = `${icon(config.icon)}<span>${config.label}</span>`;
-    window.lucide?.createIcons();
+    if (hydrateIcons) window.lucide?.createIcons();
   }
   window.BarcodePrimaryFab = { update: updatePrimaryFab };
 

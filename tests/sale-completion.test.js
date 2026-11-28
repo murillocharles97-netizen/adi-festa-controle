@@ -93,7 +93,7 @@ assert.match(css,/safe-area-inset-bottom/);
 
 const checkoutMobile=read('js/checkout-mobile.js');
 assert.match(checkoutMobile,/sale-next-action/);
-assert.match(checkoutMobile,/action==='same'/);
-assert.match(checkoutMobile,/action==='repeat'/);
+assert.match(checkoutMobile,/action\s*===\s*'same'/);
+assert.match(checkoutMobile,/action\s*===\s*'repeat'/);
 
 console.log('sale-completion.test.js: OK');

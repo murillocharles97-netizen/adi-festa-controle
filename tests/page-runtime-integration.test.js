@@ -51,6 +51,19 @@ test("shell/router monta home e navega uma vez por hashchange", () => {
   assert.deepEqual(rendered, ["inicio", "clientes", "produtos"]);
   assert.equal(runtime.snapshot().mountSequence, 3);
 });
+
+test("router mantém aliases e lê a troca de hash antes de hashchange", () => {
+  const { context } = environment("#/clientes?filtro=debito");
+  const {Router, location} = context;
+  assert.equal(Router.atual(), "clientes");
+  location.hash = "#/visitas?origem=menu";
+  assert.equal(Router.atual(), "catalogo");
+  Router.ir("fiados");
+  assert.equal(location.hash, "#/clientes");
+  assert.equal(Router.atual(), "clientes");
+  location.hash = "#/desconhecido";
+  assert.equal(Router.atual(), "inicio");
+});
 test("montagem reentrante enfileira apenas a rota mais recente", async () => {
   const rendered = [];
   let runtime;

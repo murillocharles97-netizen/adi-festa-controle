@@ -224,10 +224,10 @@
   }
   function applyPending(page) {
     if (!pending) return;
-    const context = pending, scope = window.SpaceContext?.viewScope?.();
+    const context = pending;
     pending = null;
     setTimeout(() => {
-      if (!page.isConnected || Router.atual() !== 'vender' || window.SpaceContext?.viewScope?.() !== scope) return;
+      if (!page.isConnected || Router.atual() !== 'vender' || window.SpaceContext?.viewScope?.() !== context.scope) return;
       if (context.clientId) {
         const select = $('#sale-client', page);
         window.Checkout.setSaleCustomer(context.clientId, select);
@@ -241,7 +241,24 @@
   function enhance(){
     if(enhancing||!mq.matches||Router.atual()!=='vender')return;const page=$('.pos-page');if(!page)return;const search=$('#product-search',page);if(search){search.placeholder='Buscar produto ou código';search.setAttribute('aria-label','Buscar produto por nome, código de barras ou categoria')}const first=!page.dataset.mobileSaleInitialized;if(first){payment=$('#sale-payment-method',page)?.value||window.CheckoutPaymentMethod||'pix';window.CheckoutPaymentMethod=payment}enhancing=true;try{page.classList.add('mobile-sale-page');mobileHeader(page);if(page.dataset.saleView)$$('[data-sale-filter]',page).forEach(button=>button.classList.toggle('active',button.dataset.saleFilter===page.dataset.saleView));decorateProducts(page);const summary=$('#pos-summary',page);if(summary){summaryTools(summary);$$('[data-payment]',summary).forEach(button=>button.classList.toggle('active',button.dataset.payment===payment));enhanceCart(summary)}bindPage(page);applyPending(page);if(first){page.dataset.mobileSaleInitialized='1';window.lucide?.createIcons()}}finally{enhancing=false}
   }
-  function prepareNext(action,sale){pending={clientId:action==='same'?sale?.clienteId:null,repeat:action==='repeat',items:sale?.itens||[]};Router.ir('inicio');setTimeout(()=>Router.ir('vender'),20)}
+  function prepareNext(action, sale) {
+    const context = pending = {
+      clientId: action === 'same' ? sale?.clienteId : null,
+      repeat: action === 'repeat',
+      items: sale?.itens || [],
+      scope: window.SpaceContext?.viewScope?.(),
+    };
+    Router.ir('inicio');
+    const redirectHash = location.hash;
+    setTimeout(() => {
+      if (pending !== context) return;
+      if (location.hash !== redirectHash || window.SpaceContext?.viewScope?.() !== context.scope) {
+        pending = null;
+        return;
+      }
+      Router.ir('vender');
+    }, 20);
+  }
   document.addEventListener('click',event=>{
     if(event.target.closest('.mobile-sale-favorite'))return;
     if(event.target.closest('#finish-sale'))window.CheckoutPaymentMethod=payment;

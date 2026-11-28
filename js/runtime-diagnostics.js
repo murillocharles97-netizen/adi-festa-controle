@@ -66,6 +66,69 @@
   };
   window.AppBootDiagnostics = api;
 
+  if (new URLSearchParams(location.search).has("perf-nav")) {
+    const routes = [], tasks = [], openedAt = performance.now();
+    let tap = null, scrollTouch = null, observer;
+    const active = () => performance.now() - openedAt <= 60000;
+    function collectTouch(event) {
+      if (!active()) return;
+      const link = event.target.closest?.("[data-mobile-route], [data-route][href]");
+      if (link) tap = { route: link.dataset.mobileRoute || link.dataset.route, at: event.timeStamp };
+      else if (event.pointerType === "touch") scrollTouch = event.timeStamp;
+    }
+    function collectScroll() {
+      const sample = routes.at(-1);
+      if (active() && sample && scrollTouch !== null && performance.now() - scrollTouch < 1500)
+        sample.scrollMs ??= Math.round(performance.now() - scrollTouch);
+      scrollTouch = null;
+    }
+    addEventListener("pointerdown", collectTouch, { passive: true, capture: true });
+    addEventListener("scroll", collectScroll, { passive: true, capture: true });
+    try {
+      observer = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) tasks.push(Math.round(entry.duration));
+        if (tasks.length > 20) tasks.splice(0, tasks.length - 20);
+      });
+      observer.observe({ type: "longtask" });
+    } catch {}
+    setTimeout(() => {
+      observer?.disconnect();
+      removeEventListener("pointerdown", collectTouch, true);
+      removeEventListener("scroll", collectScroll, true);
+    }, 60000);
+    api.beginNavigation = route => {
+      if (!active()) return null;
+      const now = performance.now(), start = tap?.route === route && now - tap.at < 800 ? tap.at : now;
+      const sample = { route };
+      tap = null;
+      scrollTouch = null;
+      routes.push(sample);
+      if (routes.length > 20) routes.shift();
+      return {
+        shell: () => { sample.shellMs = Math.round(performance.now() - start); },
+        useful: () => requestAnimationFrame(() => setTimeout(() => {
+          sample.usefulMs = Math.round(performance.now() - start);
+        }, 0)),
+      };
+    };
+    addEventListener("DOMContentLoaded", () => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "performance-report-button";
+      button.textContent = "Copiar desempenho";
+      button.onclick = async () => {
+        const report = JSON.stringify({ routes, longTasksMs: tasks }, null, 2);
+        try {
+          await navigator.clipboard.writeText(report);
+          button.textContent = "Desempenho copiado";
+        } catch {
+          window.prompt("Copie os tempos de desempenho", report);
+        }
+      };
+      document.body.append(button);
+    }, { once: true });
+  }
+
   addEventListener("error", (event) => {
     phase("uncaught error", {
       route: window.Router?.atual?.() || "",

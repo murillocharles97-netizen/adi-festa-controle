@@ -21,5 +21,61 @@
 #modal .exchange-reviewing .viewport-form-content>.exchange-columns,#modal .exchange-reviewing .viewport-form-content>section:not(.exchange-history){display:none}
 #modal .payment-confirmation-dialog .payment-success>.actions{position:sticky;bottom:-1px;background:white;padding:12px 0;margin-bottom:0;z-index:1;display:flex;flex-wrap:wrap}
 #modal .viewport-dialog :focus-visible{outline:3px solid #00867e;outline-offset:2px}
+
+/* A destination preview in the normal document flow. */
+#app[data-loading-route] {
+  background: var(--vf-bg, #f4f7f8);
+}
+.route-skeleton {
+  min-block-size: calc(100vh - 3.5rem);
+  min-block-size: calc(100dvh - 3.5rem);
+  padding-block: 0.75rem 1.25rem;
+}
+.route-skeleton-toolbar,
+.route-skeleton-content > div {
+  border: 1px solid var(--vf-line, #dae2e6);
+  background: var(--vf-surface, #fff);
+  border-radius: 0.875rem;
+}
+.route-skeleton-toolbar {
+  block-size: 2.75rem;
+  margin-block-end: 0.875rem;
+  background: var(--vf-surface-3, #eef3f5);
+}
+.route-skeleton-content {
+  display: grid;
+  gap: 0.75rem;
+}
+.route-skeleton-content > div {
+  block-size: 7.5rem;
+  padding: 1rem;
+}
+.route-skeleton-content > div::before,
+.route-skeleton-content > div::after {
+  content: "";
+  display: block;
+  block-size: 0.625rem;
+  border-radius: 0.25rem;
+  background: var(--vf-surface-3, #eef3f5);
+}
+.route-skeleton-content > div::before { inline-size: 55%; }
+.route-skeleton-content > div::after { inline-size: 34%; margin-block-start: 0.625rem; }
+.route-skeleton-grid .route-skeleton-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.route-skeleton-grid .route-skeleton-content > div { block-size: 10rem; }
+.performance-report-button {
+  position: fixed;
+  inset-inline-end: 1rem;
+  inset-block-end: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 100;
+  min-block-size: 2.75rem;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--vf-line, #dae2e6);
+  border-radius: 0.75rem;
+  color: var(--vf-text, #152a34);
+  background: var(--vf-surface, #fff);
+}
+@media (min-width: 1024px) {
+  .route-skeleton-grid .route-skeleton-content { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 @media(max-width:767px){#modal .mobile-sale-completion.viewport-dialog{height:100%;border-radius:20px}#modal .viewport-dialog .modal-head,#modal .viewport-dialog .modal-foot{padding:12px}#modal .viewport-dialog .modal-head h2,#modal .viewport-dialog .modal-head h3{font-size:1.1rem}#modal .viewport-dialog .sale-share-actions{padding-bottom:12px}#modal .viewport-form-host{padding:12px 12px 0}#modal .exchange-sheet.viewport-dialog{padding:12px}#modal .exchange-sheet.viewport-dialog .exchange-header h2{font-size:21px}#modal .viewport-dialog input,#modal .viewport-dialog select,#modal .viewport-dialog textarea{font-size:max(16px,1em)}}
 @media(max-height:420px){#modal .viewport-dialog .sale-completion-head,#modal .viewport-dialog .modal-head{padding:8px 12px}#modal .viewport-dialog .sale-success-icon{display:none}#modal .exchange-sheet.viewport-dialog .exchange-header p,#modal .exchange-sheet.viewport-dialog .exchange-notice{display:none}}
