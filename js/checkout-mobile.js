@@ -230,8 +230,12 @@
       if (!page.isConnected || Router.atual() !== 'vender' || window.SpaceContext?.viewScope?.() !== context.scope) return;
       if (context.clientId) {
         const select = $('#sale-client', page);
-        window.Checkout.setSaleCustomer(context.clientId, select);
-        select.dispatchEvent(new Event('change'));
+        if (select) {
+          if (typeof window.Checkout.setSaleCustomer === 'function')
+            window.Checkout.setSaleCustomer(context.clientId, select);
+          else select.value = context.clientId;
+          select.dispatchEvent(new Event('change'));
+        }
       }
       if (context.repeat) for (const item of context.items) {
         for (let n = 0; n < Number(item.quantidade || 0); n++) window.Checkout.selectCatalogProduct(item.produtoId);
@@ -257,6 +261,7 @@
         return;
       }
       Router.ir('vender');
+      context.destinationHash = location.hash;
     }, 20);
   }
   document.addEventListener('click',event=>{
@@ -276,7 +281,14 @@
     bag.getAnimations?.().forEach(animation=>animation.cancel());
     bag.animate?.([{transform:'scale(1)'},{transform:'scale(1.08)'},{transform:'scale(1)'}],{duration:220,easing:'ease-out'});
   });
-  addEventListener('hashchange',()=>{if($('#pos-summary')?.classList.contains('mobile-open'))closeSummary({immediate:true});else document.body.classList.remove('sale-sheet-open');setTimeout(enhance,0)});
+  addEventListener('hashchange',event=>{
+    if (pending?.destinationHash && event.oldURL &&
+        new URL(event.oldURL).hash === pending.destinationHash &&
+        new URL(event.newURL).hash !== pending.destinationHash) pending = null;
+    if ($('#pos-summary')?.classList.contains('mobile-open')) closeSummary({immediate:true});
+    else document.body.classList.remove('sale-sheet-open');
+    setTimeout(enhance,0);
+  });
   addEventListener('firebase-session-cleared',()=>{pending=null;payment='pix';enhancing=false;window.CheckoutPaymentMethod='pix'});
   window.CheckoutMobile={enhance,decorateProducts,openSummary,closeSummary,prepareNext};
 })();

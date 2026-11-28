@@ -96,4 +96,24 @@ assert.match(checkoutMobile,/sale-next-action/);
 assert.match(checkoutMobile,/action\s*===\s*'same'/);
 assert.match(checkoutMobile,/action\s*===\s*'repeat'/);
 
+const applyPendingSource=checkoutMobile.slice(
+  checkoutMobile.indexOf('  function applyPending('),
+  checkoutMobile.indexOf('  function enhance('),
+);
+for(const legacyCheckout of [false,true]){
+  const select={value:'',dispatchEvent(event){assert.equal(event.type,'change');assert.equal(this.value,'cliente-qa');}};
+  const checkout=legacyCheckout?{}:{setSaleCustomer(id,field){field.value=id;}};
+  const context={
+    window:{Checkout:checkout,SpaceContext:{viewScope:()=> 'scope-qa'}},
+    pending:{clientId:'cliente-qa',scope:'scope-qa'},
+    Router:{atual:()=> 'vender'},
+    $:()=>select,
+    Event,
+    setTimeout: callback=>callback(),
+  };
+  vm.runInNewContext(applyPendingSource+'\napplyPending({isConnected:true});',context);
+  assert.equal(select.value,'cliente-qa');
+  assert.equal(context.pending,null);
+}
+
 console.log('sale-completion.test.js: OK');

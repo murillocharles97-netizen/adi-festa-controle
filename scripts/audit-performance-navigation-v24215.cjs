@@ -135,6 +135,25 @@ async function verifyLoading(page, cdp, theme) {
   return moved;
 }
 
+async function verifyCancelledRepeat(page) {
+  assert.equal(await page.evaluate(() => Checkout.cartCount()), 0);
+  await page.evaluate(() => {
+    const root = document.querySelector('#app');
+    const observer = new MutationObserver(() => {
+      if (root.dataset.loadingRoute !== 'vender') return;
+      observer.disconnect();
+      Router.ir('clientes');
+    });
+    observer.observe(root,{attributes:true});
+    CheckoutMobile.prepareNext('repeat',{itens:[{produtoId:'bench-p0',quantidade:1}]});
+  });
+  await page.waitForSelector('#app[data-route="clientes"] #mobile-client-search');
+  await navigation(page,'vender');
+  // Let the normal post-mount callback run before inspecting the cart.
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve,120)));
+  assert.equal(await page.evaluate(() => Checkout.cartCount()), 0);
+}
+
 async function main(){
   const base = await listen(server), browser = await launch(), rows = [];
   try {
@@ -157,8 +176,11 @@ async function main(){
           assert.equal(swapped.final,'produtos');
           assert.ok(!swapped.mounted.includes('clientes'),JSON.stringify(swapped));
           assert.equal(swapped.invalidatedBeforeRender,true);
-          if(process.env.PERF_NAV_SMOKE === '1' && run === 0)
+          if(process.env.PERF_NAV_SMOKE === '1' && run === 0) {
             console.log(JSON.stringify({theme,loadingScroll:await verifyLoading(page,cdp,theme)}));
+            await verifyCancelledRepeat(page);
+            console.log(JSON.stringify({theme,cancelledRepeat:'pass'}));
+          }
         }
         assert.deepEqual(errors,[]);
         save(process.env.PERF_NAV_OUTPUT || 'navigation-v24215.json',rows);

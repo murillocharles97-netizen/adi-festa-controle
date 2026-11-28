@@ -64,7 +64,7 @@
 .route-skeleton-grid .route-skeleton-content > div { block-size: 10rem; }
 .performance-report-button {
   position: fixed;
-  inset-inline-end: 1rem;
+  inset-inline-start: max(1rem, env(safe-area-inset-left, 0px));
   inset-block-end: calc(5.5rem + env(safe-area-inset-bottom, 0px));
   z-index: 100;
   min-block-size: 2.75rem;
