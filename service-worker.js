@@ -1,4 +1,4 @@
-const CACHE='veconi-v242141-inicializacao-v1';
+const CACHE='veconi-v24215-desempenho-v1';
 // Trocas V1: retain compatible server fences and ledgers when rolling back the UI.
 // Shared entitlement catalog (same source consumed by Cloud Functions).
 const ARQUIVOS=['./js/pwa-update.js','./functions/src/shared/fiado-account.js','./functions/src/shared/installment-plan.js','./js/installment-credit.js','./functions/src/shared/prior-sale-policy.js','./js/prior-sales.js','./css/prior-sales.css','./js/online-checkout-attempts.js','./js/online-order-finalization.js','./js/online-orders-ui.js','./functions/src/shared/online-order.js','./css/online-orders.css','./','./index.html','./catalogo.html','./404.html','./manifest.json','./css/style.css','./css/finance.css','./css/mobile.css','./css/import.css','./css/visual.css','./css/firebase.css','./css/firebase-audit.css','./css/backup.css','./css/clientes-page.css','./css/clientes-mobile.css','./css/produtos-mobile.css','./css/product-images.css','./css/produtos-desktop.css','./css/home-mobile.css','./css/checkout-mobile.css','./css/mobile-fixes.css','./css/mensagens-mobile.css','./css/visitas.css','./css/campanhas.css','./css/catalogo.css','./assets/veconi-icon-v133.svg','./assets/veconi-icon-192-v133.png','./assets/veconi-icon-512-v133.png','./assets/lucide.min.js','./js/utils.js','./js/storage.js','./js/backup.js','./js/financial-concurrency.js','./js/clientes.js','./js/product-brand.js','./js/produtos.js','./js/product-images.js','./js/campanhas.js','./js/campanhas-ui.js','./js/vendas.js','./js/fiados.js','./js/fiado-conditions.js','./js/fiado-space-regularization.js','./js/cobrancas.js','./js/mensagens.js','./js/visitas.js','./js/router.js','./js/csvImport.js','./js/recibos.js','./js/repositories.js','./js/checkout.js','./js/checkout-mobile.js','./js/clientes-page.js','./js/mensagens-mobile.js','./js/message-center-v2.js','./js/clientes-mobile.js','./js/produtos-mobile.js','./js/home-mobile.js','./js/visual-ui.js','./js/app.js','./js/catalog-portal.js','./js/catalogo-publico.js','./js/firebase/firebase-config.js','./js/firebase/business-context.js','./js/firebase/firestore-utils.js','./js/firebase/firestore-repository.js','./js/firebase/usage-monitor.js','./js/firebase/sync.js','./js/firebase/auth.js','./js/firebase/firebase-ui.js','./js/firebase/catalog-bridge.js','./js/firebase/product-image-storage.js'];
@@ -100,7 +100,7 @@ self.addEventListener('install', event => event.waitUntil(
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '242', appVersion: '242.14.1'});
+  if (event.data === 'GET_VERSION') event.ports?.[0]?.postMessage({cache: CACHE, release: '242', appVersion: '242.15'});
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -145,10 +145,10 @@ ARQUIVOS.push("./js/auth-loading.js","./js/google-registration-ui.js","./js/fire
 
 ARQUIVOS.push('./functions/src/shared/operational-privacy-policy.js','./js/operational-read-policy.js');
 ARQUIVOS.push('./assets/fonts/inter-latin-wght-normal.woff2');
-ARQUIVOS.push('./js/clientes-mobile.js?v=24212-saldo','./js/customer-metrics.js?v=2422','./js/crm-segment-engine-v2.js?v=2422');
-ARQUIVOS.push('./js/build-info.js?v=242141-startup','./js/business-cache.js?v=242141-startup','./js/product-brand.js?v=2427-marca','./js/produtos.js?v=2427-marca','./js/product-images.js?v=2427-marca','./js/produtos-mobile.js?v=2427-marca','./js/configuracoes-mobile.js?v=2427-marca','./js/product-variations.js?v=2427-marca','./js/product-spreadsheet-ui.js?v=2427-marca','./js/firebase/auth.js?v=24213-conta','./js/firebase/firebase-ui.js?v=24213-conta','./js/firebase/sync.js?v=24213-conta','./js/firebase/product-spreadsheet-service.js?v=2426-export','./js/app.js?v=24214-perf','./js/barcode.js?v=2423','./js/checkout.js?v=2423','./js/checkout-mobile.js?v=2423','./js/desktop-sales.js?v=2423','./css/checkout-mobile.css?v=2423');
+ARQUIVOS.push('./js/clientes-mobile.js?v=24215-perf','./js/customer-metrics.js?v=2422','./js/crm-segment-engine-v2.js?v=2422');
+ARQUIVOS.push('./js/build-info.js?v=24215-perf','./js/business-cache.js?v=242141-startup','./js/product-brand.js?v=2427-marca','./js/produtos.js?v=2427-marca','./js/product-images.js?v=2427-marca','./js/produtos-mobile.js?v=24215-perf','./js/configuracoes-mobile.js?v=2427-marca','./js/product-variations.js?v=2427-marca','./js/product-spreadsheet-ui.js?v=2427-marca','./js/firebase/auth.js?v=24213-conta','./js/firebase/firebase-ui.js?v=24213-conta','./js/firebase/sync.js?v=24213-conta','./js/firebase/product-spreadsheet-service.js?v=2426-export','./js/app.js?v=24215-perf','./js/barcode.js?v=24215-perf','./js/checkout.js?v=24215-perf','./js/checkout-mobile.js?v=24215-perf','./js/desktop-sales.js?v=2423','./css/checkout-mobile.css?v=2423');
 ARQUIVOS.push('./js/clientes.js?v=24213-conta','./js/clientes-page.js?v=24213-conta','./css/clientes-page.css?v=2428-fluidez','./css/clientes-mobile.css?v=24212-saldo','./js/client-cloud-pagination.js?v=2428-fluidez','./js/client-smart-mode.js?v=2428-fluidez','./js/installment-credit.js?v=24213-conta','./js/fiados.js?v=24213-conta');
-ARQUIVOS.push('./css/firebase.css?v=24210-estab','./js/fiado-space-regularization.js?v=2429-sync','./js/mobile-navigation.js?v=2429-sync','./js/sale-recovery-ui.js?v=24210-estab','./js/recibos.js?v=24210-estab');
+ARQUIVOS.push('./css/firebase.css?v=24210-estab','./js/fiado-space-regularization.js?v=2429-sync','./js/mobile-navigation.js?v=24215-perf','./js/sale-recovery-ui.js?v=24210-estab','./js/recibos.js?v=24210-estab');
 ARQUIVOS.push('./js/customer-space-accounts.js?v=24213-conta','./js/firebase/customer-accounts-reader.js?v=24213-conta');
 ARQUIVOS.push('./css/storefront-art.css?v=2425','./assets/storefront-courier.webp','./assets/storefront-models.webp');
 ARQUIVOS.push('./css/online-store.css?v=2425','./css/catalogo.css?v=2425','./js/loja/store-kit.js?v=2425','./js/online-store-ui.js?v=2425','./js/firebase/catalog-bridge.js?v=300','./js/catalogo-publico.js?v=2425');
@@ -158,3 +158,4 @@ ARQUIVOS.push('./css/online-orders.css?v=2425','./js/online-orders-ui.js?v=2425'
 ARQUIVOS.push('./js/client-actions.js?v=24213-conta');
 
 ARQUIVOS.push('./js/cobrancas.js?v=24214-perf');
+ARQUIVOS.push('./css/style.css?v=24215-perf','./js/client-filter-rules.js?v=24215-perf','./js/router.js?v=24215-perf','./js/runtime-diagnostics.js?v=24215-perf');

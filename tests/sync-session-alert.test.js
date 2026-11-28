@@ -53,8 +53,8 @@ test('session hotfix keeps app/SW version and both Sync singleton imports aligne
   assert.deepEqual(catalogSources, [buildUrl], 'the app and catalog must load the same build identity');
   for (const url of [...entryUrls, syncUrl, buildUrl]) {
     const pin = url.split('?v=')[1];
-    // V242.14 and its startup patch retain the Sync entry points from V242.13.
-    if (version === '242' && minor === 14 && url !== buildUrl) assert.equal(pin, '24213-conta');
+    // V242.14, its startup patch and V242.15 retain the Sync entry points from V242.13.
+    if (version === '242' && [14, 15].includes(minor) && url !== buildUrl) assert.equal(pin, '24213-conta');
     else assert.match(pin || '', new RegExp(`^${releaseTag}(?:-[\\w-]+)?$`), `${url} must use the current release tag`);
     assert.ok(precache.includes(url), `${url} must be precached under the exact versioned URL`);
   }
