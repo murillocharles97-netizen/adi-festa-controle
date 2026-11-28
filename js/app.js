@@ -1302,6 +1302,9 @@
     window.lucide.createIcons({ nameAttr: "data-route-icon" });
     $$("[data-route-icon]").forEach(icon => icon.removeAttribute("data-route-icon"));
   }
+  function advancePageInstance(root) {
+    root.dataset.pageInstance = String(Number(root.dataset.pageInstance || "0") + 1);
+  }
   function render(route) {
     window.AppBootDiagnostics?.count?.("routeRenderCount", { route });
     const renderStartedAt = performance.now();
@@ -1313,12 +1316,14 @@
       route = "inicio";
     }
     const root = $("#app"), prepared = root.dataset.loadingRoute === route;
-    if (!root.dataset.loadingRoute) leavePage(root, route);
+    if (!root.dataset.loadingRoute) {
+      leavePage(root, route);
+      advancePageInstance(root);
+    }
     if (deniedRoute) chargeView = null;
     if (!prepared) updateRouteChrome(route);
     delete root.dataset.loadingRoute;
     root.removeAttribute("aria-busy");
-    root.dataset.pageInstance = String(Number(root.dataset.pageInstance || "0") + 1);
     root.dataset.route = route;
     window.SyncFirebase?.setScreen?.(route);
     root.innerHTML = deniedRoute ? window.TeamAccess.deniedMarkup() : views[route]() +
@@ -1622,6 +1627,7 @@
     const timing = window.AppBootDiagnostics?.beginNavigation?.(route);
     const spaceScope = window.SpaceContext?.viewScope?.();
     leavePage(root, route);
+    advancePageInstance(root);
     delete root.dataset.route;
     delete root.dataset.spaceViewScope;
     root.dataset.loadingRoute = route;

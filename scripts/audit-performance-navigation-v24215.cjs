@@ -82,9 +82,12 @@ async function scroll(page, cdp) {
 async function rapidSwap(page) {
   return page.evaluate(async () => {
     const root = document.querySelector('#app'), mounted = [];
+    const previousInstance = root.dataset.pageInstance;
+    let invalidatedBeforeRender = false;
     const observer = new MutationObserver(() => {
       if (root.dataset.route && mounted.at(-1)!==root.dataset.route) mounted.push(root.dataset.route);
       if (root.dataset.loadingRoute === 'clientes') {
+        invalidatedBeforeRender = root.dataset.pageInstance !== previousInstance;
         Router.ir('produtos');
         dispatchEvent(new CustomEvent('cloud-data-updated'));
       }
@@ -94,7 +97,7 @@ async function rapidSwap(page) {
     const deadline = performance.now()+3000;
     while (root.dataset.route!=='produtos' && performance.now()<deadline) await new Promise(r=>setTimeout(r,20));
     observer.disconnect();
-    return {mounted,final:root.dataset.route};
+    return {mounted,final:root.dataset.route,invalidatedBeforeRender};
   });
 }
 
@@ -153,6 +156,7 @@ async function main(){
           const swapped=await rapidSwap(page);
           assert.equal(swapped.final,'produtos');
           assert.ok(!swapped.mounted.includes('clientes'),JSON.stringify(swapped));
+          assert.equal(swapped.invalidatedBeforeRender,true);
           if(process.env.PERF_NAV_SMOKE === '1' && run === 0)
             console.log(JSON.stringify({theme,loadingScroll:await verifyLoading(page,cdp,theme)}));
         }
