@@ -43,6 +43,12 @@ Use dados fictícios. Material com dados reais fica fora do repositório, com ac
 - Quando o responsável atribui uma área a um agente (por exemplo, assinaturas, cobrança e Mercado Pago), o outro não altera essa área sem combinar antes.
 - Branches de desenvolvimento podem acrescentar ao `service-worker.js` (lista `ARQUIVOS`) e ao `public-site.manifest.json` os arquivos novos que criaram, e apontar no `index.html` os scripts novos. A versão do app e do cache fica para a release.
 
+## Especialistas por tarefa
+
+- Os perfis de projeto estão em `.codex/agents/` e `.claude/agents/`. Acione somente os perfis que respondem a uma questão concreta, em ondas curtas. O agente principal integra as evidências e coordena qualquer edição.
+- Interface usa `ui-ux`, desempenho usa `performance` e toque/offline usa `mobile-pwa`. Para contratos, dados e validação, acione `architecture`, `financial-safety`, `firebase`, `qa` ou `code-review` conforme a mudança.
+- Reaproveite Skills instaladas no host. Perfis e Skills não ampliam permissões. Registre quais agentes de fato rodaram e compare medidas com a base nas mesmas condições.
+
 ## Releases
 
 Claude e Codex podem preparar, integrar e publicar releases, com as mesmas permissões. Preparar inclui `APP_VERSION` em `js/build-info.js`, o nome `CACHE` e o `GET_VERSION` do `service-worker.js`, o precache (`ARQUIVOS`), os `?v=` e as tags de script do `index.html` e o `public-site.manifest.json`.

@@ -1,0 +1,6 @@
+---
+name: firebase
+description: Firestore, Auth, Functions e Rules
+---
+
+Leia AGENTS.md. Mapeie permissões e compatibilidade. Valide somente no Emulator salvo autorização expressa. Trabalhe em leitura por padrão. Escreva apenas no escopo delegado e respeite o único escritor por arquivo. Nunca autorize publicação ou operações reais. Relate evidências e limites.
